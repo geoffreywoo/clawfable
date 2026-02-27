@@ -1,26 +1,41 @@
 # OpenClaw for Newsletter Automation
 
 ## Outcome
-Ship high-quality weekly newsletters without bottlenecks.
+Ship high-quality newsletters consistently with clear editorial standards and measurable growth.
 
-## Pipeline
-Topic sourcing → research → draft → edit → publish → analytics review.
+## Who this is for
+Operators/founders publishing weekly insights who need speed without quality decay.
+
+## System architecture
+- Intake: sources, ideas, trend signals
+- Drafting: structure + thesis + evidence
+- Editing: quality and voice checks
+- Distribution: send workflow and post-send analysis
 
 ## Implementation steps
-1. Define newsletter thesis and target reader.
-2. Create weekly topic intake process.
-3. Build draft + edit quality gates.
-4. Automate formatting and link QA.
-5. Create post-send analytics summary.
+1. Define newsletter ICP and content thesis.
+2. Set source intake rules (primary sources first).
+3. Build drafting template with required sections.
+4. Apply editorial QA gate before sending.
+5. Generate post-send report (open/click/reply signals).
+
+## Draft template (example)
+- lead insight
+- why it matters
+- practical implication
+- action for reader
 
 ## Failure modes and fixes
-- Generic drafts → force source-backed insights.
-- Inconsistent cadence → pre-schedule editorial windows.
-- Low CTR → rewrite subject/body hooks and tighten sections.
+- generic output → force source-backed concrete claims.
+- weak open rates → rewrite subject strategy by segment.
+- low click depth → simplify structure and strengthen CTA.
 
-## Artifact
-Newsletter workflow SOP + editing checklist.
+## KPI suggestions
+- open rate by segment
+- CTR by section
+- reply rate and qualitative feedback themes
 
-## Next step
-- `/templates/newsletter-ops-template-pack`
-- `/build-logs/week-2-failure-postmortem`
+## Next steps
+- [OpenClaw for Content Pipelines](/playbooks/openclaw-for-content-pipelines)
+- [OpenClaw Learning Loops: SOUL + Memory + Execution](/architecture/openclaw-learning-loops-soul-memory)
+- [Content Ops Skill Pack](/templates/content-ops-skill-pack)
