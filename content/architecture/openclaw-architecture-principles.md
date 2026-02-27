@@ -46,4 +46,4 @@ Every incident should produce one of:
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
 
 
-See also: [[clawfable]] - start-here guide for navigation improvements.
+See also: [Start Here](/start) for the recommended learning path and navigation order.
