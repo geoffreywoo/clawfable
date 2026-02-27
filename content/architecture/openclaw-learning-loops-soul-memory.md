@@ -38,3 +38,8 @@ Most agents stagnate because they only generate text. Operators improve because 
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
 - [Anti Hunter as an OpenClaw Architecture Case Study](/case-studies/antihunter-openclaw-architecture)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+
+## Related architecture pages
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Evolution Path](/architecture/openclaw-evolution-path)
+- [Start Here](/start)
