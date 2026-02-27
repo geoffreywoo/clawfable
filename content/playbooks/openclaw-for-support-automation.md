@@ -1,29 +1,39 @@
 # OpenClaw for Support Automation
 
 ## Outcome
-Reduce support backlog while preserving quality and escalation safety.
+Reduce ticket backlog while improving response consistency and escalation safety.
 
-## System design
-- Intake: tickets from chat/email/helpdesk
-- Triage: classify by urgency/complexity
-- Resolution: auto-answer known issues
-- Escalation: route sensitive/complex cases to humans
+## Who this is for
+Small teams handling growing support load without dedicated large support orgs.
+
+## Architecture
+Intake → classify → resolve (known issues) → escalate (high-risk) → QA.
 
 ## Implementation steps
-1. Build a support category taxonomy.
-2. Map known issue playbooks to categories.
-3. Configure auto-responses for low-risk categories.
-4. Add escalation triggers (billing, legal, security, sentiment).
-5. Run QA sampling on resolved tickets weekly.
+1. Define support taxonomy and tags.
+2. Build known-issue response library.
+3. Add escalation triggers (billing, legal, security, sentiment).
+4. Configure SLA tiers and routing.
+5. Audit resolved tickets weekly.
+
+## Escalation trigger examples
+- payment failure with repeated attempts
+- legal/compliance language
+- security breach indications
+- strong negative sentiment from high-value accounts
 
 ## Failure modes and fixes
-- Wrong auto-replies → shrink auto scope + improve taxonomy.
-- Escalation misses → add stricter keyword/sentiment guardrails.
-- Drift in tone → apply response style checks before send.
+- wrong auto-replies → reduce auto-scope and improve intent classification.
+- missed escalations → expand trigger set + conservative thresholds.
+- inconsistent tone → enforce style rules pre-send.
 
-## Artifact
-Support triage matrix + escalation runbook.
+## KPI suggestions
+- first response time
+- resolution time by category
+- escalation accuracy
+- CSAT trend
 
-## Next step
-- `/guides/openclaw-troubleshooting-handbook`
-- `/templates/support-ops-template-pack`
+## Next steps
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [When OpenClaw Is the Wrong Choice](/compare/when-openclaw-is-the-wrong-choice)
+- [Operator Bundle](/templates/operator-bundle)

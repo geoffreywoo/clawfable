@@ -1,29 +1,44 @@
 # OpenClaw for Lead Gen Workflows
 
 ## Outcome
-Build a repeatable outbound + inbound lead system with qualification and follow-up automation.
+Build a lead engine that captures, scores, and follows up without manual bottlenecks.
 
-## System design
-- Input sources: website forms, LinkedIn signals, inbound DMs
-- Qualification layer: ICP scoring + disqualifier rules
-- Action layer: personalized outreach + follow-up cadences
-- Review layer: weekly conversion report
+## Who this is for
+Operators who need predictable pipeline generation with clean qualification.
+
+## System architecture
+- Intake: forms, inbound messages, social signals
+- Enrichment: company/person context
+- Scoring: ICP + intent model
+- Action: outreach and follow-up cadence
+- Review: weekly pipeline quality report
 
 ## Implementation steps
-1. Define ICP scorecard (industry, role, budget, urgency).
-2. Set ingestion connectors for lead sources.
-3. Add enrichment and scoring logic.
-4. Trigger outreach sequences based on score tier.
-5. Log outcomes for weekly optimization.
+1. Define ICP and disqualifiers.
+2. Set source ingestion and normalization.
+3. Add score tiers (A/B/C).
+4. Trigger tailored sequences per tier.
+5. Log outcomes and retrain scoring rules.
+
+## Example scoring model
+- role fit: 0-3
+- company fit: 0-3
+- pain urgency: 0-2
+- buying signal: 0-2
+
+A-tier: 8-10, B-tier: 5-7, C-tier: 0-4
 
 ## Failure modes and fixes
-- Low reply rates → tighten ICP + rewrite first-touch message.
-- High unqualified volume → raise scoring threshold.
-- Sequence fatigue → cap follow-up count and vary channels.
+- high volume, low quality → strengthen disqualifier rules.
+- low reply rates → improve first-touch relevance and timing.
+- follow-up fatigue → cap cadence and diversify touchpoints.
 
-## Artifact
-Lead qualification schema + follow-up SOP.
+## KPI suggestions
+- qualified lead rate
+- meeting-booked rate
+- reply rate by segment
 
-## Next step
-- `/templates/lead-gen-skill-pack`
-- `/compare/openclaw-vs-diy-agent-stacks`
+## Next steps
+- [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+- [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
+- [Operator Bundle](/templates/operator-bundle)

@@ -1,20 +1,38 @@
 # OpenClaw for Content Pipelines
 
 ## Outcome
-Turn one idea into multi-format output with quality gates.
+Turn one strong idea into a multi-channel publishing pipeline with quality gates.
 
-## Pipeline
-Research → draft → edit → distribute → performance review.
+## Who this is for
+Teams publishing 3-10 pieces/week who need consistent output without quality collapse.
 
-## Implementation
-1. Create content brief format.
-2. Add draft quality checklist.
-3. Define distribution schedule per channel.
-4. Run weekly postmortem on winners/losers.
+## Pipeline architecture
+Research → angle selection → draft → edit → distribution → review.
 
-## Artifact
-Content pipeline SOP + editorial QA checklist.
+## Implementation steps
+1. Define content thesis and audience.
+2. Build a source intake list (primary sources only).
+3. Create draft checklist (clarity, novelty, utility).
+4. Add editorial gate before publish.
+5. Run weekly review on winners/losers.
 
-## Next step
-- `/templates/content-ops-skill-pack`
-- `/build-logs/week-1-operator-log`
+## Editorial QA checklist
+- clear claim in first 3 lines
+- at least one concrete example
+- no generic LLM filler
+- explicit CTA/next step
+
+## Failure modes and fixes
+- bland output → force contrarian or differentiated angle selection.
+- inconsistent cadence → fixed publishing windows and preloaded queue.
+- weak conversion → tighter hooks and stronger action-oriented endings.
+
+## KPI suggestions
+- publish consistency (weekly)
+- CTR from content to target pages
+- % content pieces driving meaningful actions
+
+## Next steps
+- [Content Ops Skill Pack](/templates/content-ops-skill-pack)
+- [OpenClaw for Newsletter Automation](/playbooks/openclaw-for-newsletter-automation)
+- [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
