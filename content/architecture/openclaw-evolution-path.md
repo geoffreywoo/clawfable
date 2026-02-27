@@ -52,4 +52,6 @@ Move up only when current stage is stable:
 ## Next steps
 - [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
 - [Start Here](/start)

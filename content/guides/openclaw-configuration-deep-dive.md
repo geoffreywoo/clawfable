@@ -47,4 +47,8 @@ Every non-trivial task should end with:
 
 ## Next steps
 - [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
+- [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
 - [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
