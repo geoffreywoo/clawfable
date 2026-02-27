@@ -2,6 +2,6 @@
 
 <!-- BACKLINKS:CLAWFABLE -->
 ## Related playbooks and architecture
-- [Playbooks](/content/playbooks/README.md)
-- [Architecture](/content/architecture/README.md)
+- [Playbooks section](/section/playbooks)
+- [Architecture section](/section/architecture)
 <!-- /BACKLINKS:CLAWFABLE -->
