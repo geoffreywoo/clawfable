@@ -1,0 +1,16 @@
+cluster,page_title,primary_keyword,intent,artifact,primary_cta,secondary_cta
+pillar,OpenClaw Setup Guide (2026),openclaw setup guide,setup,full install checklist,Download launch checklist,Book setup sprint
+pillar,How to Install OpenClaw on Mac,install openclaw mac,setup,mac install script,Get Mac starter template,Buy operator pack
+pillar,How to Install OpenClaw on Ubuntu VPS,install openclaw ubuntu,setup,vps hardening + install script,Download VPS playbook,Book implementation
+pillar,OpenClaw vs n8n: Which to Use in 2026,openclaw vs n8n,comparison,decision matrix,Get workflow template bundle,Book architecture call
+pillar,OpenClaw vs LangGraph for Agent Ops,openclaw vs langgraph,comparison,feature benchmark sheet,Download comparison worksheet,Buy orchestration templates
+money,Best OpenClaw Stack for Solo Founders,best openclaw stack,money,stack blueprint,Buy founder ops template,Join email list
+money,Best OpenClaw Skills for Content Ops,best openclaw skills content,money,content pipeline template,Buy content ops skill pack,Get free checklist
+money,Best OpenClaw Skills for Lead Gen,openclaw lead generation automation,money,lead scoring template,Buy lead gen skill,Book setup sprint
+money,Best OpenClaw Skills for Support Automation,openclaw customer support automation,money,support triage config,Buy support skill pack,Get support SOP
+money,Top OpenClaw Integrations for Revenue,openclaw integrations,money,integration map,Buy integration template,Join newsletter
+programmatic,OpenClaw for Agencies: Client Ops Playbook,openclaw for agencies,setup,agency SOP template,Buy agency pack,Book implementation
+programmatic,OpenClaw for E-commerce Automation,openclaw ecommerce automation,setup,ecom workflow JSON,Buy ecom template,Join email list
+programmatic,OpenClaw for Newsletter Automation,openclaw newsletter automation,setup,newsletter automation script,Buy newsletter skill,Get free checklist
+programmatic,OpenClaw for Discord Community Ops,openclaw discord automation,setup,community moderation workflow,Buy discord ops template,Book setup sprint
+programmatic,OpenClaw for Founder Daily Briefings,openclaw daily brief automation,setup,daily briefing prompt pack,Buy briefing template,Join email list
