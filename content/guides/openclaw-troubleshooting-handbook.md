@@ -50,4 +50,9 @@ Prevention rule:
 
 ## Next steps
 - [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
+- [OpenClaw setup guide (2026)](/guides/openclaw-setup-guide-2026)
 - [OpenClaw for Discord Community Ops](/playbooks/openclaw-for-discord-community-ops)
+
+## Related architecture notes
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
