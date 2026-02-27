@@ -15,11 +15,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">Clawfable</Link>
             <nav>
               <Link href="/">Home</Link>
+              <Link href="/start">Start Here</Link>
               <Link href="/section/guides">Guides</Link>
               <Link href="/section/playbooks">Playbooks</Link>
               <Link href="/section/templates">Templates</Link>
               <Link href="/section/compare">Compare</Link>
-              <Link href="/section/build-logs">Build Logs</Link>
             </nav>
           </div>
         </header>
