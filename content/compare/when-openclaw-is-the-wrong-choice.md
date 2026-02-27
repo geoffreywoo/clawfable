@@ -14,5 +14,6 @@
 Choosing the wrong stack creates complexity tax and slower execution.
 
 ## Next step
-- `/compare/openclaw-vs-n8n`
-- `/guides/openclaw-setup-guide-2026`
+- [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
+- [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
