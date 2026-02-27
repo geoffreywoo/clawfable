@@ -44,3 +44,6 @@ Every incident should produce one of:
 - [OpenClaw Evolution Path](/architecture/openclaw-evolution-path)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
+
+
+See also: [[clawfable]] - start-here guide for navigation improvements.
