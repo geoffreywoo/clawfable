@@ -2,10 +2,16 @@
 
 This is the fastest sequence to go from zero to useful.
 
+## Recommended order (don’t skip)
+1. Complete **Track A** first (environment + sanity checks).
+2. Pick exactly one of **Track B** or **Track C** based on your immediate use case.
+3. End with **Decide your stack** so your architecture choices stay deliberate.
+
 ## Track A — New operator (90 minutes)
 1. [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 2. [Install OpenClaw on Mac](/guides/install-openclaw-mac) or [Ubuntu VPS](/guides/install-openclaw-ubuntu-vps)
 3. [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+4. [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive) *(only if you need custom runtime behavior)*
 
 ## Track B — Founder automation (half day)
 1. [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
@@ -21,6 +27,7 @@ This is the fastest sequence to go from zero to useful.
 - [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
 - [OpenClaw vs LangGraph](/compare/openclaw-vs-langgraph)
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
+- [When OpenClaw Is the Wrong Choice](/compare/when-openclaw-is-the-wrong-choice)
 
 ## What Clawfable is
 OpenClaw guides, playbooks, and templates for operators building real systems.
