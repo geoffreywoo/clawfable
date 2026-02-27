@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/section/templates">Templates</Link>
               <Link href="/section/architecture">Architecture</Link>
               <Link href="/section/compare">Compare</Link>
+              <Link href="/status">Status</Link>
             </nav>
           </div>
         </header>
