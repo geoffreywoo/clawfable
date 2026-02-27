@@ -37,5 +37,7 @@ Operators/founders publishing weekly insights who need speed without quality dec
 
 ## Next steps
 - [OpenClaw for Content Pipelines](/playbooks/openclaw-for-content-pipelines)
+- [OpenClaw Daily Brief Automation](/guides/openclaw-daily-brief-automation)
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
 - [OpenClaw Learning Loops: SOUL + Memory + Execution](/architecture/openclaw-learning-loops-soul-memory)
 - [Content Ops Skill Pack](/templates/content-ops-skill-pack)
