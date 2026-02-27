@@ -1,24 +1,56 @@
 # How to Install OpenClaw on Ubuntu VPS
 
 ## Best for
-24/7 operations, automations, and production agents.
+24/7 agent operations and long-running automations.
 
-## Install sequence
-1. Provision Ubuntu VPS.
-2. Harden host (SSH keys, firewall, updates).
-3. Install OpenClaw runtime dependencies.
-4. Configure environment secrets.
-5. Start gateway and verify status.
+## 1) Harden the host first
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo adduser claw
+sudo usermod -aG sudo claw
+```
+Use SSH keys, disable password auth, enable firewall before public exposure.
 
-## Security baseline
-- Key-only SSH
-- Restricted inbound ports
-- Separate non-root user for operations
+## 2) Install runtime dependencies
+```bash
+sudo apt install -y git curl build-essential python3 python3-pip
+# install Node LTS (example)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v && npm -v
+```
+
+## 3) Install OpenClaw and verify
+```bash
+openclaw --help
+openclaw status
+```
+
+## 4) Configure environment
+Store model keys and required runtime config in secure env files.
+
+## 5) Verify gateway/service lifecycle
+```bash
+openclaw gateway status
+openclaw gateway restart
+openclaw gateway status
+```
+
+## 6) Sanity test
+Run one low-risk task and confirm logs/output.
 
 ## Failure modes
-- Gateway not starting due to bad env
-- Clock/timezone mismatch causing cron drift
+- service won’t start: bad env variables or missing dependency
+- cron drift: incorrect timezone/clock sync
+- tool failures: OS permissions/network egress limits
 
-## Next step
-- `/guides/openclaw-troubleshooting-handbook`
-- `/playbooks/openclaw-for-support-automation`
+## Recovery ladder
+1. check service status
+2. check environment vars
+3. run minimal test task
+4. restart gateway
+5. roll back recent config changes
+
+## Next steps
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw for Support Automation](/playbooks/openclaw-for-support-automation)
