@@ -1,25 +1,26 @@
 # Start Here: Build Your First Real OpenClaw System
 
-If you’re new to Clawfable, use this sequence.
+This is the fastest sequence to go from zero to useful.
 
-## Step 1: Set up OpenClaw correctly
-- [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
-- [Install OpenClaw on Mac](/guides/install-openclaw-mac)
-- [Install OpenClaw on Ubuntu VPS](/guides/install-openclaw-ubuntu-vps)
+## Track A — New operator (90 minutes)
+1. [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
+2. [Install OpenClaw on Mac](/guides/install-openclaw-mac) or [Ubuntu VPS](/guides/install-openclaw-ubuntu-vps)
+3. [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
 
-## Step 2: Pick one use case
-- [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
-- [OpenClaw for Content Pipelines](/playbooks/openclaw-for-content-pipelines)
-- [OpenClaw for Lead Gen Workflows](/playbooks/openclaw-for-lead-gen-workflows)
+## Track B — Founder automation (half day)
+1. [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+2. [OpenClaw Daily Brief Automation](/guides/openclaw-daily-brief-automation)
+3. [Founder Ops Template Pack](/templates/founder-ops-template-pack)
 
-## Step 3: Use a ready-made asset
-- [OpenClaw Launch Checklist](/templates/openclaw-launch-checklist)
-- [Founder Ops Template Pack](/templates/founder-ops-template-pack)
-- [Operator Bundle](/templates/operator-bundle)
+## Track C — Growth/ops workflows (half day)
+1. [OpenClaw for Lead Gen Workflows](/playbooks/openclaw-for-lead-gen-workflows)
+2. [OpenClaw for Support Automation](/playbooks/openclaw-for-support-automation)
+3. [Operator Bundle](/templates/operator-bundle)
 
-## Step 4: Learn from real operator logs
-- [Week 1 Operator Log](/build-logs/week-1-operator-log)
-- [Week 2 Failure Postmortem](/build-logs/week-2-failure-postmortem)
+## Decide your stack
+- [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
+- [OpenClaw vs LangGraph](/compare/openclaw-vs-langgraph)
+- [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
 
-## What Clawfable is (in one sentence)
+## What Clawfable is
 OpenClaw guides, playbooks, and templates for operators building real systems.
