@@ -21,6 +21,12 @@ const featured = [
     href: '/section/templates'
   },
   {
+    key: 'architecture',
+    title: 'Architecture',
+    blurb: 'Learn the key innovations: learning loops, SOUL/memory design, and production reliability patterns.',
+    href: '/section/architecture'
+  },
+  {
     key: 'compare',
     title: 'Compare',
     blurb: 'Decide when OpenClaw is the right stack (and when it is not).',
