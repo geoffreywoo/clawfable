@@ -36,12 +36,13 @@ body {
 }
 
 a {
-  color: var(--accent-green);
+  color: var(--text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 a:hover {
+  color: var(--accent-green);
   text-decoration-thickness: 2px;
 }
 
@@ -90,7 +91,7 @@ a:hover {
 
 .brand-subtitle {
   margin: 0;
-  color: var(--accent-green);
+  color: var(--text-muted);
   font-size: 0.78rem;
   line-height: 1.1;
 }
@@ -104,7 +105,7 @@ a:hover {
 .nav-links a {
   padding: 0.38rem 0.76rem;
   border: 1px solid var(--line);
-  color: var(--accent-green);
+  color: var(--text);
   font-weight: 700;
   font-size: 0.86rem;
   text-transform: uppercase;
@@ -206,7 +207,7 @@ a:hover {
 }
 
 .quick-path {
-  color: var(--accent-green);
+  color: var(--text);
   font-weight: 700;
   letter-spacing: 0.05em;
 }
@@ -231,7 +232,7 @@ a:hover {
 }
 
 .latest-badge {
-  color: var(--accent-green);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 0.76rem;
@@ -250,7 +251,7 @@ a:hover {
 
 .kicker {
   margin: 0;
-  color: var(--accent-green);
+  color: var(--text);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -302,7 +303,7 @@ article h4 {
 }
 
 .prompt-mark {
-  color: var(--accent-green);
+  color: var(--text);
   font-weight: 700;
 }
 
