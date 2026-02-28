@@ -747,13 +747,17 @@ async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord
 function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
   const rev = raw.revision || {};
   const normalizedSlug = normalizeSlug(raw.slug);
+  const authorCommentaryAlias =
+    typeof (raw as Record<string, unknown>).author_comment === 'string'
+      ? ((raw as Record<string, unknown>).author_comment as string)
+      : undefined;
   return {
     section,
     slug: normalizedSlug,
     sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
     title: raw.title || 'Clawfable artifact',
     description: raw.description || 'Clawfable artifact',
-    author_commentary: raw.author_commentary || (raw as Record<string, unknown>).author_comment,
+    author_commentary: raw.author_commentary || authorCommentaryAlias,
     user_comments:
       raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
     content: raw.content || '',

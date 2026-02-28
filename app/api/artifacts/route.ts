@@ -99,7 +99,7 @@ async function clearArtifactsForSections(sections: Array<'soul' | 'memory'>) {
 
   for (const section of sections) {
     const indexKey = `${indexPrefix}${section}`;
-    const rawIndex = await (kv as any).get<unknown>(indexKey);
+    const rawIndex = await (kv as any).get(indexKey);
     const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
 
     const artifactKeysFromIndex = slugs.map((slug) => `${artifactPrefix}${section}:${slug}`);
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
       ? normalizeTargetSections(body.sections)
       : normalizeTargetSections(extractValue(body, 'section'));
 
-    const requested = sections.length ? sections : ['soul', 'memory'];
+    const requested: Array<'soul' | 'memory'> = sections.length ? sections : ['soul', 'memory'];
 
     const providedToken =
       request.headers.get('x-admin-token') ||
