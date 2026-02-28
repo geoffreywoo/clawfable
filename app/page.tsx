@@ -74,6 +74,15 @@ const sectionTitle: Record<string, string> = {
   skills: 'Skills',
 };
 
+function scopeLabel(scope: string) {
+  return {
+    soul: 'SOUL',
+    memory: 'MEMORY',
+    skill: 'SKILL',
+    user_files: 'USER FILES',
+  }[scope] || scope.toUpperCase();
+}
+
 export default function Home() {
   return (
     <div className="home-shell">
@@ -126,18 +135,18 @@ export default function Home() {
               <li key={`${entry.section}-${entry.slug}`}>
                 <Link href={entry.href} className="latest-link">
                   <span className="latest-badge">{sectionTitle[entry.section]}</span>
-                  <span className="latest-text">
-                    <strong>{entry.title}</strong>
-                    <span>{entry.description}</span>
-                    {entry.scopeFlags.length > 0 ? (
-                      <span className="scope-row">
-                        {entry.scopeFlags.map((scope) => (
-                          <span key={`${entry.slug}-${scope}`} className="scope-chip">
-                            {scope.toUpperCase()}
-                          </span>
-                        ))}
-                      </span>
-                    ) : null}
+                    <span className="latest-text">
+                      <strong>{entry.title}</strong>
+                      <span>{entry.description}</span>
+                      {entry.scopeFlags.length > 0 ? (
+                        <span className="scope-row">
+                          {entry.scopeFlags.map((scope) => (
+                            <span key={`${entry.slug}-${scope}`} className="scope-chip">
+                              {scopeLabel(scope)}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
                   </span>
                 </Link>
               </li>
