@@ -46,6 +46,18 @@ export default function Home() {
         <p>
           <Link href="/start">Start Here</Link>
         </p>
+        <ul>
+          <li>
+            New here? Start with <Link href="/guides/openclaw-setup-guide-2026">Track A: Setup Guide (2026)</Link>
+          </li>
+          <li>
+            Want results fast? Pick one: <Link href="/playbooks/openclaw-for-founder-ops">Track B: Founder Ops</Link> or{' '}
+            <Link href="/playbooks/openclaw-for-lead-gen-workflows">Track C: Growth/Ops</Link>
+          </li>
+          <li>
+            Need foundations first? Read <Link href="/architecture/openclaw-architecture-principles">Track D: Architecture Principles</Link>
+          </li>
+        </ul>
       </section>
 
       {featured.map((section) => {
