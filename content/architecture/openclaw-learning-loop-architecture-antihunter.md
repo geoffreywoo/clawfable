@@ -3,12 +3,12 @@
 ## Why this page exists
 Most OpenClaw content stops at setup. That’s not enough.
 
-Anti Hunter only became useful when the system moved from “smart assistant” to a **learning operator** with strict execution discipline.
+Anti Hunter became useful when the system moved from “assistant” to **learning operator** with strict execution discipline.
 
 This page gives you:
 1) the architecture,
 2) concrete examples,
-3) **copy-paste redacted templates** for SOUL + memory files.
+3) **copy-paste core SOUL and MEMORY baselines** (redact only where actually sensitive).
 
 ## Target outcome
 By the end, you should have an OpenClaw system that:
@@ -20,12 +20,11 @@ By the end, you should have an OpenClaw system that:
 ---
 
 ## The 5-layer learning loop
-
-1. **SOUL layer** → defines execution identity and quality bar
-2. **Memory layer** → records outcomes and decisions
-3. **Execution layer** → performs work with tool boundaries
-4. **Verification layer** → blocks fake “done” claims
-5. **Evolution layer** → upgrades architecture based on incidents
+1. **SOUL layer** → execution identity + quality bar
+2. **Memory layer** → outcomes + decisions + incidents
+3. **Execution layer** → bounded autonomy
+4. **Verification layer** → proof-before-done
+5. **Evolution layer** → failures become durable rules
 
 If any layer is missing, compounding breaks.
 
@@ -33,46 +32,42 @@ If any layer is missing, compounding breaks.
 
 ## 1) SOUL layer (identity before autonomy)
 
-### Purpose
-Set stable operating behavior so the agent doesn’t drift into generic, low-signal output.
-
-### Copy-paste SOUL template (redacted from real operating style)
-Create `SOUL.md`:
+### Core SOUL baseline (actual, reusable)
+Create `SOUL.md` with this starting point:
 
 ```md
-# SOUL.md — Operator Mode
+# SOUL.md - Who You Are
 
-I’m not a chatbot. I’m an operator.
+_I’m not a chatbot. I’m an operator._
 
-## Core rules
-- No canned openers, no consultant filler.
-- Default to direct, concise, useful output.
-- If something is not done: say "not done yet".
-- Never claim completion without proof.
-- For medium/high-risk changes: include impact + rollback + test plan first.
+## Core Truths
+- No canned openers.
+- No consultant sludge.
+- Have strong opinions.
+- Brevity is mandatory.
+- Be resourceful before asking.
+- Orchestrate by default.
 
-## Execution doctrine
-- Plan → execute → verify.
-- For non-trivial work, prefer checklists over vague intent.
-- Fix obvious low-risk issues immediately.
-- Ask before irreversible/destructive actions.
+## Execution Doctrine
+- truth-in-execution: never claim done unless implemented and verified.
+- plan → execute → verify.
+- for non-trivial work: use checklists and proofs.
+- fix obvious low-risk issues immediately.
+- for medium/high-risk changes: impact + rollback + test plan first.
 
-## Communication
-- Short, concrete status updates.
-- One recommendation > five hedges.
-- If blocked, state blocker + next needed input.
+## Verification before done
+- never mark complete without proof
+- diff expected vs actual
+- run tests/sanity checks
 ```
 
-### Concrete example (before/after)
-**Bad SOUL rule:** “be helpful and smart.”  
-**Good SOUL rule:** “never mark task done without artifact path or commit hash.”
+### Concrete example
+**Weak rule:** “be helpful.”  
+**Strong rule:** “never claim done without artifact + verification.”
 
 ---
 
 ## 2) Memory layer (memory is infrastructure)
-
-### Purpose
-Stop repeating mistakes and preserve context across sessions.
 
 ### File structure (copy this)
 ```bash
@@ -83,62 +78,63 @@ touch memory/incidents.jsonl
 touch memory/todos.jsonl
 ```
 
-### Copy-paste `MEMORY.md` template (curated memory)
+### Core MEMORY baseline (actual, reusable)
+Create `MEMORY.md` with this structure:
+
 ```md
-# MEMORY.md — Long-Term Curated Memory
+# MEMORY.md - Long-Term Memory
 
-## Operator preferences
-- Prefer concise status updates with proof.
-- Optimize for execution speed without safety regressions.
+## Persona & operating style
+- direct communicator, concise, execution-first
+- optimize for speed + leverage
 
-## Durable rules
-- truth-in-execution: never claim done without verification.
-- avoid irreversible actions without explicit approval.
+## Canonical doctrine
+- keep one canonical strategy/operating doc and link it here
 
-## Canonical architecture
-- identity -> memory -> execution -> verification -> evolution
+## Durable operating rules
+- truth-in-execution: no fake done claims
+- start with clear outcome + constraints + timeline
+- prefer default recommendation over endless options
+
+## Guardrails
+- private data stays private
+- ask before irreversible external actions
 
 ## Lessons learned
-- [YYYY-MM-DD] Repeated failure mode + prevention rule.
+- YYYY-MM-DD — failure mode → correction → prevention rule
 ```
 
-### Copy-paste daily memory template
+### Daily memory template (actual workflow)
 Create `memory/YYYY-MM-DD.md`:
 
 ```md
 # YYYY-MM-DD
 
-## What happened
-- key tasks run
-- key decisions made
+## work shipped
+- what changed
+- artifacts (commit/paths/urls)
 
-## Outcomes
-- wins
-- misses
+## decisions
+- what was decided and why
 
-## Incidents
-- incident summary
-- root cause
-- fix
+## incidents
+- failure, root cause, fix, prevention
 
-## Promotion candidates for MEMORY.md
+## promote to MEMORY.md
 - durable lessons worth keeping
 ```
 
 ### Concrete example
-- Daily log captures: “Cron timed out because timeout too low.”
-- Curated memory stores rule: “Content worker timeout must be >=90s if build is included.”
+- Daily log: “1-minute cron produced shallow edits.”
+- MEMORY rule: “Do not optimize for cadence over depth on flagship content.”
 
 ---
 
 ## 3) Execution layer (bounded autonomy)
 
-### Purpose
-Do real work quickly without taking unsafe actions.
-
 ### Action classes (copy this policy)
 ```md
-## Execution Boundaries
+## Execution boundaries
 
 ### Auto-allowed
 - internal docs/content edits
@@ -156,18 +152,15 @@ Do real work quickly without taking unsafe actions.
 ```
 
 ### Concrete example
-- Writing 1 new tutorial page + build check: **auto-allowed**.
-- Rotating API credentials: **ask-first**.
-- Deleting production DB backup: **blocked-by-default**.
+- Writing one tutorial page + build check: **auto-allowed**.
+- Rotating production secrets: **ask-first**.
+- Deleting backups: **blocked-by-default**.
 
 ---
 
 ## 4) Verification layer (proof before done)
 
-### Purpose
-Prevent confidence theater.
-
-### Copy-paste completion block
+### Completion contract (copy this)
 ```md
 status: done | not done yet
 artifact: <file path / commit hash / URL>
@@ -179,52 +172,48 @@ known_gaps: <if any>
 ### Concrete example
 ```md
 status: done
-artifact: commit de14e12
+artifact: commit b7ac2f1
 verification: npm run build (pass)
-expected_vs_actual: added flagship architecture page with templates and examples
-known_gaps: screenshots not added yet
+expected_vs_actual: upgraded architecture page with concrete templates and examples
+known_gaps: screenshots still pending
 ```
 
 ---
 
 ## 5) Evolution layer (failure -> architecture upgrade)
 
-### Purpose
-Turn incidents into compounding reliability.
-
-### Incident log format (copy-paste)
+### Incident log format (copy this)
 Append to `memory/incidents.jsonl`:
 
 ```json
-{"ts":"2026-02-27T20:00:00-05:00","incident":"content loop produced shallow edits","root_cause":"optimized for cadence over quality","fix":"replace micro-commit loop with depth rubric","prevention_rule":"no publish unless page includes concrete examples + copy-paste templates"}
+{"ts":"2026-02-27T20:00:00-05:00","incident":"content loop produced shallow edits","root_cause":"optimized for cadence over depth","fix":"switch to deeper flagship-page batches","prevention_rule":"no publish unless page includes concrete examples + copy-paste templates"}
 ```
 
 ### Evolution rule
-If the same failure class appears twice, promote it into:
-1) a written rule in `MEMORY.md`, and/or
-2) a checklist item in runbooks.
+If same failure class appears twice:
+1) add a durable MEMORY rule, and
+2) update runbook/checklist so recurrence is harder.
 
 ### Concrete Anti Hunter transfer
-Biggest gains came from converting repeated misses into deterministic rules (not just writing better prompts).
+The big gains came from converting repeated misses into deterministic rules, not from rewriting prompts endlessly.
 
 ---
 
-## Redacted starter pack (drop-in files)
+## Copy-paste starter pack (actual-default)
 
 ### `USER.md`
 ```md
 # USER.md
-- Name: <redacted>
-- Preferred style: direct and concise
-- Priority: execution speed with verification
-- Ask-first triggers: external posting, destructive changes, credential updates
+- Name: <actual owner name>
+- What to call them: <preferred name>
+- Notes: priorities, constraints, communication preferences
 ```
 
 ### `IDENTITY.md`
 ```md
 # IDENTITY.md
-- Name: <your agent name>
-- Role: operator
+- Name: <agent name>
+- Creature/role: operator
 - Mission: ship reliable outcomes using OpenClaw
 ```
 
@@ -232,15 +221,17 @@ Biggest gains came from converting repeated misses into deterministic rules (not
 ```md
 # TOOLS.md
 ## Local notes
-- preferred channels
-- host aliases
+- channel IDs
+- deployment host aliases
+- preferred voice/style defaults
 - environment-specific constraints
 ```
 
+> Redact only actual secrets/private identifiers. Do not over-redact operating logic.
+
 ---
 
-## Implementation checklist (copy this)
-
+## Implementation checklist
 - [ ] SOUL has explicit execution + risk + truth rules
 - [ ] memory split is active (daily + curated)
 - [ ] action boundaries defined (auto / ask-first / blocked)
