@@ -166,6 +166,88 @@ a:hover {
   padding: clamp(1rem, 3vw, 2rem);
 }
 
+.minimal-hero {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.orientation-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.quick-links {
+  margin-top: 0.3rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.quick-link,
+.section-map-item,
+.latest-link {
+  border: 1px solid var(--line);
+  padding: 0.62rem 0.68rem;
+  display: grid;
+  gap: 0.18rem;
+  text-decoration: none;
+}
+
+.section-map {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.quick-link:hover,
+.section-map-item:hover,
+.latest-link:hover {
+  background: var(--surface-hover);
+}
+
+.quick-path {
+  color: var(--accent-green);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.quick-note {
+  color: var(--text-muted);
+  font-size: 0.87rem;
+  line-height: 1.35;
+}
+
+.latest-list {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.latest-link {
+  grid-template-columns: 84px 1fr;
+  column-gap: 0.7rem;
+}
+
+.latest-badge {
+  color: var(--accent-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.latest-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+
+.latest-text strong {
+  color: var(--text);
+}
+
 .kicker {
   margin: 0;
   color: var(--accent-orange);
