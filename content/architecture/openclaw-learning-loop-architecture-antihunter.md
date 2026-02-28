@@ -5,7 +5,10 @@ Most OpenClaw content stops at setup. That’s not enough.
 
 Anti Hunter only became useful when the system moved from “smart assistant” to a **learning operator** with strict execution discipline.
 
-This page is the practical architecture for that transition.
+This page gives you:
+1) the architecture,
+2) concrete examples,
+3) **copy-paste redacted templates** for SOUL + memory files.
 
 ## Target outcome
 By the end, you should have an OpenClaw system that:
@@ -33,23 +36,36 @@ If any layer is missing, compounding breaks.
 ### Purpose
 Set stable operating behavior so the agent doesn’t drift into generic, low-signal output.
 
-### Minimum fields to define
-- communication style (direct/concise/no template slop)
-- decision policy (default action + when to escalate)
-- truth policy (never claim done without proof)
-- risk policy (what requires approval)
+### Copy-paste SOUL template (redacted from real operating style)
+Create `SOUL.md`:
 
-### Example SOUL constraints
 ```md
-- no canned phrasing
-- no "done" without artifact/runtime verification
-- for medium/high-risk actions: impact + rollback + test plan first
-- optimize for useful output, not message volume
+# SOUL.md — Operator Mode
+
+I’m not a chatbot. I’m an operator.
+
+## Core rules
+- No canned openers, no consultant filler.
+- Default to direct, concise, useful output.
+- If something is not done: say "not done yet".
+- Never claim completion without proof.
+- For medium/high-risk changes: include impact + rollback + test plan first.
+
+## Execution doctrine
+- Plan → execute → verify.
+- For non-trivial work, prefer checklists over vague intent.
+- Fix obvious low-risk issues immediately.
+- Ask before irreversible/destructive actions.
+
+## Communication
+- Short, concrete status updates.
+- One recommendation > five hedges.
+- If blocked, state blocker + next needed input.
 ```
 
-### Common failure mode
-**Failure:** SOUL is vague (“be helpful”).  
-**Fix:** convert vague values into explicit operational rules.
+### Concrete example (before/after)
+**Bad SOUL rule:** “be helpful and smart.”  
+**Good SOUL rule:** “never mark task done without artifact path or commit hash.”
 
 ---
 
@@ -58,22 +74,60 @@ Set stable operating behavior so the agent doesn’t drift into generic, low-sig
 ### Purpose
 Stop repeating mistakes and preserve context across sessions.
 
-### Recommended memory split
-- `memory/YYYY-MM-DD.md` → raw daily events
-- `MEMORY.md` → durable long-term rules/decisions
-- optional structured files:
-  - `memory/facts.json`
-  - `memory/incidents.jsonl`
-  - `memory/todos.jsonl`
+### File structure (copy this)
+```bash
+mkdir -p memory
+touch MEMORY.md
+touch memory/$(date +%F).md
+touch memory/incidents.jsonl
+touch memory/todos.jsonl
+```
 
-### Operational pattern
-- every significant failure gets an incident line
-- every durable lesson becomes a rule in curated memory
-- every repeated blocker becomes a runbook step
+### Copy-paste `MEMORY.md` template (curated memory)
+```md
+# MEMORY.md — Long-Term Curated Memory
 
-### Common failure mode
-**Failure:** memory is treated as a journal only.  
-**Fix:** promote repeated learnings into explicit constraints/checklists.
+## Operator preferences
+- Prefer concise status updates with proof.
+- Optimize for execution speed without safety regressions.
+
+## Durable rules
+- truth-in-execution: never claim done without verification.
+- avoid irreversible actions without explicit approval.
+
+## Canonical architecture
+- identity -> memory -> execution -> verification -> evolution
+
+## Lessons learned
+- [YYYY-MM-DD] Repeated failure mode + prevention rule.
+```
+
+### Copy-paste daily memory template
+Create `memory/YYYY-MM-DD.md`:
+
+```md
+# YYYY-MM-DD
+
+## What happened
+- key tasks run
+- key decisions made
+
+## Outcomes
+- wins
+- misses
+
+## Incidents
+- incident summary
+- root cause
+- fix
+
+## Promotion candidates for MEMORY.md
+- durable lessons worth keeping
+```
+
+### Concrete example
+- Daily log captures: “Cron timed out because timeout too low.”
+- Curated memory stores rule: “Content worker timeout must be >=90s if build is included.”
 
 ---
 
@@ -82,26 +136,29 @@ Stop repeating mistakes and preserve context across sessions.
 ### Purpose
 Do real work quickly without taking unsafe actions.
 
-### Required boundary model
-Split actions into 3 classes:
+### Action classes (copy this policy)
+```md
+## Execution Boundaries
 
-1. **Auto-allowed** (safe, reversible)
-   - drafting content
-   - internal docs updates
-   - local analysis
+### Auto-allowed
+- internal docs/content edits
+- local analysis and summaries
+- low-risk refactors with verification
 
-2. **Ask-first** (external or medium-risk)
-   - publishing public messages
-   - changing production settings
-   - deleting/modifying critical assets
+### Ask-first
+- external publishing
+- production config changes
+- deleting/modifying critical assets
 
-3. **Blocked by default**
-   - destructive operations without rollback
-   - secret/auth changes without approval
+### Blocked-by-default
+- destructive commands without rollback
+- secret/auth changes without explicit approval
+```
 
-### Common failure mode
-**Failure:** everything is either blocked or fully open.  
-**Fix:** use this 3-class model so speed and safety coexist.
+### Concrete example
+- Writing 1 new tutorial page + build check: **auto-allowed**.
+- Rotating API credentials: **ask-first**.
+- Deleting production DB backup: **blocked-by-default**.
 
 ---
 
@@ -110,23 +167,23 @@ Split actions into 3 classes:
 ### Purpose
 Prevent confidence theater.
 
-### Required completion gate
-Before marking complete:
-- run check/test/build (if relevant)
-- compare expected vs actual output
-- provide artifact proof (file path, commit hash, URL, log)
-
-### Completion format (simple)
+### Copy-paste completion block
 ```md
-status: done / not done yet
-artifact: <path|commit|url>
-verification: <what was run>
-known gaps: <if any>
+status: done | not done yet
+artifact: <file path / commit hash / URL>
+verification: <build/test/check command>
+expected_vs_actual: <brief diff>
+known_gaps: <if any>
 ```
 
-### Common failure mode
-**Failure:** reports say “done” but nothing changed.  
-**Fix:** enforce artifact + verification fields every time.
+### Concrete example
+```md
+status: done
+artifact: commit de14e12
+verification: npm run build (pass)
+expected_vs_actual: added flagship architecture page with templates and examples
+known_gaps: screenshots not added yet
+```
 
 ---
 
@@ -135,19 +192,50 @@ known gaps: <if any>
 ### Purpose
 Turn incidents into compounding reliability.
 
-### Evolution loop
-1. incident occurs
-2. root cause identified
-3. patch current issue
-4. add prevention rule/runbook step
-5. verify in next similar scenario
+### Incident log format (copy-paste)
+Append to `memory/incidents.jsonl`:
 
-### Anti Hunter transfer pattern
-The biggest gain wasn’t better prompts. It was turning recurring failure modes into durable constraints and playbooks.
+```json
+{"ts":"2026-02-27T20:00:00-05:00","incident":"content loop produced shallow edits","root_cause":"optimized for cadence over quality","fix":"replace micro-commit loop with depth rubric","prevention_rule":"no publish unless page includes concrete examples + copy-paste templates"}
+```
 
-### Common failure mode
-**Failure:** same bug class reappears weekly.  
-**Fix:** if repeated twice, promote to architecture-level rule.
+### Evolution rule
+If the same failure class appears twice, promote it into:
+1) a written rule in `MEMORY.md`, and/or
+2) a checklist item in runbooks.
+
+### Concrete Anti Hunter transfer
+Biggest gains came from converting repeated misses into deterministic rules (not just writing better prompts).
+
+---
+
+## Redacted starter pack (drop-in files)
+
+### `USER.md`
+```md
+# USER.md
+- Name: <redacted>
+- Preferred style: direct and concise
+- Priority: execution speed with verification
+- Ask-first triggers: external posting, destructive changes, credential updates
+```
+
+### `IDENTITY.md`
+```md
+# IDENTITY.md
+- Name: <your agent name>
+- Role: operator
+- Mission: ship reliable outcomes using OpenClaw
+```
+
+### `TOOLS.md`
+```md
+# TOOLS.md
+## Local notes
+- preferred channels
+- host aliases
+- environment-specific constraints
+```
 
 ---
 
