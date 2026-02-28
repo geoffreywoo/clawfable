@@ -29,7 +29,7 @@ body {
   min-height: 100vh;
   color: var(--text);
   background: var(--bg);
-  font-family: 'Menlo', 'SFMono-Regular', 'DejaVu Sans Mono', 'Consolas', 'Courier New', monospace;
+  font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace;
   color-scheme: dark;
   font-size: 16px;
   letter-spacing: 0.015em;
