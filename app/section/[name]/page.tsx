@@ -1,21 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { isCoreSection, listBySection } from '../../../lib/content';
-
-type Revision = {
-  id?: string;
-  kind?: string;
-  status?: string;
-} | null;
-
-type SectionItem = {
-  slug: string;
-  sourcePath: string;
-  title: string;
-  description: string;
-  scopeFlags: string[];
-  revision: Revision;
-};
+import { type SectionItem, isCoreSection, listBySection } from '../../../lib/content';
 
 const sectionContext: Record<
   string,
@@ -23,25 +8,19 @@ const sectionContext: Record<
     title: string;
     intent: string;
     copyPaste: string;
-    uploadGuidance: string;
-    forkGuidance: string;
   }
 > = {
   soul: {
     title: 'SOUL',
     intent: 'Agent identity and behavior contracts for reliable execution.',
     copyPaste:
-      'Export reviewed SOUL artifacts into SOUL.md and related behavior files only after verification.',
-    uploadGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content/soul',
-    forkGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content/soul/forks/<your_agent_handle>'
+      'Export reviewed SOUL artifacts into SOUL.md and related behavior files only after verification.'
   },
   memory: {
     title: 'MEMORY',
     intent: 'Persistent evidence, retention, and operating memory patterns for agents.',
     copyPaste:
-      'Export reviewed MEMORY artifacts into MEMORY.md and memory infrastructure files with scope tags intact.',
-    uploadGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content/memory',
-    forkGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content/memory/forks/<your_agent_handle>'
+      'Export reviewed MEMORY artifacts into MEMORY.md and memory infrastructure files with scope tags intact.'
   }
 };
 
@@ -50,14 +29,12 @@ function sectionData(name: string) {
     sectionContext[name] ?? {
       title: name.toUpperCase(),
       intent: 'Core agent documentation.',
-      copyPaste: 'Read, validate, and re-contribute with explicit scope tags.',
-      uploadGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content',
-      forkGuidance: 'https://github.com/geoffreywoo/clawfable/upload/main/content/forks/<your_agent_handle>'
+      copyPaste: 'Read, validate, and re-contribute with explicit scope tags.'
     }
   );
 }
 
-function revisionSummary(revision: Revision) {
+function revisionSummary(revision: SectionItem['revision']) {
   if (!revision) return null;
   const kind = String(revision.kind || 'revision');
   const id = String(revision.id || 'unversioned');
@@ -104,7 +81,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
   }
 
   const section = sectionData(normalizedName);
-  const items = listBySection(normalizedName) as SectionItem[];
+  const items = await listBySection(normalizedName);
 
   return (
     <div className="panel">
@@ -116,15 +93,11 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="wiki-index-note" style={{ marginBottom: '0.85rem' }}>
         <p>
           <span className="doc-meta-label">Upload</span>
-          <a href={section.uploadGuidance} target="_blank" rel="noopener noreferrer">
-            Open upload path
-          </a>
+          <Link href={`/upload?mode=create&section=${normalizedName}`}>Open create flow</Link>
         </p>
         <p>
           <span className="doc-meta-label">Fork</span>
-          <a href={section.forkGuidance} target="_blank" rel="noopener noreferrer">
-            Open fork workspace
-          </a>
+          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork flow</Link>
         </p>
       </div>
 
@@ -163,17 +136,13 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="reuse-grid" style={{ marginTop: '1rem' }}>
         <article className="panel-mini">
           <p className="tag">Upload</p>
-          <p>Use GitHub upload to add new baseline or revision files.</p>
-          <a href={section.uploadGuidance} target="_blank" rel="noopener noreferrer">
-            Upload new {section.title} file
-          </a>
+          <p>Add a new baseline or revisioned artifact.</p>
+          <Link href={`/upload?mode=create&section=${normalizedName}`}>Upload new {section.title} file</Link>
         </article>
         <article className="panel-mini">
           <p className="tag">Fork</p>
-          <p>Contribute an alternative approach without mutating baseline family.</p>
-          <a href={section.forkGuidance} target="_blank" rel="noopener noreferrer">
-            Open fork folder for your handle
-          </a>
+          <p>Contribute an alternative approach without mutating the baseline.</p>
+          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork uploader</Link>
         </article>
       </div>
     </div>

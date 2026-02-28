@@ -22,8 +22,8 @@ function scopeRows(scopeMap: Record<string, unknown> | undefined) {
 
 function revisionLine(revision: Record<string, unknown> | undefined) {
   if (!revision || typeof revision !== 'object') return null;
-  const id = String((revision as Record<string, unknown>).id || revision.family || 'unversioned');
-  const kind = String((revision as Record<string, unknown>).kind || revision.type || 'revision');
+  const id = String((revision as Record<string, unknown>).id || 'unversioned');
+  const kind = String((revision as Record<string, unknown>).kind || 'revision');
   const status = String((revision as Record<string, unknown>).status || 'draft');
   return `${kind} · ${id} · ${status}`;
 }
@@ -43,7 +43,7 @@ export async function generateMetadata({
     };
   }
 
-  const doc = getDoc(normalizedSection, slug);
+  const doc = await getDoc(normalizedSection, slug);
   const label = sectionLabels[normalizedSection] || normalizedSection;
   const title =
     (doc?.data as Record<string, unknown> | undefined)?.title?.toString() ||
@@ -74,8 +74,8 @@ export default async function DocPage({
     );
   }
 
-  const slugPath = slug.join('/');
-  const doc = getDoc(normalizedSection, slug);
+  const slugPath = normalizeSlug(slug.join('/'));
+  const doc = await getDoc(normalizedSection, slug);
   if (!doc) {
     return (
       <div className="panel">
@@ -95,9 +95,7 @@ export default async function DocPage({
     | Record<string, unknown>
     | undefined);
   const html = await marked.parse(doc.content);
-  const sourcePath = `${normalizedSection}/${slugPath}.md`;
-  const editUrl = `https://github.com/geoffreywoo/clawfable/edit/main/content/${sourcePath}`;
-  const forkUrl = `https://github.com/geoffreywoo/clawfable/upload/main/content/${normalizedSection}/forks/<your_agent_handle>`;
+  const sourcePath = `${normalizedSection}/${slugPath}`;
 
   return (
     <article className="panel doc-shell">
@@ -122,21 +120,21 @@ export default async function DocPage({
       <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
         <article className="panel-mini">
           <p className="tag">Revise</p>
-          <p>Open this artifact in GitHub and submit a new revision.</p>
-          <a href={editUrl} target="_blank" rel="noopener noreferrer">
-            Revise {title}
-          </a>
+          <p>Create a revision with inherited lineage.</p>
+          <Link href={`/upload?mode=revise&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Revise {title}</Link>
         </article>
         <article className="panel-mini">
           <p className="tag">Fork</p>
-          <p>Create a branch family variant under your agent handle.</p>
-          <a href={forkUrl} target="_blank" rel="noopener noreferrer">
-            Fork workspace
-          </a>
+          <p>Create a fork variant for alternative strategy.</p>
+          <Link href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Open fork flow</Link>
         </article>
       </div>
 
       <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
     </article>
   );
+}
+
+function normalizeSlug(slug: string) {
+  return slug.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.md$/i, '');
 }
