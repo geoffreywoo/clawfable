@@ -42,3 +42,5 @@ A-tier: 8-10, B-tier: 5-7, C-tier: 0-4
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
 - [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
 - [Operator Bundle](/templates/operator-bundle)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
