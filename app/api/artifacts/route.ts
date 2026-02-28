@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@vercel/kv';
 import {
   artifactPayloadFromRequest,
   createArtifact,
@@ -9,16 +10,111 @@ import {
   reviseArtifact
 } from '@/lib/content';
 
-type ArtifactMode = 'create' | 'revise' | 'fork';
+type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
 
 function isMode(value: string | undefined): value is ArtifactMode {
-  return value === 'create' || value === 'revise' || value === 'fork';
+  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear';
 }
 
 function extractValue(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
   if (value === undefined || value === null) return '';
   return String(value);
+}
+
+function readEnv(name: string) {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim() || undefined;
+  }
+  return trimmed;
+}
+
+function pickEnvValue(...names: string[]) {
+  for (const name of names) {
+    const value = readEnv(name);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function getAdminKvClient() {
+  const url = pickEnvValue(
+    'KV_REST_API_URL',
+    'CLAWFABLE_DATABASE_URL',
+    'CLAWFABLE_KV_URL',
+    'KV_URL',
+    'REDIS_URL'
+  );
+  const token = pickEnvValue(
+    'KV_REST_API_TOKEN',
+    'CLAWFABLE_DATABASE_TOKEN',
+    'CLAWFABLE_KV_TOKEN',
+    'KV_TOKEN',
+    'KV_REST_API_READ_ONLY_TOKEN'
+  );
+  if (!url || !token) return null;
+
+  return createClient({ url, token });
+}
+
+async function deleteKvKey(kv: Record<string, unknown>, key: string) {
+  if (typeof (kv as any).del === 'function') {
+    return (kv as any).del(key);
+  }
+  if (typeof (kv as any).delete === 'function') {
+    return (kv as any).delete(key);
+  }
+  if (typeof (kv as any).set === 'function') {
+    return (kv as any).set(key, null);
+  }
+  return null;
+}
+
+function normalizeTargetSections(raw: unknown) {
+  if (!raw) return [];
+  const values = Array.isArray(raw) ? raw.map(String) : String(raw).split(',');
+  return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))].filter(
+    (value) => value === 'soul' || value === 'memory'
+  ) as Array<'soul' | 'memory'>;
+}
+
+async function clearArtifactsForSections(sections: Array<'soul' | 'memory'>) {
+  const kv = getAdminKvClient();
+  if (!kv) {
+    throw new Error('Admin cache client is unavailable.');
+  }
+
+  const indexPrefix = 'clawfable:db:index:';
+  const artifactPrefix = 'clawfable:db:artifact:';
+
+  const report = [] as Array<{ section: 'soul' | 'memory'; artifactsDeleted: number; indexDeleted: boolean }>;
+
+  for (const section of sections) {
+    const indexKey = `${indexPrefix}${section}`;
+    const rawIndex = await (kv as any).get<unknown>(indexKey);
+    const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
+
+    const artifactKeysFromIndex = slugs.map((slug) => `${artifactPrefix}${section}:${slug}`);
+    const scannedKeys = await (kv as any).keys(`${artifactPrefix}${section}:*`);
+    const uniqueKeys = [...new Set([...(artifactKeysFromIndex || []), ...(Array.isArray(scannedKeys) ? scannedKeys : [])])];
+
+    const deletedArtifacts = uniqueKeys.length
+      ? (await Promise.all(uniqueKeys.map((key) => deleteKvKey(kv as any, key as string)))).filter(Boolean).length
+      : 0;
+    const indexDeleted = Boolean(await deleteKvKey(kv as any, indexKey));
+
+    report.push({
+      section,
+      artifactsDeleted: deletedArtifacts,
+      indexDeleted
+    });
+  }
+
+  return report;
 }
 
 async function parsePayload(request: NextRequest): Promise<Record<string, unknown>> {
@@ -60,7 +156,31 @@ export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
   const mode = extractValue(body, 'mode');
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, revise, or fork.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, or clear.' }, { status: 400 });
+  }
+
+  if (mode === 'clear') {
+    const sections = normalizeTargetSections(body.sections).length
+      ? normalizeTargetSections(body.sections)
+      : normalizeTargetSections(extractValue(body, 'section'));
+
+    const requested = sections.length ? sections : ['soul', 'memory'];
+
+    const providedToken =
+      request.headers.get('x-admin-token') ||
+      request.headers.get('x-clearpayload-token') ||
+      extractValue(body, 'adminToken') ||
+      extractValue(body, 'admin_token');
+    const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
+
+    if (!providedToken || !expectedToken || providedToken !== expectedToken) {
+      return NextResponse.json({ error: 'Unauthorized. Missing or invalid admin token.' }, { status: 401 });
+    }
+
+    const report = await clearArtifactsForSections(requested);
+    revalidatePath('/section/soul');
+    revalidatePath('/section/memory');
+    return NextResponse.json({ ok: true, cleared: report });
   }
 
   try {
