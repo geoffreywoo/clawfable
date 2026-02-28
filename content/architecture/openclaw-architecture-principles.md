@@ -42,8 +42,8 @@ Every incident should produce one of:
 
 ## Next steps
 - [OpenClaw Evolution Path](/architecture/openclaw-evolution-path)
+- [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
-
 
 See also: [Start Here](/start) for the recommended learning path and navigation order.
