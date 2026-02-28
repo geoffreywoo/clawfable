@@ -31,6 +31,8 @@ export type ArtifactDocument = {
   content: string;
   copy_paste_scope: ScopeMap;
   revision: RevisionMeta | null;
+  author_commentary?: string;
+  user_comments?: unknown;
 };
 
 export type SectionItem = {
@@ -64,6 +66,8 @@ type DbRecord = {
   revision: RevisionMeta;
   created_at: string;
   updated_at: string;
+  author_commentary?: string;
+  user_comments?: unknown;
 };
 
 type DbPayload = {
@@ -75,6 +79,8 @@ type DbPayload = {
   content: string;
   copy_paste_scope?: ScopeMap;
   revision?: RevisionMeta;
+  author_commentary?: string;
+  user_comments?: unknown;
 };
 
 type ForkPayload = DbPayload & {
@@ -239,6 +245,8 @@ function fromMdSection(section: CoreSection) {
         description: shortDescription(data, parsed.content),
         copy_paste_scope: scope as ScopeMap,
         revision: extractRevision(data),
+        author_commentary: typeof data?.author_commentary === 'string' ? data.author_commentary : undefined,
+        user_comments: data?.author_comments || data?.user_comments || data?.comments,
         content: parsed.content
       });
     }
@@ -279,6 +287,8 @@ function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
       description: row.description,
       copy_paste_scope: (row as DbRecord).copy_paste_scope,
       revision: (row as DbRecord).revision,
+      author_commentary: (row as Record<string, unknown>).author_commentary || (row as Record<string, unknown>).author_comment,
+      user_comments: (row as Record<string, unknown>).user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       updated_at: 'updated_at' in row ? row.updated_at : nowStamp(),
       created_at: 'created_at' in row ? (row as DbRecord).created_at : nowStamp()
     }
@@ -299,6 +309,8 @@ function toDoc(row: DbRecord): { data: Record<string, unknown>; content: string 
         parent_revision: row.revision?.parent_revision,
         source: row.revision?.source
       },
+      author_commentary: row.author_commentary || (row as Record<string, unknown>).author_comment,
+      user_comments: row.user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       source_path: row.sourcePath,
       created_at: row.created_at,
       updated_at: row.updated_at
@@ -420,6 +432,9 @@ function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
     sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
     title: raw.title || 'Clawfable artifact',
     description: raw.description || 'Clawfable artifact',
+    author_commentary: raw.author_commentary || (raw as Record<string, unknown>).author_comment,
+    user_comments:
+      raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
     content: raw.content || '',
     copy_paste_scope: sanitizeScope(raw.copy_paste_scope || {}),
     revision: {
@@ -458,6 +473,8 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
       payload.description?.trim() ||
       shortDescription({}, payload.content) ||
       `Clawfable ${section} artifact.`,
+    author_commentary: payload.author_commentary || undefined,
+    user_comments: payload.user_comments,
     content: payload.content,
     copy_paste_scope: sanitizeScope(payload.copy_paste_scope || existing?.copy_paste_scope || {}),
     revision: {
@@ -751,6 +768,8 @@ export async function artifactPayloadFromRequest(body: Record<string, unknown>) 
     description: rawDescription || shortDescription({}, content),
     content,
     copy_paste_scope: copyPasteScope,
+    author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
+    user_comments: body.user_comments || body.comments,
     revision
   };
 }

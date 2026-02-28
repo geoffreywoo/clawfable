@@ -444,6 +444,57 @@ article h4 {
   line-height: 1.65;
 }
 
+.commentary-stack {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.commentary-text {
+  margin: 0.2rem 0 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.comment-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.comment-item {
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+  padding: 0.55rem 0.62rem;
+}
+
+.comment-header {
+  margin: 0 0 0.2rem;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.comment-header span + span {
+  margin-left: 0.5rem;
+}
+
+.comment-meta {
+  color: var(--text-muted);
+}
+
+.comment-body {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.comment-empty {
+  margin: 0.35rem 0 0;
+}
+
 .doc-frame h1,
 .doc-frame h2,
 .doc-frame h3 {

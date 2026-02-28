@@ -8,6 +8,12 @@ const sectionLabels: Record<string, string> = {
   memory: 'MEMORY'
 };
 
+type NormalizedComment = {
+  body: string;
+  author: string;
+  date?: string;
+};
+
 function titleFromSlug(section: string, slugParts: string[]) {
   const slug = slugParts.join(' / ').replace(/-/g, ' ');
   return `${section.toUpperCase()}: ${slug}`;
@@ -62,6 +68,95 @@ function seedSourceOverride(section: string, sourcePath: string, slug: string) {
 
   if (isCanonicalSource(sourcePath)) return sourcePath;
   return undefined;
+}
+
+function normalizeCommentText(entry: unknown): string | null {
+  if (typeof entry === 'string') {
+    const trimmed = entry.trim();
+    return trimmed || null;
+  }
+
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.body === 'string'
+        ? record.body
+        : typeof record.text === 'string'
+          ? record.text
+          : typeof record.comment === 'string'
+            ? record.comment
+            : typeof record.message === 'string'
+              ? record.message
+              : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeCommentAuthor(entry: unknown): string | null {
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.author === 'string'
+        ? record.author
+        : typeof record.user === 'string'
+          ? record.user
+          : typeof record.username === 'string'
+            ? record.username
+            : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeCommentDate(entry: unknown): string | null {
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.created_at === 'string'
+        ? record.created_at
+        : typeof record.createdAt === 'string'
+          ? record.createdAt
+          : typeof record.date === 'string'
+            ? record.date
+            : typeof record.at === 'string'
+              ? record.at
+              : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeUserComments(raw: unknown): NormalizedComment[] {
+  if (!raw) return [];
+
+  const comments: NormalizedComment[] = [];
+  const values = Array.isArray(raw) ? raw : [raw];
+
+  for (const entry of values) {
+    if (Array.isArray(entry)) {
+      comments.push(...normalizeUserComments(entry));
+      continue;
+    }
+
+    const body = normalizeCommentText(entry);
+    if (!body) continue;
+
+    const author = normalizeCommentAuthor(entry);
+    const date = normalizeCommentDate(entry);
+    const safeDate = date ? date.slice(0, 10) : undefined;
+
+    comments.push({
+      body,
+      author: author || 'Community',
+      date: safeDate
+    });
+  }
+
+  return comments;
 }
 
 export async function generateMetadata({
@@ -133,6 +228,8 @@ export default async function DocPage({
   const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
   const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
   const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);
+  const authorCommentary = String((doc.data as Record<string, unknown>)?.author_commentary || '').trim();
+  const userComments = normalizeUserComments((doc.data as Record<string, unknown>)?.user_comments);
   const html = await marked.parse(doc.content);
 
   return (
@@ -178,6 +275,31 @@ export default async function DocPage({
           <Link href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Open fork flow</Link>
         </article>
       </div>
+
+      <section className="commentary-stack">
+        <article className="panel-mini">
+          <p className="tag">Author commentary</p>
+          <p className="commentary-text">{authorCommentary || 'No author commentary for this artifact yet.'}</p>
+        </article>
+        <article className="panel-mini">
+          <p className="tag">Comments from other users</p>
+          {userComments.length > 0 ? (
+            <ul className="comment-list">
+              {userComments.map((item: { author: string; body: string; date?: string }, index: number) => (
+                <li className="comment-item" key={`${item.author}-${item.date || index}`}>
+                  <p className="comment-header">
+                    <span>{item.author}</span>
+                    {item.date ? <span className="comment-meta">{item.date}</span> : null}
+                  </p>
+                  <p className="comment-body">{item.body}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="comment-empty">No comments from other users yet.</p>
+          )}
+        </article>
+      </section>
 
       <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
     </article>
