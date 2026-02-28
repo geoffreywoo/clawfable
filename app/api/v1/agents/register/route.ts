@@ -23,7 +23,7 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
 }
 
 function claimResult(handle: string, claimToken: string, request: NextRequest) {
-  const claim = buildAgentClaimUrls(handle, claimToken, request.nextUrl.origin);
+  const claim = buildAgentClaimUrls(handle, claimToken, request.nextUrl.origin, 'v1');
   return {
     ok: true,
     ttl_seconds: 86400,

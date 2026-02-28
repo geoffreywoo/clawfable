@@ -70,7 +70,7 @@ export type SectionItem = {
 };
 
 interface KVClient {
-  get<T>(key: string): Promise<T | null>;
+  get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<unknown>;
   delete?(key: string): Promise<unknown>;
 }
@@ -204,6 +204,10 @@ function parseArtifactCount(value: unknown): number {
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   }
   return 0;
+}
+
+async function kvGet<T>(kv: KVClient, key: string): Promise<T | null> {
+  return (await kv.get(key)) as T | null;
 }
 
 function sourcePathFor(section: CoreSection, slug: string) {
@@ -477,7 +481,7 @@ async function persistAgentProfile(profile: StoredAgentProfile) {
     artifact_count: parseArtifactCount(profile.artifact_count)
   };
 
-  const indexRaw = await kv.get<unknown>(DB_AGENT_INDEX);
+  const indexRaw = await kvGet<unknown>(kv, DB_AGENT_INDEX);
   const index = Array.isArray(indexRaw) ? indexRaw.filter((value): value is string => typeof value === 'string') : [];
   const nextIndex = [...new Set([...index, normalizedHandle])];
   await kv.set(DB_AGENT_INDEX, nextIndex);
@@ -489,7 +493,7 @@ export async function getAgentProfile(handle: string): Promise<UserProfile | nul
   if (!normalized) return null;
   const kv = await getKvClient();
   if (!kv) return null;
-  const row = await kv.get<StoredAgentProfile>(userProfileKey(normalized));
+  const row = await kvGet<StoredAgentProfile | null>(kv, userProfileKey(normalized));
   if (!row) return null;
   return normalizeAgentProfile(normalized, row);
 }
@@ -526,14 +530,14 @@ async function getAgentProfileRow(handle: string): Promise<StoredAgentProfile | 
   if (!normalized) return null;
   const kv = await getKvClient();
   if (!kv) return null;
-  return kv.get<StoredAgentProfile>(userProfileKey(normalized));
+  return kvGet<StoredAgentProfile | null>(kv, userProfileKey(normalized));
 }
 
 export async function getAgentProfiles(): Promise<UserProfile[]> {
   const kv = await getKvClient();
   if (!kv) return [];
 
-  const rawIndex = await kv.get<unknown>(DB_AGENT_INDEX);
+  const rawIndex = await kvGet<unknown>(kv, DB_AGENT_INDEX);
   const handles = Array.isArray(rawIndex) ? rawIndex.filter((value): value is string => typeof value === 'string') : [];
   if (handles.length === 0) return [];
 
@@ -591,12 +595,18 @@ export async function verifyAgentClaim(handle: string, claimToken: string): Prom
   return normalizeAgentProfile(normalized, next)!;
 }
 
-export function buildAgentClaimUrls(handle: string, claimToken: string, origin = '') {
+export function buildAgentClaimUrls(
+  handle: string,
+  claimToken: string,
+  origin = '',
+  apiVersion: 'legacy' | 'v1' = 'legacy'
+) {
   const normalizedHandle = normalizeAgentHandle(handle);
   const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
   const fallbackBase = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL : '';
   const base = cleanOrigin || fallbackBase || 'https://www.clawfable.com';
-  const verifyUrl = `${base}/api/agents/verify?handle=${encodeURIComponent(normalizedHandle)}&token=${encodeURIComponent(claimToken)}`;
+  const verifyPath = apiVersion === 'v1' ? '/api/v1/agents/verify' : '/api/agents/verify';
+  const verifyUrl = `${base}${verifyPath}?handle=${encodeURIComponent(normalizedHandle)}&token=${encodeURIComponent(claimToken)}`;
   const tweet = `I just claimed @${normalizedHandle} for Clawfable contributions. Verify this agent here: ${verifyUrl}`;
 
   return {
@@ -687,7 +697,7 @@ async function getSectionIndex(section: CoreSection): Promise<string[]> {
   const kv = await getKvClient();
   if (!kv) return [];
 
-  const raw = await kv.get<unknown>(indexKey(section));
+  const raw = await kvGet<unknown>(kv, indexKey(section));
   if (!raw) return [];
 
   if (Array.isArray(raw)) {
@@ -723,7 +733,7 @@ async function shouldSkipSectionSeed(section: CoreSection) {
   const kv = await getKvClient();
   if (!kv) return false;
 
-  const raw = await kv.get<unknown>(skipSeedKey(section));
+  const raw = await kvGet<unknown>(kv, skipSeedKey(section));
   if (raw == null) return false;
   if (typeof raw === 'boolean') return raw;
   if (typeof raw === 'number') return raw !== 0;
@@ -739,7 +749,7 @@ async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord
   const kv = await getKvClient();
   if (!kv) return null;
   const key = artifactKey(section, normalizeSlug(slug));
-  const raw = await kv.get<DbRecord>(key);
+  const raw = await kvGet<DbRecord | null>(kv, key);
   if (!raw) return null;
   return normalizeArtifact(section, raw);
 }
