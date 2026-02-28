@@ -95,6 +95,10 @@ const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
   soul: 'soul-baseline-v1',
   memory: 'memory-baseline-v1'
 };
+const OPENCLAW_TEMPLATE_BASENAME: Record<CoreSection, string> = {
+  soul: 'soul.md',
+  memory: 'memory.md'
+};
 
 let kvClient: Promise<KVClient | null> | null = null;
 const seededSections = new Set<string>();
@@ -148,7 +152,13 @@ function canonicalSourcePath(section: CoreSection, slug: string, sourcePath: str
     return sourcePath;
   }
 
-  if (slug === OPENCLAW_CANONICAL_SEEDS[section]) {
+  const normalizedSlug = slug.toLowerCase();
+  const normalizedSource = path.basename(sourcePath).toLowerCase();
+  if (
+    normalizedSlug === OPENCLAW_CANONICAL_SEEDS[section] ||
+    normalizedSource === `${OPENCLAW_CANONICAL_SEEDS[section]}.md` ||
+    normalizedSource === OPENCLAW_TEMPLATE_BASENAME[section]
+  ) {
     return OPENCLAW_CANONICAL_TEMPLATES[section];
   }
 
