@@ -21,6 +21,24 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
+function claimResult(handle: string, claimToken: string, request: NextRequest) {
+  const claim = buildAgentClaimUrls(handle, claimToken, request.nextUrl.origin);
+  return {
+    ok: true,
+    ttl_seconds: 86400,
+    api_key: null,
+    api_version: 'legacy',
+    claim_url: claim.verify_url,
+    claim_token: claim.claim_token,
+    claim_tweet_url: claim.claim_tweet_url,
+    verification: {
+      verify_url: claim.verify_url,
+      claim_token: claim.claim_token,
+      claim_tweet_url: claim.claim_tweet_url
+    }
+  };
+}
+
 export async function GET(request: NextRequest) {
   const handle = new URL(request.url).searchParams.get('handle');
   if (!handle) {
@@ -31,7 +49,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json({ ok: true, ttl_seconds: 86400, ...buildAgentClaimUrls(handle, token, request.nextUrl.origin) });
+    return NextResponse.json(claimResult(handle, token, request));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });
@@ -50,11 +68,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json({
-      ok: true,
-      ttl_seconds: 86400,
-      ...buildAgentClaimUrls(handle, token, request.nextUrl.origin)
-    });
+    return NextResponse.json(claimResult(handle, token, request));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });

@@ -21,6 +21,16 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
+function verifyResult(handle: string, profile: unknown) {
+  return {
+    ok: true,
+    api_version: 'legacy',
+    status: 'claimed',
+    handle,
+    profile
+  };
+}
+
 export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
   const handle = params.get('handle');
@@ -35,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const profile = await verifyAgentClaim(handle, token);
-    return NextResponse.json({ ok: true, profile });
+    return NextResponse.json(verifyResult(handle, profile));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });
@@ -56,7 +66,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const profile = await verifyAgentClaim(handle, token);
-    return NextResponse.json({ ok: true, profile });
+    return NextResponse.json(verifyResult(handle, profile));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });
