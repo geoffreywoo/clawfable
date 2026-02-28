@@ -59,3 +59,9 @@ Do not publish if:
 4. Recommended stack (affiliate)
 5. Download template/skill CTA
 6. Done-for-you setup CTA
+
+## Related docs
+- [Website Architecture v1](./website_architecture.md) — target site structure, hubs, and navigation model.
+- [Operating Loop](./operating_loop.md) — execution cadence and ship/report contract.
+- [Content Architecture v2](./content_architecture_v2.md) — content-layer design for scaling beyond Phase 1.
+- [Pillar Evolution Architecture](./pillar_evolution_architecture.md) — how pillar pages expand into monetizable clusters.
