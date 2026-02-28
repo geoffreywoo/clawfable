@@ -291,6 +291,21 @@ article h4 {
   flex-wrap: wrap;
 }
 
+.terminal-prompt {
+  border: 1px solid var(--line);
+  padding: 0.52rem 0.68rem;
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  color: var(--text-muted);
+  background: var(--surface-strong);
+}
+
+.prompt-mark {
+  color: var(--accent-green);
+  font-weight: 700;
+}
+
 .section-list,
 .section-list ul,
 .doc-shell ul {

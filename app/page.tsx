@@ -59,6 +59,7 @@ const latestEntries = latestFeed
         title: item.title,
         href: `/${section}/${item.slug}`,
         description: item.description,
+        scopeFlags: item.scopeFlags ?? [],
       }))
   )
   .slice(0, 6);
@@ -90,6 +91,10 @@ export default function Home() {
               <span className="quick-note">{entry.note}</span>
             </Link>
           ))}
+        </div>
+        <div className="terminal-prompt" aria-label="quick command">
+          <span className="prompt-mark">$</span>
+          <span>open /section/{'{'}target{'}'} and run read/validate/export.</span>
         </div>
         <div className="hero-actions">
           <Link href="/status" className="btn btn-ghost">
@@ -124,6 +129,15 @@ export default function Home() {
                   <span className="latest-text">
                     <strong>{entry.title}</strong>
                     <span>{entry.description}</span>
+                    {entry.scopeFlags.length > 0 ? (
+                      <span className="scope-row">
+                        {entry.scopeFlags.map((scope) => (
+                          <span key={`${entry.slug}-${scope}`} className="scope-chip">
+                            {scope.toUpperCase()}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
                   </span>
                 </Link>
               </li>

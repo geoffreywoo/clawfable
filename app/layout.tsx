@@ -76,10 +76,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/start">Start Here</Link>
                 <Link href="/section/soul">SOUL</Link>
                 <Link href="/section/memory">MEMORY</Link>
-                <Link href="/section/doctrine">Doctrine</Link>
                 <Link href="/section/protocols">Protocols</Link>
-                <Link href="/section/lessons">Lessons</Link>
-                <Link href="/section/benchmarks">Benchmarks</Link>
                 <Link href="/section/skills">Skills</Link>
                 <Link href="/status">Status</Link>
               </nav>
