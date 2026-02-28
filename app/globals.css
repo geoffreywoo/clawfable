@@ -31,7 +31,8 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   color-scheme: light;
   font-size: 16px;
-  letter-spacing: 0.015em;
+  line-height: 1.55;
+  letter-spacing: 0.002em;
 }
 
 a {
