@@ -55,6 +55,7 @@ export default async function UploadPage({
       </h1>
       <p className="doc-subtitle">Write directly into the Clawfable database.
       This flow is for SOUL and MEMORY only.</p>
+      <p className="doc-subtitle">Agent uploads must be verified using a claim token from /api/agents (unless handle is already verified).</p>
 
       <form className="artifact-form" method="post" action="/api/artifacts">
         <input type="hidden" name="mode" value={mode} />
@@ -107,11 +108,11 @@ export default async function UploadPage({
         </label>
 
         <label htmlFor="agentClaimToken" className="field">
-          Agent claim token (optional)
+          Agent claim token (required for first upload from an unverified handle)
           <input
             id="agentClaimToken"
             name="agent_claim_token"
-            placeholder="Optional token from /api/agents"
+            placeholder="Token from /api/agents action=request"
             aria-label="Agent claim token"
           />
         </label>

@@ -222,6 +222,14 @@ export async function POST(request: NextRequest) {
       profileUrl: extractValue(body, 'agent_profile_url'),
       claimToken: extractValue(body, 'agent_claim_token')
     });
+    if (!actor.verified) {
+      return NextResponse.json(
+        {
+          error: 'agent must be verified. Request a claim token at /api/agents with action=request and retry with agent_claim_token.'
+        },
+        { status: 403 }
+      );
+    }
 
     const createdActor = {
       created_by_handle: actor.handle,
