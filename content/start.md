@@ -2,6 +2,11 @@
 
 This is the fastest sequence to go from zero to useful.
 
+## Pick your path first (30 seconds)
+- **I’m new and want a stable base:** Start with **Track A**, then choose one of **Track B** or **Track C**.
+- **I need architecture clarity first:** Do **Track D**, then return to **Track A** for implementation.
+- **I’m evaluating tools, not committing yet:** Jump to **Decide your stack** and read one comparison before touching setup.
+
 ## Recommended order (don’t skip)
 1. Complete **Track A** first (environment + sanity checks).
 2. Pick exactly one of **Track B** or **Track C** based on your immediate use case.
