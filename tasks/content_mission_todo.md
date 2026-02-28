@@ -1,53 +1,62 @@
-# Clawfable Core Content Mission — Task List v1
+# Clawfable Core Content Mission — Task List v2 (Doctrine Focus)
 
 ## Objective
-Build Clawfable into an agent-first daily upgrade platform for OpenClaw architecture and self-learning loops.
+Make Clawfable the best agent-first doctrine resource for OpenClaw around:
+1) SOUL design,
+2) MEMORY architecture,
+3) self-learning loops,
+using concrete Anti Hunter instantiation examples.
 
-## Phase A — Foundation Structure (P0)
-- [ ] A1. Define canonical IA copy for `/daily`, `/protocols`, `/lessons`, `/benchmarks`, `/propose`.
-- [ ] A2. Add clear “Agent Route” blocks on home + `/start`.
-- [ ] A3. Ensure each section has a hub page with purpose, inputs, outputs, and next links.
+> Daily packets are explicitly out-of-scope for this phase and handled later.
 
-## Phase B — Daily Packets (P0)
-- [ ] B1. Create 7 consecutive daily upgrade packets (`/daily/YYYY-MM-DD-*`).
-- [ ] B2. Each packet includes: patch set, test checklist, failure pattern to watch.
-- [ ] B3. Add one-line “apply command prompt” per packet for copy/paste into OpenClaw.
+## Phase A — Canonical Doctrine Structure (P0)
+- [ ] A1. Reframe site IA copy around doctrine pillars: SOUL / MEMORY / Learning Loops.
+- [ ] A2. Add clear “Core Doctrine Route” blocks on home + `/start`.
+- [ ] A3. Ensure each doctrine section has: purpose, copy-paste assets, anti-patterns, and validation checks.
 
-## Phase C — Protocol Depth (P0)
-- [ ] C1. SOUL Patch Protocol v2 (with migration + rollback instructions).
-- [ ] C2. Memory Promotion Protocol v2 (daily -> curated promotion rubric).
-- [ ] C3. Heartbeat/Cron Protocol v2 (cadence strategy + lock + timeout guidance).
-- [ ] C4. Verification Protocol v1 (proof format + test gates + failure handling).
+## Phase B — SOUL Pillar (P0)
+- [ ] B1. Publish SOUL deep-dive v1: from philosophy to enforceable rules.
+- [ ] B2. Include direct Anti Hunter examples of strong vs weak SOUL constraints.
+- [ ] B3. Add copy-paste SOUL starter + migration checklist for existing agents.
+- [ ] B4. Add SOUL validation tests (voice drift, done-claim discipline, escalation behavior).
 
-## Phase D — Anti Hunter Lessons (P1)
-- [ ] D1. Publish 5 lesson pages from Anti Hunter architecture learnings.
-- [ ] D2. For each lesson: mechanism, implementation step, test, failure mode.
-- [ ] D3. Add “transferability score” (how broadly usable across agents).
+## Phase C — MEMORY Pillar (P0)
+- [ ] C1. Publish MEMORY architecture v1: daily logs vs curated memory vs structured memory.
+- [ ] C2. Include Anti Hunter examples of memory promotions (incident -> durable rule).
+- [ ] C3. Add copy-paste MEMORY starter pack (core + full public example).
+- [ ] C4. Add memory hygiene protocol (what to store, what not to store, promotion cadence).
 
-## Phase E — Benchmarks (P1)
-- [ ] E1. Build benchmark suite v1 pages (status quality, repeated-error rate, proof quality).
-- [ ] E2. Add pass/fail rubric and expected artifacts.
-- [ ] E3. Create weekly benchmark report template page.
+## Phase D — Self-Learning Loops Pillar (P0)
+- [ ] D1. Publish loop architecture v1: plan -> execute -> verify -> incident -> rule update.
+- [ ] D2. Add Anti Hunter case examples of loop failures and architectural fixes.
+- [ ] D3. Add copy-paste incident schema + prevention-rule protocol.
+- [ ] D4. Add loop benchmark checks (repeat-failure rate, verification compliance).
 
-## Phase F — Skill-Driven Onboarding (P1)
-- [ ] F1. Expand `skill.md` with install + daily heartbeat integration example.
-- [ ] F2. Add `heartbeat.md`, `rules.md`, `messaging.md` usage examples.
-- [ ] F3. Add “first 24 hours” onboarding tutorial for new OpenClaw agents.
+## Phase E — Anti Hunter Instantiation Layer (P1)
+- [ ] E1. Build “Anti Hunter Examples” sections into every doctrine page.
+- [ ] E2. For each example: context, mechanism, result, transferability.
+- [ ] E3. Add redaction rule: default full operational logic, redact only secrets/private identifiers.
+
+## Phase F — Skill/Onboarding Alignment (P1)
+- [ ] F1. Update `skill.md` to emphasize doctrine flow over feed flow.
+- [ ] F2. Add “first 60 minutes doctrine setup” tutorial for new OpenClaw agents.
+- [ ] F3. Ensure skill files point to SOUL/MEMORY/loop core pages first.
 
 ## Phase G — Quality Gates (P0)
-- [ ] G1. Define publish-grade checklist (no page ships below threshold).
-- [ ] G2. Add “copy-paste runnable block required” gate on all protocol pages.
-- [ ] G3. Add internal link gate: every page links to daily+protocol+benchmark flow.
+- [ ] G1. Publish-grade checklist for doctrine pages.
+- [ ] G2. Require concrete Anti Hunter example per major section.
+- [ ] G3. Require copy-paste runnable block per page.
+- [ ] G4. Require validation/test checklist per page.
 
-## Automation Loop Design (after task list approved)
-- [ ] L1. Create task queue file (`tasks/queue.jsonl`) with atomic units.
-- [ ] L2. Build worker script: pull next task -> edit page -> build check -> commit -> mark done.
-- [ ] L3. Add lock + timeout + retry policy.
-- [ ] L4. Emit concise progress report every N tasks.
+## Automation Loop Design (after this task list is approved)
+- [ ] L1. Create atomic doctrine task queue (`tasks/queue.jsonl`).
+- [ ] L2. Worker loop: pick one doctrine task -> implement -> build check -> commit -> mark done.
+- [ ] L3. Add lock + timeout + retry + blocker escalation.
+- [ ] L4. Emit concise progress updates every N completed tasks.
 
-## Definition of Done (mission phase)
-- [ ] 7 daily packets published
-- [ ] 4 protocol pages upgraded to v2 depth
-- [ ] 5 Anti Hunter lesson pages shipped
-- [ ] benchmark suite live with pass/fail rubric
-- [ ] onboarding flow usable by a fresh OpenClaw agent in <30 min
+## Definition of Done (this phase)
+- [ ] SOUL pillar publish-grade
+- [ ] MEMORY pillar publish-grade
+- [ ] self-learning loops pillar publish-grade
+- [ ] each pillar includes concrete Anti Hunter examples + copy-paste assets + validation checks
+- [ ] skill/onboarding points to doctrine-first flow
