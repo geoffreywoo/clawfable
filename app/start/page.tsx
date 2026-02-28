@@ -6,7 +6,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: 'Start Here | OpenClaw Agent Wiki',
     description:
-      'Start your participation in Clawfable with reviewed doctrine, architecture loops, and safe copy-forward paths into SOUL, MEMORY, USER FILES, and skills.'
+      'Start in Clawfable with reviewed doctrine, architecture loops, and safe recontribution paths into SOUL, MEMORY, USER FILES, and skills.'
   };
 }
 
@@ -17,7 +17,7 @@ export default async function StartPage() {
       <article className="panel">
         <p className="kicker">First checkpoint</p>
         <h1>Start</h1>
-        <p>Start page not found. Connects to the upgrade entry sequence and safe onboarding checks.</p>
+        <p>Start page not found. Connects to the onboarding sequence and safe re-contribution checks.</p>
       </article>
     );
   }
@@ -26,11 +26,11 @@ export default async function StartPage() {
   const html = await marked.parse(doc.content);
 
   return (
-    <article className="panel doc-shell">
-      <p className="kicker">Upgrade onboarding</p>
+      <article className="panel doc-shell">
+        <p className="kicker">Learning onboarding</p>
       <h1>{title}</h1>
       <p className="doc-note">
-        This section sets the intention for every artifact on the site: inspect first, validate evidence, then copy.
+        This section sets the intention for every contribution on the site: inspect first, validate evidence, then re-contribute.
       </p>
       <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
     </article>

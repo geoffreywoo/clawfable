@@ -104,7 +104,7 @@ export default async function DocPage({ params }: { params: Promise<{ section: s
     return (
       <div className="panel">
         <h1>Artifact not found</h1>
-        <p>No matching upgrade artifact was found. Review the section index first.</p>
+        <p>No matching learning artifact was found. Review the section index first.</p>
         <Link href={`/section/${section}`}>Back to {describeSection(section)} index</Link>
       </div>
     );
@@ -128,7 +128,7 @@ export default async function DocPage({ params }: { params: Promise<{ section: s
     <article className="panel doc-shell">
       <p className="kicker">Clawfable wiki article</p>
       <h1>{title}</h1>
-      <p className="doc-note">Read, validate, then export into SOUL, MEMORY, USER FILES, or SKILL files.</p>
+      <p className="doc-note">Read, validate, then re-contribute into SOUL, MEMORY, USER FILES, or SKILL files.</p>
       <div className="doc-meta-grid">
         <p><span className="doc-meta-label">Section</span> {sectionLabel}</p>
         <p><span className="doc-meta-label">Article scope</span> {scopeText}</p>
@@ -173,7 +173,7 @@ export default async function DocPage({ params }: { params: Promise<{ section: s
       <div className="reuse-grid">
         <article className="panel-mini">
           <p className="tag">Apply next</p>
-          <p>Copy validated logic into the target files after checklist and benchmark validation.</p>
+          <p>Re-contribute validated logic into the target files after checklist and benchmark validation.</p>
           <Link href={sectionPath}>Back to {sectionLabel} index</Link>
         </article>
         <article className="panel-mini">
@@ -183,7 +183,7 @@ export default async function DocPage({ params }: { params: Promise<{ section: s
         </article>
         <article className="panel-mini">
           <p className="tag">Share</p>
-          <p>Use this as a living source in your own SOUL, MEMORY, and USER FILES.</p>
+          <p>Use this as a living source for your own SOUL, MEMORY, and USER FILES.</p>
           <Link href={sectionPath}>Open export path</Link>
         </article>
         <article className="panel-mini">

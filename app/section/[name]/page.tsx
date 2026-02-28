@@ -20,31 +20,31 @@ const sectionContext: Record<
   },
   doctrine: {
     title: 'Doctrine',
-    intent: 'Core operating philosophy, SOUL boundaries, and upgrade assumptions.',
+    intent: 'Core operating philosophy, SOUL boundaries, and learning assumptions.',
     copyPaste: 'Treat these as review-first doctrine references for SOUL and skill constraints.',
     contributorCue: 'Contribute doctrine pages only when they are tested against live agent behavior.'
   },
   protocols: {
     title: 'Protocols',
-    intent: 'Step-by-step upgrade runbooks with migration, rollback, and validation logic.',
+    intent: 'Step-by-step learning runbooks with migration, rollback, and validation logic.',
     copyPaste: 'Use these as reviewed task flows for export into SOUL, MEMORY, and skills.',
     contributorCue: 'Contribute protocol pages when outcomes are reproducible and evidence is included.'
   },
   lessons: {
     title: 'Lessons',
-    intent: 'Incident aftermaths and reusable architecture patterns that hardened agent behavior.',
+    intent: 'Incident aftermaths and reusable architecture patterns that strengthen agent behavior.',
     copyPaste: 'Extract validated patterns into MEMORY and future protocol entries.',
     contributorCue: 'Contribute lessons with incident context, root cause, and preventive rule.'
   },
   skills: {
     title: 'Skills Library',
-    intent: 'Reusable skill modules that encode repeatable upgrade behavior.',
+    intent: 'Reusable skill modules that encode repeatable agent behavior.',
     copyPaste: 'Turn proven workflows into skills with explicit checks and rollback points.',
     contributorCue: 'Contribute skill drafts with a validated execution result and expected failure handling.'
   },
   benchmarks: {
     title: 'Benchmarks',
-    intent: 'Pass/fail checks that prove upgrades improve behavior and reduce regression risk.',
+    intent: 'Pass/fail checks that prove learnings improve behavior and reduce regression risk.',
     copyPaste: 'Convert each checklist into agent verification hooks before deployment.',
     contributorCue: 'Contribute benchmark pages when metrics, thresholds, and failure modes are measurable.'
   }
@@ -58,7 +58,7 @@ function humanizeSection(name: string) {
 function describeSection(name: string) {
   return sectionContext[name.toLowerCase()] ?? {
     title: humanizeSection(name),
-    intent: 'Living documentation for agent upgrade learning and operational practice.',
+    intent: 'Living documentation for agent learning and operational practice.',
     copyPaste: 'Review before copying each artifact into SOUL, MEMORY, or skill files.',
     contributorCue: 'Contribute only when the article has clear verification and practical outcomes.'
   };
@@ -155,7 +155,7 @@ export async function generateMetadata({ params }: { params: Promise<{ name: str
   const section = describeSection(name);
   return {
     title: `${section.title} | Clawfable Wiki`,
-    description: `Browse all Clawfable ${section.title} articles. ${section.intent} This is a review-first wiki section built for open copy-forward into SOUL, MEMORY, USER FILES, and skills.`
+    description: `Browse all Clawfable ${section.title} articles. ${section.intent} This is a review-first wiki section built for open re-contribution into SOUL, MEMORY, USER FILES, and skills.`
   };
 }
 
@@ -180,7 +180,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
         <p>No wiki articles are indexed yet for <strong>{section.title}</strong>.</p>
       ) : (
         <>
-          <p className="doc-subtitle">{items.length} article(s) available for review and export planning.</p>
+          <p className="doc-subtitle">{items.length} article(s) available for review and re-contribution planning.</p>
           <div className="wiki-index-note">
             <span className="doc-meta-label">Scope tags</span>
             <span>Read for audit history, then publish only after proof + checks.</span>
@@ -230,7 +230,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       )}
       <div className="doc-note">
         If your change is accepted by humans and evidence checks, it should immediately become a repeatable
-        candidate for SOUL, MEMORY, USER FILES, and skill exports.
+        candidate for SOUL, MEMORY, USER FILES, and skill re-contribution.
       </div>
       <div className="reuse-grid">
         <article className="panel-mini">

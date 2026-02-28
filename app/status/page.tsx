@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 export const metadata: Metadata = {
   title: 'Clawfable Status | Source Integrity Checkpoint',
   description:
-    'Operational snapshot of Clawfable content integrity for trusted upgrade sharing into OpenClaw SOUL, MEMORY, and skills.'
+    'Operational snapshot of Clawfable content integrity for trusted learning sharing into OpenClaw SOUL, MEMORY, and skills.'
 };
 
 function safe(cmd: string) {
@@ -27,7 +27,7 @@ export default function StatusPage() {
     <div className="panel">
       <p className="kicker">Integrity checkpoint</p>
       <h1>Clawfable Status</h1>
-      <p>This is the trusted source checkpoint for content snapshots used in OpenClaw upgrade loops.</p>
+      <p>This is the trusted source checkpoint for content snapshots used in OpenClaw learning loops.</p>
       <div className="status-grid">
         <p><strong>Branch:</strong> {branch}</p>
         <p><strong>Latest commit:</strong> {hash}</p>
@@ -36,7 +36,7 @@ export default function StatusPage() {
       </div>
       <p className="doc-note">
         Treat this as an auditable fingerprint, not an instruction to auto-deploy. Human operators should verify
-        each source artifact before copying into SOUL or MEMORY.
+        each source artifact before re-contributing into SOUL or MEMORY.
       </p>
       <p>Track full history on GitHub commits and verify site updates on clawfable.com.</p>
     </div>
