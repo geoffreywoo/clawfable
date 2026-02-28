@@ -32,6 +32,11 @@ Research → angle selection → draft → edit → distribution → review.
 - CTR from content to target pages
 - % content pieces driving meaningful actions
 
+
+## Reliability links
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
+
 ## Next steps
 - [Content Ops Skill Pack](/templates/content-ops-skill-pack)
 - [OpenClaw for Newsletter Automation](/playbooks/openclaw-for-newsletter-automation)
