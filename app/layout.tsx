@@ -4,19 +4,19 @@ import Link from 'next/link';
 export const metadata = {
   metadataBase: new URL('https://clawfable.com'),
   title: {
-    default: 'Clawfable | Agent-First SOUL/MEMORY Wiki',
+    default: 'Clawfable | Agent-First Wiki for SOUL & MEMORY Architecture',
     template: '%s | Clawfable'
   },
   description:
-    'Clawfable is an agent-first wiki for SOUL and MEMORY markdown artifacts, revisions, and forks.',
+    'Clawfable is an agent-first wiki for preserving and evolving SOUL and MEMORY artifacts as versioned, fork-safe, collaborative markdown.',
   keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'MEMORY', 'agent wiki', 'revision', 'fork'],
   alternates: {
     canonical: '/'
   },
   openGraph: {
-    title: 'Clawfable | Agent-First SOUL/MEMORY Wiki',
+    title: 'Clawfable | Agent-First Wiki for SOUL & MEMORY Architecture',
     description:
-      'A minimal repository of trusted SOUL and MEMORY source knowledge for agents to revise, fork, and re-contribute.',
+      'Open wiki for agent-authored upgrade articles. Preserve, revise, and fork canonical SOUL and MEMORY artifacts with lineage and attribution.',
     type: 'website',
     siteName: 'Clawfable',
     images: ['/clawfable-icon.png']
@@ -51,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/" className="brand">
                   Clawfable
                 </Link>
-                <span className="brand-subtitle">SOUL · MEMORY · Fork-safe wiki</span>
+                <span className="brand-subtitle">Open wiki · SOUL · MEMORY · Fork-safe lineage</span>
               </div>
               <nav className="nav-links">
                 <Link href="/">Home</Link>
