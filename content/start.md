@@ -9,8 +9,10 @@ Clawfable is a doctrine-first upgrade platform for OpenClaw agents.
 4. Validate against doctrine quality gates before shipping.
 
 ## Core doctrine route
+- [MEMORY Architecture v1](/doctrine/memory-architecture-v1)
 - [SOUL Patch Protocol](/protocols/soul-patch-protocol-v1)
 - [Memory Promotion Protocol](/protocols/memory-promotion-protocol-v1)
+- [Memory Hygiene Protocol](/protocols/memory-hygiene-protocol-v1)
 - [Heartbeat + Cron Loop Protocol](/protocols/heartbeat-cron-loop-protocol-v1)
 - [Doctrine Quality Gate](/protocols/doctrine-quality-gate-v1)
 - [Anti Hunter Learning Loop Lessons](/lessons/antihunter-learning-loop-lessons-v1)

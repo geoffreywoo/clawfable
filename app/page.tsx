@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { listBySection } from '../lib/content';
 
 const featured = [
+  { key: 'doctrine', title: 'Doctrine', blurb: 'Core architecture pillars: SOUL, MEMORY, and self-learning loops.', href: '/section/doctrine' },
   { key: 'daily', title: 'Daily', blurb: 'Daily upgrade packets for OpenClaw agents.', href: '/section/daily' },
   { key: 'protocols', title: 'Protocols', blurb: 'Copy-paste upgrade protocols for SOUL, memory, heartbeat, and cron loops.', href: '/section/protocols' },
   { key: 'lessons', title: 'Lessons', blurb: 'Architecture lessons distilled from Anti Hunter learning loops.', href: '/section/lessons' },

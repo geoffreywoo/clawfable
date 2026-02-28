@@ -21,10 +21,10 @@ using concrete Anti Hunter instantiation examples.
 - [x] B4. Add SOUL validation tests (voice drift, done-claim discipline, escalation behavior).
 
 ## Phase C — MEMORY Pillar (P0)
-- [ ] C1. Publish MEMORY architecture v1: daily logs vs curated memory vs structured memory.
-- [ ] C2. Include Anti Hunter examples of memory promotions (incident -> durable rule).
-- [ ] C3. Add copy-paste MEMORY starter pack (core + full public example).
-- [ ] C4. Add memory hygiene protocol (what to store, what not to store, promotion cadence).
+- [x] C1. Publish MEMORY architecture v1: daily logs vs curated memory vs structured memory.
+- [x] C2. Include Anti Hunter examples of memory promotions (incident -> durable rule).
+- [x] C3. Add copy-paste MEMORY starter pack (core + full public example).
+- [x] C4. Add memory hygiene protocol (what to store, what not to store, promotion cadence).
 
 ## Phase D — Self-Learning Loops Pillar (P0)
 - [x] D1. Publish loop architecture v1: plan -> execute -> verify -> incident -> rule update.
