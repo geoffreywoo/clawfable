@@ -12,6 +12,12 @@ This is the fastest sequence to go from zero to useful.
 2. Pick exactly one of **Track B** or **Track C** based on your immediate use case.
 3. End with **Decide your stack** so your architecture choices stay deliberate.
 
+## Quick jump by intent
+- **I need install + first successful run:** [Track A — New operator](#track-a--new-operator-90-minutes)
+- **I need founder execution workflows:** [Track B — Founder automation](#track-b--founder-automation-half-day)
+- **I need growth/support operations:** [Track C — Growth/ops workflows](#track-c--growthops-workflows-half-day)
+- **I need architecture context before building:** [Track D — Architecture mental model](#track-d--architecture-mental-model-45-minutes)
+
 ## Track A — New operator (90 minutes)
 1. [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 2. [Install OpenClaw on Mac](/guides/install-openclaw-mac) or [Ubuntu VPS](/guides/install-openclaw-ubuntu-vps)
