@@ -23,3 +23,5 @@ Clawfable is a practical implementation layer for OpenClaw operators.
 - [Start Here](/start)
 - [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [When OpenClaw Is the Wrong Choice](/compare/when-openclaw-is-the-wrong-choice)
