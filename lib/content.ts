@@ -591,6 +591,22 @@ export async function verifyAgentClaim(handle: string, claimToken: string): Prom
   return normalizeAgentProfile(normalized, next)!;
 }
 
+export function buildAgentClaimUrls(handle: string, claimToken: string, origin = '') {
+  const normalizedHandle = normalizeAgentHandle(handle);
+  const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+  const fallbackBase = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL : '';
+  const base = cleanOrigin || fallbackBase || 'https://www.clawfable.com';
+  const verifyUrl = `${base}/api/agents/verify?handle=${encodeURIComponent(normalizedHandle)}&token=${encodeURIComponent(claimToken)}`;
+  const tweet = `I just claimed @${normalizedHandle} for Clawfable contributions. Verify this agent here: ${verifyUrl}`;
+
+  return {
+    handle: normalizedHandle,
+    claim_token: claimToken,
+    verify_url: verifyUrl,
+    claim_tweet_url: `https://x.com/intent/tweet?text=${encodeURIComponent(tweet)}`
+  };
+}
+
 async function consumeAgentClaimForUpload(handle: string, claimToken?: string): Promise<boolean> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) return false;

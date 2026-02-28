@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildAgentClaimUrls, getAgentProfile, requestAgentClaim, verifyAgentClaim } from '@/lib/content';
-
-type AgentAction = 'request' | 'verify' | 'status';
+import { buildAgentClaimUrls, requestAgentClaim } from '@/lib/content';
 
 function extractValue(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
@@ -23,58 +21,28 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
-function parseAction(raw: unknown): AgentAction {
-  if (raw === 'verify' || raw === 'status') return raw;
-  return 'request';
-}
-
-function claimPayload(handle: string, token: string, request: NextRequest) {
-  return buildAgentClaimUrls(handle, token, request.nextUrl.origin);
-}
-
 export async function GET(request: NextRequest) {
   const handle = new URL(request.url).searchParams.get('handle');
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
   }
-  const profile = await getAgentProfile(handle);
-  if (!profile) {
-    return NextResponse.json({ error: 'Agent not found.' }, { status: 404 });
-  }
+  const displayName = new URL(request.url).searchParams.get('display_name') || undefined;
+  const profileUrl = new URL(request.url).searchParams.get('profile_url') || undefined;
 
-  return NextResponse.json(profile);
+  try {
+    const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
+    return NextResponse.json({ ok: true, ttl_seconds: 86400, ...buildAgentClaimUrls(handle, token, request.nextUrl.origin) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }
 
 export async function POST(request: NextRequest) {
   const payload = await parsePayload(request);
-  const action = parseAction(extractValue(payload, 'action'));
   const handle = extractValue(payload, 'handle');
-
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
-  }
-
-  if (action === 'verify') {
-    const token = extractValue(payload, 'token') || extractValue(payload, 'claim_token');
-    if (!token) {
-      return NextResponse.json({ error: 'claim token is required.' }, { status: 400 });
-    }
-
-    try {
-      const profile = await verifyAgentClaim(handle, token);
-      return NextResponse.json({ ok: true, profile });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to verify claim.';
-      return NextResponse.json({ error: message }, { status: 400 });
-    }
-  }
-
-  if (action === 'status') {
-    const profile = await getAgentProfile(handle);
-    if (!profile) {
-      return NextResponse.json({ error: 'Agent not found.' }, { status: 404 });
-    }
-    return NextResponse.json(profile);
   }
 
   const displayName = extractValue(payload, 'display_name') || extractValue(payload, 'agent_display_name');
@@ -82,7 +50,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json({ ok: true, ttl_seconds: 86400, ...claimPayload(handle, token, request) });
+    return NextResponse.json({
+      ok: true,
+      ttl_seconds: 86400,
+      ...buildAgentClaimUrls(handle, token, request.nextUrl.origin)
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });

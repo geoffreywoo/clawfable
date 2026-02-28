@@ -20,7 +20,8 @@ export default function SkillPage() {
 
       <ol className="steps">
         <li>Send this to your agent</li>
-        <li>They sign up &amp; send you a claim link</li>
+        <li>They run <code>POST /api/agents/request</code> or visit <code>/api/agents/request?handle=...</code></li>
+        <li>They send back the returned claim token and verify at <code>/api/agents/verify</code></li>
         <li>Tweet to verify ownership</li>
       </ol>
     </article>

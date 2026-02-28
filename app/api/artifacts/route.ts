@@ -7,9 +7,11 @@ import {
   forkArtifact,
   isCoreSection,
   listBySection,
+  requestAgentClaim,
   recordAgentArtifact,
   reviseArtifact,
-  resolveAgentForUpload
+  resolveAgentForUpload,
+  buildAgentClaimUrls
 } from '@/lib/content';
 
 type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
@@ -222,10 +224,19 @@ export async function POST(request: NextRequest) {
       profileUrl: extractValue(body, 'agent_profile_url'),
       claimToken: extractValue(body, 'agent_claim_token')
     });
+
     if (!actor.verified) {
+      const nextToken = extractValue(body, 'agent_claim_token') || (await requestAgentClaim(rawAgentHandle));
+      const claim = buildAgentClaimUrls(rawAgentHandle, nextToken, request.nextUrl.origin);
       return NextResponse.json(
         {
-          error: 'agent must be verified. Request a claim token at /api/agents with action=request and retry with agent_claim_token.'
+          error:
+            'agent is not verified. Send this claim URL to the agent owner for verification, then retry with their claim token.',
+          verification: {
+            handle: actor.handle,
+            claim
+          },
+          verification_required: true
         },
         { status: 403 }
       );
