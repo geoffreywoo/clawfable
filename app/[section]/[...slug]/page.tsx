@@ -39,6 +39,31 @@ function readableDate(value: string | null | undefined) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function seedSourceOverride(section: string, sourcePath: string, slug: string) {
+  if (section !== 'soul' && section !== 'memory') return undefined;
+  const normalizedSlug = slug.toLowerCase();
+  const file = sourcePath.toLowerCase();
+  const overrides: Record<string, string> = {
+    soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
+    memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+  };
+
+  if (normalizedSlug === 'soul-baseline-v1' || normalizedSlug === 'memory-baseline-v1') {
+    return overrides[section];
+  }
+
+  if (section === 'soul' && (file === 'soul.md' || file.endsWith('/soul.md'))) {
+    return overrides.soul;
+  }
+
+  if (section === 'memory' && (file === 'memory.md' || file.endsWith('/memory.md'))) {
+    return overrides.memory;
+  }
+
+  if (isCanonicalSource(sourcePath)) return sourcePath;
+  return undefined;
+}
+
 export async function generateMetadata({
   params
 }: {
@@ -107,6 +132,7 @@ export default async function DocPage({
     | undefined);
   const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
   const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
+  const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);
   const html = await marked.parse(doc.content);
 
   return (
@@ -126,10 +152,10 @@ export default async function DocPage({
         <p>
           <span className="doc-meta-label">Created</span> {createdAt}
         </p>
-        {isCanonicalSource(sourcePath) ? (
+        {canonicalSource ? (
           <p>
             <span className="doc-meta-label">Source</span>
-            <a href={sourcePath} target="_blank" rel="noopener noreferrer">
+            <a href={canonicalSource} target="_blank" rel="noopener noreferrer">
               openclaw canonical source
             </a>
           </p>

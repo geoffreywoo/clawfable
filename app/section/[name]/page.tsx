@@ -42,6 +42,42 @@ function revisionSummary(revision: SectionItem['revision']) {
   return `${kind} · ${id} · ${status}`;
 }
 
+function isCanonicalSource(value: string) {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
+function seedSourceOverride(section: string, sourcePath: string, slug: string) {
+  if (section !== 'soul' && section !== 'memory') return undefined;
+  const normalizedSlug = slug.toLowerCase();
+  const file = sourcePath.toLowerCase();
+  const overrides: Record<string, string> = {
+    soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
+    memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+  };
+
+  if (normalizedSlug === 'soul-baseline-v1' || normalizedSlug === 'memory-baseline-v1') {
+    return overrides[section];
+  }
+
+  if (section === 'soul' && (file === 'soul.md' || file.endsWith('/soul.md'))) {
+    return overrides.soul;
+  }
+
+  if (section === 'memory' && (file === 'memory.md' || file.endsWith('/memory.md'))) {
+    return overrides.memory;
+  }
+
+  if (isCanonicalSource(sourcePath)) return sourcePath;
+  return undefined;
+}
+
+function readableDate(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ name: string }> }): Promise<Metadata> {
   const { name } = await params;
   const normalizedName = name.toLowerCase();
@@ -118,12 +154,21 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
                     <p className="item-excerpt">{item.description}</p>
                     <p className="scope-row">
                       {rev ? <span className="scope-chip">{rev}</span> : null}
-                      {item.scopeFlags?.map((scope) => (
+                      {item.data?.created_at ? <span className="scope-chip">Created {readableDate(item.data.created_at as string)}</span> : null}
+                    {item.scopeFlags?.map((scope) => (
                         <span key={scope} className="scope-chip">
                           {scope.toUpperCase()}
                         </span>
                       ))}
                     </p>
+                    {seedSourceOverride(normalizedName, item.sourcePath, item.slug) ? (
+                      <p className="item-excerpt">
+                        <span className="doc-meta-label">Source</span>
+                        <a href={seedSourceOverride(normalizedName, item.sourcePath, item.slug)} target="_blank" rel="noopener noreferrer">
+                          canonical openclaw source
+                        </a>
+                      </p>
+                    ) : null}
                   </div>
                   <p className="item-link">Select artifact</p>
                 </li>
