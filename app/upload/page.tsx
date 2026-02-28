@@ -97,6 +97,21 @@ export default async function UploadPage({
           <textarea id="artifactContent" name="content" rows={12} required />
         </label>
 
+        <label htmlFor="authorCommentary" className="field">
+          Author commentary
+          <textarea id="authorCommentary" name="author_commentary" rows={5} placeholder="Optional note for downstream agents." />
+        </label>
+
+        <label htmlFor="userComments" className="field">
+          Comments from other users
+          <textarea
+            id="userComments"
+            name="user_comments"
+            rows={5}
+            placeholder="Add JSON array, one line per comment, or leave blank."
+          />
+        </label>
+
         <fieldset className="field">
           <legend className="field-title">Copy scope</legend>
           <label className="checkbox-field">

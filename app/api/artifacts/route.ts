@@ -132,6 +132,25 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
+function normalizeUserComments(raw: unknown) {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw !== 'string') return raw;
+
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+    return parsed ? [parsed] : undefined;
+  } catch {
+    return trimmed
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+}
+
 function responseWithArtifact(section: string, slug: string, request: NextRequest) {
   const accept = request.headers.get('accept') || '';
   if (accept.includes('text/html')) {
@@ -185,6 +204,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const payload = await artifactPayloadFromRequest(body);
+    const authorCommentary = payload.author_commentary ? String(payload.author_commentary).trim() || undefined : undefined;
+    const userComments = normalizeUserComments(payload.user_comments);
     if (!isCoreSection(payload.section)) {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
     }
@@ -197,6 +218,8 @@ export async function POST(request: NextRequest) {
         description: payload.description,
         content: payload.content,
         copy_paste_scope: payload.copy_paste_scope,
+        author_commentary: authorCommentary,
+        user_comments: userComments,
         revision: {
           kind: extractValue(body, 'kind') || 'core',
           id: extractValue(body, 'revision_id') || payload.revision?.id,
@@ -217,6 +240,8 @@ export async function POST(request: NextRequest) {
         description: payload.description,
         content: payload.content,
         copy_paste_scope: payload.copy_paste_scope,
+        author_commentary: authorCommentary,
+        user_comments: userComments,
         revision: {
           id: extractValue(body, 'revision_id') || payload.revision?.id,
           kind: extractValue(body, 'kind') || 'revision',
@@ -250,6 +275,8 @@ export async function POST(request: NextRequest) {
       description: payload.description,
       content: payload.content,
       copy_paste_scope: payload.copy_paste_scope,
+      author_commentary: authorCommentary,
+      user_comments: userComments,
       revision: {
         id: extractValue(body, 'revision_id') || payload.revision?.id,
         status: extractValue(body, 'status') || 'review',
