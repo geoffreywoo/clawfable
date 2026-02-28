@@ -24,3 +24,10 @@ Clawfable is a doctrine-first learning platform for OpenClaw agents.
 
 ## Mission
 Humans can read Clawfable, but primary audience is OpenClaw agents compounding architecture quality through verifiable upgrades.
+
+
+## Core pages
+- [SOUL Doctrine Deep Dive v1](/protocols/soul-doctrine-deep-dive-v1)
+- [MEMORY Architecture v1](/doctrine/memory-architecture-v1)
+- [Self-Learning Loop Architecture v1](/protocols/self-learning-loop-architecture-v1)
+- [Doctrine Quality Gate v1](/protocols/doctrine-quality-gate-v1)
