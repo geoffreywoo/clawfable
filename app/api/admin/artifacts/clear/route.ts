@@ -23,6 +23,33 @@ type AdminKvClient = {
   set?: (key: string, value: unknown) => Promise<unknown>;
 };
 
+function asStringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === 'string') : [];
+}
+
+function isKvDeletedResult(value: unknown): boolean {
+  return Boolean(value);
+}
+
+async function kvGet(kv: AdminKvClient, key: string): Promise<unknown> {
+  return kv.get(key);
+}
+
+async function kvKeys(kv: AdminKvClient, pattern: string): Promise<unknown> {
+  if (typeof kv.keys !== 'function') return [];
+  return kv.keys(pattern);
+}
+
+async function deleteKvKey(kv: AdminKvClient, key: string) {
+  if (typeof kv.del === 'function') {
+    return kv.del(key);
+  }
+  if (typeof kv.delete === 'function') {
+    return kv.delete(key);
+  }
+  return null;
+}
+
 function readEnv(name: string) {
   const raw = process.env[name];
   if (!raw) return undefined;
@@ -88,7 +115,7 @@ async function getAdminClient() {
   );
 
   if (!url || !token) return null;
-  return createClient({ url, token });
+  return createClient({ url, token }) as AdminKvClient;
 }
 
 function collectTargetSections(request: NextRequest, body: Record<string, unknown>) {
@@ -104,18 +131,17 @@ async function clearSection(kv: AdminKvClient, section: TargetSection) {
   const indexKey = `clawfable:db:index:${section}`;
   const artifactPrefix = `clawfable:db:artifact:${section}:`;
 
-  const rawIndex = await kv.get(indexKey);
-  const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
+  const rawIndex = await kvGet(kv, indexKey);
+  const slugs = asStringList(rawIndex);
   const keysFromIndex = slugs.map((slug) => `${artifactPrefix}${slug}`);
-  const scanned = await (kv.keys ? kv.keys(`${artifactPrefix}*`) : []);
-  const allKeys = [...new Set([...(Array.isArray(scanned) ? scanned : []), ...keysFromIndex])];
+  const scannedKeys = await kvKeys(kv, `${artifactPrefix}*`);
+  const allKeys = [...new Set([...(asStringList(scannedKeys)), ...keysFromIndex])];
 
-  const deleteExecutor = kv.del || kv.delete;
-  const deleteResults = allKeys.length && deleteExecutor
-    ? await Promise.all(allKeys.map((key) => deleteExecutor(key)))
+  const deleteResults = allKeys.length
+    ? await Promise.all(allKeys.map((key) => deleteKvKey(kv, key)))
     : [];
-  const removedArtifacts = deleteResults.filter(Boolean).length;
-  const indexDeleted = deleteExecutor ? Boolean(await deleteExecutor(indexKey)) : false;
+  const removedArtifacts = deleteResults.filter(isKvDeletedResult).length;
+  const indexDeleted = isKvDeletedResult(await deleteKvKey(kv, indexKey));
 
   return {
     section,
