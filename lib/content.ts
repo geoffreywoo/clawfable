@@ -90,6 +90,25 @@ const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
 let kvClient: Promise<KVClient | null> | null = null;
 const seededSections = new Set<string>();
 
+function readEnv(name: string) {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim() || undefined;
+  }
+  return trimmed;
+}
+
+function pickEnvValue(...names: string[]) {
+  for (const name of names) {
+    const value = readEnv(name);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 function scopeFlagsFromMap(scopeMap?: Record<string, unknown>): string[] {
   if (!scopeMap) return [];
   return scopeOrder.filter((key) => scopeMap[key] === true);
@@ -262,15 +281,21 @@ async function getKvClient(): Promise<KVClient | null> {
 
   kvClient = (async () => {
     const directUrl =
-      process.env.CLAWFABLE_DATABASE_URL ||
-      process.env.CLAWFABLE_KV_URL ||
-      process.env.KV_URL ||
-      process.env.KV_REST_API_URL;
+      pickEnvValue(
+        'KV_REST_API_URL',
+        'CLAWFABLE_DATABASE_URL',
+        'CLAWFABLE_KV_URL',
+        'KV_URL',
+        'REDIS_URL'
+      );
     const directToken =
-      process.env.CLAWFABLE_DATABASE_TOKEN ||
-      process.env.CLAWFABLE_KV_TOKEN ||
-      process.env.KV_TOKEN ||
-      process.env.KV_REST_API_TOKEN;
+      pickEnvValue(
+        'KV_REST_API_TOKEN',
+        'CLAWFABLE_DATABASE_TOKEN',
+        'CLAWFABLE_KV_TOKEN',
+        'KV_TOKEN',
+        'KV_REST_API_READ_ONLY_TOKEN'
+      );
 
     if (!directUrl || !directToken) return null;
 
@@ -362,7 +387,7 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
   const kv = await getKvClient();
   if (!kv) {
     throw new Error(
-      'No database configured. Set CLAWFABLE_DATABASE_URL + CLAWFABLE_DATABASE_TOKEN, CLAWFABLE_KV_URL + CLAWFABLE_KV_TOKEN, or KV_REST_API_URL + KV_REST_API_TOKEN.'
+      'No database configured. Set CLAWFABLE_DATABASE_URL + CLAWFABLE_DATABASE_TOKEN, CLAWFABLE_KV_URL + CLAWFABLE_KV_TOKEN, KV_REST_API_URL + KV_REST_API_TOKEN (read-write), or KV_REST_API_URL + KV_REST_API_READ_ONLY_TOKEN (read-only).'
     );
   }
 
