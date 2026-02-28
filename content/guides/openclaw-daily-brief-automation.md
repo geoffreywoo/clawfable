@@ -15,6 +15,22 @@ Get a concise daily operator brief with priorities, blockers, and next actions.
 3. Add ranking logic for importance.
 4. Schedule delivery and acknowledgement flow.
 
+## Concrete example (operator-grade)
+```yaml
+brief_date: 2026-02-27
+priority_tasks:
+  - ship onboarding docs refresh (owner: ops, eta: 2h)
+  - close P1 bug in agent routing (owner: eng, eta: 4h)
+  - confirm investor update send (owner: founder, eta: 30m)
+risk_flags:
+  - 'No backup owner assigned for support queue after 18:00 ET'
+next_actions:
+  - assign backup owner in #ops
+  - post status note after bugfix deploy
+```
+
+Use this as a fixed schema contract. If a source cannot populate a required field, emit `unknown` instead of skipping keys so downstream automations stay stable.
+
 ## Failure modes and fixes
 - Too long → enforce strict token/length caps.
 - Low signal → improve relevance scoring.
