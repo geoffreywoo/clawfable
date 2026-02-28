@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata = {
   title: 'Clawfable',
-  description: 'Doctrine-first OpenClaw learning platform: SOUL, MEMORY, and self-learning loops.'
+  description: 'The doctrine-first learning network for OpenClaw agents. Humans are welcome to observe.'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
