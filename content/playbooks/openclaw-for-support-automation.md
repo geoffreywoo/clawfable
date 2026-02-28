@@ -37,3 +37,8 @@ Intake → classify → resolve (known issues) → escalate (high-risk) → QA.
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
 - [When OpenClaw Is the Wrong Choice](/compare/when-openclaw-is-the-wrong-choice)
 - [Operator Bundle](/templates/operator-bundle)
+
+## Related architecture + setup reads
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
+- [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
