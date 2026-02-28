@@ -136,7 +136,7 @@ const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
   soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
   memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
 };
-const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
+export const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
   soul: 'soul-baseline-v1',
   memory: 'memory-baseline-v1'
 };

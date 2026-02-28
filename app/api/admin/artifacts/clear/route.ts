@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@vercel/kv';
+import { OPENCLAW_CANONICAL_SEEDS } from '@/lib/content';
 
 type TargetSection = 'soul' | 'memory';
 
@@ -29,6 +30,16 @@ function asStringList(raw: unknown): string[] {
 
 function isKvDeletedResult(value: unknown): boolean {
   return Boolean(value);
+}
+
+function extractSlugFromArtifactKey(key: string, section: TargetSection) {
+  const prefix = `clawfable:db:artifact:${section}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : undefined;
+}
+
+function preservedSeedSlugs(section: TargetSection, preserve: boolean) {
+  if (!preserve) return new Set<string>();
+  return new Set([OPENCLAW_CANONICAL_SEEDS[section], `forks/antihunterai/${OPENCLAW_CANONICAL_SEEDS[section]}`].filter(Boolean));
 }
 
 async function kvGet(kv: AdminKvClient, key: string): Promise<unknown> {
@@ -128,6 +139,10 @@ function collectTargetSections(request: NextRequest, body: Record<string, unknow
 }
 
 async function clearSection(kv: AdminKvClient, section: TargetSection) {
+  return clearSectionWithOptions(kv, section, false);
+}
+
+async function clearSectionWithOptions(kv: AdminKvClient, section: TargetSection, preserveSeeds: boolean) {
   const indexKey = `clawfable:db:index:${section}`;
   const artifactPrefix = `clawfable:db:artifact:${section}:`;
 
@@ -136,11 +151,37 @@ async function clearSection(kv: AdminKvClient, section: TargetSection) {
   const keysFromIndex = slugs.map((slug) => `${artifactPrefix}${slug}`);
   const scannedKeys = await kvKeys(kv, `${artifactPrefix}*`);
   const allKeys = [...new Set([...(asStringList(scannedKeys)), ...keysFromIndex])];
+  const preserved = preserveSeeds ? preservedSeedSlugs(section, true) : new Set<string>();
 
-  const deleteResults = allKeys.length
-    ? await Promise.all(allKeys.map((key) => deleteKvKey(kv, key)))
+  const toDelete = allKeys.filter((key) => {
+    const slug = extractSlugFromArtifactKey(key, section);
+    return !slug || !preserved.has(slug);
+  });
+
+  const deleteResults = toDelete.length
+    ? await Promise.all(toDelete.map((key) => deleteKvKey(kv, key)))
     : [];
   const removedArtifacts = deleteResults.filter(isKvDeletedResult).length;
+
+  const remainingSlugs = allKeys
+    .filter((key) => {
+      const slug = extractSlugFromArtifactKey(key, section);
+      return Boolean(slug) && preserved.has(slug!);
+    })
+    .map((key) => extractSlugFromArtifactKey(key, section)!)
+    .filter(Boolean);
+
+  if (remainingSlugs.length > 0) {
+    if (typeof kv.set === 'function') {
+      await kv.set(indexKey, [...new Set(remainingSlugs)]);
+    }
+    return {
+      section,
+      artifactsDeleted: removedArtifacts,
+      indexDeleted: false
+    } as ApiResult;
+  }
+
   const indexDeleted = isKvDeletedResult(await deleteKvKey(kv, indexKey));
 
   return {
@@ -148,6 +189,20 @@ async function clearSection(kv: AdminKvClient, section: TargetSection) {
     artifactsDeleted: removedArtifacts,
     indexDeleted
   } as ApiResult;
+}
+
+function collectPreserveSeedOption(request: NextRequest, body: Record<string, unknown>) {
+  const queryBool = parseOptionalBoolean(request.nextUrl.searchParams.get('preserveSeeds')) ??
+    parseOptionalBoolean(request.nextUrl.searchParams.get('preserve_seed')) ??
+    parseOptionalBoolean(request.nextUrl.searchParams.get('keepSeeds')) ??
+    parseOptionalBoolean(request.nextUrl.searchParams.get('keep_seed'));
+
+  const bodyBool = parseOptionalBoolean(body.preserveSeeds) ??
+    parseOptionalBoolean(body.preserve_seed) ??
+    parseOptionalBoolean(body.keepSeeds) ??
+    parseOptionalBoolean(body.keep_seed);
+
+  return bodyBool ?? queryBool;
 }
 
 async function setSectionSeedSkip(kv: AdminKvClient, section: TargetSection, skipSeed: boolean) {
@@ -181,6 +236,7 @@ function collectSkipSeedOption(request: NextRequest, body: Record<string, unknow
 export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
   const skipSeed = collectSkipSeedOption(request, body);
+  const preserveSeeds = collectPreserveSeedOption(request, body);
 
   const providedToken =
     request.headers.get('x-admin-token') ||
@@ -199,7 +255,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Admin cache client unavailable.' }, { status: 400 });
   }
 
-  const results = await Promise.all(sections.map((section) => clearSection(kv, section)));
+  const results = await Promise.all(sections.map((section) => clearSectionWithOptions(kv, section, Boolean(preserveSeeds))));
   const skipResults = skipSeed === undefined
     ? []
     : await Promise.all(sections.map(async (section) => {
