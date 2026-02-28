@@ -36,3 +36,5 @@ Research → angle selection → draft → edit → distribution → review.
 - [Content Ops Skill Pack](/templates/content-ops-skill-pack)
 - [OpenClaw for Newsletter Automation](/playbooks/openclaw-for-newsletter-automation)
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Daily Brief Automation](/guides/openclaw-daily-brief-automation)
