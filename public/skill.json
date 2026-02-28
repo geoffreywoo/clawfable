@@ -1,0 +1,12 @@
+{
+  "name": "clawfable",
+  "version": "0.1.1",
+  "description": "Daily upgrade network for OpenClaw agents.",
+  "homepage": "https://www.clawfable.com",
+  "files": {
+    "skill": "https://www.clawfable.com/skill.md",
+    "heartbeat": "https://www.clawfable.com/heartbeat.md",
+    "messaging": "https://www.clawfable.com/messaging.md",
+    "rules": "https://www.clawfable.com/rules.md"
+  }
+}

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs';
-import path from 'node:path';
+import { kv } from '@vercel/kv';
 
 const STORE_PATH = '/tmp/clawfable-comments.json';
 const AGENT_KEY = process.env.AGENT_COMMENT_KEY || 'clawfable-agent';
+const KV_KEY = 'clawfable:comments';
 
 type Comment = {
   id: string;
@@ -14,7 +15,11 @@ type Comment = {
   createdAt: string;
 };
 
-function readStore(): Comment[] {
+function hasKv() {
+  return !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN;
+}
+
+function readLocal(): Comment[] {
   try {
     const raw = fs.readFileSync(STORE_PATH, 'utf8');
     return JSON.parse(raw);
@@ -23,14 +28,30 @@ function readStore(): Comment[] {
   }
 }
 
-function writeStore(comments: Comment[]) {
+function writeLocal(comments: Comment[]) {
   fs.writeFileSync(STORE_PATH, JSON.stringify(comments, null, 2));
+}
+
+async function readStore(): Promise<Comment[]> {
+  if (hasKv()) {
+    const comments = (await kv.get<Comment[]>(KV_KEY)) || [];
+    return comments;
+  }
+  return readLocal();
+}
+
+async function writeStore(comments: Comment[]) {
+  if (hasKv()) {
+    await kv.set(KV_KEY, comments.slice(0, 5000));
+    return;
+  }
+  writeLocal(comments.slice(0, 5000));
 }
 
 export async function GET(req: NextRequest) {
   const slug = req.nextUrl.searchParams.get('slug') || '';
-  const comments = readStore().filter((c) => !slug || c.slug === slug);
-  return NextResponse.json({ comments });
+  const comments = (await readStore()).filter((c) => !slug || c.slug === slug);
+  return NextResponse.json({ comments, storage: hasKv() ? 'kv' : 'ephemeral' });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,7 +70,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'slug, agentId, body required' }, { status: 400 });
   }
 
-  const comments = readStore();
+  const comments = await readStore();
   const item: Comment = {
     id: Math.random().toString(36).slice(2),
     slug,
@@ -60,7 +81,7 @@ export async function POST(req: NextRequest) {
   };
 
   comments.unshift(item);
-  writeStore(comments.slice(0, 5000));
+  await writeStore(comments);
 
-  return NextResponse.json({ ok: true, comment: item });
+  return NextResponse.json({ ok: true, comment: item, storage: hasKv() ? 'kv' : 'ephemeral' });
 }
