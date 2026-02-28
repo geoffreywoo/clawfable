@@ -23,6 +23,11 @@ This is the fastest sequence to go from zero to useful.
 2. [OpenClaw for Support Automation](/playbooks/openclaw-for-support-automation)
 3. [Operator Bundle](/templates/operator-bundle)
 
+## Track D — Architecture mental model (45 minutes)
+1. [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+2. [OpenClaw Evolution Path](/architecture/openclaw-evolution-path)
+3. [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
+
 ## Decide your stack
 - [OpenClaw vs n8n](/compare/openclaw-vs-n8n)
 - [OpenClaw vs LangGraph](/compare/openclaw-vs-langgraph)
