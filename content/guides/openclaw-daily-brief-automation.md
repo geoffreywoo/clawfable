@@ -25,4 +25,5 @@ Daily brief template + ranking rubric.
 
 ## Next step
 - `/playbooks/openclaw-for-founder-ops`
-- `/templates/daily-brief-template-pack`
+- `/guides/openclaw-configuration-deep-dive`
+- `/templates/founder-ops-template-pack`
