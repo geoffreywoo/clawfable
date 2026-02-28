@@ -56,3 +56,10 @@ Prevention rule:
 ## Related architecture notes
 - [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
 - [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
+
+## Related paths
+
+- If your issue stems from install/runtime drift, follow [Install OpenClaw on Ubuntu VPS](/guides/install-openclaw-ubuntu-vps) first.
+- If the failure is config-driven, run through [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive).
+- For architecture-level root cause analysis, use [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles).
+
