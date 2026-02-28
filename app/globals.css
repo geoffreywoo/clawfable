@@ -658,6 +658,38 @@ ul {
   padding-left: 1.1rem;
 }
 
+.skill-plain {
+  max-width: 760px;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.skill-plain .steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.simple-links {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.simple-links li {
+  list-style: none;
+}
+
+.simple-links a {
+  border: 1px solid var(--line);
+  display: block;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
 .section-list,
 .section-list ul,
 .doc-shell ul {
