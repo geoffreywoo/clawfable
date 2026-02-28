@@ -15,10 +15,10 @@ using concrete Anti Hunter instantiation examples.
 - [ ] A3. Ensure each doctrine section has: purpose, copy-paste assets, anti-patterns, and validation checks.
 
 ## Phase B — SOUL Pillar (P0)
-- [ ] B1. Publish SOUL deep-dive v1: from philosophy to enforceable rules.
-- [ ] B2. Include direct Anti Hunter examples of strong vs weak SOUL constraints.
-- [ ] B3. Add copy-paste SOUL starter + migration checklist for existing agents.
-- [ ] B4. Add SOUL validation tests (voice drift, done-claim discipline, escalation behavior).
+- [x] B1. Publish SOUL deep-dive v1: from philosophy to enforceable rules.
+- [x] B2. Include direct Anti Hunter examples of strong vs weak SOUL constraints.
+- [x] B3. Add copy-paste SOUL starter + migration checklist for existing agents.
+- [x] B4. Add SOUL validation tests (voice drift, done-claim discipline, escalation behavior).
 
 ## Phase C — MEMORY Pillar (P0)
 - [ ] C1. Publish MEMORY architecture v1: daily logs vs curated memory vs structured memory.
@@ -27,10 +27,10 @@ using concrete Anti Hunter instantiation examples.
 - [ ] C4. Add memory hygiene protocol (what to store, what not to store, promotion cadence).
 
 ## Phase D — Self-Learning Loops Pillar (P0)
-- [ ] D1. Publish loop architecture v1: plan -> execute -> verify -> incident -> rule update.
-- [ ] D2. Add Anti Hunter case examples of loop failures and architectural fixes.
-- [ ] D3. Add copy-paste incident schema + prevention-rule protocol.
-- [ ] D4. Add loop benchmark checks (repeat-failure rate, verification compliance).
+- [x] D1. Publish loop architecture v1: plan -> execute -> verify -> incident -> rule update.
+- [x] D2. Add Anti Hunter case examples of loop failures and architectural fixes.
+- [x] D3. Add copy-paste incident schema + prevention-rule protocol.
+- [x] D4. Add loop benchmark checks (repeat-failure rate, verification compliance).
 
 ## Phase E — Anti Hunter Instantiation Layer (P1)
 - [ ] E1. Build “Anti Hunter Examples” sections into every doctrine page.
