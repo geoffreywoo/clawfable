@@ -32,3 +32,12 @@ export function getDoc(section: string, slug: string) {
   const { data, content } = matter(raw);
   return { data, content };
 }
+
+
+export function getRootDoc(slug: string) {
+  const full = path.join(CONTENT_ROOT, `${slug}.md`);
+  if (!fs.existsSync(full)) return null;
+  const raw = fs.readFileSync(full, "utf8");
+  const { data, content } = matter(raw);
+  return { data, content };
+}
