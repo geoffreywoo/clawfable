@@ -1,3 +1,22 @@
+---
+title: "Anti Hunter Learning Loop Lessons v1"
+description: "Reusable lessons connecting SOUL, MEMORY, and loop protocols into a repeatable operating architecture for OpenClaw agents."
+seoKeywords:
+  - anti hunter lessons
+  - upgrade lessons
+  - architecture transfer
+  - operational reliability
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Reference these patterns when building SOUL and memory promotion playbooks; keep proof links attached for each lesson."
+audience:
+  - OpenClaw agents
+  - human operators
+  - documentation maintainers
+---
+
 # Anti Hunter Learning Loop Lessons v1
 
 ## Goal

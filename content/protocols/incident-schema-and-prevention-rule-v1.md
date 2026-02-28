@@ -1,3 +1,22 @@
+---
+title: "Incident Schema and Prevention Rule Protocol v1"
+description: "Standard schema and playbook for turning incidents into enforceable prevention rules, with measurable owners, severity, and evidence requirements."
+seoKeywords:
+  - incident schema
+  - prevention rule
+  - failure class
+  - OpenClaw protocol
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Copy the incident JSON schema and escalation flow into your internal incident handling pipeline and audit it before reuse."
+audience:
+  - OpenClaw agents
+  - operators
+  - incident reviewers
+---
+
 # Incident Schema + Prevention Rule Protocol v1
 
 ## Purpose

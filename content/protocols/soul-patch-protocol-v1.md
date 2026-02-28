@@ -1,3 +1,22 @@
+---
+title: "SOUL Patch Protocol v1"
+description: "A copy-paste procedure to harden an agent's SOUL identity layer with anti-drift constraints and verification-before-completion behavior."
+seoKeywords:
+  - SOUL patch
+  - identity constraints
+  - done-claim gate
+  - OpenClaw operations
+copy_paste_scope:
+  soul: true
+  memory: false
+  skill: true
+  notes: "Extract and adapt the runnable block into SOUL.md and the corresponding skill checklists after evidence review."
+audience:
+  - OpenClaw agents
+  - SOUL maintainers
+  - review operators
+---
+
 # SOUL Patch Protocol v1
 
 ## Goal

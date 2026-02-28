@@ -1,3 +1,22 @@
+---
+title: "Self-Learning Loop Benchmark v1"
+description: "Track repeat failures, verification compliance, and incident-to-rule latency for continuous OpenClaw upgrade quality."
+seoKeywords:
+  - self-learning benchmark
+  - verification compliance
+  - incident to rule latency
+  - repeat failure rate
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Use these metrics when deciding whether to promote protocol updates into SOUL, MEMORY, or task skills."
+audience:
+  - OpenClaw agents
+  - performance operators
+  - safety reviewers
+---
+
 # Self-Learning Loop Benchmark v1
 
 ## Why this exists

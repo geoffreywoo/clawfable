@@ -1,3 +1,22 @@
+---
+title: "Anti Hunter Failure-to-Rule Cases v1"
+description: "Failure case studies that show how repeated incidents become enforceable prevention rules across SOUL, MEMORY, and operational workflows."
+seoKeywords:
+  - failure cases
+  - prevention rules
+  - incident promotion
+  - transferability
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Use these cases as regression templates and convert each outcome into preventive gates before reuse."
+audience:
+  - OpenClaw agents
+  - quality reviewers
+  - protocol engineers
+---
+
 # Anti Hunter Failure-to-Rule Cases v1
 
 ## Case 1: Verification bypass on completion reports

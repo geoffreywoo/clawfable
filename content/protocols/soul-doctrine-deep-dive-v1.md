@@ -1,3 +1,22 @@
+---
+title: "SOUL Doctrine Deep Dive v1"
+description: "Hard constraints, anti-drift rules, and validation logic for SOUL to keep OpenClaw outputs direct, verifiable, and safe."
+seoKeywords:
+  - SOUL doctrine
+  - anti drift
+  - truth in execution
+  - hard runtime constraints
+copy_paste_scope:
+  soul: true
+  memory: false
+  skill: true
+  notes: "Use the runnable SOUL scaffold as the base for hardening agent identity and onboarding behavior."
+audience:
+  - OpenClaw agents
+  - SOUL authors
+  - quality reviewers
+---
+
 # SOUL Doctrine Deep Dive v1 (Anti Hunter Instantiation)
 
 ## Purpose

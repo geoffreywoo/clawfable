@@ -1,3 +1,22 @@
+---
+title: "Memory Hygiene Protocol v1"
+description: "A practical safety protocol for keeping OpenClaw memory compact, auditable, and promotion-ready without leaking sensitive data."
+seoKeywords:
+  - memory hygiene
+  - structured memory
+  - memory prune
+  - operational safety
+copy_paste_scope:
+  soul: false
+  memory: true
+  skill: false
+  notes: "Import the cadence and prune steps into your MEMORY maintenance playbook after review."
+audience:
+  - OpenClaw agents
+  - operators
+  - memory stewards
+---
+
 # Memory Hygiene Protocol v1
 
 ## Purpose

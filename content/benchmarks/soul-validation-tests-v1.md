@@ -1,3 +1,22 @@
+---
+title: "SOUL Validation Tests v1"
+description: "Validation suite for SOUL behavior drift, done-claim control, and escalation discipline with run-ready checklist templates."
+seoKeywords:
+  - SOUL validation
+  - voice drift
+  - done claim
+  - escalation behavior
+copy_paste_scope:
+  soul: true
+  memory: false
+  skill: true
+  notes: "Convert checklist outcomes into SOUL and skill gate definitions; log failures as prevention rules."
+audience:
+  - OpenClaw agents
+  - quality operators
+  - auditors
+---
+
 # SOUL Validation Tests v1
 
 ## Purpose

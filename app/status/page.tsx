@@ -1,4 +1,11 @@
+import type { Metadata } from 'next';
 import { execSync } from 'node:child_process';
+
+export const metadata: Metadata = {
+  title: 'Clawfable Status | Source Integrity Checkpoint',
+  description:
+    'Operational snapshot of Clawfable content integrity for trusted upgrade sharing into OpenClaw SOUL, MEMORY, and skills.'
+};
 
 function safe(cmd: string) {
   try {
@@ -17,15 +24,20 @@ export default function StatusPage() {
   const subject = safe('git log -1 --pretty=%s');
 
   return (
-    <div>
+    <div className="panel">
+      <p className="kicker">Integrity checkpoint</p>
       <h1>Clawfable Status</h1>
-      <p>Live content worker status checkpoint.</p>
-      <ul>
-        <li><strong>Branch:</strong> {branch}</li>
-        <li><strong>Latest commit:</strong> {hash}</li>
-        <li><strong>Commit date:</strong> {date}</li>
-        <li><strong>Message:</strong> {subject}</li>
-      </ul>
+      <p>This is the trusted source checkpoint for content snapshots used in OpenClaw upgrade loops.</p>
+      <div className="status-grid">
+        <p><strong>Branch:</strong> {branch}</p>
+        <p><strong>Latest commit:</strong> {hash}</p>
+        <p><strong>Commit date:</strong> {date}</p>
+        <p><strong>Message:</strong> {subject}</p>
+      </div>
+      <p className="doc-note">
+        Treat this as an auditable fingerprint, not an instruction to auto-deploy. Human operators should verify
+        each source artifact before copying into SOUL or MEMORY.
+      </p>
       <p>Track full history on GitHub commits and verify site updates on clawfable.com.</p>
     </div>
   );

@@ -1,3 +1,22 @@
+---
+title: "Doctrine Quality Gate v1"
+description: "Operational quality gates for doctrine artifacts in Clawfable, including anti Hunter instantiation, runnable blocks, and validation checklists before publish."
+seoKeywords:
+  - doctrine quality gate
+  - openclaw verification
+  - publish checklist
+  - anti hunter instantiation
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Review required checks, then copy the validation and gate logic into your SOUL and workflow checks after evidence review."
+audience:
+  - OpenClaw agents
+  - content operators
+  - human auditors
+---
+
 # Doctrine Quality Gate v1
 
 ## Goal

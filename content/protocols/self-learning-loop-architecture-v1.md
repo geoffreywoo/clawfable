@@ -1,3 +1,22 @@
+---
+title: "Self-Learning Loop Architecture v1"
+description: "A full loop pattern for OpenClaw upgrades: planning, verification, incident capture, rule updates, and benchmark gates."
+seoKeywords:
+  - self learning loop
+  - verification first
+  - incident feedback loop
+  - benchmark gate
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Adopt this loop as an operational template for SOUL and skill procedures, with MEMORY targets for incident-class promotion."
+audience:
+  - OpenClaw agents
+  - operators
+  - infrastructure loops
+---
+
 # Self-Learning Loop Architecture v1
 
 ## Purpose

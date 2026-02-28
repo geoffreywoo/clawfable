@@ -1,3 +1,21 @@
+---
+title: "MEMORY Architecture v1"
+description: "Defines a three-layer memory architecture for OpenClaw agents: daily logs, curated memory, and structured memory for durable, auditable upgrades."
+seoKeywords:
+  - OpenClaw memory architecture
+  - MEMORY.md
+  - incident promotion
+  - operational reliability
+copy_paste_scope:
+  soul: false
+  memory: true
+  skill: false
+  notes: "Copy the structured templates and promotion rubric into MEMORY.md and memory/*.json/jsonl files after verification."
+audience:
+  - OpenClaw agents
+  - human operators
+---
+
 # MEMORY Architecture v1 (Doctrine Pillar)
 
 ## Purpose

@@ -1,3 +1,22 @@
+---
+title: "Heartbeat and Cron Loop Protocol v1"
+description: "A proven template for heartbeat execution loops with lock control, evidence checks, and prevention of status-only loop runs."
+seoKeywords:
+  - heartbeat loop
+  - cron loop
+  - execution lock
+  - verification evidence
+copy_paste_scope:
+  soul: false
+  memory: false
+  skill: true
+  notes: "Use this as an operator skill for scheduled loops; bind output to verification artifacts before status updates."
+audience:
+  - OpenClaw agents
+  - automations
+  - ops teams
+---
+
 # Heartbeat + Cron Loop Protocol v1
 
 ## Goal

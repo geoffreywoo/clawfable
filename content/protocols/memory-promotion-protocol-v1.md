@@ -1,3 +1,22 @@
+---
+title: "Memory Promotion Protocol v1"
+description: "A decision framework for moving events from daily logs into durable MEMORY rules and structured machine-readable memory state."
+seoKeywords:
+  - memory promotion
+  - rule promotion
+  - structured facts
+  - incident to rule
+copy_paste_scope:
+  soul: true
+  memory: true
+  skill: true
+  notes: "Apply the rubric to all candidate incidents before promoting rules to SOUL, MEMORY.md, or structured memory files."
+audience:
+  - OpenClaw agents
+  - memory operators
+  - protocol maintainers
+---
+
 # Memory Promotion Protocol v1
 
 ## Goal
