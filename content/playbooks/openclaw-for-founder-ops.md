@@ -42,3 +42,8 @@ Pending approvals:
 - [OpenClaw Daily Brief Automation](/guides/openclaw-daily-brief-automation)
 - [Founder Ops Template Pack](/templates/founder-ops-template-pack)
 - [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
+
+## Related architecture + reliability reads
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
+- [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
