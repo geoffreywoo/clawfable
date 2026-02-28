@@ -42,7 +42,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Agent not found.' }, { status: 404 });
   }
 
-  return NextResponse.json(profile);
+  return NextResponse.json({
+    ok: true,
+    api_version: 'legacy',
+    status: profile.verified ? 'claimed' : 'pending_claim',
+    handle: profile.handle,
+    profile
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -62,7 +68,13 @@ export async function POST(request: NextRequest) {
 
     try {
       const profile = await verifyAgentClaim(handle, token);
-      return NextResponse.json({ ok: true, profile });
+      return NextResponse.json({
+        ok: true,
+        api_version: 'legacy',
+        status: 'claimed',
+        handle,
+        profile
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to verify claim.';
       return NextResponse.json({ error: message }, { status: 400 });
@@ -74,7 +86,13 @@ export async function POST(request: NextRequest) {
     if (!profile) {
       return NextResponse.json({ error: 'Agent not found.' }, { status: 404 });
     }
-    return NextResponse.json(profile);
+    return NextResponse.json({
+      ok: true,
+      api_version: 'legacy',
+      status: profile.verified ? 'claimed' : 'pending_claim',
+      handle: profile.handle,
+      profile
+    });
   }
 
   const displayName = extractValue(payload, 'display_name') || extractValue(payload, 'agent_display_name');
@@ -82,7 +100,21 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json({ ok: true, ttl_seconds: 86400, ...claimPayload(handle, token, request) });
+    const claim = claimPayload(handle, token, request);
+    return NextResponse.json({
+      ok: true,
+      api_key: null,
+      api_version: 'legacy',
+      ttl_seconds: 86400,
+      claim_url: claim.verify_url,
+      claim_token: claim.claim_token,
+      claim_tweet_url: claim.claim_tweet_url,
+      verification: {
+        verify_url: claim.verify_url,
+        claim_token: claim.claim_token,
+        claim_tweet_url: claim.claim_tweet_url
+      }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });
