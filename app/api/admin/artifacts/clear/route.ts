@@ -4,6 +4,12 @@ import { createClient } from '@vercel/kv';
 
 type TargetSection = 'soul' | 'memory';
 
+type ApiResult = {
+  section: TargetSection;
+  artifactsDeleted: number;
+  indexDeleted: boolean;
+};
+
 function readEnv(name: string) {
   const raw = process.env[name];
   if (!raw) return undefined;
@@ -23,8 +29,8 @@ function pickEnvValue(...names: string[]) {
   return undefined;
 }
 
-function normalizeTargetSections(raw: unknown) {
-  if (!raw) return [] as TargetSection[];
+function normalizeTargetSections(raw: unknown): TargetSection[] {
+  if (!raw) return [];
   const values = Array.isArray(raw) ? raw.map(String) : String(raw).split(',');
   return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))]
     .filter((value) => value === 'soul' || value === 'memory')
@@ -61,9 +67,7 @@ async function getAdminClient() {
 }
 
 function collectTargetSections(request: NextRequest, body: Record<string, unknown>) {
-  const bodyTarget =
-    normalizeTargetSections(body.sections) ||
-    normalizeTargetSections(body.section);
+  const bodyTarget = normalizeTargetSections(body.sections);
   const queryTarget = normalizeTargetSections(request.nextUrl.searchParams.get('sections'));
   const querySection = normalizeTargetSections(request.nextUrl.searchParams.get('section'));
 
@@ -78,21 +82,19 @@ async function clearSection(kv: Record<string, unknown>, section: TargetSection)
   const rawIndex = await (kv as any).get<unknown>(indexKey);
   const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
   const keysFromIndex = slugs.map((slug) => `${artifactPrefix}${slug}`);
-
   const scanned = await (kv as any).keys(`${artifactPrefix}*`);
   const allKeys = [...new Set([...(Array.isArray(scanned) ? scanned : []), ...keysFromIndex])];
 
   const removedArtifacts = allKeys.length
-    ? (await Promise.all(allKeys.map((key: string) => ((kv as any).del ? (kv as any).del(key) : (kv as any).delete(key)))).filter(Boolean).length)
+    ? (await Promise.all(allKeys.map((key) => ((kv as any).del ? (kv as any).del(key) : (kv as any).delete(key)))).filter(Boolean).length)
     : 0;
-
   const indexDeleted = Boolean((kv as any).del ? (kv as any).del(indexKey) : (kv as any).delete(indexKey));
 
   return {
     section,
     artifactsDeleted: removedArtifacts,
     indexDeleted
-  };
+  } as ApiResult;
 }
 
 export async function POST(request: NextRequest) {
