@@ -87,6 +87,14 @@ const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
 const DB_ARTIFACT_INDEX_PREFIX = 'clawfable:db:index';
 const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
 const DB_SKIP_SEED_PREFIX = 'clawfable:admin:skip_seed';
+const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
+  soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
+  memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+};
+const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
+  soul: 'soul-baseline-v1',
+  memory: 'memory-baseline-v1'
+};
 
 let kvClient: Promise<KVClient | null> | null = null;
 const seededSections = new Set<string>();
@@ -133,6 +141,18 @@ function nowStamp() {
 
 function sourcePathFor(section: CoreSection, slug: string) {
   return `${section}/${slug}.md`;
+}
+
+function canonicalSourcePath(section: CoreSection, slug: string, sourcePath: string) {
+  if (sourcePath.startsWith('http://') || sourcePath.startsWith('https://')) {
+    return sourcePath;
+  }
+
+  if (slug === OPENCLAW_CANONICAL_SEEDS[section]) {
+    return OPENCLAW_CANONICAL_TEMPLATES[section];
+  }
+
+  return sourcePath;
 }
 
 function artifactKey(section: CoreSection, slug: string) {
@@ -383,10 +403,11 @@ async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord
 
 function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
   const rev = raw.revision || {};
+  const normalizedSlug = normalizeSlug(raw.slug);
   return {
     section,
-    slug: normalizeSlug(raw.slug),
-    sourcePath: raw.sourcePath || sourcePathFor(section, normalizeSlug(raw.slug)),
+    slug: normalizedSlug,
+    sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
     title: raw.title || 'Clawfable artifact',
     description: raw.description || 'Clawfable artifact',
     content: raw.content || '',
@@ -421,7 +442,7 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
   const record: DbRecord = {
     section,
     slug,
-    sourcePath: payload.sourcePath || sourcePathFor(section, slug),
+    sourcePath: canonicalSourcePath(section, slug, payload.sourcePath || sourcePathFor(section, slug)),
     title: payload.title,
     description:
       payload.description?.trim() ||
@@ -524,7 +545,7 @@ export async function listBySection(section: string): Promise<SectionItem[]> {
     .map((row) => mapRecordToSectionItem({
       section: normalized,
       slug: row.slug,
-      sourcePath: row.sourcePath,
+      sourcePath: canonicalSourcePath(normalized, row.slug, row.sourcePath),
       title: row.title,
       description: row.description,
       content: row.content,
@@ -564,7 +585,11 @@ export async function getDoc(section: string, slug: string | string[]) {
   const row: DbRecord = {
     section: normalizedSection,
     slug: normalizedSlug,
-    sourcePath: `${normalizedSlug}.md`,
+    sourcePath: canonicalSourcePath(
+      normalizedSection,
+      normalizedSlug,
+      `${normalizedSection}/${normalizedSlug}.md`
+    ),
     title: (data?.title as string) || `Clawfable ${normalizedSection} artifact`,
     description: shortDescription(data, parsed.content),
     content: parsed.content,

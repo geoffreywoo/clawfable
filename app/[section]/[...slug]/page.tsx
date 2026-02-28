@@ -28,6 +28,17 @@ function revisionLine(revision: Record<string, unknown> | undefined) {
   return `${kind} · ${id} · ${status}`;
 }
 
+function isCanonicalSource(value: string) {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
+function readableDate(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
+}
+
 export async function generateMetadata({
   params
 }: {
@@ -94,8 +105,9 @@ export default async function DocPage({
   const revision = revisionLine((doc.data as Record<string, unknown> | undefined)?.revision as
     | Record<string, unknown>
     | undefined);
+  const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
+  const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
   const html = await marked.parse(doc.content);
-  const sourcePath = `${normalizedSection}/${slugPath}`;
 
   return (
     <article className="panel doc-shell">
@@ -111,6 +123,17 @@ export default async function DocPage({
         <p>
           <span className="doc-meta-label">Revision lineage</span> {revision || 'unversioned'}
         </p>
+        <p>
+          <span className="doc-meta-label">Created</span> {createdAt}
+        </p>
+        {isCanonicalSource(sourcePath) ? (
+          <p>
+            <span className="doc-meta-label">Source</span>
+            <a href={sourcePath} target="_blank" rel="noopener noreferrer">
+              openclaw canonical source
+            </a>
+          </p>
+        ) : null}
         <p>
           <span className="doc-meta-label">Back</span>
           <Link href={`/section/${normalizedSection}`}>{label} index</Link>
