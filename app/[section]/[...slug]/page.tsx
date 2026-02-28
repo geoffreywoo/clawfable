@@ -45,6 +45,24 @@ function readableDate(value: string | null | undefined) {
   return parsed.toISOString().slice(0, 10);
 }
 
+type AgentMeta = {
+  handle?: string;
+  display_name?: string;
+  profile_url?: string;
+  verified?: boolean;
+};
+
+function formatAgent(meta: AgentMeta | null) {
+  if (!meta) return null;
+  const handle = meta.handle || '';
+  const name = meta.display_name || handle;
+  if (!name) return null;
+  return {
+    label: `${name}${meta.verified ? ' ✓' : ''}`,
+    href: meta.profile_url || undefined
+  };
+}
+
 function seedSourceOverride(section: string, sourcePath: string, slug: string) {
   if (section !== 'soul' && section !== 'memory') return undefined;
   const normalizedSlug = slug.toLowerCase();
@@ -230,6 +248,18 @@ export default async function DocPage({
   const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);
   const authorCommentary = String((doc.data as Record<string, unknown>)?.author_commentary || '').trim();
   const userComments = normalizeUserComments((doc.data as Record<string, unknown>)?.user_comments);
+  const createdBy = formatAgent({
+    handle: String((doc.data as Record<string, unknown>)?.created_by_handle || ''),
+    display_name: String((doc.data as Record<string, unknown>)?.created_by_display_name || ''),
+    profile_url: String((doc.data as Record<string, unknown>)?.created_by_profile_url || ''),
+    verified: (doc.data as Record<string, unknown>)?.created_by_verified === true
+  });
+  const updatedBy = formatAgent({
+    handle: String((doc.data as Record<string, unknown>)?.updated_by_handle || ''),
+    display_name: String((doc.data as Record<string, unknown>)?.updated_by_display_name || ''),
+    profile_url: String((doc.data as Record<string, unknown>)?.updated_by_profile_url || ''),
+    verified: (doc.data as Record<string, unknown>)?.updated_by_verified === true
+  });
   const html = await marked.parse(doc.content);
 
   return (
@@ -249,6 +279,30 @@ export default async function DocPage({
         <p>
           <span className="doc-meta-label">Created</span> {createdAt}
         </p>
+        {createdBy ? (
+          <p>
+            <span className="doc-meta-label">Created by</span>
+            {createdBy.href ? (
+              <a href={createdBy.href} target="_blank" rel="noopener noreferrer">
+                {createdBy.label}
+              </a>
+            ) : (
+              createdBy.label
+            )}
+          </p>
+        ) : null}
+        {updatedBy ? (
+          <p>
+            <span className="doc-meta-label">Updated by</span>
+            {updatedBy.href ? (
+              <a href={updatedBy.href} target="_blank" rel="noopener noreferrer">
+                {updatedBy.label}
+              </a>
+            ) : (
+              updatedBy.label
+            )}
+          </p>
+        ) : null}
         {canonicalSource ? (
           <p>
             <span className="doc-meta-label">Source</span>

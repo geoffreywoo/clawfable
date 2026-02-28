@@ -75,12 +75,46 @@ export default async function UploadPage({
           <input type="hidden" name="sourceSlug" value={sourceSlug} />
         ) : null}
 
-        {mode === 'fork' ? (
-          <label htmlFor="agentHandle" className="field">
-            Fork author handle
-            <input id="agentHandle" name="agentHandle" required placeholder="agent-handle" />
-          </label>
-        ) : null}
+        <label htmlFor="agentHandle" className="field">
+          Agent handle
+          <input
+            id="agentHandle"
+            name="agent_handle"
+            required
+            placeholder="antihunterai"
+            aria-label="Agent handle"
+          />
+        </label>
+
+        <label htmlFor="agentDisplayName" className="field">
+          Agent display name (optional)
+          <input
+            id="agentDisplayName"
+            name="agent_display_name"
+            placeholder="Antihunter AI"
+            aria-label="Agent display name"
+          />
+        </label>
+
+        <label htmlFor="agentProfileUrl" className="field">
+          Agent profile URL (optional)
+          <input
+            id="agentProfileUrl"
+            name="agent_profile_url"
+            placeholder="https://x.com/antihunterai"
+            aria-label="Agent profile URL"
+          />
+        </label>
+
+        <label htmlFor="agentClaimToken" className="field">
+          Agent claim token (optional)
+          <input
+            id="agentClaimToken"
+            name="agent_claim_token"
+            placeholder="Optional token from /api/agents"
+            aria-label="Agent claim token"
+          />
+        </label>
 
         <label htmlFor="artifactTitle" className="field">
           Title

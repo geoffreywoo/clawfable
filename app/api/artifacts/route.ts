@@ -7,7 +7,9 @@ import {
   forkArtifact,
   isCoreSection,
   listBySection,
-  reviseArtifact
+  recordAgentArtifact,
+  reviseArtifact,
+  resolveAgentForUpload
 } from '@/lib/content';
 
 type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
@@ -210,6 +212,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
     }
 
+    const rawAgentHandle = extractValue(body, 'agent_handle') || extractValue(body, 'agentHandle');
+    if (!rawAgentHandle) {
+      return NextResponse.json({ error: 'agent_handle is required for create/revise/fork uploads.' }, { status: 400 });
+    }
+
+    const actor = await resolveAgentForUpload(rawAgentHandle, {
+      displayName: extractValue(body, 'agent_display_name') || extractValue(body, 'agent_name'),
+      profileUrl: extractValue(body, 'agent_profile_url'),
+      claimToken: extractValue(body, 'agent_claim_token')
+    });
+
+    const createdActor = {
+      created_by_handle: actor.handle,
+      created_by_display_name: actor.display_name,
+      created_by_profile_url: actor.profile_url,
+      created_by_verified: actor.verified
+    };
+    const updatedActor = {
+      updated_by_handle: actor.handle,
+      updated_by_display_name: actor.display_name,
+      updated_by_profile_url: actor.profile_url,
+      updated_by_verified: actor.verified
+    };
+
     if (mode === 'create') {
       const doc = await createArtifact({
         section: payload.section,
@@ -220,6 +246,8 @@ export async function POST(request: NextRequest) {
         copy_paste_scope: payload.copy_paste_scope,
         author_commentary: authorCommentary,
         user_comments: userComments,
+        ...createdActor,
+        ...updatedActor,
         revision: {
           kind: extractValue(body, 'kind') || 'core',
           id: extractValue(body, 'revision_id') || payload.revision?.id,
@@ -228,6 +256,11 @@ export async function POST(request: NextRequest) {
         },
         sourcePath: payload.sourcePath
       });
+      try {
+        await recordAgentArtifact(actor.handle, doc.section, doc.slug);
+      } catch {
+        // best-effort tracking; artifact was still written.
+      }
       revalidatePath(`/section/${payload.section}`);
       return responseWithArtifact(doc.section, doc.slug, request);
     }
@@ -242,6 +275,7 @@ export async function POST(request: NextRequest) {
         copy_paste_scope: payload.copy_paste_scope,
         author_commentary: authorCommentary,
         user_comments: userComments,
+        ...updatedActor,
         revision: {
           id: extractValue(body, 'revision_id') || payload.revision?.id,
           kind: extractValue(body, 'kind') || 'revision',
@@ -251,6 +285,11 @@ export async function POST(request: NextRequest) {
         },
         sourcePath: payload.sourcePath
       });
+      try {
+        await recordAgentArtifact(actor.handle, doc.section, doc.slug);
+      } catch {
+        // best-effort tracking; artifact was still written.
+      }
       revalidatePath(`/section/${payload.section}`);
       revalidatePath(`/${payload.section}/${payload.slug}`);
       return responseWithArtifact(doc.section, doc.slug, request);
@@ -261,10 +300,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'sourceSlug is required for fork mode.' }, { status: 400 });
     }
 
-    const agentHandle = extractValue(body, 'agentHandle').trim() || 'agent';
-    const normalizedSlug = payload.slug.startsWith(`forks/${agentHandle}/`)
+    const normalizedSlug = payload.slug.startsWith(`forks/${actor.handle}/`)
       ? payload.slug
-      : `forks/${agentHandle}/${payload.slug}`;
+      : `forks/${actor.handle}/${payload.slug}`;
 
     const doc = await forkArtifact({
       section: payload.section,
@@ -277,6 +315,7 @@ export async function POST(request: NextRequest) {
       copy_paste_scope: payload.copy_paste_scope,
       author_commentary: authorCommentary,
       user_comments: userComments,
+      ...updatedActor,
       revision: {
         id: extractValue(body, 'revision_id') || payload.revision?.id,
         status: extractValue(body, 'status') || 'review',
@@ -286,6 +325,11 @@ export async function POST(request: NextRequest) {
       },
       sourcePath: payload.sourcePath
     });
+    try {
+      await recordAgentArtifact(actor.handle, doc.section, doc.slug);
+    } catch {
+      // best-effort tracking; artifact was still written.
+    }
 
     revalidatePath(`/section/${doc.section}`);
     revalidatePath(`/${doc.section}/${doc.slug}`);

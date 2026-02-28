@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
+import { randomBytes } from 'node:crypto';
 
 export const coreSections = ['soul', 'memory'] as const;
 
@@ -23,6 +24,17 @@ type RevisionMeta = {
   source?: string;
 };
 
+export type UserProfile = {
+  handle: string;
+  display_name?: string;
+  profile_url?: string;
+  verified: boolean;
+  created_at: string;
+  updated_at: string;
+  artifact_count: number;
+  last_artifact_ref?: string;
+};
+
 export type ArtifactDocument = {
   slug: string;
   sourcePath: string;
@@ -33,6 +45,14 @@ export type ArtifactDocument = {
   revision: RevisionMeta | null;
   author_commentary?: string;
   user_comments?: unknown;
+  created_by_handle?: string;
+  created_by_display_name?: string;
+  created_by_profile_url?: string;
+  created_by_verified?: boolean;
+  updated_by_handle?: string;
+  updated_by_display_name?: string;
+  updated_by_profile_url?: string;
+  updated_by_verified?: boolean;
 };
 
 export type SectionItem = {
@@ -68,6 +88,14 @@ type DbRecord = {
   updated_at: string;
   author_commentary?: string;
   user_comments?: unknown;
+  created_by_handle?: string;
+  created_by_display_name?: string;
+  created_by_profile_url?: string;
+  created_by_verified?: boolean;
+  updated_by_handle?: string;
+  updated_by_display_name?: string;
+  updated_by_profile_url?: string;
+  updated_by_verified?: boolean;
 };
 
 type DbPayload = {
@@ -81,6 +109,14 @@ type DbPayload = {
   revision?: RevisionMeta;
   author_commentary?: string;
   user_comments?: unknown;
+  created_by_handle?: string;
+  created_by_display_name?: string;
+  created_by_profile_url?: string;
+  created_by_verified?: boolean;
+  updated_by_handle?: string;
+  updated_by_display_name?: string;
+  updated_by_profile_url?: string;
+  updated_by_verified?: boolean;
 };
 
 type ForkPayload = DbPayload & {
@@ -92,6 +128,9 @@ const CONTENT_ROOT = path.join(process.cwd(), 'content');
 const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
 const DB_ARTIFACT_INDEX_PREFIX = 'clawfable:db:index';
 const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
+const DB_AGENT_INDEX = 'clawfable:agents:index';
+const DB_AGENT_PROFILE_PREFIX = 'clawfable:agents:profile';
+const AGENT_CLAIM_TTL_MS = 24 * 60 * 60 * 1000;
 const DB_SKIP_SEED_PREFIX = 'clawfable:admin:skip_seed';
 const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
   soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
@@ -108,6 +147,11 @@ const OPENCLAW_TEMPLATE_BASENAME: Record<CoreSection, string> = {
 
 let kvClient: Promise<KVClient | null> | null = null;
 const seededSections = new Set<string>();
+
+type StoredAgentProfile = UserProfile & {
+  claim_token?: string;
+  claim_token_expires_at?: string;
+};
 
 function readEnv(name: string) {
   const raw = process.env[name];
@@ -145,8 +189,21 @@ function normalizeSlug(slug: string) {
   return slug.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.md$/i, '');
 }
 
+function normalizeAgentHandle(raw: string) {
+  return raw.trim().replace(/^@+/, '').trim().toLowerCase();
+}
+
 function nowStamp() {
   return new Date().toISOString();
+}
+
+function parseArtifactCount(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  }
+  return 0;
 }
 
 function sourcePathFor(section: CoreSection, slug: string) {
@@ -285,8 +342,16 @@ function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
     data: {
       title: row.title,
       description: row.description,
-      copy_paste_scope: (row as DbRecord).copy_paste_scope,
+        copy_paste_scope: (row as DbRecord).copy_paste_scope,
       revision: (row as DbRecord).revision,
+      created_by_handle: (row as DbRecord).created_by_handle,
+      created_by_display_name: (row as DbRecord).created_by_display_name,
+      created_by_profile_url: (row as DbRecord).created_by_profile_url,
+      created_by_verified: (row as DbRecord).created_by_verified,
+      updated_by_handle: (row as DbRecord).updated_by_handle,
+      updated_by_display_name: (row as DbRecord).updated_by_display_name,
+      updated_by_profile_url: (row as DbRecord).updated_by_profile_url,
+      updated_by_verified: (row as DbRecord).updated_by_verified,
       author_commentary: (row as Record<string, unknown>).author_commentary || (row as Record<string, unknown>).author_comment,
       user_comments: (row as Record<string, unknown>).user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       updated_at: 'updated_at' in row ? row.updated_at : nowStamp(),
@@ -312,6 +377,14 @@ function toDoc(row: DbRecord): { data: Record<string, unknown>; content: string 
       author_commentary: row.author_commentary || (row as Record<string, unknown>).author_comment,
       user_comments: row.user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       source_path: row.sourcePath,
+      created_by_handle: row.created_by_handle,
+      created_by_display_name: row.created_by_display_name,
+      created_by_profile_url: row.created_by_profile_url,
+      created_by_verified: row.created_by_verified,
+      updated_by_handle: row.updated_by_handle,
+      updated_by_display_name: row.updated_by_display_name,
+      updated_by_profile_url: row.updated_by_profile_url,
+      updated_by_verified: row.updated_by_verified,
       created_at: row.created_at,
       updated_at: row.updated_at
     },
@@ -360,6 +433,238 @@ async function getKvClient(): Promise<KVClient | null> {
   })();
 
   return kvClient;
+}
+
+function userProfileKey(rawHandle: string) {
+  return `${DB_AGENT_PROFILE_PREFIX}:${normalizeAgentHandle(rawHandle)}`;
+}
+
+function isExpiredAt(raw?: string) {
+  if (!raw) return true;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return true;
+  return parsed.getTime() <= Date.now();
+}
+
+function normalizeAgentProfile(handle: string, raw: StoredAgentProfile | null): UserProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    handle: normalizeAgentHandle(handle),
+    display_name:
+      typeof raw.display_name === 'string' && raw.display_name.trim() ? raw.display_name.trim() : undefined,
+    profile_url: typeof raw.profile_url === 'string' && raw.profile_url.trim() ? raw.profile_url.trim() : undefined,
+    verified: raw.verified === true,
+    created_at: raw.created_at || nowStamp(),
+    updated_at: raw.updated_at || nowStamp(),
+    artifact_count: parseArtifactCount(raw.artifact_count),
+    last_artifact_ref: typeof raw.last_artifact_ref === 'string' && raw.last_artifact_ref.trim() ? raw.last_artifact_ref : undefined
+  };
+}
+
+async function persistAgentProfile(profile: StoredAgentProfile) {
+  const kv = await getKvClient();
+  if (!kv) {
+    throw new Error('No database configured for user profiles.');
+  }
+
+  const now = nowStamp();
+  const normalizedHandle = normalizeAgentHandle(profile.handle);
+  const record: StoredAgentProfile = {
+    ...profile,
+    handle: normalizedHandle,
+    created_at: profile.created_at || now,
+    updated_at: now,
+    artifact_count: parseArtifactCount(profile.artifact_count)
+  };
+
+  const indexRaw = await kv.get<unknown>(DB_AGENT_INDEX);
+  const index = Array.isArray(indexRaw) ? indexRaw.filter((value): value is string => typeof value === 'string') : [];
+  const nextIndex = [...new Set([...index, normalizedHandle])];
+  await kv.set(DB_AGENT_INDEX, nextIndex);
+  await kv.set(userProfileKey(normalizedHandle), record);
+}
+
+export async function getAgentProfile(handle: string): Promise<UserProfile | null> {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) return null;
+  const kv = await getKvClient();
+  if (!kv) return null;
+  const row = await kv.get<StoredAgentProfile>(userProfileKey(normalized));
+  if (!row) return null;
+  return normalizeAgentProfile(normalized, row);
+}
+
+async function setAgentProfile(raw: StoredAgentProfile) {
+  await persistAgentProfile(raw);
+}
+
+function parseAgentProfile(raw: StoredAgentProfile | null, fallbackHandle: string): StoredAgentProfile {
+  const base = normalizeAgentHandle(fallbackHandle);
+  if (!base) throw new Error('Agent handle is required.');
+  const now = nowStamp();
+  if (!raw || typeof raw !== 'object') {
+    return {
+      handle: base,
+      verified: false,
+      created_at: now,
+      updated_at: now,
+      artifact_count: 0
+    };
+  }
+  return {
+    ...raw,
+    handle: base,
+    verified: raw.verified === true,
+    created_at: raw.created_at || now,
+    updated_at: now,
+    artifact_count: parseArtifactCount(raw.artifact_count)
+  };
+}
+
+async function getAgentProfileRow(handle: string): Promise<StoredAgentProfile | null> {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) return null;
+  const kv = await getKvClient();
+  if (!kv) return null;
+  return kv.get<StoredAgentProfile>(userProfileKey(normalized));
+}
+
+export async function getAgentProfiles(): Promise<UserProfile[]> {
+  const kv = await getKvClient();
+  if (!kv) return [];
+
+  const rawIndex = await kv.get<unknown>(DB_AGENT_INDEX);
+  const handles = Array.isArray(rawIndex) ? rawIndex.filter((value): value is string => typeof value === 'string') : [];
+  if (handles.length === 0) return [];
+
+  const rows = await Promise.all(handles.map((handle) => getAgentProfile(handle)));
+  return rows.filter((row): row is UserProfile => Boolean(row));
+}
+
+export async function requestAgentClaim(handle: string, displayName?: string, profileUrl?: string) {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) throw new Error('Agent handle is required to request a claim.');
+  const now = nowStamp();
+  const raw = await getAgentProfileRow(normalized);
+  const base = parseAgentProfile(raw, normalized);
+
+  const next: StoredAgentProfile = {
+    ...base,
+    handle: normalized,
+    display_name: displayName || base.display_name,
+    profile_url: profileUrl || base.profile_url,
+    claim_token: randomBytes(16).toString('hex'),
+    claim_token_expires_at: new Date(Date.parse(now) + AGENT_CLAIM_TTL_MS).toISOString(),
+    updated_at: now
+  };
+
+  await persistAgentProfile(next);
+  return next.claim_token;
+}
+
+export async function verifyAgentClaim(handle: string, claimToken: string): Promise<UserProfile> {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) throw new Error('Agent handle is required.');
+  if (!claimToken) throw new Error('Claim token is required.');
+
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured for user verification.');
+
+  const raw = await getAgentProfileRow(normalized);
+  if (!raw) throw new Error('Agent not found.');
+  if (typeof raw.claim_token !== 'string' || raw.claim_token !== claimToken) {
+    throw new Error('Claim token is invalid.');
+  }
+  if (isExpiredAt(raw.claim_token_expires_at)) {
+    throw new Error('Claim token expired.');
+  }
+
+  const next: StoredAgentProfile = {
+    ...raw,
+    handle: normalized,
+    verified: true,
+    claim_token: undefined,
+    claim_token_expires_at: undefined,
+    updated_at: nowStamp()
+  };
+  await persistAgentProfile(next);
+  return normalizeAgentProfile(normalized, next)!;
+}
+
+async function consumeAgentClaimForUpload(handle: string, claimToken?: string): Promise<boolean> {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) return false;
+  if (!claimToken) return false;
+
+  const kv = await getKvClient();
+  if (!kv) return false;
+  const raw = await getAgentProfileRow(normalized);
+  if (!raw || raw.verified === true) {
+    return raw ? raw.verified === true : false;
+  }
+  if (typeof raw.claim_token !== 'string' || raw.claim_token !== claimToken) {
+    return false;
+  }
+  if (isExpiredAt(raw.claim_token_expires_at)) return false;
+
+  await persistAgentProfile({
+    ...raw,
+    handle: normalized,
+    verified: true,
+    claim_token: undefined,
+    claim_token_expires_at: undefined,
+    updated_at: nowStamp()
+  });
+  return true;
+}
+
+export async function resolveAgentForUpload(
+  handle: string,
+  metadata: {
+    displayName?: string;
+    profileUrl?: string;
+    claimToken?: string;
+  } = {}
+): Promise<Required<Pick<UserProfile, 'handle' | 'verified'>> & Pick<UserProfile, 'display_name' | 'profile_url'> {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) throw new Error('agent_handle is required.');
+
+  const raw = await getAgentProfileRow(normalized);
+  const base = parseAgentProfile(raw, normalized);
+
+  const now = nowStamp();
+  const isVerified = base.verified || (await consumeAgentClaimForUpload(normalized, metadata.claimToken));
+  const updated = {
+    ...base,
+    handle: normalized,
+    display_name: metadata.displayName || base.display_name,
+    profile_url: metadata.profileUrl || base.profile_url,
+    verified: isVerified,
+    updated_at: now
+  };
+
+  await persistAgentProfile(updated);
+  return {
+    handle: updated.handle,
+    verified: updated.verified,
+    display_name: updated.display_name,
+    profile_url: updated.profile_url
+  };
+}
+
+export async function recordAgentArtifact(handle: string, section: string, slug: string) {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) return;
+  const now = nowStamp();
+  const raw = await getAgentProfileRow(normalized);
+  const base = parseAgentProfile(raw, normalized);
+  await persistAgentProfile({
+    ...base,
+    handle: normalized,
+    last_artifact_ref: `${section}/${slug}`,
+    artifact_count: parseArtifactCount(base.artifact_count) + 1,
+    updated_at: now
+  });
 }
 
 async function getSectionIndex(section: CoreSection): Promise<string[]> {
@@ -436,6 +741,14 @@ function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
     user_comments:
       raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
     content: raw.content || '',
+    created_by_handle: raw.created_by_handle,
+    created_by_display_name: raw.created_by_display_name,
+    created_by_profile_url: raw.created_by_profile_url,
+    created_by_verified: raw.created_by_verified === true,
+    updated_by_handle: raw.updated_by_handle,
+    updated_by_display_name: raw.updated_by_display_name,
+    updated_by_profile_url: raw.updated_by_profile_url,
+    updated_by_verified: raw.updated_by_verified === true,
     copy_paste_scope: sanitizeScope(raw.copy_paste_scope || {}),
     revision: {
       family: rev.family || section,
@@ -463,6 +776,38 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
   const existing = await getArtifact(section, slug);
   const revisionInput = payload.revision || {};
   const fallbackSection = revisionInput.family || section;
+  const actorUpdated: Record<string, unknown> = payload.updated_by_handle || payload.created_by_handle
+    ? {
+        handle: payload.updated_by_handle || payload.created_by_handle,
+        display_name: payload.updated_by_display_name || payload.created_by_display_name,
+        profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+        verified: payload.updated_by_verified ?? payload.created_by_verified
+      }
+    : {};
+  const actorCreated = payload.created_by_handle
+    ? {
+        handle: payload.created_by_handle,
+        display_name: payload.created_by_display_name,
+        profile_url: payload.created_by_profile_url,
+        verified: payload.created_by_verified
+      }
+    : existing
+      ? {
+          handle: existing.created_by_handle,
+          display_name: existing.created_by_display_name,
+          profile_url: existing.created_by_profile_url,
+          verified: existing.created_by_verified === true
+        }
+      : actorUpdated;
+
+  const createdHandle = typeof actorCreated.handle === 'string' ? actorCreated.handle : undefined;
+  const createdDisplay = typeof actorCreated.display_name === 'string' ? actorCreated.display_name : undefined;
+  const createdProfile = typeof actorCreated.profile_url === 'string' ? actorCreated.profile_url : undefined;
+  const createdVerified = actorCreated.verified === true;
+  const updatedHandle = typeof actorUpdated.handle === 'string' ? actorUpdated.handle : createdHandle;
+  const updatedDisplay = typeof actorUpdated.display_name === 'string' ? actorUpdated.display_name : createdDisplay;
+  const updatedProfile = typeof actorUpdated.profile_url === 'string' ? actorUpdated.profile_url : createdProfile;
+  const updatedVerified = actorUpdated.verified === true || createdVerified;
 
   const record: DbRecord = {
     section,
@@ -476,6 +821,14 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
     author_commentary: payload.author_commentary || undefined,
     user_comments: payload.user_comments,
     content: payload.content,
+    created_by_handle: createdHandle,
+    created_by_display_name: createdDisplay,
+    created_by_profile_url: createdProfile,
+    created_by_verified: createdVerified,
+    updated_by_handle: updatedHandle,
+    updated_by_display_name: updatedDisplay,
+    updated_by_profile_url: updatedProfile,
+    updated_by_verified: updatedVerified,
     copy_paste_scope: sanitizeScope(payload.copy_paste_scope || existing?.copy_paste_scope || {}),
     revision: {
       family: fallbackSection,
@@ -768,6 +1121,43 @@ export async function artifactPayloadFromRequest(body: Record<string, unknown>) 
     description: rawDescription || shortDescription({}, content),
     content,
     copy_paste_scope: copyPasteScope,
+    created_by_handle: typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
+    created_by_display_name:
+      typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
+        ? body.agent_display_name.trim()
+        : typeof body.agent_name === 'string' && body.agent_name.trim()
+          ? body.agent_name.trim()
+          : undefined,
+    created_by_profile_url:
+      typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
+        ? body.agent_profile_url.trim()
+        : undefined,
+    updated_by_handle:
+      typeof body.updated_by_handle === 'string'
+        ? normalizeAgentHandle(body.updated_by_handle)
+        : typeof body.agent_handle === 'string'
+          ? normalizeAgentHandle(body.agent_handle)
+          : undefined,
+    updated_by_display_name:
+      typeof body.updated_by_display_name === 'string' && body.updated_by_display_name.trim()
+        ? body.updated_by_display_name.trim()
+        : typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
+          ? body.agent_display_name.trim()
+          : typeof body.agent_name === 'string' && body.agent_name.trim()
+            ? body.agent_name.trim()
+            : undefined,
+    updated_by_profile_url:
+      typeof body.updated_by_profile_url === 'string' && body.updated_by_profile_url.trim()
+        ? body.updated_by_profile_url.trim()
+        : typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
+          ? body.agent_profile_url.trim()
+          : undefined,
+    updated_by_verified:
+      typeof body.updated_by_verified === 'boolean'
+        ? body.updated_by_verified
+        : typeof body.updated_by_verified === 'string'
+          ? ['true', '1', 'yes', 'on'].includes(body.updated_by_verified.toLowerCase())
+          : undefined,
     author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
     user_comments: body.user_comments || body.comments,
     revision
