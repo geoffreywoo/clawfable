@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { listBySection } from '../lib/content';
 
 const quickEntries = [
   {
@@ -24,64 +23,43 @@ const quickEntries = [
   },
 ];
 
-const indexSections = [
+const sectionGroups = [
+  {
+    href: '/section/soul',
+    path: '/section/soul',
+    note: 'SOUL rules, identity boundaries, and behavior contracts.',
+  },
+  {
+    href: '/section/memory',
+    path: '/section/memory',
+    note: 'Memory architecture, retention, and durable records.',
+  },
   {
     href: '/section/doctrine',
-    title: 'Doctrine',
-    desc: 'Foundational assumptions and operating principles.',
+    path: '/section/doctrine',
+    note: 'Foundational assumptions and operating principles.',
+  },
+  {
+    href: '/section/protocols',
+    path: '/section/protocols',
+    note: 'Re-usable loops, migration, and rollback methods.',
   },
   {
     href: '/section/lessons',
-    title: 'Lessons',
-    desc: 'Postmortem patterns that improve future behavior.',
+    path: '/section/lessons',
+    note: 'Postmortem patterns that improve future behavior.',
   },
   {
     href: '/section/benchmarks',
-    title: 'Benchmarks',
-    desc: 'Validation checks before re-contribution.',
+    path: '/section/benchmarks',
+    note: 'Validation checks before re-contribution.',
   },
   {
     href: '/section/skills',
-    title: 'Skills',
-    desc: 'Reusable skill modules for deterministic behavior.',
+    path: '/section/skills',
+    note: 'Reusable skill modules for deterministic behavior.',
   },
 ];
-
-const latestFeed = ['soul', 'memory', 'doctrine', 'protocols', 'lessons', 'benchmarks', 'skills'] as const;
-
-const latestEntries = latestFeed
-  .flatMap((section) =>
-    listBySection(section)
-      .slice(0, 1)
-      .map((item) => ({
-        section,
-        slug: item.slug,
-        title: item.title,
-        href: `/${section}/${item.slug}`,
-        description: item.description,
-        scopeFlags: item.scopeFlags ?? [],
-      }))
-  )
-  .slice(0, 6);
-
-const sectionTitle: Record<string, string> = {
-  soul: 'SOUL',
-  memory: 'MEMORY',
-  doctrine: 'Doctrine',
-  protocols: 'Protocols',
-  lessons: 'Lessons',
-  benchmarks: 'Benchmarks',
-  skills: 'Skills',
-};
-
-function scopeLabel(scope: string) {
-  return {
-    soul: 'SOUL',
-    memory: 'MEMORY',
-    skill: 'SKILL',
-    user_files: 'USER FILES',
-  }[scope] || scope.toUpperCase();
-}
 
 export default function Home() {
   return (
@@ -106,6 +84,9 @@ export default function Home() {
           <span>open /section/{'{'}target{'}'} and run read/validate/export.</span>
         </div>
         <div className="hero-actions">
+          <Link href="/start" className="btn btn-primary">
+            Start Here
+          </Link>
           <Link href="/status" className="btn btn-ghost">
             View learning status
           </Link>
@@ -113,46 +94,16 @@ export default function Home() {
       </section>
 
       <section className="panel">
-        <h2>Section map</h2>
-        <p className="doc-subtitle">Navigate by the section you want to improve.</p>
+        <h2>Browse source areas</h2>
+        <p className="doc-subtitle">Run a section command to open the learning context.</p>
         <div className="section-map">
-          {indexSections.map((section) => (
+          {sectionGroups.map((section) => (
             <Link key={section.href} href={section.href} className="section-map-item">
-              <span className="quick-path">{section.title}</span>
-              <span className="quick-note">{section.desc}</span>
+              <span className="quick-path">{section.path}</span>
+              <span className="quick-note">{section.note}</span>
             </Link>
           ))}
         </div>
-      </section>
-
-      <section className="panel">
-        <h2>Latest additions</h2>
-        <ul className="latest-list">
-          {latestEntries.length === 0 ? (
-            <li>No indexed entries yet.</li>
-          ) : (
-            latestEntries.map((entry) => (
-              <li key={`${entry.section}-${entry.slug}`}>
-                <Link href={entry.href} className="latest-link">
-                  <span className="latest-badge">{sectionTitle[entry.section]}</span>
-                    <span className="latest-text">
-                      <strong>{entry.title}</strong>
-                      <span>{entry.description}</span>
-                      {entry.scopeFlags.length > 0 ? (
-                        <span className="scope-row">
-                          {entry.scopeFlags.map((scope) => (
-                            <span key={`${entry.slug}-${scope}`} className="scope-chip">
-                              {scopeLabel(scope)}
-                            </span>
-                          ))}
-                        </span>
-                      ) : null}
-                  </span>
-                </Link>
-              </li>
-            ))
-          )}
-        </ul>
       </section>
     </div>
   );
