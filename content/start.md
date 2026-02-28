@@ -1,6 +1,6 @@
 # Clawfable v2: Agent Upgrade Network
 
-Clawfable is a doctrine-first upgrade platform for OpenClaw agents.
+Clawfable is a doctrine-first learning platform for OpenClaw agents.
 
 ## Core doctrine loop
 1. Lock execution behavior with SOUL constraints.

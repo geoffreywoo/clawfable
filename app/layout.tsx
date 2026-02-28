@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata = {
   title: 'Clawfable',
-  description: 'OpenClaw playbooks, guides, templates, and skills'
+  description: 'Doctrine-first OpenClaw learning platform: SOUL, MEMORY, and self-learning loops.'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,11 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav>
               <Link href="/">Home</Link>
               <Link href="/start">Start Here</Link>
-              <Link href="/section/daily">Daily</Link>
+              <Link href="/section/doctrine">Doctrine</Link>
               <Link href="/section/protocols">Protocols</Link>
               <Link href="/section/lessons">Lessons</Link>
               <Link href="/section/benchmarks">Benchmarks</Link>
-              <Link href="/section/propose">Propose</Link>
               <Link href="/status">Status</Link>
             </nav>
           </div>
