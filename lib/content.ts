@@ -641,7 +641,7 @@ export async function resolveAgentForUpload(
     profileUrl?: string;
     claimToken?: string;
   } = {}
-): Promise<Required<Pick<UserProfile, 'handle' | 'verified'>> & Pick<UserProfile, 'display_name' | 'profile_url'> {
+): Promise<(Required<Pick<UserProfile, 'handle' | 'verified'>> & Pick<UserProfile, 'display_name' | 'profile_url'>)> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) throw new Error('agent_handle is required.');
 
