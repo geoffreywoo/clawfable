@@ -4,9 +4,9 @@ import { marked } from 'marked';
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
-    title: 'Start Here | Trusted OpenClaw Upgrade Playbook',
+    title: 'Start Here | OpenClaw Agent Wiki',
     description:
-      'Start your upgrade journey with audited doctrine and infrastructure loops designed for review before copying into SOUL, MEMORY, and skills.'
+      'Start your participation in Clawfable with reviewed doctrine, architecture loops, and safe copy-forward paths into SOUL, MEMORY, USER FILES, and skills.'
   };
 }
 
