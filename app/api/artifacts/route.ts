@@ -16,8 +16,33 @@ import {
 
 type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
 
+type ArtifactKvClient = {
+  get: (key: string) => Promise<unknown>;
+  keys?: (pattern: string) => Promise<unknown>;
+  del?: (key: string) => Promise<unknown>;
+  delete?: (key: string) => Promise<unknown>;
+  set?: (key: string, value: unknown) => Promise<unknown>;
+};
+
 function isMode(value: string | undefined): value is ArtifactMode {
   return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear';
+}
+
+function extractStringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === 'string') : [];
+}
+
+async function kvGet(kv: ArtifactKvClient, key: string): Promise<unknown> {
+  return kv.get(key);
+}
+
+async function kvKeys(kv: ArtifactKvClient, pattern: string): Promise<unknown> {
+  if (typeof kv.keys !== 'function') return [];
+  return kv.keys(pattern);
+}
+
+function isKvDeletedResult(value: unknown): boolean {
+  return Boolean(value);
 }
 
 function extractValue(payload: Record<string, unknown>, key: string) {
@@ -45,7 +70,7 @@ function pickEnvValue(...names: string[]) {
   return undefined;
 }
 
-function getAdminKvClient() {
+function getAdminKvClient(): ArtifactKvClient | null {
   const url = pickEnvValue(
     'KV_REST_API_URL',
     'CLAWFABLE_DATABASE_URL',
@@ -62,18 +87,18 @@ function getAdminKvClient() {
   );
   if (!url || !token) return null;
 
-  return createClient({ url, token });
+  return createClient({ url, token }) as ArtifactKvClient;
 }
 
-async function deleteKvKey(kv: Record<string, unknown>, key: string) {
-  if (typeof (kv as any).del === 'function') {
-    return (kv as any).del(key);
+async function deleteKvKey(kv: ArtifactKvClient, key: string) {
+  if (typeof kv.del === 'function') {
+    return kv.del(key);
   }
-  if (typeof (kv as any).delete === 'function') {
-    return (kv as any).delete(key);
+  if (typeof kv.delete === 'function') {
+    return kv.delete(key);
   }
-  if (typeof (kv as any).set === 'function') {
-    return (kv as any).set(key, null);
+  if (typeof kv.set === 'function') {
+    return kv.set(key, null);
   }
   return null;
 }
@@ -99,17 +124,18 @@ async function clearArtifactsForSections(sections: Array<'soul' | 'memory'>) {
 
   for (const section of sections) {
     const indexKey = `${indexPrefix}${section}`;
-    const rawIndex = await (kv as any).get(indexKey);
-    const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
+    const rawIndex = await kvGet(kv, indexKey);
+    const slugs = extractStringList(rawIndex);
 
     const artifactKeysFromIndex = slugs.map((slug) => `${artifactPrefix}${section}:${slug}`);
-    const scannedKeys = await (kv as any).keys(`${artifactPrefix}${section}:*`);
-    const uniqueKeys = [...new Set([...(artifactKeysFromIndex || []), ...(Array.isArray(scannedKeys) ? scannedKeys : [])])];
+    const scannedKeys = await kvKeys(kv, `${artifactPrefix}${section}:*`);
+    const scannedStringKeys = extractStringList(scannedKeys);
+    const uniqueKeys = [...new Set([...(artifactKeysFromIndex || []), ...scannedStringKeys])];
 
     const deletedArtifacts = uniqueKeys.length
-      ? (await Promise.all(uniqueKeys.map((key) => deleteKvKey(kv as any, key as string)))).filter(Boolean).length
+      ? (await Promise.all(uniqueKeys.map((key) => deleteKvKey(kv, key)))).filter(isKvDeletedResult).length
       : 0;
-    const indexDeleted = Boolean(await deleteKvKey(kv as any, indexKey));
+    const indexDeleted = Boolean(await deleteKvKey(kv, indexKey));
 
     report.push({
       section,
