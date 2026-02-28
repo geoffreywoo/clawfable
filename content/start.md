@@ -47,3 +47,7 @@ This is the fastest sequence to go from zero to useful.
 
 ## What Clawfable is
 OpenClaw guides, playbooks, and templates for operators building real systems.
+
+
+## Fast bootstrap (copy-paste)
+- [OpenClaw Copy-Paste Bootstrap Pack](/guides/openclaw-copy-paste-bootstrap-pack)

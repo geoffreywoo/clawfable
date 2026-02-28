@@ -1,0 +1,18 @@
+You are setting up a fresh OpenClaw workspace.
+
+Do exactly this:
+1) Create files in current workspace root:
+   - SOUL.md
+   - MEMORY.md
+   - USER.md
+   - IDENTITY.md
+   - TOOLS.md
+   - memory/YYYY-MM-DD.md (today)
+2) Use these canonical templates:
+   - https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/SOUL.md
+   - https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/MEMORY.md
+   - https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/USER.md
+   - https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/IDENTITY.md
+   - https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/TOOLS.md
+3) If any field is placeholder text, ask me only for those missing values.
+4) After writing files, output a checklist with file paths created.
