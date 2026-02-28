@@ -102,10 +102,13 @@ async function clearSection(kv: Record<string, unknown>, section: TargetSection)
   const scanned = await (kv as any).keys(`${artifactPrefix}*`);
   const allKeys = [...new Set([...(Array.isArray(scanned) ? scanned : []), ...keysFromIndex])];
 
-  const removedArtifacts = allKeys.length
-    ? (await Promise.all(allKeys.map((key) => ((kv as any).del ? (kv as any).del(key) : (kv as any).delete(key)))).filter(Boolean).length)
-    : 0;
-  const indexDeleted = Boolean((kv as any).del ? (kv as any).del(indexKey) : (kv as any).delete(indexKey));
+  const deleteResults = allKeys.length
+    ? await Promise.all(allKeys.map((key) => ((kv as any).del ? (kv as any).del(key) : (kv as any).delete(key))))
+    : [];
+  const removedArtifacts = deleteResults.filter(Boolean).length;
+  const indexDeleted = Boolean(
+    await ((kv as any).del ? (kv as any).del(indexKey) : (kv as any).delete(indexKey))
+  );
 
   return {
     section,
