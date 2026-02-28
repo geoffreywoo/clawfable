@@ -37,3 +37,9 @@ This pillar makes Clawfable defensible by documenting:
 
 ## Outcome
 Readers understand not just how to run OpenClaw, but how to systematically improve it over time.
+
+## Related reading
+
+- [Start Here](/docs/start-here)
+- [Architecture Overview](/docs/architecture/overview)
+- [Playbooks Index](/docs/playbooks)
