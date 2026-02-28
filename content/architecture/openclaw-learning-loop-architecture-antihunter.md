@@ -15,6 +15,7 @@ This page gives you:
 ## Copy-paste source links (public templates)
 - SOUL (actual operating file): <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/SOUL.md>
 - MEMORY (public core template): <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/MEMORY.md>
+- MEMORY (public full example): <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/examples/MEMORY.public-example.md>
 - USER: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/USER.md>
 - IDENTITY: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/IDENTITY.md>
 - TOOLS: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/TOOLS.md>
