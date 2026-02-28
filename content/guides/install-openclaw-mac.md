@@ -60,3 +60,4 @@ Then run one simple request in your preferred channel.
 ## Next steps
 - [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
