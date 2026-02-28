@@ -49,6 +49,17 @@ Move up only when current stage is stable:
 - failure modes documented
 - rollback strategy defined
 
+## Common transition failure modes (and concrete fixes)
+1. **Jumping from Stage 1 to Stage 3 too early**
+   - Symptom: sub-agents run in parallel, but outputs conflict and require manual cleanup.
+   - Fix: lock one canonical output format first (template + acceptance checks), then re-enable parallelism.
+2. **Treating memory as notes instead of state**
+   - Symptom: recurring mistakes because decisions are logged but never converted to rules.
+   - Fix: after each incident, add one prevention rule to long-term memory + one runbook step.
+3. **No rollback path for recurring tasks**
+   - Symptom: scheduled workflow fails and leaves half-complete external actions.
+   - Fix: define per-workflow rollback command and verification check before enabling cron.
+
 ## Next steps
 - [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
