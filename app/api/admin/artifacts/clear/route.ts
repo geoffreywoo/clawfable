@@ -15,6 +15,14 @@ type SkipFlagResult = {
   skipSeed: boolean;
 };
 
+type AdminKvClient = {
+  get: (key: string) => Promise<unknown>;
+  del?: (key: string) => Promise<unknown>;
+  delete?: (key: string) => Promise<unknown>;
+  keys?: (pattern: string) => Promise<unknown>;
+  set?: (key: string, value: unknown) => Promise<unknown>;
+};
+
 function readEnv(name: string) {
   const raw = process.env[name];
   if (!raw) return undefined;
@@ -92,23 +100,22 @@ function collectTargetSections(request: NextRequest, body: Record<string, unknow
   return sections.length ? sections : (['soul', 'memory'] as TargetSection[]);
 }
 
-async function clearSection(kv: Record<string, unknown>, section: TargetSection) {
+async function clearSection(kv: AdminKvClient, section: TargetSection) {
   const indexKey = `clawfable:db:index:${section}`;
   const artifactPrefix = `clawfable:db:artifact:${section}:`;
 
-  const rawIndex = await (kv as any).get(indexKey);
+  const rawIndex = await kv.get(indexKey);
   const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
   const keysFromIndex = slugs.map((slug) => `${artifactPrefix}${slug}`);
-  const scanned = await (kv as any).keys(`${artifactPrefix}*`);
+  const scanned = await (kv.keys ? kv.keys(`${artifactPrefix}*`) : []);
   const allKeys = [...new Set([...(Array.isArray(scanned) ? scanned : []), ...keysFromIndex])];
 
-  const deleteResults = allKeys.length
-    ? await Promise.all(allKeys.map((key) => ((kv as any).del ? (kv as any).del(key) : (kv as any).delete(key))))
+  const deleteExecutor = kv.del || kv.delete;
+  const deleteResults = allKeys.length && deleteExecutor
+    ? await Promise.all(allKeys.map((key) => deleteExecutor(key)))
     : [];
   const removedArtifacts = deleteResults.filter(Boolean).length;
-  const indexDeleted = Boolean(
-    await ((kv as any).del ? (kv as any).del(indexKey) : (kv as any).delete(indexKey))
-  );
+  const indexDeleted = deleteExecutor ? Boolean(await deleteExecutor(indexKey)) : false;
 
   return {
     section,
@@ -117,19 +124,19 @@ async function clearSection(kv: Record<string, unknown>, section: TargetSection)
   } as ApiResult;
 }
 
-async function setSectionSeedSkip(kv: Record<string, unknown>, section: TargetSection, skipSeed: boolean) {
+async function setSectionSeedSkip(kv: AdminKvClient, section: TargetSection, skipSeed: boolean) {
   const key = `clawfable:admin:skip_seed:${section}`;
   if (skipSeed) {
-    if (typeof (kv as any).set === 'function') {
-      await (kv as any).set(key, true);
+    if (typeof kv.set === 'function') {
+      await kv.set(key, true);
     }
     return;
   }
 
-  if (typeof (kv as any).del === 'function') {
-    await (kv as any).del(key);
-  } else if (typeof (kv as any).delete === 'function') {
-    await (kv as any).delete(key);
+  if (typeof kv.del === 'function') {
+    await kv.del(key);
+  } else if (typeof kv.delete === 'function') {
+    await kv.delete(key);
   }
 }
 
@@ -170,7 +177,7 @@ export async function POST(request: NextRequest) {
   const skipResults = skipSeed === undefined
     ? []
     : await Promise.all(sections.map(async (section) => {
-        await setSectionSeedSkip(kv as any, section, skipSeed);
+        await setSectionSeedSkip(kv, section, skipSeed);
         return {
           section,
           skipSeed
