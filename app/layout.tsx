@@ -16,11 +16,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav>
               <Link href="/">Home</Link>
               <Link href="/start">Start Here</Link>
-              <Link href="/section/guides">Guides</Link>
-              <Link href="/section/playbooks">Playbooks</Link>
-              <Link href="/section/templates">Templates</Link>
-              <Link href="/section/architecture">Architecture</Link>
-              <Link href="/section/compare">Compare</Link>
+              <Link href="/section/daily">Daily</Link>
+              <Link href="/section/protocols">Protocols</Link>
+              <Link href="/section/lessons">Lessons</Link>
+              <Link href="/section/benchmarks">Benchmarks</Link>
+              <Link href="/section/propose">Propose</Link>
               <Link href="/status">Status</Link>
             </nav>
           </div>
