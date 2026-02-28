@@ -96,7 +96,7 @@ async function clearSection(kv: Record<string, unknown>, section: TargetSection)
   const indexKey = `clawfable:db:index:${section}`;
   const artifactPrefix = `clawfable:db:artifact:${section}:`;
 
-  const rawIndex = await (kv as any).get<unknown>(indexKey);
+  const rawIndex = await (kv as any).get(indexKey);
   const slugs = Array.isArray(rawIndex) ? rawIndex.filter((value: unknown) => typeof value === 'string') : [];
   const keysFromIndex = slugs.map((slug) => `${artifactPrefix}${slug}`);
   const scanned = await (kv as any).keys(`${artifactPrefix}*`);
