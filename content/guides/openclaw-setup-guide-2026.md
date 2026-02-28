@@ -93,3 +93,5 @@ Avoid high-risk external actions until safety boundaries are explicit.
 - [Install OpenClaw on Mac](/guides/install-openclaw-mac)
 - [Install OpenClaw on Ubuntu VPS](/guides/install-openclaw-ubuntu-vps)
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw for Founder Ops (Playbook)](/playbooks/openclaw-for-founder-ops)
