@@ -90,7 +90,7 @@ a:hover {
 
 .brand-subtitle {
   margin: 0;
-  color: var(--accent-orange);
+  color: var(--accent-green);
   font-size: 0.78rem;
   line-height: 1.1;
 }
@@ -231,7 +231,7 @@ a:hover {
 }
 
 .latest-badge {
-  color: var(--accent-orange);
+  color: var(--accent-green);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 0.76rem;
@@ -250,7 +250,7 @@ a:hover {
 
 .kicker {
   margin: 0;
-  color: var(--accent-orange);
+  color: var(--accent-green);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -355,7 +355,7 @@ article h4 {
   border: 1px solid var(--line);
   padding: 0.22rem 0.55rem;
   white-space: nowrap;
-  color: var(--accent-orange);
+  color: var(--accent-green);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   font-weight: 700;
@@ -399,7 +399,7 @@ article h4 {
 }
 
 .doc-meta-label {
-  color: var(--accent-orange);
+  color: var(--accent-green);
   margin-right: 0.45rem;
   font-weight: 700;
   font-size: 0.77rem;
@@ -477,18 +477,18 @@ article h4 {
 
 .btn-primary {
   background: #ffffff;
-  color: var(--accent-orange);
-  border-color: var(--accent-orange);
+  color: var(--accent-green);
+  border-color: var(--accent-green);
 }
 
 .btn-primary:hover {
-  background: #fff8e8;
+  background: #f2f6ff;
 }
 
 .btn-ghost {
   background: #ffffff;
   color: var(--accent-green);
-  border-color: var(--accent-green);
+  border-color: var(--line);
 }
 
 .btn-ghost:hover {
@@ -555,7 +555,7 @@ article h4 {
   margin: 0 0 0.4rem;
   text-transform: uppercase;
   letter-spacing: 0.11em;
-  color: var(--accent-orange);
+  color: var(--accent-green);
   font-weight: 700;
   font-size: 0.78rem;
 }
@@ -627,7 +627,7 @@ article h4 {
 .view-all {
   margin-top: auto;
   padding-top: 0.5rem;
-  border-top: 1px dashed var(--accent-orange);
+  border-top: 1px dashed var(--accent-green);
 }
 
 .feature-card {
@@ -639,7 +639,7 @@ pre {
   background: var(--bg-alt);
   color: var(--text);
   padding: 0.8rem;
-  border: 1px solid var(--accent-orange);
+  border: 1px solid var(--accent-green);
 }
 
 article {
