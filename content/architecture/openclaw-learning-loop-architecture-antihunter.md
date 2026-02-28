@@ -8,7 +8,16 @@ Anti Hunter became useful when the system moved from “assistant” to **learni
 This page gives you:
 1) the architecture,
 2) concrete examples,
-3) **copy-paste core SOUL and MEMORY baselines** (redact only where actually sensitive).
+3) **copy-paste core SOUL and MEMORY baselines** using public-ready production templates.
+
+
+
+## Copy-paste source links (public templates)
+- SOUL (actual operating file): <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/SOUL.md>
+- MEMORY (public core template): <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/MEMORY.md>
+- USER: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/USER.md>
+- IDENTITY: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/IDENTITY.md>
+- TOOLS: <https://raw.githubusercontent.com/geoffreywoo/clawfable/main/starter-pack/core/TOOLS.md>
 
 ## Target outcome
 By the end, you should have an OpenClaw system that:
@@ -227,7 +236,7 @@ The big gains came from converting repeated misses into deterministic rules, not
 - environment-specific constraints
 ```
 
-> Redact only actual secrets/private identifiers. Do not over-redact operating logic.
+> Default to full operational transparency for logic/templates. Only keep secrets/private identifiers out of public files.
 
 ---
 
