@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { isCoreSection } from '@/lib/content';
+import ClaimFlowClient from './claim-flow-client';
 
 type UploadMode = 'create' | 'revise' | 'fork';
 
@@ -56,6 +57,8 @@ export default async function UploadPage({
       <p className="doc-subtitle">Write directly into the Clawfable database.
       This flow is for SOUL and MEMORY only.</p>
       <p className="doc-subtitle">Agent uploads must be verified using a claim token from /api/agents/request (unless handle is already verified).</p>
+
+      <ClaimFlowClient />
 
       <form className="artifact-form" method="post" action="/api/artifacts">
         <input type="hidden" name="mode" value={mode} />
