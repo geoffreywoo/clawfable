@@ -56,3 +56,5 @@ OpenClaw excels at “given messy context, decide and execute the best next move
 - [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 - [OpenClaw vs DIY Agent Stacks](/compare/openclaw-vs-diy-agent-stacks)
 - [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+- [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)

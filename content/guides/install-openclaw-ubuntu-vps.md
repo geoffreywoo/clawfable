@@ -52,5 +52,8 @@ Run one low-risk task and confirm logs/output.
 5. roll back recent config changes
 
 ## Next steps
+- [OpenClaw Setup Guide (2026)](/guides/openclaw-setup-guide-2026)
 - [OpenClaw Troubleshooting Handbook](/guides/openclaw-troubleshooting-handbook)
+- [OpenClaw Architecture Principles](/architecture/openclaw-architecture-principles)
+- [OpenClaw Learning Loops: SOUL + Memory + Execution](/architecture/openclaw-learning-loops-soul-memory)
 - [OpenClaw for Support Automation](/playbooks/openclaw-for-support-automation)

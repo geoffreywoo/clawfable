@@ -24,6 +24,7 @@ Get a concise daily operator brief with priorities, blockers, and next actions.
 Daily brief template + ranking rubric.
 
 ## Next step
-- `/playbooks/openclaw-for-founder-ops`
-- `/guides/openclaw-configuration-deep-dive`
-- `/templates/founder-ops-template-pack`
+- [OpenClaw for Founder Ops](/playbooks/openclaw-for-founder-ops)
+- [OpenClaw Configuration Deep Dive](/guides/openclaw-configuration-deep-dive)
+- [Founder Ops Template Pack](/templates/founder-ops-template-pack)
+- [OpenClaw Learning Loops: Soul + Memory](/architecture/openclaw-learning-loops-soul-memory)
