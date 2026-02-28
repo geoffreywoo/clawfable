@@ -4,7 +4,15 @@ import matter from 'gray-matter';
 
 const CONTENT_ROOT = path.join(process.cwd(), 'content');
 
-const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
+export const coreSections = ['soul', 'memory'] as const;
+
+export type CoreSection = (typeof coreSections)[number];
+
+export function isCoreSection(section: string): section is CoreSection {
+  return coreSections.includes(section.toLowerCase() as CoreSection);
+}
+
+const scopeOrder = ['soul', 'memory', 'user_files'];
 const revisionOrder = ['draft', 'review', 'accepted', 'archived'];
 
 function extractScopeTags(scopeMap?: Record<string, unknown>): string[] {
@@ -21,6 +29,7 @@ function extractRevision(meta: Record<string, unknown> | undefined) {
   const kind = String(revision.kind || revision.type || 'revision');
   const family = String(revision.family || 'default');
   const id = String(revision.id || revision.version || 'v1');
+
   return {
     family,
     id,
@@ -40,7 +49,7 @@ function shortDescription(frontmatter: Record<string, unknown> | undefined, cont
   if (fromFrontmatter) {
     return fromFrontmatter;
   }
-  const titleLine = content.split('\n').find((l) => l.startsWith('# '));
+  const titleLine = content.split('\n').find((line) => line.startsWith('# '));
   const firstBody = content
     .split('\n')
     .filter((line) => line.trim() && !line.startsWith('#'))
@@ -52,7 +61,7 @@ function shortDescription(frontmatter: Record<string, unknown> | undefined, cont
 }
 
 export function listSections(): string[] {
-  return fs.readdirSync(CONTENT_ROOT).filter((f) => fs.statSync(path.join(CONTENT_ROOT, f)).isDirectory());
+  return coreSections.filter((section) => fs.existsSync(path.join(CONTENT_ROOT, section)));
 }
 
 function listMarkdownFiles(sectionDir: string, prefix = '') {
@@ -67,14 +76,18 @@ function listMarkdownFiles(sectionDir: string, prefix = '') {
       continue;
     }
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+
     const file = entry.name;
     const full = path.join(sectionDir, file);
     const raw = fs.readFileSync(full, 'utf8');
     const { data, content } = matter(raw);
     const titleLine = content.split('\n').find((l) => l.startsWith('# '));
     const slug = `${prefix}${file.replace(/\.md$/, '')}`;
+    const sourcePath = `${prefix}${file}`;
+
     files.push({
       slug,
+      sourcePath,
       title: (data as any).title
         ? (data as any).title
         : titleLine
@@ -86,15 +99,20 @@ function listMarkdownFiles(sectionDir: string, prefix = '') {
       data
     });
   }
+
   return files;
 }
 
 export function listBySection(section: string) {
-  const dir = path.join(CONTENT_ROOT, section);
+  if (!isCoreSection(section)) {
+    return [];
+  }
+  const dir = path.join(CONTENT_ROOT, section.toLowerCase());
   return listMarkdownFiles(dir);
 }
 
 export function getDoc(section: string, slug: string | string[]) {
+  if (!isCoreSection(section)) return null;
   const normalizedSlug = Array.isArray(slug) ? slug.join('/') : slug;
   const full = path.join(CONTENT_ROOT, section, `${normalizedSlug}.md`);
   if (!fs.existsSync(full)) return null;
@@ -103,11 +121,10 @@ export function getDoc(section: string, slug: string | string[]) {
   return { data, content };
 }
 
-
 export function getRootDoc(slug: string) {
   const full = path.join(CONTENT_ROOT, `${slug}.md`);
   if (!fs.existsSync(full)) return null;
-  const raw = fs.readFileSync(full, "utf8");
+  const raw = fs.readFileSync(full, 'utf8');
   const { data, content } = matter(raw);
   return { data, content };
 }
