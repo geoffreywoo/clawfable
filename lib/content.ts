@@ -86,6 +86,7 @@ const CONTENT_ROOT = path.join(process.cwd(), 'content');
 const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
 const DB_ARTIFACT_INDEX_PREFIX = 'clawfable:db:index';
 const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
+const DB_SKIP_SEED_PREFIX = 'clawfable:admin:skip_seed';
 
 let kvClient: Promise<KVClient | null> | null = null;
 const seededSections = new Set<string>();
@@ -351,6 +352,26 @@ async function setSectionIndex(section: CoreSection, values: string[]) {
   await kv.set(indexKey(section), next);
 }
 
+function skipSeedKey(section: CoreSection) {
+  return `${DB_SKIP_SEED_PREFIX}:${section}`;
+}
+
+async function shouldSkipSectionSeed(section: CoreSection) {
+  const kv = await getKvClient();
+  if (!kv) return false;
+
+  const raw = await kv.get<unknown>(skipSeedKey(section));
+  if (raw == null) return false;
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'number') return raw !== 0;
+  if (typeof raw === 'string') {
+    const value = raw.trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on', 'enabled', 'skip'].includes(value);
+  }
+
+  return false;
+}
+
 async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord | null> {
   const kv = await getKvClient();
   if (!kv) return null;
@@ -434,6 +455,10 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
 async function ensureSectionSeeded(section: CoreSection) {
   if (seededSections.has(section)) return;
 
+  if (await shouldSkipSectionSeed(section)) {
+    return;
+  }
+
   const index = await getSectionIndex(section);
   if (index.length > 0) {
     seededSections.add(section);
@@ -475,6 +500,7 @@ export async function listBySection(section: string): Promise<SectionItem[]> {
   const normalized = normalizeSection(section);
 
   await ensureSectionSeeded(normalized);
+  const isSeedingSkipped = await shouldSkipSectionSeed(normalized);
 
   const recordsFromDb = await (async () => {
     const index = await getSectionIndex(normalized);
@@ -487,6 +513,10 @@ export async function listBySection(section: string): Promise<SectionItem[]> {
     return recordsFromDb
       .map((row) => mapRecordToSectionItem(row))
       .sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  if (isSeedingSkipped) {
+    return [];
   }
 
   const fallback = fromMdSection(normalized);
@@ -513,10 +543,15 @@ export async function getDoc(section: string, slug: string | string[]) {
   const normalizedSlug = normalizeSlug(Array.isArray(slug) ? slug.join('/') : String(slug));
 
   await ensureSectionSeeded(normalizedSection);
+  const isSeedingSkipped = await shouldSkipSectionSeed(normalizedSection);
 
   const fromDb = await getArtifact(normalizedSection, normalizedSlug);
   if (fromDb) {
     return toDoc(fromDb);
+  }
+
+  if (isSeedingSkipped) {
+    return null;
   }
 
   const sectionDir = path.join(CONTENT_ROOT, normalizedSection);

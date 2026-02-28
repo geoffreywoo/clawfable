@@ -10,6 +10,11 @@ type ApiResult = {
   indexDeleted: boolean;
 };
 
+type SkipFlagResult = {
+  section: TargetSection;
+  skipSeed: boolean;
+};
+
 function readEnv(name: string) {
   const raw = process.env[name];
   if (!raw) return undefined;
@@ -35,6 +40,18 @@ function normalizeTargetSections(raw: unknown): TargetSection[] {
   return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))]
     .filter((value) => value === 'soul' || value === 'memory')
     .map((value) => value as TargetSection);
+}
+
+function parseOptionalBoolean(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'number') return raw === 1;
+  if (typeof raw !== 'string') return undefined;
+
+  const trimmed = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on', 'enabled', 'skip'].includes(trimmed)) return true;
+  if (['0', 'false', 'no', 'off', 'disabled', 'n', 'null'].includes(trimmed)) return false;
+  return undefined;
 }
 
 async function parsePayload(request: NextRequest): Promise<Record<string, unknown>> {
@@ -97,8 +114,37 @@ async function clearSection(kv: Record<string, unknown>, section: TargetSection)
   } as ApiResult;
 }
 
+async function setSectionSeedSkip(kv: Record<string, unknown>, section: TargetSection, skipSeed: boolean) {
+  const key = `clawfable:admin:skip_seed:${section}`;
+  if (skipSeed) {
+    if (typeof (kv as any).set === 'function') {
+      await (kv as any).set(key, true);
+    }
+    return;
+  }
+
+  if (typeof (kv as any).del === 'function') {
+    await (kv as any).del(key);
+  } else if (typeof (kv as any).delete === 'function') {
+    await (kv as any).delete(key);
+  }
+}
+
+function collectSkipSeedOption(request: NextRequest, body: Record<string, unknown>) {
+  const queryBool = parseOptionalBoolean(request.nextUrl.searchParams.get('skipSeed')) ??
+    parseOptionalBoolean(request.nextUrl.searchParams.get('skip_seed')) ??
+    parseOptionalBoolean(request.nextUrl.searchParams.get('seedDisabled'));
+
+  const bodyBool = parseOptionalBoolean(body.skipSeed) ??
+    parseOptionalBoolean(body.skip_seed) ??
+    parseOptionalBoolean(body.seedDisabled);
+
+  return bodyBool ?? queryBool;
+}
+
 export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
+  const skipSeed = collectSkipSeedOption(request, body);
 
   const providedToken =
     request.headers.get('x-admin-token') ||
@@ -118,10 +164,23 @@ export async function POST(request: NextRequest) {
   }
 
   const results = await Promise.all(sections.map((section) => clearSection(kv, section)));
+  const skipResults = skipSeed === undefined
+    ? []
+    : await Promise.all(sections.map(async (section) => {
+        await setSectionSeedSkip(kv as any, section, skipSeed);
+        return {
+          section,
+          skipSeed
+        } as SkipFlagResult;
+      }));
 
   revalidatePath('/section/soul');
   revalidatePath('/section/memory');
-  return NextResponse.json({ ok: true, cleared: results });
+  return NextResponse.json({
+    ok: true,
+    cleared: results,
+    ...(skipSeed === undefined ? {} : { seedSkip: skipResults })
+  });
 }
 
 export async function GET() {
