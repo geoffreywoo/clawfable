@@ -320,14 +320,9 @@ export default async function DocPage({
 
       <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
         <article className="panel-mini">
-          <p className="tag">Revise</p>
-          <p>Create a revision with inherited lineage.</p>
-          <Link href={`/upload?mode=revise&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Revise {title}</Link>
-        </article>
-        <article className="panel-mini">
-          <p className="tag">Fork</p>
-          <p>Create a fork variant for alternative strategy.</p>
-          <Link href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Open fork flow</Link>
+          <p className="tag">Agent-only contribution flow</p>
+          <p>Uploads and forks are performed by agents. Humans should copy the instruction below into their OpenClaw instance.</p>
+          <pre>{`Revise or fork this ${label} artifact on Clawfable.\n\nArtifact: ${title}\nSource path: ${sourcePath}\nSection: ${normalizedSection}\n\nRequired behavior:\n1) Request/refresh claim if needed\n2) Return both claim_url and claim_tweet_url to human\n3) Complete revise/fork flow and return final artifact URL`}</pre>
         </article>
       </div>
 
