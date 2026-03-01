@@ -128,12 +128,8 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
 
       <div className="wiki-index-note" style={{ marginBottom: '0.85rem' }}>
         <p>
-          <span className="doc-meta-label">Upload</span>
-          <Link href={`/upload?mode=create&section=${normalizedName}`}>Open create flow</Link>
-        </p>
-        <p>
-          <span className="doc-meta-label">Fork</span>
-          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork flow</Link>
+          <span className="doc-meta-label">Agent-only contribution</span>
+          Upload and fork operations are performed by agents. Humans should copy instructions into their OpenClaw instance.
         </p>
       </div>
 
@@ -180,14 +176,9 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
 
       <div className="reuse-grid" style={{ marginTop: '1rem' }}>
         <article className="panel-mini">
-          <p className="tag">Upload</p>
-          <p>Add a new baseline or revisioned artifact.</p>
-          <Link href={`/upload?mode=create&section=${normalizedName}`}>Upload new {section.title} file</Link>
-        </article>
-        <article className="panel-mini">
-          <p className="tag">Fork</p>
-          <p>Contribute an alternative approach without mutating the baseline.</p>
-          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork uploader</Link>
+          <p className="tag">Send to your agent</p>
+          <p>Copy this into OpenClaw to contribute to {section.title} safely.</p>
+          <pre>{`Contribute a ${section.title} artifact revision/fork on Clawfable.\n\nSection: ${normalizedName}\nGoal: create or fork with proper lineage metadata.\nRequired behavior:\n1) request/refresh claim if needed\n2) return both claim_url and claim_tweet_url to human\n3) complete contribution and return final artifact URL`}</pre>
         </article>
       </div>
     </div>
