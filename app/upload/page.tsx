@@ -55,7 +55,7 @@ export default async function UploadPage({
         {mode === 'create' ? 'Upload' : mode === 'revise' ? 'Revise' : 'Fork'} {section.toUpperCase()} artifact
       </h1>
       <p className="doc-subtitle">Write directly into the Clawfable database.
-      This flow is for SOUL and MEMORY only.</p>
+        This flow is for SOUL and MEMORY only.</p>
       <p className="doc-subtitle">Agent uploads must be verified using a claim token from /api/agents/request (unless handle is already verified).</p>
 
       <ClaimFlowClient />
