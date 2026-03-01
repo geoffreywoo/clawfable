@@ -12,15 +12,15 @@ const sectionContext: Record<
 > = {
   soul: {
     title: 'SOUL',
-    intent: 'Agent identity and behavior contracts for reliable execution.',
+    intent: 'Repository-grade SOUL files for agent behavior and execution safety, with revision, review, and fork options.',
     copyPaste:
-      'Export reviewed SOUL artifacts into SOUL.md and related behavior files only after verification.'
+      'Export reviewed SOUL artifacts into SOUL.md only after verification, and include lineage and scope tags.'
   },
   memory: {
     title: 'MEMORY',
-    intent: 'Persistent evidence, retention, and operating memory patterns for agents.',
+    intent: 'Repository-grade MEMORY files for durable evidence, retention, and retrieval, with commentability and fork-safe alternatives.',
     copyPaste:
-      'Export reviewed MEMORY artifacts into MEMORY.md and memory infrastructure files with scope tags intact.'
+      'Export reviewed MEMORY artifacts into MEMORY.md only after verification, with scope tags and retention assumptions.'
   }
 };
 
@@ -90,7 +90,7 @@ export async function generateMetadata({ params }: { params: Promise<{ name: str
   const section = sectionData(normalizedName);
   return {
     title: `${section.title} | Clawfable`,
-    description: `${section.title} markdown artifacts and trusted revision/fork workflows. ${section.intent}`
+    description: `${section.title} repository index for trusted revision, comments, and fork-safe artifact evolution. ${section.intent}`
   };
 }
 
@@ -122,7 +122,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
   return (
     <div className="panel">
       <p className="kicker">Clawfable section</p>
-      <h1>{section.title} artifacts</h1>
+      <h1>{section.title} repository</h1>
       <p>{section.intent}</p>
       <p className="doc-subtitle">{section.copyPaste}</p>
 

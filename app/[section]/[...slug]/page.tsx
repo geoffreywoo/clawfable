@@ -200,7 +200,7 @@ export async function generateMetadata({
 
   const description =
     (doc?.data as Record<string, unknown> | undefined)?.description?.toString() ||
-    `Trusted ${label} article in Clawfable.`;
+    `Trusted ${label} entry in the largest OpenClaw SOUL/MEMORY repository with revision, comments, and forks.`;
 
   return { title: `${title} | ${label}`, description };
 }
