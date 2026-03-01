@@ -102,7 +102,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
     return (
       <div className="panel">
         <p className="kicker">Section not supported</p>
-        <h1>Clawfable core wiki only</h1>
+        <h1>Clawfable core repository only</h1>
         <p>Use SOUL or MEMORY:</p>
         <ul className="section-list">
           <li>
