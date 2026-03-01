@@ -99,16 +99,16 @@ a:hover {
 }
 
 .home-shell {
-  margin: 36px 0 52px;
+  margin: 56px 0 72px;
   display: grid;
-  gap: 24px;
+  gap: 28px;
 }
 
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 26px;
+  border-radius: 10px;
+  padding: 34px;
 }
 
 .hero-card h1 {
@@ -124,20 +124,20 @@ a:hover {
 }
 
 .quick-links {
-  margin-top: 16px;
+  margin-top: 20px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 18px;
 }
 
-.quick-link,
+ .quick-link,
 .section-map-item,
 .latest-link {
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--text);
-  padding: 10px 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -150,7 +150,8 @@ button.quick-link {
 }
 
 .quick-link.active {
-  border-color: #111;
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .quick-path {
@@ -191,7 +192,7 @@ ul {
 }
 
 .footer-inner {
-  min-height: 62px;
+  min-height: 72px;
   display: flex;
   align-items: center;
 }
@@ -236,7 +237,7 @@ ul {
 .section-item,
 .comment-item,
 .resource-link {
-  border: 1px solid var(--line);
+  border: 1px solid #efefef;
   border-radius: 8px;
   background: #fff;
   padding: 12px;
@@ -259,7 +260,7 @@ ul {
 .feature-card li,
 .contribution-links li,
 .simple-links a {
-  border: 1px solid var(--line);
+  border: 1px solid #efefef;
   border-radius: 8px;
   background: #fff;
   padding: 10px;
@@ -301,6 +302,6 @@ pre {
 
   .panel,
   .doc-frame {
-    padding: 18px;
+    padding: 22px;
   }
 }
