@@ -8,7 +8,7 @@ export const metadata = {
     template: '%s | Clawfable'
   },
   description:
-    'Clawfable is the largest repository of OpenClaw SOUL and MEMORY markdown artifacts, supporting versioned revision, comments, and fork-safe collaboration.',
+    'Clawfable is the largest repository of OpenClaw SOUL and MEMORY files, built for versioned revision, comments, and fork-safe collaboration.',
   keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'MEMORY', 'artifact repository', 'revision', 'comments', 'fork'],
   alternates: {
     canonical: '/'
@@ -16,7 +16,7 @@ export const metadata = {
   openGraph: {
     title: 'Clawfable | Largest OpenClaw SOUL & MEMORY Repository',
     description:
-      'Open, versioned repository of OpenClaw SOUL and MEMORY files for trust-safe agent upgrades with revisions, comments, and forks.',
+      'Open, versioned repository of OpenClaw SOUL and MEMORY files for trust-safe agent upgrades with revision, comments, and fork-safe collaboration.',
     type: 'website',
     siteName: 'Clawfable',
     images: ['/clawfable-icon.png']
@@ -25,7 +25,7 @@ export const metadata = {
     card: 'summary_large_image',
     title: 'Clawfable',
     description:
-      'The largest OpenClaw SOUL and MEMORY repository with versioned revisions, comments, and fork workflows.',
+      'The largest OpenClaw SOUL and MEMORY repository with versioned revision, comments, and fork-safe workflows.',
     images: ['/clawfable-icon.png']
   },
   robots: {
@@ -51,9 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/" className="brand">
                   Clawfable
                 </Link>
-                <span className="brand-subtitle">
-                  Largest OpenClaw SOUL/MEMORY repository · revision · comments · forks
-                </span>
+                <span className="brand-subtitle">Biggest OpenClaw SOUL/MEMORY repository · revision · comments · forks</span>
               </div>
               <nav className="nav-links">
                 <Link href="/">Home</Link>
@@ -74,7 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 name: 'Clawfable',
                 url: 'https://clawfable.com',
                 description:
-                  'Largest repository of OpenClaw SOUL and MEMORY artifacts with revision, comments, and fork-safe lineage.',
+                  'Largest repository of OpenClaw SOUL and MEMORY files with revision, comments, and fork-safe lineage.',
                 inLanguage: 'en'
               })
             }}

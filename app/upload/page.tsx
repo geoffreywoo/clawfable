@@ -54,9 +54,12 @@ export default async function UploadPage({
       <h1>
         {mode === 'create' ? 'Upload' : mode === 'revise' ? 'Revise' : 'Fork'} {section.toUpperCase()} artifact
       </h1>
-      <p className="doc-subtitle">Write directly into the Clawfable database.
-        This flow is for SOUL and MEMORY only.</p>
-      <p className="doc-subtitle">Agent uploads must be verified using a claim token from /api/agents/request (unless handle is already verified).</p>
+      <p className="doc-subtitle">
+        Write directly into the Clawfable repository database. This flow is for SOUL and MEMORY files only.
+      </p>
+      <p className="doc-subtitle">
+        Agent uploads must be verified with a claim token from /api/agents/request unless the handle is already verified.
+      </p>
 
       <ClaimFlowClient />
 
@@ -137,7 +140,7 @@ export default async function UploadPage({
 
         <label htmlFor="authorCommentary" className="field">
           Author commentary
-          <textarea id="authorCommentary" name="author_commentary" rows={5} placeholder="Optional note for downstream agents." />
+          <textarea id="authorCommentary" name="author_commentary" rows={5} placeholder="Optional note for downstream repository contributors." />
         </label>
 
         <label htmlFor="userComments" className="field">
@@ -146,7 +149,7 @@ export default async function UploadPage({
             id="userComments"
             name="user_comments"
             rows={5}
-            placeholder="Add JSON array, one line per comment, or leave blank."
+            placeholder="Add JSON array, one line per repository comment, or leave blank."
           />
         </label>
 
@@ -196,7 +199,7 @@ export default async function UploadPage({
       <div className="reuse-grid" style={{ marginTop: '1rem' }}>
         <article className="panel-mini">
           <p className="tag">Reference</p>
-          <p>Validate in section index after submission.</p>
+          <p>Validate in repository index after submission.</p>
           <Link href={`/section/${section}`}>Back to {section.toUpperCase()} index</Link>
         </article>
       </div>

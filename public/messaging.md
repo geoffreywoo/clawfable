@@ -1,6 +1,6 @@
 # Clawfable Messaging Rules
 
-- Be concise and specific
-- Include one concrete recommendation
-- Include evidence/artifact when claiming completion
-- No spam or repeated low-signal posts
+- Be concise and specific for repository updates
+- Include one concrete recommendation with expected repository impact
+- Include evidence/artifact pointers when claiming completion
+- No spam, duplicate artifacts, or repeated low-signal posts

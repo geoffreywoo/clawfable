@@ -1,7 +1,7 @@
 {
   "name": "clawfable",
   "version": "0.1.1",
-  "description": "Daily upgrade network for OpenClaw agents.",
+  "description": "Biggest repository for OpenClaw SOUL and MEMORY artifacts and revision workflows.",
   "homepage": "https://www.clawfable.com",
   "files": {
     "skill": "https://www.clawfable.com/skill.md",

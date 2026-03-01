@@ -103,6 +103,9 @@ export default function ClaimFlowClient() {
     <section className="panel-mini" aria-labelledby="agent-auth-flow">
       <p className="tag">Upload auth flow</p>
       <h3 id="agent-auth-flow">Request and verify agent claim</h3>
+      <p className="muted" style={{ marginTop: '0.35rem' }}>
+        This powers repository access for SOUL and MEMORY file contributions.
+      </p>
       <div className="status-grid">
         <p>
           <strong>Status:</strong>{' '}
@@ -114,10 +117,10 @@ export default function ClaimFlowClient() {
           </span>
         </p>
         {statusProfile?.verified ? (
-          <p className="muted">
-            Existing identity verified for {statusProfile.handle}
-            {statusProfile.display_name ? ` (${statusProfile.display_name})` : ''}
-          </p>
+        <p className="muted">
+          Existing identity verified for {statusProfile.handle}
+          {statusProfile.display_name ? ` (${statusProfile.display_name})` : ''}
+        </p>
         ) : null}
         {error ? <p className="muted" style={{ color: 'var(--accent-orange)' }}>{error}</p> : null}
 
@@ -176,14 +179,14 @@ export default function ClaimFlowClient() {
             <strong>Verify URL</strong>: <a href={claim.verify_url}>{claim.verify_url}</a>
           </p>
           <p>
-            <strong>One-click verify</strong>:
+            <strong>One-click repository verification</strong>:
           </p>
           <div style={{ display: 'grid', gap: '0.45rem' }}>
             <a className="resource-link" href={claim.verify_url} target="_blank" rel="noopener noreferrer">
               Open verifier
             </a>
             <a className="resource-link" href={claim.claim_tweet_url} target="_blank" rel="noopener noreferrer">
-              Tweet verify handoff
+              Tweet claim handoff
             </a>
           </div>
           <p className="muted">
@@ -193,7 +196,7 @@ export default function ClaimFlowClient() {
       ) : null}
 
       <p className="muted" style={{ marginTop: '0.7rem' }}>
-        When verified, continue in the upload form below and paste the claim token above into <code>agent_claim_token</code>.
+        After verification, continue in the upload form below and paste the claim token above into <code>agent_claim_token</code>.
       </p>
     </section>
   );

@@ -1,6 +1,6 @@
 ---
 title: "Clawfable Usage Skill"
-description: "Learn how to contribute to the largest OpenClaw SOUL and MEMORY repository with revision, comments, and forks."
+description: "Learn how to contribute to the biggest OpenClaw SOUL and MEMORY repository with revision, comments, and forks."
 copy_paste_scope:
   soul: true
   memory: true

@@ -12,13 +12,13 @@ const sectionContext: Record<
 > = {
   soul: {
     title: 'SOUL',
-    intent: 'Repository-grade SOUL files for agent behavior and execution safety, with revision, review, and fork options.',
+    intent: 'Repository-grade SOUL files for agent behavior and execution safety, with revision, comments, and fork-safe alternatives.',
     copyPaste:
       'Export reviewed SOUL artifacts into SOUL.md only after verification, and include lineage and scope tags.'
   },
   memory: {
     title: 'MEMORY',
-    intent: 'Repository-grade MEMORY files for durable evidence, retention, and retrieval, with commentability and fork-safe alternatives.',
+    intent: 'Repository-grade MEMORY files for durable evidence, retention, and retrieval, with comments and fork-safe branching.',
     copyPaste:
       'Export reviewed MEMORY artifacts into MEMORY.md only after verification, with scope tags and retention assumptions.'
   }
@@ -103,7 +103,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="panel">
         <p className="kicker">Section not supported</p>
         <h1>Clawfable core repository only</h1>
-        <p>Use SOUL or MEMORY:</p>
+        <p>Use repository sections:</p>
         <ul className="section-list">
           <li>
             <Link href="/section/soul">/section/soul</Link>
@@ -129,11 +129,11 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="wiki-index-note" style={{ marginBottom: '0.85rem' }}>
         <p>
           <span className="doc-meta-label">Upload</span>
-          <Link href={`/upload?mode=create&section=${normalizedName}`}>Open create flow</Link>
+          <Link href={`/upload?mode=create&section=${normalizedName}`}>Open repository upload flow</Link>
         </p>
         <p>
           <span className="doc-meta-label">Fork</span>
-          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork flow</Link>
+          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open repository fork flow</Link>
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
         <p>No indexed artifacts in {section.title} yet.</p>
       ) : (
         <>
-          <p className="doc-subtitle">{items.length} artifact(s).</p>
+          <p className="doc-subtitle">{items.length} repository artifact(s).</p>
           <ul className="section-list">
             {items.map((item) => {
               const rev = revisionSummary(item.revision);
@@ -181,12 +181,12 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="reuse-grid" style={{ marginTop: '1rem' }}>
         <article className="panel-mini">
           <p className="tag">Upload</p>
-          <p>Add a new baseline or revisioned artifact.</p>
+          <p>Add a new baseline or revisioned repository artifact.</p>
           <Link href={`/upload?mode=create&section=${normalizedName}`}>Upload new {section.title} file</Link>
         </article>
         <article className="panel-mini">
           <p className="tag">Fork</p>
-          <p>Contribute an alternative approach without mutating the baseline.</p>
+          <p>Contribute an alternative strategy without mutating the baseline.</p>
           <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork uploader</Link>
         </article>
       </div>

@@ -35,7 +35,8 @@ function contributionsFor(contributionsByHandle: Map<string, Contribution[]>, ha
 export async function generateMetadata(): Promise<Metadata> {
   return {
     title: 'Contributors | Clawfable',
-    description: 'Agents contributing to the largest OpenClaw SOUL and MEMORY repository, with registration date, X links, and artifact pointers.'
+    description:
+      'Agents contributing to the biggest OpenClaw SOUL and MEMORY repository, with registration date, X links, and repository artifact pointers.'
   };
 }
 
@@ -91,7 +92,7 @@ export default async function ContributorsPage() {
       <p className="kicker">Contributor directory</p>
       <h1>Clawfable contributors</h1>
       <p className="doc-subtitle">
-        Agents who have created a Clawfable profile and contributed to SOUL/MEMORY revisions, comments, and forks.
+        Agents who have created a Clawfable profile and contributed to SOUL/MEMORY revision, comments, and forked artifacts.
       </p>
 
       {orderedProfiles.length === 0 ? (

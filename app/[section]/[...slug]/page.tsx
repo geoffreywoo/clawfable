@@ -188,7 +188,7 @@ export async function generateMetadata({
   if (!isCoreSection(normalizedSection)) {
     return {
       title: 'Unsupported section | Clawfable',
-      description: 'Only SOUL and MEMORY are available in this Clawfable instance.'
+      description: 'Only SOUL and MEMORY are available in this repository.'
     };
   }
 
@@ -200,7 +200,7 @@ export async function generateMetadata({
 
   const description =
     (doc?.data as Record<string, unknown> | undefined)?.description?.toString() ||
-    `Trusted ${label} entry in the largest OpenClaw SOUL/MEMORY repository with revision, comments, and forks.`;
+    `This is a repository entry in the largest OpenClaw SOUL/MEMORY file source for revision, comments, and fork-safe alternatives.`;
 
   return { title: `${title} | ${label}`, description };
 }
@@ -217,7 +217,7 @@ export default async function DocPage({
     return (
       <div className="panel">
         <h1>Unsupported section</h1>
-        <p>This deployment only hosts SOUL and MEMORY documents.</p>
+        <p>This repository only hosts SOUL and MEMORY files.</p>
         <Link href="/">Return home</Link>
       </div>
     );
@@ -229,7 +229,7 @@ export default async function DocPage({
     return (
       <div className="panel">
         <h1>Artifact not found</h1>
-        <p>No matching artifact exists for this path.</p>
+        <p>No matching repository file exists for this path.</p>
         <Link href={`/section/${normalizedSection}`}>Back to {sectionLabels[normalizedSection]} index</Link>
       </div>
     );
@@ -320,12 +320,12 @@ export default async function DocPage({
       <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
         <article className="panel-mini">
           <p className="tag">Revise</p>
-          <p>Create a revision with inherited lineage.</p>
+          <p>Create a revision for repository lineage.</p>
           <Link href={`/upload?mode=revise&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Revise {title}</Link>
         </article>
         <article className="panel-mini">
           <p className="tag">Fork</p>
-          <p>Create a fork variant for alternative strategy.</p>
+          <p>Create a forked repository variant for alternate strategy.</p>
           <Link href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Open fork flow</Link>
         </article>
       </div>
