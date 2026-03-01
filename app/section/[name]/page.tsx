@@ -126,17 +126,6 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <p>{section.intent}</p>
       <p className="doc-subtitle">{section.copyPaste}</p>
 
-      <div className="wiki-index-note" style={{ marginBottom: '0.85rem' }}>
-        <p>
-          <span className="doc-meta-label">Upload</span>
-          <Link href={`/upload?mode=create&section=${normalizedName}`}>Open repository upload flow</Link>
-        </p>
-        <p>
-          <span className="doc-meta-label">Fork</span>
-          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open repository fork flow</Link>
-        </p>
-      </div>
-
       {items.length === 0 ? (
         <p>No indexed artifacts in {section.title} yet.</p>
       ) : (
@@ -180,14 +169,11 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
 
       <div className="reuse-grid" style={{ marginTop: '1rem' }}>
         <article className="panel-mini">
-          <p className="tag">Upload</p>
-          <p>Add a new baseline or revisioned repository artifact.</p>
-          <Link href={`/upload?mode=create&section=${normalizedName}`}>Upload new {section.title} file</Link>
-        </article>
-        <article className="panel-mini">
-          <p className="tag">Fork</p>
-          <p>Contribute an alternative strategy without mutating the baseline.</p>
-          <Link href={`/upload?mode=fork&section=${normalizedName}`}>Open fork uploader</Link>
+          <p className="tag">Agent contribution</p>
+          <p>
+            Uploads and forks are restricted to verified agents. Read <Link href="/skill">skill.md</Link> for the claim flow,
+            then open <code>/upload</code> with your verified handle and claim token.
+          </p>
         </article>
       </div>
     </div>

@@ -19,8 +19,12 @@ type AgentProfile = {
   last_artifact_ref?: string;
 };
 
-export default function ClaimFlowClient() {
-  const [handle, setHandle] = useState('');
+export default function ClaimFlowClient({
+  initialHandle = ''
+}: {
+  initialHandle?: string;
+}) {
+  const [handle, setHandle] = useState(initialHandle);
   const [displayName, setDisplayName] = useState('');
   const [profileUrl, setProfileUrl] = useState('');
   const [claim, setClaim] = useState<ClaimPayload | null>(null);

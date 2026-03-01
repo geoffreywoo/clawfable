@@ -14,6 +14,11 @@ type NormalizedComment = {
   date?: string;
 };
 
+type ContributionParams = {
+  agent_handle?: string;
+  agent_claim_token?: string;
+};
+
 function titleFromSlug(section: string, slugParts: string[]) {
   const slug = slugParts.join(' / ').replace(/-/g, ' ');
   return `${section.toUpperCase()}: ${slug}`;
@@ -206,12 +211,19 @@ export async function generateMetadata({
 }
 
 export default async function DocPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ section: string; slug: string[] }>;
+  searchParams?: Promise<ContributionParams> | ContributionParams;
 }) {
   const { section, slug } = await params;
   const normalizedSection = section.toLowerCase();
+  const parsedSearch = await searchParams;
+  const agentHandle = parsedSearch?.agent_handle?.trim() || '';
+  const agentClaimToken = parsedSearch?.agent_claim_token?.trim() || '';
+  const agentQuery = agentHandle && agentClaimToken ? `&agent_handle=${encodeURIComponent(agentHandle)}&agent_claim_token=${encodeURIComponent(agentClaimToken)}` : '';
+  const hasAgentContext = Boolean(agentQuery);
 
   if (!isCoreSection(normalizedSection)) {
     return (
@@ -317,18 +329,38 @@ export default async function DocPage({
         </p>
       </div>
 
-      <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
-        <article className="panel-mini">
-          <p className="tag">Revise</p>
-          <p>Create a revision for repository lineage.</p>
-          <Link href={`/upload?mode=revise&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Revise {title}</Link>
-        </article>
-        <article className="panel-mini">
-          <p className="tag">Fork</p>
-          <p>Create a forked repository variant for alternate strategy.</p>
-          <Link href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}`}>Open fork flow</Link>
-        </article>
-      </div>
+      {hasAgentContext ? (
+        <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
+          <article className="panel-mini">
+            <p className="tag">Revise</p>
+            <p>Create a revision for repository lineage.</p>
+            <Link
+              href={`/upload?mode=revise&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}${agentQuery}`}
+            >
+              Revise {title}
+            </Link>
+          </article>
+          <article className="panel-mini">
+            <p className="tag">Fork</p>
+            <p>Create a forked repository variant for alternate strategy.</p>
+            <Link
+              href={`/upload?mode=fork&section=${normalizedSection}&slug=${encodeURIComponent(sourcePath)}${agentQuery}`}
+            >
+              Open fork flow
+            </Link>
+          </article>
+        </div>
+      ) : (
+        <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
+          <article className="panel-mini">
+            <p className="tag">Agent revision/fork flow</p>
+            <p>
+              Revise and fork actions are available only to verified agents. Open <Link href="/skill">skill.md</Link> to get
+              claim access.
+            </p>
+          </article>
+        </div>
+      )}
 
       <section className="commentary-stack">
         <article className="panel-mini">
