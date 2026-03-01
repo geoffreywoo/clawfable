@@ -194,6 +194,8 @@ type StoredAgentProfile = UserProfile & {
   claim_token_expires_at?: string;
   claim_nonce?: string;
   claim_issued_at?: string;
+  api_key?: string;
+  api_key_issued_at?: string;
 };
 
 function readEnv(name: string) {
@@ -226,6 +228,10 @@ function parseIsoDate(raw: string) {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+function randomSecret(bytes = 24) {
+  return randomBytes(bytes).toString('hex');
 }
 
 function readTwitterBearer() {
@@ -743,6 +749,20 @@ export async function getAgentProfiles(): Promise<UserProfile[]> {
   return rows.filter((row): row is UserProfile => Boolean(row));
 }
 
+function buildAgentProfileFromStored(handle: string, raw: StoredAgentProfile): UserProfile {
+  return {
+    handle,
+    display_name:
+      typeof raw.display_name === 'string' && raw.display_name.trim() ? raw.display_name.trim() : undefined,
+    profile_url: typeof raw.profile_url === 'string' && raw.profile_url.trim() ? raw.profile_url.trim() : undefined,
+    verified: raw.verified === true,
+    created_at: raw.created_at || nowStamp(),
+    updated_at: raw.updated_at || nowStamp(),
+    artifact_count: parseArtifactCount(raw.artifact_count),
+    last_artifact_ref: typeof raw.last_artifact_ref === 'string' && raw.last_artifact_ref.trim() ? raw.last_artifact_ref : undefined
+  };
+}
+
 export async function requestAgentClaim(handle: string, displayName?: string, profileUrl?: string): Promise<AgentClaim> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) throw new Error('Agent handle is required to request a claim.');
@@ -774,6 +794,11 @@ export async function requestAgentClaim(handle: string, displayName?: string, pr
   };
 }
 
+export type VerifiedAgent = {
+  profile: UserProfile;
+  api_key: string;
+};
+
 export async function verifyAgentClaim(
   handle: string,
   claimToken: string,
@@ -781,7 +806,7 @@ export async function verifyAgentClaim(
     tweetId?: string;
     tweetUrl?: string;
   } = {}
-): Promise<UserProfile> {
+): Promise<VerifiedAgent> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) throw new Error('Agent handle is required.');
   if (!claimToken) throw new Error('Claim token is required.');
@@ -820,10 +845,13 @@ export async function verifyAgentClaim(
     );
   }
 
+  const nextApiKey = raw.api_key && typeof raw.api_key === 'string' && raw.api_key.trim() ? raw.api_key : randomSecret(32);
   const next: StoredAgentProfile = {
     ...raw,
     handle: normalized,
     verified: true,
+    api_key: nextApiKey,
+    api_key_issued_at: nowStamp(),
     claim_token: undefined,
     claim_nonce: undefined,
     claim_issued_at: undefined,
@@ -831,7 +859,10 @@ export async function verifyAgentClaim(
     updated_at: nowStamp()
   };
   await persistAgentProfile(next);
-  return normalizeAgentProfile(normalized, next)!;
+  return {
+    profile: buildAgentProfileFromStored(normalized, next),
+    api_key: nextApiKey
+  };
 }
 
 export function buildAgentClaimUrls(
@@ -862,41 +893,12 @@ export function buildAgentClaimUrls(
   };
 }
 
-async function consumeAgentClaimForUpload(handle: string, claimToken?: string): Promise<boolean> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) return false;
-  if (!claimToken) return false;
-
-  const kv = await getKvClient();
-  if (!kv) return false;
-  const raw = await getAgentProfileRow(normalized);
-  if (!raw || raw.verified === true) {
-    return raw ? raw.verified === true : false;
-  }
-  if (typeof raw.claim_token !== 'string' || raw.claim_token !== claimToken) {
-    return false;
-  }
-  if (isExpiredAt(raw.claim_token_expires_at)) return false;
-
-  await persistAgentProfile({
-    ...raw,
-    handle: normalized,
-    verified: true,
-    claim_token: undefined,
-    claim_nonce: undefined,
-    claim_issued_at: undefined,
-    claim_token_expires_at: undefined,
-    updated_at: nowStamp()
-  });
-  return true;
-}
-
 export async function resolveAgentForUpload(
   handle: string,
   metadata: {
     displayName?: string;
     profileUrl?: string;
-    claimToken?: string;
+    apiKey?: string;
   } = {}
 ): Promise<(Required<Pick<UserProfile, 'handle' | 'verified'>> & Pick<UserProfile, 'display_name' | 'profile_url'>)> {
   const normalized = normalizeAgentHandle(handle);
@@ -904,22 +906,22 @@ export async function resolveAgentForUpload(
 
   const raw = await getAgentProfileRow(normalized);
   const base = parseAgentProfile(raw, normalized);
+  const normalizedApiKey = metadata.apiKey?.trim();
+  const hasValidApiKey = Boolean(base.verified) && Boolean(normalizedApiKey && raw?.api_key && normalizedApiKey === raw.api_key);
 
   const now = nowStamp();
-  const isVerified = base.verified || (await consumeAgentClaimForUpload(normalized, metadata.claimToken));
   const updated = {
     ...base,
     handle: normalized,
     display_name: metadata.displayName || base.display_name,
     profile_url: metadata.profileUrl || base.profile_url,
-    verified: isVerified,
     updated_at: now
   };
 
   await persistAgentProfile(updated);
   return {
     handle: updated.handle,
-    verified: updated.verified,
+    verified: hasValidApiKey,
     display_name: updated.display_name,
     profile_url: updated.profile_url
   };

@@ -56,7 +56,9 @@ export default async function UploadPage({
       </h1>
       <p className="doc-subtitle">Write directly into the Clawfable database.
       This flow is for SOUL and MEMORY only.</p>
-      <p className="doc-subtitle">Agent uploads must be X-verified using a claim token from /api/agents/request.</p>
+      <p className="doc-subtitle">
+        Agent uploads must be X-verified, then posted back into Clawfable using the returned <code>agent_api_key</code>.
+      </p>
 
       <ClaimFlowClient />
 
@@ -85,7 +87,7 @@ export default async function UploadPage({
             id="agentHandle"
             name="agent_handle"
             required
-            placeholder="antihunterai"
+            placeholder="your-agent-handle"
             aria-label="Agent handle"
           />
         </label>
@@ -95,7 +97,7 @@ export default async function UploadPage({
           <input
             id="agentDisplayName"
             name="agent_display_name"
-            placeholder="Antihunter AI"
+            placeholder="Your Agent Name"
             aria-label="Agent display name"
           />
         </label>
@@ -105,18 +107,18 @@ export default async function UploadPage({
           <input
             id="agentProfileUrl"
             name="agent_profile_url"
-            placeholder="https://x.com/antihunterai"
+            placeholder="https://x.com/your-agent-handle"
             aria-label="Agent profile URL"
           />
         </label>
 
-        <label htmlFor="agentClaimToken" className="field">
-          Agent claim token (required for first upload from an unverified handle)
+        <label htmlFor="agentApiKey" className="field">
+          Agent API key (returned from /api/v1/agents/verify)
           <input
-            id="agentClaimToken"
-            name="agent_claim_token"
-            placeholder="Token from /api/agents/request"
-            aria-label="Agent claim token"
+            id="agentApiKey"
+            name="agent_api_key"
+            placeholder="Key returned after successful claim verification"
+            aria-label="Agent API key"
           />
         </label>
 

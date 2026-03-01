@@ -5,9 +5,17 @@ import { FormEvent, useMemo, useState } from 'react';
 type ClaimPayload = {
   claim_token: string;
   handle: string;
-  verify_url: string;
+  claim_url?: string;
+  verify_url?: string;
   claim_tweet_url: string;
   ttl_seconds?: number;
+};
+
+type ClaimStatus = {
+  ok?: boolean;
+  status?: string;
+  handle?: string;
+  profile?: AgentProfile;
 };
 
 type AgentProfile = {
@@ -38,7 +46,7 @@ export default function ClaimFlowClient() {
     setRequesting(true);
 
     try {
-      const response = await fetch('/api/agents/request', {
+      const response = await fetch('/api/v1/agents/register', {
         method: 'POST',
         headers: {
           'content-type': 'application/json'
@@ -52,14 +60,19 @@ export default function ClaimFlowClient() {
       const payload = (await response.json()) as Record<string, unknown>;
       if (!response.ok) {
         setClaim(null);
-        setError(String((payload as { error?: string }).error || 'Unable to request claim token.'));
+        setError(String((payload as { error?: string }).error || 'Unable to start claim flow.'));
         return;
       }
       const next = payload as ClaimPayload & { error?: string };
+      const claimVerifyUrl = next.claim_url || next.verify_url || '';
+      if (!claimVerifyUrl) {
+        setError('Claim response is missing claim_url.');
+        return;
+      }
       setClaim({
         claim_token: next.claim_token,
         handle: handleTrimmed,
-        verify_url: next.verify_url,
+        verify_url: claimVerifyUrl,
         claim_tweet_url: next.claim_tweet_url,
         ttl_seconds: next.ttl_seconds
       });
@@ -78,19 +91,19 @@ export default function ClaimFlowClient() {
     setChecking(true);
     setError('');
     try {
-      const response = await fetch(`/api/agents?handle=${encodeURIComponent(handleValue.trim())}`, {
+      const response = await fetch(`/api/v1/agents/status?handle=${encodeURIComponent(handleValue.trim())}`, {
         method: 'GET'
       });
-      const payload = (await response.json()) as Record<string, unknown>;
-      if (!response.ok) {
+      const payload = (await response.json()) as ClaimStatus;
+      if (!response.ok || payload.status === 'not_found' || !payload.profile) {
         setStatusProfile(null);
         setError(String((payload as { error?: string }).error || 'Unable to resolve profile.'));
         return;
       }
 
-      const profile = payload as AgentProfile;
+      const profile = payload.profile;
       setStatusProfile(profile);
-      setHandle((profile.handle || handleTrimmed).replace(/^@/, ''));
+      setHandle((profile?.handle || payload.handle || handleTrimmed).replace(/^@/, ''));
     } finally {
       setChecking(false);
     }
@@ -129,7 +142,7 @@ export default function ClaimFlowClient() {
               name="handle"
               value={handle}
               onChange={(event) => setHandle(event.target.value)}
-              placeholder="antihunterai"
+              placeholder="your-agent-handle"
             />
           </label>
           <label htmlFor="flowDisplayName" className="field">
@@ -153,7 +166,7 @@ export default function ClaimFlowClient() {
 
           <div className="item-cta" style={{ marginTop: '0.6rem', display: 'flex', gap: '0.55rem', flexWrap: 'wrap' }}>
             <button type="submit" className="btn btn-primary" disabled={!canRun || requesting}>
-              {requesting ? 'Requesting...' : 'Request claim token'}
+              {requesting ? 'Requesting...' : 'Request claim link'}
             </button>
             <button
               type="button"
@@ -193,8 +206,8 @@ export default function ClaimFlowClient() {
       ) : null}
 
       <p className="muted" style={{ marginTop: '0.7rem' }}>
-        Post the claim tweet, complete X verification, then continue in the upload form below and paste the claim token above into{' '}
-        <code>agent_claim_token</code>.
+        Post the claim tweet, complete X verification, then continue in the upload form below and paste the returned{' '}
+        <code>api_key</code> into <code>agent_api_key</code>.
       </p>
     </section>
   );
