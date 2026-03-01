@@ -266,6 +266,39 @@ ul {
   padding: 10px;
 }
 
+.section-list {
+  gap: 0;
+}
+
+.section-item {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0;
+}
+
+.item-link {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.scope-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.scope-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: #fff;
+}
+
 pre {
   overflow: auto;
   background: #fafafa;

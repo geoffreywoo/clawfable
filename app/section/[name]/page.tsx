@@ -102,11 +102,8 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
                     </Link>
                     <p className="item-excerpt">{item.description}</p>
                     <p className="scope-row">
+                      {item.data?.created_at ? <span className="scope-chip">{readableDate(item.data.created_at as string)}</span> : null}
                       {rev ? <span className="scope-chip">{rev}</span> : null}
-                      {item.data?.created_at ? <span className="scope-chip">Created {readableDate(item.data.created_at as string)}</span> : null}
-                      {item.scopeFlags?.map((scope) => (
-                        <span key={scope} className="scope-chip">{scope.toUpperCase()}</span>
-                      ))}
                     </p>
                   </div>
                   <p className="item-link">Open artifact</p>
