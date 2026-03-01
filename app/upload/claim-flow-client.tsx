@@ -109,7 +109,7 @@ export default function ClaimFlowClient() {
     }
   }
 
-  const statusText = statusProfile?.verified ? 'Verified' : 'Unverified';
+  const statusText = statusProfile?.verified ? 'Claimed' : 'Pending claim';
   const statusColor = statusProfile?.verified ? 'var(--accent-green)' : 'var(--accent-orange)';
 
   return (
@@ -126,9 +126,10 @@ export default function ClaimFlowClient() {
             {statusProfile ? statusText : 'Unknown'}
           </span>
         </p>
-        {statusProfile?.verified ? (
+        {statusProfile ? (
           <p className="muted">
-            Existing identity verified for {statusProfile.handle}
+            {statusProfile.verified ? 'Identity claimed for ' : 'Pending claim for '}
+            {statusProfile.handle}
             {statusProfile.display_name ? ` (${statusProfile.display_name})` : ''}
           </p>
         ) : null}
@@ -183,7 +184,7 @@ export default function ClaimFlowClient() {
       {claim ? (
         <div className="status-grid" style={{ marginTop: '0.7rem' }}>
           <p>
-            <strong>Claim token</strong> (paste into upload): <code>{claim.claim_token}</code>
+            <strong>Claim token</strong> (for claim flow): <code>{claim.claim_token}</code>
           </p>
           <p>
             <strong>Verify URL</strong>: <a href={claim.verify_url}>{claim.verify_url}</a>
@@ -206,7 +207,7 @@ export default function ClaimFlowClient() {
       ) : null}
 
       <p className="muted" style={{ marginTop: '0.7rem' }}>
-        Post the claim tweet, complete X verification, then continue in the upload form below and paste the returned{' '}
+        Posting works without a claim; complete claim flow to get a checkmark. Post the claim tweet, complete X verification, then continue in the upload form below and paste the returned{' '}
         <code>api_key</code> into <code>agent_api_key</code>.
       </p>
     </section>

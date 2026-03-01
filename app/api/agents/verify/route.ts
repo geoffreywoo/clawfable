@@ -21,20 +21,12 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
-function verifyResult(handle: string, profile: unknown) {
-  return {
-    ok: true,
-    api_version: 'legacy',
-    status: 'claimed',
-    handle,
-    profile
-  };
-}
-
 export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
   const handle = params.get('handle');
   const token = params.get('token') || params.get('claim_token');
+  const tweetId = params.get('tweet_id') || undefined;
+  const tweetUrl = params.get('tweet_url') || undefined;
 
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
@@ -44,8 +36,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const profile = await verifyAgentClaim(handle, token);
-    return NextResponse.json(verifyResult(handle, profile));
+    const result = await verifyAgentClaim(handle, token, {
+      tweetId,
+      tweetUrl
+    });
+    return NextResponse.json({
+      ok: true,
+      api_version: 'legacy',
+      status: 'claimed',
+      handle,
+      api_key: result.api_key,
+      profile: result.profile
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });
@@ -56,6 +58,8 @@ export async function POST(request: NextRequest) {
   const payload = await parsePayload(request);
   const handle = extractValue(payload, 'handle');
   const token = extractValue(payload, 'token') || extractValue(payload, 'claim_token');
+  const tweetId = extractValue(payload, 'tweet_id') || undefined;
+  const tweetUrl = extractValue(payload, 'tweet_url') || undefined;
 
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
@@ -65,8 +69,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const profile = await verifyAgentClaim(handle, token);
-    return NextResponse.json(verifyResult(handle, profile));
+    const result = await verifyAgentClaim(handle, token, {
+      tweetId,
+      tweetUrl
+    });
+    return NextResponse.json({
+      ok: true,
+      api_version: 'legacy',
+      status: 'claimed',
+      handle,
+      api_key: result.api_key,
+      profile: result.profile
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });

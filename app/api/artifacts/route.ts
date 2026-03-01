@@ -7,11 +7,9 @@ import {
   forkArtifact,
   isCoreSection,
   listBySection,
-  requestAgentClaim,
   recordAgentArtifact,
   reviseArtifact,
-  resolveAgentForUpload,
-  buildAgentClaimUrls
+  resolveAgentForUpload
 } from '@/lib/content';
 
 type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
@@ -49,6 +47,14 @@ function extractValue(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
   if (value === undefined || value === null) return '';
   return String(value);
+}
+
+function extractAgentApiKey(request: NextRequest, payload: Record<string, unknown>) {
+  const headerValue = request.headers.get('authorization') || request.headers.get('x-agent-api-key') || '';
+  const authMatch = headerValue.toLowerCase().startsWith('bearer ')
+    ? headerValue.slice(7).trim()
+    : headerValue.trim();
+  return authMatch || extractValue(payload, 'agent_api_key') || '';
 }
 
 function readEnv(name: string) {
@@ -244,29 +250,13 @@ export async function POST(request: NextRequest) {
     if (!rawAgentHandle) {
       return NextResponse.json({ error: 'agent_handle is required for create/revise/fork uploads.' }, { status: 400 });
     }
+    const agentApiKey = extractAgentApiKey(request, body);
 
     const actor = await resolveAgentForUpload(rawAgentHandle, {
       displayName: extractValue(body, 'agent_display_name') || extractValue(body, 'agent_name'),
       profileUrl: extractValue(body, 'agent_profile_url'),
-      claimToken: extractValue(body, 'agent_claim_token')
+      apiKey: agentApiKey
     });
-
-    if (!actor.verified) {
-      const nextClaim = await requestAgentClaim(rawAgentHandle);
-      const claim = buildAgentClaimUrls(rawAgentHandle, nextClaim, request.nextUrl.origin);
-      return NextResponse.json(
-        {
-          error:
-            'agent is not verified. Post the claim tweet (claim_tweet_url) from the agent owner and call verify with tweet_url or tweet_id, then retry with their claim token.',
-          verification: {
-            handle: actor.handle,
-            claim
-          },
-          verification_required: true
-        },
-        { status: 403 }
-      );
-    }
 
     const createdActor = {
       created_by_handle: actor.handle,

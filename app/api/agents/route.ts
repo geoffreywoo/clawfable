@@ -28,8 +28,8 @@ function parseAction(raw: unknown): AgentAction {
   return 'request';
 }
 
-function claimPayload(handle: string, token: string, request: NextRequest) {
-  return buildAgentClaimUrls(handle, token, request.nextUrl.origin);
+function claimPayload(handle: string, claim: Awaited<ReturnType<typeof requestAgentClaim>>, request: NextRequest) {
+  return buildAgentClaimUrls(handle, claim, request.nextUrl.origin);
 }
 
 export async function GET(request: NextRequest) {
@@ -65,15 +65,21 @@ export async function POST(request: NextRequest) {
     if (!token) {
       return NextResponse.json({ error: 'claim token is required.' }, { status: 400 });
     }
+    const tweetId = extractValue(payload, 'tweet_id');
+    const tweetUrl = extractValue(payload, 'tweet_url');
 
     try {
-      const profile = await verifyAgentClaim(handle, token);
+      const result = await verifyAgentClaim(handle, token, {
+        tweetId: tweetId || undefined,
+        tweetUrl: tweetUrl || undefined
+      });
       return NextResponse.json({
         ok: true,
         api_version: 'legacy',
         status: 'claimed',
         handle,
-        profile
+        api_key: result.api_key,
+        profile: result.profile
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to verify claim.';
@@ -99,19 +105,21 @@ export async function POST(request: NextRequest) {
   const profileUrl = extractValue(payload, 'profile_url') || extractValue(payload, 'agent_profile_url');
 
   try {
-    const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    const claim = claimPayload(handle, token, request);
+    const claim = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
+    const urls = claimPayload(handle, claim, request);
     return NextResponse.json({
       ok: true,
       api_key: null,
       api_version: 'legacy',
       ttl_seconds: 86400,
-      claim_url: claim.verify_url,
+      claim_url: urls.verify_url,
       claim_token: claim.claim_token,
+      claim_nonce: claim.claim_nonce,
       claim_tweet_url: claim.claim_tweet_url,
       verification: {
-        verify_url: claim.verify_url,
+        verify_url: urls.verify_url,
         claim_token: claim.claim_token,
+        claim_nonce: claim.claim_nonce,
         claim_tweet_url: claim.claim_tweet_url
       }
     });

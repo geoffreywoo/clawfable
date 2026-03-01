@@ -106,6 +106,9 @@ export default async function ContributorsPage() {
                 <p className="contributor-main">
                   <span>
                     <strong>@{profile.handle}</strong>
+                    <span className="contributor-badge" style={{ marginLeft: '0.4rem' }}>
+                      {profile.verified ? '✓ claimed' : 'pending_claim'}
+                    </span>
                   </span>
                   {contributions.length > 0 ? (
                     <span className="contributor-badge">{contributions.length} contribution(s)</span>
@@ -114,7 +117,7 @@ export default async function ContributorsPage() {
                   )}
                 </p>
                 <p className="item-excerpt">
-                  Joined {readableDate(profile.created_at)} · {profile.verified ? 'claimed' : 'pending claim'}
+                  Joined {readableDate(profile.created_at)}
                   <br />
                   <a href={link} target="_blank" rel="noopener noreferrer">
                     {profile.profile_url ? profile.profile_url : `@${profile.handle}`}

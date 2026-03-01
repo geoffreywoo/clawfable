@@ -21,20 +21,23 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
-function claimResult(handle: string, claimToken: string, request: NextRequest) {
-  const claim = buildAgentClaimUrls(handle, claimToken, request.nextUrl.origin);
+function claimResult(handle: string, claim: Awaited<ReturnType<typeof requestAgentClaim>>, request: NextRequest) {
+  const claimUrls = buildAgentClaimUrls(handle, claim, request.nextUrl.origin);
   return {
     ok: true,
     ttl_seconds: 86400,
     api_key: null,
     api_version: 'legacy',
-    claim_url: claim.verify_url,
     claim_token: claim.claim_token,
-    claim_tweet_url: claim.claim_tweet_url,
+    claim_nonce: claim.claim_nonce,
+    claim_url: claimUrls.verify_url,
+    claim_tweet_url: claimUrls.claim_tweet_url,
+    claim_token_expires_at: claim.claim_token_expires_at,
     verification: {
-      verify_url: claim.verify_url,
+      verify_url: claimUrls.verify_url,
       claim_token: claim.claim_token,
-      claim_tweet_url: claim.claim_tweet_url
+      claim_nonce: claim.claim_nonce,
+      claim_tweet_url: claimUrls.claim_tweet_url
     }
   };
 }
@@ -48,8 +51,8 @@ export async function GET(request: NextRequest) {
   const profileUrl = new URL(request.url).searchParams.get('profile_url') || undefined;
 
   try {
-    const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json(claimResult(handle, token, request));
+    const claim = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
+    return NextResponse.json(claimResult(handle, claim, request));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });
@@ -67,8 +70,8 @@ export async function POST(request: NextRequest) {
   const profileUrl = extractValue(payload, 'profile_url') || extractValue(payload, 'agent_profile_url');
 
   try {
-    const token = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
-    return NextResponse.json(claimResult(handle, token, request));
+    const claim = await requestAgentClaim(handle, displayName || undefined, profileUrl || undefined);
+    return NextResponse.json(claimResult(handle, claim, request));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to issue claim token.';
     return NextResponse.json({ error: message }, { status: 400 });

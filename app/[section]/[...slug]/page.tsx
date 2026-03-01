@@ -57,8 +57,9 @@ function formatAgent(meta: AgentMeta | null) {
   const handle = meta.handle || '';
   const name = meta.display_name || handle;
   if (!name) return null;
+  const status = meta.verified ? ' ✓' : ' (pending claim)';
   return {
-    label: `${name}${meta.verified ? ' ✓' : ''}`,
+    label: `${name}${status}`,
     href: meta.profile_url || undefined
   };
 }

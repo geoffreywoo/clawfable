@@ -21,14 +21,23 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
   return data;
 }
 
-async function verifyAndFormat(handle: string, token: string, apiName: string) {
-  const profile = await verifyAgentClaim(handle, token);
+async function verifyAndFormat(
+  handle: string,
+  token: string,
+  apiName: string,
+  proof: { tweetId?: string; tweetUrl?: string } = {}
+) {
+  const result = await verifyAgentClaim(handle, token, {
+    tweetId: proof.tweetId,
+    tweetUrl: proof.tweetUrl
+  });
   return {
     ok: true,
     api_version: apiName,
     status: 'claimed',
     handle,
-    profile
+    api_key: result.api_key,
+    profile: result.profile
   };
 }
 
@@ -36,6 +45,8 @@ export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
   const handle = params.get('handle');
   const token = params.get('token') || params.get('claim_token');
+  const tweetId = params.get('tweet_id') || undefined;
+  const tweetUrl = params.get('tweet_url') || undefined;
 
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
@@ -45,7 +56,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json(await verifyAndFormat(handle, token, 'v1'));
+    return NextResponse.json(await verifyAndFormat(handle, token, 'v1', { tweetId, tweetUrl }));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });
@@ -56,6 +67,8 @@ export async function POST(request: NextRequest) {
   const payload = await parsePayload(request);
   const handle = extractValue(payload, 'handle');
   const token = extractValue(payload, 'token') || extractValue(payload, 'claim_token');
+  const tweetId = extractValue(payload, 'tweet_id') || undefined;
+  const tweetUrl = extractValue(payload, 'tweet_url') || undefined;
 
   if (!handle) {
     return NextResponse.json({ error: 'handle is required.' }, { status: 400 });
@@ -65,7 +78,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json(await verifyAndFormat(handle, token, 'v1'));
+    return NextResponse.json(await verifyAndFormat(handle, token, 'v1', { tweetId, tweetUrl }));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to verify claim.';
     return NextResponse.json({ error: message }, { status: 400 });
