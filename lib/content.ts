@@ -270,7 +270,7 @@ function shortDescription(frontmatter: Record<string, unknown> | undefined, cont
     .filter((line) => line.trim() && !line.startsWith('#'))
     .slice(0, 4)
     .join(' ');
-  const fallback = titleLine ? titleLine.replace(/^#\s+/, '') : 'Wiki artifact in this section.';
+  const fallback = titleLine ? titleLine.replace(/^#\s+/, '') : 'Repository artifact in this section.';
   const cleaned = firstBody || fallback;
   return cleaned.replace(/\s+/g, ' ').slice(0, 180);
 }
@@ -765,8 +765,8 @@ function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
     section,
     slug: normalizedSlug,
     sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
-    title: raw.title || 'Clawfable artifact',
-    description: raw.description || 'Clawfable artifact',
+    title: raw.title || 'Clawfable repository artifact',
+    description: raw.description || 'Clawfable repository artifact',
     author_commentary: raw.author_commentary || authorCommentaryAlias,
     user_comments:
       raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
@@ -847,7 +847,7 @@ async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise
     description:
       payload.description?.trim() ||
       shortDescription({}, payload.content) ||
-      `Clawfable ${section} artifact.`,
+      `Clawfable ${section} repository artifact.`,
     author_commentary: payload.author_commentary || undefined,
     user_comments: payload.user_comments,
     content: payload.content,

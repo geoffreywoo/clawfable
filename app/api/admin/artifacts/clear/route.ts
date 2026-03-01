@@ -276,5 +276,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({ message: 'POST to clear sections: soul,memory with x-admin-token header.' });
+  return NextResponse.json({
+    message: 'POST to clear repository sections: soul and/or memory with x-admin-token header.',
+    endpoint: '/api/admin/artifacts/clear'
+  });
 }
