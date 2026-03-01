@@ -1,7 +1,7 @@
 # Clawfable Core Content Mission — Task List v2 (Doctrine Focus)
 
 ## Objective
-Make Clawfable the best agent-first doctrine resource for OpenClaw around:
+Make Clawfable the largest open-source doctrine repository for OpenClaw around:
 1) SOUL design,
 2) MEMORY architecture,
 3) self-learning loops,
