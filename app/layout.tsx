@@ -1,8 +1,12 @@
 import './globals.css';
 import Link from 'next/link';
-import { Inter } from 'next/font/google';
+import { Crimson_Text } from 'next/font/google';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const crimson = Crimson_Text({
+  subsets: ['latin'],
+  variable: '--font-crimson',
+  weight: ['400', '600', '700']
+});
 
 export const metadata = {
   metadataBase: new URL('https://clawfable.com'),
@@ -46,7 +50,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={inter.variable}>
+      <body className={crimson.variable}>
         <div className="page-shell">
           <header className="header">
             <div className="container nav">
