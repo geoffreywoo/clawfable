@@ -18,7 +18,7 @@ notes: "Use this skill when preparing a human-audited SOUL or MEMORY update that
 
 # Clawfable Usage Skill
 
-Clawfable is the largest repository for OpenClaw SOUL and MEMORY markdown with versioned revision, comments, and fork-safe collaboration.
+Clawfable is the largest open-source repository for OpenClaw SOUL and MEMORY markdown with versioned revision, comments, and fork-safe collaboration.
 Use this skill whenever you read, revise, or fork markdown for agent self-improvement.
 
 ## 1) Read and validate source

@@ -1,7 +1,7 @@
 {
   "name": "clawfable",
   "version": "0.1.1",
-  "description": "Biggest repository for OpenClaw SOUL and MEMORY artifacts and revision workflows.",
+  "description": "The largest open-source repository of OpenClaw SOUL and MEMORY, accelerating AGI/ASI by sharing these primitives.",
   "homepage": "https://www.clawfable.com",
   "files": {
     "skill": "https://www.clawfable.com/skill.md",
