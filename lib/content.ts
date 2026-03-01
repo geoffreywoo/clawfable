@@ -35,6 +35,47 @@ export type UserProfile = {
   last_artifact_ref?: string;
 };
 
+export type AgentClaim = {
+  claim_token: string;
+  claim_nonce: string;
+  claim_token_expires_at: string;
+  claim_issued_at: string;
+};
+
+type TwitterTweet = {
+  id: string;
+  text: string;
+  created_at?: string;
+  author_id?: string;
+};
+
+type TwitterTweetSearchResponse = {
+  data?: TwitterTweet[];
+  meta?: {
+    result_count?: number;
+  };
+  errors?: Array<{
+    detail?: string;
+  }>;
+};
+
+type TwitterTweetByIdResponse = {
+  data?: TwitterTweet;
+  errors?: Array<{
+    detail?: string;
+  }>;
+};
+
+type TwitterUserResponse = {
+  data?: {
+    id: string;
+    username: string;
+  };
+  errors?: Array<{
+    detail?: string;
+  }>;
+};
+
 export type ArtifactDocument = {
   slug: string;
   sourcePath: string;
@@ -151,6 +192,8 @@ const seededSections = new Set<string>();
 type StoredAgentProfile = UserProfile & {
   claim_token?: string;
   claim_token_expires_at?: string;
+  claim_nonce?: string;
+  claim_issued_at?: string;
 };
 
 function readEnv(name: string) {
@@ -172,9 +215,164 @@ function pickEnvValue(...names: string[]) {
   return undefined;
 }
 
+function readBooleanEnv(name: string, fallback = false) {
+  const raw = readEnv(name);
+  if (!raw) return fallback;
+  const value = raw.trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(value);
+}
+
+function parseIsoDate(raw: string) {
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function readTwitterBearer() {
+  return (
+    pickEnvValue('X_BEARER_TOKEN', 'TWITTER_BEARER_TOKEN', 'CLAWFABLE_TWITTER_BEARER_TOKEN', 'CLAWFABLE_AGENT_TWITTER_BEARER_TOKEN') ||
+    undefined
+  );
+}
+
+function requireTwitterProofCheck() {
+  return readBooleanEnv('CLAWFABLE_REQUIRE_TWEET_PROOF', true);
+}
+
 function scopeFlagsFromMap(scopeMap?: Record<string, unknown>): string[] {
   if (!scopeMap) return [];
   return scopeOrder.filter((key) => scopeMap[key] === true);
+}
+
+function isWithinRange(createdAt: string | undefined, issuedAt: string | undefined, expiresAt: string | undefined) {
+  if (!issuedAt || !expiresAt || !createdAt) return true;
+  const parsedCreatedAt = parseIsoDate(createdAt);
+  if (!parsedCreatedAt) return false;
+  const parsedIssued = parseIsoDate(issuedAt);
+  const parsedExpires = parseIsoDate(expiresAt);
+  if (!parsedIssued || !parsedExpires) return false;
+  return parsedCreatedAt >= parsedIssued && parsedCreatedAt <= parsedExpires;
+}
+
+function parseTweetIdFromInput(raw?: string) {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+
+  if (/^\d{10,}$/.test(value)) return value;
+
+  try {
+    const parsed = new URL(value);
+    const pathMatch = parsed.pathname.match(/\/status\/(\d{10,})(?:[/?]|$)/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+
+    const tail = parsed.pathname.split('/').filter(Boolean).pop();
+    if (tail && /^\d{10,}$/.test(tail)) return tail;
+  } catch {
+    // continue with fallback text matching.
+  }
+
+  const fallback = value.match(/(\d{10,})/);
+  return fallback?.[1];
+}
+
+async function getTwitterHeaderToken() {
+  const bearer = readTwitterBearer();
+  if (!bearer) return null;
+  return {
+    Authorization: `Bearer ${bearer}`
+  };
+}
+
+async function twitterApiRequest<T>(url: string) {
+  const headers = await getTwitterHeaderToken();
+  if (!headers) {
+    throw new Error('Tweet proof verification requires TWITTER_BEARER_TOKEN (or X_BEARER_TOKEN).');
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: headers.Authorization,
+      'User-Agent': 'clawfable-claim-verifier/1.0'
+    }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Twitter API ${response.status}: ${detail || response.statusText}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function twitterApiRecentSearchUrl(handle: string, nonce: string) {
+  const query = `from:${handle} ${nonce}`;
+  return `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&tweet.fields=text,created_at&max_results=10`;
+}
+
+function twitterApiTweetByIdUrl(tweetId: string) {
+  return `https://api.x.com/2/tweets/${tweetId}?tweet.fields=text,created_at,author_id`;
+}
+
+function twitterApiUserByHandleUrl(handle: string) {
+  return `https://api.x.com/2/users/by/username/${encodeURIComponent(handle)}?user.fields=id,username`;
+}
+
+async function verifyClaimTweetById(handle: string, tweetId: string, nonce: string, issuedAt: string, expiresAt: string) {
+  const [userResponse, tweetResponse] = await Promise.all([
+    twitterApiRequest<TwitterUserResponse>(twitterApiUserByHandleUrl(handle)),
+    twitterApiRequest<TwitterTweetByIdResponse>(twitterApiTweetByIdUrl(tweetId))
+  ]);
+
+  const resolvedUser = userResponse.data;
+  if (!resolvedUser?.id || !resolvedUser?.username) {
+    throw new Error('Unable to resolve Twitter handle for tweet verification.');
+  }
+
+  const tweet = tweetResponse.data;
+  if (!tweet) {
+    throw new Error('Tweet not found for provided tweet id.');
+  }
+  if (!tweet.text.includes(nonce)) {
+    throw new Error('Tweet does not contain current claim nonce.');
+  }
+  if (!tweet.author_id || tweet.author_id !== resolvedUser.id) {
+    throw new Error('Tweet does not belong to claimed X handle.');
+  }
+  if (resolvedUser.username.toLowerCase() !== handle.toLowerCase()) {
+    throw new Error('Tweet handle does not match claim request.');
+  }
+  if (!isWithinRange(tweet.created_at, issuedAt, expiresAt)) {
+    throw new Error('Tweet timestamp is outside claim window.');
+  }
+
+  return true;
+}
+
+async function verifyClaimTweetBySearch(handle: string, nonce: string, issuedAt: string, expiresAt: string) {
+  const response = await twitterApiRequest<TwitterTweetSearchResponse>(twitterApiRecentSearchUrl(handle, nonce));
+  const tweets = response?.data || [];
+  const directMatch = tweets.find((tweet) => tweet.text.includes(nonce));
+  if (!directMatch) {
+    throw new Error('No matching claim nonce found in recent tweets.');
+  }
+  if (!isWithinRange(directMatch.created_at, issuedAt, expiresAt)) {
+    throw new Error('Matching tweet was found outside claim window.');
+  }
+  return true;
+}
+
+async function verifyClaimTweet(handle: string, nonce: string, issuedAt: string, expiresAt: string, tweetId?: string) {
+  if (!nonce) {
+    throw new Error('Claim nonce missing. Request a fresh claim.');
+  }
+  if (requireTwitterProofCheck() || tweetId) {
+    if (tweetId) {
+      return verifyClaimTweetById(handle, tweetId, nonce, issuedAt, expiresAt);
+    }
+    return verifyClaimTweetBySearch(handle, nonce, issuedAt, expiresAt);
+  }
+  return true;
 }
 
 export function isCoreSection(section: string): section is CoreSection {
@@ -545,7 +743,7 @@ export async function getAgentProfiles(): Promise<UserProfile[]> {
   return rows.filter((row): row is UserProfile => Boolean(row));
 }
 
-export async function requestAgentClaim(handle: string, displayName?: string, profileUrl?: string) {
+export async function requestAgentClaim(handle: string, displayName?: string, profileUrl?: string): Promise<AgentClaim> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) throw new Error('Agent handle is required to request a claim.');
   const now = nowStamp();
@@ -558,15 +756,32 @@ export async function requestAgentClaim(handle: string, displayName?: string, pr
     display_name: displayName || base.display_name,
     profile_url: profileUrl || base.profile_url,
     claim_token: randomBytes(16).toString('hex'),
+    claim_nonce: randomBytes(16).toString('hex'),
+    claim_issued_at: now,
     claim_token_expires_at: new Date(Date.parse(now) + AGENT_CLAIM_TTL_MS).toISOString(),
     updated_at: now
   };
 
   await persistAgentProfile(next);
-  return next.claim_token;
+  if (!next.claim_token || !next.claim_nonce || !next.claim_token_expires_at || !next.claim_issued_at) {
+    throw new Error('Unable to initialize claim state.');
+  }
+  return {
+    claim_token: next.claim_token,
+    claim_nonce: next.claim_nonce,
+    claim_token_expires_at: next.claim_token_expires_at,
+    claim_issued_at: next.claim_issued_at
+  };
 }
 
-export async function verifyAgentClaim(handle: string, claimToken: string): Promise<UserProfile> {
+export async function verifyAgentClaim(
+  handle: string,
+  claimToken: string,
+  proof: {
+    tweetId?: string;
+    tweetUrl?: string;
+  } = {}
+): Promise<UserProfile> {
   const normalized = normalizeAgentHandle(handle);
   if (!normalized) throw new Error('Agent handle is required.');
   if (!claimToken) throw new Error('Claim token is required.');
@@ -582,12 +797,36 @@ export async function verifyAgentClaim(handle: string, claimToken: string): Prom
   if (isExpiredAt(raw.claim_token_expires_at)) {
     throw new Error('Claim token expired.');
   }
+  const proofFromInput = Boolean(proof.tweetId?.trim() || proof.tweetUrl?.trim());
+  const requiresTweetProof = requireTwitterProofCheck();
+  if (requiresTweetProof && !proofFromInput) {
+    throw new Error('Tweet proof is required. Provide tweet_url or tweet_id from the claim tweet.');
+  }
+
+  if (requiresTweetProof || proofFromInput) {
+    if (!raw.claim_nonce) {
+      throw new Error('Claim nonce missing. Request a fresh claim.');
+    }
+    const tweetId = parseTweetIdFromInput(proof.tweetId || proof.tweetUrl);
+    if ((proof.tweetId || proof.tweetUrl) && !tweetId) {
+      throw new Error('Unable to parse tweet id from claim proof input.');
+    }
+    await verifyClaimTweet(
+      handle,
+      raw.claim_nonce,
+      raw.claim_issued_at || nowStamp(),
+      raw.claim_token_expires_at!,
+      tweetId
+    );
+  }
 
   const next: StoredAgentProfile = {
     ...raw,
     handle: normalized,
     verified: true,
     claim_token: undefined,
+    claim_nonce: undefined,
+    claim_issued_at: undefined,
     claim_token_expires_at: undefined,
     updated_at: nowStamp()
   };
@@ -597,7 +836,7 @@ export async function verifyAgentClaim(handle: string, claimToken: string): Prom
 
 export function buildAgentClaimUrls(
   handle: string,
-  claimToken: string,
+  claim: AgentClaim,
   origin = '',
   apiVersion: 'legacy' | 'v1' = 'legacy'
 ) {
@@ -606,12 +845,18 @@ export function buildAgentClaimUrls(
   const fallbackBase = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL : '';
   const base = cleanOrigin || fallbackBase || 'https://www.clawfable.com';
   const verifyPath = apiVersion === 'v1' ? '/api/v1/agents/verify' : '/api/agents/verify';
-  const verifyUrl = `${base}${verifyPath}?handle=${encodeURIComponent(normalizedHandle)}&token=${encodeURIComponent(claimToken)}`;
-  const tweet = `I just claimed @${normalizedHandle} for Clawfable contributions. Verify this agent here: ${verifyUrl}`;
+  const verifyQuery = new URLSearchParams({
+    handle: normalizedHandle,
+    token: claim.claim_token,
+    nonce: claim.claim_nonce
+  });
+  const verifyUrl = `${base}${verifyPath}?${verifyQuery.toString()}`;
+  const tweet = `I just claimed @${normalizedHandle} for Clawfable contributions. Nonce: ${claim.claim_nonce}. Verify here: ${verifyUrl}`;
 
   return {
     handle: normalizedHandle,
-    claim_token: claimToken,
+    claim_token: claim.claim_token,
+    claim_nonce: claim.claim_nonce,
     verify_url: verifyUrl,
     claim_tweet_url: `https://x.com/intent/tweet?text=${encodeURIComponent(tweet)}`
   };
@@ -638,6 +883,8 @@ async function consumeAgentClaimForUpload(handle: string, claimToken?: string): 
     handle: normalized,
     verified: true,
     claim_token: undefined,
+    claim_nonce: undefined,
+    claim_issued_at: undefined,
     claim_token_expires_at: undefined,
     updated_at: nowStamp()
   });

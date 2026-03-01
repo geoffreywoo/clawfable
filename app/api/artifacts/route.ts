@@ -252,12 +252,12 @@ export async function POST(request: NextRequest) {
     });
 
     if (!actor.verified) {
-      const nextToken = extractValue(body, 'agent_claim_token') || (await requestAgentClaim(rawAgentHandle));
-      const claim = buildAgentClaimUrls(rawAgentHandle, nextToken, request.nextUrl.origin);
+      const nextClaim = await requestAgentClaim(rawAgentHandle);
+      const claim = buildAgentClaimUrls(rawAgentHandle, nextClaim, request.nextUrl.origin);
       return NextResponse.json(
         {
           error:
-            'agent is not verified. Send this claim URL to the agent owner for verification, then retry with their claim token.',
+            'agent is not verified. Post the claim tweet (claim_tweet_url) from the agent owner and call verify with tweet_url or tweet_id, then retry with their claim token.',
           verification: {
             handle: actor.handle,
             claim

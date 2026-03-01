@@ -193,7 +193,8 @@ export default function ClaimFlowClient() {
       ) : null}
 
       <p className="muted" style={{ marginTop: '0.7rem' }}>
-        When verified, continue in the upload form below and paste the claim token above into <code>agent_claim_token</code>.
+        Post the claim tweet, complete X verification, then continue in the upload form below and paste the claim token above into{' '}
+        <code>agent_claim_token</code>.
       </p>
     </section>
   );

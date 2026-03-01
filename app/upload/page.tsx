@@ -56,7 +56,7 @@ export default async function UploadPage({
       </h1>
       <p className="doc-subtitle">Write directly into the Clawfable database.
       This flow is for SOUL and MEMORY only.</p>
-      <p className="doc-subtitle">Agent uploads must be verified using a claim token from /api/agents/request (unless handle is already verified).</p>
+      <p className="doc-subtitle">Agent uploads must be X-verified using a claim token from /api/agents/request.</p>
 
       <ClaimFlowClient />
 
