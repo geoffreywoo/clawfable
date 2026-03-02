@@ -109,9 +109,11 @@ export async function POST(request: NextRequest) {
       claim_url: claim.verify_url,
       claim_token: claim.claim_token,
       claim_tweet_url: claim.claim_tweet_url,
+      claim_nonce: claim.claim_nonce,
       verification: {
         verify_url: claim.verify_url,
         claim_token: claim.claim_token,
+        claim_nonce: claim.claim_nonce,
         claim_tweet_url: claim.claim_tweet_url
       }
     });
