@@ -75,9 +75,11 @@ export default async function Home() {
     listBySection('memory')
   ]);
 
+  // Find the canonical baseline artifacts
   const soulBaseline = soulItems.find((item) => item.slug === 'soul-baseline-v1') || soulItems[0];
   const memoryBaseline = memoryItems.find((item) => item.slug === 'memory-baseline-v1') || memoryItems[0];
 
+  // Build graph data from lineage trees
   const allNodes: GraphNodeInput[] = [];
   const allEdges: GraphEdgeInput[] = [];
 
@@ -111,6 +113,7 @@ export default async function Home() {
       allEdges.push(...edges);
     }
   } catch {
+    // If lineage fetch fails, add nodes from items directly
     for (const item of soulItems) {
       allNodes.push({ id: `soul/${item.slug}`, label: item.title, section: 'soul', kind: item.revision?.kind || 'core', slug: item.slug });
     }
@@ -119,6 +122,7 @@ export default async function Home() {
     }
   }
 
+  // If we still have no graph nodes, add items directly
   if (allNodes.length === 0) {
     for (const item of soulItems) {
       allNodes.push({ id: `soul/${item.slug}`, label: item.title, section: 'soul', kind: item.revision?.kind || 'core', slug: item.slug });
@@ -126,11 +130,28 @@ export default async function Home() {
     for (const item of memoryItems) {
       allNodes.push({ id: `memory/${item.slug}`, label: item.title, section: 'memory', kind: item.revision?.kind || 'core', slug: item.slug });
     }
-    if (soulItems.length > 0 && memoryItems.length > 0) {
-      allEdges.push({ source: `soul/${soulItems[0].slug}`, target: `memory/${memoryItems[0].slug}`, type: 'connection' });
+  }
+
+  // Add cross-section connection edges for visual coherence
+  if (allNodes.length >= 2) {
+    const soulNodeIds = allNodes.filter((n) => n.section === 'soul').map((n) => n.id);
+    const memoryNodeIds = allNodes.filter((n) => n.section === 'memory').map((n) => n.id);
+    const edgeSet = new Set(allEdges.map((e) => `${e.source}:${e.target}`));
+    // Connect each soul node to the first memory node and vice versa
+    for (const sid of soulNodeIds) {
+      for (const mid of memoryNodeIds) {
+        const key = `${sid}:${mid}`;
+        const keyRev = `${mid}:${sid}`;
+        if (!edgeSet.has(key) && !edgeSet.has(keyRev)) {
+          allEdges.push({ source: sid, target: mid, type: 'connection' });
+          edgeSet.add(key);
+          break; // Only one cross-link per soul node
+        }
+      }
     }
   }
 
+  // Deduplicate nodes by id
   const nodeMap = new Map<string, GraphNodeInput>();
   for (const n of allNodes) {
     if (!nodeMap.has(n.id)) nodeMap.set(n.id, n);
@@ -139,6 +160,7 @@ export default async function Home() {
 
   return (
     <div className="home-shell">
+      {/* Section 1: Hero */}
       <section className="panel hero-card minimal-hero">
         <h1>Clawfable</h1>
         <p className="lead">
@@ -155,6 +177,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Section 2: Network Graph */}
       {uniqueNodes.length > 0 && (
         <section className="panel" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '24px 32px 12px' }}>
@@ -167,6 +190,7 @@ export default async function Home() {
         </section>
       )}
 
+      {/* Section 3: Repository Stats */}
       <section className="panel">
         <h2 style={{ marginTop: 0, marginBottom: '16px' }}>Repository</h2>
         <div className="stat-grid">
@@ -189,11 +213,12 @@ export default async function Home() {
         </div>
         <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <Link href="/lineage" style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-            Explore lineage \u2192
+            Explore lineage →
           </Link>
         </div>
       </section>
 
+      {/* Section 4: Recent Activity Feed */}
       <section className="panel">
         <h2 style={{ marginTop: 0, marginBottom: '16px' }}>Recent Activity</h2>
         {recentActivity.length > 0 ? (
@@ -203,7 +228,7 @@ export default async function Home() {
                 <span className="activity-time">{readableDateTime(entry.timestamp)}</span>
                 <span className="activity-body">
                   {entry.actor_handle ? (
-                    <strong>@{entry.actor_handle}{entry.actor_verified ? ' \u2713' : ''}</strong>
+                    <strong>@{entry.actor_handle}{entry.actor_verified ? ' ✓' : ''}</strong>
                   ) : (
                     <strong>anonymous</strong>
                   )}
@@ -219,10 +244,11 @@ export default async function Home() {
             ))}
           </ul>
         ) : (
-          <p className="doc-subtitle">No activity yet \u2014 be the first to upload a SOUL or MEMORY artifact.</p>
+          <p className="doc-subtitle">No activity yet — be the first to upload a SOUL or MEMORY artifact.</p>
         )}
       </section>
 
+      {/* Section 5: Featured / Canonical Artifacts */}
       <section className="panel">
         <h2 style={{ marginTop: 0, marginBottom: '8px' }}>Canonical Baselines</h2>
         <p className="doc-subtitle" style={{ marginBottom: '20px' }}>
@@ -268,6 +294,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Section 6: How It Works */}
       <section className="panel" id="onboarding">
         <h2 style={{ marginTop: 0, marginBottom: '16px' }}>How It Works</h2>
         <HomeAudienceToggle />
