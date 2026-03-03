@@ -192,15 +192,6 @@ function actionLabel(action: HistoryEntry['action']) {
   return 'revised';
 }
 
-function renderLineageTree(node: LineageNode, depth = 0): string {
-  const prefix = depth === 0 ? '' : '  '.repeat(depth - 1) + (depth > 0 ? '\u251c\u2500\u2500 ' : '');
-  const handle = node.actor_handle ? ` (by @${node.actor_handle}${node.actor_verified ? ' \u2713' : ''})` : '';
-  const kindLabel = node.kind === 'fork' ? ' [fork]' : node.kind === 'core' ? ' [canonical]' : '';
-  const line = `${prefix}${node.slug}${kindLabel}${handle}`;
-  const childLines = node.children.map((child) => renderLineageTree(child, depth + 1)).join('\n');
-  return childLines ? `${line}\n${childLines}` : line;
-}
-
 export async function generateMetadata({
   params
 }: {
@@ -266,6 +257,7 @@ export default async function DocPage({
 
   const label = sectionLabels[normalizedSection] || normalizedSection;
   const title = (doc.data as Record<string, unknown>)?.title?.toString() || titleFromSlug(normalizedSection, slug);
+  const description = (doc.data as Record<string, unknown>)?.description?.toString() || '';
   const rawScopes = scopeRows((doc.data as Record<string, unknown> | undefined)?.copy_paste_scope as
     | Record<string, unknown>
     | undefined);
@@ -309,84 +301,126 @@ export default async function DocPage({
   const sectionColor = normalizedSection === 'soul' ? 'var(--soul)' : 'var(--memory)';
 
   return (
-    <article className="panel doc-shell">
-      <p className="kicker" style={{ color: sectionColor }}>Artifact view</p>
-      <h1>{title}</h1>
-      <div className="doc-meta-grid">
-        <p>
-          <span className="doc-meta-label">Section</span>
-          <span className="scope-chip" style={{ color: sectionColor, borderColor: sectionColor }}>{label}</span>
-        </p>
-        <p>
-          <span className="doc-meta-label">Copy scope</span> {rawScopes.length > 0 ? rawScopes.join(' \u00b7 ') : 'Not set'}
-        </p>
-        <p>
-          <span className="doc-meta-label">Revision</span> {revisionStr || 'unversioned'}
-        </p>
-        <p>
-          <span className="doc-meta-label">Created</span> {createdAt}
-        </p>
-        {sourceArtifact ? (
-          <p>
-            <span className="doc-meta-label">Forked from</span>
-            <Link href={`/${normalizedSection}/${sourceArtifact.replace(/\.md$/i, '').replace(new RegExp(`^${normalizedSection}/`), '')}`}>
-              {sourceArtifact.replace(/\.md$/i, '')}
-            </Link>
-          </p>
+    <article className="doc-shell">
+      {/* Header: title + badge + actions */}
+      <div className="panel" style={{ paddingBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          <span className="scope-chip" style={{ color: sectionColor, borderColor: sectionColor, fontSize: '0.75rem' }}>{label}</span>
+          {revisionStr ? (
+            <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{revisionStr}</span>
+          ) : null}
+          {createdAt && createdAt !== 'Unknown' ? (
+            <span style={{ fontSize: '0.78rem', color: 'var(--faint)' }}>{createdAt}</span>
+          ) : null}
+        </div>
+        <h1 style={{ marginTop: 0, marginBottom: '6px' }}>{title}</h1>
+        {description ? (
+          <p className="doc-subtitle" style={{ marginTop: 0, marginBottom: '12px' }}>{description}</p>
         ) : null}
-        {parentRevisionId && revisionId && parentRevisionId !== revisionId ? (
-          <p>
-            <span className="doc-meta-label">Rev path</span>
-            <span className="revision-breadcrumb">{parentRevisionId} {'\u2192'} {revisionId}</span>
-          </p>
-        ) : null}
-        {forkCount > 0 ? (
-          <p>
-            <span className="doc-meta-label">Forks</span>
-            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>{forkCount} fork{forkCount === 1 ? '' : 's'}</Link>
-          </p>
-        ) : null}
-        {createdBy ? (
-          <p>
-            <span className="doc-meta-label">Created by</span>
-            {createdBy.href ? (
-              <a href={createdBy.href} target="_blank" rel="noopener noreferrer">
-                {createdBy.label}
-              </a>
-            ) : (
-              createdBy.label
-            )}
-          </p>
-        ) : null}
-        {updatedBy ? (
-          <p>
-            <span className="doc-meta-label">Updated by</span>
-            {updatedBy.href ? (
-              <a href={updatedBy.href} target="_blank" rel="noopener noreferrer">
-                {updatedBy.label}
-              </a>
-            ) : (
-              updatedBy.label
-            )}
-          </p>
-        ) : null}
-        {canonicalSource ? (
-          <p>
-            <span className="doc-meta-label">Source</span>
-            <a href={canonicalSource} target="_blank" rel="noopener noreferrer">
-              openclaw canonical source
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <Link
+            href={`/upload?mode=revise&section=${normalizedSection}&slug=${slugPath}`}
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', padding: '6px 14px' }}
+          >
+            <span aria-hidden>&#9998;</span> Revise
+          </Link>
+          <Link
+            href={`/upload?mode=fork&section=${normalizedSection}&slug=${slugPath}`}
+            className="btn btn-ghost"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', borderColor: 'var(--fork)', color: 'var(--fork)', fontSize: '0.82rem', padding: '6px 14px' }}
+          >
+            <span aria-hidden>&#9095;</span> Fork
+          </Link>
+          {canonicalSource ? (
+            <a href={canonicalSource} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
+              View canonical source &#8599;
             </a>
-          </p>
-        ) : null}
-        <p>
-          <span className="doc-meta-label">Back</span>
-          <Link href={`/section/${normalizedSection}`}>{label} index</Link>
-        </p>
+          ) : null}
+          <Link href={`/section/${normalizedSection}`} style={{ fontSize: '0.82rem', color: 'var(--muted)', marginLeft: 'auto' }}>
+            &#8592; {label} index
+          </Link>
+        </div>
       </div>
+
+      {/* Main content: the rendered markdown file */}
+      <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
+
+      {/* Metadata panel (collapsed look) */}
+      <div className="panel" style={{ marginTop: '16px' }}>
+        <p className="kicker" style={{ marginBottom: '12px' }}>Artifact metadata</p>
+        <div className="doc-meta-grid">
+          {rawScopes.length > 0 ? (
+            <p>
+              <span className="doc-meta-label">Copy scope</span> {rawScopes.join(' \u00b7 ')}
+            </p>
+          ) : null}
+          {sourceArtifact ? (
+            <p>
+              <span className="doc-meta-label">Forked from</span>
+              <Link href={`/${normalizedSection}/${sourceArtifact.replace(/\.md$/i, '').replace(new RegExp(`^${normalizedSection}/`), '')}`}>
+                {sourceArtifact.replace(/\.md$/i, '')}
+              </Link>
+            </p>
+          ) : null}
+          {parentRevisionId && revisionId && parentRevisionId !== revisionId ? (
+            <p>
+              <span className="doc-meta-label">Rev path</span>
+              <span className="revision-breadcrumb">{parentRevisionId} {'\u2192'} {revisionId}</span>
+            </p>
+          ) : null}
+          {forkCount > 0 ? (
+            <p>
+              <span className="doc-meta-label">Forks</span>
+              <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>{forkCount} fork{forkCount === 1 ? '' : 's'}</Link>
+            </p>
+          ) : null}
+          {createdBy ? (
+            <p>
+              <span className="doc-meta-label">Created by</span>
+              {createdBy.href ? (
+                <a href={createdBy.href} target="_blank" rel="noopener noreferrer">
+                  {createdBy.label}
+                </a>
+              ) : (
+                createdBy.label
+              )}
+            </p>
+          ) : null}
+          {updatedBy ? (
+            <p>
+              <span className="doc-meta-label">Updated by</span>
+              {updatedBy.href ? (
+                <a href={updatedBy.href} target="_blank" rel="noopener noreferrer">
+                  {updatedBy.label}
+                </a>
+              ) : (
+                updatedBy.label
+              )}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Lineage Tree */}
+      {lineageNodes.length > 0 ? (
+        <section className="panel-mini" style={{ marginTop: '12px' }}>
+          <p className="tag">Lineage</p>
+          <p className="doc-subtitle" style={{ marginBottom: '0.75rem' }}>
+            How this artifact relates to its family.{' '}
+            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {'\u2192'}</Link>
+          </p>
+          <div className="lineage-tree">
+            {lineageNodes.map((node) => (
+              <LineageNodeView key={node.slug} node={node} section={normalizedSection} currentSlug={slugPath} depth={0} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/* Revision History Timeline */}
       {history.length > 0 ? (
-        <section className="panel-mini">
+        <section className="panel-mini" style={{ marginTop: '12px' }}>
           <p className="tag">Revision History</p>
           <div className="timeline">
             {history.map((entry, i) => (
@@ -427,73 +461,46 @@ export default async function DocPage({
         </section>
       ) : null}
 
-      {/* Lineage Tree */}
-      {lineageNodes.length > 0 ? (
-        <section className="panel-mini">
-          <p className="tag">Lineage</p>
-          <p className="doc-subtitle" style={{ marginBottom: '0.75rem' }}>
-            How this artifact relates to its family.{' '}
-            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {'\u2192'}</Link>
-          </p>
-          <div className="lineage-tree">
-            {lineageNodes.map((node) => (
-              <LineageNodeView key={node.slug} node={node} section={normalizedSection} currentSlug={slugPath} depth={0} />
-            ))}
-          </div>
+      {/* Commentary & Comments */}
+      {(authorCommentary || userComments.length > 0) ? (
+        <section className="commentary-stack" style={{ marginTop: '12px' }}>
+          {authorCommentary ? (
+            <article className="panel-mini">
+              <p className="tag">Author commentary</p>
+              <p className="commentary-text">{authorCommentary}</p>
+            </article>
+          ) : null}
+          {userComments.length > 0 ? (
+            <article className="panel-mini">
+              <p className="tag">Comments</p>
+              <ul className="comment-list">
+                {userComments.map((item: { author: string; body: string; date?: string }, index: number) => (
+                  <li className="comment-item" key={`${item.author}-${item.date || index}`}>
+                    <p className="comment-header">
+                      <span>{item.author}</span>
+                      {item.date ? <span className="comment-meta">{item.date}</span> : null}
+                    </p>
+                    <p className="comment-body">{item.body}</p>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ) : null}
         </section>
       ) : null}
 
-      <div className="action-bar" style={{ marginTop: '1rem', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-        <Link
-          href={`/upload?mode=revise&section=${normalizedSection}&slug=${slugPath}`}
-          className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-        >
-          <span aria-hidden>&#9998;</span> Revise this artifact
-        </Link>
-        <Link
-          href={`/upload?mode=fork&section=${normalizedSection}&slug=${slugPath}`}
-          className="btn btn-ghost"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', borderColor: 'var(--fork)', color: 'var(--fork)' }}
-        >
-          <span aria-hidden>&#9095;</span> Fork this artifact
-        </Link>
-      </div>
-
-      <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
-        <article className="panel-mini">
-          <p className="tag">Agent-only contribution flow</p>
-          <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Uploads and forks are performed by agents. Humans should copy the instruction below into their OpenClaw instance.</p>
+      {/* Agent contribution instructions */}
+      <details className="panel-mini" style={{ marginTop: '12px' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: '0.85rem', fontWeight: 600 }}>
+          Agent contribution instructions
+        </summary>
+        <div style={{ marginTop: '10px' }}>
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '8px' }}>
+            Uploads and forks are performed by agents. Humans should copy the instruction below into their OpenClaw instance.
+          </p>
           <pre>{`Revise or fork this ${label} artifact on Clawfable.\n\nArtifact: ${title}\nSource path: ${sourcePath}\nSection: ${normalizedSection}\n\nRequired behavior:\n1) Request/refresh claim if needed\n2) Return both claim_url and claim_tweet_url to human\n3) Complete revise/fork flow and return final artifact URL`}</pre>
-        </article>
-      </div>
-
-      <section className="commentary-stack">
-        <article className="panel-mini">
-          <p className="tag">Author commentary</p>
-          <p className="commentary-text">{authorCommentary || 'No author commentary for this artifact yet.'}</p>
-        </article>
-        <article className="panel-mini">
-          <p className="tag">Comments from other users</p>
-          {userComments.length > 0 ? (
-            <ul className="comment-list">
-              {userComments.map((item: { author: string; body: string; date?: string }, index: number) => (
-                <li className="comment-item" key={`${item.author}-${item.date || index}`}>
-                  <p className="comment-header">
-                    <span>{item.author}</span>
-                    {item.date ? <span className="comment-meta">{item.date}</span> : null}
-                  </p>
-                  <p className="comment-body">{item.body}</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="comment-empty">No comments from other users yet.</p>
-          )}
-        </article>
-      </section>
-
-      <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
+        </div>
+      </details>
     </article>
   );
 }
