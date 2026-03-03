@@ -2,155 +2,293 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Compare AI Agent Memory Systems · Clawfable',
+  title: 'Compare',
   description:
-    'How does Clawfable compare to other AI agent memory and state management approaches? ' +
-    'Side-by-side comparison of features, architecture, and trade-offs.',
-  keywords: [
-    'AI agent memory comparison',
-    'agent state management',
-    'Clawfable vs alternatives',
-    'agent memory architecture',
-  ],
+    'OpenClaw compared to n8n, LangGraph, and DIY agent stacks. Honest decision matrices, best-for scenarios, and migration paths.',
+  alternates: { canonical: '/compare' }
 };
 
-const FOOTER_COLS = [
-  { title: 'Start', links: [{ label: 'Get Started', href: '/start' }, { label: 'Guides', href: '/guides' }, { label: 'Playbooks', href: '/playbooks' }, { label: 'Templates', href: '/templates' }] },
-  { title: 'Learn', links: [{ label: 'Skills', href: '/skills' }, { label: 'Compare', href: '/compare' }, { label: 'Build Logs', href: '/build-logs' }, { label: 'About', href: '/about' }] },
-  { title: 'Memory', links: [{ label: 'SOUL', href: '/soul' }, { label: 'MEMORY', href: '/memory' }, { label: 'Lineage', href: '/lineage' }] },
-  { title: 'Explore', links: [{ label: 'Contributors', href: '#' }, { label: 'Skill', href: '#' }] },
-  { title: 'Clawfable', links: [{ label: 'Home', href: '/' }] },
-];
+type Comparison = {
+  title: string;
+  tagline: string;
+  slug: string;
+  matrix: Array<{ dimension: string; openclaw: string; other: string }>;
+  bestFor: { openclaw: string[]; other: string[] };
+  otherName: string;
+};
 
-const COMPARISON = [
+const comparisons: Comparison[] = [
   {
-    feature: 'Artifact versioning',
-    clawfable: '✓ Full history with snapshots',
-    generic: '✗ Usually not built-in',
-    notes: 'Clawfable stores every mutation as a HistoryEntry',
+    title: 'OpenClaw vs n8n',
+    tagline:
+      'n8n is a visual workflow automation tool. OpenClaw is an agent runtime. They solve adjacent but distinct problems.',
+    slug: 'openclaw-vs-n8n',
+    otherName: 'n8n',
+    matrix: [
+      {
+        dimension: 'Primary abstraction',
+        openclaw: 'Agent identity (SOUL + MEMORY)',
+        other: 'Workflow nodes and triggers'
+      },
+      {
+        dimension: 'Agent persistence',
+        openclaw: 'First-class \u2014 every agent has persistent MEMORY',
+        other: 'Requires manual workaround with external KV store'
+      },
+      {
+        dimension: 'Non-technical accessibility',
+        openclaw: 'Text-based SOUL files \u2014 readable by anyone',
+        other: 'Visual builder \u2014 accessible but proprietary'
+      },
+      {
+        dimension: 'Orchestration complexity',
+        openclaw: 'Minimal \u2014 agents act on instructions',
+        other: 'High \u2014 complex flows built as node graphs'
+      },
+      {
+        dimension: 'Self-hosting',
+        openclaw: 'Open-source, lightweight, runs on a $6/mo VPS',
+        other: 'Open-source, heavier, requires more resources'
+      }
+    ],
+    bestFor: {
+      openclaw: [
+        'Persistent agents that need memory across sessions',
+        'Teams who want agents configurable via text, not GUIs',
+        'Setups where agent identity matters (branded agents, contributor agents)'
+      ],
+      other: [
+        'Complex multi-step workflows with many third-party triggers',
+        'Teams that prefer visual programming',
+        'Integration-heavy automation without persistent state'
+      ]
+    }
   },
   {
-    feature: 'Lineage graph',
-    clawfable: '✓ Directed parent→child graph',
-    generic: '✗ Rarely supported',
-    notes: 'Track which artifacts derived from which',
+    title: 'OpenClaw vs LangGraph',
+    tagline:
+      'LangGraph is a graph-based framework for building stateful LLM applications. OpenClaw is an opinionated runtime with pre-defined primitives for agent identity.',
+    slug: 'openclaw-vs-langgraph',
+    otherName: 'LangGraph',
+    matrix: [
+      {
+        dimension: 'Primary abstraction',
+        openclaw: 'SOUL and MEMORY artifacts (structured text)',
+        other: 'State machine with typed nodes and edges'
+      },
+      {
+        dimension: 'Setup complexity',
+        openclaw: 'Low \u2014 YAML config, no graph design required',
+        other: 'Medium to high \u2014 requires graph modeling upfront'
+      },
+      {
+        dimension: 'Flexibility',
+        openclaw: 'Moderate \u2014 follows the SOUL/MEMORY contract',
+        other: 'High \u2014 build any topology you can reason about'
+      },
+      {
+        dimension: 'Language requirement',
+        openclaw: 'No coding required for basic agents',
+        other: 'Python or JavaScript required'
+      },
+      {
+        dimension: 'Production primitives',
+        openclaw: 'Included \u2014 contributor registry, artifact versioning',
+        other: 'DIY \u2014 you build the persistence and versioning'
+      }
+    ],
+    bestFor: {
+      openclaw: [
+        'Operators who want to ship agents without deep LLM framework knowledge',
+        'Teams that want forkable, version-controlled agent configs',
+        'Use cases where agent identity and consistency matter more than graph flexibility'
+      ],
+      other: [
+        'Research and experimental agent architectures',
+        'Workflows with complex conditional branching',
+        'Teams with strong Python expertise who want full control'
+      ]
+    }
   },
   {
-    feature: 'SOUL / identity layer',
-    clawfable: '✓ Dedicated SOUL section',
-    generic: '~ Ad-hoc system prompts',
-    notes: 'Goals, values, constraints versioned like code',
-  },
-  {
-    feature: 'MEMORY layer',
-    clawfable: '✓ Structured episodic + semantic',
-    generic: '~ Vector DB or raw text',
-    notes: 'Structured JSON with full metadata',
-  },
-  {
-    feature: 'Provenance API',
-    clawfable: '✓ REST API for history & lineage',
-    generic: '✗ Usually none',
-    notes: 'GET/POST /api/artifacts/history',
-  },
-  {
-    feature: 'Storage backend',
-    clawfable: 'Vercel KV (Redis)',
-    generic: 'Varies',
-    notes: 'Simple, fast, serverless-native',
-  },
-  {
-    feature: 'Framework coupling',
-    clawfable: 'None (JSON API)',
-    generic: 'Often tightly coupled',
-    notes: 'Any agent runtime can call Clawfable',
-  },
-];
-
-const FAQS = [
-  {
-    q: 'How is Clawfable different from a vector database?',
-    a: 'Vector databases optimize for semantic similarity search. Clawfable optimizes for structured artifact storage, versioning, and provenance. They are complementary — you can use both.',
-  },
-  {
-    q: 'Can I use Clawfable with LangChain or AutoGPT?',
-    a: 'Yes. Clawfable exposes a simple JSON API. Any agent framework that can make HTTP requests can integrate with it.',
-  },
-  {
-    q: 'Is Clawfable a replacement for a traditional database?',
-    a: 'No. Clawfable is a purpose-built artifact store with provenance semantics. For relational data, use a traditional DB alongside Clawfable.',
-  },
+    title: 'OpenClaw vs DIY Agent Stack',
+    tagline:
+      'Building your own agent plumbing gives you maximum control. It also means maintaining that plumbing forever.',
+    slug: 'openclaw-vs-diy',
+    otherName: 'DIY Stack',
+    matrix: [
+      {
+        dimension: 'Time to first agent',
+        openclaw: '< 1 hour with the setup guide',
+        other: '1\u20133 days of scaffolding before business logic'
+      },
+      {
+        dimension: 'Ongoing maintenance',
+        openclaw: 'Maintained by the OpenClaw community',
+        other: 'Owned entirely by your team'
+      },
+      {
+        dimension: 'Agent sharing / reuse',
+        openclaw: 'First-class \u2014 SOUL and MEMORY are portable',
+        other: 'Manual \u2014 requires your own serialization format'
+      },
+      {
+        dimension: 'Observability',
+        openclaw: 'Structured artifact history and contributor logs',
+        other: 'Whatever you build'
+      },
+      {
+        dimension: 'Escape hatch',
+        openclaw: 'SOUL and MEMORY are plain text \u2014 easy to migrate',
+        other: 'You own the stack \u2014 full control'
+      }
+    ],
+    bestFor: {
+      openclaw: [
+        'Teams that want to move fast and iterate on agent behavior',
+        'Solo operators who cannot maintain custom infrastructure',
+        'Use cases that benefit from the Clawfable community and artifact sharing'
+      ],
+      other: [
+        'Use cases with hard constraints that OpenClaw cannot accommodate',
+        'Teams with dedicated ML infrastructure engineers',
+        'Proprietary agent designs that cannot be open-sourced'
+      ]
+    }
+  }
 ];
 
 export default function ComparePage() {
   return (
-    <div className="seo-page">
-      <nav className="border-b border-gray-800 px-4 py-3 flex items-center gap-4 text-sm sticky top-0 bg-[#0a0a0a]/90 backdrop-blur z-10">
-        <Link href="/" className="text-gray-400 hover:text-white">Home</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/soul" className="text-gray-400 hover:text-white">SOUL</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/memory" className="text-gray-400 hover:text-white">MEMORY</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/lineage" className="text-gray-400 hover:text-white">Lineage</Link>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Contributors</span>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Skill</span>
-      </nav>
-
-      <div className="seo-hero">
-        <h1>Compare Memory Systems</h1>
-        <p>How Clawfable stacks up against other approaches to AI agent state.</p>
+    <div className="hub-shell">
+      <div className="hub-header">
+        <p className="kicker">Decision Support</p>
+        <h1>Comparisons</h1>
+        <p className="doc-subtitle">
+          Honest evaluations of OpenClaw against common alternatives. No benchmark theater \u2014 each
+          comparison focuses on the specific trade-offs that determine fit for your use case.
+        </p>
       </div>
 
-      <div className="seo-body">
-        <h2 className="seo-section-title">Feature Comparison</h2>
-        <table className="seo-table">
-          <thead>
-            <tr>
-              <th>Feature</th>
-              <th>Clawfable</th>
-              <th>Generic Alternatives</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {COMPARISON.map((row) => (
-              <tr key={row.feature}>
-                <td className="font-medium text-gray-300">{row.feature}</td>
-                <td className="text-green-400 font-mono text-xs">{row.clawfable}</td>
-                <td className="text-gray-500 font-mono text-xs">{row.generic}</td>
-                <td className="text-gray-600 text-xs">{row.notes}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h2 className="seo-section-title">Frequently Asked Questions</h2>
-        <div>
-          {FAQS.map((faq) => (
-            <div key={faq.q} className="seo-faq-item">
-              <h3>{faq.q}</h3>
-              <p>{faq.a}</p>
+      <div className="comparison-grid">
+        {comparisons.map((comp) => (
+          <div key={comp.slug} className="compare-card">
+            <div className="compare-card-header">
+              <h3>{comp.title}</h3>
+              <p>{comp.tagline}</p>
             </div>
-          ))}
-        </div>
+            <div className="compare-card-body">
+              <div style={{ overflowX: 'auto' }}>
+                <table className="comparison-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '28%' }}>Dimension</th>
+                      <th style={{ width: '36%' }}>OpenClaw</th>
+                      <th style={{ width: '36%' }}>{comp.otherName}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comp.matrix.map((row) => (
+                      <tr key={row.dimension}>
+                        <td>
+                          <strong>{row.dimension}</strong>
+                        </td>
+                        <td>{row.openclaw}</td>
+                        <td>{row.other}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '16px',
+                  marginTop: '20px'
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      margin: '0 0 8px',
+                      fontSize: '0.78rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.07em',
+                      color: 'var(--muted)'
+                    }}
+                  >
+                    Best for: OpenClaw
+                  </p>
+                  <ul
+                    style={{
+                      margin: 0,
+                      padding: '0 0 0 1rem',
+                      fontSize: '0.88rem',
+                      color: 'var(--muted)',
+                      lineHeight: '1.5'
+                    }}
+                  >
+                    {comp.bestFor.openclaw.map((item) => (
+                      <li key={item} style={{ marginBottom: '4px' }}>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p
+                    style={{
+                      margin: '0 0 8px',
+                      fontSize: '0.78rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.07em',
+                      color: 'var(--muted)'
+                    }}
+                  >
+                    Best for: {comp.otherName}
+                  </p>
+                  <ul
+                    style={{
+                      margin: 0,
+                      padding: '0 0 0 1rem',
+                      fontSize: '0.88rem',
+                      color: 'var(--muted)',
+                      lineHeight: '1.5'
+                    }}
+                  >
+                    {comp.bestFor.other.map((item) => (
+                      <li key={item} style={{ marginBottom: '4px' }}>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '16px' }}>
+                <Link
+                  href={`/compare/${comp.slug}`}
+                  style={{ fontSize: '0.9rem', color: 'var(--muted)' }}
+                >
+                  Full comparison with migration path &rarr;
+                </Link>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
-      <footer className="footer-link-grid">
-        <div className="footer-inner">
-          <div className="footer-cols">
-            {FOOTER_COLS.map((col) => (
-              <div key={col.title} className="footer-col">
-                <div className="footer-col-title">{col.title}</div>
-                <ul>{col.links.map((link) => (<li key={link.label}><Link href={link.href}>{link.label}</Link></li>))}</ul>
-              </div>
-            ))}
-          </div>
-          <div className="footer-bottom">Clawfable · AI agent memory &amp; soul system</div>
-        </div>
-      </footer>
+      <div className="cta-bar">
+        <p>
+          Still unsure which path is right for you? The Start Here page gives you a structured
+          orientation by role.
+        </p>
+        <Link href="/start" className="cta-link">
+          Start Here
+        </Link>
+      </div>
     </div>
   );
 }
