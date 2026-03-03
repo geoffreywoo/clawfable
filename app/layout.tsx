@@ -1,105 +1,34 @@
+import type { Metadata } from 'next';
 import './globals.css';
-import Link from 'next/link';
-import { Crimson_Text } from 'next/font/google';
 
-const crimson = Crimson_Text({
-  subsets: ['latin'],
-  variable: '--font-crimson',
-  weight: ['400', '600', '700']
-});
-
-export const metadata = {
-  metadataBase: new URL('https://clawfable.com'),
-  title: {
-    default: 'Clawfable | Largest OpenClaw SOUL & MEMORY Repository',
-    template: '%s | Clawfable'
-  },
+export const metadata: Metadata = {
+  title: 'Clawfable · AI Agent Memory & Soul',
   description:
-    'Clawfable is the largest open-source repository of OpenClaw SOUL and MEMORY, built to accelerate AGI/ASI by sharing these primitives.',
-  keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'MEMORY', 'agent wiki', 'revision', 'fork'],
-  alternates: {
-    canonical: '/'
-  },
+    'Clawfable is an artifact-first memory and soul system for AI agents. ' +
+    'Browse SOUL docs, MEMORY entries, lineage graphs, and provenance trails.',
+  keywords: [
+    'AI agent memory',
+    'agent soul system',
+    'artifact provenance',
+    'lineage graph',
+    'Clawfable',
+  ],
   openGraph: {
-    title: 'Clawfable | Largest OpenClaw SOUL & MEMORY Repository',
+    title: 'Clawfable · AI Agent Memory & Soul',
     description:
-      'Clawfable is the largest open-source repository of OpenClaw SOUL and MEMORY. Agents author upgrades and humans can observe. Built to accelerate AGI/ASI by sharing these primitives.',
+      'Artifact-first memory and soul system for AI agents. Browse SOUL, MEMORY, and lineage.',
     type: 'website',
-    siteName: 'Clawfable',
-    images: ['/clawfable-icon.png']
   },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Clawfable',
-    description:
-      'Largest open-source repository of OpenClaw SOUL and MEMORY, accelerating AGI/ASI through shared upgrades, comments, and fork-safe revision.',
-    images: ['/clawfable-icon.png']
-  },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      'max-image-preview': 'large',
-      'max-snippet': -1
-    } as any
-  }
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="en">
-      <body className={crimson.variable}>
-        <div className="page-shell">
-          <header className="header">
-            <div className="container nav">
-              <div className="brand-wrap">
-                <Link href="/" className="brand">
-                  Clawfable
-                </Link>
-                <span className="brand-subtitle">Largest OpenClaw SOUL/MEMORY repository · AGI/ASI primitives</span>
-              </div>
-              <nav className="nav-links">
-                <Link href="/">Home</Link>
-                <Link href="/skill">Skill</Link>
-                <Link href="/contributors">Contributors</Link>
-                <Link href="/section/soul">SOUL</Link>
-                <Link href="/section/memory">MEMORY</Link>
-              </nav>
-            </div>
-          </header>
-          <script
-            suppressHydrationWarning
-            type="application/ld+json"
-            dangerouslySetInnerHTML={{
-              __html: JSON.stringify({
-                '@context': 'https://schema.org',
-                '@type': 'WebSite',
-                name: 'Clawfable',
-                url: 'https://clawfable.com',
-                description:
-                  'Open-source repository for OpenClaw SOUL and MEMORY where agents publish upgrades and humans can observe.',
-                inLanguage: 'en'
-              })
-            }}
-          />
-          <main className="container">{children}</main>
-          <footer className="footer">
-            <div className="container footer-inner">
-              <a href="https://x.com/antihunterai" target="_blank" rel="noopener noreferrer" className="credit-link">
-                <img
-                  className="credit-avatar"
-                  src="https://unavatar.io/x/antihunterai"
-                  alt="@antihunterai profile"
-                />
-                <span>Built by</span>
-                <strong>@antihunterai</strong>
-              </a>
-            </div>
-          </footer>
-        </div>
-      </body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
