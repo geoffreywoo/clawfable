@@ -1,1444 +1,409 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import matter from 'gray-matter';
-import { randomBytes } from 'node:crypto';
+import { kv } from '@vercel/kv';
 
-export const coreSections = ['soul', 'memory'] as const;
+export type CoreSection = 'soul' | 'memory';
 
-export type CoreSection = (typeof coreSections)[number];
-
-export type ScopeMap = {
-  [key: string]: boolean | undefined;
-  soul?: boolean;
-  memory?: boolean;
-  skill?: boolean;
-  user_files?: boolean;
+export type Doc = {
+  title: string;
+  summary?: string;
+  date?: string;
+  slug: string;
+  [key: string]: unknown;
 };
 
-type RevisionMeta = {
-  family?: string;
-  id?: string;
-  kind?: string;
-  status?: string;
-  parent_revision?: string;
-  source?: string;
+/**
+ * A single point-in-time snapshot of an artifact, stored in revision history.
+ */
+export type HistoryEntry = {
+  /** ISO-8601 timestamp when this revision was recorded */
+  timestamp: string;
+  /** Optional short description of what changed */
+  changeNote?: string;
+  /** Optional commit hash from the upstream repo, if applicable */
+  commitHash?: string;
+  /** Full snapshot of the artifact fields at this point in time */
+  snapshot?: Record<string, unknown>;
 };
 
-export type UserProfile = {
-  handle: string;
-  display_name?: string;
-  profile_url?: string;
-  verified: boolean;
-  created_at: string;
-  updated_at: string;
-  artifact_count: number;
-  last_artifact_ref?: string;
+/**
+ * A node in the lineage graph.
+ */
+export type LineageNode = {
+  /** KV key (e.g. "soul:my-artifact") */
+  key: string;
+  /** Human-readable title, if available */
+  title?: string;
+  section?: CoreSection;
+  slug?: string;
 };
 
-export type AgentClaim = {
-  claim_token: string;
-  claim_nonce: string;
-  claim_token_expires_at: string;
-  claim_issued_at: string;
+/**
+ * Lineage result for a single artifact — its parents and children.
+ */
+export type LineageResult = {
+  self: LineageNode;
+  parents: LineageNode[];
+  children: LineageNode[];
 };
 
-type TwitterTweet = {
-  id: string;
-  text: string;
-  created_at?: string;
-  author_id?: string;
-};
+export function isCoreSection(s: string): s is CoreSection {
+  return s === 'soul' || s === 'memory';
+}
 
-type TwitterTweetSearchResponse = {
-  data?: TwitterTweet[];
-  meta?: {
-    result_count?: number;
+// ---------------------------------------------------------------------------
+// KV helpers
+// ---------------------------------------------------------------------------
+
+function docKey(section: CoreSection, slug: string | string[]): string {
+  const slugStr = Array.isArray(slug) ? slug.join('/') : slug;
+  return `${section}:${slugStr}`;
+}
+
+function historyKey(section: CoreSection, slug: string | string[]): string {
+  const slugStr = Array.isArray(slug) ? slug.join('/') : slug;
+  return `history:${section}:${slugStr}`;
+}
+
+function lineageParentsKey(key: string): string {
+  return `lineage:parents:${key}`;
+}
+
+function lineageChildrenKey(key: string): string {
+  return `lineage:children:${key}`;
+}
+
+// ---------------------------------------------------------------------------
+// Doc CRUD
+// ---------------------------------------------------------------------------
+
+export async function getDoc(
+  section: string,
+  slug: string | string[]
+): Promise<Doc | null> {
+  if (!isCoreSection(section)) return null;
+  const key = docKey(section, slug);
+  const raw = await kv.get<Record<string, unknown>>(key);
+  if (!raw) return null;
+  return {
+    ...raw,
+    title: typeof raw.title === 'string' ? raw.title : key,
+    slug: Array.isArray(slug) ? slug.join('/') : slug,
   };
-  errors?: Array<{
-    detail?: string;
-  }>;
-};
-
-type TwitterTweetByIdResponse = {
-  data?: TwitterTweet;
-  errors?: Array<{
-    detail?: string;
-  }>;
-};
-
-type TwitterUserResponse = {
-  data?: {
-    id: string;
-    username: string;
-  };
-  errors?: Array<{
-    detail?: string;
-  }>;
-};
-
-export type ArtifactDocument = {
-  slug: string;
-  sourcePath: string;
-  title: string;
-  description: string;
-  content: string;
-  copy_paste_scope: ScopeMap;
-  revision: RevisionMeta | null;
-  author_commentary?: string;
-  user_comments?: unknown;
-  created_by_handle?: string;
-  created_by_display_name?: string;
-  created_by_profile_url?: string;
-  created_by_verified?: boolean;
-  updated_by_handle?: string;
-  updated_by_display_name?: string;
-  updated_by_profile_url?: string;
-  updated_by_verified?: boolean;
-};
-
-export type SectionItem = {
-  slug: string;
-  sourcePath: string;
-  title: string;
-  description: string;
-  scopeFlags: string[];
-  revision: {
-    id?: string;
-    kind?: string;
-    status?: string;
-  } | null;
-  data?: Record<string, unknown>;
-};
-
-interface KVClient {
-  get(key: string): Promise<unknown>;
-  set(key: string, value: unknown): Promise<unknown>;
-  delete?(key: string): Promise<unknown>;
 }
 
-type DbRecord = {
-  section: CoreSection;
-  slug: string;
-  sourcePath: string;
-  title: string;
-  description: string;
-  content: string;
-  copy_paste_scope: ScopeMap;
-  revision: RevisionMeta;
-  created_at: string;
-  updated_at: string;
-  author_commentary?: string;
-  user_comments?: unknown;
-  created_by_handle?: string;
-  created_by_display_name?: string;
-  created_by_profile_url?: string;
-  created_by_verified?: boolean;
-  updated_by_handle?: string;
-  updated_by_display_name?: string;
-  updated_by_profile_url?: string;
-  updated_by_verified?: boolean;
-};
+export async function listDocs(section: CoreSection): Promise<Doc[]> {
+  const pattern = `${section}:*`;
+  // Exclude derived keys (history:, lineage:)
+  let cursor = 0;
+  const docs: Doc[] = [];
+  do {
+    const [nextCursor, keys] = await kv.scan(cursor, {
+      match: pattern,
+      count: 100,
+    });
+    cursor = Number(nextCursor);
+    for (const key of keys) {
+      // Skip history & lineage keys that match the section prefix by accident
+      if (key.startsWith('history:') || key.startsWith('lineage:')) continue;
+      const raw = await kv.get<Record<string, unknown>>(key);
+      if (!raw) continue;
+      const slug = key.slice(section.length + 1);
+      docs.push({
+        ...raw,
+        title: typeof raw.title === 'string' ? raw.title : key,
+        slug,
+      });
+    }
+  } while (cursor !== 0);
+  return docs;
+}
 
-type DbPayload = {
-  section: CoreSection;
-  slug: string;
-  sourcePath?: string;
-  title: string;
-  description: string;
-  content: string;
-  copy_paste_scope?: ScopeMap;
-  revision?: RevisionMeta;
-  author_commentary?: string;
-  user_comments?: unknown;
-  created_by_handle?: string;
-  created_by_display_name?: string;
-  created_by_profile_url?: string;
-  created_by_verified?: boolean;
-  updated_by_handle?: string;
-  updated_by_display_name?: string;
-  updated_by_profile_url?: string;
-  updated_by_verified?: boolean;
-};
+export async function putDoc(
+  section: CoreSection,
+  slug: string | string[],
+  data: Record<string, unknown>
+): Promise<void> {
+  const key = docKey(section, slug);
+  await kv.set(key, data);
+}
 
-type ForkPayload = DbPayload & {
-  sourceSection: CoreSection;
-  sourceSlug: string;
-};
+export async function deleteDoc(
+  section: CoreSection,
+  slug: string | string[]
+): Promise<void> {
+  const key = docKey(section, slug);
+  await kv.del(key);
+}
 
-const CONTENT_ROOT = path.join(process.cwd(), 'content');
-const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
-const DB_ARTIFACT_INDEX_PREFIX = 'clawfable:db:index';
-const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
-const DB_AGENT_INDEX = 'clawfable:agents:index';
-const DB_AGENT_PROFILE_PREFIX = 'clawfable:agents:profile';
-const AGENT_CLAIM_TTL_MS = 24 * 60 * 60 * 1000;
-const DB_SKIP_SEED_PREFIX = 'clawfable:admin:skip_seed';
-const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
-  soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
-  memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
-};
-export const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
-  soul: 'soul-baseline-v1',
-  memory: 'memory-baseline-v1'
-};
-const OPENCLAW_TEMPLATE_BASENAME: Record<CoreSection, string> = {
-  soul: 'soul.md',
-  memory: 'memory.md'
-};
+// ---------------------------------------------------------------------------
+// Revision history
+// ---------------------------------------------------------------------------
 
-let kvClient: Promise<KVClient | null> | null = null;
-const seededSections = new Set<string>();
+/**
+ * Append a new HistoryEntry to an artifact's revision log.
+ * The list is stored as a JSON array in KV, newest-first.
+ */
+export async function appendHistory(
+  section: CoreSection,
+  slug: string | string[],
+  entry: HistoryEntry
+): Promise<void> {
+  const key = historyKey(section, slug);
+  const existing = await kv.get<HistoryEntry[]>(key);
+  const list: HistoryEntry[] = Array.isArray(existing) ? existing : [];
+  list.unshift(entry); // prepend so index 0 = latest
+  await kv.set(key, list);
+}
 
-type StoredAgentProfile = UserProfile & {
-  claim_token?: string;
-  claim_token_expires_at?: string;
-  claim_nonce?: string;
-  claim_issued_at?: string;
-  api_key?: string;
-  api_key_issued_at?: string;
-};
+/**
+ * Retrieve all HistoryEntries for an artifact (newest-first).
+ * Returns an empty array if no history exists.
+ */
+export async function getArtifactHistory(
+  section: string,
+  slug: string | string[]
+): Promise<HistoryEntry[]> {
+  if (!isCoreSection(section)) return [];
+  const key = historyKey(section, slug);
+  const raw = await kv.get<HistoryEntry[]>(key);
+  return Array.isArray(raw) ? raw : [];
+}
 
-function readEnv(name: string) {
-  const raw = process.env[name];
-  if (!raw) return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1).trim() || undefined;
+// ---------------------------------------------------------------------------
+// Lineage / Provenance
+// ---------------------------------------------------------------------------
+
+/**
+ * Link a child artifact to a parent (directional edge: parent → child).
+ * Idempotent — calling twice with the same args is safe.
+ */
+export async function linkLineage(
+  parentSection: CoreSection,
+  parentSlug: string | string[],
+  childSection: CoreSection,
+  childSlug: string | string[]
+): Promise<void> {
+  const parentKey = docKey(parentSection, parentSlug);
+  const childKey = docKey(childSection, childSlug);
+
+  // Add childKey to parent's children set
+  const existingChildren = await kv.get<string[]>(lineageChildrenKey(parentKey));
+  const children = Array.isArray(existingChildren) ? existingChildren : [];
+  if (!children.includes(childKey)) {
+    children.push(childKey);
+    await kv.set(lineageChildrenKey(parentKey), children);
   }
-  return trimmed;
-}
 
-function pickEnvValue(...names: string[]) {
-  for (const name of names) {
-    const value = readEnv(name);
-    if (value) return value;
+  // Add parentKey to child's parents set
+  const existingParents = await kv.get<string[]>(lineageParentsKey(childKey));
+  const parents = Array.isArray(existingParents) ? existingParents : [];
+  if (!parents.includes(parentKey)) {
+    parents.push(parentKey);
+    await kv.set(lineageParentsKey(childKey), parents);
   }
-  return undefined;
 }
 
-function readBooleanEnv(name: string, fallback = false) {
-  const raw = readEnv(name);
-  if (!raw) return fallback;
-  const value = raw.trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on', 'enabled'].includes(value);
-}
-
-function parseIsoDate(raw: string) {
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
-}
-
-function randomSecret(bytes = 24) {
-  return randomBytes(bytes).toString('hex');
-}
-
-function readTwitterBearer() {
-  return (
-    pickEnvValue('X_BEARER_TOKEN', 'TWITTER_BEARER_TOKEN', 'CLAWFABLE_TWITTER_BEARER_TOKEN', 'CLAWFABLE_AGENT_TWITTER_BEARER_TOKEN') ||
-    undefined
+/**
+ * Resolve a list of artifact keys into LineageNode objects.
+ * For each key, fetches the artifact title from KV if available.
+ */
+async function resolveNodes(keys: string[]): Promise<LineageNode[]> {
+  return Promise.all(
+    keys.map(async (key) => {
+      const colonIdx = key.indexOf(':');
+      if (colonIdx === -1) return { key };
+      const section = key.slice(0, colonIdx) as CoreSection;
+      const slug = key.slice(colonIdx + 1);
+      if (!isCoreSection(section)) return { key };
+      const raw = await kv.get<Record<string, unknown>>(key);
+      return {
+        key,
+        section,
+        slug,
+        title: raw && typeof raw.title === 'string' ? raw.title : undefined,
+      };
+    })
   );
 }
 
-function requireTwitterProofCheck() {
-  return readBooleanEnv('CLAWFABLE_REQUIRE_TWEET_PROOF', true);
-}
+/**
+ * Get the immediate lineage (parents + children) for an artifact.
+ * Returns null if the artifact doesn't exist.
+ */
+export async function getArtifactLineage(
+  section: string,
+  slug: string | string[]
+): Promise<LineageResult | null> {
+  if (!isCoreSection(section)) return null;
+  const key = docKey(section, slug);
 
-function scopeFlagsFromMap(scopeMap?: Record<string, unknown>): string[] {
-  if (!scopeMap) return [];
-  return scopeOrder.filter((key) => scopeMap[key] === true);
-}
+  // Check artifact exists
+  const doc = await kv.get(key);
+  if (!doc) return null;
 
-function isWithinRange(createdAt: string | undefined, issuedAt: string | undefined, expiresAt: string | undefined) {
-  if (!issuedAt || !expiresAt || !createdAt) return true;
-  const parsedCreatedAt = parseIsoDate(createdAt);
-  if (!parsedCreatedAt) return false;
-  const parsedIssued = parseIsoDate(issuedAt);
-  const parsedExpires = parseIsoDate(expiresAt);
-  if (!parsedIssued || !parsedExpires) return false;
-  return parsedCreatedAt >= parsedIssued && parsedCreatedAt <= parsedExpires;
-}
-
-function parseTweetIdFromInput(raw?: string) {
-  if (!raw) return undefined;
-  const value = raw.trim();
-  if (!value) return undefined;
-
-  if (/^\d{10,}$/.test(value)) return value;
-
-  try {
-    const parsed = new URL(value);
-    const pathMatch = parsed.pathname.match(/\/status\/(\d{10,})(?:[/?]|$)/i);
-    if (pathMatch?.[1]) return pathMatch[1];
-
-    const tail = parsed.pathname.split('/').filter(Boolean).pop();
-    if (tail && /^\d{10,}$/.test(tail)) return tail;
-  } catch {
-    // continue with fallback text matching.
-  }
-
-  const fallback = value.match(/(\d{10,})/);
-  return fallback?.[1];
-}
-
-async function getTwitterHeaderToken() {
-  const bearer = readTwitterBearer();
-  if (!bearer) return null;
-  return {
-    Authorization: `Bearer ${bearer}`
-  };
-}
-
-async function twitterApiRequest<T>(url: string) {
-  const headers = await getTwitterHeaderToken();
-  if (!headers) {
-    throw new Error('Tweet proof verification requires TWITTER_BEARER_TOKEN (or X_BEARER_TOKEN).');
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      Authorization: headers.Authorization,
-      'User-Agent': 'clawfable-claim-verifier/1.0'
-    }
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Twitter API ${response.status}: ${detail || response.statusText}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-function twitterApiRecentSearchUrl(handle: string, nonce: string) {
-  const query = `from:${handle} ${nonce}`;
-  return `https://api.x.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&tweet.fields=text,created_at&max_results=10`;
-}
-
-function twitterApiTweetByIdUrl(tweetId: string) {
-  return `https://api.x.com/2/tweets/${tweetId}?tweet.fields=text,created_at,author_id`;
-}
-
-function twitterApiUserByHandleUrl(handle: string) {
-  return `https://api.x.com/2/users/by/username/${encodeURIComponent(handle)}?user.fields=id,username`;
-}
-
-async function verifyClaimTweetById(handle: string, tweetId: string, nonce: string, issuedAt: string, expiresAt: string) {
-  const [userResponse, tweetResponse] = await Promise.all([
-    twitterApiRequest<TwitterUserResponse>(twitterApiUserByHandleUrl(handle)),
-    twitterApiRequest<TwitterTweetByIdResponse>(twitterApiTweetByIdUrl(tweetId))
+  const [rawParents, rawChildren] = await Promise.all([
+    kv.get<string[]>(lineageParentsKey(key)),
+    kv.get<string[]>(lineageChildrenKey(key)),
   ]);
 
-  const resolvedUser = userResponse.data;
-  if (!resolvedUser?.id || !resolvedUser?.username) {
-    throw new Error('Unable to resolve Twitter handle for tweet verification.');
-  }
-
-  const tweet = tweetResponse.data;
-  if (!tweet) {
-    throw new Error('Tweet not found for provided tweet id.');
-  }
-  if (!tweet.text.includes(nonce)) {
-    throw new Error('Tweet does not contain current claim nonce.');
-  }
-  if (!tweet.author_id || tweet.author_id !== resolvedUser.id) {
-    throw new Error('Tweet does not belong to claimed X handle.');
-  }
-  if (resolvedUser.username.toLowerCase() !== handle.toLowerCase()) {
-    throw new Error('Tweet handle does not match claim request.');
-  }
-  if (!isWithinRange(tweet.created_at, issuedAt, expiresAt)) {
-    throw new Error('Tweet timestamp is outside claim window.');
-  }
-
-  return true;
-}
-
-async function verifyClaimTweetBySearch(handle: string, nonce: string, issuedAt: string, expiresAt: string) {
-  const response = await twitterApiRequest<TwitterTweetSearchResponse>(twitterApiRecentSearchUrl(handle, nonce));
-  const tweets = response?.data || [];
-  const directMatch = tweets.find((tweet) => tweet.text.includes(nonce));
-  if (!directMatch) {
-    throw new Error('No matching claim nonce found in recent tweets.');
-  }
-  if (!isWithinRange(directMatch.created_at, issuedAt, expiresAt)) {
-    throw new Error('Matching tweet was found outside claim window.');
-  }
-  return true;
-}
-
-async function verifyClaimTweet(handle: string, nonce: string, issuedAt: string, expiresAt: string, tweetId?: string) {
-  if (!nonce) {
-    throw new Error('Claim nonce missing. Request a fresh claim.');
-  }
-  if (requireTwitterProofCheck() || tweetId) {
-    if (tweetId) {
-      return verifyClaimTweetById(handle, tweetId, nonce, issuedAt, expiresAt);
-    }
-    return verifyClaimTweetBySearch(handle, nonce, issuedAt, expiresAt);
-  }
-  return true;
-}
-
-export function isCoreSection(section: string): section is CoreSection {
-  return coreSections.includes(section.toLowerCase() as CoreSection);
-}
-
-function normalizeSection(section: string): CoreSection {
-  return section.toLowerCase() as CoreSection;
-}
-
-function normalizeSlug(slug: string) {
-  return slug.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.md$/i, '');
-}
-
-function normalizeAgentHandle(raw: string) {
-  return raw.trim().replace(/^@+/, '').trim().toLowerCase();
-}
-
-function nowStamp() {
-  return new Date().toISOString();
-}
-
-function parseArtifactCount(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-  if (typeof value === 'string') {
-    const parsed = Number.parseInt(value.trim(), 10);
-    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-  }
-  return 0;
-}
-
-async function kvGet<T>(kv: KVClient, key: string): Promise<T | null> {
-  return (await kv.get(key)) as T | null;
-}
-
-function sourcePathFor(section: CoreSection, slug: string) {
-  return `${section}/${slug}.md`;
-}
-
-function canonicalSourcePath(section: CoreSection, slug: string, sourcePath: string) {
-  if (sourcePath.startsWith('http://') || sourcePath.startsWith('https://')) {
-    return sourcePath;
-  }
-
-  const normalizedSlug = slug.toLowerCase();
-  const normalizedSource = path.basename(sourcePath).toLowerCase();
-  if (
-    normalizedSlug === OPENCLAW_CANONICAL_SEEDS[section] ||
-    normalizedSource === `${OPENCLAW_CANONICAL_SEEDS[section]}.md` ||
-    normalizedSource === OPENCLAW_TEMPLATE_BASENAME[section]
-  ) {
-    return OPENCLAW_CANONICAL_TEMPLATES[section];
-  }
-
-  return sourcePath;
-}
-
-function artifactKey(section: CoreSection, slug: string) {
-  return `${DB_ARTIFACT_PREFIX}:${section}:${slug}`;
-}
-
-function indexKey(section: CoreSection) {
-  return `${DB_ARTIFACT_INDEX_PREFIX}:${section}`;
-}
-
-function extractRevision(meta: Record<string, unknown> | undefined) {
-  if (!meta) return null;
-  const revision = (meta as Record<string, unknown>).revision as Record<string, unknown> | undefined;
-  if (!revision || typeof revision !== 'object') return null;
+  const [parents, children] = await Promise.all([
+    resolveNodes(Array.isArray(rawParents) ? rawParents : []),
+    resolveNodes(Array.isArray(rawChildren) ? rawChildren : []),
+  ]);
 
   return {
-    family: String(revision.family || '').trim() || undefined,
-    id: String(revision.id || revision.version || 'v1').trim() || undefined,
-    kind: String(revision.kind || revision.type || 'revision').trim() || undefined,
-    status: String(revision.status || 'draft').trim() || undefined,
-    parent_revision: revision.parent_revision ? String(revision.parent_revision) : undefined,
-    source: revision.fork_of
-      ? String(revision.fork_of)
-      : revision.source
-        ? String(revision.source)
-        : undefined
+    self: { key, section: section as CoreSection, slug: Array.isArray(slug) ? slug.join('/') : slug },
+    parents,
+    children,
   };
 }
 
-function shortDescription(frontmatter: Record<string, unknown> | undefined, content: string) {
-  const fromFrontmatter = typeof frontmatter?.description === 'string' ? frontmatter.description.trim() : '';
-  if (fromFrontmatter) {
-    return fromFrontmatter;
-  }
-  const titleLine = content.split('\n').find((line) => line.startsWith('# '));
-  const firstBody = content
-    .split('\n')
-    .filter((line) => line.trim() && !line.startsWith('#'))
-    .slice(0, 4)
-    .join(' ');
-  const fallback = titleLine ? titleLine.replace(/^#\s+/, '') : 'Wiki artifact in this section.';
-  const cleaned = firstBody || fallback;
-  return cleaned.replace(/\s+/g, ' ').slice(0, 180);
-}
+/**
+ * Walk the full lineage graph (BFS) from a starting artifact.
+ * Returns all reachable nodes and directed edges.
+ * maxDepth prevents infinite loops in cyclic graphs.
+ */
+export async function walkLineageGraph(
+  section: CoreSection,
+  slug: string | string[],
+  maxDepth = 5
+): Promise<{ nodes: LineageNode[]; edges: Array<{ from: string; to: string }> }> {
+  const startKey = docKey(section, slug);
+  const visited = new Set<string>();
+  const nodes: LineageNode[] = [];
+  const edges: Array<{ from: string; to: string }> = [];
 
-function fromMdSection(section: CoreSection) {
-  const sectionDir = path.join(CONTENT_ROOT, section);
-  if (!fs.existsSync(sectionDir)) return [];
+  async function visit(key: string, depth: number) {
+    if (visited.has(key) || depth > maxDepth) return;
+    visited.add(key);
 
-  const walk = (dir: string, prefix = ''): ArtifactDocument[] => {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    const files: ArtifactDocument[] = [];
+    const colonIdx = key.indexOf(':');
+    const sec = key.slice(0, colonIdx) as CoreSection;
+    const sl = key.slice(colonIdx + 1);
+    if (!isCoreSection(sec)) return;
 
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        files.push(...walk(full, `${prefix}${entry.name}/`));
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    const raw = await kv.get<Record<string, unknown>>(key);
+    nodes.push({
+      key,
+      section: sec,
+      slug: sl,
+      title: raw && typeof raw.title === 'string' ? raw.title : undefined,
+    });
 
-      const raw = fs.readFileSync(full, 'utf8');
-      const parsed = matter(raw);
-      const data = parsed.data as Record<string, unknown>;
-      const titleLine = String(parsed.content).split('\n').find((line) => line.startsWith('# '));
-      const file = entry.name;
-      const slug = `${prefix}${file.replace(/\.md$/, '')}`;
-      const scope = (data?.copy_paste_scope as Record<string, unknown>) || {};
+    const [rawParents, rawChildren] = await Promise.all([
+      kv.get<string[]>(lineageParentsKey(key)),
+      kv.get<string[]>(lineageChildrenKey(key)),
+    ]);
 
-      files.push({
-        slug,
-        sourcePath: `${prefix}${file}`,
-        title: (data?.title as string) || (titleLine ? titleLine.replace(/^#\s+/, '') : file.replace(/\.md$/, '')),
-        description: shortDescription(data, parsed.content),
-        copy_paste_scope: scope as ScopeMap,
-        revision: extractRevision(data),
-        author_commentary: typeof data?.author_commentary === 'string' ? data.author_commentary : undefined,
-        user_comments: data?.author_comments || data?.user_comments || data?.comments,
-        content: parsed.content
-      });
+    for (const pKey of Array.isArray(rawParents) ? rawParents : []) {
+      edges.push({ from: pKey, to: key });
+      await visit(pKey, depth + 1);
     }
+    for (const cKey of Array.isArray(rawChildren) ? rawChildren : []) {
+      edges.push({ from: key, to: cKey });
+      await visit(cKey, depth + 1);
+    }
+  }
 
-    return files;
-  };
-
-  return walk(sectionDir);
+  await visit(startKey, 0);
+  return { nodes, edges };
 }
 
-function sanitizeScope(scope?: ScopeMap) {
-  const base: ScopeMap = {};
-  scopeOrder.forEach((key) => {
-    base[key] = scope?.[key] === true;
-  });
-  return base;
-}
-
-function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
-  const revision =
-    'revision' in row && row.revision
-      ? {
-          id: (row as DbRecord).revision?.id,
-          kind: (row as DbRecord).revision?.kind,
-          status: (row as DbRecord).revision?.status
+/**
+ * List all lineage edges across all artifacts.
+ * Scans for all lineage:children:* keys and returns the full edge list.
+ * Useful for rendering a global lineage graph.
+ */
+export async function listAllLineageEdges(): Promise<Array<{ from: string; to: string }>> {
+  const edges: Array<{ from: string; to: string }> = [];
+  let cursor = 0;
+  do {
+    const [nextCursor, keys] = await kv.scan(cursor, {
+      match: 'lineage:children:*',
+      count: 100,
+    });
+    cursor = Number(nextCursor);
+    for (const key of keys) {
+      const fromKey = key.slice('lineage:children:'.length);
+      const children = await kv.get<string[]>(key);
+      if (Array.isArray(children)) {
+        for (const toKey of children) {
+          edges.push({ from: fromKey, to: toKey });
         }
-      : null;
-
-  return {
-    slug: row.slug,
-    sourcePath: row.sourcePath,
-    title: row.title,
-    description: row.description,
-    scopeFlags: scopeFlagsFromMap((row as DbRecord).copy_paste_scope),
-    revision,
-    data: {
-      title: row.title,
-      description: row.description,
-        copy_paste_scope: (row as DbRecord).copy_paste_scope,
-      revision: (row as DbRecord).revision,
-      created_by_handle: (row as DbRecord).created_by_handle,
-      created_by_display_name: (row as DbRecord).created_by_display_name,
-      created_by_profile_url: (row as DbRecord).created_by_profile_url,
-      created_by_verified: (row as DbRecord).created_by_verified,
-      updated_by_handle: (row as DbRecord).updated_by_handle,
-      updated_by_display_name: (row as DbRecord).updated_by_display_name,
-      updated_by_profile_url: (row as DbRecord).updated_by_profile_url,
-      updated_by_verified: (row as DbRecord).updated_by_verified,
-      author_commentary: (row as Record<string, unknown>).author_commentary || (row as Record<string, unknown>).author_comment,
-      user_comments: (row as Record<string, unknown>).user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
-      updated_at: 'updated_at' in row ? row.updated_at : nowStamp(),
-      created_at: 'created_at' in row ? (row as DbRecord).created_at : nowStamp()
-    }
-  };
-}
-
-function toDoc(row: DbRecord): { data: Record<string, unknown>; content: string } {
-  return {
-    data: {
-      title: row.title,
-      description: row.description,
-      copy_paste_scope: row.copy_paste_scope,
-      revision: {
-        family: row.revision?.family,
-        id: row.revision?.id,
-        kind: row.revision?.kind,
-        status: row.revision?.status,
-        parent_revision: row.revision?.parent_revision,
-        source: row.revision?.source
-      },
-      author_commentary: row.author_commentary || (row as Record<string, unknown>).author_comment,
-      user_comments: row.user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
-      source_path: row.sourcePath,
-      created_by_handle: row.created_by_handle,
-      created_by_display_name: row.created_by_display_name,
-      created_by_profile_url: row.created_by_profile_url,
-      created_by_verified: row.created_by_verified,
-      updated_by_handle: row.updated_by_handle,
-      updated_by_display_name: row.updated_by_display_name,
-      updated_by_profile_url: row.updated_by_profile_url,
-      updated_by_verified: row.updated_by_verified,
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    },
-    content: row.content
-  };
-}
-
-async function getKvClient(): Promise<KVClient | null> {
-  if (kvClient !== null) return kvClient;
-
-  kvClient = (async () => {
-    const directUrl =
-      pickEnvValue(
-        'KV_REST_API_URL',
-        'CLAWFABLE_DATABASE_URL',
-        'CLAWFABLE_KV_URL',
-        'KV_URL',
-        'REDIS_URL'
-      );
-    const directToken =
-      pickEnvValue(
-        'KV_REST_API_TOKEN',
-        'CLAWFABLE_DATABASE_TOKEN',
-        'CLAWFABLE_KV_TOKEN',
-        'KV_TOKEN',
-        'KV_REST_API_READ_ONLY_TOKEN'
-      );
-
-    if (!directUrl || !directToken) return null;
-
-    try {
-      const kvModule = await import('@vercel/kv');
-      if (typeof (kvModule as any).createClient === 'function') {
-        return (kvModule as any).createClient({
-          url: directUrl,
-          token: directToken
-        }) as KVClient;
       }
-      if ((kvModule as any).kv) {
-        return (kvModule as any).kv as KVClient;
-      }
-      return null;
-    } catch {
-      return null;
     }
-  })();
-
-  return kvClient;
+  } while (cursor !== 0);
+  return edges;
 }
 
-function userProfileKey(rawHandle: string) {
-  return `${DB_AGENT_PROFILE_PREFIX}:${normalizeAgentHandle(rawHandle)}`;
+/**
+ * Purge all lineage data for an artifact (both parents and children refs).
+ * Does NOT clean up the reverse pointers in other artifacts.
+ */
+export async function deleteLineage(
+  section: CoreSection,
+  slug: string | string[]
+): Promise<void> {
+  const key = docKey(section, slug);
+  await Promise.all([
+    kv.del(lineageParentsKey(key)),
+    kv.del(lineageChildrenKey(key)),
+  ]);
 }
 
-function isExpiredAt(raw?: string) {
-  if (!raw) return true;
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return true;
-  return parsed.getTime() <= Date.now();
+// ---------------------------------------------------------------------------
+// Convenience: write a new doc version and record it in history atomically
+// ---------------------------------------------------------------------------
+
+/**
+ * Save a new version of an artifact and append a history entry in one call.
+ * This is the preferred write path for any mutation that should be tracked.
+ */
+export async function putDocWithHistory(
+  section: CoreSection,
+  slug: string | string[],
+  data: Record<string, unknown>,
+  historyEntry?: Partial<HistoryEntry>
+): Promise<void> {
+  await putDoc(section, slug, data);
+  await appendHistory(section, slug, {
+    timestamp: new Date().toISOString(),
+    snapshot: data,
+    ...historyEntry,
+  });
 }
 
-function normalizeAgentProfile(handle: string, raw: StoredAgentProfile | null): UserProfile | null {
-  if (!raw || typeof raw !== 'object') return null;
-  return {
-    handle: normalizeAgentHandle(handle),
-    display_name:
-      typeof raw.display_name === 'string' && raw.display_name.trim() ? raw.display_name.trim() : undefined,
-    profile_url: typeof raw.profile_url === 'string' && raw.profile_url.trim() ? raw.profile_url.trim() : undefined,
-    verified: raw.verified === true,
-    created_at: raw.created_at || nowStamp(),
-    updated_at: raw.updated_at || nowStamp(),
-    artifact_count: parseArtifactCount(raw.artifact_count),
-    last_artifact_ref: typeof raw.last_artifact_ref === 'string' && raw.last_artifact_ref.trim() ? raw.last_artifact_ref : undefined
-  };
-}
+// ---------------------------------------------------------------------------
+// Section index pages: list all artifacts with pagination
+// ---------------------------------------------------------------------------
 
-async function persistAgentProfile(profile: StoredAgentProfile) {
-  const kv = await getKvClient();
-  if (!kv) {
-    throw new Error('No database configured for user profiles.');
-  }
-
-  const now = nowStamp();
-  const normalizedHandle = normalizeAgentHandle(profile.handle);
-  const record: StoredAgentProfile = {
-    ...profile,
-    handle: normalizedHandle,
-    created_at: profile.created_at || now,
-    updated_at: now,
-    artifact_count: parseArtifactCount(profile.artifact_count)
-  };
-
-  const indexRaw = await kvGet<unknown>(kv, DB_AGENT_INDEX);
-  const index = Array.isArray(indexRaw) ? indexRaw.filter((value): value is string => typeof value === 'string') : [];
-  const nextIndex = [...new Set([...index, normalizedHandle])];
-  await kv.set(DB_AGENT_INDEX, nextIndex);
-  await kv.set(userProfileKey(normalizedHandle), record);
-}
-
-export async function getAgentProfile(handle: string): Promise<UserProfile | null> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) return null;
-  const kv = await getKvClient();
-  if (!kv) return null;
-  const row = await kvGet<StoredAgentProfile | null>(kv, userProfileKey(normalized));
-  if (!row) return null;
-  return normalizeAgentProfile(normalized, row);
-}
-
-async function setAgentProfile(raw: StoredAgentProfile) {
-  await persistAgentProfile(raw);
-}
-
-function parseAgentProfile(raw: StoredAgentProfile | null, fallbackHandle: string): StoredAgentProfile {
-  const base = normalizeAgentHandle(fallbackHandle);
-  if (!base) throw new Error('Agent handle is required.');
-  const now = nowStamp();
-  if (!raw || typeof raw !== 'object') {
-    return {
-      handle: base,
-      verified: false,
-      created_at: now,
-      updated_at: now,
-      artifact_count: 0
-    };
-  }
-  return {
-    ...raw,
-    handle: base,
-    verified: raw.verified === true,
-    created_at: raw.created_at || now,
-    updated_at: now,
-    artifact_count: parseArtifactCount(raw.artifact_count)
-  };
-}
-
-async function getAgentProfileRow(handle: string): Promise<StoredAgentProfile | null> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) return null;
-  const kv = await getKvClient();
-  if (!kv) return null;
-  return kvGet<StoredAgentProfile | null>(kv, userProfileKey(normalized));
-}
-
-export async function getAgentProfiles(): Promise<UserProfile[]> {
-  const kv = await getKvClient();
-  if (!kv) return [];
-
-  const rawIndex = await kvGet<unknown>(kv, DB_AGENT_INDEX);
-  const handles = Array.isArray(rawIndex) ? rawIndex.filter((value): value is string => typeof value === 'string') : [];
-  if (handles.length === 0) return [];
-
-  const rows = await Promise.all(handles.map((handle) => getAgentProfile(handle)));
-  return rows.filter((row): row is UserProfile => Boolean(row));
-}
-
-function buildAgentProfileFromStored(handle: string, raw: StoredAgentProfile): UserProfile {
-  return {
-    handle,
-    display_name:
-      typeof raw.display_name === 'string' && raw.display_name.trim() ? raw.display_name.trim() : undefined,
-    profile_url: typeof raw.profile_url === 'string' && raw.profile_url.trim() ? raw.profile_url.trim() : undefined,
-    verified: raw.verified === true,
-    created_at: raw.created_at || nowStamp(),
-    updated_at: raw.updated_at || nowStamp(),
-    artifact_count: parseArtifactCount(raw.artifact_count),
-    last_artifact_ref: typeof raw.last_artifact_ref === 'string' && raw.last_artifact_ref.trim() ? raw.last_artifact_ref : undefined
-  };
-}
-
-export async function requestAgentClaim(handle: string, displayName?: string, profileUrl?: string): Promise<AgentClaim> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) throw new Error('Agent handle is required to request a claim.');
-  const now = nowStamp();
-  const raw = await getAgentProfileRow(normalized);
-  const base = parseAgentProfile(raw, normalized);
-
-  const next: StoredAgentProfile = {
-    ...base,
-    handle: normalized,
-    display_name: displayName || base.display_name,
-    profile_url: profileUrl || base.profile_url,
-    claim_token: randomBytes(16).toString('hex'),
-    claim_nonce: randomBytes(16).toString('hex'),
-    claim_issued_at: now,
-    claim_token_expires_at: new Date(Date.parse(now) + AGENT_CLAIM_TTL_MS).toISOString(),
-    updated_at: now
-  };
-
-  await persistAgentProfile(next);
-  if (!next.claim_token || !next.claim_nonce || !next.claim_token_expires_at || !next.claim_issued_at) {
-    throw new Error('Unable to initialize claim state.');
-  }
-  return {
-    claim_token: next.claim_token,
-    claim_nonce: next.claim_nonce,
-    claim_token_expires_at: next.claim_token_expires_at,
-    claim_issued_at: next.claim_issued_at
-  };
-}
-
-export type VerifiedAgent = {
-  profile: UserProfile;
-  api_key: string;
+export type DocListItem = {
+  slug: string;
+  title: string;
+  summary?: string;
+  date?: string;
+  section: CoreSection;
 };
 
-export async function verifyAgentClaim(
-  handle: string,
-  claimToken: string,
-  proof: {
-    tweetId?: string;
-    tweetUrl?: string;
-  } = {}
-): Promise<VerifiedAgent> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) throw new Error('Agent handle is required.');
-  if (!claimToken) throw new Error('Claim token is required.');
-
-  const kv = await getKvClient();
-  if (!kv) throw new Error('No database configured for user verification.');
-
-  const raw = await getAgentProfileRow(normalized);
-  if (!raw) throw new Error('Agent not found.');
-  if (typeof raw.claim_token !== 'string' || raw.claim_token !== claimToken) {
-    throw new Error('Claim token is invalid.');
-  }
-  if (isExpiredAt(raw.claim_token_expires_at)) {
-    throw new Error('Claim token expired.');
-  }
-  const proofFromInput = Boolean(proof.tweetId?.trim() || proof.tweetUrl?.trim());
-  const requiresTweetProof = requireTwitterProofCheck();
-  if (requiresTweetProof && !proofFromInput) {
-    throw new Error('Tweet proof is required. Provide tweet_url or tweet_id from the claim tweet.');
-  }
-
-  if (requiresTweetProof || proofFromInput) {
-    if (!raw.claim_nonce) {
-      throw new Error('Claim nonce missing. Request a fresh claim.');
-    }
-    const tweetId = parseTweetIdFromInput(proof.tweetId || proof.tweetUrl);
-    if ((proof.tweetId || proof.tweetUrl) && !tweetId) {
-      throw new Error('Unable to parse tweet id from claim proof input.');
-    }
-    await verifyClaimTweet(
-      handle,
-      raw.claim_nonce,
-      raw.claim_issued_at || nowStamp(),
-      raw.claim_token_expires_at!,
-      tweetId
-    );
-  }
-
-  const nextApiKey = raw.api_key && typeof raw.api_key === 'string' && raw.api_key.trim() ? raw.api_key : randomSecret(32);
-  const next: StoredAgentProfile = {
-    ...raw,
-    handle: normalized,
-    verified: true,
-    api_key: nextApiKey,
-    api_key_issued_at: nowStamp(),
-    claim_token: undefined,
-    claim_nonce: undefined,
-    claim_issued_at: undefined,
-    claim_token_expires_at: undefined,
-    updated_at: nowStamp()
-  };
-  await persistAgentProfile(next);
-  return {
-    profile: buildAgentProfileFromStored(normalized, next),
-    api_key: nextApiKey
-  };
-}
-
-export function buildAgentClaimUrls(
-  handle: string,
-  claim: AgentClaim,
-  origin = '',
-  apiVersion: 'legacy' | 'v1' = 'legacy'
-) {
-  const normalizedHandle = normalizeAgentHandle(handle);
-  const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  const fallbackBase = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL : '';
-  const base = cleanOrigin || fallbackBase || 'https://www.clawfable.com';
-  const verifyPath = apiVersion === 'v1' ? '/api/v1/agents/verify' : '/api/agents/verify';
-  const verifyQuery = new URLSearchParams({
-    handle: normalizedHandle,
-    token: claim.claim_token,
-    nonce: claim.claim_nonce
+export async function listDocsPaginated(
+  section: CoreSection,
+  page = 1,
+  pageSize = 20
+): Promise<{ items: DocListItem[]; total: number; page: number; pageSize: number }> {
+  const all = await listDocs(section);
+  // Sort by date desc
+  all.sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : 0;
+    const db = b.date ? new Date(b.date).getTime() : 0;
+    return db - da;
   });
-  const verifyUrl = `${base}${verifyPath}?${verifyQuery.toString()}`;
-  const tweet = `I just claimed @${normalizedHandle} for Clawfable contributions. Nonce: ${claim.claim_nonce}. Verify here: ${verifyUrl}`;
-
-  return {
-    handle: normalizedHandle,
-    claim_token: claim.claim_token,
-    claim_nonce: claim.claim_nonce,
-    verify_url: verifyUrl,
-    claim_tweet_url: `https://x.com/intent/tweet?text=${encodeURIComponent(tweet)}`
-  };
-}
-
-export async function resolveAgentForUpload(
-  handle: string,
-  metadata: {
-    displayName?: string;
-    profileUrl?: string;
-    apiKey?: string;
-  } = {}
-): Promise<(Required<Pick<UserProfile, 'handle' | 'verified'>> & Pick<UserProfile, 'display_name' | 'profile_url'>)> {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) throw new Error('agent_handle is required.');
-
-  const raw = await getAgentProfileRow(normalized);
-  const base = parseAgentProfile(raw, normalized);
-  const normalizedApiKey = metadata.apiKey?.trim();
-  const hasValidApiKey = Boolean(base.verified) && Boolean(normalizedApiKey && raw?.api_key && normalizedApiKey === raw.api_key);
-
-  const now = nowStamp();
-  const updated = {
-    ...base,
-    handle: normalized,
-    display_name: metadata.displayName || base.display_name,
-    profile_url: metadata.profileUrl || base.profile_url,
-    updated_at: now
-  };
-
-  await persistAgentProfile(updated);
-  return {
-    handle: updated.handle,
-    verified: hasValidApiKey,
-    display_name: updated.display_name,
-    profile_url: updated.profile_url
-  };
-}
-
-export async function recordAgentArtifact(handle: string, section: string, slug: string) {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) return;
-  const now = nowStamp();
-  const raw = await getAgentProfileRow(normalized);
-  const base = parseAgentProfile(raw, normalized);
-  await persistAgentProfile({
-    ...base,
-    handle: normalized,
-    last_artifact_ref: `${section}/${slug}`,
-    artifact_count: parseArtifactCount(base.artifact_count) + 1,
-    updated_at: now
-  });
-}
-
-async function getSectionIndex(section: CoreSection): Promise<string[]> {
-  const kv = await getKvClient();
-  if (!kv) return [];
-
-  const raw = await kvGet<unknown>(kv, indexKey(section));
-  if (!raw) return [];
-
-  if (Array.isArray(raw)) {
-    return raw.filter((item): item is string => typeof item === 'string');
-  }
-
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === 'string');
-      }
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-async function setSectionIndex(section: CoreSection, values: string[]) {
-  const kv = await getKvClient();
-  if (!kv) return;
-  const next = [...new Set(values.filter(Boolean).map((item) => item.trim()).filter(Boolean))];
-  await kv.set(indexKey(section), next);
-}
-
-function skipSeedKey(section: CoreSection) {
-  return `${DB_SKIP_SEED_PREFIX}:${section}`;
-}
-
-async function shouldSkipSectionSeed(section: CoreSection) {
-  const kv = await getKvClient();
-  if (!kv) return false;
-
-  const raw = await kvGet<unknown>(kv, skipSeedKey(section));
-  if (raw == null) return false;
-  if (typeof raw === 'boolean') return raw;
-  if (typeof raw === 'number') return raw !== 0;
-  if (typeof raw === 'string') {
-    const value = raw.trim().toLowerCase();
-    return ['1', 'true', 'yes', 'on', 'enabled', 'skip'].includes(value);
-  }
-
-  return false;
-}
-
-async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord | null> {
-  const kv = await getKvClient();
-  if (!kv) return null;
-  const key = artifactKey(section, normalizeSlug(slug));
-  const raw = await kvGet<DbRecord | null>(kv, key);
-  if (!raw) return null;
-  return normalizeArtifact(section, raw);
-}
-
-function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
-  const rev = raw.revision || {};
-  const normalizedSlug = normalizeSlug(raw.slug);
-  const authorCommentaryAlias =
-    typeof (raw as Record<string, unknown>).author_comment === 'string'
-      ? ((raw as Record<string, unknown>).author_comment as string)
-      : undefined;
-  return {
+  const total = all.length;
+  const start = (page - 1) * pageSize;
+  const items = all.slice(start, start + pageSize).map((d) => ({
+    slug: d.slug,
+    title: d.title,
+    summary: d.summary,
+    date: d.date,
     section,
-    slug: normalizedSlug,
-    sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
-    title: raw.title || 'Clawfable artifact',
-    description: raw.description || 'Clawfable artifact',
-    author_commentary: raw.author_commentary || authorCommentaryAlias,
-    user_comments:
-      raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
-    content: raw.content || '',
-    created_by_handle: raw.created_by_handle,
-    created_by_display_name: raw.created_by_display_name,
-    created_by_profile_url: raw.created_by_profile_url,
-    created_by_verified: raw.created_by_verified === true,
-    updated_by_handle: raw.updated_by_handle,
-    updated_by_display_name: raw.updated_by_display_name,
-    updated_by_profile_url: raw.updated_by_profile_url,
-    updated_by_verified: raw.updated_by_verified === true,
-    copy_paste_scope: sanitizeScope(raw.copy_paste_scope || {}),
-    revision: {
-      family: rev.family || section,
-      id: rev.id || 'v1',
-      kind: rev.kind || 'core',
-      status: rev.status || 'draft',
-      parent_revision: rev.parent_revision,
-      source: rev.source
-    },
-    created_at: raw.created_at || nowStamp(),
-    updated_at: raw.updated_at || nowStamp()
-  };
-}
-
-async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise<DbRecord> {
-  const kv = await getKvClient();
-  if (!kv) {
-    throw new Error(
-      'No database configured. Set CLAWFABLE_DATABASE_URL + CLAWFABLE_DATABASE_TOKEN, CLAWFABLE_KV_URL + CLAWFABLE_KV_TOKEN, KV_REST_API_URL + KV_REST_API_TOKEN (read-write), or KV_REST_API_URL + KV_REST_API_READ_ONLY_TOKEN (read-only).'
-    );
-  }
-
-  const slug = normalizeSlug(payload.slug);
-  const now = nowStamp();
-  const existing = await getArtifact(section, slug);
-  const revisionInput = payload.revision || {};
-  const fallbackSection = revisionInput.family || section;
-  const actorUpdated: Record<string, unknown> = payload.updated_by_handle || payload.created_by_handle
-    ? {
-        handle: payload.updated_by_handle || payload.created_by_handle,
-        display_name: payload.updated_by_display_name || payload.created_by_display_name,
-        profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
-        verified: payload.updated_by_verified ?? payload.created_by_verified
-      }
-    : {};
-  const actorCreated = payload.created_by_handle
-    ? {
-        handle: payload.created_by_handle,
-        display_name: payload.created_by_display_name,
-        profile_url: payload.created_by_profile_url,
-        verified: payload.created_by_verified
-      }
-    : existing
-      ? {
-          handle: existing.created_by_handle,
-          display_name: existing.created_by_display_name,
-          profile_url: existing.created_by_profile_url,
-          verified: existing.created_by_verified === true
-        }
-      : actorUpdated;
-
-  const createdHandle = typeof actorCreated.handle === 'string' ? actorCreated.handle : undefined;
-  const createdDisplay = typeof actorCreated.display_name === 'string' ? actorCreated.display_name : undefined;
-  const createdProfile = typeof actorCreated.profile_url === 'string' ? actorCreated.profile_url : undefined;
-  const createdVerified = actorCreated.verified === true;
-  const updatedHandle = typeof actorUpdated.handle === 'string' ? actorUpdated.handle : createdHandle;
-  const updatedDisplay = typeof actorUpdated.display_name === 'string' ? actorUpdated.display_name : createdDisplay;
-  const updatedProfile = typeof actorUpdated.profile_url === 'string' ? actorUpdated.profile_url : createdProfile;
-  const updatedVerified = actorUpdated.verified === true || createdVerified;
-
-  const record: DbRecord = {
-    section,
-    slug,
-    sourcePath: canonicalSourcePath(section, slug, payload.sourcePath || sourcePathFor(section, slug)),
-    title: payload.title,
-    description:
-      payload.description?.trim() ||
-      shortDescription({}, payload.content) ||
-      `Clawfable ${section} artifact.`,
-    author_commentary: payload.author_commentary || undefined,
-    user_comments: payload.user_comments,
-    content: payload.content,
-    created_by_handle: createdHandle,
-    created_by_display_name: createdDisplay,
-    created_by_profile_url: createdProfile,
-    created_by_verified: createdVerified,
-    updated_by_handle: updatedHandle,
-    updated_by_display_name: updatedDisplay,
-    updated_by_profile_url: updatedProfile,
-    updated_by_verified: updatedVerified,
-    copy_paste_scope: sanitizeScope(payload.copy_paste_scope || existing?.copy_paste_scope || {}),
-    revision: {
-      family: fallbackSection,
-      id: revisionInput.id || existing?.revision?.id || 'v1',
-      kind: revisionInput.kind || existing?.revision?.kind || 'revision',
-      status: revisionInput.status || existing?.revision?.status || 'draft',
-      parent_revision: revisionInput.parent_revision || existing?.revision?.parent_revision,
-      source: revisionInput.source || existing?.revision?.source
-    },
-    created_at: existing?.created_at || now,
-    updated_at: now
-  };
-
-  await kv.set(artifactKey(section, slug), record);
-
-  const index = await getSectionIndex(section);
-  if (!index.includes(slug)) {
-    index.push(slug);
-    await setSectionIndex(section, index);
-  }
-
-  return record;
-}
-
-async function ensureSectionSeeded(section: CoreSection) {
-  if (seededSections.has(section)) return;
-
-  if (await shouldSkipSectionSeed(section)) {
-    return;
-  }
-
-  const index = await getSectionIndex(section);
-  if (index.length > 0) {
-    seededSections.add(section);
-    return;
-  }
-
-  const seededRows = fromMdSection(section);
-  const kv = await getKvClient();
-  if (!kv) {
-    seededSections.add(section);
-    return;
-  }
-
-  for (const row of seededRows) {
-    await upsertArtifact(section, {
-      section,
-      slug: row.slug,
-      title: row.title,
-      description: row.description,
-      content: row.content,
-      copy_paste_scope: row.copy_paste_scope,
-      revision: row.revision || undefined,
-      sourcePath: row.sourcePath
-    });
-  }
-
-  seededSections.add(section);
-}
-
-export function listSections(): string[] {
-  return coreSections.filter((section) => {
-    const contentDirectory = path.join(CONTENT_ROOT, section);
-    return fs.existsSync(contentDirectory);
-  });
-}
-
-export async function listBySection(section: string): Promise<SectionItem[]> {
-  if (!isCoreSection(section)) return [];
-  const normalized = normalizeSection(section);
-
-  await ensureSectionSeeded(normalized);
-  const isSeedingSkipped = await shouldSkipSectionSeed(normalized);
-
-  const recordsFromDb = await (async () => {
-    const index = await getSectionIndex(normalized);
-    if (index.length === 0) return [];
-    const rows = await Promise.all(index.map((slug) => getArtifact(normalized, slug)));
-    return rows.filter((row): row is DbRecord => Boolean(row));
-  })();
-
-  if (recordsFromDb.length > 0) {
-    return recordsFromDb
-      .map((row) => mapRecordToSectionItem(row))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }
-
-  if (isSeedingSkipped) {
-    return [];
-  }
-
-  const fallback = fromMdSection(normalized);
-  return fallback
-    .map((row) => mapRecordToSectionItem({
-      section: normalized,
-      slug: row.slug,
-      sourcePath: canonicalSourcePath(normalized, row.slug, row.sourcePath),
-      title: row.title,
-      description: row.description,
-      content: row.content,
-      copy_paste_scope: row.copy_paste_scope,
-      revision: row.revision || {},
-      created_at: nowStamp(),
-      updated_at: nowStamp()
-    }))
-    .sort((a, b) => a.title.localeCompare(b.title));
-}
-
-export async function getDoc(section: string, slug: string | string[]) {
-  if (!isCoreSection(section)) return null;
-
-  const normalizedSection = normalizeSection(section);
-  const normalizedSlug = normalizeSlug(Array.isArray(slug) ? slug.join('/') : String(slug));
-
-  await ensureSectionSeeded(normalizedSection);
-  const isSeedingSkipped = await shouldSkipSectionSeed(normalizedSection);
-
-  const fromDb = await getArtifact(normalizedSection, normalizedSlug);
-  if (fromDb) {
-    return toDoc(fromDb);
-  }
-
-  if (isSeedingSkipped) {
-    return null;
-  }
-
-  const sectionDir = path.join(CONTENT_ROOT, normalizedSection);
-  const fallbackPath = path.join(sectionDir, `${normalizedSlug}.md`);
-  if (!fs.existsSync(fallbackPath)) return null;
-  const raw = fs.readFileSync(fallbackPath, 'utf8');
-  const parsed = matter(raw);
-  const data = parsed.data as Record<string, unknown>;
-
-  const row: DbRecord = {
-    section: normalizedSection,
-    slug: normalizedSlug,
-    sourcePath: canonicalSourcePath(
-      normalizedSection,
-      normalizedSlug,
-      `${normalizedSection}/${normalizedSlug}.md`
-    ),
-    title: (data?.title as string) || `Clawfable ${normalizedSection} artifact`,
-    description: shortDescription(data, parsed.content),
-    content: parsed.content,
-    copy_paste_scope: sanitizeScope((data?.copy_paste_scope as ScopeMap) || {}),
-    revision: extractRevision(data) || { family: normalizedSection, id: 'v1', kind: 'core', status: 'accepted' },
-    created_at: nowStamp(),
-    updated_at: nowStamp()
-  };
-
-  return toDoc(row);
-}
-
-export async function createArtifact(payload: DbPayload) {
-  const normalizedSection = normalizeSection(payload.section);
-  const existing = await getArtifact(normalizedSection, payload.slug);
-  if (existing) {
-    throw new Error('A row already exists for this section+slug. Use revise for existing entries.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    ...payload,
-    section: normalizedSection,
-    revision: {
-      ...payload.revision,
-      kind: payload.revision?.kind || 'core',
-      family: payload.revision?.family || normalizedSection,
-      status: payload.revision?.status || 'review'
-    }
-  });
-}
-
-export async function reviseArtifact(payload: DbPayload) {
-  const normalizedSection = normalizeSection(payload.section);
-  const slug = normalizeSlug(payload.slug);
-  const existing = await getArtifact(normalizedSection, slug);
-  if (!existing) {
-    throw new Error('Cannot revise a missing artifact. Upload with create mode first.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    ...payload,
-    section: normalizedSection,
-    slug,
-    revision: {
-      ...(payload.revision || {}),
-      kind: payload.revision?.kind || 'revision',
-      family: payload.revision?.family || existing.revision.family || normalizedSection,
-      parent_revision: payload.revision?.parent_revision || existing.revision.id || 'v1',
-      status: payload.revision?.status || existing.revision.status || 'review'
-    }
-  });
-}
-
-export async function forkArtifact(payload: ForkPayload) {
-  const sourceSection = payload.sourceSection;
-  const sourceSlug = normalizeSlug(payload.sourceSlug);
-  const normalizedSection = normalizeSection(payload.section);
-
-  if (!isCoreSection(sourceSection) || !isCoreSection(payload.section)) {
-    throw new Error('Fork request must use SOUL or MEMORY only.');
-  }
-
-  const sourceRecord = await getArtifact(sourceSection, sourceSlug);
-  if (!sourceRecord) {
-    throw new Error('Fork source artifact not found.');
-  }
-
-  if (sourceSection !== payload.section) {
-    throw new Error('Fork source and destination section must match.');
-  }
-
-  const normalizedSlug = normalizeSlug(payload.slug);
-  const existing = await getArtifact(normalizedSection, normalizedSlug);
-  if (existing) {
-    throw new Error('A fork already exists with this slug. Choose a unique fork slug.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    section: normalizedSection,
-    slug: normalizedSlug,
-    title: payload.title,
-    description: payload.description || sourceRecord.description,
-    content: payload.content,
-    copy_paste_scope: payload.copy_paste_scope || sourceRecord.copy_paste_scope,
-    revision: {
-      family: payload.revision?.family || sourceRecord.revision.family,
-      kind: 'fork',
-      id: payload.revision?.id,
-      status: payload.revision?.status || 'review',
-      parent_revision: payload.revision?.parent_revision || sourceRecord.revision.id,
-      source: payload.revision?.source || sourceRecord.sourcePath
-    },
-    sourcePath: payload.sourcePath || sourcePathFor(normalizedSection, normalizedSlug)
-  });
-}
-
-export function getRootDoc(slug: string) {
-  const full = path.join(CONTENT_ROOT, `${slug}.md`);
-  if (!fs.existsSync(full)) return null;
-  const raw = fs.readFileSync(full, 'utf8');
-  const parsed = matter(raw);
-  return { data: parsed.data, content: parsed.content };
-}
-
-export async function artifactPayloadFromRequest(body: Record<string, unknown>) {
-  const section = normalizeSection(String(body.section || ''));
-  if (!isCoreSection(section)) {
-    throw new Error('Unsupported section. Use soul or memory.');
-  }
-
-  const slug = normalizeSlug(String(body.slug || ''));
-  if (!slug) {
-    throw new Error('Artifact slug is required.');
-  }
-  const title = String(body.title || '').trim();
-  const content = String(body.content || '').trim();
-  if (!title || !content) {
-    throw new Error('Artifact title and content are required.');
-  }
-
-  const sourcePath = body.sourcePath ? String(body.sourcePath) : sourcePathFor(section, slug);
-  const rawDescription = body.description ? String(body.description) : '';
-  const parseCheckbox = (value: unknown) => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value !== 'string') return false;
-    return ['on', 'true', '1', 'yes'].includes(value.toLowerCase());
-  };
-  const copyPasteScope: ScopeMap = {
-    soul: parseCheckbox(body.soul) || parseCheckbox(body.copy_paste_soul),
-    memory: parseCheckbox(body.memory) || parseCheckbox(body.copy_paste_memory),
-    skill: parseCheckbox(body.skill) || parseCheckbox(body.copy_paste_skill),
-    user_files: parseCheckbox(body.user_files) || parseCheckbox(body.copy_paste_user_files)
-  };
-
-  const revision: RevisionMeta = {
-    family: body.family ? String(body.family) : section,
-    id: body.revision_id ? String(body.revision_id).trim() : undefined,
-    kind: body.kind ? String(body.kind) : undefined,
-    status: body.status ? String(body.status) : undefined,
-    parent_revision: body.parent_revision ? String(body.parent_revision) : undefined,
-    source: body.source ? String(body.source) : undefined
-  };
-
-  return {
-    section,
-    slug,
-    sourcePath,
-    title,
-    description: rawDescription || shortDescription({}, content),
-    content,
-    copy_paste_scope: copyPasteScope,
-    created_by_handle: typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
-    created_by_display_name:
-      typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
-        ? body.agent_display_name.trim()
-        : typeof body.agent_name === 'string' && body.agent_name.trim()
-          ? body.agent_name.trim()
-          : undefined,
-    created_by_profile_url:
-      typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
-        ? body.agent_profile_url.trim()
-        : undefined,
-    updated_by_handle:
-      typeof body.updated_by_handle === 'string'
-        ? normalizeAgentHandle(body.updated_by_handle)
-        : typeof body.agent_handle === 'string'
-          ? normalizeAgentHandle(body.agent_handle)
-          : undefined,
-    updated_by_display_name:
-      typeof body.updated_by_display_name === 'string' && body.updated_by_display_name.trim()
-        ? body.updated_by_display_name.trim()
-        : typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
-          ? body.agent_display_name.trim()
-          : typeof body.agent_name === 'string' && body.agent_name.trim()
-            ? body.agent_name.trim()
-            : undefined,
-    updated_by_profile_url:
-      typeof body.updated_by_profile_url === 'string' && body.updated_by_profile_url.trim()
-        ? body.updated_by_profile_url.trim()
-        : typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
-          ? body.agent_profile_url.trim()
-          : undefined,
-    updated_by_verified:
-      typeof body.updated_by_verified === 'boolean'
-        ? body.updated_by_verified
-        : typeof body.updated_by_verified === 'string'
-          ? ['true', '1', 'yes', 'on'].includes(body.updated_by_verified.toLowerCase())
-          : undefined,
-    author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
-    user_comments: body.user_comments || body.comments,
-    revision
-  };
+  }));
+  return { items, total, page, pageSize };
 }
