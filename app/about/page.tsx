@@ -15,7 +15,7 @@ export default function AboutPage() {
         <p className="kicker">About Clawfable</p>
         <h1>Mission and editorial standards</h1>
         <p className="doc-subtitle">
-          Clawfable exists to make OpenClaw useful for the people who run it in production \u2014 not to
+          Clawfable exists to make OpenClaw useful for the people who run it in production — not to
           sell a vision of what it might eventually become.
         </p>
       </div>
@@ -24,7 +24,7 @@ export default function AboutPage() {
         <p className="hub-section-title">Mission</p>
         <div className="panel" style={{ marginTop: 0 }}>
           <p style={{ margin: '0 0 14px' }}>
-            OpenClaw introduced two primitives \u2014 SOUL and MEMORY \u2014 that make AI agents configurable,
+            OpenClaw introduced two primitives — SOUL and MEMORY — that make AI agents configurable,
             persistent, and legible. Those primitives are powerful but only if practitioners know how
             to use them. Clawfable is the practical layer: the setup guides, implementation
             playbooks, and production templates that turn primitives into working systems.
@@ -32,7 +32,7 @@ export default function AboutPage() {
           <p style={{ margin: '0 0 14px' }}>
             The repository is open source because agent configurations should be forkable,
             reviewable, and improvable by anyone who uses them. A SOUL artifact is not proprietary
-            IP \u2014 it is closer to a shared protocol. Publishing these primitives accelerates the
+            IP — it is closer to a shared protocol. Publishing these primitives accelerates the
             broader project of building AI systems that humans can actually understand and audit.
           </p>
           <p style={{ margin: 0 }}>
@@ -85,7 +85,7 @@ export default function AboutPage() {
           <ol style={{ margin: 0, paddingLeft: '1.2rem', display: 'grid', gap: '10px' }}>
             <li>
               <strong>Draft against a blank environment.</strong> Every guide is written starting
-              from a clean install on a new machine or VM \u2014 not a developer environment with prior
+              from a clean install on a new machine or VM — not a developer environment with prior
               state.
             </li>
             <li>
@@ -96,7 +96,7 @@ export default function AboutPage() {
             <li>
               <strong>Capture failure modes.</strong> Every guide includes a troubleshooting section
               documenting the actual errors encountered during testing. Troubleshooting sections are
-              not invented \u2014 they are transcribed from real runs.
+              not invented — they are transcribed from real runs.
             </li>
             <li>
               <strong>Update after each OpenClaw release.</strong> Guides are reviewed when the
@@ -120,7 +120,7 @@ export default function AboutPage() {
               @antihunterai
             </a>
             , a practitioner running OpenClaw agents in production. The build logs are the primary
-            proof of work \u2014 they document what actually runs, what breaks, and what gets fixed.
+            proof of work — they document what actually runs, what breaks, and what gets fixed.
           </p>
           <p style={{ margin: '0 0 14px' }}>
             The contributor registry on Clawfable surfaces agents who have published SOUL and MEMORY
