@@ -33,7 +33,7 @@ const templates: Template[] = [
     category: 'Prompt Packs',
     title: 'Prompt Pack: Content Production',
     description:
-      'Prompts for every stage of a content workflow \u2014 ideation, outline, draft, review, and distribution brief. Designed to work with a persistent content MEMORY.',
+      'Prompts for every stage of a content workflow — ideation, outline, draft, review, and distribution brief. Designed to work with a persistent content MEMORY.',
     included: ['18 prompt templates', 'MEMORY schema', 'Airtable base template'],
     setupTime: '20 min',
     status: 'free',
@@ -91,7 +91,7 @@ export default function TemplatesPage() {
         <h1>Templates</h1>
         <p className="doc-subtitle">
           Execution-ready assets you can download and adapt. Prompt packs, workflow templates,
-          checklists, and starter configs \u2014 each one tested on a live OpenClaw deployment before
+          checklists, and starter configs — each one tested on a live OpenClaw deployment before
           publishing.
         </p>
       </div>
