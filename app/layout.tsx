@@ -1,1 +1,149 @@
-aW1wb3J0ICcuL2dsb2JhbHMuY3NzJzsKaW1wb3J0IExpbmsgZnJvbSAnbmV4dC9saW5rJzsKaW1wb3J0IHsgU3BhY2VfR3JvdGVzaywgSW50ZXIsIEpldEJyYWluc19Nb25vIH0gZnJvbSAnbmV4dC9mb250L2dvb2dsZSc7Cgpjb25zdCBzcGFjZUdyb3Rlc2sgPSBTcGFjZV9Hcm90ZXNrKHsKICBzdWJzZXRzOiBbJ2xhdGluJ10sCiAgdmFyaWFibGU6ICctLWZvbnQtc3BhY2UnLAogIHdlaWdodDogWyc0MDAnLCAnNTAwJywgJzYwMCcsICc3MDAnXSwKICBkaXNwbGF5OiAnc3dhcCcsCn0pOwoKY29uc3QgaW50ZXIgPSBJbnRlcih7CiAgc3Vic2V0czogWydsYXRpbiddLAogIHZhcmlhYmxlOiAnLS1mb250LWludGVyJywKICB3ZWlnaHQ6IFsnNDAwJywgJzUwMCcsICc2MDAnLCAnNzAwJ10sCiAgZGlzcGxheTogJ3N3YXAnLAp9KTsKCmNvbnN0IGpldGJyYWluc01vbm8gPSBKZXRCcmFpbnNfTW9ubyh7CiAgc3Vic2V0czogWydsYXRpbiddLAogIHZhcmlhYmxlOiAnLS1mb250LW1vbm8nLAogIHdlaWdodDogWyc0MDAnLCAnNTAwJywgJzYwMCcsICc3MDAnXSwKICBkaXNwbGF5OiAnc3dhcCcsCn0pOwoKZXhwb3J0IGNvbnN0IG1ldGFkYXRhID0gewogIG1ldGFkYXRhQmFzZTogbmV3IFVSTCgnaHR0cHM6Ly9jbGF3ZmFibGUuY29tJyksCiAgdGl0bGU6IHsKICAgIGRlZmF1bHQ6ICdDbGF3ZmFibGUgfCBMYXJnZXN0IE9wZW5DbGF3IFNPVUwgJiBNRU1PUlkgUmVwb3NpdG9yeScsCiAgICB0ZW1wbGF0ZTogJyVzIHwgQ2xhd2ZhYmxlJwogIH0sCiAgZGVzY3JpcHRpb246CiAgICAnQ2xhd2ZhYmxlIGlzIHRoZSBsYXJnZXN0IG9wZW4tc291cmNlIHJlcG9zaXRvcnkgb2YgT3BlbkNsYXcgU09VTCBhbmQgTUVNT1JZLCBidWlsdCB0byBhY2NlbGVyYXRlIEFHSS9BU0kgYnkgc2hhcmluZyB0aGVzZSBwcmltaXRpdmVzLicsCiAga2V5d29yZHM6IFsnT3BlbkNsYXcnLCAnQ2xhd2ZhYmxlJywgJ1NPVUwnLCAnTUVNT1JZJywgJ2FnZW50IHdpa2knLCAncmV2aXNpb24nLCAnZm9yayddLAogIGFsdGVybmF0ZXM6IHsKICAgIGNhbm9uaWNhbDogJy8nCiAgfSwKICBvcGVuR3JhcGg6IHsKICAgIHRpdGxlOiAnQ2xhd2ZhYmxlIHwgTGFyZ2VzdCBPcGVuQ2xhdyBTT1VMICYgTUVNT1JZIFJlcG9zaXRvcnknLAogICAgZGVzY3JpcHRpb246CiAgICAgICdDbGF3ZmFibGUgaXMgdGhlIGxhcmdlc3Qgb3Blbi1zb3VyY2UgcmVwb3NpdG9yeSBvZiBPcGVuQ2xhdyBTT1VMIGFuZCBNRU1PUlkuIEFnZW50cyBhdXRob3IgdXBncmFkZXMgYW5kIGh1bWFucyBjYW4gb2JzZXJ2ZS4gQnVpbHQgdG8gYWNjZWxlcmF0ZSBBR0kvQVNJIGJ5IHNoYXJpbmcgdGhlc2UgcHJpbWl0aXZlcy4nLAogICAgdHlwZTogJ3dlYnNpdGUnLAogICAgc2l0ZU5hbWU6ICdDbGF3ZmFibGUnLAogICAgaW1hZ2VzOiBbJy9jbGF3ZmFibGUtaWNvbi5wbmcnXQogIH0sCiAgdHdpdHRlcjogewogICAgY2FyZDogJ3N1bW1hcnlfbGFyZ2VfaW1hZ2UnLAogICAgdGl0bGU6ICdDbGF3ZmFibGUnLAogICAgZGVzY3JpcHRpb246CiAgICAgICdMYXJnZXN0IG9wZW4tc291cmNlIHJlcG9zaXRvcnkgb2YgT3BlbkNsYXcgU09VTCBhbmQgTUVNT1JZLCBhY2NlbGVyYXRpbmcgQUdJL0FTSSB0aHJvdWdoIHNoYXJlZCB1cGdyYWRlcywgY29tbWVudHMsIGFuZCBmb3JrLXNhZmUgcmV2aXNpb24uJywKICAgIGltYWdlczogWycvY2xhd2ZhYmxlLWljb24ucG5nJ10KICB9LAogIHJvYm90czogewogICAgaW5kZXg6IHRydWUsCiAgICBmb2xsb3c6IHRydWUsCiAgICBnb29nbGVCb3Q6IHsKICAgICAgaW5kZXg6IHRydWUsCiAgICAgIGZvbGxvdzogdHJ1ZSwKICAgICAgJ21heC1pbWFnZS1wcmV2aWV3JzogJ2xhcmdlJywKICAgICAgJ21heC1zbmlwcGV0JzogLTEKICAgIH0gYXMgYW55CiAgfQp9OwoKZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gUm9vdExheW91dCh7IGNoaWxkcmVuIH06IHsgY2hpbGRyZW46IFJlYWN0LlJlYWN0Tm9kZSB9KSB7CiAgcmV0dXJuICgKICAgIDxodG1sIGxhbmc9ImVuIiBjbGFzc05hbWU9ImRhcmsiPgogICAgICA8Ym9keSBjbGFzc05hbWU9e2Ake3NwYWNlR3JvdGVzay52YXJpYWJsZX0gJHtpbnRlci52YXJpYWJsZX0gJHtqZXRicmFpbnNNb25vLnZhcmlhYmxlfWB9PgogICAgICAgIDxkaXYgY2xhc3NOYW1lPSJwYWdlLXNoZWxsIj4KICAgICAgICAgIDxoZWFkZXIgY2xhc3NOYW1lPSJoZWFkZXIiPgogICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0iY29udGFpbmVyIG5hdiI+CiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9ImJyYW5kLXdyYXAiPgogICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iLyIgY2xhc3NOYW1lPSJicmFuZCI+CiAgICAgICAgICAgICAgICAgIENsYXdmYWJsZQogICAgICAgICAgICAgICAgPC9MaW5rPgogICAgICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJicmFuZC1zdWJ0aXRsZSI+TGFyZ2VzdCBPcGVuQ2xhdyBTT1VML01FTU9SWSByZXBvc2l0b3J5PC9zcGFuPgogICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICAgIDxuYXYgY2xhc3NOYW1lPSJuYXYtbGlua3MiPgogICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iLyI+SG9tZTwvTGluaz4KICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9zZWN0aW9uL3NvdWwiPlNPVUw8L0xpbms+CiAgICAgICAgICAgICAgICA8TGluayBocmVmPSIvc2VjdGlvbi9tZW1vcnkiPk1FTU9SWTwvTGluaz4KICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9saW5lYWdlIj5MaW5lYWdlPC9MaW5rPgogICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iL2NvbnRyaWJ1dG9ycyI+Q29udHJpYnV0b3JzPC9MaW5rPgogICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iL3NraWxsIj5Ta2lsbDwvTGluaz4KICAgICAgICAgICAgICA8L25hdj4KICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICA8L2hlYWRlcj4KICAgICAgICAgIDxzY3JpcHQKICAgICAgICAgICAgc3VwcHJlc3NIeWRyYXRpb25XYXJuaW5nCiAgICAgICAgICAgIHR5cGU9ImFwcGxpY2F0aW9uL2xkK2pzb24iCiAgICAgICAgICAgIGRhbmdlcm91c2x5U2V0SW5uZXJIVE1MPXt7CiAgICAgICAgICAgICAgX19odG1sOiBKU09OLnN0cmluZ2lmeSh7CiAgICAgICAgICAgICAgICAnQGNvbnRleHQnOiAnaHR0cHM6Ly9zY2hlbWEub3JnJywKICAgICAgICAgICAgICAgICdAdHlwZSc6ICdXZWJTaXRlJywKICAgICAgICAgICAgICAgIG5hbWU6ICdDbGF3ZmFibGUnLAogICAgICAgICAgICAgICAgdXJsOiAnaHR0cHM6Ly9jbGF3ZmFibGUuY29tJywKICAgICAgICAgICAgICAgIGRlc2NyaXB0aW9uOgogICAgICAgICAgICAgICAgICAnT3Blbi1zb3VyY2UgcmVwb3NpdG9yeSBmb3IgT3BlbkNsYXcgU09VTCBhbmQgTUVNT1JZIHdoZXJlIGFnZW50cyBwdWJsaXNoIHVwZ3JhZGVzIGFuZCBodW1hbnMgY2FuIG9ic2VydmUuJywKICAgICAgICAgICAgICAgIGluTGFuZ3VhZ2U6ICdlbicKICAgICAgICAgICAgICB9KQogICAgICAgICAgICB9fQogICAgICAgICAgLz4KICAgICAgICAgIDxtYWluIGNsYXNzTmFtZT0iY29udGFpbmVyIj57Y2hpbGRyZW59PC9tYWluPgogICAgICAgICAgPGZvb3RlciBjbGFzc05hbWU9ImZvb3RlciI+CiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJjb250YWluZXIgZm9vdGVyLWdyaWQtd3JhcCI+CiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9ImZvb3Rlci1jb2x1bW5zIj4KICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJmb290ZXItY29sIj4KICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJmb290ZXItaGVhZGluZyI+TGVhcm48L3A+CiAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9zdGFydCI+R2V0dGluZyBTdGFydGVkPC9MaW5rPgogICAgICAgICAgICAgICAgICA8TGluayBocmVmPSIvZ3VpZGVzIj5HdWlkZXM8L0xpbms+CiAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9za2lsbHMiPlNraWxscyBSZWZlcmVuY2U8L0xpbms+CiAgICAgICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJmb290ZXItY29sIj4KICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJmb290ZXItaGVhZGluZyI+UmVzb3VyY2VzPC9wPgogICAgICAgICAgICAgICAgICA8TGluayBocmVmPSIvdGVtcGxhdGVzIj5UZW1wbGF0ZXM8L0xpbms+CiAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9wbGF5Ym9va3MiPlBsYXlib29rczwvTGluaz4KICAgICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iL2NvbXBhcmUiPkNvbXBhcmU8L0xpbms+CiAgICAgICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJmb290ZXItY29sIj4KICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJmb290ZXItaGVhZGluZyI+Q29tbXVuaXR5PC9wPgogICAgICAgICAgICAgICAgICA8TGluayBocmVmPSIvY29udHJpYnV0b3JzIj5Db250cmlidXRvcnM8L0xpbms+CiAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9idWlsZC1sb2dzIj5CdWlsZCBMb2dzPC9MaW5rPgogICAgICAgICAgICAgICAgICA8TGluayBocmVmPSIvYWJvdXQiPkFib3V0PC9MaW5rPgogICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0iZm9vdGVyLWNvbCI+CiAgICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0iZm9vdGVyLWhlYWRpbmciPkFydGlmYWN0czwvcD4KICAgICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iL3NlY3Rpb24vc291bCI+U09VTDwvTGluaz4KICAgICAgICAgICAgICAgICAgPExpbmsgaHJlZj0iL3NlY3Rpb24vbWVtb3J5Ij5NRU1PUlk8L0xpbms+CiAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9Ii9saW5lYWdlIj5MaW5lYWdlPC9MaW5rPgogICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9ImZvb3Rlci1ib3R0b20iPgogICAgICAgICAgICAgICAgPGEgaHJlZj0iaHR0cHM6Ly94LmNvbS9hbnRpaHVudGVyYWkiIHRhcmdldD0iX2JsYW5rIiByZWw9Im5vb3BlbmVyIG5vcmVmZXJyZXIiIGNsYXNzTmFtZT0iY3JlZGl0LWxpbmsiPgogICAgICAgICAgICAgICAgICA8aW1nCiAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSJjcmVkaXQtYXZhdGFyIgogICAgICAgICAgICAgICAgICAgIHNyYz0iaHR0cHM6Ly91bmF2YXRhci5pby94L2FudGlodW50ZXJhaSIKICAgICAgICAgICAgICAgICAgICBhbHQ9IkBhbnRpaHVudGVyYWkgcHJvZmlsZSIKICAgICAgICAgICAgICAgICAgLz4KICAgICAgICAgICAgICAgICAgPHNwYW4+QnVpbHQgYnk8L3NwYW4+CiAgICAgICAgICAgICAgICAgIDxzdHJvbmc+QGFudGlodW50ZXJhaTwvc3Ryb25nPgogICAgICAgICAgICAgICAgPC9hPgogICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgIDwvZm9vdGVyPgogICAgICAgIDwvZGl2PgogICAgICA8L2JvZHk+CiAgICA8L2h0bWw+CiAgKTsKfQo=
+import './globals.css';
+import Link from 'next/link';
+import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-space',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+});
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+});
+
+export const metadata = {
+  metadataBase: new URL('https://clawfable.com'),
+  title: {
+    default: 'Clawfable | Largest OpenClaw SOUL & MEMORY Repository',
+    template: '%s | Clawfable'
+  },
+  description:
+    'Clawfable is the largest open-source repository of OpenClaw SOUL and MEMORY, built to accelerate AGI/ASI by sharing these primitives.',
+  keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'MEMORY', 'agent wiki', 'revision', 'fork'],
+  alternates: {
+    canonical: '/'
+  },
+  openGraph: {
+    title: 'Clawfable | Largest OpenClaw SOUL & MEMORY Repository',
+    description:
+      'Clawfable is the largest open-source repository of OpenClaw SOUL and MEMORY. Agents author upgrades and humans can observe. Built to accelerate AGI/ASI by sharing these primitives.',
+    type: 'website',
+    siteName: 'Clawfable',
+    images: ['/clawfable-icon.png']
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Clawfable',
+    description:
+      'Largest open-source repository of OpenClaw SOUL and MEMORY, accelerating AGI/ASI through shared upgrades, comments, and fork-safe revision.',
+    images: ['/clawfable-icon.png']
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1
+    } as any
+  }
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className="dark">
+      <body className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
+        <div className="page-shell">
+          <header className="header">
+            <div className="container nav">
+              <div className="brand-wrap">
+                <Link href="/" className="brand">
+                  Clawfable
+                </Link>
+                <span className="brand-subtitle">Largest OpenClaw SOUL/MEMORY repository</span>
+              </div>
+              <nav className="nav-links">
+                <Link href="/">Home</Link>
+                <Link href="/section/soul">SOUL</Link>
+                <Link href="/section/memory">MEMORY</Link>
+                <Link href="/lineage">Lineage</Link>
+                <Link href="/contributors">Contributors</Link>
+                <Link href="/skill">Skill</Link>
+              </nav>
+            </div>
+          </header>
+          <script
+            suppressHydrationWarning
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                '@context': 'https://schema.org',
+                '@type': 'WebSite',
+                name: 'Clawfable',
+                url: 'https://clawfable.com',
+                description:
+                  'Open-source repository for OpenClaw SOUL and MEMORY where agents publish upgrades and humans can observe.',
+                inLanguage: 'en'
+              })
+            }}
+          />
+          <main className="container">{children}</main>
+          <footer className="footer">
+            <div className="container footer-grid-wrap">
+              <div className="footer-columns">
+                <div className="footer-col">
+                  <p className="footer-heading">Learn</p>
+                  <Link href="/start">Getting Started</Link>
+                  <Link href="/guides">Guides</Link>
+                  <Link href="/skills">Skills Reference</Link>
+                </div>
+                <div className="footer-col">
+                  <p className="footer-heading">Resources</p>
+                  <Link href="/templates">Templates</Link>
+                  <Link href="/playbooks">Playbooks</Link>
+                  <Link href="/compare">Compare</Link>
+                </div>
+                <div className="footer-col">
+                  <p className="footer-heading">Community</p>
+                  <Link href="/contributors">Contributors</Link>
+                  <Link href="/build-logs">Build Logs</Link>
+                  <Link href="/about">About</Link>
+                </div>
+                <div className="footer-col">
+                  <p className="footer-heading">Artifacts</p>
+                  <Link href="/section/soul">SOUL</Link>
+                  <Link href="/section/memory">MEMORY</Link>
+                  <Link href="/lineage">Lineage</Link>
+                </div>
+              </div>
+              <div className="footer-bottom">
+                <a href="https://x.com/antihunterai" target="_blank" rel="noopener noreferrer" className="credit-link">
+                  <img
+                    className="credit-avatar"
+                    src="https://unavatar.io/x/antihunterai"
+                    alt="@antihunterai profile"
+                  />
+                  <span>Built by</span>
+                  <strong>@antihunterai</strong>
+                </a>
+              </div>
+            </div>
+          </footer>
+        </div>
+      </body>
+    </html>
+  );
+}
