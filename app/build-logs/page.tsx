@@ -29,11 +29,11 @@ const logs: LogEntry[] = [
       'Agent correctly attributed all 14 content drafts to its registered handle'
     ],
     broke: [
-      'MEMORY recall returned stale entries for 3 of 14 queries \u2014 root cause: key collision on short slugs',
-      'Agent silently skipped malformed SOUL lines instead of erroring \u2014 added validation step'
+      'MEMORY recall returned stale entries for 3 of 14 queries — root cause: key collision on short slugs',
+      'Agent silently skipped malformed SOUL lines instead of erroring — added validation step'
     ],
     changed: [
-      'Moved from flat key names to namespaced keys (handle:scope:slug) \u2014 eliminates collision class entirely',
+      'Moved from flat key names to namespaced keys (handle:scope:slug) — eliminates collision class entirely',
       'SOUL validation now runs before any agent session starts; malformed files return a structured error'
     ],
     note: 'The key collision issue was predictable in retrospect. Namespaced keys should have been the default from the start.'
@@ -43,17 +43,17 @@ const logs: LogEntry[] = [
     date: '2026-03-02',
     title: 'Multi-agent MEMORY isolation confirmed; outbound skill in review',
     shipped: [
-      'Verified that two agents with different handles cannot read each other\'s MEMORY \u2014 isolation holds at KV level',
-      'Outbound Personalization Skill first draft complete \u2014 3 internal testers running it',
+      'Verified that two agents with different handles cannot read each other\'s MEMORY — isolation holds at KV level',
+      'Outbound Personalization Skill first draft complete — 3 internal testers running it',
       'Weekly report template published with Notion export working'
     ],
     broke: [
-      'Notion export silently fails if a page ID contains a hyphen in certain positions \u2014 Notion API inconsistency',
-      'One tester\'s outbound skill hallucinated a company name not in their ICP MEMORY \u2014 scope is too broad'
+      'Notion export silently fails if a page ID contains a hyphen in certain positions — Notion API inconsistency',
+      'One tester\'s outbound skill hallucinated a company name not in their ICP MEMORY — scope is too broad'
     ],
     changed: [
       'Added a pre-export validation step that normalizes Notion page IDs before the API call',
-      'Outbound Personalization Skill now requires an explicit company allowlist in MEMORY \u2014 no open-ended search'
+      'Outbound Personalization Skill now requires an explicit company allowlist in MEMORY — no open-ended search'
     ]
   },
   {
@@ -66,8 +66,8 @@ const logs: LogEntry[] = [
       'Contributor count: 12 registered handles, 7 with linked artifacts'
     ],
     broke: [
-      'TypeScript strict mode surfaced two implicit any types in lib/content.ts \u2014 patched before deploy',
-      'Mobile nav wraps to 3 lines on iPhone SE \u2014 acceptable for now, flagged for next sprint'
+      'TypeScript strict mode surfaced two implicit any types in lib/content.ts — patched before deploy',
+      'Mobile nav wraps to 3 lines on iPhone SE — acceptable for now, flagged for next sprint'
     ],
     changed: [
       'Navigation updated to include Start Here, Guides, Playbooks, Templates, Skills, Compare, Build Logs',
@@ -84,7 +84,7 @@ export default function BuildLogsPage() {
         <h1>Build Logs</h1>
         <p className="doc-subtitle">
           Weekly logs from production OpenClaw deployments. What shipped, what broke, and what
-          changed \u2014 with enough specificity to be useful for anyone running a similar setup.
+          changed — with enough specificity to be useful for anyone running a similar setup.
         </p>
       </div>
 
