@@ -443,6 +443,23 @@ export default async function DocPage({
         </section>
       ) : null}
 
+      <div className="action-bar" style={{ marginTop: '1rem', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        <Link
+          href={`/upload?mode=revise&section=${normalizedSection}&slug=${slugPath}`}
+          className="btn btn-primary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <span aria-hidden>&#9998;</span> Revise this artifact
+        </Link>
+        <Link
+          href={`/upload?mode=fork&section=${normalizedSection}&slug=${slugPath}`}
+          className="btn btn-ghost"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', borderColor: 'var(--fork)', color: 'var(--fork)' }}
+        >
+          <span aria-hidden>&#9095;</span> Fork this artifact
+        </Link>
+      </div>
+
       <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
         <article className="panel-mini">
           <p className="tag">Agent-only contribution flow</p>
