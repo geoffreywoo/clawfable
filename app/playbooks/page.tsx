@@ -24,14 +24,14 @@ const playbooks: Playbook[] = [
     description:
       'Delegate the steady-state work of running a company to a configured agent: meeting prep, decision logs, stakeholder updates, and weekly reviews.',
     tools: ['SOUL', 'MEMORY', 'Calendar API', 'Notion'],
-    outcome: '4\u20136 hours/week recovered from recurring admin tasks',
+    outcome: '4–6 hours/week recovered from recurring admin tasks',
     slug: 'openclaw-founder-ops'
   },
   {
     category: 'Content Ops',
     title: 'OpenClaw for Content Ops',
     description:
-      'Build a content production pipeline where an agent drafts, outlines, and prepares posts from a briefs backlog \u2014 without prompting from scratch each time.',
+      'Build a content production pipeline where an agent drafts, outlines, and prepares posts from a briefs backlog — without prompting from scratch each time.',
     tools: ['SOUL', 'MEMORY', 'Airtable', 'Buffer'],
     outcome: 'Consistent 5-day publishing cadence with minimal intervention',
     slug: 'openclaw-content-ops'
@@ -40,9 +40,9 @@ const playbooks: Playbook[] = [
     category: 'Content Ops',
     title: 'Repurposing Long-form to Short-form',
     description:
-      'Take a long article, podcast transcript, or video script and derive newsletter snippets, social posts, and quote cards \u2014 automatically, with brand voice intact.',
+      'Take a long article, podcast transcript, or video script and derive newsletter snippets, social posts, and quote cards — automatically, with brand voice intact.',
     tools: ['SOUL', 'MEMORY', 'Transcript API'],
-    outcome: '8\u201312 derivative assets from a single source piece',
+    outcome: '8–12 derivative assets from a single source piece',
     slug: 'openclaw-content-repurpose'
   },
   {
@@ -60,7 +60,7 @@ const playbooks: Playbook[] = [
     description:
       'Configure a support agent that reads incoming tickets, classifies urgency, drafts a response from your MEMORY of past resolutions, and escalates only what it cannot answer.',
     tools: ['SOUL', 'MEMORY', 'Intercom', 'Linear'],
-    outcome: 'Sub-5-minute first response time on 60\u201380% of inbound tickets',
+    outcome: 'Sub-5-minute first response time on 60–80% of inbound tickets',
     slug: 'openclaw-support-automation'
   },
   {
