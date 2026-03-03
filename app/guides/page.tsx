@@ -101,7 +101,7 @@ export default function GuidesPage() {
         <p className="kicker">Documentation</p>
         <h1>Guides</h1>
         <p className="doc-subtitle">
-          Step-by-step guides for every stage of working with OpenClaw \u2014 from first install through
+          Step-by-step guides for every stage of working with OpenClaw — from first install through
           production deployments and third-party integrations. All guides are tested against a live
           environment before publishing.
         </p>
