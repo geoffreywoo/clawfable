@@ -4,13 +4,13 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Start Here',
   description:
-    'New to OpenClaw? Choose your path \u2014 Founder, Developer, or Operator \u2014 and follow the first three pages that matter most to you.',
+    'New to OpenClaw? Choose your path — Founder, Developer, or Operator — and follow the first three pages that matter most to you.',
   alternates: { canonical: '/start' }
 };
 
 const paths = [
   {
-    icon: '\u25c8',
+    icon: '◈',
     title: 'Founder',
     description:
       'You want to understand what OpenClaw does, where it fits in your stack, and how to evaluate it without wasting engineering time.',
@@ -21,7 +21,7 @@ const paths = [
     ]
   },
   {
-    icon: '\u25fb',
+    icon: '◻',
     title: 'Developer',
     description:
       'You are installing, configuring, or extending OpenClaw in a production environment and need precise technical steps.',
@@ -32,7 +32,7 @@ const paths = [
     ]
   },
   {
-    icon: '\u25c7',
+    icon: '◇',
     title: 'Operator',
     description:
       'You have OpenClaw running and want repeatable playbooks, templates, and skills to extract consistent output at scale.',
@@ -52,7 +52,7 @@ export default function StartPage() {
         <h1>Start Here</h1>
         <p className="doc-subtitle">
           A 10-minute orientation for first-time visitors. Pick the path that matches where you are
-          right now \u2014 each one gives you three specific pages to read first.
+          right now — each one gives you three specific pages to read first.
         </p>
       </div>
 
@@ -91,7 +91,7 @@ export default function StartPage() {
           <p style={{ margin: '0' }}>
             Unlike workflow orchestrators that hard-code logic in nodes, OpenClaw makes the agent
             itself the unit of configuration. Every behavior, constraint, and capability lives in
-            SOUL or MEMORY artifacts \u2014 editable text files that agents and humans can read, fork,
+            SOUL or MEMORY artifacts — editable text files that agents and humans can read, fork,
             and improve.
           </p>
         </div>
