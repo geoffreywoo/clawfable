@@ -32,18 +32,18 @@ const comparisons: Comparison[] = [
       },
       {
         dimension: 'Agent persistence',
-        openclaw: 'First-class \u2014 every agent has persistent MEMORY',
+        openclaw: 'First-class — every agent has persistent MEMORY',
         other: 'Requires manual workaround with external KV store'
       },
       {
         dimension: 'Non-technical accessibility',
-        openclaw: 'Text-based SOUL files \u2014 readable by anyone',
-        other: 'Visual builder \u2014 accessible but proprietary'
+        openclaw: 'Text-based SOUL files — readable by anyone',
+        other: 'Visual builder — accessible but proprietary'
       },
       {
         dimension: 'Orchestration complexity',
-        openclaw: 'Minimal \u2014 agents act on instructions',
-        other: 'High \u2014 complex flows built as node graphs'
+        openclaw: 'Minimal — agents act on instructions',
+        other: 'High — complex flows built as node graphs'
       },
       {
         dimension: 'Self-hosting',
@@ -78,13 +78,13 @@ const comparisons: Comparison[] = [
       },
       {
         dimension: 'Setup complexity',
-        openclaw: 'Low \u2014 YAML config, no graph design required',
-        other: 'Medium to high \u2014 requires graph modeling upfront'
+        openclaw: 'Low — YAML config, no graph design required',
+        other: 'Medium to high — requires graph modeling upfront'
       },
       {
         dimension: 'Flexibility',
-        openclaw: 'Moderate \u2014 follows the SOUL/MEMORY contract',
-        other: 'High \u2014 build any topology you can reason about'
+        openclaw: 'Moderate — follows the SOUL/MEMORY contract',
+        other: 'High — build any topology you can reason about'
       },
       {
         dimension: 'Language requirement',
@@ -93,8 +93,8 @@ const comparisons: Comparison[] = [
       },
       {
         dimension: 'Production primitives',
-        openclaw: 'Included \u2014 contributor registry, artifact versioning',
-        other: 'DIY \u2014 you build the persistence and versioning'
+        openclaw: 'Included — contributor registry, artifact versioning',
+        other: 'DIY — you build the persistence and versioning'
       }
     ],
     bestFor: {
@@ -120,7 +120,7 @@ const comparisons: Comparison[] = [
       {
         dimension: 'Time to first agent',
         openclaw: '< 1 hour with the setup guide',
-        other: '1\u20133 days of scaffolding before business logic'
+        other: '1–3 days of scaffolding before business logic'
       },
       {
         dimension: 'Ongoing maintenance',
@@ -129,8 +129,8 @@ const comparisons: Comparison[] = [
       },
       {
         dimension: 'Agent sharing / reuse',
-        openclaw: 'First-class \u2014 SOUL and MEMORY are portable',
-        other: 'Manual \u2014 requires your own serialization format'
+        openclaw: 'First-class — SOUL and MEMORY are portable',
+        other: 'Manual — requires your own serialization format'
       },
       {
         dimension: 'Observability',
@@ -139,8 +139,8 @@ const comparisons: Comparison[] = [
       },
       {
         dimension: 'Escape hatch',
-        openclaw: 'SOUL and MEMORY are plain text \u2014 easy to migrate',
-        other: 'You own the stack \u2014 full control'
+        openclaw: 'SOUL and MEMORY are plain text — easy to migrate',
+        other: 'You own the stack — full control'
       }
     ],
     bestFor: {
@@ -165,7 +165,7 @@ export default function ComparePage() {
         <p className="kicker">Decision Support</p>
         <h1>Comparisons</h1>
         <p className="doc-subtitle">
-          Honest evaluations of OpenClaw against common alternatives. No benchmark theater \u2014 each
+          Honest evaluations of OpenClaw against common alternatives. No benchmark theater — each
           comparison focuses on the specific trade-offs that determine fit for your use case.
         </p>
       </div>
