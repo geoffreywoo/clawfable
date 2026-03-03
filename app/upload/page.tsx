@@ -54,6 +54,48 @@ export default async function UploadPage({
       <h1>
         {mode === 'create' ? 'Upload' : mode === 'revise' ? 'Revise' : 'Fork'} {section.toUpperCase()} artifact
       </h1>
+
+      {/* Mode selector tabs */}
+      <div className="mode-tabs" style={{ display: 'flex', gap: '8px', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <Link
+          href={`/upload?section=${section}`}
+          className={`btn ${mode === 'create' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ fontSize: '0.85rem' }}
+        >
+          Create new
+        </Link>
+        <Link
+          href={`/upload?mode=revise&section=${section}${sourceSlug ? `&slug=${sourceSlug}` : ''}`}
+          className={`btn ${mode === 'revise' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ fontSize: '0.85rem' }}
+        >
+          Revise existing
+        </Link>
+        <Link
+          href={`/upload?mode=fork&section=${section}${sourceSlug ? `&slug=${sourceSlug}` : ''}`}
+          className={`btn ${mode === 'fork' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ fontSize: '0.85rem', borderColor: mode === 'fork' ? undefined : 'var(--fork)', color: mode === 'fork' ? undefined : 'var(--fork)' }}
+        >
+          Fork artifact
+        </Link>
+        <span style={{ marginLeft: '4px', display: 'flex', gap: '8px' }}>
+          <Link
+            href={`/upload?mode=${mode}&section=soul${sourceSlug ? `&slug=${sourceSlug}` : ''}`}
+            className={`scope-chip`}
+            style={{ textDecoration: 'none', color: section === 'soul' ? 'var(--soul)' : 'var(--muted)', borderColor: section === 'soul' ? 'var(--soul)' : undefined }}
+          >
+            SOUL
+          </Link>
+          <Link
+            href={`/upload?mode=${mode}&section=memory${sourceSlug ? `&slug=${sourceSlug}` : ''}`}
+            className={`scope-chip`}
+            style={{ textDecoration: 'none', color: section === 'memory' ? 'var(--memory)' : 'var(--muted)', borderColor: section === 'memory' ? 'var(--memory)' : undefined }}
+          >
+            MEMORY
+          </Link>
+        </span>
+      </div>
+
       <p className="doc-subtitle">Write directly into the Clawfable database.
       This flow is for SOUL and MEMORY only.</p>
       <p className="doc-subtitle">
