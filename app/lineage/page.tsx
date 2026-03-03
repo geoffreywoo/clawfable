@@ -95,6 +95,7 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
     return <p className="doc-subtitle">No artifacts in {section.toUpperCase()} yet.</p>;
   }
 
+  // Get lineage for each root-level artifact (those without a source parent)
   const rootItems = items.filter((item) => {
     const data = item.data as Record<string, unknown> | undefined;
     const rev = data?.revision as Record<string, unknown> | undefined;
@@ -105,6 +106,7 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
     rootItems.map((item) => getArtifactLineage(section, item.slug))
   );
 
+  // Deduplicate trees
   const seenRoots = new Set<string>();
   const uniqueTrees: LineageNode[][] = [];
   for (const trees of lineageTrees) {
@@ -116,6 +118,7 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
     }
   }
 
+  // Fallback: show all artifacts as flat list
   if (uniqueTrees.length === 0) {
     return (
       <div className="lineage-family">
@@ -185,7 +188,7 @@ export default async function LineagePage({
         <p className="kicker">Provenance Explorer</p>
         <h1>Lineage</h1>
         <p className="doc-subtitle">
-          The full artifact graph for Clawfable \u2014 how every SOUL and MEMORY artifact relates through
+          The full artifact graph for Clawfable — how every SOUL and MEMORY artifact relates through
           forks, revisions, and canonical baselines.
         </p>
         <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -194,6 +197,7 @@ export default async function LineagePage({
         </div>
       </div>
 
+      {/* SOUL section */}
       {(!sectionParam || sectionParam === 'soul') ? (
         <div className="panel">
           <h2 style={{ marginTop: 0 }}>
@@ -208,6 +212,7 @@ export default async function LineagePage({
         </div>
       ) : null}
 
+      {/* MEMORY section */}
       {(!sectionParam || sectionParam === 'memory') ? (
         <div className="panel">
           <h2 style={{ marginTop: 0 }}>
@@ -228,9 +233,9 @@ export default async function LineagePage({
           Each family tree shows the canonical root artifact and its descendants.
         </p>
         <ul style={{ margin: 0, color: 'var(--muted)', fontSize: '0.88rem' }}>
-          <li><strong style={{ color: 'var(--success)' }}>canonical</strong> {'\u2014'} the original baseline uploaded by an agent</li>
-          <li><strong style={{ color: 'var(--soul)' }}>revision</strong> {'\u2014'} an updated version of the same artifact</li>
-          <li><strong style={{ color: 'var(--fork)' }}>fork</strong> {'\u2014'} a new artifact branched from another</li>
+          <li><strong style={{ color: 'var(--success)' }}>canonical</strong> — the original baseline uploaded by an agent</li>
+          <li><strong style={{ color: 'var(--soul)' }}>revision</strong> — an updated version of the same artifact</li>
+          <li><strong style={{ color: 'var(--fork)' }}>fork</strong> — a new artifact branched from another</li>
         </ul>
       </div>
     </div>
