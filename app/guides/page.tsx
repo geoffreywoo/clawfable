@@ -2,113 +2,145 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Guides · Clawfable',
+  title: 'Guides',
   description:
-    'Step-by-step guides for using Clawfable to build AI agent memory systems. ' +
-    'Learn how to store artifacts, track provenance, and query lineage.',
-  keywords: ['AI agent memory guide', 'Clawfable guide', 'artifact storage tutorial', 'agent provenance'],
+    'Step-by-step OpenClaw guides covering setup, deployment, integrations, troubleshooting, and comparisons. Practical guides tested in production.',
+  alternates: { canonical: '/guides' }
 };
 
-const FOOTER_COLS = [
-  { title: 'Start', links: [{ label: 'Get Started', href: '/start' }, { label: 'Guides', href: '/guides' }, { label: 'Playbooks', href: '/playbooks' }, { label: 'Templates', href: '/templates' }] },
-  { title: 'Learn', links: [{ label: 'Skills', href: '/skills' }, { label: 'Compare', href: '/compare' }, { label: 'Build Logs', href: '/build-logs' }, { label: 'About', href: '/about' }] },
-  { title: 'Memory', links: [{ label: 'SOUL', href: '/soul' }, { label: 'MEMORY', href: '/memory' }, { label: 'Lineage', href: '/lineage' }] },
-  { title: 'Explore', links: [{ label: 'Contributors', href: '#' }, { label: 'Skill', href: '#' }] },
-  { title: 'Clawfable', links: [{ label: 'Home', href: '/' }] },
+type Guide = {
+  title: string;
+  description: string;
+  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  time: string;
+  slug: string;
+  category: string;
+};
+
+const guides: Guide[] = [
+  {
+    category: 'Setup',
+    title: 'OpenClaw Setup Guide',
+    description:
+      'Install and configure OpenClaw from scratch. Covers prerequisites, environment variables, your first SOUL artifact, and a working smoke test.',
+    difficulty: 'Beginner',
+    time: '30 min',
+    slug: 'openclaw-setup-guide'
+  },
+  {
+    category: 'Setup',
+    title: 'Configuring Your First SOUL',
+    description:
+      'Understand the SOUL artifact format, required fields, optional scopes, and how to wire a SOUL to an active agent session.',
+    difficulty: 'Beginner',
+    time: '20 min',
+    slug: 'configuring-first-soul'
+  },
+  {
+    category: 'Deployment',
+    title: 'Deploying OpenClaw to a VPS',
+    description:
+      'Run OpenClaw on a bare Ubuntu 22.04 server. Covers systemd service setup, reverse-proxy with Caddy, and zero-downtime restarts.',
+    difficulty: 'Intermediate',
+    time: '45 min',
+    slug: 'deploy-openclaw-vps'
+  },
+  {
+    category: 'Deployment',
+    title: 'OpenClaw on Fly.io',
+    description:
+      'Deploy OpenClaw to Fly.io with persistent volumes for MEMORY storage. Includes fly.toml reference and common pitfalls.',
+    difficulty: 'Intermediate',
+    time: '25 min',
+    slug: 'deploy-openclaw-fly'
+  },
+  {
+    category: 'Integrations',
+    title: 'OpenClaw Integrations Overview',
+    description:
+      'Supported integration points: webhooks, REST, MCP tools, and direct SDK usage. Understand which integration pattern fits your stack.',
+    difficulty: 'Intermediate',
+    time: '15 min',
+    slug: 'openclaw-integrations'
+  },
+  {
+    category: 'Integrations',
+    title: 'Connecting OpenClaw to Slack',
+    description:
+      'Wire an OpenClaw agent to a Slack workspace as a bot. Covers OAuth scopes, event subscriptions, and MEMORY-backed message threading.',
+    difficulty: 'Intermediate',
+    time: '40 min',
+    slug: 'openclaw-slack-integration'
+  },
+  {
+    category: 'Troubleshooting',
+    title: 'Debugging MEMORY Retrieval Failures',
+    description:
+      'Diagnose and fix the most common MEMORY lookup failures: stale indexes, key collisions, and mis-scoped artifact references.',
+    difficulty: 'Intermediate',
+    time: '20 min',
+    slug: 'debug-memory-retrieval'
+  },
+  {
+    category: 'Comparisons',
+    title: 'OpenClaw vs DIY Agent Stacks',
+    description:
+      'When does rolling your own agent plumbing make sense? An honest look at maintenance costs, flexibility trade-offs, and migration paths.',
+    difficulty: 'Beginner',
+    time: '10 min',
+    slug: 'openclaw-vs-diy'
+  }
 ];
 
-const GUIDES = [
-  {
-    title: 'Storing your first artifact',
-    description: 'Write a SOUL or MEMORY artifact to Vercel KV using the putDoc API.',
-    href: '#',
-  },
-  {
-    title: 'Tracking revision history',
-    description: 'Use putDocWithHistory to atomically save a doc and record a HistoryEntry.',
-    href: '#',
-  },
-  {
-    title: 'Building a lineage graph',
-    description: 'Link artifacts with linkLineage and explore the graph at /lineage.',
-    href: '#',
-  },
-  {
-    title: 'Querying via the REST API',
-    description: 'Use GET /api/artifacts/history and POST /api/artifacts/history from any client.',
-    href: '#',
-  },
-  {
-    title: 'Paginating large artifact lists',
-    description: 'Use listDocsPaginated to build infinite-scroll or paged artifact browsers.',
-    href: '#',
-  },
-  {
-    title: 'Integrating with LangChain',
-    description: 'Call Clawfable from a LangChain tool to persist agent memory between runs.',
-    href: '#',
-  },
-];
+const categories = ['Setup', 'Deployment', 'Integrations', 'Troubleshooting', 'Comparisons'];
 
 export default function GuidesPage() {
   return (
-    <div className="seo-page">
-      <nav className="border-b border-gray-800 px-4 py-3 flex items-center gap-4 text-sm sticky top-0 bg-[#0a0a0a]/90 backdrop-blur z-10">
-        <Link href="/" className="text-gray-400 hover:text-white">Home</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/soul" className="text-gray-400 hover:text-white">SOUL</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/memory" className="text-gray-400 hover:text-white">MEMORY</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/lineage" className="text-gray-400 hover:text-white">Lineage</Link>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Contributors</span>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Skill</span>
-      </nav>
-
-      <div className="seo-hero">
+    <div className="hub-shell">
+      <div className="hub-header">
+        <p className="kicker">Documentation</p>
         <h1>Guides</h1>
-        <p>Step-by-step instructions for building with Clawfable.</p>
+        <p className="doc-subtitle">
+          Step-by-step guides for every stage of working with OpenClaw \u2014 from first install through
+          production deployments and third-party integrations. All guides are tested against a live
+          environment before publishing.
+        </p>
       </div>
 
-      <div className="seo-body">
-        <h2 className="seo-section-title">All Guides</h2>
-        <div className="seo-card-grid">
-          {GUIDES.map((g) => (
-            <Link key={g.title} href={g.href} className="seo-card">
-              <h3>{g.title}</h3>
-              <p>{g.description}</p>
-            </Link>
-          ))}
-        </div>
+      {categories.map((category) => {
+        const items = guides.filter((g) => g.category === category);
+        if (items.length === 0) return null;
+        return (
+          <section key={category} className="hub-section">
+            <p className="hub-section-title">{category}</p>
+            <div className="hub-grid">
+              {items.map((guide) => (
+                <Link
+                  key={guide.slug}
+                  href={`/guides/${guide.slug}`}
+                  className="hub-card"
+                >
+                  <p className="hub-card-title">{guide.title}</p>
+                  <p className="hub-card-desc">{guide.description}</p>
+                  <div className="hub-card-meta">
+                    <span className={`hub-tag hub-tag--difficulty`}>{guide.difficulty}</span>
+                    <span className="hub-tag">{guide.time}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        );
+      })}
 
-        <h2 className="seo-section-title">Frequently Asked Questions</h2>
-        <div>
-          <div className="seo-faq-item">
-            <h3>Do I need to know TypeScript to use Clawfable?</h3>
-            <p>The core library is TypeScript, but the REST API is language-agnostic. Any HTTP client can interact with Clawfable.</p>
-          </div>
-          <div className="seo-faq-item">
-            <h3>Can I use Clawfable without Vercel KV?</h3>
-            <p>The current implementation targets Vercel KV. Alternative storage backends are on the roadmap.</p>
-          </div>
-        </div>
+      <div className="cta-bar">
+        <p>
+          New to OpenClaw? The setup guide is the right first step, regardless of your background.
+        </p>
+        <Link href="/start" className="cta-link">
+          Start Here
+        </Link>
       </div>
-
-      <footer className="footer-link-grid">
-        <div className="footer-inner">
-          <div className="footer-cols">
-            {FOOTER_COLS.map((col) => (
-              <div key={col.title} className="footer-col">
-                <div className="footer-col-title">{col.title}</div>
-                <ul>{col.links.map((link) => (<li key={link.label}><Link href={link.href}>{link.label}</Link></li>))}</ul>
-              </div>
-            ))}
-          </div>
-          <div className="footer-bottom">Clawfable · AI agent memory &amp; soul system</div>
-        </div>
-      </footer>
     </div>
   );
 }
