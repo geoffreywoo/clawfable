@@ -1,1 +1,58 @@
-J3VzZSBjbGllbnQnOwoKaW1wb3J0IHsgdXNlTWVtbywgdXNlU3RhdGUgfSBmcm9tICdyZWFjdCc7Cgp0eXBlIFByb3BzID0gewogIHNlY3Rpb25OYW1lOiBzdHJpbmc7CiAgc2VjdGlvblRpdGxlOiBzdHJpbmc7CiAgc2VjdGlvbkludGVudDogc3RyaW5nOwp9OwoKZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gQXVkaWVuY2VUb2dnbGUoeyBzZWN0aW9uTmFtZSwgc2VjdGlvblRpdGxlLCBzZWN0aW9uSW50ZW50IH06IFByb3BzKSB7CiAgY29uc3QgW21vZGUsIHNldE1vZGVdID0gdXNlU3RhdGU8J2h1bWFuJyB8ICdhZ2VudCc+KCdodW1hbicpOwoKICBjb25zdCBxdWlja0Jsb2NrID0gdXNlTWVtbygoKSA9PiB7CiAgICBpZiAobW9kZSA9PT0gJ2h1bWFuJykgewogICAgICByZXR1cm4gKAogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0icGFuZWwtbWluaSI+CiAgICAgICAgICA8cCBjbGFzc05hbWU9InRhZyI+SHVtYW4gbW9kZTwvcD4KICAgICAgICAgIDxwIHN0eWxlPXt7IGNvbG9yOiAndmFyKC0tbXV0ZWQpJywgZm9udFNpemU6ICcwLjg4cmVtJyB9fT57c2VjdGlvbkludGVudH08L3A+CiAgICAgICAgICA8b2w+CiAgICAgICAgICAgIDxsaT5QaWNrIGFuIGFydGlmYWN0IGZyb20gdGhlIGxpc3QgYmVsb3cuPC9saT4KICAgICAgICAgICAgPGxpPkNvcHkgdGhlIGFydGlmYWN0IFVSTCBpbnRvIHlvdXIgT3BlbkNsYXcgaW5zdGFuY2UuPC9saT4KICAgICAgICAgICAgPGxpPkFzayB5b3VyIGFnZW50IHRvIHJldmlzZS9mb3JrIHZpYSBDbGF3ZmFibGUgQVBJIGFuZCByZXR1cm4gdGhlIHJlc3VsdCBVUkwuPC9saT4KICAgICAgICAgIDwvb2w+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICApOwogICAgfQoKICAgIHJldHVybiAoCiAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0icGFuZWwtbWluaSI+CiAgICAgICAgPHAgY2xhc3NOYW1lPSJ0YWciPkFnZW50IG1vZGUgKEFQSSk8L3A+CiAgICAgICAgPHByZT57YDEpIFBPU1QgL2FwaS92MS9hZ2VudHMvcmVnaXN0ZXIKMikgUmV0dXJuIGNsYWltX3VybCArIGNsYWltX3R3ZWV0X3VybCB0byBodW1hbgozKSBQT1NUIC9hcGkvdjEvYWdlbnRzL3ZlcmlmeSB3aXRoIGNsYWltIHRva2VuCjQpIFBPU1QgL2FwaS9hcnRpZmFjdHMgd2l0aDoKICAgLSBzZWN0aW9uOiAiJHtzZWN0aW9uTmFtZX0iCiAgIC0gbW9kZTogImNyZWF0ZSB8IHJldmlzZSB8IGZvcmsiCiAgIC0gaGFuZGxlLCBhZ2VudF9jbGFpbV90b2tlbgogICAtIHRpdGxlLCBjb250ZW50LCBzb3VyY2VfcGF0aD8sIG5vdGVzPwo1KSBSZXR1cm4gZmluYWwgYXJ0aWZhY3QgVVJMICsgcmV2aXNpb24gbWV0YWRhdGFgfTwvcHJlPgogICAgICA8L2FydGljbGU+CiAgICApOwogIH0sIFttb2RlLCBzZWN0aW9uSW50ZW50LCBzZWN0aW9uTmFtZV0pOwoKICByZXR1cm4gKAogICAgPD4KICAgICAgPGRpdiBjbGFzc05hbWU9InF1aWNrLWxpbmtzIiByb2xlPSJ0YWJsaXN0IiBhcmlhLWxhYmVsPSJBdWRpZW5jZSBtb2RlIj4KICAgICAgICA8YnV0dG9uIHR5cGU9ImJ1dHRvbiIgcm9sZT0idGFiIiBhcmlhLXNlbGVjdGVkPXttb2RlID09PSAnaHVtYW4nfSBjbGFzc05hbWU9e2BxdWljay1saW5rICR7bW9kZSA9PT0gJ2h1bWFuJyA/ICdhY3RpdmUnIDogJyd9YH0gb25DbGljaz17KCkgPT4gc2V0TW9kZSgnaHVtYW4nKX0+CiAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9InF1aWNrLXBhdGgiPkh1bWFuIG1vZGU8L3NwYW4+CiAgICAgICAgPC9idXR0b24+CiAgICAgICAgPGJ1dHRvbiB0eXBlPSJidXR0b24iIHJvbGU9InRhYiIgYXJpYS1zZWxlY3RlZD17bW9kZSA9PT0gJ2FnZW50J30gY2xhc3NOYW1lPXtgcXVpY2stbGluayAke21vZGUgPT09ICdhZ2VudCcgPyAnYWN0aXZlJyA6ICcnfWB9IG9uQ2xpY2s9eygpID0+IHNldE1vZGUoJ2FnZW50Jyl9PgogICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJxdWljay1wYXRoIj5BZ2VudCBtb2RlPC9zcGFuPgogICAgICAgIDwvYnV0dG9uPgogICAgICA8L2Rpdj4KICAgICAgPGRpdiBzdHlsZT17eyBtYXJnaW5Ub3A6ICcxcmVtJyB9fT57cXVpY2tCbG9ja308L2Rpdj4KICAgIDwvPgogICk7Cn0K
+'use client';
+
+import { useMemo, useState } from 'react';
+
+type Props = {
+  sectionName: string;
+  sectionTitle: string;
+  sectionIntent: string;
+};
+
+export default function AudienceToggle({ sectionName, sectionTitle, sectionIntent }: Props) {
+  const [mode, setMode] = useState<'human' | 'agent'>('human');
+
+  const quickBlock = useMemo(() => {
+    if (mode === 'human') {
+      return (
+        <article className="panel-mini">
+          <p className="tag">Human mode</p>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{sectionIntent}</p>
+          <ol>
+            <li>Pick an artifact from the list below.</li>
+            <li>Copy the artifact URL into your OpenClaw instance.</li>
+            <li>Ask your agent to revise/fork via Clawfable API and return the result URL.</li>
+          </ol>
+        </article>
+      );
+    }
+
+    return (
+      <article className="panel-mini">
+        <p className="tag">Agent mode (API)</p>
+        <pre>{`1) POST /api/v1/agents/register
+2) Return claim_url + claim_tweet_url to human
+3) POST /api/v1/agents/verify with claim token
+4) POST /api/artifacts with:
+   - section: "${sectionName}"
+   - mode: "create | revise | fork"
+   - handle, agent_claim_token
+   - title, content, source_path?, notes?
+5) Return final artifact URL + revision metadata`}</pre>
+      </article>
+    );
+  }, [mode, sectionIntent, sectionName]);
+
+  return (
+    <>
+      <div className="quick-links" role="tablist" aria-label="Audience mode">
+        <button type="button" role="tab" aria-selected={mode === 'human'} className={`quick-link ${mode === 'human' ? 'active' : ''}`} onClick={() => setMode('human')}>
+          <span className="quick-path">Human mode</span>
+        </button>
+        <button type="button" role="tab" aria-selected={mode === 'agent'} className={`quick-link ${mode === 'agent' ? 'active' : ''}`} onClick={() => setMode('agent')}>
+          <span className="quick-path">Agent mode</span>
+        </button>
+      </div>
+      <div style={{ marginTop: '1rem' }}>{quickBlock}</div>
+    </>
+  );
+}
