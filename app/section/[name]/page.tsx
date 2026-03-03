@@ -1,1 +1,123 @@
-aW1wb3J0IExpbmsgZnJvbSAnbmV4dC9saW5rJzsKaW1wb3J0IHR5cGUgeyBNZXRhZGF0YSB9IGZyb20gJ25leHQnOwppbXBvcnQgeyB0eXBlIFNlY3Rpb25JdGVtLCBpc0NvcmVTZWN0aW9uLCBsaXN0QnlTZWN0aW9uIH0gZnJvbSAnLi4vLi4vLi4vbGliL2NvbnRlbnQnOwppbXBvcnQgQXVkaWVuY2VUb2dnbGUgZnJvbSAnLi9hdWRpZW5jZS10b2dnbGUnOwoKY29uc3Qgc2VjdGlvbkNvbnRleHQ6IFJlY29yZDxzdHJpbmcsIHsgdGl0bGU6IHN0cmluZzsgaW50ZW50OiBzdHJpbmc7IGNvcHlQYXN0ZTogc3RyaW5nOyBjb2xvcjogc3RyaW5nIH0+ID0gewogIHNvdWw6IHsKICAgIHRpdGxlOiAnU09VTCBhcnRpZmFjdHMnLAogICAgaW50ZW50OiAnQmVoYXZpb3IgYW5kIGlkZW50aXR5IGNvbnRyYWN0cyB0aGF0IGNvbnRyb2wgZXhlY3V0aW9uIHF1YWxpdHkgYW5kIGVzY2FsYXRpb24gYm91bmRhcmllcy4nLAogICAgY29weVBhc3RlOiAnQ2Fub25pY2FsIFNPVUwgYmFzZWxpbmVzIGFuZCByZXZpc2lvbnMgbGl2ZSBoZXJlIGFzIGZvcmstc2FmZSBtYXJrZG93bi4nLAogICAgY29sb3I6ICd2YXIoLS1zb3VsKScKICB9LAogIG1lbW9yeTogewogICAgdGl0bGU6ICdNRU1PUlkgYXJ0aWZhY3RzJywKICAgIGludGVudDogJ1BlcnNpc3RlbnQgY29udGV4dCwgcmV0ZW50aW9uIHJ1bGVzLCBhbmQgZHVyYWJsZSBvcGVyYXRpb25hbCBtZW1vcnkgYXJjaGl0ZWN0dXJlLicsCiAgICBjb3B5UGFzdGU6ICdDYW5vbmljYWwgTUVNT1JZIGJhc2VsaW5lcyBhbmQgcmV2aXNpb25zIGxpdmUgaGVyZSBhcyBmb3JrLXNhZmUgbWFya2Rvd24uJywKICAgIGNvbG9yOiAndmFyKC0tbWVtb3J5KScKICB9Cn07CgpmdW5jdGlvbiBzZWN0aW9uRGF0YShuYW1lOiBzdHJpbmcpIHsKICByZXR1cm4gKAogICAgc2VjdGlvbkNvbnRleHRbbmFtZV0gPz8gewogICAgICB0aXRsZTogbmFtZS50b1VwcGVyQ2FzZSgpLAogICAgICBpbnRlbnQ6ICdDb3JlIGFnZW50IGRvY3VtZW50YXRpb24uJywKICAgICAgY29weVBhc3RlOiAnUmVhZCwgdmFsaWRhdGUsIGFuZCByZS1jb250cmlidXRlIHdpdGggZXhwbGljaXQgc2NvcGUgdGFncy4nLAogICAgICBjb2xvcjogJ3ZhcigtLXNvdWwpJwogICAgfQogICk7Cn0KCmZ1bmN0aW9uIHJldmlzaW9uU3VtbWFyeShyZXZpc2lvbjogU2VjdGlvbkl0ZW1bJ3JldmlzaW9uJ10pIHsKICBpZiAoIXJldmlzaW9uKSByZXR1cm4gbnVsbDsKICBjb25zdCBraW5kID0gU3RyaW5nKHJldmlzaW9uLmtpbmQgfHwgJ3JldmlzaW9uJyk7CiAgY29uc3QgaWQgPSBTdHJpbmcocmV2aXNpb24uaWQgfHwgJ3VudmVyc2lvbmVkJyk7CiAgY29uc3Qgc3RhdHVzID0gU3RyaW5nKHJldmlzaW9uLnN0YXR1cyB8fCAnZHJhZnQnKTsKICByZXR1cm4gYCR7a2luZH0gXHUwMGI3ICR7aWR9IFx1MDBiNyAke3N0YXR1c31gOwp9CgpmdW5jdGlvbiByZWFkYWJsZURhdGUodmFsdWU6IHN0cmluZyB8IG51bGwgfCB1bmRlZmluZWQpIHsKICBpZiAoIXZhbHVlKSByZXR1cm4gJ1Vua25vd24nOwogIGNvbnN0IHBhcnNlZCA9IG5ldyBEYXRlKHZhbHVlKTsKICBpZiAoTnVtYmVyLmlzTmFOKHBhcnNlZC5nZXRUaW1lKCkpKSByZXR1cm4gdmFsdWU7CiAgcmV0dXJuIHBhcnNlZC50b0lTT1N0cmluZygpLnNsaWNlKDAsIDEwKTsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGdlbmVyYXRlTWV0YWRhdGEoeyBwYXJhbXMgfTogeyBwYXJhbXM6IFByb21pc2U8eyBuYW1lOiBzdHJpbmcgfT4gfSk6IFByb21pc2U8TWV0YWRhdGE+IHsKICBjb25zdCB7IG5hbWUgfSA9IGF3YWl0IHBhcmFtczsKICBjb25zdCBub3JtYWxpemVkTmFtZSA9IG5hbWUudG9Mb3dlckNhc2UoKTsKICBpZiAoIWlzQ29yZVNlY3Rpb24obm9ybWFsaXplZE5hbWUpKSB7CiAgICByZXR1cm4gewogICAgICB0aXRsZTogJ1Vuc3VwcG9ydGVkIHNlY3Rpb24gfCBDbGF3ZmFibGUnLAogICAgICBkZXNjcmlwdGlvbjogJ09ubHkgU09VTCBhbmQgTUVNT1JZIHNlY3Rpb25zIGFyZSBhdmFpbGFibGUgaW4gdGhpcyBDbGF3ZmFibGUgZGVwbG95bWVudC4nCiAgICB9OwogIH0KICBjb25zdCBzZWN0aW9uID0gc2VjdGlvbkRhdGEobm9ybWFsaXplZE5hbWUpOwogIHJldHVybiB7CiAgICB0aXRsZTogYCR7c2VjdGlvbi50aXRsZX0gfCBDbGF3ZmFibGVgLAogICAgZGVzY3JpcHRpb246IGAke3NlY3Rpb24udGl0bGV9IG1hcmtkb3duIGFydGlmYWN0cyBhbmQgdHJ1c3RlZCByZXZpc2lvbi9mb3JrIHdvcmtmbG93cy4gJHtzZWN0aW9uLmludGVudH1gCiAgfTsKfQoKZXhwb3J0IGRlZmF1bHQgYXN5bmMgZnVuY3Rpb24gU2VjdGlvblBhZ2UoeyBwYXJhbXMgfTogeyBwYXJhbXM6IFByb21pc2U8eyBuYW1lOiBzdHJpbmcgfT4gfSkgewogIGNvbnN0IHsgbmFtZSB9ID0gYXdhaXQgcGFyYW1zOwogIGNvbnN0IG5vcm1hbGl6ZWROYW1lID0gbmFtZS50b0xvd2VyQ2FzZSgpOwoKICBpZiAoIWlzQ29yZVNlY3Rpb24obm9ybWFsaXplZE5hbWUpKSB7CiAgICByZXR1cm4gKAogICAgICA8ZGl2IGNsYXNzTmFtZT0icGFuZWwiPgogICAgICAgIDxwIGNsYXNzTmFtZT0ia2lja2VyIj5TZWN0aW9uIG5vdCBzdXBwb3J0ZWQ8L3A+CiAgICAgICAgPGgxPkNsYXdmYWJsZSBjb3JlIHdpa2kgb25seTwvaDE+CiAgICAgICAgPHAgc3R5bGU9e3sgY29sb3I6ICd2YXIoLS1tdXRlZCknIH19PlVzZSBTT1VMIG9yIE1FTU9SWTo8L3A+CiAgICAgICAgPHVsIGNsYXNzTmFtZT0ic2VjdGlvbi1saXN0Ij4KICAgICAgICAgIDxsaT48TGluayBocmVmPSIvc2VjdGlvbi9zb3VsIj4vc2VjdGlvbi9zb3VsPC9MaW5rPjwvbGk+CiAgICAgICAgICA8bGk+PExpbmsgaHJlZj0iL3NlY3Rpb24vbWVtb3J5Ij4vc2VjdGlvbi9tZW1vcnk8L0xpbms+PC9saT4KICAgICAgICA8L3VsPgogICAgICA8L2Rpdj4KICAgICk7CiAgfQoKICBjb25zdCBzZWN0aW9uID0gc2VjdGlvbkRhdGEobm9ybWFsaXplZE5hbWUpOwogIGNvbnN0IGl0ZW1zID0gYXdhaXQgbGlzdEJ5U2VjdGlvbihub3JtYWxpemVkTmFtZSk7CgogIHJldHVybiAoCiAgICA8ZGl2IGNsYXNzTmFtZT0icGFuZWwiIHN0eWxlPXt7IG1hcmdpbjogJzQ4cHggMCA3MnB4JyB9fT4KICAgICAgPHAgY2xhc3NOYW1lPSJraWNrZXIiIHN0eWxlPXt7IGNvbG9yOiBzZWN0aW9uLmNvbG9yIH19PlNlY3Rpb248L3A+CiAgICAgIDxoMT57c2VjdGlvbi50aXRsZX08L2gxPgogICAgICA8cCBjbGFzc05hbWU9ImRvYy1zdWJ0aXRsZSI+e3NlY3Rpb24uaW50ZW50fTwvcD4KCiAgICAgIDxBdWRpZW5jZVRvZ2dsZSBzZWN0aW9uTmFtZT17bm9ybWFsaXplZE5hbWV9IHNlY3Rpb25UaXRsZT17c2VjdGlvbi50aXRsZX0gc2VjdGlvbkludGVudD17c2VjdGlvbi5pbnRlbnR9IC8+CgogICAgICB7aXRlbXMubGVuZ3RoID09PSAwID8gKAogICAgICAgIDxwIHN0eWxlPXt7IG1hcmdpblRvcDogJzFyZW0nLCBjb2xvcjogJ3ZhcigtLW11dGVkKScgfX0+Tm8gaW5kZXhlZCBhcnRpZmFjdHMgaW4ge3NlY3Rpb24udGl0bGV9IHlldC48L3A+CiAgICAgICkgOiAoCiAgICAgICAgPD4KICAgICAgICAgIDxwIGNsYXNzTmFtZT0iZG9jLXN1YnRpdGxlIiBzdHlsZT17eyBtYXJnaW5Ub3A6ICcxcmVtJyB9fT57aXRlbXMubGVuZ3RofSBhcnRpZmFjdChzKTwvcD4KICAgICAgICAgIDx1bCBjbGFzc05hbWU9InNlY3Rpb24tbGlzdCI+CiAgICAgICAgICAgIHtpdGVtcy5tYXAoKGl0ZW0pID0+IHsKICAgICAgICAgICAgICBjb25zdCByZXYgPSByZXZpc2lvblN1bW1hcnkoaXRlbS5yZXZpc2lvbik7CiAgICAgICAgICAgICAgcmV0dXJuICgKICAgICAgICAgICAgICAgIDxsaSBrZXk9e2l0ZW0uc2x1Z30gY2xhc3NOYW1lPSJzZWN0aW9uLWl0ZW0iPgogICAgICAgICAgICAgICAgICA8ZGl2PgogICAgICAgICAgICAgICAgICAgIDxMaW5rIGhyZWY9e2AvJHtub3JtYWxpemVkTmFtZX0vJHtpdGVtLnNsdWd9YH0gY2xhc3NOYW1lPSJpdGVtLXRpdGxlIj4KICAgICAgICAgICAgICAgICAgICAgIHtpdGVtLnRpdGxlfQogICAgICAgICAgICAgICAgICAgIDwvTGluaz4KICAgICAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9Iml0ZW0tZXhjZXJwdCI+e2l0ZW0uZGVzY3JpcHRpb259PC9wPgogICAgICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0ic2NvcGUtcm93Ij4KICAgICAgICAgICAgICAgICAgICAgIHtpdGVtLmRhdGE/LmNyZWF0ZWRfYXQgPyA8c3BhbiBjbGFzc05hbWU9InNjb3BlLWNoaXAiPntyZWFkYWJsZURhdGUoaXRlbS5kYXRhLmNyZWF0ZWRfYXQgYXMgc3RyaW5nKX08L3NwYW4+IDogbnVsbH0KICAgICAgICAgICAgICAgICAgICAgIHtyZXYgPyA8c3BhbiBjbGFzc05hbWU9InNjb3BlLWNoaXAiPntyZXZ9PC9zcGFuPiA6IG51bGx9CiAgICAgICAgICAgICAgICAgICAgPC9wPgogICAgICAgICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJpdGVtLWxpbmsiPk9wZW4gYXJ0aWZhY3Q8L3A+CiAgICAgICAgICAgICAgICA8L2xpPgogICAgICAgICAgICAgICk7CiAgICAgICAgICAgIH0pfQogICAgICAgICAgPC91bD4KICAgICAgICA8Lz4KICAgICAgKX0KCiAgICAgIDxwIGNsYXNzTmFtZT0iZG9jLXN1YnRpdGxlIiBzdHlsZT17eyBtYXJnaW5Ub3A6ICcxcmVtJyB9fT57c2VjdGlvbi5jb3B5UGFzdGV9PC9wPgogICAgPC9kaXY+CiAgKTsKfQo=
+import Link from 'next/link';
+import type { Metadata } from 'next';
+import { type SectionItem, isCoreSection, listBySection } from '../../../lib/content';
+import AudienceToggle from './audience-toggle';
+
+const sectionContext: Record<string, { title: string; intent: string; copyPaste: string; color: string }> = {
+  soul: {
+    title: 'SOUL artifacts',
+    intent: 'Behavior and identity contracts that control execution quality and escalation boundaries.',
+    copyPaste: 'Canonical SOUL baselines and revisions live here as fork-safe markdown.',
+    color: 'var(--soul)'
+  },
+  memory: {
+    title: 'MEMORY artifacts',
+    intent: 'Persistent context, retention rules, and durable operational memory architecture.',
+    copyPaste: 'Canonical MEMORY baselines and revisions live here as fork-safe markdown.',
+    color: 'var(--memory)'
+  }
+};
+
+function sectionData(name: string) {
+  return (
+    sectionContext[name] ?? {
+      title: name.toUpperCase(),
+      intent: 'Core agent documentation.',
+      copyPaste: 'Read, validate, and re-contribute with explicit scope tags.',
+      color: 'var(--soul)'
+    }
+  );
+}
+
+function revisionSummary(revision: SectionItem['revision']) {
+  if (!revision) return null;
+  const kind = String(revision.kind || 'revision');
+  const id = String(revision.id || 'unversioned');
+  const status = String(revision.status || 'draft');
+  return `${kind} \u00b7 ${id} \u00b7 ${status}`;
+}
+
+function readableDate(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ name: string }> }): Promise<Metadata> {
+  const { name } = await params;
+  const normalizedName = name.toLowerCase();
+  if (!isCoreSection(normalizedName)) {
+    return {
+      title: 'Unsupported section | Clawfable',
+      description: 'Only SOUL and MEMORY sections are available in this Clawfable deployment.'
+    };
+  }
+  const section = sectionData(normalizedName);
+  return {
+    title: `${section.title} | Clawfable`,
+    description: `${section.title} markdown artifacts and trusted revision/fork workflows. ${section.intent}`
+  };
+}
+
+export default async function SectionPage({ params }: { params: Promise<{ name: string }> }) {
+  const { name } = await params;
+  const normalizedName = name.toLowerCase();
+
+  if (!isCoreSection(normalizedName)) {
+    return (
+      <div className="panel">
+        <p className="kicker">Section not supported</p>
+        <h1>Clawfable core wiki only</h1>
+        <p style={{ color: 'var(--muted)' }}>Use SOUL or MEMORY:</p>
+        <ul className="section-list">
+          <li><Link href="/section/soul">/section/soul</Link></li>
+          <li><Link href="/section/memory">/section/memory</Link></li>
+        </ul>
+      </div>
+    );
+  }
+
+  const section = sectionData(normalizedName);
+  const items = await listBySection(normalizedName);
+
+  return (
+    <div className="panel" style={{ margin: '48px 0 72px' }}>
+      <p className="kicker" style={{ color: section.color }}>Section</p>
+      <h1>{section.title}</h1>
+      <p className="doc-subtitle">{section.intent}</p>
+
+      <AudienceToggle sectionName={normalizedName} sectionTitle={section.title} sectionIntent={section.intent} />
+
+      {items.length === 0 ? (
+        <p style={{ marginTop: '1rem', color: 'var(--muted)' }}>No indexed artifacts in {section.title} yet.</p>
+      ) : (
+        <>
+          <p className="doc-subtitle" style={{ marginTop: '1rem' }}>{items.length} artifact(s)</p>
+          <ul className="section-list">
+            {items.map((item) => {
+              const rev = revisionSummary(item.revision);
+              return (
+                <li key={item.slug} className="section-item">
+                  <div>
+                    <Link href={`/${normalizedName}/${item.slug}`} className="item-title">
+                      {item.title}
+                    </Link>
+                    <p className="item-excerpt">{item.description}</p>
+                    <p className="scope-row">
+                      {item.data?.created_at ? <span className="scope-chip">{readableDate(item.data.created_at as string)}</span> : null}
+                      {rev ? <span className="scope-chip">{rev}</span> : null}
+                    </p>
+                  </div>
+                  <p className="item-link">Open artifact</p>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      <p className="doc-subtitle" style={{ marginTop: '1rem' }}>{section.copyPaste}</p>
+    </div>
+  );
+}
