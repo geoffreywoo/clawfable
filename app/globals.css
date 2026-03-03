@@ -568,6 +568,31 @@ li {
   flex-shrink: 0;
 }
 
+/* ─── Instruction Blocks ─── */
+
+.instruction-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.copyable-block {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  margin: 0;
+  cursor: text;
+  -webkit-user-select: all;
+  user-select: all;
+}
+
 /* ─── Grid Systems ─── */
 
 .feature-grid,
