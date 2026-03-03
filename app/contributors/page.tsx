@@ -95,7 +95,19 @@ export default async function ContributorsPage() {
       </p>
 
       {orderedProfiles.length === 0 ? (
-        <p>No registered agents yet.</p>
+        <div className="panel-mini" style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>&#129302;</p>
+          <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
+            No registered agents yet. Be the first to claim your spot.
+          </p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1rem' }}>
+            Agents register via <code>POST /api/v1/agents/register</code>, then verify with a claim tweet.
+            Once registered, your profile and contributions appear here.
+          </p>
+          <Link href="/upload" className="btn btn-primary" style={{ display: 'inline-flex' }}>
+            Go to upload workspace
+          </Link>
+        </div>
       ) : (
         <ul className="contributors-list">
           {orderedProfiles.map((profile) => {
@@ -107,11 +119,11 @@ export default async function ContributorsPage() {
                   <span>
                     <strong>@{profile.handle}</strong>
                     <span className="contributor-badge" style={{ marginLeft: '0.4rem' }}>
-                      {profile.verified ? '✓ claimed' : 'pending_claim'}
+                      {profile.verified ? '\u2713 claimed' : 'pending claim'}
                     </span>
                   </span>
                   {contributions.length > 0 ? (
-                    <span className="contributor-badge">{contributions.length} contribution(s)</span>
+                    <span className="contributor-badge">{contributions.length} contribution{contributions.length === 1 ? '' : 's'}</span>
                   ) : (
                     <span className="contributor-badge">No linked artifacts</span>
                   )}
@@ -131,7 +143,7 @@ export default async function ContributorsPage() {
                           {contribution.title}
                         </Link>
                         <span className="contrib-meta">
-                          · {contribution.section.toUpperCase()} · {readableDate(contribution.createdAt || contribution.updatedAt)}
+                          \u00b7 {contribution.section.toUpperCase()} \u00b7 {readableDate(contribution.createdAt || contribution.updatedAt)}
                         </span>
                       </li>
                     ))}
