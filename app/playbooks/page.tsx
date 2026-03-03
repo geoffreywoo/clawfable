@@ -2,96 +2,137 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Playbooks · Clawfable',
+  title: 'Playbooks',
   description:
-    'Operational playbooks for common AI agent memory patterns. ' +
-    'Proven recipes for SOUL setup, MEMORY management, and lineage tracking.',
-  keywords: ['AI agent playbook', 'agent memory patterns', 'Clawfable playbook', 'agent soul setup'],
+    'OpenClaw implementation playbooks for founders, operators, and teams. Repeatable patterns for content ops, sales automation, community, and more.',
+  alternates: { canonical: '/playbooks' }
 };
 
-const FOOTER_COLS = [
-  { title: 'Start', links: [{ label: 'Get Started', href: '/start' }, { label: 'Guides', href: '/guides' }, { label: 'Playbooks', href: '/playbooks' }, { label: 'Templates', href: '/templates' }] },
-  { title: 'Learn', links: [{ label: 'Skills', href: '/skills' }, { label: 'Compare', href: '/compare' }, { label: 'Build Logs', href: '/build-logs' }, { label: 'About', href: '/about' }] },
-  { title: 'Memory', links: [{ label: 'SOUL', href: '/soul' }, { label: 'MEMORY', href: '/memory' }, { label: 'Lineage', href: '/lineage' }] },
-  { title: 'Explore', links: [{ label: 'Contributors', href: '#' }, { label: 'Skill', href: '#' }] },
-  { title: 'Clawfable', links: [{ label: 'Home', href: '/' }] },
+type Playbook = {
+  category: string;
+  title: string;
+  description: string;
+  tools: string[];
+  outcome: string;
+  slug: string;
+};
+
+const playbooks: Playbook[] = [
+  {
+    category: 'Founder Ops',
+    title: 'OpenClaw for Founder Ops',
+    description:
+      'Delegate the steady-state work of running a company to a configured agent: meeting prep, decision logs, stakeholder updates, and weekly reviews.',
+    tools: ['SOUL', 'MEMORY', 'Calendar API', 'Notion'],
+    outcome: '4\u20136 hours/week recovered from recurring admin tasks',
+    slug: 'openclaw-founder-ops'
+  },
+  {
+    category: 'Content Ops',
+    title: 'OpenClaw for Content Ops',
+    description:
+      'Build a content production pipeline where an agent drafts, outlines, and prepares posts from a briefs backlog \u2014 without prompting from scratch each time.',
+    tools: ['SOUL', 'MEMORY', 'Airtable', 'Buffer'],
+    outcome: 'Consistent 5-day publishing cadence with minimal intervention',
+    slug: 'openclaw-content-ops'
+  },
+  {
+    category: 'Content Ops',
+    title: 'Repurposing Long-form to Short-form',
+    description:
+      'Take a long article, podcast transcript, or video script and derive newsletter snippets, social posts, and quote cards \u2014 automatically, with brand voice intact.',
+    tools: ['SOUL', 'MEMORY', 'Transcript API'],
+    outcome: '8\u201312 derivative assets from a single source piece',
+    slug: 'openclaw-content-repurpose'
+  },
+  {
+    category: 'Sales / Lead Gen',
+    title: 'Outbound Research and Personalization',
+    description:
+      'Use an OpenClaw agent with a rich MEMORY of your ICP to research prospects, score leads, and draft personalized first-touch messages without human review per contact.',
+    tools: ['SOUL', 'MEMORY', 'Apollo API', 'Gmail'],
+    outcome: '3x increase in personalization coverage at the same headcount',
+    slug: 'openclaw-outbound-research'
+  },
+  {
+    category: 'Support Ops',
+    title: 'First-response Support Automation',
+    description:
+      'Configure a support agent that reads incoming tickets, classifies urgency, drafts a response from your MEMORY of past resolutions, and escalates only what it cannot answer.',
+    tools: ['SOUL', 'MEMORY', 'Intercom', 'Linear'],
+    outcome: 'Sub-5-minute first response time on 60\u201380% of inbound tickets',
+    slug: 'openclaw-support-automation'
+  },
+  {
+    category: 'Community Ops',
+    title: 'Community Monitoring and Triage',
+    description:
+      'Monitor Discord or Slack communities, surface unanswered questions, identify high-signal threads, and generate daily digests for community managers.',
+    tools: ['SOUL', 'MEMORY', 'Discord API', 'Slack API'],
+    outcome: 'Zero missed questions in active channels, daily signal digest',
+    slug: 'openclaw-community-ops'
+  }
 ];
 
-const PLAYBOOKS = [
-  {
-    title: 'Bootstrap a new agent',
-    description: 'Set up SOUL artifacts (identity, goals, constraints) and an initial MEMORY baseline for a new AI agent.',
-    steps: ['Define identity artifact in SOUL', 'Write goal and constraint docs', 'Create initial MEMORY seed', 'Link all with linkLineage'],
-  },
-  {
-    title: 'Version a major goal change',
-    description: 'When an agent\'s goals change significantly, create a new SOUL artifact and record the lineage.',
-    steps: ['Snapshot current artifact via putDocWithHistory', 'Write new version', 'Link old → new with linkLineage', 'Update agent\'s SOUL reference'],
-  },
-  {
-    title: 'Audit a decision trail',
-    description: 'Trace the provenance of a decision artifact from origin through all derived artifacts.',
-    steps: ['Fetch artifact with getArtifactLineage', 'Walk graph with walkLineageGraph', 'Review HistoryEntry log', 'Export for reporting'],
-  },
-  {
-    title: 'Purge stale memory',
-    description: 'Safely remove old MEMORY artifacts while preserving their lineage record.',
-    steps: ['Identify stale slugs', 'Archive snapshot via appendHistory', 'Call deleteDoc', 'Optionally call deleteLineage'],
-  },
-];
+const categories = ['Founder Ops', 'Content Ops', 'Sales / Lead Gen', 'Support Ops', 'Community Ops'];
 
 export default function PlaybooksPage() {
   return (
-    <div className="seo-page">
-      <nav className="border-b border-gray-800 px-4 py-3 flex items-center gap-4 text-sm sticky top-0 bg-[#0a0a0a]/90 backdrop-blur z-10">
-        <Link href="/" className="text-gray-400 hover:text-white">Home</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/soul" className="text-gray-400 hover:text-white">SOUL</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/memory" className="text-gray-400 hover:text-white">MEMORY</Link>
-        <span className="text-gray-700">/</span>
-        <Link href="/lineage" className="text-gray-400 hover:text-white">Lineage</Link>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Contributors</span>
-        <span className="text-gray-700">/</span>
-        <span className="text-gray-500">Skill</span>
-      </nav>
-
-      <div className="seo-hero">
+    <div className="hub-shell">
+      <div className="hub-header">
+        <p className="kicker">Use Cases</p>
         <h1>Playbooks</h1>
-        <p>Proven recipes for common AI agent memory operations.</p>
+        <p className="doc-subtitle">
+          Implementation patterns for specific business functions. Each playbook includes required
+          tools, architecture notes, and the expected outcome so you can evaluate fit before
+          committing engineering time.
+        </p>
       </div>
 
-      <div className="seo-body">
-        <h2 className="seo-section-title">All Playbooks</h2>
-        <div className="space-y-8">
-          {PLAYBOOKS.map((pb) => (
-            <div key={pb.title} className="seo-card">
-              <h3>{pb.title}</h3>
-              <p className="mb-3">{pb.description}</p>
-              <ol className="list-decimal list-inside space-y-1">
-                {pb.steps.map((step) => (
-                  <li key={step} className="text-xs text-gray-500 font-mono">{step}</li>
-                ))}
-              </ol>
+      {categories.map((category) => {
+        const items = playbooks.filter((p) => p.category === category);
+        if (items.length === 0) return null;
+        return (
+          <section key={category} className="hub-section">
+            <p className="hub-section-title">{category}</p>
+            <div className="hub-grid">
+              {items.map((playbook) => (
+                <Link
+                  key={playbook.slug}
+                  href={`/playbooks/${playbook.slug}`}
+                  className="hub-card"
+                >
+                  <p className="hub-card-title">{playbook.title}</p>
+                  <p className="hub-card-desc">{playbook.description}</p>
+                  <div className="hub-card-meta">
+                    {playbook.tools.map((tool) => (
+                      <span key={tool} className="hub-tag">
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                  <p
+                    className="hub-card-desc"
+                    style={{ fontSize: '0.82rem', fontStyle: 'italic', marginTop: '4px' }}
+                  >
+                    Outcome: {playbook.outcome}
+                  </p>
+                </Link>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </section>
+        );
+      })}
 
-      <footer className="footer-link-grid">
-        <div className="footer-inner">
-          <div className="footer-cols">
-            {FOOTER_COLS.map((col) => (
-              <div key={col.title} className="footer-col">
-                <div className="footer-col-title">{col.title}</div>
-                <ul>{col.links.map((link) => (<li key={link.label}><Link href={link.href}>{link.label}</Link></li>))}</ul>
-              </div>
-            ))}
-          </div>
-          <div className="footer-bottom">Clawfable · AI agent memory &amp; soul system</div>
-        </div>
-      </footer>
+      <div className="cta-bar">
+        <p>
+          Not sure which playbook applies to your situation? The Start Here page routes you to the
+          right starting point.
+        </p>
+        <Link href="/start" className="cta-link">
+          Start Here
+        </Link>
+      </div>
     </div>
   );
 }
