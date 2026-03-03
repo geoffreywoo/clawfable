@@ -31,7 +31,7 @@ const skills: Skill[] = [
     category: 'Free Starter Skills',
     title: 'Structured Output Skill',
     summary:
-      'Forces agent outputs into clean JSON, Markdown tables, or YAML \u2014 with schema validation. Reduces downstream parsing work in automated pipelines.',
+      'Forces agent outputs into clean JSON, Markdown tables, or YAML — with schema validation. Reduces downstream parsing work in automated pipelines.',
     prerequisites: ['OpenClaw installed'],
     status: 'free',
     slug: 'structured-output-skill'
