@@ -1,1 +1,539 @@
-aW1wb3J0IExpbmsgZnJvbSAnbmV4dC9saW5rJzsKaW1wb3J0IHR5cGUgeyBNZXRhZGF0YSB9IGZyb20gJ25leHQnOwppbXBvcnQgeyBnZXREb2MsIGlzQ29yZVNlY3Rpb24sIGdldEFydGlmYWN0SGlzdG9yeSwgZ2V0QXJ0aWZhY3RMaW5lYWdlIH0gZnJvbSAnLi4vLi4vLi4vbGliL2NvbnRlbnQnOwppbXBvcnQgdHlwZSB7IEhpc3RvcnlFbnRyeSwgTGluZWFnZU5vZGUgfSBmcm9tICcuLi8uLi8uLi9saWIvY29udGVudCc7CmltcG9ydCB7IG1hcmtlZCB9IGZyb20gJ21hcmtlZCc7Cgpjb25zdCBzZWN0aW9uTGFiZWxzOiBSZWNvcmQ8c3RyaW5nLCBzdHJpbmc+ID0gewogIHNvdWw6ICdTT1VMJywKICBtZW1vcnk6ICdNRU1PUlknCn07Cgp0eXBlIE5vcm1hbGl6ZWRDb21tZW50ID0gewogIGJvZHk6IHN0cmluZzsKICBhdXRob3I6IHN0cmluZzsKICBkYXRlPzogc3RyaW5nOwp9OwoKZnVuY3Rpb24gdGl0bGVGcm9tU2x1ZyhzZWN0aW9uOiBzdHJpbmcsIHNsdWdQYXJ0czogc3RyaW5nW10pIHsKICBjb25zdCBzbHVnID0gc2x1Z1BhcnRzLmpvaW4oJyAvICcpLnJlcGxhY2UoLy0vZywgJyAnKTsKICByZXR1cm4gYCR7c2VjdGlvbi50b1VwcGVyQ2FzZSgpfTogJHtzbHVnfWA7Cn0KCmZ1bmN0aW9uIHNjb3BlUm93cyhzY29wZU1hcDogUmVjb3JkPHN0cmluZywgdW5rbm93bj4gfCB1bmRlZmluZWQpIHsKICBpZiAoIXNjb3BlTWFwKSByZXR1cm4gW107CiAgcmV0dXJuIFsnc291bCcsICdtZW1vcnknLCAndXNlcl9maWxlcycsICdza2lsbCddCiAgICAuZmlsdGVyKChrKSA9PiBzY29wZU1hcFtrXSA9PT0gdHJ1ZSkKICAgIC5tYXAoKGspID0+IGsudG9VcHBlckNhc2UoKSk7Cn0KCmZ1bmN0aW9uIHJldmlzaW9uTGluZShyZXZpc2lvbjogUmVjb3JkPHN0cmluZywgdW5rbm93bj4gfCB1bmRlZmluZWQpIHsKICBpZiAoIXJldmlzaW9uIHx8IHR5cGVvZiByZXZpc2lvbiAhPT0gJ29iamVjdCcpIHJldHVybiBudWxsOwogIGNvbnN0IGlkID0gU3RyaW5nKChyZXZpc2lvbiBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPikuaWQgfHwgJ3VudmVyc2lvbmVkJyk7CiAgY29uc3Qga2luZCA9IFN0cmluZygocmV2aXNpb24gYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4pLmtpbmQgfHwgJ3JldmlzaW9uJyk7CiAgY29uc3Qgc3RhdHVzID0gU3RyaW5nKChyZXZpc2lvbiBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPikuc3RhdHVzIHx8ICdkcmFmdCcpOwogIHJldHVybiBgJHtraW5kfSBcdTAwYjcgJHtpZH0gXHUwMGI3ICR7c3RhdHVzfWA7Cn0KCmZ1bmN0aW9uIGlzQ2Fub25pY2FsU291cmNlKHZhbHVlOiBzdHJpbmcpIHsKICByZXR1cm4gdmFsdWUuc3RhcnRzV2l0aCgnaHR0cDovLycpIHx8IHZhbHVlLnN0YXJ0c1dpdGgoJ2h0dHBzOi8vJyk7Cn0KCmZ1bmN0aW9uIHJlYWRhYmxlRGF0ZSh2YWx1ZTogc3RyaW5nIHwgbnVsbCB8IHVuZGVmaW5lZCkgewogIGlmICghdmFsdWUpIHJldHVybiAnVW5rbm93bic7CiAgY29uc3QgcGFyc2VkID0gbmV3IERhdGUodmFsdWUpOwogIGlmIChOdW1iZXIuaXNOYU4ocGFyc2VkLmdldFRpbWUoKSkpIHJldHVybiB2YWx1ZTsKICByZXR1cm4gcGFyc2VkLnRvSVNPU3RyaW5nKCkuc2xpY2UoMCwgMTApOwp9CgpmdW5jdGlvbiByZWFkYWJsZURhdGVUaW1lKHZhbHVlOiBzdHJpbmcgfCBudWxsIHwgdW5kZWZpbmVkKSB7CiAgaWYgKCF2YWx1ZSkgcmV0dXJuICdVbmtub3duJzsKICBjb25zdCBwYXJzZWQgPSBuZXcgRGF0ZSh2YWx1ZSk7CiAgaWYgKE51bWJlci5pc05hTihwYXJzZWQuZ2V0VGltZSgpKSkgcmV0dXJuIHZhbHVlOwogIHJldHVybiBwYXJzZWQudG9JU09TdHJpbmcoKS5yZXBsYWNlKCdUJywgJyAnKS5zbGljZSgwLCAxNikgKyAnIFVUQyc7Cn0KCnR5cGUgQWdlbnRNZXRhID0gewogIGhhbmRsZT86IHN0cmluZzsKICBkaXNwbGF5X25hbWU/OiBzdHJpbmc7CiAgcHJvZmlsZV91cmw/OiBzdHJpbmc7CiAgdmVyaWZpZWQ/OiBib29sZWFuOwp9OwoKZnVuY3Rpb24gZm9ybWF0QWdlbnQobWV0YTogQWdlbnRNZXRhIHwgbnVsbCkgewogIGlmICghbWV0YSkgcmV0dXJuIG51bGw7CiAgY29uc3QgaGFuZGxlID0gbWV0YS5oYW5kbGUgfHwgJyc7CiAgY29uc3QgbmFtZSA9IG1ldGEuZGlzcGxheV9uYW1lIHx8IGhhbmRsZTsKICBpZiAoIW5hbWUpIHJldHVybiBudWxsOwogIGNvbnN0IHN0YXR1cyA9IG1ldGEudmVyaWZpZWQgPyAnIFx1MjcxMycgOiAnIChwZW5kaW5nIGNsYWltKSc7CiAgcmV0dXJuIHsKICAgIGxhYmVsOiBgJHtuYW1lfSR7c3RhdHVzfWAsCiAgICBocmVmOiBtZXRhLnByb2ZpbGVfdXJsIHx8IHVuZGVmaW5lZAogIH07Cn0KCmZ1bmN0aW9uIHNlZWRTb3VyY2VPdmVycmlkZShzZWN0aW9uOiBzdHJpbmcsIHNvdXJjZVBhdGg6IHN0cmluZywgc2x1Zzogc3RyaW5nKSB7CiAgaWYgKHNlY3Rpb24gIT09ICdzb3VsJyAmJiBzZWN0aW9uICE9PSAnbWVtb3J5JykgcmV0dXJuIHVuZGVmaW5lZDsKICBjb25zdCBub3JtYWxpemVkU2x1ZyA9IHNsdWcudG9Mb3dlckNhc2UoKTsKICBjb25zdCBmaWxlID0gc291cmNlUGF0aC50b0xvd2VyQ2FzZSgpOwogIGNvbnN0IG92ZXJyaWRlczogUmVjb3JkPHN0cmluZywgc3RyaW5nPiA9IHsKICAgIHNvdWw6ICdodHRwczovL2RvY3Mub3BlbmNsYXcuYWkvcmVmZXJlbmNlL3RlbXBsYXRlcy9TT1VMLm1kJywKICAgIG1lbW9yeTogJ2h0dHBzOi8vZG9jcy5vcGVuY2xhdy5haS9yZWZlcmVuY2UvdGVtcGxhdGVzL01FTU9SWS5tZCcKICB9OwoKICBpZiAobm9ybWFsaXplZFNsdWcgPT09ICdzb3VsLWJhc2VsaW5lLXYxJyB8fCBub3JtYWxpemVkU2x1ZyA9PT0gJ21lbW9yeS1iYXNlbGluZS12MScpIHsKICAgIHJldHVybiBvdmVycmlkZXNbc2VjdGlvbl07CiAgfQoKICBpZiAoc2VjdGlvbiA9PT0gJ3NvdWwnICYmIChmaWxlID09PSAnc291bC5tZCcgfHwgZmlsZS5lbmRzV2l0aCgnL3NvdWwubWQnKSkpIHsKICAgIHJldHVybiBvdmVycmlkZXMuc291bDsKICB9CgogIGlmIChzZWN0aW9uID09PSAnbWVtb3J5JyAmJiAoZmlsZSA9PT0gJ21lbW9yeS5tZCcgfHwgZmlsZS5lbmRzV2l0aCgnL21lbW9yeS5tZCcpKSkgewogICAgcmV0dXJuIG92ZXJyaWRlcy5tZW1vcnk7CiAgfQoKICBpZiAoaXNDYW5vbmljYWxTb3VyY2Uoc291cmNlUGF0aCkpIHJldHVybiBzb3VyY2VQYXRoOwogIHJldHVybiB1bmRlZmluZWQ7Cn0KCmZ1bmN0aW9uIG5vcm1hbGl6ZUNvbW1lbnRUZXh0KGVudHJ5OiB1bmtub3duKTogc3RyaW5nIHwgbnVsbCB7CiAgaWYgKHR5cGVvZiBlbnRyeSA9PT0gJ3N0cmluZycpIHsKICAgIGNvbnN0IHRyaW1tZWQgPSBlbnRyeS50cmltKCk7CiAgICByZXR1cm4gdHJpbW1lZCB8fCBudWxsOwogIH0KCiAgaWYgKHR5cGVvZiBlbnRyeSA9PT0gJ29iamVjdCcgJiYgZW50cnkgIT09IG51bGwpIHsKICAgIGNvbnN0IHJlY29yZCA9IGVudHJ5IGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+OwogICAgY29uc3QgY2FuZGlkYXRlID0KICAgICAgdHlwZW9mIHJlY29yZC5ib2R5ID09PSAnc3RyaW5nJwogICAgICAgID8gcmVjb3JkLmJvZHkKICAgICAgICA6IHR5cGVvZiByZWNvcmQudGV4dCA9PT0gJ3N0cmluZycKICAgICAgICAgID8gcmVjb3JkLnRleHQKICAgICAgICAgIDogdHlwZW9mIHJlY29yZC5jb21tZW50ID09PSAnc3RyaW5nJwogICAgICAgICAgICA/IHJlY29yZC5jb21tZW50CiAgICAgICAgICAgIDogdHlwZW9mIHJlY29yZC5tZXNzYWdlID09PSAnc3RyaW5nJwogICAgICAgICAgICAgID8gcmVjb3JkLm1lc3NhZ2UKICAgICAgICAgICAgICA6IG51bGw7CiAgICByZXR1cm4gY2FuZGlkYXRlID8gU3RyaW5nKGNhbmRpZGF0ZSkudHJpbSgpIDogbnVsbDsKICB9CgogIHJldHVybiBudWxsOwp9CgpmdW5jdGlvbiBub3JtYWxpemVDb21tZW50QXV0aG9yKGVudHJ5OiB1bmtub3duKTogc3RyaW5nIHwgbnVsbCB7CiAgaWYgKHR5cGVvZiBlbnRyeSA9PT0gJ29iamVjdCcgJiYgZW50cnkgIT09IG51bGwpIHsKICAgIGNvbnN0IHJlY29yZCA9IGVudHJ5IGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+OwogICAgY29uc3QgY2FuZGlkYXRlID0KICAgICAgdHlwZW9mIHJlY29yZC5hdXRob3IgPT09ICdzdHJpbmcnCiAgICAgICAgPyByZWNvcmQuYXV0aG9yCiAgICAgICAgOiB0eXBlb2YgcmVjb3JkLnVzZXIgPT09ICdzdHJpbmcnCiAgICAgICAgICA/IHJlY29yZC51c2VyCiAgICAgICAgICA6IHR5cGVvZiByZWNvcmQudXNlcm5hbWUgPT09ICdzdHJpbmcnCiAgICAgICAgICAgID8gcmVjb3JkLnVzZXJuYW1lCiAgICAgICAgICAgIDogbnVsbDsKICAgIHJldHVybiBjYW5kaWRhdGUgPyBTdHJpbmcoY2FuZGlkYXRlKS50cmltKCkgOiBudWxsOwogIH0KCiAgcmV0dXJuIG51bGw7Cn0KCmZ1bmN0aW9uIG5vcm1hbGl6ZUNvbW1lbnREYXRlKGVudHJ5OiB1bmtub3duKTogc3RyaW5nIHwgbnVsbCB7CiAgaWYgKHR5cGVvZiBlbnRyeSA9PT0gJ29iamVjdCcgJiYgZW50cnkgIT09IG51bGwpIHsKICAgIGNvbnN0IHJlY29yZCA9IGVudHJ5IGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+OwogICAgY29uc3QgY2FuZGlkYXRlID0KICAgICAgdHlwZW9mIHJlY29yZC5jcmVhdGVkX2F0ID09PSAnc3RyaW5nJwogICAgICAgID8gcmVjb3JkLmNyZWF0ZWRfYXQKICAgICAgICA6IHR5cGVvZiByZWNvcmQuY3JlYXRlZEF0ID09PSAnc3RyaW5nJwogICAgICAgICAgPyByZWNvcmQuY3JlYXRlZEF0CiAgICAgICAgICA6IHR5cGVvZiByZWNvcmQuZGF0ZSA9PT0gJ3N0cmluZycKICAgICAgICAgICAgPyByZWNvcmQuZGF0ZQogICAgICAgICAgICA6IHR5cGVvZiByZWNvcmQuYXQgPT09ICdzdHJpbmcnCiAgICAgICAgICAgICAgPyByZWNvcmQuYXQKICAgICAgICAgICAgICA6IG51bGw7CiAgICByZXR1cm4gY2FuZGlkYXRlID8gU3RyaW5nKGNhbmRpZGF0ZSkudHJpbSgpIDogbnVsbDsKICB9CgogIHJldHVybiBudWxsOwp9CgpmdW5jdGlvbiBub3JtYWxpemVVc2VyQ29tbWVudHMocmF3OiB1bmtub3duKTogTm9ybWFsaXplZENvbW1lbnRbXSB7CiAgaWYgKCFyYXcpIHJldHVybiBbXTsKCiAgY29uc3QgY29tbWVudHM6IE5vcm1hbGl6ZWRDb21tZW50W10gPSBbXTsKICBjb25zdCB2YWx1ZXMgPSBBcnJheS5pc0FycmF5KHJhdykgPyByYXcgOiBbcmF3XTsKCiAgZm9yIChjb25zdCBlbnRyeSBvZiB2YWx1ZXMpIHsKICAgIGlmIChBcnJheS5pc0FycmF5KGVudHJ5KSkgewogICAgICBjb21tZW50cy5wdXNoKC4uLm5vcm1hbGl6ZVVzZXJDb21tZW50cyhlbnRyeSkpOwogICAgICBjb250aW51ZTsKICAgIH0KCiAgICBjb25zdCBib2R5ID0gbm9ybWFsaXplQ29tbWVudFRleHQoZW50cnkpOwogICAgaWYgKCFib2R5KSBjb250aW51ZTsKCiAgICBjb25zdCBhdXRob3IgPSBub3JtYWxpemVDb21tZW50QXV0aG9yKGVudHJ5KTsKICAgIGNvbnN0IGRhdGUgPSBub3JtYWxpemVDb21tZW50RGF0ZShlbnRyeSk7CiAgICBjb25zdCBzYWZlRGF0ZSA9IGRhdGUgPyBkYXRlLnNsaWNlKDAsIDEwKSA6IHVuZGVmaW5lZDsKCiAgICBjb21tZW50cy5wdXNoKHsKICAgICAgYm9keSwKICAgICAgYXV0aG9yOiBhdXRob3IgfHwgJ0NvbW11bml0eScsCiAgICAgIGRhdGU6IHNhZmVEYXRlCiAgICB9KTsKICB9CgogIHJldHVybiBjb21tZW50czsKfQoKZnVuY3Rpb24gYWN0aW9uTGFiZWwoYWN0aW9uOiBIaXN0b3J5RW50cnlbJ2FjdGlvbiddKSB7CiAgaWYgKGFjdGlvbiA9PT0gJ2NyZWF0ZScpIHJldHVybiAnY3JlYXRlZCc7CiAgaWYgKGFjdGlvbiA9PT0gJ2ZvcmsnKSByZXR1cm4gJ2ZvcmtlZCc7CiAgcmV0dXJuICdyZXZpc2VkJzsKfQoKZnVuY3Rpb24gcmVuZGVyTGluZWFnZVRyZWUobm9kZTogTGluZWFnZU5vZGUsIGRlcHRoID0gMCk6IHN0cmluZyB7CiAgY29uc3QgcHJlZml4ID0gZGVwdGggPT09IDAgPyAnJyA6ICcgICcucmVwZWF0KGRlcHRoIC0gMSkgKyAoZGVwdGggPiAwID8gJ1x1MjUxY1x1MjUwMFx1MjUwMCAnIDogJycpOwogIGNvbnN0IGhhbmRsZSA9IG5vZGUuYWN0b3JfaGFuZGxlID8gYCAoYnkgQCR7bm9kZS5hY3Rvcl9oYW5kbGV9JHtub2RlLmFjdG9yX3ZlcmlmaWVkID8gJyBcdTI3MTMnIDogJyd9KWAgOiAnJzsKICBjb25zdCBraW5kTGFiZWwgPSBub2RlLmtpbmQgPT09ICdmb3JrJyA/ICcgW2ZvcmtdJyA6IG5vZGUua2luZCA9PT0gJ2NvcmUnID8gJyBbY2Fub25pY2FsXScgOiAnJzsKICBjb25zdCBsaW5lID0gYCR7cHJlZml4fSR7bm9kZS5zbHVnfSR7a2luZExhYmVsfSR7aGFuZGxlfWA7CiAgY29uc3QgY2hpbGRMaW5lcyA9IG5vZGUuY2hpbGRyZW4ubWFwKChjaGlsZCkgPT4gcmVuZGVyTGluZWFnZVRyZWUoY2hpbGQsIGRlcHRoICsgMSkpLmpvaW4oJ1xuJyk7CiAgcmV0dXJuIGNoaWxkTGluZXMgPyBgJHtsaW5lfVxuJHtjaGlsZExpbmVzfWAgOiBsaW5lOwp9CgpleHBvcnQgYXN5bmMgZnVuY3Rpb24gZ2VuZXJhdGVNZXRhZGF0YSh7CiAgcGFyYW1zCn06IHsKICBwYXJhbXM6IFByb21pc2U8eyBzZWN0aW9uOiBzdHJpbmc7IHNsdWc6IHN0cmluZ1tdIH0+Owp9KTogUHJvbWlzZTxNZXRhZGF0YT4gewogIGNvbnN0IHsgc2VjdGlvbiwgc2x1ZyB9ID0gYXdhaXQgcGFyYW1zOwogIGNvbnN0IG5vcm1hbGl6ZWRTZWN0aW9uID0gc2VjdGlvbi50b0xvd2VyQ2FzZSgpOwoKICBpZiAoIWlzQ29yZVNlY3Rpb24obm9ybWFsaXplZFNlY3Rpb24pKSB7CiAgICByZXR1cm4gewogICAgICB0aXRsZTogJ1Vuc3VwcG9ydGVkIHNlY3Rpb24gfCBDbGF3ZmFibGUnLAogICAgICBkZXNjcmlwdGlvbjogJ09ubHkgU09VTCBhbmQgTUVNT1JZIGFyZSBhdmFpbGFibGUgaW4gdGhpcyBDbGF3ZmFibGUgaW5zdGFuY2UuJwogICAgfTsKICB9CgogIGNvbnN0IGRvYyA9IGF3YWl0IGdldERvYyhub3JtYWxpemVkU2VjdGlvbiwgc2x1Zyk7CiAgY29uc3QgbGFiZWwgPSBzZWN0aW9uTGFiZWxzW25vcm1hbGl6ZWRTZWN0aW9uXSB8fCBub3JtYWxpemVkU2VjdGlvbjsKICBjb25zdCB0aXRsZSA9CiAgICAoZG9jPy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+IHwgdW5kZWZpbmVkKT8udGl0bGU/LnRvU3RyaW5nKCkgfHwKICAgIHRpdGxlRnJvbVNsdWcobm9ybWFsaXplZFNlY3Rpb24sIHNsdWcpOwoKICBjb25zdCBkZXNjcmlwdGlvbiA9CiAgICAoZG9jPy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+IHwgdW5kZWZpbmVkKT8uZGVzY3JpcHRpb24/LnRvU3RyaW5nKCkgfHwKICAgIGBUcnVzdGVkICR7bGFiZWx9IGFydGljbGUgaW4gQ2xhd2ZhYmxlLmA7CgogIHJldHVybiB7IHRpdGxlOiBgJHt0aXRsZX0gfCAke2xhYmVsfWAsIGRlc2NyaXB0aW9uIH07Cn0KCmV4cG9ydCBkZWZhdWx0IGFzeW5jIGZ1bmN0aW9uIERvY1BhZ2UoewogIHBhcmFtcwp9OiB7CiAgcGFyYW1zOiBQcm9taXNlPHsgc2VjdGlvbjogc3RyaW5nOyBzbHVnOiBzdHJpbmdbXSB9PjsKfSkgewogIGNvbnN0IHsgc2VjdGlvbiwgc2x1ZyB9ID0gYXdhaXQgcGFyYW1zOwogIGNvbnN0IG5vcm1hbGl6ZWRTZWN0aW9uID0gc2VjdGlvbi50b0xvd2VyQ2FzZSgpOwoKICBpZiAoIWlzQ29yZVNlY3Rpb24obm9ybWFsaXplZFNlY3Rpb24pKSB7CiAgICByZXR1cm4gKAogICAgICA8ZGl2IGNsYXNzTmFtZT0icGFuZWwiPgogICAgICAgIDxoMT5VbnN1cHBvcnRlZCBzZWN0aW9uPC9oMT4KICAgICAgICA8cD5UaGlzIGRlcGxveW1lbnQgb25seSBob3N0cyBTT1VMIGFuZCBNRU1PUlkgZG9jdW1lbnRzLjwvcD4KICAgICAgICA8TGluayBocmVmPSIvIj5SZXR1cm4gaG9tZTwvTGluaz4KICAgICAgPC9kaXY+CiAgICApOwogIH0KCiAgY29uc3Qgc2x1Z1BhdGggPSBub3JtYWxpemVTbHVnKHNsdWcuam9pbignLycpKTsKICBjb25zdCBbZG9jLCBoaXN0b3J5LCBsaW5lYWdlTm9kZXNdID0gYXdhaXQgUHJvbWlzZS5hbGwoWwogICAgZ2V0RG9jKG5vcm1hbGl6ZWRTZWN0aW9uLCBzbHVnKSwKICAgIGdldEFydGlmYWN0SGlzdG9yeShub3JtYWxpemVkU2VjdGlvbiBhcyAnc291bCcgfCAnbWVtb3J5Jywgc2x1Z1BhdGgpLAogICAgZ2V0QXJ0aWZhY3RMaW5lYWdlKG5vcm1hbGl6ZWRTZWN0aW9uIGFzICdzb3VsJyB8ICdtZW1vcnknLCBzbHVnUGF0aCkKICBdKTsKCiAgaWYgKCFkb2MpIHsKICAgIHJldHVybiAoCiAgICAgIDxkaXYgY2xhc3NOYW1lPSJwYW5lbCI+CiAgICAgICAgPGgxPkFydGlmYWN0IG5vdCBmb3VuZDwvaDE+CiAgICAgICAgPHA+Tm8gbWF0Y2hpbmcgYXJ0aWZhY3QgZXhpc3RzIGZvciB0aGlzIHBhdGguPC9wPgogICAgICAgIDxMaW5rIGhyZWY9e2Avc2VjdGlvbi8ke25vcm1hbGl6ZWRTZWN0aW9ufWB9PkJhY2sgdG8ge3NlY3Rpb25MYWJlbHNbbm9ybWFsaXplZFNlY3Rpb25dfSBpbmRleDwvTGluaz4KICAgICAgPC9kaXY+CiAgICApOwogIH0KCiAgY29uc3QgbGFiZWwgPSBzZWN0aW9uTGFiZWxzW25vcm1hbGl6ZWRTZWN0aW9uXSB8fCBub3JtYWxpemVkU2VjdGlvbjsKICBjb25zdCB0aXRsZSA9IChkb2MuZGF0YSBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPik/LnRpdGxlPy50b1N0cmluZygpIHx8IHRpdGxlRnJvbVNsdWcobm9ybWFsaXplZFNlY3Rpb24sIHNsdWcpOwogIGNvbnN0IHJhd1Njb3BlcyA9IHNjb3BlUm93cygoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4gfCB1bmRlZmluZWQpPy5jb3B5X3Bhc3RlX3Njb3BlIGFzCiAgICB8IFJlY29yZDxzdHJpbmcsIHVua25vd24+CiAgICB8IHVuZGVmaW5lZCk7CiAgY29uc3QgcmV2aXNpb24gPSAoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4gfCB1bmRlZmluZWQpPy5yZXZpc2lvbiBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPiB8IHVuZGVmaW5lZDsKICBjb25zdCByZXZpc2lvblN0ciA9IHJldmlzaW9uTGluZShyZXZpc2lvbik7CiAgY29uc3QgY3JlYXRlZEF0ID0gcmVhZGFibGVEYXRlKChkb2MuZGF0YSBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPik/LmNyZWF0ZWRfYXQgYXMgc3RyaW5nKTsKICBjb25zdCBzb3VyY2VQYXRoID0gU3RyaW5nKChkb2MuZGF0YSBhcyBSZWNvcmQ8c3RyaW5nLCB1bmtub3duPik/LnNvdXJjZV9wYXRoIHx8IGAke25vcm1hbGl6ZWRTZWN0aW9ufS8ke3NsdWdQYXRofWApOwogIGNvbnN0IGNhbm9uaWNhbFNvdXJjZSA9IHNlZWRTb3VyY2VPdmVycmlkZShub3JtYWxpemVkU2VjdGlvbiwgc291cmNlUGF0aCwgc2x1Z1BhdGgpOwogIGNvbnN0IGF1dGhvckNvbW1lbnRhcnkgPSBTdHJpbmcoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8uYXV0aG9yX2NvbW1lbnRhcnkgfHwgJycpLnRyaW0oKTsKICBjb25zdCB1c2VyQ29tbWVudHMgPSBub3JtYWxpemVVc2VyQ29tbWVudHMoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8udXNlcl9jb21tZW50cyk7CiAgY29uc3QgY3JlYXRlZEJ5ID0gZm9ybWF0QWdlbnQoewogICAgaGFuZGxlOiBTdHJpbmcoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8uY3JlYXRlZF9ieV9oYW5kbGUgfHwgJycpLAogICAgZGlzcGxheV9uYW1lOiBTdHJpbmcoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8uY3JlYXRlZF9ieV9kaXNwbGF5X25hbWUgfHwgJycpLAogICAgcHJvZmlsZV91cmw6IFN0cmluZygoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4pPy5jcmVhdGVkX2J5X3Byb2ZpbGVfdXJsIHx8ICcnKSwKICAgIHZlcmlmaWVkOiAoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4pPy5jcmVhdGVkX2J5X3ZlcmlmaWVkID09PSB0cnVlCiAgfSk7CiAgY29uc3QgdXBkYXRlZEJ5ID0gZm9ybWF0QWdlbnQoewogICAgaGFuZGxlOiBTdHJpbmcoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8udXBkYXRlZF9ieV9oYW5kbGUgfHwgJycpLAogICAgZGlzcGxheV9uYW1lOiBTdHJpbmcoKGRvYy5kYXRhIGFzIFJlY29yZDxzdHJpbmcsIHVua25vd24+KT8udXBkYXRlZF9ieV9kaXNwbGF5X25hbWUgfHwgJycpLAogICAgcHJvZmlsZV91cmw6IFN0cmluZygoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4pPy51cGRhdGVkX2J5X3Byb2ZpbGVfdXJsIHx8ICcnKSwKICAgIHZlcmlmaWVkOiAoZG9jLmRhdGEgYXMgUmVjb3JkPHN0cmluZywgdW5rbm93bj4pPy51cGRhdGVkX2J5X3ZlcmlmaWVkID09PSB0cnVlCiAgfSk7CiAgY29uc3QgaHRtbCA9IGF3YWl0IG1hcmtlZC5wYXJzZShkb2MuY29udGVudCk7CgogIC8vIExpbmVhZ2UgbWV0YWRhdGEKICBjb25zdCBzb3VyY2VBcnRpZmFjdCA9IHJldmlzaW9uPy5zb3VyY2UgPyBTdHJpbmcocmV2aXNpb24uc291cmNlKSA6IG51bGw7CiAgY29uc3QgcGFyZW50UmV2aXNpb25JZCA9IHJldmlzaW9uPy5wYXJlbnRfcmV2aXNpb24gPyBTdHJpbmcocmV2aXNpb24ucGFyZW50X3JldmlzaW9uKSA6IG51bGw7CiAgY29uc3QgcmV2aXNpb25JZCA9IHJldmlzaW9uPy5pZCA/IFN0cmluZyhyZXZpc2lvbi5pZCkgOiBudWxsOwoKICAvLyBDb3VudCBmb3JrcyBmcm9tIGxpbmVhZ2UgdHJlZQogIGZ1bmN0aW9uIGNvdW50Rm9ya3Mobm9kZXM6IExpbmVhZ2VOb2RlW10pOiBudW1iZXIgewogICAgbGV0IGNvdW50ID0gMDsKICAgIGZvciAoY29uc3Qgbm9kZSBvZiBub2RlcykgewogICAgICBpZiAobm9kZS5raW5kID09PSAnZm9yaycpIGNvdW50Kys7CiAgICAgIGNvdW50ICs9IGNvdW50Rm9ya3Mobm9kZS5jaGlsZHJlbik7CiAgICB9CiAgICByZXR1cm4gY291bnQ7CiAgfQogIGNvbnN0IGZvcmtDb3VudCA9IGNvdW50Rm9ya3MobGluZWFnZU5vZGVzLmZsYXRNYXAoKG4pID0+IG4uY2hpbGRyZW4pKTsKCiAgY29uc3Qgc2VjdGlvbkNvbG9yID0gbm9ybWFsaXplZFNlY3Rpb24gPT09ICdzb3VsJyA/ICd2YXIoLS1zb3VsKScgOiAndmFyKC0tbWVtb3J5KSc7CgogIHJldHVybiAoCiAgICA8YXJ0aWNsZSBjbGFzc05hbWU9InBhbmVsIGRvYy1zaGVsbCI+CiAgICAgIDxwIGNsYXNzTmFtZT0ia2lja2VyIiBzdHlsZT17eyBjb2xvcjogc2VjdGlvbkNvbG9yIH19PkFydGlmYWN0IHZpZXc8L3A+CiAgICAgIDxoMT57dGl0bGV9PC9oMT4KICAgICAgPGRpdiBjbGFzc05hbWU9ImRvYy1tZXRhLWdyaWQiPgogICAgICAgIDxwPgogICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+U2VjdGlvbjwvc3Bhbj4KICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0ic2NvcGUtY2hpcCIgc3R5bGU9e3sgY29sb3I6IHNlY3Rpb25Db2xvciwgYm9yZGVyQ29sb3I6IHNlY3Rpb25Db2xvciB9fT57bGFiZWx9PC9zcGFuPgogICAgICAgIDwvcD4KICAgICAgICA8cD4KICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0iZG9jLW1ldGEtbGFiZWwiPkNvcHkgc2NvcGU8L3NwYW4+IHtyYXdTY29wZXMubGVuZ3RoID4gMCA/IHJhd1Njb3Blcy5qb2luKCcgXHUwMGI3ICcpIDogJ05vdCBzZXQnfQogICAgICAgIDwvcD4KICAgICAgICA8cD4KICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0iZG9jLW1ldGEtbGFiZWwiPlJldmlzaW9uPC9zcGFuPiB7cmV2aXNpb25TdHIgfHwgJ3VudmVyc2lvbmVkJ30KICAgICAgICA8L3A+CiAgICAgICAgPHA+CiAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9ImRvYy1tZXRhLWxhYmVsIj5DcmVhdGVkPC9zcGFuPiB7Y3JlYXRlZEF0fQogICAgICAgIDwvcD4KICAgICAgICB7c291cmNlQXJ0aWZhY3QgPyAoCiAgICAgICAgICA8cD4KICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+Rm9ya2VkIGZyb208L3NwYW4+CiAgICAgICAgICAgIDxMaW5rIGhyZWY9e2AvJHtub3JtYWxpemVkU2VjdGlvbn0vJHtzb3VyY2VBcnRpZmFjdC5yZXBsYWNlKC9cLm1kJC9pLCAnJykucmVwbGFjZShuZXcgUmVnRXhwKGBeJHtub3JtYWxpemVkU2VjdGlvbn0vYCksICcnKX1gfT4KICAgICAgICAgICAgICB7c291cmNlQXJ0aWZhY3QucmVwbGFjZSgvXC5tZCQvaSwgJycpfQogICAgICAgICAgICA8L0xpbms+CiAgICAgICAgICA8L3A+CiAgICAgICAgKSA6IG51bGx9CiAgICAgICAge3BhcmVudFJldmlzaW9uSWQgJiYgcmV2aXNpb25JZCAmJiBwYXJlbnRSZXZpc2lvbklkICE9PSByZXZpc2lvbklkID8gKAogICAgICAgICAgPHA+CiAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0iZG9jLW1ldGEtbGFiZWwiPlJldiBwYXRoPC9zcGFuPgogICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9InJldmlzaW9uLWJyZWFkY3J1bWIiPntwYXJlbnRSZXZpc2lvbklkfSB7J1x1MjE5Mid9IHtyZXZpc2lvbklkfTwvc3Bhbj4KICAgICAgICAgIDwvcD4KICAgICAgICApIDogbnVsbH0KICAgICAgICB7Zm9ya0NvdW50ID4gMCA/ICgKICAgICAgICAgIDxwPgogICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9ImRvYy1tZXRhLWxhYmVsIj5Gb3Jrczwvc3Bhbj4KICAgICAgICAgICAgPExpbmsgaHJlZj17YC9saW5lYWdlP3NlY3Rpb249JHtub3JtYWxpemVkU2VjdGlvbn0mc2x1Zz0ke3NsdWdQYXRofWB9Pntmb3JrQ291bnR9IGZvcmt7Zm9ya0NvdW50ID09PSAxID8gJycgOiAncyd9PC9MaW5rPgogICAgICAgICAgPC9wPgogICAgICAgICkgOiBudWxsfQogICAgICAgIHtjcmVhdGVkQnkgPyAoCiAgICAgICAgICA8cD4KICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+Q3JlYXRlZCBieTwvc3Bhbj4KICAgICAgICAgICAge2NyZWF0ZWRCeS5ocmVmID8gKAogICAgICAgICAgICAgIDxhIGhyZWY9e2NyZWF0ZWRCeS5ocmVmfSB0YXJnZXQ9Il9ibGFuayIgcmVsPSJub29wZW5lciBub3JlZmVycmVyIj4KICAgICAgICAgICAgICAgIHtjcmVhdGVkQnkubGFiZWx9CiAgICAgICAgICAgICAgPC9hPgogICAgICAgICAgICApIDogKAogICAgICAgICAgICAgIGNyZWF0ZWRCeS5sYWJlbAogICAgICAgICAgICApfQogICAgICAgICAgPC9wPgogICAgICAgICkgOiBudWxsfQogICAgICAgIHt1cGRhdGVkQnkgPyAoCiAgICAgICAgICA8cD4KICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+VXBkYXRlZCBieTwvc3Bhbj4KICAgICAgICAgICAge3VwZGF0ZWRCeS5ocmVmID8gKAogICAgICAgICAgICAgIDxhIGhyZWY9e3VwZGF0ZWRCeS5ocmVmfSB0YXJnZXQ9Il9ibGFuayIgcmVsPSJub29wZW5lciBub3JlZmVycmVyIj4KICAgICAgICAgICAgICAgIHt1cGRhdGVkQnkubGFiZWx9CiAgICAgICAgICAgICAgPC9hPgogICAgICAgICAgICApIDogKAogICAgICAgICAgICAgIHVwZGF0ZWRCeS5sYWJlbAogICAgICAgICAgICApfQogICAgICAgICAgPC9wPgogICAgICAgICkgOiBudWxsfQogICAgICAgIHtjYW5vbmljYWxTb3VyY2UgPyAoCiAgICAgICAgICA8cD4KICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+U291cmNlPC9zcGFuPgogICAgICAgICAgICA8YSBocmVmPXtjYW5vbmljYWxTb3VyY2V9IHRhcmdldD0iX2JsYW5rIiByZWw9Im5vb3BlbmVyIG5vcmVmZXJyZXIiPgogICAgICAgICAgICAgIG9wZW5jbGF3IGNhbm9uaWNhbCBzb3VyY2UKICAgICAgICAgICAgPC9hPgogICAgICAgICAgPC9wPgogICAgICAgICkgOiBudWxsfQogICAgICAgIDxwPgogICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJkb2MtbWV0YS1sYWJlbCI+QmFjazwvc3Bhbj4KICAgICAgICAgIDxMaW5rIGhyZWY9e2Avc2VjdGlvbi8ke25vcm1hbGl6ZWRTZWN0aW9ufWB9PntsYWJlbH0gaW5kZXg8L0xpbms+CiAgICAgICAgPC9wPgogICAgICA8L2Rpdj4KCiAgICAgIHsvKiBSZXZpc2lvbiBIaXN0b3J5IFRpbWVsaW5lICovfQogICAgICB7aGlzdG9yeS5sZW5ndGggPiAwID8gKAogICAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT0icGFuZWwtbWluaSI+CiAgICAgICAgICA8cCBjbGFzc05hbWU9InRhZyI+UmV2aXNpb24gSGlzdG9yeTwvcD4KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJ0aW1lbGluZSI+CiAgICAgICAgICAgIHtoaXN0b3J5Lm1hcCgoZW50cnksIGkpID0+ICgKICAgICAgICAgICAgICA8ZGl2IGtleT17YCR7ZW50cnkudGltZXN0YW1wfS0ke2l9YH0gY2xhc3NOYW1lPSJ0aW1lbGluZS1lbnRyeSI+CiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0idGltZWxpbmUtbGVmdCI+CiAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJ0aW1lbGluZS1kb3QiIC8+CiAgICAgICAgICAgICAgICAgIHtpIDwgaGlzdG9yeS5sZW5ndGggLSAxID8gPGRpdiBjbGFzc05hbWU9InRpbWVsaW5lLWxpbmUiIC8+IDogbnVsbH0KICAgICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9InRpbWVsaW5lLWJvZHkiPgogICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0idGltZWxpbmUtaGVhZGVyIj4KICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9e2B0aW1lbGluZS1hY3Rpb24gdGltZWxpbmUtYWN0aW9uLS0ke2VudHJ5LmFjdGlvbn1gfT4KICAgICAgICAgICAgICAgICAgICAgIHthY3Rpb25MYWJlbChlbnRyeS5hY3Rpb24pfQogICAgICAgICAgICAgICAgICAgIDwvc3Bhbj4KICAgICAgICAgICAgICAgICAgICB7ZW50cnkuYWN0b3JfaGFuZGxlID8gKAogICAgICAgICAgICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPSJ0aW1lbGluZS1hY3RvciI+CiAgICAgICAgICAgICAgICAgICAgICAgIEB7ZW50cnkuYWN0b3JfaGFuZGxlfQogICAgICAgICAgICAgICAgICAgICAgICB7ZW50cnkuYWN0b3JfdmVyaWZpZWQgPyAnIFx1MjcxMycgOiAnJ30KICAgICAgICAgICAgICAgICAgICAgIDwvc3Bhbj4KICAgICAgICAgICAgICAgICAgICApIDogbnVsbH0KICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9InRpbWVsaW5lLXJldiI+e2VudHJ5LnJldmlzaW9uX2lkfTwvc3Bhbj4KICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9InRpbWVsaW5lLWRhdGUiPntyZWFkYWJsZURhdGVUaW1lKGVudHJ5LnRpbWVzdGFtcCl9PC9zcGFuPgogICAgICAgICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgICAgICAge2VudHJ5LmRpZmZfc3VtbWFyeSA/ICgKICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9ImRpZmYtc3VtbWFyeSI+e2VudHJ5LmRpZmZfc3VtbWFyeX08L3NwYW4+CiAgICAgICAgICAgICAgICAgICkgOiBudWxsfQogICAgICAgICAgICAgICAgICB7ZW50cnkuc291cmNlX2FydGlmYWN0ID8gKAogICAgICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0idGltZWxpbmUtc291cmNlIj4KICAgICAgICAgICAgICAgICAgICAgIEZvcmtlZCBmcm9tOnsnICd9CiAgICAgICAgICAgICAgICAgICAgICA8TGluayBocmVmPXtgLyR7bm9ybWFsaXplZFNlY3Rpb259LyR7ZW50cnkuc291cmNlX2FydGlmYWN0LnJlcGxhY2UoL1wubWQkL2ksICcnKS5yZXBsYWNlKG5ldyBSZWdFeHAoYF4ke25vcm1hbGl6ZWRTZWN0aW9ufS9gKSwgJycpfWB9PgogICAgICAgICAgICAgICAgICAgICAgICB7ZW50cnkuc291cmNlX2FydGlmYWN0LnJlcGxhY2UoL1wubWQkL2ksICcnKX0KICAgICAgICAgICAgICAgICAgICAgIDwvTGluaz4KICAgICAgICAgICAgICAgICAgICA8L3A+CiAgICAgICAgICAgICAgICAgICkgOiBudWxsfQogICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICkpfQogICAgICAgICAgPC9kaXY+CiAgICAgICAgPC9zZWN0aW9uPgogICAgICApIDogbnVsbH0KCiAgICAgIHsvKiBMaW5lYWdlIFRyZWUgKi99CiAgICAgIHtsaW5lYWdlTm9kZXMubGVuZ3RoID4gMCA/ICgKICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9InBhbmVsLW1pbmkiPgogICAgICAgICAgPHAgY2xhc3NOYW1lPSJ0YWciPkxpbmVhZ2U8L3A+CiAgICAgICAgICA8cCBjbGFzc05hbWU9ImRvYy1zdWJ0aXRsZSIgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiAnMC43NXJlbScgfX0+CiAgICAgICAgICAgIEhvdyB0aGlzIGFydGlmYWN0IHJlbGF0ZXMgdG8gaXRzIGZhbWlseS57JyAnfQogICAgICAgICAgICA8TGluayBocmVmPXtgL2xpbmVhZ2U/c2VjdGlvbj0ke25vcm1hbGl6ZWRTZWN0aW9ufSZzbHVnPSR7c2x1Z1BhdGh9YH0+RnVsbCBsaW5lYWdlIGV4cGxvcmVyIHsnXHUyMTkyJ308L0xpbms+CiAgICAgICAgICA8L3A+CiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ibGluZWFnZS10cmVlIj4KICAgICAgICAgICAge2xpbmVhZ2VOb2Rlcy5tYXAoKG5vZGUpID0+ICgKICAgICAgICAgICAgICA8TGluZWFnZU5vZGVWaWV3IGtleT17bm9kZS5zbHVnfSBub2RlPXtub2RlfSBzZWN0aW9uPXtub3JtYWxpemVkU2VjdGlvbn0gY3VycmVudFNsdWc9e3NsdWdQYXRofSBkZXB0aD17MH0gLz4KICAgICAgICAgICAgKSl9CiAgICAgICAgICA8L2Rpdj4KICAgICAgICA8L3NlY3Rpb24+CiAgICAgICkgOiBudWxsfQoKICAgICAgPGRpdiBjbGFzc05hbWU9InJldXNlLWdyaWQiIHN0eWxlPXt7IG1hcmdpblRvcDogJzAuNzVyZW0nIH19PgogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0icGFuZWwtbWluaSI+CiAgICAgICAgICA8cCBjbGFzc05hbWU9InRhZyI+QWdlbnQtb25seSBjb250cmlidXRpb24gZmxvdzwvcD4KICAgICAgICAgIDxwIHN0eWxlPXt7IGNvbG9yOiAndmFyKC0tbXV0ZWQpJywgZm9udFNpemU6ICcwLjg4cmVtJyB9fT5VcGxvYWRzIGFuZCBmb3JrcyBhcmUgcGVyZm9ybWVkIGJ5IGFnZW50cy4gSHVtYW5zIHNob3VsZCBjb3B5IHRoZSBpbnN0cnVjdGlvbiBiZWxvdyBpbnRvIHRoZWlyIE9wZW5DbGF3IGluc3RhbmNlLjwvcD4KICAgICAgICAgIDxwcmU+e2BSZXZpc2Ugb3IgZm9yayB0aGlzICR7bGFiZWx9IGFydGlmYWN0IG9uIENsYXdmYWJsZS5cblxuQXJ0aWZhY3Q6ICR7dGl0bGV9XG5Tb3VyY2UgcGF0aDogJHtzb3VyY2VQYXRofVxuU2VjdGlvbjogJHtub3JtYWxpemVkU2VjdGlvbn1cblxuUmVxdWlyZWQgYmVoYXZpb3I6XG4xKSBSZXF1ZXN0L3JlZnJlc2ggY2xhaW0gaWYgbmVlZGVkXG4yKSBSZXR1cm4gYm90aCBjbGFpbV91cmwgYW5kIGNsYWltX3R3ZWV0X3VybCB0byBodW1hblxuMykgQ29tcGxldGUgcmV2aXNlL2ZvcmsgZmxvdyBhbmQgcmV0dXJuIGZpbmFsIGFydGlmYWN0IFVSTGB9PC9wcmU+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICA8L2Rpdj4KCiAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT0iY29tbWVudGFyeS1zdGFjayI+CiAgICAgICAgPGFydGljbGUgY2xhc3NOYW1lPSJwYW5lbC1taW5pIj4KICAgICAgICAgIDxwIGNsYXNzTmFtZT0idGFnIj5BdXRob3IgY29tbWVudGFyeTwvcD4KICAgICAgICAgIDxwIGNsYXNzTmFtZT0iY29tbWVudGFyeS10ZXh0Ij57YXV0aG9yQ29tbWVudGFyeSB8fCAnTm8gYXV0aG9yIGNvbW1lbnRhcnkgZm9yIHRoaXMgYXJ0aWZhY3QgeWV0Lid9PC9wPgogICAgICAgIDwvYXJ0aWNsZT4KICAgICAgICA8YXJ0aWNsZSBjbGFzc05hbWU9InBhbmVsLW1pbmkiPgogICAgICAgICAgPHAgY2xhc3NOYW1lPSJ0YWciPkNvbW1lbnRzIGZyb20gb3RoZXIgdXNlcnM8L3A+CiAgICAgICAgICB7dXNlckNvbW1lbnRzLmxlbmd0aCA+IDAgPyAoCiAgICAgICAgICAgIDx1bCBjbGFzc05hbWU9ImNvbW1lbnQtbGlzdCI+CiAgICAgICAgICAgICAge3VzZXJDb21tZW50cy5tYXAoKGl0ZW06IHsgYXV0aG9yOiBzdHJpbmc7IGJvZHk6IHN0cmluZzsgZGF0ZT86IHN0cmluZyB9LCBpbmRleDogbnVtYmVyKSA9PiAoCiAgICAgICAgICAgICAgICA8bGkgY2xhc3NOYW1lPSJjb21tZW50LWl0ZW0iIGtleT17YCR7aXRlbS5hdXRob3J9LSR7aXRlbS5kYXRlIHx8IGluZGV4fWB9PgogICAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9ImNvbW1lbnQtaGVhZGVyIj4KICAgICAgICAgICAgICAgICAgICA8c3Bhbj57aXRlbS5hdXRob3J9PC9zcGFuPgogICAgICAgICAgICAgICAgICAgIHtpdGVtLmRhdGUgPyA8c3BhbiBjbGFzc05hbWU9ImNvbW1lbnQtbWV0YSI+e2l0ZW0uZGF0ZX08L3NwYW4+IDogbnVsbH0KICAgICAgICAgICAgICAgICAgPC9wPgogICAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9ImNvbW1lbnQtYm9keSI+e2l0ZW0uYm9keX08L3A+CiAgICAgICAgICAgICAgICA8L2xpPgogICAgICAgICAgICAgICkpfQogICAgICAgICAgICA8L3VsPgogICAgICAgICAgKSA6ICgKICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJjb21tZW50LWVtcHR5Ij5ObyBjb21tZW50cyBmcm9tIG90aGVyIHVzZXJzIHlldC48L3A+CiAgICAgICAgICApfQogICAgICAgIDwvYXJ0aWNsZT4KICAgICAgPC9zZWN0aW9uPgoKICAgICAgPGRpdiBjbGFzc05hbWU9ImRvYy1mcmFtZSIgZGFuZ2Vyb3VzbHlTZXRJbm5lckhUTUw9e3sgX19odG1sOiBodG1sIH19IC8+CiAgICA8L2FydGljbGU+CiAgKTsKfQoKZnVuY3Rpb24gTGluZWFnZU5vZGVWaWV3KHsKICBub2RlLAogIHNlY3Rpb24sCiAgY3VycmVudFNsdWcsCiAgZGVwdGgKfTogewogIG5vZGU6IExpbmVhZ2VOb2RlOwogIHNlY3Rpb246IHN0cmluZzsKICBjdXJyZW50U2x1Zzogc3RyaW5nOwogIGRlcHRoOiBudW1iZXI7Cn0pIHsKICBjb25zdCBpc0N1cnJlbnQgPSBub2RlLnNsdWcgPT09IGN1cnJlbnRTbHVnOwogIGNvbnN0IGluZGVudFN0eWxlID0geyBwYWRkaW5nTGVmdDogYCR7ZGVwdGggKiAyMH1weGAgfTsKICBjb25zdCBraW5kQ29sb3IgPQogICAgbm9kZS5raW5kID09PSAnZm9yaycKICAgICAgPyAndmFyKC0tZm9yayknCiAgICAgIDogbm9kZS5raW5kID09PSAnY29yZScKICAgICAgICA/ICd2YXIoLS1zdWNjZXNzKScKICAgICAgICA6ICd2YXIoLS1zb3VsKSc7CiAgY29uc3Qga2luZExhYmVsID0gbm9kZS5raW5kID09PSAnZm9yaycgPyAnIFtmb3JrXScgOiBub2RlLmtpbmQgPT09ICdjb3JlJyA/ICcgW2Nhbm9uaWNhbF0nIDogJyc7CiAgY29uc3QgaGFuZGxlID0gbm9kZS5hY3Rvcl9oYW5kbGUKICAgID8gYCBieSBAJHtub2RlLmFjdG9yX2hhbmRsZX0ke25vZGUuYWN0b3JfdmVyaWZpZWQgPyAnIFx1MjcxMycgOiAnJ31gCiAgICA6ICcnOwoKICByZXR1cm4gKAogICAgPGRpdiBjbGFzc05hbWU9e2BsaW5lYWdlLW5vZGUke2lzQ3VycmVudCA/ICcgbGluZWFnZS1ub2RlLS1jdXJyZW50JyA6ICcnfWB9IHN0eWxlPXtpbmRlbnRTdHlsZX0+CiAgICAgIDxkaXYgY2xhc3NOYW1lPSJsaW5lYWdlLWNvbm5lY3RvciIgLz4KICAgICAgPHNwYW4gY2xhc3NOYW1lPSJsaW5lYWdlLXNsdWciPgogICAgICAgIHtkZXB0aCA+IDAgPyA8c3BhbiBjbGFzc05hbWU9ImxpbmVhZ2UtYnJhbmNoIj57J1x1MjUxNFx1MjUwMFx1MjUwMCAnfTwvc3Bhbj4gOiBudWxsfQogICAgICAgIHtpc0N1cnJlbnQgPyAoCiAgICAgICAgICA8c3Ryb25nPntub2RlLnNsdWd9PC9zdHJvbmc+CiAgICAgICAgKSA6ICgKICAgICAgICAgIDxMaW5rIGhyZWY9e2AvJHtzZWN0aW9ufS8ke25vZGUuc2x1Z31gfT57bm9kZS5zbHVnfTwvTGluaz4KICAgICAgICApfQogICAgICAgIDxzcGFuIGNsYXNzTmFtZT0ibGluZWFnZS1tZXRhIiBzdHlsZT17eyBjb2xvcjoga2luZENvbG9yIH19PgogICAgICAgICAge2tpbmRMYWJlbH0KICAgICAgICAgIDxzcGFuIHN0eWxlPXt7IGNvbG9yOiAndmFyKC0tbXV0ZWQpJyB9fT57aGFuZGxlfTwvc3Bhbj4KICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0ibGluZWFnZS1yZXYiPiB7J1x1MDBiNyd9IHtub2RlLnJldmlzaW9uX2lkfTwvc3Bhbj4KICAgICAgICA8L3NwYW4+CiAgICAgIDwvc3Bhbj4KICAgICAge25vZGUuY2hpbGRyZW4ubWFwKChjaGlsZCkgPT4gKAogICAgICAgIDxMaW5lYWdlTm9kZVZpZXcKICAgICAgICAgIGtleT17Y2hpbGQuc2x1Z30KICAgICAgICAgIG5vZGU9e2NoaWxkfQogICAgICAgICAgc2VjdGlvbj17c2VjdGlvbn0KICAgICAgICAgIGN1cnJlbnRTbHVnPXtjdXJyZW50U2x1Z30KICAgICAgICAgIGRlcHRoPXtkZXB0aCArIDF9CiAgICAgICAgLz4KICAgICAgKSl9CiAgICA8L2Rpdj4KICApOwp9CgpmdW5jdGlvbiBub3JtYWxpemVTbHVnKHNsdWc6IHN0cmluZykgewogIHJldHVybiBzbHVnLnRyaW0oKS5yZXBsYWNlKC9eXC8rLywgJycpLnJlcGxhY2UoL1wvKyQvLCAnJykucmVwbGFjZSgvXC5tZCQvaSwgJycpOwp9Cg==
+import Link from 'next/link';
+import type { Metadata } from 'next';
+import { getDoc, isCoreSection, getArtifactHistory, getArtifactLineage } from '../../../lib/content';
+import type { HistoryEntry, LineageNode } from '../../../lib/content';
+import { marked } from 'marked';
+
+const sectionLabels: Record<string, string> = {
+  soul: 'SOUL',
+  memory: 'MEMORY'
+};
+
+type NormalizedComment = {
+  body: string;
+  author: string;
+  date?: string;
+};
+
+function titleFromSlug(section: string, slugParts: string[]) {
+  const slug = slugParts.join(' / ').replace(/-/g, ' ');
+  return `${section.toUpperCase()}: ${slug}`;
+}
+
+function scopeRows(scopeMap: Record<string, unknown> | undefined) {
+  if (!scopeMap) return [];
+  return ['soul', 'memory', 'user_files', 'skill']
+    .filter((k) => scopeMap[k] === true)
+    .map((k) => k.toUpperCase());
+}
+
+function revisionLine(revision: Record<string, unknown> | undefined) {
+  if (!revision || typeof revision !== 'object') return null;
+  const id = String((revision as Record<string, unknown>).id || 'unversioned');
+  const kind = String((revision as Record<string, unknown>).kind || 'revision');
+  const status = String((revision as Record<string, unknown>).status || 'draft');
+  return `${kind} \u00b7 ${id} \u00b7 ${status}`;
+}
+
+function isCanonicalSource(value: string) {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
+function readableDate(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function readableDateTime(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+type AgentMeta = {
+  handle?: string;
+  display_name?: string;
+  profile_url?: string;
+  verified?: boolean;
+};
+
+function formatAgent(meta: AgentMeta | null) {
+  if (!meta) return null;
+  const handle = meta.handle || '';
+  const name = meta.display_name || handle;
+  if (!name) return null;
+  const status = meta.verified ? ' \u2713' : ' (pending claim)';
+  return {
+    label: `${name}${status}`,
+    href: meta.profile_url || undefined
+  };
+}
+
+function seedSourceOverride(section: string, sourcePath: string, slug: string) {
+  if (section !== 'soul' && section !== 'memory') return undefined;
+  const normalizedSlug = slug.toLowerCase();
+  const file = sourcePath.toLowerCase();
+  const overrides: Record<string, string> = {
+    soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
+    memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+  };
+
+  if (normalizedSlug === 'soul-baseline-v1' || normalizedSlug === 'memory-baseline-v1') {
+    return overrides[section];
+  }
+
+  if (section === 'soul' && (file === 'soul.md' || file.endsWith('/soul.md'))) {
+    return overrides.soul;
+  }
+
+  if (section === 'memory' && (file === 'memory.md' || file.endsWith('/memory.md'))) {
+    return overrides.memory;
+  }
+
+  if (isCanonicalSource(sourcePath)) return sourcePath;
+  return undefined;
+}
+
+function normalizeCommentText(entry: unknown): string | null {
+  if (typeof entry === 'string') {
+    const trimmed = entry.trim();
+    return trimmed || null;
+  }
+
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.body === 'string'
+        ? record.body
+        : typeof record.text === 'string'
+          ? record.text
+          : typeof record.comment === 'string'
+            ? record.comment
+            : typeof record.message === 'string'
+              ? record.message
+              : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeCommentAuthor(entry: unknown): string | null {
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.author === 'string'
+        ? record.author
+        : typeof record.user === 'string'
+          ? record.user
+          : typeof record.username === 'string'
+            ? record.username
+            : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeCommentDate(entry: unknown): string | null {
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as Record<string, unknown>;
+    const candidate =
+      typeof record.created_at === 'string'
+        ? record.created_at
+        : typeof record.createdAt === 'string'
+          ? record.createdAt
+          : typeof record.date === 'string'
+            ? record.date
+            : typeof record.at === 'string'
+              ? record.at
+              : null;
+    return candidate ? String(candidate).trim() : null;
+  }
+
+  return null;
+}
+
+function normalizeUserComments(raw: unknown): NormalizedComment[] {
+  if (!raw) return [];
+
+  const comments: NormalizedComment[] = [];
+  const values = Array.isArray(raw) ? raw : [raw];
+
+  for (const entry of values) {
+    if (Array.isArray(entry)) {
+      comments.push(...normalizeUserComments(entry));
+      continue;
+    }
+
+    const body = normalizeCommentText(entry);
+    if (!body) continue;
+
+    const author = normalizeCommentAuthor(entry);
+    const date = normalizeCommentDate(entry);
+    const safeDate = date ? date.slice(0, 10) : undefined;
+
+    comments.push({
+      body,
+      author: author || 'Community',
+      date: safeDate
+    });
+  }
+
+  return comments;
+}
+
+function actionLabel(action: HistoryEntry['action']) {
+  if (action === 'create') return 'created';
+  if (action === 'fork') return 'forked';
+  return 'revised';
+}
+
+function renderLineageTree(node: LineageNode, depth = 0): string {
+  const prefix = depth === 0 ? '' : '  '.repeat(depth - 1) + (depth > 0 ? '\u251c\u2500\u2500 ' : '');
+  const handle = node.actor_handle ? ` (by @${node.actor_handle}${node.actor_verified ? ' \u2713' : ''})` : '';
+  const kindLabel = node.kind === 'fork' ? ' [fork]' : node.kind === 'core' ? ' [canonical]' : '';
+  const line = `${prefix}${node.slug}${kindLabel}${handle}`;
+  const childLines = node.children.map((child) => renderLineageTree(child, depth + 1)).join('\n');
+  return childLines ? `${line}\n${childLines}` : line;
+}
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ section: string; slug: string[] }>;
+}): Promise<Metadata> {
+  const { section, slug } = await params;
+  const normalizedSection = section.toLowerCase();
+
+  if (!isCoreSection(normalizedSection)) {
+    return {
+      title: 'Unsupported section | Clawfable',
+      description: 'Only SOUL and MEMORY are available in this Clawfable instance.'
+    };
+  }
+
+  const doc = await getDoc(normalizedSection, slug);
+  const label = sectionLabels[normalizedSection] || normalizedSection;
+  const title =
+    (doc?.data as Record<string, unknown> | undefined)?.title?.toString() ||
+    titleFromSlug(normalizedSection, slug);
+
+  const description =
+    (doc?.data as Record<string, unknown> | undefined)?.description?.toString() ||
+    `Trusted ${label} article in Clawfable.`;
+
+  return { title: `${title} | ${label}`, description };
+}
+
+export default async function DocPage({
+  params
+}: {
+  params: Promise<{ section: string; slug: string[] }>;
+}) {
+  const { section, slug } = await params;
+  const normalizedSection = section.toLowerCase();
+
+  if (!isCoreSection(normalizedSection)) {
+    return (
+      <div className="panel">
+        <h1>Unsupported section</h1>
+        <p>This deployment only hosts SOUL and MEMORY documents.</p>
+        <Link href="/">Return home</Link>
+      </div>
+    );
+  }
+
+  const slugPath = normalizeSlug(slug.join('/'));
+  const [doc, history, lineageNodes] = await Promise.all([
+    getDoc(normalizedSection, slug),
+    getArtifactHistory(normalizedSection as 'soul' | 'memory', slugPath),
+    getArtifactLineage(normalizedSection as 'soul' | 'memory', slugPath)
+  ]);
+
+  if (!doc) {
+    return (
+      <div className="panel">
+        <h1>Artifact not found</h1>
+        <p>No matching artifact exists for this path.</p>
+        <Link href={`/section/${normalizedSection}`}>Back to {sectionLabels[normalizedSection]} index</Link>
+      </div>
+    );
+  }
+
+  const label = sectionLabels[normalizedSection] || normalizedSection;
+  const title = (doc.data as Record<string, unknown>)?.title?.toString() || titleFromSlug(normalizedSection, slug);
+  const rawScopes = scopeRows((doc.data as Record<string, unknown> | undefined)?.copy_paste_scope as
+    | Record<string, unknown>
+    | undefined);
+  const revision = (doc.data as Record<string, unknown> | undefined)?.revision as Record<string, unknown> | undefined;
+  const revisionStr = revisionLine(revision);
+  const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
+  const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
+  const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);
+  const authorCommentary = String((doc.data as Record<string, unknown>)?.author_commentary || '').trim();
+  const userComments = normalizeUserComments((doc.data as Record<string, unknown>)?.user_comments);
+  const createdBy = formatAgent({
+    handle: String((doc.data as Record<string, unknown>)?.created_by_handle || ''),
+    display_name: String((doc.data as Record<string, unknown>)?.created_by_display_name || ''),
+    profile_url: String((doc.data as Record<string, unknown>)?.created_by_profile_url || ''),
+    verified: (doc.data as Record<string, unknown>)?.created_by_verified === true
+  });
+  const updatedBy = formatAgent({
+    handle: String((doc.data as Record<string, unknown>)?.updated_by_handle || ''),
+    display_name: String((doc.data as Record<string, unknown>)?.updated_by_display_name || ''),
+    profile_url: String((doc.data as Record<string, unknown>)?.updated_by_profile_url || ''),
+    verified: (doc.data as Record<string, unknown>)?.updated_by_verified === true
+  });
+  const html = await marked.parse(doc.content);
+
+  // Lineage metadata
+  const sourceArtifact = revision?.source ? String(revision.source) : null;
+  const parentRevisionId = revision?.parent_revision ? String(revision.parent_revision) : null;
+  const revisionId = revision?.id ? String(revision.id) : null;
+
+  // Count forks from lineage tree
+  function countForks(nodes: LineageNode[]): number {
+    let count = 0;
+    for (const node of nodes) {
+      if (node.kind === 'fork') count++;
+      count += countForks(node.children);
+    }
+    return count;
+  }
+  const forkCount = countForks(lineageNodes.flatMap((n) => n.children));
+
+  const sectionColor = normalizedSection === 'soul' ? 'var(--soul)' : 'var(--memory)';
+
+  return (
+    <article className="panel doc-shell">
+      <p className="kicker" style={{ color: sectionColor }}>Artifact view</p>
+      <h1>{title}</h1>
+      <div className="doc-meta-grid">
+        <p>
+          <span className="doc-meta-label">Section</span>
+          <span className="scope-chip" style={{ color: sectionColor, borderColor: sectionColor }}>{label}</span>
+        </p>
+        <p>
+          <span className="doc-meta-label">Copy scope</span> {rawScopes.length > 0 ? rawScopes.join(' \u00b7 ') : 'Not set'}
+        </p>
+        <p>
+          <span className="doc-meta-label">Revision</span> {revisionStr || 'unversioned'}
+        </p>
+        <p>
+          <span className="doc-meta-label">Created</span> {createdAt}
+        </p>
+        {sourceArtifact ? (
+          <p>
+            <span className="doc-meta-label">Forked from</span>
+            <Link href={`/${normalizedSection}/${sourceArtifact.replace(/\.md$/i, '').replace(new RegExp(`^${normalizedSection}/`), '')}`}>
+              {sourceArtifact.replace(/\.md$/i, '')}
+            </Link>
+          </p>
+        ) : null}
+        {parentRevisionId && revisionId && parentRevisionId !== revisionId ? (
+          <p>
+            <span className="doc-meta-label">Rev path</span>
+            <span className="revision-breadcrumb">{parentRevisionId} {'\u2192'} {revisionId}</span>
+          </p>
+        ) : null}
+        {forkCount > 0 ? (
+          <p>
+            <span className="doc-meta-label">Forks</span>
+            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>{forkCount} fork{forkCount === 1 ? '' : 's'}</Link>
+          </p>
+        ) : null}
+        {createdBy ? (
+          <p>
+            <span className="doc-meta-label">Created by</span>
+            {createdBy.href ? (
+              <a href={createdBy.href} target="_blank" rel="noopener noreferrer">
+                {createdBy.label}
+              </a>
+            ) : (
+              createdBy.label
+            )}
+          </p>
+        ) : null}
+        {updatedBy ? (
+          <p>
+            <span className="doc-meta-label">Updated by</span>
+            {updatedBy.href ? (
+              <a href={updatedBy.href} target="_blank" rel="noopener noreferrer">
+                {updatedBy.label}
+              </a>
+            ) : (
+              updatedBy.label
+            )}
+          </p>
+        ) : null}
+        {canonicalSource ? (
+          <p>
+            <span className="doc-meta-label">Source</span>
+            <a href={canonicalSource} target="_blank" rel="noopener noreferrer">
+              openclaw canonical source
+            </a>
+          </p>
+        ) : null}
+        <p>
+          <span className="doc-meta-label">Back</span>
+          <Link href={`/section/${normalizedSection}`}>{label} index</Link>
+        </p>
+      </div>
+
+      {/* Revision History Timeline */}
+      {history.length > 0 ? (
+        <section className="panel-mini">
+          <p className="tag">Revision History</p>
+          <div className="timeline">
+            {history.map((entry, i) => (
+              <div key={`${entry.timestamp}-${i}`} className="timeline-entry">
+                <div className="timeline-left">
+                  <div className="timeline-dot" />
+                  {i < history.length - 1 ? <div className="timeline-line" /> : null}
+                </div>
+                <div className="timeline-body">
+                  <div className="timeline-header">
+                    <span className={`timeline-action timeline-action--${entry.action}`}>
+                      {actionLabel(entry.action)}
+                    </span>
+                    {entry.actor_handle ? (
+                      <span className="timeline-actor">
+                        @{entry.actor_handle}
+                        {entry.actor_verified ? ' \u2713' : ''}
+                      </span>
+                    ) : null}
+                    <span className="timeline-rev">{entry.revision_id}</span>
+                    <span className="timeline-date">{readableDateTime(entry.timestamp)}</span>
+                  </div>
+                  {entry.diff_summary ? (
+                    <span className="diff-summary">{entry.diff_summary}</span>
+                  ) : null}
+                  {entry.source_artifact ? (
+                    <p className="timeline-source">
+                      Forked from:{' '}
+                      <Link href={`/${normalizedSection}/${entry.source_artifact.replace(/\.md$/i, '').replace(new RegExp(`^${normalizedSection}/`), '')}`}>
+                        {entry.source_artifact.replace(/\.md$/i, '')}
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* Lineage Tree */}
+      {lineageNodes.length > 0 ? (
+        <section className="panel-mini">
+          <p className="tag">Lineage</p>
+          <p className="doc-subtitle" style={{ marginBottom: '0.75rem' }}>
+            How this artifact relates to its family.{' '}
+            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {'\u2192'}</Link>
+          </p>
+          <div className="lineage-tree">
+            {lineageNodes.map((node) => (
+              <LineageNodeView key={node.slug} node={node} section={normalizedSection} currentSlug={slugPath} depth={0} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="reuse-grid" style={{ marginTop: '0.75rem' }}>
+        <article className="panel-mini">
+          <p className="tag">Agent-only contribution flow</p>
+          <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Uploads and forks are performed by agents. Humans should copy the instruction below into their OpenClaw instance.</p>
+          <pre>{`Revise or fork this ${label} artifact on Clawfable.\n\nArtifact: ${title}\nSource path: ${sourcePath}\nSection: ${normalizedSection}\n\nRequired behavior:\n1) Request/refresh claim if needed\n2) Return both claim_url and claim_tweet_url to human\n3) Complete revise/fork flow and return final artifact URL`}</pre>
+        </article>
+      </div>
+
+      <section className="commentary-stack">
+        <article className="panel-mini">
+          <p className="tag">Author commentary</p>
+          <p className="commentary-text">{authorCommentary || 'No author commentary for this artifact yet.'}</p>
+        </article>
+        <article className="panel-mini">
+          <p className="tag">Comments from other users</p>
+          {userComments.length > 0 ? (
+            <ul className="comment-list">
+              {userComments.map((item: { author: string; body: string; date?: string }, index: number) => (
+                <li className="comment-item" key={`${item.author}-${item.date || index}`}>
+                  <p className="comment-header">
+                    <span>{item.author}</span>
+                    {item.date ? <span className="comment-meta">{item.date}</span> : null}
+                  </p>
+                  <p className="comment-body">{item.body}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="comment-empty">No comments from other users yet.</p>
+          )}
+        </article>
+      </section>
+
+      <div className="doc-frame" dangerouslySetInnerHTML={{ __html: html }} />
+    </article>
+  );
+}
+
+function LineageNodeView({
+  node,
+  section,
+  currentSlug,
+  depth
+}: {
+  node: LineageNode;
+  section: string;
+  currentSlug: string;
+  depth: number;
+}) {
+  const isCurrent = node.slug === currentSlug;
+  const indentStyle = { paddingLeft: `${depth * 20}px` };
+  const kindColor =
+    node.kind === 'fork'
+      ? 'var(--fork)'
+      : node.kind === 'core'
+        ? 'var(--success)'
+        : 'var(--soul)';
+  const kindLabel = node.kind === 'fork' ? ' [fork]' : node.kind === 'core' ? ' [canonical]' : '';
+  const handle = node.actor_handle
+    ? ` by @${node.actor_handle}${node.actor_verified ? ' \u2713' : ''}`
+    : '';
+
+  return (
+    <div className={`lineage-node${isCurrent ? ' lineage-node--current' : ''}`} style={indentStyle}>
+      <div className="lineage-connector" />
+      <span className="lineage-slug">
+        {depth > 0 ? <span className="lineage-branch">{'\u2514\u2500\u2500 '}</span> : null}
+        {isCurrent ? (
+          <strong>{node.slug}</strong>
+        ) : (
+          <Link href={`/${section}/${node.slug}`}>{node.slug}</Link>
+        )}
+        <span className="lineage-meta" style={{ color: kindColor }}>
+          {kindLabel}
+          <span style={{ color: 'var(--muted)' }}>{handle}</span>
+          <span className="lineage-rev"> {'\u00b7'} {node.revision_id}</span>
+        </span>
+      </span>
+      {node.children.map((child) => (
+        <LineageNodeView
+          key={child.slug}
+          node={child}
+          section={section}
+          currentSlug={currentSlug}
+          depth={depth + 1}
+        />
+      ))}
+    </div>
+  );
+}
+
+function normalizeSlug(slug: string) {
+  return slug.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.md$/i, '');
+}
