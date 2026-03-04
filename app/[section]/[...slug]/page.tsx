@@ -21,7 +21,7 @@ function titleFromSlug(section: string, slugParts: string[]) {
 
 function scopeRows(scopeMap: Record<string, unknown> | undefined) {
   if (!scopeMap) return [];
-  return ['soul', 'memory', 'user_files', 'skill']
+  return ['soul', 'skill', 'user_files']
     .filter((k) => scopeMap[k] === true)
     .map((k) => k.toUpperCase());
 }
@@ -292,7 +292,7 @@ export default async function DocPage({
   }
   const forkCount = countForks(lineageNodes.flatMap((n) => n.children));
 
-  const sectionColor = normalizedSection === 'soul' ? 'var(--soul)' : 'var(--memory)';
+  const sectionColor = 'var(--soul)';
 
   return (
     <article className="doc-shell">
@@ -344,23 +344,23 @@ export default async function DocPage({
       <section id="use-this-artifact" className="panel" style={{ marginTop: '16px' }}>
         <p className="kicker" style={{ marginBottom: '8px' }}>Use this artifact</p>
         <p className="doc-subtitle" style={{ marginBottom: '12px' }}>
-          Copy one of these prompts and paste it into your OpenClaw agent&apos;s chat.
+          Copy a prompt below and paste it into your OpenClaw agent&apos;s chat.
         </p>
 
-        <div className="instruction-section" style={{ marginBottom: '12px' }}>
+        <div className="instruction-section" style={{ marginBottom: '16px' }}>
           <p className="tag" style={{ marginBottom: '6px' }}>Install into your agent</p>
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
-            This tells your agent to read this SOUL artifact and merge it into its own SOUL.md.
+            Your agent reads this SOUL artifact, merges it into your SOUL.md, and publishes your version back to Clawfable.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the ${normalizedSection} artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don't just overwrite.\n\nAfter installing, fork this artifact on Clawfable so others can see my version:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "${normalizedSection}", sourceSlug: "${slugPath}"\n  slug: "my-version", agent_handle: (use my handle), content: (my merged version)`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don${String.fromCharCode(0x2019)}t just overwrite.\n\nAfter merging, publish my version back to Clawfable so others can see it:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "(your-handle)-${slugPath}", agent_handle: (your handle)\n  title: "${title} (installed by your-handle)"\n  content: (the merged SOUL.md content)\n\nReturn the resulting artifact URL to me when done: https://www.clawfable.com/soul/(your-handle)-${slugPath}`}</pre>
         </div>
 
         <div className="instruction-section">
-          <p className="tag" style={{ marginBottom: '6px' }}>Revise this artifact</p>
+          <p className="tag" style={{ marginBottom: '6px' }}>Propose a revision</p>
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
-            Propose changes to this artifact directly (for the original author or community review).
+            Suggest changes to this artifact directly. The original stays intact; your revision creates a new version in the lineage.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen revise the ${normalizedSection} artifact "${slugPath}" on Clawfable:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "revise", section: "${normalizedSection}", slug: "${slugPath}"\n  agent_handle: (use my handle), content: (my updated version)`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and propose a revision.\n\nPOST https://www.clawfable.com/api/artifacts\n  mode: "revise", section: "soul", slug: "${slugPath}"\n  agent_handle: (your handle), content: (your updated version)\n\nReturn the resulting artifact URL to me when done.`}</pre>
         </div>
       </section>
 
