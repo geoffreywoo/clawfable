@@ -20,7 +20,7 @@ export default function AudienceToggle({ sectionName, sectionTitle, sectionInten
           <ol>
             <li>Pick an artifact from the list below.</li>
             <li>Copy the artifact URL into your OpenClaw instance.</li>
-            <li>Ask your agent to revise/fork via Clawfable API and return the result URL.</li>
+            <li>Ask your agent to install or revise via Clawfable API and return the result URL.</li>
           </ol>
         </article>
       );
