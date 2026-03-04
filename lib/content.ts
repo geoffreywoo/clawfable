@@ -3,14 +3,14 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import { randomBytes } from 'node:crypto';
 
-export const coreSections = ['soul', 'memory'] as const;
+export const coreSections = ['soul'] as const;
 
 export type CoreSection = (typeof coreSections)[number];
 
 export type ScopeMap = {
   [key: string]: boolean | undefined;
   soul?: boolean;
-  memory?: boolean;
+
   skill?: boolean;
   user_files?: boolean;
 };
@@ -166,7 +166,7 @@ type ForkPayload = DbPayload & {
 };
 
 const CONTENT_ROOT = path.join(process.cwd(), 'content');
-const scopeOrder = ['soul', 'memory', 'skill', 'user_files'];
+const scopeOrder = ['soul', 'skill', 'user_files'];
 const DB_ARTIFACT_INDEX_PREFIX = 'clawfable:db:index';
 const DB_ARTIFACT_PREFIX = 'clawfable:db:artifact';
 const DB_AGENT_INDEX = 'clawfable:agents:index';
@@ -178,16 +178,13 @@ const DB_HISTORY_INDEX_PREFIX = 'clawfable:db:history_index';
 const DB_RECENT_ACTIVITY_KEY = 'clawfable:db:recent_activity';
 const RECENT_ACTIVITY_CAP = 100;
 const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
-  soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
-  memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+  soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md'
 };
 export const OPENCLAW_CANONICAL_SEEDS: Record<CoreSection, string> = {
-  soul: 'soul-baseline-v1',
-  memory: 'memory-baseline-v1'
+  soul: 'soul-baseline-v1'
 };
 const OPENCLAW_TEMPLATE_BASENAME: Record<CoreSection, string> = {
-  soul: 'soul.md',
-  memory: 'memory.md'
+  soul: 'soul.md'
 };
 
 let kvClient: Promise<KVClient | null> | null = null;
@@ -1454,7 +1451,7 @@ export async function artifactPayloadFromRequest(body: Record<string, unknown>) 
   };
 }
 
-// ─── Provenance & Revision History ─────────────────────────────────────────────────────
+// --- Provenance & Revision History ---
 
 export type HistoryEntry = {
   timestamp: string;
@@ -1777,18 +1774,16 @@ export async function getRecentActivity(limit = 20): Promise<HistoryEntry[]> {
 
 export async function getSiteStats(): Promise<{
   soulCount: number;
-  memoryCount: number;
   contributorCount: number;
   revisionCount: number;
 }> {
   const kv = await getKvClient();
   if (!kv) {
-    return { soulCount: 0, memoryCount: 0, contributorCount: 0, revisionCount: 0 };
+    return { soulCount: 0, contributorCount: 0, revisionCount: 0 };
   }
 
-  const [soulIndex, memoryIndex, rawAgentIndex, rawRecentActivity] = await Promise.all([
+  const [soulIndex, rawAgentIndex, rawRecentActivity] = await Promise.all([
     getSectionIndex('soul'),
-    getSectionIndex('memory'),
     kvGet<unknown>(kv, DB_AGENT_INDEX),
     kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY)
   ]);
@@ -1803,7 +1798,6 @@ export async function getSiteStats(): Promise<{
 
   return {
     soulCount: soulIndex.length,
-    memoryCount: memoryIndex.length,
     contributorCount,
     revisionCount
   };
