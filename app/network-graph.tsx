@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 type GraphNode = {
   id: string;
   label: string;
-  section: 'soul' | 'memory';
+  section: 'soul';
   kind: string;
   slug: string;
   href: string;
@@ -27,7 +27,7 @@ type Props = {
   nodes: {
     id: string;
     label: string;
-    section: 'soul' | 'memory';
+    section: 'soul';
     kind: string;
     slug: string;
   }[];
@@ -53,7 +53,7 @@ const COLORS = {
 
 const NODE_RADIUS = 8;
 const HOVER_RADIUS = 12;
-const LABEL_ALWAYS_THRESHOLD = 8; // Show labels always when fewer than this many nodes
+const LABEL_ALWAYS_THRESHOLD = 8;
 
 export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,7 +67,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
   const router = useRouter();
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string; section: string } | null>(null);
 
-  // Initialize nodes with positions
   useEffect(() => {
     const w = sizeRef.current.w;
     const h = sizeRef.current.h;
@@ -77,7 +76,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     nodesRef.current = inputNodes.map((n, i) => {
       const angle = (i / Math.max(inputNodes.length, 1)) * Math.PI * 2;
       const baseRadius = inputNodes.length <= 4
-        ? Math.min(w, h) * 0.18  // Wider spread for very few nodes
+        ? Math.min(w, h) * 0.18
         : Math.min(w, h) * 0.25;
       const radius = baseRadius + Math.random() * 40;
       return {
@@ -93,7 +92,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     edgesRef.current = inputEdges;
   }, [inputNodes, inputEdges]);
 
-  // Physics simulation
   const simulate = useCallback(() => {
     const nodes = nodesRef.current;
     const edges = edgesRef.current;
@@ -110,7 +108,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const centerForce = 0.003;
     const drift = 0.15;
 
-    // Repulsion between all nodes
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const dx = nodes[j].x - nodes[i].x;
@@ -126,7 +123,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       }
     }
 
-    // Attraction along edges
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     for (const edge of edges) {
       const source = nodeMap.get(edge.source);
@@ -146,23 +142,17 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       target.vy -= fy;
     }
 
-    // Centering force + gentle drift
     const time = Date.now() / 5000;
     for (const node of nodes) {
       node.vx += (cx - node.x) * centerForce;
       node.vy += (cy - node.y) * centerForce;
-
-      // Gentle organic drift
       node.vx += Math.sin(time + node.x * 0.01) * drift;
       node.vy += Math.cos(time + node.y * 0.01) * drift;
-
-      // Apply velocity with damping
       node.vx *= damping;
       node.vy *= damping;
       node.x += node.vx;
       node.y += node.vy;
 
-      // Boundary constraints with padding
       const pad = 30;
       if (node.x < pad) { node.x = pad; node.vx = Math.abs(node.vx) * 0.5; }
       if (node.x > w - pad) { node.x = w - pad; node.vx = -Math.abs(node.vx) * 0.5; }
@@ -171,7 +161,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     }
   }, []);
 
-  // Draw
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -185,12 +174,9 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const dpr = window.devicePixelRatio || 1;
 
     ctx.clearRect(0, 0, w, h);
-
-    // Background
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
-    // Grid pattern
     ctx.strokeStyle = COLORS.gridLine;
     ctx.lineWidth = dpr * 0.5;
     const gridSize = 40 * dpr;
@@ -211,7 +197,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const mx = mouseRef.current.x * dpr;
     const my = mouseRef.current.y * dpr;
 
-    // Find hovered node
     let hovered: GraphNode | null = null;
     const hoverDist = HOVER_RADIUS * dpr * 2;
     for (const node of nodes) {
@@ -225,7 +210,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     }
     hoveredRef.current = hovered;
 
-    // Draw edges
     for (const edge of edges) {
       const source = nodeMap.get(edge.source);
       const target = nodeMap.get(edge.target);
@@ -259,7 +243,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Particle effect on edges
       if (isHighlighted) {
         const t = (Date.now() % 2000) / 2000;
         const px = sx + (tx - sx) * t;
@@ -271,7 +254,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       }
     }
 
-    // Draw nodes
     for (const node of nodes) {
       const nx = node.x * dpr;
       const ny = node.y * dpr;
@@ -282,7 +264,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       const color = node.section === 'soul' ? COLORS.soul : COLORS.memory;
       const radius = (isHovered ? HOVER_RADIUS : NODE_RADIUS) * dpr;
 
-      // Glow
       if (isHovered || isConnected) {
         const gradient = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius * 3);
         gradient.addColorStop(0, color + '40');
@@ -293,7 +274,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         ctx.fill();
       }
 
-      // Node circle
       ctx.beginPath();
       ctx.arc(nx, ny, radius, 0, Math.PI * 2);
 
@@ -309,7 +289,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       ctx.lineWidth = 1.5 * dpr;
       ctx.stroke();
 
-      // Inner dot for core nodes
       if (node.kind === 'core' || node.kind === 'canonical') {
         ctx.beginPath();
         ctx.arc(nx, ny, radius * 0.4, 0, Math.PI * 2);
@@ -317,7 +296,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         ctx.fill();
       }
 
-      // Label for hovered or always-show
       const alwaysShowLabels = nodes.length < LABEL_ALWAYS_THRESHOLD;
       if (isHovered || alwaysShowLabels) {
         ctx.font = `${(isHovered ? 13 : 11) * dpr}px "JetBrains Mono", "Fira Code", monospace`;
@@ -328,7 +306,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     }
   }, []);
 
-  // Animation loop
   useEffect(() => {
     const loop = () => {
       simulate();
@@ -339,7 +316,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     return () => cancelAnimationFrame(animRef.current);
   }, [simulate, draw]);
 
-  // Handle resize
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -363,7 +339,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     return () => observer.disconnect();
   }, []);
 
-  // Mouse events
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
