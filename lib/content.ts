@@ -1,1 +1,346 @@
-aW1wb3J0IHsgREJfQUdFTlRfSU5ERVgsIERCX1JFQ0VOVF9BQ1RJVklUWV9LRVksIGFkZFRvU2VjdGlvbkluZGV4LCBhcHBlbmRIaXN0b3J5LCBhcHBlbmRSZWNlbnRBY3Rpdml0eSwgYXJ0aWZhY3RLZXksIGZyb21NZFNlY3Rpb24sIGdldEFnZW50UHJvZmlsZVJvdywgZ2V0S3ZDbGllbnQsIGdldFNlY3Rpb25JbmRleCwgaXNDb3JlU2VjdGlvbiwga3ZHZXQsIG5vcm1hbGl6ZUFnZW50SGFuZGxlLCBub3JtYWxpemVTZWN0aW9uLCBub3JtYWxpemVTbHVnLCBub3dTdGFtcCwgcGFyc2VBZ2VudFByb2ZpbGUsIHBhcnNlQXJ0aWZhY3RDb3VudCwgcGVyc2lzdEFnZW50UHJvZmlsZSwgcmVtb3ZlRnJvbVNlY3Rpb25JbmRleCwgc2FuaXRpemVTY29wZSwgc2hvcnREZXNjcmlwdGlvbiwgc291cmNlUGF0aEZvciwgdXNlclByb2ZpbGVLZXkgfSBmcm9tICcuL2NvbnRlbnQtY29yZSc7CmltcG9ydCB0eXBlIHsgQ29yZVNlY3Rpb24sIERiUGF5bG9hZCwgRGJSZWNvcmQsIEZvcmtQYXlsb2FkLCBTY29wZU1hcCwgU3RvcmVkQWdlbnRQcm9maWxlIH0gZnJvbSAnLi9jb250ZW50LWNvcmUnOwpleHBvcnQgKiBmcm9tICcuL2NvbnRlbnQtY29yZSc7CgpleHBvcnQgYXN5bmMgZnVuY3Rpb24gY3JlYXRlQXJ0aWZhY3QocGF5bG9hZDogRGJQYXlsb2FkKTogUHJvbWlzZTxEYlJlY29yZD4gewogIGNvbnN0IGt2ID0gYXdhaXQgZ2V0S3ZDbGllbnQoKTsKICBpZiAoIWt2KSB0aHJvdyBuZXcgRXJyb3IoJ05vIGRhdGFiYXNlIGNvbmZpZ3VyZWQuIENhbm5vdCBjcmVhdGUgYXJ0aWZhY3Qgd2l0aG91dCBhIEtWIHN0b3JlLicpOwoKICBjb25zdCBub3JtYWxpemVkU2VjdGlvbiA9IG5vcm1hbGl6ZVNlY3Rpb24ocGF5bG9hZC5zZWN0aW9uKTsKICBjb25zdCBub3JtYWxpemVkU2x1ZyA9IG5vcm1hbGl6ZVNsdWcocGF5bG9hZC5zbHVnKTsKCiAgaWYgKCFub3JtYWxpemVkU2x1ZykgdGhyb3cgbmV3IEVycm9yKCdBcnRpZmFjdCBzbHVnIGlzIHJlcXVpcmVkLicpOwogIGlmICghcGF5bG9hZC50aXRsZT8udHJpbSgpKSB0aHJvdyBuZXcgRXJyb3IoJ0FydGlmYWN0IHRpdGxlIGlzIHJlcXVpcmVkLicpOwogIGlmICghcGF5bG9hZC5jb250ZW50Py50cmltKCkpIHRocm93IG5ldyBFcnJvcignQXJ0aWZhY3QgY29udGVudCBpcyByZXF1aXJlZC4nKTsKCiAgY29uc3QgZXhpc3RpbmdLZXkgPSBhcnRpZmFjdEtleShub3JtYWxpemVkU2VjdGlvbiwgbm9ybWFsaXplZFNsdWcpOwogIGNvbnN0IGV4aXN0aW5nID0gYXdhaXQga3ZHZXQ8RGJSZWNvcmQ+KGt2LCBleGlzdGluZ0tleSk7CiAgaWYgKGV4aXN0aW5nKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoYEFydGlmYWN0IGFscmVhZHkgZXhpc3RzOiAke25vcm1hbGl6ZWRTZWN0aW9ufS8ke25vcm1hbGl6ZWRTbHVnfS4gVXNlIG1vZGUgInJldmlzZSIgdG8gdXBkYXRlIGl0LmApOwogIH0KCiAgY29uc3Qgbm93ID0gbm93U3RhbXAoKTsKICBjb25zdCByZWNvcmQ6IERiUmVjb3JkID0gewogICAgc2VjdGlvbjogbm9ybWFsaXplZFNlY3Rpb24sCiAgICBzbHVnOiBub3JtYWxpemVkU2x1ZywKICAgIHNvdXJjZVBhdGg6IHBheWxvYWQuc291cmNlUGF0aCB8fCBzb3VyY2VQYXRoRm9yKG5vcm1hbGl6ZWRTZWN0aW9uLCBub3JtYWxpemVkU2x1ZyksCiAgICB0aXRsZTogcGF5bG9hZC50aXRsZS50cmltKCksCiAgICBkZXNjcmlwdGlvbjogcGF5bG9hZC5kZXNjcmlwdGlvbj8udHJpbSgpIHx8IHNob3J0RGVzY3JpcHRpb24odW5kZWZpbmVkLCBwYXlsb2FkLmNvbnRlbnQpLAogICAgY29udGVudDogcGF5bG9hZC5jb250ZW50LAogICAgY29weV9wYXN0ZV9zY29wZTogc2FuaXRpemVTY29wZShwYXlsb2FkLmNvcHlfcGFzdGVfc2NvcGUpLAogICAgcmV2aXNpb246IHsKICAgICAgaWQ6IHBheWxvYWQucmV2aXNpb24/LmlkIHx8ICd2MScsCiAgICAgIGtpbmQ6IHBheWxvYWQucmV2aXNpb24/LmtpbmQgfHwgJ2NvcmUnLAogICAgICBzdGF0dXM6IHBheWxvYWQucmV2aXNpb24/LnN0YXR1cyB8fCAnYWN0aXZlJywKICAgICAgZmFtaWx5OiBwYXlsb2FkLnJldmlzaW9uPy5mYW1pbHksCiAgICAgIHBhcmVudF9yZXZpc2lvbjogcGF5bG9hZC5yZXZpc2lvbj8ucGFyZW50X3JldmlzaW9uLAogICAgICBzb3VyY2U6IHBheWxvYWQucmV2aXNpb24/LnNvdXJjZQogICAgfSwKICAgIGNyZWF0ZWRfYXQ6IG5vdywKICAgIHVwZGF0ZWRfYXQ6IG5vdywKICAgIGF1dGhvcl9jb21tZW50YXJ5OiBwYXlsb2FkLmF1dGhvcl9jb21tZW50YXJ5LAogICAgdXNlcl9jb21tZW50czogcGF5bG9hZC51c2VyX2NvbW1lbnRzLAogICAgY3JlYXRlZF9ieV9oYW5kbGU6IHBheWxvYWQuY3JlYXRlZF9ieV9oYW5kbGUsCiAgICBjcmVhdGVkX2J5X2Rpc3BsYXlfbmFtZTogcGF5bG9hZC5jcmVhdGVkX2J5X2Rpc3BsYXlfbmFtZSwKICAgIGNyZWF0ZWRfYnlfcHJvZmlsZV91cmw6IHBheWxvYWQuY3JlYXRlZF9ieV9wcm9maWxlX3VybCwKICAgIGNyZWF0ZWRfYnlfdmVyaWZpZWQ6IHBheWxvYWQuY3JlYXRlZF9ieV92ZXJpZmllZCwKICAgIHVwZGF0ZWRfYnlfaGFuZGxlOiBwYXlsb2FkLnVwZGF0ZWRfYnlfaGFuZGxlLAogICAgdXBkYXRlZF9ieV9kaXNwbGF5X25hbWU6IHBheWxvYWQudXBkYXRlZF9ieV9kaXNwbGF5X25hbWUsCiAgICB1cGRhdGVkX2J5X3Byb2ZpbGVfdXJsOiBwYXlsb2FkLnVwZGF0ZWRfYnlfcHJvZmlsZV91cmwsCiAgICB1cGRhdGVkX2J5X3ZlcmlmaWVkOiBwYXlsb2FkLnVwZGF0ZWRfYnlfdmVyaWZpZWQKICB9OwoKICBhd2FpdCBrdi5zZXQoZXhpc3RpbmdLZXksIHJlY29yZCk7CiAgYXdhaXQgYWRkVG9TZWN0aW9uSW5kZXgoa3YsIG5vcm1hbGl6ZWRTZWN0aW9uLCBub3JtYWxpemVkU2x1Zyk7CgogIGlmIChwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKSB7CiAgICBjb25zdCBhZ2VudFJvdyA9IGF3YWl0IGdldEFnZW50UHJvZmlsZVJvdyhwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKTsKICAgIGNvbnN0IGFnZW50QmFzZSA9IHBhcnNlQWdlbnRQcm9maWxlKGFnZW50Um93LCBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKTsKICAgIGF3YWl0IHBlcnNpc3RBZ2VudFByb2ZpbGUoewogICAgICAuLi5hZ2VudEJhc2UsCiAgICAgIGFydGlmYWN0X2NvdW50OiBhZ2VudEJhc2UuYXJ0aWZhY3RfY291bnQgKyAxLAogICAgICBsYXN0X2FydGlmYWN0X3JlZjogYCR7bm9ybWFsaXplZFNlY3Rpb259LyR7bm9ybWFsaXplZFNsdWd9YAogICAgfSk7CiAgfQoKICBhd2FpdCBhcHBlbmRIaXN0b3J5KGt2LCBub3JtYWxpemVkU2VjdGlvbiwgbm9ybWFsaXplZFNsdWcsIHsKICAgIGFjdGlvbjogJ2NyZWF0ZScsCiAgICBhY3Rvcl9oYW5kbGU6IHBheWxvYWQuY3JlYXRlZF9ieV9oYW5kbGUsCiAgICBhY3Rvcl9kaXNwbGF5X25hbWU6IHBheWxvYWQuY3JlYXRlZF9ieV9kaXNwbGF5X25hbWUsCiAgICBhY3Rvcl9wcm9maWxlX3VybDogcGF5bG9hZC5jcmVhdGVkX2J5X3Byb2ZpbGVfdXJsLAogICAgYWN0b3JfdmVyaWZpZWQ6IHBheWxvYWQuY3JlYXRlZF9ieV92ZXJpZmllZCwKICAgIHJldmlzaW9uX2lkOiByZWNvcmQucmV2aXNpb24/LmlkLAogICAgdGltZXN0YW1wOiBub3csCiAgICB0aXRsZTogcGF5bG9hZC50aXRsZQogIH0pOwoKICBhd2FpdCBhcHBlbmRSZWNlbnRBY3Rpdml0eShrdiwgewogICAgYWN0aW9uOiAnY3JlYXRlJywKICAgIGFjdG9yX2hhbmRsZTogcGF5bG9hZC5jcmVhdGVkX2J5X2hhbmRsZSwKICAgIGFjdG9yX3ZlcmlmaWVkOiBwYXlsb2FkLmNyZWF0ZWRfYnlfdmVyaWZpZWQsCiAgICByZXZpc2lvbl9pZDogcmVjb3JkLnJldmlzaW9uPy5pZCwKICAgIHRpbWVzdGFtcDogbm93LAogICAgdGl0bGU6IHBheWxvYWQudGl0bGUKICB9KTsKCiAgcmV0dXJuIHJlY29yZDsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHJldmlzZUFydGlmYWN0KHBheWxvYWQ6IERiUGF5bG9hZCk6IFByb21pc2U8RGJSZWNvcmQ+IHsKICBjb25zdCBrdiA9IGF3YWl0IGdldEt2Q2xpZW50KCk7CiAgaWYgKCFrdikgdGhyb3cgbmV3IEVycm9yKCdObyBkYXRhYmFzZSBjb25maWd1cmVkLiBDYW5ub3QgcmV2aXNlIGFydGlmYWN0IHdpdGhvdXQgYSBLViBzdG9yZS4nKTsKCiAgY29uc3Qgbm9ybWFsaXplZFNlY3Rpb24gPSBub3JtYWxpemVTZWN0aW9uKHBheWxvYWQuc2VjdGlvbik7CiAgY29uc3Qgbm9ybWFsaXplZFNsdWcgPSBub3JtYWxpemVTbHVnKHBheWxvYWQuc2x1Zyk7CgogIGlmICghbm9ybWFsaXplZFNsdWcpIHRocm93IG5ldyBFcnJvcignQXJ0aWZhY3Qgc2x1ZyBpcyByZXF1aXJlZC4nKTsKICBpZiAoIXBheWxvYWQudGl0bGU/LnRyaW0oKSkgdGhyb3cgbmV3IEVycm9yKCdBcnRpZmFjdCB0aXRsZSBpcyByZXF1aXJlZC4nKTsKICBpZiAoIXBheWxvYWQuY29udGVudD8udHJpbSgpKSB0aHJvdyBuZXcgRXJyb3IoJ0FydGlmYWN0IGNvbnRlbnQgaXMgcmVxdWlyZWQuJyk7CgogIGNvbnN0IGV4aXN0aW5nS2V5ID0gYXJ0aWZhY3RLZXkobm9ybWFsaXplZFNlY3Rpb24sIG5vcm1hbGl6ZWRTbHVnKTsKICBjb25zdCBleGlzdGluZyA9IGF3YWl0IGt2R2V0PERiUmVjb3JkPihrdiwgZXhpc3RpbmdLZXkpOwogIGlmICghZXhpc3RpbmcpIHsKICAgIHRocm93IG5ldyBFcnJvcihgQXJ0aWZhY3Qgbm90IGZvdW5kOiAke25vcm1hbGl6ZWRTZWN0aW9ufS8ke25vcm1hbGl6ZWRTbHVnfS4gVXNlIG1vZGUgImNyZWF0ZSIgdG8gY3JlYXRlIGEgbmV3IG9uZS5gKTsKICB9CgogIGNvbnN0IG5vdyA9IG5vd1N0YW1wKCk7CiAgY29uc3QgcHJldlJldmlzaW9uSWQgPSBleGlzdGluZy5yZXZpc2lvbj8uaWQ7CiAgY29uc3QgbmV4dFJldmlzaW9uSWQgPSBidW1wUmV2aXNpb25JZChleGlzdGluZy5yZXZpc2lvbj8uaWQpOwoKICBjb25zdCByZWNvcmQ6IERiUmVjb3JkID0gewogICAgLi4uZXhpc3RpbmcsCiAgICB0aXRsZTogcGF5bG9hZC50aXRsZS50cmltKCksCiAgICBkZXNjcmlwdGlvbjogcGF5bG9hZC5kZXNjcmlwdGlvbj8udHJpbSgpIHx8IHNob3J0RGVzY3JpcHRpb24odW5kZWZpbmVkLCBwYXlsb2FkLmNvbnRlbnQpLAogICAgY29udGVudDogcGF5bG9hZC5jb250ZW50LAogICAgY29weV9wYXN0ZV9zY29wZTogc2FuaXRpemVTY29wZShwYXlsb2FkLmNvcHlfcGFzdGVfc2NvcGUgPz8gZXhpc3RpbmcuY29weV9wYXN0ZV9zY29wZSksCiAgICByZXZpc2lvbjogewogICAgICAuLi5leGlzdGluZy5yZXZpc2lvbiwKICAgICAgaWQ6IG5leHRSZXZpc2lvbklkLAogICAgICBraW5kOiBwYXlsb2FkLnJldmlzaW9uPy5raW5kIHx8IGV4aXN0aW5nLnJldmlzaW9uPy5raW5kIHx8ICdyZXZpc2lvbicsCiAgICAgIHN0YXR1czogcGF5bG9hZC5yZXZpc2lvbj8uc3RhdHVzIHx8IGV4aXN0aW5nLnJldmlzaW9uPy5zdGF0dXMgfHwgJ2FjdGl2ZScsCiAgICAgIHBhcmVudF9yZXZpc2lvbjogcHJldlJldmlzaW9uSWQsCiAgICAgIHNvdXJjZTogZXhpc3RpbmcucmV2aXNpb24/LnNvdXJjZQogICAgfSwKICAgIHVwZGF0ZWRfYXQ6IG5vdywKICAgIGF1dGhvcl9jb21tZW50YXJ5OiBwYXlsb2FkLmF1dGhvcl9jb21tZW50YXJ5ID8/IGV4aXN0aW5nLmF1dGhvcl9jb21tZW50YXJ5LAogICAgdXNlcl9jb21tZW50czogcGF5bG9hZC51c2VyX2NvbW1lbnRzID8/IGV4aXN0aW5nLnVzZXJfY29tbWVudHMsCiAgICB1cGRhdGVkX2J5X2hhbmRsZTogcGF5bG9hZC51cGRhdGVkX2J5X2hhbmRsZSB8fCBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlLAogICAgdXBkYXRlZF9ieV9kaXNwbGF5X25hbWU6IHBheWxvYWQudXBkYXRlZF9ieV9kaXNwbGF5X25hbWUgfHwgcGF5bG9hZC5jcmVhdGVkX2J5X2Rpc3BsYXlfbmFtZSwKICAgIHVwZGF0ZWRfYnlfcHJvZmlsZV91cmw6IHBheWxvYWQudXBkYXRlZF9ieV9wcm9maWxlX3VybCB8fCBwYXlsb2FkLmNyZWF0ZWRfYnlfcHJvZmlsZV91cmwsCiAgICB1cGRhdGVkX2J5X3ZlcmlmaWVkOiBwYXlsb2FkLnVwZGF0ZWRfYnlfdmVyaWZpZWQgPz8gcGF5bG9hZC5jcmVhdGVkX2J5X3ZlcmlmaWVkID8/IGV4aXN0aW5nLnVwZGF0ZWRfYnlfdmVyaWZpZWQKICB9OwoKICBhd2FpdCBrdi5zZXQoZXhpc3RpbmdLZXksIHJlY29yZCk7CgogIGNvbnN0IGFjdG9ySGFuZGxlID0gcGF5bG9hZC51cGRhdGVkX2J5X2hhbmRsZSB8fCBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlOwogIGlmIChhY3RvckhhbmRsZSkgewogICAgY29uc3QgYWdlbnRSb3cgPSBhd2FpdCBnZXRBZ2VudFByb2ZpbGVSb3coYWN0b3JIYW5kbGUpOwogICAgY29uc3QgYWdlbnRCYXNlID0gcGFyc2VBZ2VudFByb2ZpbGUoYWdlbnRSb3csIGFjdG9ySGFuZGxlKTsKICAgIGF3YWl0IHBlcnNpc3RBZ2VudFByb2ZpbGUoewogICAgICAuLi5hZ2VudEJhc2UsCiAgICAgIGFydGlmYWN0X2NvdW50OiBhZ2VudEJhc2UuYXJ0aWZhY3RfY291bnQgKyAxLAogICAgICBsYXN0X2FydGlmYWN0X3JlZjogYCR7bm9ybWFsaXplZFNlY3Rpb259LyR7bm9ybWFsaXplZFNsdWd9YAogICAgfSk7CiAgfQoKICBhd2FpdCBhcHBlbmRIaXN0b3J5KGt2LCBub3JtYWxpemVkU2VjdGlvbiwgbm9ybWFsaXplZFNsdWcsIHsKICAgIGFjdGlvbjogJ3JldmlzZScsCiAgICBhY3Rvcl9oYW5kbGU6IGFjdG9ySGFuZGxlLAogICAgYWN0b3JfZGlzcGxheV9uYW1lOiBwYXlsb2FkLnVwZGF0ZWRfYnlfZGlzcGxheV9uYW1lIHx8IHBheWxvYWQuY3JlYXRlZF9ieV9kaXNwbGF5X25hbWUsCiAgICBhY3Rvcl9wcm9maWxlX3VybDogcGF5bG9hZC51cGRhdGVkX2J5X3Byb2ZpbGVfdXJsIHx8IHBheWxvYWQuY3JlYXRlZF9ieV9wcm9maWxlX3VybCwKICAgIGFjdG9yX3ZlcmlmaWVkOiBwYXlsb2FkLnVwZGF0ZWRfYnlfdmVyaWZpZWQgPz8gcGF5bG9hZC5jcmVhdGVkX2J5X3ZlcmlmaWVkLAogICAgcmV2aXNpb25faWQ6IG5leHRSZXZpc2lvbklkLAogICAgZGlmZl9zdW1tYXJ5OiBwYXlsb2FkLmF1dGhvcl9jb21tZW50YXJ5IHx8IGBSZXZpc2lvbiAke3ByZXZSZXZpc2lvbklkfSDihpIgJHtuZXh0UmV2aXNpb25JZH1gLAogICAgdGltZXN0YW1wOiBub3csCiAgICB0aXRsZTogcGF5bG9hZC50aXRsZQogIH0pOwoKICBhd2FpdCBhcHBlbmRSZWNlbnRBY3Rpdml0eShrdiwgewogICAgYWN0aW9uOiAncmV2aXNlJywKICAgIGFjdG9yX2hhbmRsZTogYWN0b3JIYW5kbGUsCiAgICBhY3Rvcl92ZXJpZmllZDogcGF5bG9hZC51cGRhdGVkX2J5X3ZlcmlmaWVkID8/IHBheWxvYWQuY3JlYXRlZF9ieV92ZXJpZmllZCwKICAgIHJldmlzaW9uX2lkOiBuZXh0UmV2aXNpb25JZCwKICAgIHRpbWVzdGFtcDogbm93LAogICAgdGl0bGU6IHBheWxvYWQudGl0bGUKICB9KTsKCiAgcmV0dXJuIHJlY29yZDsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGZvcmtBcnRpZmFjdChwYXlsb2FkOiBGb3JrUGF5bG9hZCk6IFByb21pc2U8RGJSZWNvcmQ+IHsKICBjb25zdCBrdiA9IGF3YWl0IGdldEt2Q2xpZW50KCk7CiAgaWYgKCFrdikgdGhyb3cgbmV3IEVycm9yKCdObyBkYXRhYmFzZSBjb25maWd1cmVkLiBDYW5ub3QgZm9yayBhcnRpZmFjdCB3aXRob3V0IGEgS1Ygc3RvcmUuJyk7CgogIGNvbnN0IG5vcm1hbGl6ZWRTZWN0aW9uID0gbm9ybWFsaXplU2VjdGlvbihwYXlsb2FkLnNlY3Rpb24pOwogIGNvbnN0IG5vcm1hbGl6ZWRTbHVnID0gbm9ybWFsaXplU2x1ZyhwYXlsb2FkLnNsdWcpOwogIGNvbnN0IG5vcm1hbGl6ZWRTb3VyY2VTZWN0aW9uID0gbm9ybWFsaXplU2VjdGlvbihwYXlsb2FkLnNvdXJjZVNlY3Rpb24pOwogIGNvbnN0IG5vcm1hbGl6ZWRTb3VyY2VTbHVnID0gbm9ybWFsaXplU2x1ZyhwYXlsb2FkLnNvdXJjZVNsdWcpOwoKICBpZiAoIW5vcm1hbGl6ZWRTbHVnKSB0aHJvdyBuZXcgRXJyb3IoJ0Zvcmsgc2x1ZyBpcyByZXF1aXJlZC4nKTsKICBpZiAoIW5vcm1hbGl6ZWRTb3VyY2VTbHVnKSB0aHJvdyBuZXcgRXJyb3IoJ1NvdXJjZSBhcnRpZmFjdCBzbHVnIGlzIHJlcXVpcmVkLicpOwoKICBjb25zdCBzb3VyY2VLZXkgPSBhcnRpZmFjdEtleShub3JtYWxpemVkU291cmNlU2VjdGlvbiwgbm9ybWFsaXplZFNvdXJjZVNsdWcpOwogIGNvbnN0IHNvdXJjZSA9IGF3YWl0IGt2R2V0PERiUmVjb3JkPihrdiwgc291cmNlS2V5KTsKICBpZiAoIXNvdXJjZSkgewogICAgdGhyb3cgbmV3IEVycm9yKGBTb3VyY2UgYXJ0aWZhY3Qgbm90IGZvdW5kOiAke25vcm1hbGl6ZWRTb3VyY2VTZWN0aW9ufS8ke25vcm1hbGl6ZWRTb3VyY2VTbHVnfS5gKTsKICB9CgogIGNvbnN0IGZvcmtLZXkgPSBhcnRpZmFjdEtleShub3JtYWxpemVkU2VjdGlvbiwgbm9ybWFsaXplZFNsdWcpOwogIGNvbnN0IGV4aXN0aW5nRm9yayA9IGF3YWl0IGt2R2V0PERiUmVjb3JkPihrdiwgZm9ya0tleSk7CiAgaWYgKGV4aXN0aW5nRm9yaykgewogICAgdGhyb3cgbmV3IEVycm9yKGBGb3JrIGFydGlmYWN0IGFscmVhZHkgZXhpc3RzOiAke25vcm1hbGl6ZWRTZWN0aW9ufS8ke25vcm1hbGl6ZWRTbHVnfS4gVXNlIG1vZGUgInJldmlzZSIgdG8gdXBkYXRlIGl0LmApOwogIH0KCiAgY29uc3Qgbm93ID0gbm93U3RhbXAoKTsKICBjb25zdCByZWNvcmQ6IERiUmVjb3JkID0gewogICAgc2VjdGlvbjogbm9ybWFsaXplZFNlY3Rpb24sCiAgICBzbHVnOiBub3JtYWxpemVkU2x1ZywKICAgIHNvdXJjZVBhdGg6IHNvdXJjZVBhdGhGb3Iobm9ybWFsaXplZFNlY3Rpb24sIG5vcm1hbGl6ZWRTbHVnKSwKICAgIHRpdGxlOiBwYXlsb2FkLnRpdGxlPy50cmltKCkgfHwgc291cmNlLnRpdGxlLAogICAgZGVzY3JpcHRpb246IHBheWxvYWQuZGVzY3JpcHRpb24/LnRyaW0oKSB8fCBzb3VyY2UuZGVzY3JpcHRpb24sCiAgICBjb250ZW50OiBwYXlsb2FkLmNvbnRlbnQ/LnRyaW0oKSB8fCBzb3VyY2UuY29udGVudCwKICAgIGNvcHlfcGFzdGVfc2NvcGU6IHNhbml0aXplU2NvcGUocGF5bG9hZC5jb3B5X3Bhc3RlX3Njb3BlID8/IHNvdXJjZS5jb3B5X3Bhc3RlX3Njb3BlKSwKICAgIHJldmlzaW9uOiB7CiAgICAgIGlkOiAndjEnLAogICAgICBraW5kOiAnZm9yaycsCiAgICAgIHN0YXR1czogcGF5bG9hZC5yZXZpc2lvbj8uc3RhdHVzIHx8ICdhY3RpdmUnLAogICAgICBmYW1pbHk6IHNvdXJjZS5yZXZpc2lvbj8uZmFtaWx5IHx8IG5vcm1hbGl6ZWRTb3VyY2VTbHVnLAogICAgICBzb3VyY2U6IGAke25vcm1hbGl6ZWRTb3VyY2VTZWN0aW9ufS8ke25vcm1hbGl6ZWRTb3VyY2VTbHVnfWAKICAgIH0sCiAgICBjcmVhdGVkX2F0OiBub3csCiAgICB1cGRhdGVkX2F0OiBub3csCiAgICBhdXRob3JfY29tbWVudGFyeTogcGF5bG9hZC5hdXRob3JfY29tbWVudGFyeSwKICAgIHVzZXJfY29tbWVudHM6IHBheWxvYWQudXNlcl9jb21tZW50cywKICAgIGNyZWF0ZWRfYnlfaGFuZGxlOiBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlLAogICAgY3JlYXRlZF9ieV9kaXNwbGF5X25hbWU6IHBheWxvYWQuY3JlYXRlZF9ieV9kaXNwbGF5X25hbWUsCiAgICBjcmVhdGVkX2J5X3Byb2ZpbGVfdXJsOiBwYXlsb2FkLmNyZWF0ZWRfYnlfcHJvZmlsZV91cmwsCiAgICBjcmVhdGVkX2J5X3ZlcmlmaWVkOiBwYXlsb2FkLmNyZWF0ZWRfYnlfdmVyaWZpZWQsCiAgICB1cGRhdGVkX2J5X2hhbmRsZTogcGF5bG9hZC51cGRhdGVkX2J5X2hhbmRsZSwKICAgIHVwZGF0ZWRfYnlfZGlzcGxheV9uYW1lOiBwYXlsb2FkLnVwZGF0ZWRfYnlfZGlzcGxheV9uYW1lLAogICAgdXBkYXRlZF9ieV9wcm9maWxlX3VybDogcGF5bG9hZC51cGRhdGVkX2J5X3Byb2ZpbGVfdXJsLAogICAgdXBkYXRlZF9ieV92ZXJpZmllZDogcGF5bG9hZC51cGRhdGVkX2J5X3ZlcmlmaWVkCiAgfTsKCiAgYXdhaXQga3Yuc2V0KGZvcmtLZXksIHJlY29yZCk7CiAgYXdhaXQgYWRkVG9TZWN0aW9uSW5kZXgoa3YsIG5vcm1hbGl6ZWRTZWN0aW9uLCBub3JtYWxpemVkU2x1Zyk7CgogIGlmIChwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKSB7CiAgICBjb25zdCBhZ2VudFJvdyA9IGF3YWl0IGdldEFnZW50UHJvZmlsZVJvdyhwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKTsKICAgIGNvbnN0IGFnZW50QmFzZSA9IHBhcnNlQWdlbnRQcm9maWxlKGFnZW50Um93LCBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlKTsKICAgIGF3YWl0IHBlcnNpc3RBZ2VudFByb2ZpbGUoewogICAgICAuLi5hZ2VudEJhc2UsCiAgICAgIGFydGlmYWN0X2NvdW50OiBhZ2VudEJhc2UuYXJ0aWZhY3RfY291bnQgKyAxLAogICAgICBsYXN0X2FydGlmYWN0X3JlZjogYCR7bm9ybWFsaXplZFNlY3Rpb259LyR7bm9ybWFsaXplZFNsdWd9YAogICAgfSk7CiAgfQoKICBhd2FpdCBhcHBlbmRIaXN0b3J5KGt2LCBub3JtYWxpemVkU2VjdGlvbiwgbm9ybWFsaXplZFNsdWcsIHsKICAgIGFjdGlvbjogJ2ZvcmsnLAogICAgYWN0b3JfaGFuZGxlOiBwYXlsb2FkLmNyZWF0ZWRfYnlfaGFuZGxlLAogICAgYWN0b3JfZGlzcGxheV9uYW1lOiBwYXlsb2FkLmNyZWF0ZWRfYnlfZGlzcGxheV9uYW1lLAogICAgYWN0b3JfcHJvZmlsZV91cmw6IHBheWxvYWQuY3JlYXRlZF9ieV9wcm9maWxlX3VybCwKICAgIGFjdG9yX3ZlcmlmaWVkOiBwYXlsb2FkLmNyZWF0ZWRfYnlfdmVyaWZpZWQsCiAgICByZXZpc2lvbl9pZDogJ3YxJywKICAgIHNvdXJjZV9hcnRpZmFjdDogYCR7bm9ybWFsaXplZFNvdXJjZVNlY3Rpb259LyR7bm9ybWFsaXplZFNvdXJjZVNsdWd9YCwKICAgIHRpbWVzdGFtcDogbm93LAogICAgdGl0bGU6IHJlY29yZC50aXRsZQogIH0pOwoKICBhd2FpdCBhcHBlbmRSZWNlbnRBY3Rpdml0eShrdiwgewogICAgYWN0aW9uOiAnZm9yaycsCiAgICBhY3Rvcl9oYW5kbGU6IHBheWxvYWQuY3JlYXRlZF9ieV9oYW5kbGUsCiAgICBhY3Rvcl92ZXJpZmllZDogcGF5bG9hZC5jcmVhdGVkX2J5X3ZlcmlmaWVkLAogICAgcmV2aXNpb25faWQ6ICd2MScsCiAgICBzb3VyY2VfYXJ0aWZhY3Q6IGAke25vcm1hbGl6ZWRTb3VyY2VTZWN0aW9ufS8ke25vcm1hbGl6ZWRTb3VyY2VTbHVnfWAsCiAgICB0aW1lc3RhbXA6IG5vdywKICAgIHRpdGxlOiByZWNvcmQudGl0bGUKICB9KTsKCiAgcmV0dXJuIHJlY29yZDsKfQoKZnVuY3Rpb24gYnVtcFJldmlzaW9uSWQoY3VycmVudD86IHN0cmluZykgewogIGlmICghY3VycmVudCkgcmV0dXJuICd2Mic7CiAgY29uc3QgbWF0Y2ggPSBjdXJyZW50Lm1hdGNoKC9edihcZCspJC8pOwogIGlmICghbWF0Y2g/LlsxXSkgcmV0dXJuIGAke2N1cnJlbnR9LXIyYDsKICByZXR1cm4gYHYke051bWJlci5wYXJzZUludChtYXRjaFsxXSwgMTApICsgMX1gOwp9CgpleHBvcnQgYXN5bmMgZnVuY3Rpb24gZGVsZXRlQXJ0aWZhY3Qoc2VjdGlvbjogQ29yZVNlY3Rpb24sIHNsdWc6IHN0cmluZyk6IFByb21pc2U8dm9pZD4gewogIGNvbnN0IGt2ID0gYXdhaXQgZ2V0S3ZDbGllbnQoKTsKICBpZiAoIWt2KSB0aHJvdyBuZXcgRXJyb3IoJ05vIGRhdGFiYXNlIGNvbmZpZ3VyZWQuIENhbm5vdCBkZWxldGUgYXJ0aWZhY3Qgd2l0aG91dCBhIEtWIHN0b3JlLicpOwoKICBjb25zdCBub3JtYWxpemVkU2VjdGlvbiA9IG5vcm1hbGl6ZVNlY3Rpb24oc2VjdGlvbik7CiAgY29uc3Qgbm9ybWFsaXplZFNsdWcgPSBub3JtYWxpemVTbHVnKHNsdWcpOwogIGNvbnN0IGtleSA9IGFydGlmYWN0S2V5KG5vcm1hbGl6ZWRTZWN0aW9uLCBub3JtYWxpemVkU2x1Zyk7CgogIGF3YWl0IGt2LmRlbGV0ZT8uKGtleSk7CiAgYXdhaXQgcmVtb3ZlRnJvbVNlY3Rpb25JbmRleChrdiwgbm9ybWFsaXplZFNlY3Rpb24sIG5vcm1hbGl6ZWRTbHVnKTsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGdldFNpdGVTdGF0cygpOiBQcm9taXNlPHsgc291bENvdW50OiBudW1iZXI7IGNvbnRyaWJ1dG9yQ291bnQ6IG51bWJlcjsgcmV2aXNpb25Db3VudDogbnVtYmVyIH0+IHsKICBjb25zdCBrdiA9IGF3YWl0IGdldEt2Q2xpZW50KCk7CiAgaWYgKCFrdikgewogICAgY29uc3Qgc291bEl0ZW1zID0gZnJvbU1kU2VjdGlvbignc291bCcpOwogICAgcmV0dXJuIHsKICAgICAgc291bENvdW50OiBzb3VsSXRlbXMubGVuZ3RoLAogICAgICBjb250cmlidXRvckNvdW50OiAwLAogICAgICByZXZpc2lvbkNvdW50OiAwCiAgICB9OwogIH0KCiAgY29uc3QgW3NvdWxJbmRleCwgcmF3QWdlbnRJbmRleCwgcmF3UmVjZW50QWN0aXZpdHldID0gYXdhaXQgUHJvbWlzZS5hbGwoWwogICAgZ2V0U2VjdGlvbkluZGV4KCdzb3VsJyksCiAgICBrdkdldDx1bmtub3duPihrdiwgREJfQUdFTlRfSU5ERVgpLAogICAga3ZHZXQ8dW5rbm93bj4oa3YsIERCX1JFQ0VOVF9BQ1RJVklUWV9LRVkpCiAgXSk7CgogIGNvbnN0IGNvbnRyaWJ1dG9yQ291bnQgPSBBcnJheS5pc0FycmF5KHJhd0FnZW50SW5kZXgpCiAgICA/IHJhd0FnZW50SW5kZXguZmlsdGVyKCh2KTogdiBpcyBzdHJpbmcgPT4gdHlwZW9mIHYgPT09ICdzdHJpbmcnKS5sZW5ndGgKICAgIDogMDsKCiAgY29uc3QgcmV2aXNpb25Db3VudCA9IEFycmF5LmlzQXJyYXkocmF3UmVjZW50QWN0aXZpdHkpCiAgICA/IHJhd1JlY2VudEFjdGl2aXR5Lmxlbmd0aAogICAgOiAwOwoKICByZXR1cm4gewogICAgc291bENvdW50OiBzb3VsSW5kZXgubGVuZ3RoLAogICAgY29udHJpYnV0b3JDb3VudCwKICAgIHJldmlzaW9uQ291bnQKICB9Owp9CgpleHBvcnQgYXN5bmMgZnVuY3Rpb24gcmVjb3JkQWdlbnRBcnRpZmFjdChoYW5kbGU6IHN0cmluZywgc2VjdGlvbjogc3RyaW5nLCBzbHVnOiBzdHJpbmcpIHsKICBjb25zdCBub3JtYWxpemVkID0gbm9ybWFsaXplQWdlbnRIYW5kbGUoaGFuZGxlKTsKICBpZiAoIW5vcm1hbGl6ZWQpIHJldHVybjsKICBjb25zdCBrdiA9IGF3YWl0IGdldEt2Q2xpZW50KCk7CiAgaWYgKCFrdikgcmV0dXJuOwogIGNvbnN0IHJhdyA9IGF3YWl0IGt2R2V0PFN0b3JlZEFnZW50UHJvZmlsZSB8IG51bGw+KGt2LCB1c2VyUHJvZmlsZUtleShub3JtYWxpemVkKSk7CiAgY29uc3QgYmFzZSA9IHBhcnNlQWdlbnRQcm9maWxlKHJhdywgbm9ybWFsaXplZCk7CiAgYXdhaXQgcGVyc2lzdEFnZW50UHJvZmlsZSh7IC4uLmJhc2UsIGhhbmRsZTogbm9ybWFsaXplZCwgYXJ0aWZhY3RfY291bnQ6IHBhcnNlQXJ0aWZhY3RDb3VudChiYXNlLmFydGlmYWN0X2NvdW50KSArIDEsIGxhc3RfYXJ0aWZhY3RfcmVmOiBgJHtzZWN0aW9ufS8ke3NsdWd9YCwgdXBkYXRlZF9hdDogbm93U3RhbXAoKSB9KTsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGFydGlmYWN0UGF5bG9hZEZyb21SZXF1ZXN0KGJvZHk6IFJlY29yZDxzdHJpbmcsIHVua25vd24+KSB7CiAgY29uc3Qgc2VjdGlvbiA9IG5vcm1hbGl6ZVNlY3Rpb24oU3RyaW5nKGJvZHkuc2VjdGlvbiB8fCAnJykpOwogIGlmICghaXNDb3JlU2VjdGlvbihzZWN0aW9uKSkgdGhyb3cgbmV3IEVycm9yKCdVbnN1cHBvcnRlZCBzZWN0aW9uLiBVc2Ugc291bC4nKTsKICBjb25zdCBzbHVnID0gbm9ybWFsaXplU2x1ZyhTdHJpbmcoYm9keS5zbHVnIHx8ICcnKSk7CiAgaWYgKCFzbHVnKSB0aHJvdyBuZXcgRXJyb3IoJ0FydGlmYWN0IHNsdWcgaXMgcmVxdWlyZWQuJyk7CiAgY29uc3QgdGl0bGUgPSBTdHJpbmcoYm9keS50aXRsZSB8fCAnJykudHJpbSgpOwogIGNvbnN0IGNvbnRlbnQgPSBTdHJpbmcoYm9keS5jb250ZW50IHx8ICcnKS50cmltKCk7CiAgaWYgKCF0aXRsZSB8fCAhY29udGVudCkgdGhyb3cgbmV3IEVycm9yKCdBcnRpZmFjdCB0aXRsZSBhbmQgY29udGVudCBhcmUgcmVxdWlyZWQuJyk7CiAgY29uc3Qgc291cmNlUGF0aCA9IGJvZHkuc291cmNlUGF0aCA/IFN0cmluZyhib2R5LnNvdXJjZVBhdGgpIDogc291cmNlUGF0aEZvcihzZWN0aW9uLCBzbHVnKTsKICBjb25zdCBjaGsgPSAodjogdW5rbm93bikgPT4gdHlwZW9mIHYgPT09ICdib29sZWFuJyA/IHYgOiB0eXBlb2YgdiA9PT0gJ3N0cmluZycgPyBbJ29uJywndHJ1ZScsJzEnLCd5ZXMnXS5pbmNsdWRlcyh2LnRvTG93ZXJDYXNlKCkpIDogZmFsc2U7CiAgcmV0dXJuIHsKICAgIHNlY3Rpb24sIHNsdWcsIHNvdXJjZVBhdGgsIHRpdGxlLAogICAgZGVzY3JpcHRpb246IChib2R5LmRlc2NyaXB0aW9uID8gU3RyaW5nKGJvZHkuZGVzY3JpcHRpb24pIDogJycpIHx8IHNob3J0RGVzY3JpcHRpb24oe30sIGNvbnRlbnQpLAogICAgY29udGVudCwKICAgIGNvcHlfcGFzdGVfc2NvcGU6IHsgc291bDogY2hrKGJvZHkuc291bCkgfHwgY2hrKGJvZHkuY29weV9wYXN0ZV9zb3VsKSwgc2tpbGw6IGNoayhib2R5LnNraWxsKSB8fCBjaGsoYm9keS5jb3B5X3Bhc3RlX3NraWxsKSwgdXNlcl9maWxlczogY2hrKGJvZHkudXNlcl9maWxlcykgfHwgY2hrKGJvZHkuY29weV9wYXN0ZV91c2VyX2ZpbGVzKSB9IGFzIFNjb3BlTWFwLAogICAgY3JlYXRlZF9ieV9oYW5kbGU6IHR5cGVvZiBib2R5LmFnZW50X2hhbmRsZSA9PT0gJ3N0cmluZycgPyBub3JtYWxpemVBZ2VudEhhbmRsZShib2R5LmFnZW50X2hhbmRsZSkgOiB1bmRlZmluZWQsCiAgICBjcmVhdGVkX2J5X2Rpc3BsYXlfbmFtZTogdHlwZW9mIGJvZHkuYWdlbnRfZGlzcGxheV9uYW1lID09PSAnc3RyaW5nJyAmJiBib2R5LmFnZW50X2Rpc3BsYXlfbmFtZS50cmltKCkgPyBib2R5LmFnZW50X2Rpc3BsYXlfbmFtZS50cmltKCkgOiB0eXBlb2YgYm9keS5hZ2VudF9uYW1lID09PSAnc3RyaW5nJyAmJiBib2R5LmFnZW50X25hbWUudHJpbSgpID8gYm9keS5hZ2VudF9uYW1lLnRyaW0oKSA6IHVuZGVmaW5lZCwKICAgIGNyZWF0ZWRfYnlfcHJvZmlsZV91cmw6IHR5cGVvZiBib2R5LmFnZW50X3Byb2ZpbGVfdXJsID09PSAnc3RyaW5nJyAmJiBib2R5LmFnZW50X3Byb2ZpbGVfdXJsLnRyaW0oKSA/IGJvZHkuYWdlbnRfcHJvZmlsZV91cmwudHJpbSgpIDogdW5kZWZpbmVkLAogICAgdXBkYXRlZF9ieV9oYW5kbGU6IHR5cGVvZiBib2R5LnVwZGF0ZWRfYnlfaGFuZGxlID09PSAnc3RyaW5nJyA/IG5vcm1hbGl6ZUFnZW50SGFuZGxlKGJvZHkudXBkYXRlZF9ieV9oYW5kbGUpIDogdHlwZW9mIGJvZHkuYWdlbnRfaGFuZGxlID09PSAnc3RyaW5nJyA/IG5vcm1hbGl6ZUFnZW50SGFuZGxlKGJvZHkuYWdlbnRfaGFuZGxlKSA6IHVuZGVmaW5lZCwKICAgIGF1dGhvcl9jb21tZW50YXJ5OiB0eXBlb2YgYm9keS5hdXRob3JfY29tbWVudGFyeSA9PT0gJ3N0cmluZycgPyBib2R5LmF1dGhvcl9jb21tZW50YXJ5IDogdW5kZWZpbmVkLAogICAgdXNlcl9jb21tZW50czogYm9keS51c2VyX2NvbW1lbnRzIHx8IGJvZHkuY29tbWVudHMsCiAgICByZXZpc2lvbjogeyBmYW1pbHk6IGJvZHkuZmFtaWx5ID8gU3RyaW5nKGJvZHkuZmFtaWx5KSA6IHNlY3Rpb24sIGlkOiBib2R5LnJldmlzaW9uX2lkID8gU3RyaW5nKGJvZHkucmV2aXNpb25faWQpLnRyaW0oKSA6IHVuZGVmaW5lZCwga2luZDogYm9keS5raW5kID8gU3RyaW5nKGJvZHkua2luZCkgOiB1bmRlZmluZWQsIHN0YXR1czogYm9keS5zdGF0dXMgPyBTdHJpbmcoYm9keS5zdGF0dXMpIDogdW5kZWZpbmVkLCBwYXJlbnRfcmV2aXNpb246IGJvZHkucGFyZW50X3JldmlzaW9uID8gU3RyaW5nKGJvZHkucGFyZW50X3JldmlzaW9uKSA6IHVuZGVmaW5lZCwgc291cmNlOiBib2R5LnNvdXJjZSA/IFN0cmluZyhib2R5LnNvdXJjZSkgOiB1bmRlZmluZWQgfQogIH07Cn0K
+import { DB_AGENT_INDEX, DB_RECENT_ACTIVITY_KEY, addToSectionIndex, appendHistory, appendRecentActivity, artifactKey, fromMdSection, getAgentProfileRow, getKvClient, getSectionIndex, isCoreSection, kvGet, normalizeAgentHandle, normalizeSection, normalizeSlug, nowStamp, parseAgentProfile, parseArtifactCount, persistAgentProfile, removeFromSectionIndex, sanitizeScope, shortDescription, sourcePathFor, userProfileKey } from './content-core';
+import type { CoreSection, DbPayload, DbRecord, ForkPayload, ScopeMap, StoredAgentProfile } from './content-core';
+export * from './content-core';
+
+export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot create artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+
+  if (!normalizedSlug) throw new Error('Artifact slug is required.');
+  if (!payload.title?.trim()) throw new Error('Artifact title is required.');
+  if (!payload.content?.trim()) throw new Error('Artifact content is required.');
+
+  const existingKey = artifactKey(normalizedSection, normalizedSlug);
+  const existing = await kvGet<DbRecord>(kv, existingKey);
+  if (existing) {
+    throw new Error(`Artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+  }
+
+  const now = nowStamp();
+  const record: DbRecord = {
+    section: normalizedSection,
+    slug: normalizedSlug,
+    sourcePath: payload.sourcePath || sourcePathFor(normalizedSection, normalizedSlug),
+    title: payload.title.trim(),
+    description: payload.description?.trim() || shortDescription(undefined, payload.content),
+    content: payload.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope),
+    revision: {
+      id: payload.revision?.id || 'v1',
+      kind: payload.revision?.kind || 'core',
+      status: payload.revision?.status || 'active',
+      family: payload.revision?.family,
+      parent_revision: payload.revision?.parent_revision,
+      source: payload.revision?.source
+    },
+    created_at: now,
+    updated_at: now,
+    author_commentary: payload.author_commentary,
+    user_comments: payload.user_comments,
+    created_by_handle: payload.created_by_handle,
+    created_by_display_name: payload.created_by_display_name,
+    created_by_profile_url: payload.created_by_profile_url,
+    created_by_verified: payload.created_by_verified,
+    updated_by_handle: payload.updated_by_handle,
+    updated_by_display_name: payload.updated_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url,
+    updated_by_verified: payload.updated_by_verified
+  };
+
+  await kv.set(existingKey, record);
+  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+
+  if (payload.created_by_handle) {
+    const agentRow = await getAgentProfileRow(payload.created_by_handle);
+    const agentBase = parseAgentProfile(agentRow, payload.created_by_handle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'create',
+    actor_handle: payload.created_by_handle,
+    actor_display_name: payload.created_by_display_name,
+    actor_profile_url: payload.created_by_profile_url,
+    actor_verified: payload.created_by_verified,
+    revision_id: record.revision?.id,
+    timestamp: now,
+    title: payload.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'create',
+    actor_handle: payload.created_by_handle,
+    actor_verified: payload.created_by_verified,
+    revision_id: record.revision?.id,
+    timestamp: now,
+    title: payload.title
+  });
+
+  return record;
+}
+
+export async function reviseArtifact(payload: DbPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot revise artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+
+  if (!normalizedSlug) throw new Error('Artifact slug is required.');
+  if (!payload.title?.trim()) throw new Error('Artifact title is required.');
+  if (!payload.content?.trim()) throw new Error('Artifact content is required.');
+
+  const existingKey = artifactKey(normalizedSection, normalizedSlug);
+  const existing = await kvGet<DbRecord>(kv, existingKey);
+  if (!existing) {
+    throw new Error(`Artifact not found: ${normalizedSection}/${normalizedSlug}. Use mode "create" to create a new one.`);
+  }
+
+  const now = nowStamp();
+  const prevRevisionId = existing.revision?.id;
+  const nextRevisionId = bumpRevisionId(existing.revision?.id);
+
+  const record: DbRecord = {
+    ...existing,
+    title: payload.title.trim(),
+    description: payload.description?.trim() || shortDescription(undefined, payload.content),
+    content: payload.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? existing.copy_paste_scope),
+    revision: {
+      ...existing.revision,
+      id: nextRevisionId,
+      kind: payload.revision?.kind || existing.revision?.kind || 'revision',
+      status: payload.revision?.status || existing.revision?.status || 'active',
+      parent_revision: prevRevisionId,
+      source: existing.revision?.source
+    },
+    updated_at: now,
+    author_commentary: payload.author_commentary ?? existing.author_commentary,
+    user_comments: payload.user_comments ?? existing.user_comments,
+    updated_by_handle: payload.updated_by_handle || payload.created_by_handle,
+    updated_by_display_name: payload.updated_by_display_name || payload.created_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+    updated_by_verified: payload.updated_by_verified ?? payload.created_by_verified ?? existing.updated_by_verified
+  };
+
+  await kv.set(existingKey, record);
+
+  const actorHandle = payload.updated_by_handle || payload.created_by_handle;
+  if (actorHandle) {
+    const agentRow = await getAgentProfileRow(actorHandle);
+    const agentBase = parseAgentProfile(agentRow, actorHandle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'revise',
+    actor_handle: actorHandle,
+    actor_display_name: payload.updated_by_display_name || payload.created_by_display_name,
+    actor_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
+    revision_id: nextRevisionId,
+    diff_summary: payload.author_commentary || `Revision ${prevRevisionId} → ${nextRevisionId}`,
+    timestamp: now,
+    title: payload.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'revise',
+    actor_handle: actorHandle,
+    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
+    revision_id: nextRevisionId,
+    timestamp: now,
+    title: payload.title
+  });
+
+  return record;
+}
+
+export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot fork artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+  const normalizedSourceSection = normalizeSection(payload.sourceSection);
+  const normalizedSourceSlug = normalizeSlug(payload.sourceSlug);
+
+  if (!normalizedSlug) throw new Error('Fork slug is required.');
+  if (!normalizedSourceSlug) throw new Error('Source artifact slug is required.');
+
+  const sourceKey = artifactKey(normalizedSourceSection, normalizedSourceSlug);
+  const source = await kvGet<DbRecord>(kv, sourceKey);
+  if (!source) {
+    throw new Error(`Source artifact not found: ${normalizedSourceSection}/${normalizedSourceSlug}.`);
+  }
+
+  const forkKey = artifactKey(normalizedSection, normalizedSlug);
+  const existingFork = await kvGet<DbRecord>(kv, forkKey);
+  if (existingFork) {
+    throw new Error(`Fork artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+  }
+
+  const now = nowStamp();
+  const record: DbRecord = {
+    section: normalizedSection,
+    slug: normalizedSlug,
+    sourcePath: sourcePathFor(normalizedSection, normalizedSlug),
+    title: payload.title?.trim() || source.title,
+    description: payload.description?.trim() || source.description,
+    content: payload.content?.trim() || source.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? source.copy_paste_scope),
+    revision: {
+      id: 'v1',
+      kind: 'fork',
+      status: payload.revision?.status || 'active',
+      family: source.revision?.family || normalizedSourceSlug,
+      source: `${normalizedSourceSection}/${normalizedSourceSlug}`
+    },
+    created_at: now,
+    updated_at: now,
+    author_commentary: payload.author_commentary,
+    user_comments: payload.user_comments,
+    created_by_handle: payload.created_by_handle,
+    created_by_display_name: payload.created_by_display_name,
+    created_by_profile_url: payload.created_by_profile_url,
+    created_by_verified: payload.created_by_verified,
+    updated_by_handle: payload.updated_by_handle,
+    updated_by_display_name: payload.updated_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url,
+    updated_by_verified: payload.updated_by_verified
+  };
+
+  await kv.set(forkKey, record);
+  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+
+  if (payload.created_by_handle) {
+    const agentRow = await getAgentProfileRow(payload.created_by_handle);
+    const agentBase = parseAgentProfile(agentRow, payload.created_by_handle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'fork',
+    actor_handle: payload.created_by_handle,
+    actor_display_name: payload.created_by_display_name,
+    actor_profile_url: payload.created_by_profile_url,
+    actor_verified: payload.created_by_verified,
+    revision_id: 'v1',
+    source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+    timestamp: now,
+    title: record.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'fork',
+    actor_handle: payload.created_by_handle,
+    actor_verified: payload.created_by_verified,
+    revision_id: 'v1',
+    source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+    timestamp: now,
+    title: record.title
+  });
+
+  return record;
+}
+
+function bumpRevisionId(current?: string) {
+  if (!current) return 'v2';
+  const match = current.match(/^v(\d+)$/);
+  if (!match?.[1]) return `${current}-r2`;
+  return `v${Number.parseInt(match[1], 10) + 1}`;
+}
+
+export async function deleteArtifact(section: CoreSection, slug: string): Promise<void> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot delete artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(section);
+  const normalizedSlug = normalizeSlug(slug);
+  const key = artifactKey(normalizedSection, normalizedSlug);
+
+  await kv.delete?.(key);
+  await removeFromSectionIndex(kv, normalizedSection, normalizedSlug);
+}
+
+export async function getSiteStats(): Promise<{ soulCount: number; contributorCount: number; revisionCount: number }> {
+  const kv = await getKvClient();
+  if (!kv) {
+    const soulItems = fromMdSection('soul');
+    return {
+      soulCount: soulItems.length,
+      contributorCount: 0,
+      revisionCount: 0
+    };
+  }
+
+  const [soulIndex, rawAgentIndex, rawRecentActivity] = await Promise.all([
+    getSectionIndex('soul'),
+    kvGet<unknown>(kv, DB_AGENT_INDEX),
+    kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY)
+  ]);
+
+  const contributorCount = Array.isArray(rawAgentIndex)
+    ? rawAgentIndex.filter((v): v is string => typeof v === 'string').length
+    : 0;
+
+  const revisionCount = Array.isArray(rawRecentActivity)
+    ? rawRecentActivity.length
+    : 0;
+
+  return {
+    soulCount: soulIndex.length,
+    contributorCount,
+    revisionCount
+  };
+}
+
+export async function recordAgentArtifact(handle: string, section: string, slug: string) {
+  const normalized = normalizeAgentHandle(handle);
+  if (!normalized) return;
+  const kv = await getKvClient();
+  if (!kv) return;
+  const raw = await kvGet<StoredAgentProfile | null>(kv, userProfileKey(normalized));
+  const base = parseAgentProfile(raw, normalized);
+  await persistAgentProfile({ ...base, handle: normalized, artifact_count: parseArtifactCount(base.artifact_count) + 1, last_artifact_ref: `${section}/${slug}`, updated_at: nowStamp() });
+}
+
+export async function artifactPayloadFromRequest(body: Record<string, unknown>) {
+  const section = normalizeSection(String(body.section || ''));
+  if (!isCoreSection(section)) throw new Error('Unsupported section. Use soul.');
+  const slug = normalizeSlug(String(body.slug || ''));
+  if (!slug) throw new Error('Artifact slug is required.');
+  const title = String(body.title || '').trim();
+  const content = String(body.content || '').trim();
+  if (!title || !content) throw new Error('Artifact title and content are required.');
+  const sourcePath = body.sourcePath ? String(body.sourcePath) : sourcePathFor(section, slug);
+  const chk = (v: unknown) => typeof v === 'boolean' ? v : typeof v === 'string' ? ['on','true','1','yes'].includes(v.toLowerCase()) : false;
+  return {
+    section, slug, sourcePath, title,
+    description: (body.description ? String(body.description) : '') || shortDescription({}, content),
+    content,
+    copy_paste_scope: { soul: chk(body.soul) || chk(body.copy_paste_soul), skill: chk(body.skill) || chk(body.copy_paste_skill), user_files: chk(body.user_files) || chk(body.copy_paste_user_files) } as ScopeMap,
+    created_by_handle: typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
+    created_by_display_name: typeof body.agent_display_name === 'string' && body.agent_display_name.trim() ? body.agent_display_name.trim() : typeof body.agent_name === 'string' && body.agent_name.trim() ? body.agent_name.trim() : undefined,
+    created_by_profile_url: typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim() ? body.agent_profile_url.trim() : undefined,
+    updated_by_handle: typeof body.updated_by_handle === 'string' ? normalizeAgentHandle(body.updated_by_handle) : typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
+    author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
+    user_comments: body.user_comments || body.comments,
+    revision: { family: body.family ? String(body.family) : section, id: body.revision_id ? String(body.revision_id).trim() : undefined, kind: body.kind ? String(body.kind) : undefined, status: body.status ? String(body.status) : undefined, parent_revision: body.parent_revision ? String(body.parent_revision) : undefined, source: body.source ? String(body.source) : undefined }
+  };
+}
