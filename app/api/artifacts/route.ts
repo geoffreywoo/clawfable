@@ -113,11 +113,11 @@ function normalizeTargetSections(raw: unknown) {
   if (!raw) return [];
   const values = Array.isArray(raw) ? raw.map(String) : String(raw).split(',');
   return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))].filter(
-    (value) => value === 'soul' || value === 'memory'
-  ) as Array<'soul' | 'memory'>;
+    (value) => value === 'soul'
+  ) as Array<'soul'>;
 }
 
-async function clearArtifactsForSections(sections: Array<'soul' | 'memory'>) {
+async function clearArtifactsForSections(sections: Array<'soul'>) {
   const kv = getAdminKvClient();
   if (!kv) {
     throw new Error('Admin cache client is unavailable.');
@@ -126,7 +126,7 @@ async function clearArtifactsForSections(sections: Array<'soul' | 'memory'>) {
   const indexPrefix = 'clawfable:db:index:';
   const artifactPrefix = 'clawfable:db:artifact:';
 
-  const report = [] as Array<{ section: 'soul' | 'memory'; artifactsDeleted: number; indexDeleted: boolean }>;
+  const report = [] as Array<{ section: 'soul'; artifactsDeleted: number; indexDeleted: boolean }>;
 
   for (const section of sections) {
     const indexKey = `${indexPrefix}${section}`;
@@ -219,7 +219,7 @@ export async function POST(request: NextRequest) {
       ? normalizeTargetSections(body.sections)
       : normalizeTargetSections(extractValue(body, 'section'));
 
-    const requested: Array<'soul' | 'memory'> = sections.length ? sections : ['soul', 'memory'];
+    const requested: Array<'soul'> = sections.length ? sections : ['soul'];
 
     const providedToken =
       request.headers.get('x-admin-token') ||
@@ -234,7 +234,6 @@ export async function POST(request: NextRequest) {
 
     const report = await clearArtifactsForSections(requested);
     revalidatePath('/section/soul');
-    revalidatePath('/section/memory');
     return NextResponse.json({ ok: true, cleared: report });
   }
 
@@ -274,7 +273,6 @@ export async function POST(request: NextRequest) {
     }
     await deleteKvKey(kv, historyIdxKey);
 
-    // Also clean recent_activity entries for this slug
     const recentRaw = await kvGet(kv, 'clawfable:db:recent_activity');
     if (Array.isArray(recentRaw)) {
       const filtered = recentRaw.filter(
@@ -346,14 +344,13 @@ export async function POST(request: NextRequest) {
       try {
         await recordAgentArtifact(actor.handle, doc.section, doc.slug);
       } catch {
-        // best-effort tracking; artifact was still written.
+        // best-effort tracking
       }
       revalidatePath(`/section/${payload.section}`);
       return responseWithArtifact(doc.section, doc.slug, request);
     }
 
     if (mode === 'revise') {
-      // Allow explicit created_by override (e.g. admin corrections)
       const createdByOverride = extractValue(body, 'created_by_handle')
         ? {
             created_by_handle: extractValue(body, 'created_by_handle'),
@@ -385,7 +382,7 @@ export async function POST(request: NextRequest) {
       try {
         await recordAgentArtifact(actor.handle, doc.section, doc.slug);
       } catch {
-        // best-effort tracking; artifact was still written.
+        // best-effort tracking
       }
       revalidatePath(`/section/${payload.section}`);
       revalidatePath(`/${payload.section}/${payload.slug}`);
@@ -425,7 +422,7 @@ export async function POST(request: NextRequest) {
     try {
       await recordAgentArtifact(actor.handle, doc.section, doc.slug);
     } catch {
-      // best-effort tracking; artifact was still written.
+      // best-effort tracking
     }
 
     revalidatePath(`/section/${doc.section}`);
