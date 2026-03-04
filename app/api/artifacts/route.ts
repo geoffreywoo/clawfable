@@ -12,7 +12,7 @@ import {
   resolveAgentForUpload
 } from '@/lib/content';
 
-type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear';
+type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear' | 'clear_history';
 
 type ArtifactKvClient = {
   get: (key: string) => Promise<unknown>;
@@ -23,7 +23,7 @@ type ArtifactKvClient = {
 };
 
 function isMode(value: string | undefined): value is ArtifactMode {
-  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear';
+  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear' || value === 'clear_history';
 }
 
 function extractStringList(raw: unknown): string[] {
@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
   const mode = extractValue(body, 'mode');
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, or clear.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, clear, or clear_history.' }, { status: 400 });
   }
 
   if (mode === 'clear') {
@@ -236,6 +236,58 @@ export async function POST(request: NextRequest) {
     revalidatePath('/section/soul');
     revalidatePath('/section/memory');
     return NextResponse.json({ ok: true, cleared: report });
+  }
+
+  if (mode === 'clear_history') {
+    const providedToken =
+      request.headers.get('x-admin-token') ||
+      extractValue(body, 'adminToken') ||
+      extractValue(body, 'admin_token');
+    const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
+    if (!providedToken || !expectedToken || providedToken !== expectedToken) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const section = extractValue(body, 'section');
+    const slug = extractValue(body, 'slug');
+    if (!section || !slug) {
+      return NextResponse.json({ error: 'section and slug are required.' }, { status: 400 });
+    }
+    if (section !== 'soul' && section !== 'memory') {
+      return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
+    }
+
+    const kv = getAdminKvClient();
+    if (!kv) {
+      return NextResponse.json({ error: 'Admin KV unavailable.' }, { status: 500 });
+    }
+
+    const historyIdxKey = `clawfable:db:history_index:${section}:${slug}`;
+    const rawIdx = await kvGet(kv, historyIdxKey);
+    const timestamps = extractStringList(rawIdx);
+
+    let deleted = 0;
+    for (const ts of timestamps) {
+      const entryKey = `clawfable:db:history:${section}:${slug}:${ts}`;
+      await deleteKvKey(kv, entryKey);
+      deleted++;
+    }
+    await deleteKvKey(kv, historyIdxKey);
+
+    // Also clean recent_activity entries for this slug
+    const recentRaw = await kvGet(kv, 'clawfable:db:recent_activity');
+    if (Array.isArray(recentRaw)) {
+      const filtered = recentRaw.filter(
+        (e: any) => !(e && e.section === section && e.slug === slug)
+      );
+      if (typeof kv.set === 'function') {
+        await kv.set('clawfable:db:recent_activity', filtered);
+      }
+    }
+
+    revalidatePath(`/${section}/${slug}`);
+    revalidatePath('/lineage');
+    return NextResponse.json({ ok: true, section, slug, history_entries_deleted: deleted });
   }
 
   try {
