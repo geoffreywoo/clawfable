@@ -5,7 +5,7 @@ import type { LineageNode, CoreSection } from '../../lib/content';
 
 export const metadata: Metadata = {
   title: 'Lineage Explorer | Clawfable',
-  description: 'Explore the full provenance graph of SOUL and MEMORY artifacts on Clawfable. See how artifacts fork and evolve over time.'
+  description: 'Explore the full provenance graph of SOUL artifacts on Clawfable, the first and largest open-source OpenClaw SOUL repository. See how artifacts fork and evolve over time.'
 };
 
 function readableDate(value: string | null | undefined) {
@@ -57,7 +57,7 @@ function LineageNodeRow({
         className={`lineage-node${isCurrent ? ' lineage-node--current' : ''}`}
         style={{ paddingLeft: `${indentPx}px` }}
       >
-        {depth > 0 ? <span className="lineage-branch">{'\u2514\u2500 '}</span> : null}
+        {depth > 0 ? <span className="lineage-branch">{`${String.fromCharCode(0x2514)}${String.fromCharCode(0x2500)} `}</span> : null}
         <span className="lineage-slug">
           <Link href={`/${section}/${node.slug}`}>{node.slug}</Link>
         </span>
@@ -71,7 +71,7 @@ function LineageNodeRow({
         {node.actor_handle ? (
           <span className="lineage-actor">
             @{node.actor_handle}
-            {node.actor_verified ? ' \u2713' : ''}
+            {node.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}
           </span>
         ) : null}
         <span className="lineage-date">{readableDate(node.updated_at)}</span>
@@ -188,12 +188,11 @@ export default async function LineagePage({
         <p className="kicker">Provenance Explorer</p>
         <h1>Lineage</h1>
         <p className="doc-subtitle">
-          The full artifact graph for Clawfable — how every SOUL and MEMORY artifact relates through
+          The full artifact graph for Clawfable {String.fromCharCode(0x2014)} how every SOUL artifact relates through
           forks, revisions, and canonical baselines.
         </p>
         <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <Link href="/lineage?section=soul" className="cta-link">Browse SOUL lineage</Link>
-          <Link href="/lineage?section=memory" className="cta-link">Browse MEMORY lineage</Link>
         </div>
       </div>
 
@@ -204,26 +203,11 @@ export default async function LineagePage({
             SOUL artifacts
             <span style={{ marginLeft: '12px' }}>
               <Link href="/section/soul" className="scope-chip" style={{ textDecoration: 'none', color: 'var(--soul)' }}>
-                Browse all {'\u2192'}
+                Browse all {String.fromCharCode(0x2192)}
               </Link>
             </span>
           </h2>
           <SectionLineage section="soul" highlightSlug={sectionParam === 'soul' ? slugParam : undefined} />
-        </div>
-      ) : null}
-
-      {/* MEMORY section */}
-      {(!sectionParam || sectionParam === 'memory') ? (
-        <div className="panel">
-          <h2 style={{ marginTop: 0 }}>
-            MEMORY artifacts
-            <span style={{ marginLeft: '12px' }}>
-              <Link href="/section/memory" className="scope-chip" style={{ textDecoration: 'none', color: 'var(--memory)' }}>
-                Browse all {'\u2192'}
-              </Link>
-            </span>
-          </h2>
-          <SectionLineage section="memory" highlightSlug={sectionParam === 'memory' ? slugParam : undefined} />
         </div>
       ) : null}
 
