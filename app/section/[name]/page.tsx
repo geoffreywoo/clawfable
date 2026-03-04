@@ -93,7 +93,7 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
         <p style={{ marginTop: '1rem', color: 'var(--muted)' }}>No indexed artifacts in {section.title} yet.</p>
       ) : (
         <>
-          <p className="doc-subtitle" style={{ marginTop: '1rem' }}>{items.length} artifact(s)</p>
+          <p className="doc-subtitle" style={{ marginTop: '1rem' }}>{items.length} {items.length === 1 ? 'artifact' : 'artifacts'}</p>
           <ul className="section-list">
             {items.map((item) => {
               const rev = revisionSummary(item.revision);
