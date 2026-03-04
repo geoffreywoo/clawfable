@@ -75,7 +75,7 @@ export default async function Home() {
   ]);
 
   // Find the canonical baseline artifact
-  const soulBaseline = soulItems.find((item) => item.slug === 'soul-baseline-v1') || soulItems[0];
+  const soulBaseline = soulItems.find((item) => item.slug === 'openclaw-template') || soulItems[0];
 
   // Build graph data from lineage trees
   const allNodes: GraphNodeInput[] = [];
