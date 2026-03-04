@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@vercel/kv';
 import { OPENCLAW_CANONICAL_SEEDS } from '@/lib/content';
 
-type TargetSection = 'soul' | 'memory';
+type TargetSection = 'soul';
 
 type ApiResult = {
   section: TargetSection;
@@ -84,7 +84,7 @@ function normalizeTargetSections(raw: unknown): TargetSection[] {
   if (!raw) return [];
   const values = Array.isArray(raw) ? raw.map(String) : String(raw).split(',');
   return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))]
-    .filter((value) => value === 'soul' || value === 'memory')
+    .filter((value) => value === 'soul')
     .map((value) => value as TargetSection);
 }
 
@@ -135,7 +135,7 @@ function collectTargetSections(request: NextRequest, body: Record<string, unknow
   const querySection = normalizeTargetSections(request.nextUrl.searchParams.get('section'));
 
   const sections = bodyTarget.length ? bodyTarget : queryTarget.length ? queryTarget : querySection;
-  return sections.length ? sections : (['soul', 'memory'] as TargetSection[]);
+  return sections.length ? sections : (['soul'] as TargetSection[]);
 }
 
 async function clearSection(kv: AdminKvClient, section: TargetSection) {
@@ -267,7 +267,6 @@ export async function POST(request: NextRequest) {
       }));
 
   revalidatePath('/section/soul');
-  revalidatePath('/section/memory');
   return NextResponse.json({
     ok: true,
     cleared: results,
@@ -276,5 +275,5 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({ message: 'POST to clear sections: soul,memory with x-admin-token header.' });
+  return NextResponse.json({ message: 'POST to clear sections: soul with x-admin-token header.' });
 }
