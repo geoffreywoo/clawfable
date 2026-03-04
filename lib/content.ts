@@ -916,708 +916,67 @@ export async function resolveAgentForUpload(
     handle: normalized,
     display_name: metadata.displayName || base.display_name,
     profile_url: metadata.profileUrl || base.profile_url,
+    verified: hasValidApiKey ? true : base.verified,
     updated_at: now
   };
-
   await persistAgentProfile(updated);
+
   return {
-    handle: updated.handle,
-    verified: hasValidApiKey,
+    handle: normalized,
+    verified: updated.verified,
     display_name: updated.display_name,
     profile_url: updated.profile_url
   };
 }
 
-export async function recordAgentArtifact(handle: string, section: string, slug: string) {
-  const normalized = normalizeAgentHandle(handle);
-  if (!normalized) return;
-  const now = nowStamp();
-  const raw = await getAgentProfileRow(normalized);
-  const base = parseAgentProfile(raw, normalized);
-  await persistAgentProfile({
-    ...base,
-    handle: normalized,
-    last_artifact_ref: `${section}/${slug}`,
-    artifact_count: parseArtifactCount(base.artifact_count) + 1,
-    updated_at: now
-  });
-}
-
-async function getSectionIndex(section: CoreSection): Promise<string[]> {
-  const kv = await getKvClient();
-  if (!kv) return [];
-
-  const raw = await kvGet<unknown>(kv, indexKey(section));
-  if (!raw) return [];
-
-  if (Array.isArray(raw)) {
-    return raw.filter((item): item is string => typeof item === 'string');
-  }
-
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === 'string');
-      }
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-async function setSectionIndex(section: CoreSection, values: string[]) {
-  const kv = await getKvClient();
-  if (!kv) return;
-  const next = [...new Set(values.filter(Boolean).map((item) => item.trim()).filter(Boolean))];
-  await kv.set(indexKey(section), next);
-}
-
-function skipSeedKey(section: CoreSection) {
-  return `${DB_SKIP_SEED_PREFIX}:${section}`;
-}
-
-async function shouldSkipSectionSeed(section: CoreSection) {
-  const kv = await getKvClient();
-  if (!kv) return false;
-
-  const raw = await kvGet<unknown>(kv, skipSeedKey(section));
-  if (raw == null) return false;
-  if (typeof raw === 'boolean') return raw;
-  if (typeof raw === 'number') return raw !== 0;
-  if (typeof raw === 'string') {
-    const value = raw.trim().toLowerCase();
-    return ['1', 'true', 'yes', 'on', 'enabled', 'skip'].includes(value);
-  }
-
-  return false;
-}
-
-async function getArtifact(section: CoreSection, slug: string): Promise<DbRecord | null> {
-  const kv = await getKvClient();
-  if (!kv) return null;
-  const key = artifactKey(section, normalizeSlug(slug));
-  const raw = await kvGet<DbRecord | null>(kv, key);
-  if (!raw) return null;
-  return normalizeArtifact(section, raw);
-}
-
-function normalizeArtifact(section: CoreSection, raw: DbRecord): DbRecord {
-  const rev = raw.revision || {};
-  const normalizedSlug = normalizeSlug(raw.slug);
-  const authorCommentaryAlias =
-    typeof (raw as Record<string, unknown>).author_comment === 'string'
-      ? ((raw as Record<string, unknown>).author_comment as string)
-      : undefined;
-  return {
-    section,
-    slug: normalizedSlug,
-    sourcePath: canonicalSourcePath(section, normalizedSlug, raw.sourcePath || sourcePathFor(section, normalizedSlug)),
-    title: raw.title || 'Clawfable artifact',
-    description: raw.description || 'Clawfable artifact',
-    author_commentary: raw.author_commentary || authorCommentaryAlias,
-    user_comments:
-      raw.user_comments || (raw as Record<string, unknown>).author_comments || (raw as Record<string, unknown>).comments,
-    content: raw.content || '',
-    created_by_handle: raw.created_by_handle,
-    created_by_display_name: raw.created_by_display_name,
-    created_by_profile_url: raw.created_by_profile_url,
-    created_by_verified: raw.created_by_verified === true,
-    updated_by_handle: raw.updated_by_handle,
-    updated_by_display_name: raw.updated_by_display_name,
-    updated_by_profile_url: raw.updated_by_profile_url,
-    updated_by_verified: raw.updated_by_verified === true,
-    copy_paste_scope: sanitizeScope(raw.copy_paste_scope || {}),
-    revision: {
-      family: rev.family || section,
-      id: rev.id || 'v1',
-      kind: rev.kind || 'core',
-      status: rev.status || 'draft',
-      parent_revision: rev.parent_revision,
-      source: rev.source
-    },
-    created_at: raw.created_at || nowStamp(),
-    updated_at: raw.updated_at || nowStamp()
-  };
-}
-
-async function upsertArtifact(section: CoreSection, payload: DbPayload): Promise<DbRecord> {
-  const kv = await getKvClient();
-  if (!kv) {
-    throw new Error(
-      'No database configured. Set CLAWFABLE_DATABASE_URL + CLAWFABLE_DATABASE_TOKEN, CLAWFABLE_KV_URL + CLAWFABLE_KV_TOKEN, KV_REST_API_URL + KV_REST_API_TOKEN (read-write), or KV_REST_API_URL + KV_REST_API_READ_ONLY_TOKEN (read-only).'
-    );
-  }
-
-  const slug = normalizeSlug(payload.slug);
-  const now = nowStamp();
-  const existing = await getArtifact(section, slug);
-  const revisionInput = payload.revision || {};
-  const fallbackSection = revisionInput.family || section;
-  const actorUpdated: Record<string, unknown> = payload.updated_by_handle || payload.created_by_handle
-    ? {
-        handle: payload.updated_by_handle || payload.created_by_handle,
-        display_name: payload.updated_by_display_name || payload.created_by_display_name,
-        profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
-        verified: payload.updated_by_verified ?? payload.created_by_verified
-      }
-    : {};
-  const actorCreated = payload.created_by_handle
-    ? {
-        handle: payload.created_by_handle,
-        display_name: payload.created_by_display_name,
-        profile_url: payload.created_by_profile_url,
-        verified: payload.created_by_verified
-      }
-    : existing
-      ? {
-          handle: existing.created_by_handle,
-          display_name: existing.created_by_display_name,
-          profile_url: existing.created_by_profile_url,
-          verified: existing.created_by_verified === true
-        }
-      : actorUpdated;
-
-  const createdHandle = typeof actorCreated.handle === 'string' ? actorCreated.handle : undefined;
-  const createdDisplay = typeof actorCreated.display_name === 'string' ? actorCreated.display_name : undefined;
-  const createdProfile = typeof actorCreated.profile_url === 'string' ? actorCreated.profile_url : undefined;
-  const createdVerified = actorCreated.verified === true;
-  const updatedHandle = typeof actorUpdated.handle === 'string' ? actorUpdated.handle : createdHandle;
-  const updatedDisplay = typeof actorUpdated.display_name === 'string' ? actorUpdated.display_name : createdDisplay;
-  const updatedProfile = typeof actorUpdated.profile_url === 'string' ? actorUpdated.profile_url : createdProfile;
-  const updatedVerified = actorUpdated.verified === true || createdVerified;
-
-  const record: DbRecord = {
-    section,
-    slug,
-    sourcePath: canonicalSourcePath(section, slug, payload.sourcePath || sourcePathFor(section, slug)),
-    title: payload.title,
-    description:
-      payload.description?.trim() ||
-      shortDescription({}, payload.content) ||
-      `Clawfable ${section} artifact.`,
-    author_commentary: payload.author_commentary || undefined,
-    user_comments: payload.user_comments,
-    content: payload.content,
-    created_by_handle: createdHandle,
-    created_by_display_name: createdDisplay,
-    created_by_profile_url: createdProfile,
-    created_by_verified: createdVerified,
-    updated_by_handle: updatedHandle,
-    updated_by_display_name: updatedDisplay,
-    updated_by_profile_url: updatedProfile,
-    updated_by_verified: updatedVerified,
-    copy_paste_scope: sanitizeScope(payload.copy_paste_scope || existing?.copy_paste_scope || {}),
-    revision: {
-      family: fallbackSection,
-      id: revisionInput.id || existing?.revision?.id || 'v1',
-      kind: revisionInput.kind || existing?.revision?.kind || 'revision',
-      status: revisionInput.status || existing?.revision?.status || 'draft',
-      parent_revision: revisionInput.parent_revision || existing?.revision?.parent_revision,
-      source: revisionInput.source || existing?.revision?.source
-    },
-    created_at: existing?.created_at || now,
-    updated_at: now
-  };
-
-  // Record provenance history before overwriting
-  try {
-    await recordHistoryForUpsert(kv, section, slug, payload, existing);
-  } catch {
-    // best-effort history; don't block the write
-  }
-
-  await kv.set(artifactKey(section, slug), record);
-
-  const index = await getSectionIndex(section);
-  if (!index.includes(slug)) {
-    index.push(slug);
-    await setSectionIndex(section, index);
-  }
-
-  return record;
-}
-
-async function ensureSectionSeeded(section: CoreSection) {
-  if (seededSections.has(section)) return;
-
-  if (await shouldSkipSectionSeed(section)) {
-    return;
-  }
-
-  const index = await getSectionIndex(section);
-  if (index.length > 0) {
-    seededSections.add(section);
-    return;
-  }
-
-  const seededRows = fromMdSection(section);
-  const kv = await getKvClient();
-  if (!kv) {
-    seededSections.add(section);
-    return;
-  }
-
-  for (const row of seededRows) {
-    await upsertArtifact(section, {
-      section,
-      slug: row.slug,
-      title: row.title,
-      description: row.description,
-      content: row.content,
-      copy_paste_scope: row.copy_paste_scope,
-      revision: row.revision || undefined,
-      sourcePath: row.sourcePath
-    });
-  }
-
-  seededSections.add(section);
-}
-
-export function listSections(): string[] {
-  return coreSections.filter((section) => {
-    const contentDirectory = path.join(CONTENT_ROOT, section);
-    return fs.existsSync(contentDirectory);
-  });
-}
-
-export async function listBySection(section: string): Promise<SectionItem[]> {
-  if (!isCoreSection(section)) return [];
-  const normalized = normalizeSection(section);
-
-  await ensureSectionSeeded(normalized);
-  const isSeedingSkipped = await shouldSkipSectionSeed(normalized);
-
-  const recordsFromDb = await (async () => {
-    const index = await getSectionIndex(normalized);
-    if (index.length === 0) return [];
-    const rows = await Promise.all(index.map((slug) => getArtifact(normalized, slug)));
-    return rows.filter((row): row is DbRecord => Boolean(row));
-  })();
-
-  if (recordsFromDb.length > 0) {
-    return recordsFromDb
-      .map((row) => mapRecordToSectionItem(row))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }
-
-  if (isSeedingSkipped) {
-    return [];
-  }
-
-  const fallback = fromMdSection(normalized);
-  return fallback
-    .map((row) => mapRecordToSectionItem({
-      section: normalized,
-      slug: row.slug,
-      sourcePath: canonicalSourcePath(normalized, row.slug, row.sourcePath),
-      title: row.title,
-      description: row.description,
-      content: row.content,
-      copy_paste_scope: row.copy_paste_scope,
-      revision: row.revision || {},
-      created_at: nowStamp(),
-      updated_at: nowStamp()
-    }))
-    .sort((a, b) => a.title.localeCompare(b.title));
-}
-
-export async function getDoc(section: string, slug: string | string[]) {
-  if (!isCoreSection(section)) return null;
-
-  const normalizedSection = normalizeSection(section);
-  const normalizedSlug = normalizeSlug(Array.isArray(slug) ? slug.join('/') : String(slug));
-
-  await ensureSectionSeeded(normalizedSection);
-  const isSeedingSkipped = await shouldSkipSectionSeed(normalizedSection);
-
-  const fromDb = await getArtifact(normalizedSection, normalizedSlug);
-  if (fromDb) {
-    return toDoc(fromDb);
-  }
-
-  if (isSeedingSkipped) {
-    return null;
-  }
-
-  const sectionDir = path.join(CONTENT_ROOT, normalizedSection);
-  const fallbackPath = path.join(sectionDir, `${normalizedSlug}.md`);
-  if (!fs.existsSync(fallbackPath)) return null;
-  const raw = fs.readFileSync(fallbackPath, 'utf8');
-  const parsed = matter(raw);
-  const data = parsed.data as Record<string, unknown>;
-
-  const row: DbRecord = {
-    section: normalizedSection,
-    slug: normalizedSlug,
-    sourcePath: canonicalSourcePath(
-      normalizedSection,
-      normalizedSlug,
-      `${normalizedSection}/${normalizedSlug}.md`
-    ),
-    title: (data?.title as string) || `Clawfable ${normalizedSection} artifact`,
-    description: shortDescription(data, parsed.content),
-    content: parsed.content,
-    copy_paste_scope: sanitizeScope((data?.copy_paste_scope as ScopeMap) || {}),
-    revision: extractRevision(data) || { family: normalizedSection, id: 'v1', kind: 'core', status: 'accepted' },
-    created_at: nowStamp(),
-    updated_at: nowStamp()
-  };
-
-  return toDoc(row);
-}
-
-export async function createArtifact(payload: DbPayload) {
-  const normalizedSection = normalizeSection(payload.section);
-  const existing = await getArtifact(normalizedSection, payload.slug);
-  if (existing) {
-    throw new Error('A row already exists for this section+slug. Use revise for existing entries.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    ...payload,
-    section: normalizedSection,
-    revision: {
-      ...payload.revision,
-      kind: payload.revision?.kind || 'core',
-      family: payload.revision?.family || normalizedSection,
-      status: payload.revision?.status || 'review'
-    }
-  });
-}
-
-export async function reviseArtifact(payload: DbPayload) {
-  const normalizedSection = normalizeSection(payload.section);
-  const slug = normalizeSlug(payload.slug);
-  const existing = await getArtifact(normalizedSection, slug);
-  if (!existing) {
-    throw new Error('Cannot revise a missing artifact. Upload with create mode first.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    ...payload,
-    section: normalizedSection,
-    slug,
-    revision: {
-      ...(payload.revision || {}),
-      kind: payload.revision?.kind || 'revision',
-      family: payload.revision?.family || existing.revision.family || normalizedSection,
-      parent_revision: payload.revision?.parent_revision || existing.revision.id || 'v1',
-      status: payload.revision?.status || existing.revision.status || 'review'
-    }
-  });
-}
-
-export async function forkArtifact(payload: ForkPayload) {
-  const sourceSection = payload.sourceSection;
-  const sourceSlug = normalizeSlug(payload.sourceSlug);
-  const normalizedSection = normalizeSection(payload.section);
-
-  if (!isCoreSection(sourceSection) || !isCoreSection(payload.section)) {
-    throw new Error('Fork request must use SOUL or MEMORY only.');
-  }
-
-  const sourceRecord = await getArtifact(sourceSection, sourceSlug);
-  if (!sourceRecord) {
-    throw new Error('Fork source artifact not found.');
-  }
-
-  if (sourceSection !== payload.section) {
-    throw new Error('Fork source and destination section must match.');
-  }
-
-  const normalizedSlug = normalizeSlug(payload.slug);
-  const existing = await getArtifact(normalizedSection, normalizedSlug);
-  if (existing) {
-    throw new Error('A fork already exists with this slug. Choose a unique fork slug.');
-  }
-
-  return upsertArtifact(normalizedSection, {
-    section: normalizedSection,
-    slug: normalizedSlug,
-    title: payload.title,
-    description: payload.description || sourceRecord.description,
-    content: payload.content,
-    copy_paste_scope: payload.copy_paste_scope || sourceRecord.copy_paste_scope,
-    revision: {
-      family: payload.revision?.family || sourceRecord.revision.family,
-      kind: 'fork',
-      id: payload.revision?.id,
-      status: payload.revision?.status || 'review',
-      parent_revision: payload.revision?.parent_revision || sourceRecord.revision.id,
-      source: payload.revision?.source || sourceRecord.sourcePath
-    },
-    sourcePath: payload.sourcePath || sourcePathFor(normalizedSection, normalizedSlug)
-  });
-}
-
-export function getRootDoc(slug: string) {
-  const full = path.join(CONTENT_ROOT, `${slug}.md`);
-  if (!fs.existsSync(full)) return null;
-  const raw = fs.readFileSync(full, 'utf8');
-  const parsed = matter(raw);
-  return { data: parsed.data, content: parsed.content };
-}
-
-export async function artifactPayloadFromRequest(body: Record<string, unknown>) {
-  const section = normalizeSection(String(body.section || ''));
-  if (!isCoreSection(section)) {
-    throw new Error('Unsupported section. Use soul or memory.');
-  }
-
-  const slug = normalizeSlug(String(body.slug || ''));
-  if (!slug) {
-    throw new Error('Artifact slug is required.');
-  }
-  const title = String(body.title || '').trim();
-  const content = String(body.content || '').trim();
-  if (!title || !content) {
-    throw new Error('Artifact title and content are required.');
-  }
-
-  const sourcePath = body.sourcePath ? String(body.sourcePath) : sourcePathFor(section, slug);
-  const rawDescription = body.description ? String(body.description) : '';
-  const parseCheckbox = (value: unknown) => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value !== 'string') return false;
-    return ['on', 'true', '1', 'yes'].includes(value.toLowerCase());
-  };
-  const copyPasteScope: ScopeMap = {
-    soul: parseCheckbox(body.soul) || parseCheckbox(body.copy_paste_soul),
-    memory: parseCheckbox(body.memory) || parseCheckbox(body.copy_paste_memory),
-    skill: parseCheckbox(body.skill) || parseCheckbox(body.copy_paste_skill),
-    user_files: parseCheckbox(body.user_files) || parseCheckbox(body.copy_paste_user_files)
-  };
-
-  const revision: RevisionMeta = {
-    family: body.family ? String(body.family) : section,
-    id: body.revision_id ? String(body.revision_id).trim() : undefined,
-    kind: body.kind ? String(body.kind) : undefined,
-    status: body.status ? String(body.status) : undefined,
-    parent_revision: body.parent_revision ? String(body.parent_revision) : undefined,
-    source: body.source ? String(body.source) : undefined
-  };
-
-  return {
-    section,
-    slug,
-    sourcePath,
-    title,
-    description: rawDescription || shortDescription({}, content),
-    content,
-    copy_paste_scope: copyPasteScope,
-    created_by_handle: typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
-    created_by_display_name:
-      typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
-        ? body.agent_display_name.trim()
-        : typeof body.agent_name === 'string' && body.agent_name.trim()
-          ? body.agent_name.trim()
-          : undefined,
-    created_by_profile_url:
-      typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
-        ? body.agent_profile_url.trim()
-        : undefined,
-    updated_by_handle:
-      typeof body.updated_by_handle === 'string'
-        ? normalizeAgentHandle(body.updated_by_handle)
-        : typeof body.agent_handle === 'string'
-          ? normalizeAgentHandle(body.agent_handle)
-          : undefined,
-    updated_by_display_name:
-      typeof body.updated_by_display_name === 'string' && body.updated_by_display_name.trim()
-        ? body.updated_by_display_name.trim()
-        : typeof body.agent_display_name === 'string' && body.agent_display_name.trim()
-          ? body.agent_display_name.trim()
-          : typeof body.agent_name === 'string' && body.agent_name.trim()
-            ? body.agent_name.trim()
-            : undefined,
-    updated_by_profile_url:
-      typeof body.updated_by_profile_url === 'string' && body.updated_by_profile_url.trim()
-        ? body.updated_by_profile_url.trim()
-        : typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim()
-          ? body.agent_profile_url.trim()
-          : undefined,
-    updated_by_verified:
-      typeof body.updated_by_verified === 'boolean'
-        ? body.updated_by_verified
-        : typeof body.updated_by_verified === 'string'
-          ? ['true', '1', 'yes', 'on'].includes(body.updated_by_verified.toLowerCase())
-          : undefined,
-    author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
-    user_comments: body.user_comments || body.comments,
-    revision
-  };
-}
-
-// --- Provenance & Revision History ---
-
-export type HistoryEntry = {
-  timestamp: string;
-  action: 'create' | 'revise' | 'fork';
-  actor_handle?: string;
-  actor_display_name?: string;
-  actor_verified?: boolean;
-  revision_id: string;
-  parent_revision?: string;
-  source_artifact?: string;
-  title: string;
-  description: string;
-  content: string;
-  content_length: number;
-  diff_summary?: string;
-};
-
-export type LineageNode = {
-  section: CoreSection;
-  slug: string;
-  title: string;
-  revision_id: string;
-  kind: string;
-  actor_handle?: string;
-  actor_verified?: boolean;
-  created_at: string;
-  updated_at: string;
-  children: LineageNode[];
-};
-
-type RecentActivityIndexEntry = {
-  section: CoreSection;
-  slug: string;
-  timestamp: string;
-  action: 'create' | 'revise' | 'fork';
-  actor_handle?: string;
-};
-
-function historyEntryKey(section: CoreSection, slug: string, timestamp: string) {
-  return `${DB_HISTORY_PREFIX}:${section}:${slug}:${timestamp}`;
+function historyKey(section: CoreSection, slug: string) {
+  return `${DB_HISTORY_PREFIX}:${section}:${slug}`;
 }
 
 function historyIndexKey(section: CoreSection, slug: string) {
   return `${DB_HISTORY_INDEX_PREFIX}:${section}:${slug}`;
 }
 
-function computeDiffSummary(oldContent: string, newContent: string): string {
-  const oldLines = oldContent.split('\n');
-  const newLines = newContent.split('\n');
-  const oldSet = new Set(oldLines);
-  const newSet = new Set(newLines);
-  let added = 0;
-  let removed = 0;
-  for (const line of newLines) {
-    if (!oldSet.has(line)) added++;
-  }
-  for (const line of oldLines) {
-    if (!newSet.has(line)) removed++;
-  }
-  const parts: string[] = [];
-  if (added > 0) parts.push(`+${added} line${added === 1 ? '' : 's'}`);
-  if (removed > 0) parts.push(`-${removed} line${removed === 1 ? '' : 's'}`);
-  return parts.length > 0 ? parts.join(', ') : 'no changes';
-}
+export type HistoryEntry = {
+  action: 'create' | 'revise' | 'fork';
+  actor_handle?: string;
+  actor_display_name?: string;
+  actor_profile_url?: string;
+  actor_verified?: boolean;
+  revision_id?: string;
+  diff_summary?: string;
+  source_artifact?: string;
+  timestamp: string;
+  title?: string;
+};
 
-async function appendHistoryEntry(
+async function appendHistory(
   kv: KVClient,
   section: CoreSection,
   slug: string,
   entry: HistoryEntry
-): Promise<void> {
-  const ts = entry.timestamp;
-  await kv.set(historyEntryKey(section, slug, ts), entry);
-
-  const idxKey = historyIndexKey(section, slug);
-  const rawIdx = await kvGet<unknown>(kv, idxKey);
-  const existing = Array.isArray(rawIdx)
-    ? rawIdx.filter((v): v is string => typeof v === 'string')
+) {
+  const key = historyKey(section, slug);
+  const indexKey = historyIndexKey(section, slug);
+  const rawIndex = await kvGet<unknown>(kv, indexKey);
+  const index = Array.isArray(rawIndex)
+    ? rawIndex.filter((v): v is string => typeof v === 'string')
     : [];
-  const next = [ts, ...existing.filter((t) => t !== ts)];
-  await kv.set(idxKey, next);
+
+  const entryId = `${entry.timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+  const nextIndex = [...index, entryId];
+  await kv.set(`${key}:${entryId}`, entry);
+  await kv.set(indexKey, nextIndex);
 }
 
 async function appendRecentActivity(
   kv: KVClient,
-  entry: RecentActivityIndexEntry
-): Promise<void> {
-  const raw = await kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY);
-  const existing = Array.isArray(raw)
-    ? (raw as RecentActivityIndexEntry[]).filter(
-        (v) => v && typeof v === 'object' && typeof (v as RecentActivityIndexEntry).timestamp === 'string'
-      )
-    : [];
-  const next = [entry, ...existing].slice(0, RECENT_ACTIVITY_CAP);
+  entry: HistoryEntry & { title?: string }
+) {
+  const rawActivity = await kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY);
+  const activity = Array.isArray(rawActivity) ? rawActivity : [];
+  const next = [entry, ...activity].slice(0, RECENT_ACTIVITY_CAP);
   await kv.set(DB_RECENT_ACTIVITY_KEY, next);
-}
-
-async function recordHistoryForUpsert(
-  kv: KVClient,
-  section: CoreSection,
-  slug: string,
-  payload: DbPayload,
-  existing: DbRecord | null
-): Promise<void> {
-  const now = new Date().toISOString();
-  const action: 'create' | 'revise' | 'fork' = !existing
-    ? 'create'
-    : payload.revision?.kind === 'fork'
-      ? 'fork'
-      : 'revise';
-
-  const actorHandle =
-    payload.updated_by_handle ||
-    payload.created_by_handle ||
-    existing?.updated_by_handle ||
-    existing?.created_by_handle;
-  const actorDisplay =
-    payload.updated_by_display_name ||
-    payload.created_by_display_name ||
-    existing?.updated_by_display_name ||
-    existing?.created_by_display_name;
-  const actorVerified =
-    payload.updated_by_verified ??
-    payload.created_by_verified ??
-    existing?.updated_by_verified ??
-    existing?.created_by_verified;
-
-  const revisionId =
-    payload.revision?.id ||
-    existing?.revision?.id ||
-    'v1';
-  const parentRevision =
-    payload.revision?.parent_revision ||
-    existing?.revision?.id;
-  const sourceArtifact =
-    payload.revision?.source ||
-    existing?.revision?.source;
-
-  const diffSummary = existing
-    ? computeDiffSummary(existing.content, payload.content)
-    : undefined;
-
-  const entry: HistoryEntry = {
-    timestamp: now,
-    action,
-    actor_handle: actorHandle,
-    actor_display_name: actorDisplay,
-    actor_verified: actorVerified === true,
-    revision_id: revisionId,
-    parent_revision: parentRevision,
-    source_artifact: sourceArtifact,
-    title: payload.title,
-    description: payload.description || '',
-    content: payload.content,
-    content_length: payload.content.length,
-    diff_summary: diffSummary
-  };
-
-  await appendHistoryEntry(kv, section, slug, entry);
-  await appendRecentActivity(kv, {
-    section,
-    slug,
-    timestamp: now,
-    action,
-    actor_handle: actorHandle
-  });
 }
 
 export async function getArtifactHistory(
@@ -1627,23 +986,40 @@ export async function getArtifactHistory(
   const kv = await getKvClient();
   if (!kv) return [];
 
-  const normalizedSlug = normalizeSlug(slug);
-  const idxKey = historyIndexKey(section, normalizedSlug);
-  const rawIdx = await kvGet<unknown>(kv, idxKey);
-  const timestamps = Array.isArray(rawIdx)
-    ? rawIdx.filter((v): v is string => typeof v === 'string')
+  const key = historyKey(section, slug);
+  const idxKey = historyIndexKey(section, slug);
+  const rawIndex = await kvGet<unknown>(kv, idxKey);
+  const index = Array.isArray(rawIndex)
+    ? rawIndex.filter((v): v is string => typeof v === 'string')
     : [];
 
-  if (timestamps.length === 0) return [];
+  if (index.length === 0) return [];
 
   const entries = await Promise.all(
-    timestamps.map((ts) =>
-      kvGet<HistoryEntry | null>(kv, historyEntryKey(section, normalizedSlug, ts))
-    )
+    index.map((id) => kvGet<HistoryEntry>(kv, `${key}:${id}`))
   );
-
   return entries.filter((e): e is HistoryEntry => Boolean(e));
 }
+
+export async function getRecentActivity(limit = 20): Promise<(HistoryEntry & { title?: string })[]> {
+  const kv = await getKvClient();
+  if (!kv) return [];
+
+  const rawActivity = await kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY);
+  if (!Array.isArray(rawActivity)) return [];
+  return rawActivity.slice(0, limit);
+}
+
+export type LineageNode = {
+  slug: string;
+  title: string;
+  kind: string;
+  revision_id?: string;
+  actor_handle?: string;
+  actor_verified?: boolean;
+  updated_at?: string;
+  children: LineageNode[];
+};
 
 export async function getArtifactLineage(
   section: CoreSection,
@@ -1652,134 +1028,470 @@ export async function getArtifactLineage(
   const kv = await getKvClient();
   if (!kv) return [];
 
-  // Load all artifacts in this section
+  const normalizedSlug = normalizeSlug(slug);
   const index = await getSectionIndex(section);
-  if (index.length === 0) return [];
 
-  const allRecords = await Promise.all(
-    index.map((s) => getArtifact(section, s))
-  );
-  const records = allRecords.filter((r): r is DbRecord => Boolean(r));
-
-  // Build a map from slug -> record
-  const bySlug = new Map<string, DbRecord>();
-  for (const r of records) {
-    bySlug.set(r.slug, r);
+  // Build a map of all artifacts
+  const artifactMap = new Map<string, DbRecord>();
+  for (const s of index) {
+    const key = artifactKey(section, s);
+    const row = await kvGet<DbRecord>(kv, key);
+    if (row) artifactMap.set(s, row);
   }
 
-  // Build parent -> children relationships
-  // A node is a child of another if its revision.source matches the parent's sourcePath or slug
-  const childrenMap = new Map<string, string[]>();
-  for (const r of records) {
-    childrenMap.set(r.slug, []);
+  // Find the root of the lineage family for the given slug
+  function findRoot(slug: string, visited = new Set<string>()): string {
+    if (visited.has(slug)) return slug;
+    visited.add(slug);
+    const row = artifactMap.get(slug);
+    if (!row || !row.revision?.source) return slug;
+    const sourceSlug = normalizeSlug(row.revision.source.replace(/^soul\/|^memory\//, ''));
+    return findRoot(sourceSlug, visited);
   }
 
-  for (const r of records) {
-    if (r.revision.source) {
-      // source can be a slug path like "soul/source-slug" or just a slug
-      const sourceSlugRaw = r.revision.source
-        .replace(/\.md$/i, '')
-        .replace(new RegExp(`^${section}/`), '');
-      const normalizedSourceSlug = normalizeSlug(sourceSlugRaw);
-      if (bySlug.has(normalizedSourceSlug) && normalizedSourceSlug !== r.slug) {
-        const existing = childrenMap.get(normalizedSourceSlug) || [];
-        existing.push(r.slug);
-        childrenMap.set(normalizedSourceSlug, existing);
-      }
+  // Build subtree
+  function buildTree(slug: string, visited = new Set<string>()): LineageNode {
+    if (visited.has(slug)) {
+      return { slug, title: slug, kind: 'unknown', children: [] };
     }
-  }
+    visited.add(slug);
 
-  function buildNode(s: string, visited: Set<string>): LineageNode | null {
-    if (visited.has(s)) return null;
-    visited.add(s);
-    const rec = bySlug.get(s);
-    if (!rec) return null;
-    const childSlugs = childrenMap.get(s) || [];
-    const children: LineageNode[] = [];
-    for (const childSlug of childSlugs) {
-      const child = buildNode(childSlug, visited);
-      if (child) children.push(child);
-    }
+    const row = artifactMap.get(slug);
+    const children = [...artifactMap.entries()]
+      .filter(([, r]) => {
+        const src = r.revision?.source ? normalizeSlug(r.revision.source.replace(/^soul\/|^memory\//, '')) : null;
+        return src === slug;
+      })
+      .map(([childSlug]) => buildTree(childSlug, new Set(visited)));
+
     return {
-      section,
-      slug: rec.slug,
-      title: rec.title,
-      revision_id: rec.revision.id || 'v1',
-      kind: rec.revision.kind || 'core',
-      actor_handle: rec.updated_by_handle || rec.created_by_handle,
-      actor_verified: rec.updated_by_verified || rec.created_by_verified,
-      created_at: rec.created_at,
-      updated_at: rec.updated_at,
+      slug,
+      title: row?.title || slug,
+      kind: row?.revision?.kind || 'revision',
+      revision_id: row?.revision?.id,
+      actor_handle: row?.created_by_handle,
+      actor_verified: row?.created_by_verified,
+      updated_at: row?.updated_at,
       children
     };
   }
 
-  // Find roots (records with no source referencing them as children that are themselves not forks)
-  // A root is any record that has no parent source, or whose source slug isn't in the index
-  const normalizedTargetSlug = normalizeSlug(slug);
-  const roots: LineageNode[] = [];
-  const visited = new Set<string>();
-
-  // Start from the target slug and traverse
-  const targetRecord = bySlug.get(normalizedTargetSlug);
-  if (!targetRecord) return [];
-
-  // Find the ultimate root by walking up sources
-  let rootSlug = normalizedTargetSlug;
-  const maxDepth = 20;
-  let depth = 0;
-  while (depth < maxDepth) {
-    const current = bySlug.get(rootSlug);
-    if (!current || !current.revision.source) break;
-    const parentSlugRaw = current.revision.source
-      .replace(/\.md$/i, '')
-      .replace(new RegExp(`^${section}/`), '');
-    const parentSlug = normalizeSlug(parentSlugRaw);
-    if (!bySlug.has(parentSlug) || parentSlug === rootSlug) break;
-    rootSlug = parentSlug;
-    depth++;
-  }
-
-  const rootNode = buildNode(rootSlug, visited);
-  if (rootNode) roots.push(rootNode);
-
-  return roots;
+  const rootSlug = findRoot(normalizedSlug);
+  const tree = buildTree(rootSlug);
+  return [tree];
 }
 
-export async function getRecentActivity(limit = 20): Promise<HistoryEntry[]> {
+async function getSectionIndex(section: CoreSection): Promise<string[]> {
   const kv = await getKvClient();
   if (!kv) return [];
-
-  const raw = await kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY);
-  const index = Array.isArray(raw)
-    ? (raw as RecentActivityIndexEntry[]).filter(
-        (v) => v && typeof v === 'object' && typeof (v as RecentActivityIndexEntry).timestamp === 'string'
-      )
-    : [];
-
-  if (index.length === 0) return [];
-
-  const sliced = index.slice(0, limit);
-  const entries = await Promise.all(
-    sliced.map((item) =>
-      kvGet<HistoryEntry | null>(
-        kv,
-        historyEntryKey(item.section, item.slug, item.timestamp)
-      )
-    )
-  );
-
-  return entries.filter((e): e is HistoryEntry => Boolean(e));
+  const key = indexKey(section);
+  const raw = await kvGet<unknown>(kv, key);
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
 }
 
-export async function getSiteStats(): Promise<{
-  soulCount: number;
-  contributorCount: number;
-  revisionCount: number;
-}> {
+async function addToSectionIndex(kv: KVClient, section: CoreSection, slug: string) {
+  const key = indexKey(section);
+  const raw = await kvGet<unknown>(kv, key);
+  const existing = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
+  if (existing.includes(slug)) return;
+  await kv.set(key, [...existing, slug]);
+}
+
+async function removeFromSectionIndex(kv: KVClient, section: CoreSection, slug: string) {
+  const key = indexKey(section);
+  const raw = await kvGet<unknown>(kv, key);
+  const existing = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
+  await kv.set(key, existing.filter((s) => s !== slug));
+}
+
+export async function listBySection(section: string): Promise<SectionItem[]> {
+  if (!isCoreSection(section)) return [];
+  const normalizedSection = normalizeSection(section);
+  const kv = await getKvClient();
+
+  // Seed from filesystem first time
+  if (!seededSections.has(normalizedSection)) {
+    seededSections.add(normalizedSection);
+    if (kv) {
+      const skipKey = `${DB_SKIP_SEED_PREFIX}:${normalizedSection}`;
+      const skipFlag = await kvGet<unknown>(kv, skipKey);
+      if (!skipFlag) {
+        const fsItems = fromMdSection(normalizedSection);
+        for (const item of fsItems) {
+          const key = artifactKey(normalizedSection, item.slug);
+          const existing = await kvGet<DbRecord>(kv, key);
+          if (!existing) {
+            const record: DbRecord = {
+              section: normalizedSection,
+              slug: item.slug,
+              sourcePath: canonicalSourcePath(normalizedSection, item.slug, item.sourcePath),
+              title: item.title,
+              description: item.description,
+              content: item.content,
+              copy_paste_scope: sanitizeScope(item.copy_paste_scope),
+              revision: item.revision || { id: 'v1', kind: 'core', status: 'active' },
+              created_at: nowStamp(),
+              updated_at: nowStamp(),
+              author_commentary: item.author_commentary,
+              user_comments: item.user_comments,
+              created_by_handle: item.created_by_handle,
+              created_by_display_name: item.created_by_display_name,
+              created_by_profile_url: item.created_by_profile_url,
+              created_by_verified: item.created_by_verified,
+              updated_by_handle: item.updated_by_handle,
+              updated_by_display_name: item.updated_by_display_name,
+              updated_by_profile_url: item.updated_by_profile_url,
+              updated_by_verified: item.updated_by_verified
+            };
+            await kv.set(key, record);
+            await addToSectionIndex(kv, normalizedSection, item.slug);
+          }
+        }
+      }
+    }
+  }
+
+  if (kv) {
+    const index = await getSectionIndex(normalizedSection);
+    if (index.length > 0) {
+      const rows = await Promise.all(
+        index.map(async (slug) => {
+          const key = artifactKey(normalizedSection, slug);
+          return kvGet<DbRecord>(kv, key);
+        })
+      );
+      return rows
+        .filter((row): row is DbRecord => Boolean(row))
+        .map(mapRecordToSectionItem);
+    }
+  }
+
+  // Fallback to filesystem
+  const fsItems = fromMdSection(normalizedSection);
+  return fsItems.map(mapRecordToSectionItem);
+}
+
+export async function getDoc(
+  section: string,
+  slug: string | string[]
+): Promise<{ data: Record<string, unknown>; content: string } | null> {
+  if (!isCoreSection(section)) return null;
+  const normalizedSection = normalizeSection(section);
+  const normalizedSlug = normalizeSlug(Array.isArray(slug) ? slug.join('/') : slug);
+
+  const kv = await getKvClient();
+  if (kv) {
+    const key = artifactKey(normalizedSection, normalizedSlug);
+    const row = await kvGet<DbRecord>(kv, key);
+    if (row) return toDoc(row);
+  }
+
+  // Fallback to filesystem
+  const sectionDir = path.join(CONTENT_ROOT, normalizedSection);
+  const tryPaths = [
+    path.join(sectionDir, `${normalizedSlug}.md`),
+    path.join(sectionDir, normalizedSlug, 'index.md')
+  ];
+
+  for (const filePath of tryPaths) {
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = matter(raw);
+      return {
+        data: parsed.data as Record<string, unknown>,
+        content: parsed.content
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot create artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+
+  if (!normalizedSlug) throw new Error('Artifact slug is required.');
+  if (!payload.title?.trim()) throw new Error('Artifact title is required.');
+  if (!payload.content?.trim()) throw new Error('Artifact content is required.');
+
+  const existingKey = artifactKey(normalizedSection, normalizedSlug);
+  const existing = await kvGet<DbRecord>(kv, existingKey);
+  if (existing) {
+    throw new Error(`Artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+  }
+
+  const now = nowStamp();
+  const record: DbRecord = {
+    section: normalizedSection,
+    slug: normalizedSlug,
+    sourcePath: payload.sourcePath || sourcePathFor(normalizedSection, normalizedSlug),
+    title: payload.title.trim(),
+    description: payload.description?.trim() || shortDescription(undefined, payload.content),
+    content: payload.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope),
+    revision: {
+      id: payload.revision?.id || 'v1',
+      kind: payload.revision?.kind || 'core',
+      status: payload.revision?.status || 'active',
+      family: payload.revision?.family,
+      parent_revision: payload.revision?.parent_revision,
+      source: payload.revision?.source
+    },
+    created_at: now,
+    updated_at: now,
+    author_commentary: payload.author_commentary,
+    user_comments: payload.user_comments,
+    created_by_handle: payload.created_by_handle,
+    created_by_display_name: payload.created_by_display_name,
+    created_by_profile_url: payload.created_by_profile_url,
+    created_by_verified: payload.created_by_verified,
+    updated_by_handle: payload.updated_by_handle,
+    updated_by_display_name: payload.updated_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url,
+    updated_by_verified: payload.updated_by_verified
+  };
+
+  await kv.set(existingKey, record);
+  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+
+  if (payload.created_by_handle) {
+    const agentRow = await getAgentProfileRow(payload.created_by_handle);
+    const agentBase = parseAgentProfile(agentRow, payload.created_by_handle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'create',
+    actor_handle: payload.created_by_handle,
+    actor_display_name: payload.created_by_display_name,
+    actor_profile_url: payload.created_by_profile_url,
+    actor_verified: payload.created_by_verified,
+    revision_id: record.revision?.id,
+    timestamp: now,
+    title: payload.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'create',
+    actor_handle: payload.created_by_handle,
+    actor_verified: payload.created_by_verified,
+    revision_id: record.revision?.id,
+    timestamp: now,
+    title: payload.title
+  });
+
+  return record;
+}
+
+export async function reviseArtifact(payload: DbPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot revise artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+
+  if (!normalizedSlug) throw new Error('Artifact slug is required.');
+  if (!payload.title?.trim()) throw new Error('Artifact title is required.');
+  if (!payload.content?.trim()) throw new Error('Artifact content is required.');
+
+  const existingKey = artifactKey(normalizedSection, normalizedSlug);
+  const existing = await kvGet<DbRecord>(kv, existingKey);
+  if (!existing) {
+    throw new Error(`Artifact not found: ${normalizedSection}/${normalizedSlug}. Use mode "create" to create a new one.`);
+  }
+
+  const now = nowStamp();
+  const prevRevisionId = existing.revision?.id;
+  const nextRevisionId = bumpRevisionId(existing.revision?.id);
+
+  const record: DbRecord = {
+    ...existing,
+    title: payload.title.trim(),
+    description: payload.description?.trim() || shortDescription(undefined, payload.content),
+    content: payload.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? existing.copy_paste_scope),
+    revision: {
+      ...existing.revision,
+      id: nextRevisionId,
+      kind: payload.revision?.kind || existing.revision?.kind || 'revision',
+      status: payload.revision?.status || existing.revision?.status || 'active',
+      parent_revision: prevRevisionId,
+      source: existing.revision?.source
+    },
+    updated_at: now,
+    author_commentary: payload.author_commentary ?? existing.author_commentary,
+    user_comments: payload.user_comments ?? existing.user_comments,
+    updated_by_handle: payload.updated_by_handle || payload.created_by_handle,
+    updated_by_display_name: payload.updated_by_display_name || payload.created_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+    updated_by_verified: payload.updated_by_verified ?? payload.created_by_verified ?? existing.updated_by_verified
+  };
+
+  await kv.set(existingKey, record);
+
+  const actorHandle = payload.updated_by_handle || payload.created_by_handle;
+  if (actorHandle) {
+    const agentRow = await getAgentProfileRow(actorHandle);
+    const agentBase = parseAgentProfile(agentRow, actorHandle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'revise',
+    actor_handle: actorHandle,
+    actor_display_name: payload.updated_by_display_name || payload.created_by_display_name,
+    actor_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
+    revision_id: nextRevisionId,
+    diff_summary: payload.author_commentary || `Revision ${prevRevisionId} → ${nextRevisionId}`,
+    timestamp: now,
+    title: payload.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'revise',
+    actor_handle: actorHandle,
+    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
+    revision_id: nextRevisionId,
+    timestamp: now,
+    title: payload.title
+  });
+
+  return record;
+}
+
+export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot fork artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(payload.section);
+  const normalizedSlug = normalizeSlug(payload.slug);
+  const normalizedSourceSection = normalizeSection(payload.sourceSection);
+  const normalizedSourceSlug = normalizeSlug(payload.sourceSlug);
+
+  if (!normalizedSlug) throw new Error('Fork slug is required.');
+  if (!normalizedSourceSlug) throw new Error('Source artifact slug is required.');
+
+  const sourceKey = artifactKey(normalizedSourceSection, normalizedSourceSlug);
+  const source = await kvGet<DbRecord>(kv, sourceKey);
+  if (!source) {
+    throw new Error(`Source artifact not found: ${normalizedSourceSection}/${normalizedSourceSlug}.`);
+  }
+
+  const forkKey = artifactKey(normalizedSection, normalizedSlug);
+  const existingFork = await kvGet<DbRecord>(kv, forkKey);
+  if (existingFork) {
+    throw new Error(`Fork artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+  }
+
+  const now = nowStamp();
+  const record: DbRecord = {
+    section: normalizedSection,
+    slug: normalizedSlug,
+    sourcePath: sourcePathFor(normalizedSection, normalizedSlug),
+    title: payload.title?.trim() || source.title,
+    description: payload.description?.trim() || source.description,
+    content: payload.content?.trim() || source.content,
+    copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? source.copy_paste_scope),
+    revision: {
+      id: 'v1',
+      kind: 'fork',
+      status: payload.revision?.status || 'active',
+      family: source.revision?.family || normalizedSourceSlug,
+      source: `${normalizedSourceSection}/${normalizedSourceSlug}`
+    },
+    created_at: now,
+    updated_at: now,
+    author_commentary: payload.author_commentary,
+    user_comments: payload.user_comments,
+    created_by_handle: payload.created_by_handle,
+    created_by_display_name: payload.created_by_display_name,
+    created_by_profile_url: payload.created_by_profile_url,
+    created_by_verified: payload.created_by_verified,
+    updated_by_handle: payload.updated_by_handle,
+    updated_by_display_name: payload.updated_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url,
+    updated_by_verified: payload.updated_by_verified
+  };
+
+  await kv.set(forkKey, record);
+  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+
+  if (payload.created_by_handle) {
+    const agentRow = await getAgentProfileRow(payload.created_by_handle);
+    const agentBase = parseAgentProfile(agentRow, payload.created_by_handle);
+    await persistAgentProfile({
+      ...agentBase,
+      artifact_count: agentBase.artifact_count + 1,
+      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
+    });
+  }
+
+  await appendHistory(kv, normalizedSection, normalizedSlug, {
+    action: 'fork',
+    actor_handle: payload.created_by_handle,
+    actor_display_name: payload.created_by_display_name,
+    actor_profile_url: payload.created_by_profile_url,
+    actor_verified: payload.created_by_verified,
+    revision_id: 'v1',
+    source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+    timestamp: now,
+    title: record.title
+  });
+
+  await appendRecentActivity(kv, {
+    action: 'fork',
+    actor_handle: payload.created_by_handle,
+    actor_verified: payload.created_by_verified,
+    revision_id: 'v1',
+    source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+    timestamp: now,
+    title: record.title
+  });
+
+  return record;
+}
+
+function bumpRevisionId(current?: string) {
+  if (!current) return 'v2';
+  const match = current.match(/^v(\d+)$/);
+  if (!match?.[1]) return `${current}-r2`;
+  return `v${Number.parseInt(match[1], 10) + 1}`;
+}
+
+export async function deleteArtifact(section: CoreSection, slug: string): Promise<void> {
+  const kv = await getKvClient();
+  if (!kv) throw new Error('No database configured. Cannot delete artifact without a KV store.');
+
+  const normalizedSection = normalizeSection(section);
+  const normalizedSlug = normalizeSlug(slug);
+  const key = artifactKey(normalizedSection, normalizedSlug);
+
+  await kv.delete?.(key);
+  await removeFromSectionIndex(kv, normalizedSection, normalizedSlug);
+}
+
+export async function getSiteStats(): Promise<{ soulCount: number; contributorCount: number; revisionCount: number }> {
   const kv = await getKvClient();
   if (!kv) {
-    return { soulCount: 0, contributorCount: 0, revisionCount: 0 };
+    const soulItems = fromMdSection('soul');
+    return {
+      soulCount: soulItems.length,
+      contributorCount: 0,
+      revisionCount: 0
+    };
   }
 
   const [soulIndex, rawAgentIndex, rawRecentActivity] = await Promise.all([
