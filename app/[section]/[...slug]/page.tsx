@@ -79,7 +79,7 @@ function seedSourceOverride(section: string, sourcePath: string, slug: string) {
     soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md'
   };
 
-  if (normalizedSlug === 'soul-baseline-v1') {
+  if (normalizedSlug === 'openclaw-template') {
     return overrides[section];
   }
 
