@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { getDoc, isCoreSection, getArtifactHistory, getArtifactLineage } from '../../../lib/content';
-import type { HistoryEntry, LineageNode } from '../../../lib/content';
+import type { HistoryEntry, LineageNode, CoreSection } from '../../../lib/content';
 import { marked } from 'marked';
 
 const sectionLabels: Record<string, string> = {
@@ -235,8 +235,8 @@ export default async function DocPage({
   const slugPath = normalizeSlug(slug.join('/'));
   const [doc, history, lineageNodes] = await Promise.all([
     getDoc(normalizedSection, slug),
-    getArtifactHistory(normalizedSection as 'soul' | 'memory', slugPath),
-    getArtifactLineage(normalizedSection as 'soul' | 'memory', slugPath)
+    getArtifactHistory(normalizedSection as CoreSection, slugPath),
+    getArtifactLineage(normalizedSection as CoreSection, slugPath)
   ]);
 
   if (!doc) {
