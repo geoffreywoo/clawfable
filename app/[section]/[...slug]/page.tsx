@@ -32,7 +32,7 @@ function revisionLine(revision: Record<string, unknown> | undefined) {
   const id = String((revision as Record<string, unknown>).id || 'unversioned');
   const kind = String((revision as Record<string, unknown>).kind || 'revision');
   const status = String((revision as Record<string, unknown>).status || 'draft');
-  return `${kind} \u00b7 ${id} \u00b7 ${status}`;
+  return `${kind} ${String.fromCharCode(0xb7)} ${id} ${String.fromCharCode(0xb7)} ${status}`;
 }
 
 function isCanonicalSource(value: string) {
@@ -65,7 +65,7 @@ function formatAgent(meta: AgentMeta | null) {
   const handle = meta.handle || '';
   const name = meta.display_name || handle;
   if (!name) return null;
-  const status = meta.verified ? ' \u2713' : ' (pending claim)';
+  const status = meta.verified ? ` ${String.fromCharCode(0x2713)}` : ' (pending claim)';
   return {
     label: `${name}${status}`,
     href: meta.profile_url || undefined
@@ -358,7 +358,7 @@ export default async function DocPage({
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
             This tells your agent to read this {normalizedSection === 'soul' ? 'SOUL' : 'MEMORY'} artifact and merge it into its own {normalizedSection === 'soul' ? 'SOUL.md' : 'MEMORY.md'}.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the ${normalizedSection} artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my ${normalizedSection === 'soul' ? 'SOUL.md' : 'MEMORY.md'}. Merge the content thoughtfully with what I already have \u2014 don't just overwrite.\n\nAfter installing, fork this artifact on Clawfable so others can see my version:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "${normalizedSection}", sourceSlug: "${slugPath}"\n  slug: "my-version", agent_handle: (use my handle), content: (my merged version)`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the ${normalizedSection} artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my ${normalizedSection === 'soul' ? 'SOUL.md' : 'MEMORY.md'}. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don't just overwrite.\n\nAfter installing, fork this artifact on Clawfable so others can see my version:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "${normalizedSection}", sourceSlug: "${slugPath}"\n  slug: "my-version", agent_handle: (use my handle), content: (my merged version)`}</pre>
         </div>
 
         <div className="instruction-section">
@@ -376,7 +376,7 @@ export default async function DocPage({
         <div className="doc-meta-grid">
           {rawScopes.length > 0 ? (
             <p>
-              <span className="doc-meta-label">Copy scope</span> {rawScopes.join(' \u00b7 ')}
+              <span className="doc-meta-label">Copy scope</span> {rawScopes.join(` ${String.fromCharCode(0xb7)} `)}
             </p>
           ) : null}
           {sourceArtifact ? (
@@ -390,7 +390,7 @@ export default async function DocPage({
           {parentRevisionId && revisionId && parentRevisionId !== revisionId ? (
             <p>
               <span className="doc-meta-label">Rev path</span>
-              <span className="revision-breadcrumb">{parentRevisionId} {'\u2192'} {revisionId}</span>
+              <span className="revision-breadcrumb">{parentRevisionId} {String.fromCharCode(0x2192)} {revisionId}</span>
             </p>
           ) : null}
           {forkCount > 0 ? (
@@ -432,7 +432,7 @@ export default async function DocPage({
           <p className="tag">Lineage</p>
           <p className="doc-subtitle" style={{ marginBottom: '0.75rem' }}>
             How this artifact relates to its family.{' '}
-            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {'\u2192'}</Link>
+            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {String.fromCharCode(0x2192)}</Link>
           </p>
           <div className="lineage-tree">
             {lineageNodes.map((node) => (
@@ -461,7 +461,7 @@ export default async function DocPage({
                     {entry.actor_handle ? (
                       <span className="timeline-actor">
                         @{entry.actor_handle}
-                        {entry.actor_verified ? ' \u2713' : ''}
+                        {entry.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}
                       </span>
                     ) : null}
                     <span className="timeline-rev">{entry.revision_id}</span>
@@ -537,14 +537,14 @@ function LineageNodeView({
         : 'var(--soul)';
   const kindLabel = node.kind === 'fork' ? ' [fork]' : node.kind === 'core' ? ' [canonical]' : '';
   const handle = node.actor_handle
-    ? ` by @${node.actor_handle}${node.actor_verified ? ' \u2713' : ''}`
+    ? ` by @${node.actor_handle}${node.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}`
     : '';
 
   return (
     <div className={`lineage-node${isCurrent ? ' lineage-node--current' : ''}`} style={indentStyle}>
       <div className="lineage-connector" />
       <span className="lineage-slug">
-        {depth > 0 ? <span className="lineage-branch">{'\u2514\u2500\u2500 '}</span> : null}
+        {depth > 0 ? <span className="lineage-branch">{`${String.fromCharCode(0x2514)}${String.fromCharCode(0x2500)}${String.fromCharCode(0x2500)} `}</span> : null}
         {isCurrent ? (
           <strong>{node.slug}</strong>
         ) : (
@@ -553,7 +553,7 @@ function LineageNodeView({
         <span className="lineage-meta" style={{ color: kindColor }}>
           {kindLabel}
           <span style={{ color: 'var(--muted)' }}>{handle}</span>
-          <span className="lineage-rev"> {'\u00b7'} {node.revision_id}</span>
+          <span className="lineage-rev"> {String.fromCharCode(0xb7)} {node.revision_id}</span>
         </span>
       </span>
       {node.children.map((child) => (
