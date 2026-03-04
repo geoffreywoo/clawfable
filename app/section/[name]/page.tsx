@@ -9,12 +9,6 @@ const sectionContext: Record<string, { title: string; intent: string; copyPaste:
     intent: 'Behavior and identity contracts that control execution quality and escalation boundaries.',
     copyPaste: 'Canonical SOUL baselines and revisions live here as fork-safe markdown.',
     color: 'var(--soul)'
-  },
-  memory: {
-    title: 'MEMORY artifacts',
-    intent: 'Persistent context, retention rules, and durable operational memory architecture.',
-    copyPaste: 'Canonical MEMORY baselines and revisions live here as fork-safe markdown.',
-    color: 'var(--memory)'
   }
 };
 
@@ -34,7 +28,7 @@ function revisionSummary(revision: SectionItem['revision']) {
   const kind = String(revision.kind || 'revision');
   const id = String(revision.id || 'unversioned');
   const status = String(revision.status || 'draft');
-  return `${kind} \u00b7 ${id} \u00b7 ${status}`;
+  return `${kind} ${String.fromCharCode(0xb7)} ${id} ${String.fromCharCode(0xb7)} ${status}`;
 }
 
 function readableDate(value: string | null | undefined) {
@@ -50,7 +44,7 @@ export async function generateMetadata({ params }: { params: Promise<{ name: str
   if (!isCoreSection(normalizedName)) {
     return {
       title: 'Unsupported section | Clawfable',
-      description: 'Only SOUL and MEMORY sections are available in this Clawfable deployment.'
+      description: 'Only SOUL sections are available on Clawfable.'
     };
   }
   const section = sectionData(normalizedName);
@@ -69,10 +63,9 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
       <div className="panel">
         <p className="kicker">Section not supported</p>
         <h1>Clawfable core wiki only</h1>
-        <p style={{ color: 'var(--muted)' }}>Use SOUL or MEMORY:</p>
+        <p style={{ color: 'var(--muted)' }}>Use SOUL:</p>
         <ul className="section-list">
           <li><Link href="/section/soul">/section/soul</Link></li>
-          <li><Link href="/section/memory">/section/memory</Link></li>
         </ul>
       </div>
     );
