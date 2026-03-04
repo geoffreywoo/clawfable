@@ -301,6 +301,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (mode === 'revise') {
+      // Allow explicit created_by override (e.g. admin corrections)
+      const createdByOverride = extractValue(body, 'created_by_handle')
+        ? {
+            created_by_handle: extractValue(body, 'created_by_handle'),
+            created_by_display_name: extractValue(body, 'created_by_display_name') || undefined,
+            created_by_profile_url: extractValue(body, 'created_by_profile_url') || undefined,
+            created_by_verified: body.created_by_verified === true
+          }
+        : {};
       const doc = await reviseArtifact({
         section: payload.section,
         slug: payload.slug,
@@ -311,6 +320,7 @@ export async function POST(request: NextRequest) {
         author_commentary: authorCommentary,
         user_comments: userComments,
         ...updatedActor,
+        ...createdByOverride,
         revision: {
           id: extractValue(body, 'revision_id') || payload.revision?.id,
           kind: extractValue(body, 'kind') || 'revision',
