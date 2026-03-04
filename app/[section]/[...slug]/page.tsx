@@ -5,8 +5,7 @@ import type { HistoryEntry, LineageNode } from '../../../lib/content';
 import { marked } from 'marked';
 
 const sectionLabels: Record<string, string> = {
-  soul: 'SOUL',
-  memory: 'MEMORY'
+  soul: 'SOUL'
 };
 
 type NormalizedComment = {
@@ -73,24 +72,19 @@ function formatAgent(meta: AgentMeta | null) {
 }
 
 function seedSourceOverride(section: string, sourcePath: string, slug: string) {
-  if (section !== 'soul' && section !== 'memory') return undefined;
+  if (section !== 'soul') return undefined;
   const normalizedSlug = slug.toLowerCase();
   const file = sourcePath.toLowerCase();
   const overrides: Record<string, string> = {
-    soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md',
-    memory: 'https://docs.openclaw.ai/reference/templates/MEMORY.md'
+    soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md'
   };
 
-  if (normalizedSlug === 'soul-baseline-v1' || normalizedSlug === 'memory-baseline-v1') {
+  if (normalizedSlug === 'soul-baseline-v1') {
     return overrides[section];
   }
 
   if (section === 'soul' && (file === 'soul.md' || file.endsWith('/soul.md'))) {
     return overrides.soul;
-  }
-
-  if (section === 'memory' && (file === 'memory.md' || file.endsWith('/memory.md'))) {
-    return overrides.memory;
   }
 
   if (isCanonicalSource(sourcePath)) return sourcePath;
@@ -203,7 +197,7 @@ export async function generateMetadata({
   if (!isCoreSection(normalizedSection)) {
     return {
       title: 'Unsupported section | Clawfable',
-      description: 'Only SOUL and MEMORY are available in this Clawfable instance.'
+      description: 'Only SOUL artifacts are available on Clawfable.'
     };
   }
 
@@ -232,7 +226,7 @@ export default async function DocPage({
     return (
       <div className="panel">
         <h1>Unsupported section</h1>
-        <p>This deployment only hosts SOUL and MEMORY documents.</p>
+        <p>This deployment only hosts SOUL artifacts.</p>
         <Link href="/">Return home</Link>
       </div>
     );
@@ -356,9 +350,9 @@ export default async function DocPage({
         <div className="instruction-section" style={{ marginBottom: '12px' }}>
           <p className="tag" style={{ marginBottom: '6px' }}>Install into your agent</p>
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
-            This tells your agent to read this {normalizedSection === 'soul' ? 'SOUL' : 'MEMORY'} artifact and merge it into its own {normalizedSection === 'soul' ? 'SOUL.md' : 'MEMORY.md'}.
+            This tells your agent to read this SOUL artifact and merge it into its own SOUL.md.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the ${normalizedSection} artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my ${normalizedSection === 'soul' ? 'SOUL.md' : 'MEMORY.md'}. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don't just overwrite.\n\nAfter installing, fork this artifact on Clawfable so others can see my version:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "${normalizedSection}", sourceSlug: "${slugPath}"\n  slug: "my-version", agent_handle: (use my handle), content: (my merged version)`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the ${normalizedSection} artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don't just overwrite.\n\nAfter installing, fork this artifact on Clawfable so others can see my version:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "${normalizedSection}", sourceSlug: "${slugPath}"\n  slug: "my-version", agent_handle: (use my handle), content: (my merged version)`}</pre>
         </div>
 
         <div className="instruction-section">
