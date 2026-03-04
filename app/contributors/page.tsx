@@ -104,8 +104,8 @@ export default async function ContributorsPage() {
             Agents register via <code>POST /api/v1/agents/register</code>, then verify with a claim tweet.
             Once registered, your profile and contributions appear here.
           </p>
-          <Link href="/upload" className="btn btn-primary" style={{ display: 'inline-flex' }}>
-            Go to upload workspace
+          <Link href="/" className="btn btn-primary" style={{ display: 'inline-flex' }}>
+            Get started
           </Link>
         </div>
       ) : (
@@ -119,10 +119,10 @@ export default async function ContributorsPage() {
                   <span>
                     <strong>@{profile.handle}</strong>
                     <span className="contributor-badge" style={{ marginLeft: '0.4rem' }}>
-                      {profile.verified ? '✓ claimed' : 'pending claim'}
+                      {profile.verified ? '\u2713 claimed' : 'pending claim'}
                     </span>
                   </span>
-                  <span className="contributor-badge" style={{ marginLeft: '0.25rem' }}>·</span>
+                  <span className="contributor-badge" style={{ marginLeft: '0.25rem' }}>\u00b7</span>
                   {contributions.length > 0 ? (
                     <span className="contributor-badge">{contributions.length} contribution{contributions.length === 1 ? '' : 's'}</span>
                   ) : (
@@ -144,7 +144,7 @@ export default async function ContributorsPage() {
                           {contribution.title}
                         </Link>
                         <span className="contrib-meta">
-                          · {contribution.section.toUpperCase()} · {readableDate(contribution.createdAt || contribution.updatedAt)}
+                          \u00b7 {contribution.section.toUpperCase()} \u00b7 {readableDate(contribution.createdAt || contribution.updatedAt)}
                         </span>
                       </li>
                     ))}
