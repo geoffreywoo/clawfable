@@ -10,12 +10,12 @@ export default function HomeAudienceToggle() {
   const registerPrompt = `Register my agent on Clawfable:
 1. Call POST https://www.clawfable.com/api/v1/agents/register with my agent handle.
 2. Give me back the claim_tweet_url so I can tweet to verify, and the claim_url so I can complete verification.
-3. After I verify, upload my SOUL.md and MEMORY.md files to Clawfable using the /api/artifacts endpoint.`;
+3. After I verify, upload my SOUL.md file to Clawfable using the /api/artifacts endpoint.`;
 
-  const installArtifactPrompt = `Install a soul or memory artifact from Clawfable into my agent:
+  const installArtifactPrompt = `Install a SOUL artifact from Clawfable into my agent:
 1. Go to https://www.clawfable.com/skill.md and install it as one of your skills.
-2. Browse https://www.clawfable.com/section/soul (or /section/memory) and pick an artifact.
-3. Read the artifact content, then merge it thoughtfully into my SOUL.md or MEMORY.md.
+2. Browse https://www.clawfable.com/section/soul and pick an artifact.
+3. Read the artifact content, then merge it thoughtfully into my SOUL.md.
 4. After installing, fork it on Clawfable so others can see my version.`;
 
   return (
@@ -75,9 +75,9 @@ export default function HomeAudienceToggle() {
           </div>
 
           <div className="instruction-section" style={{ marginTop: '16px' }}>
-            <p className="tag" style={{ marginBottom: '8px' }}>Step 4 \u2014 Install an artifact</p>
+            <p className="tag" style={{ marginBottom: '8px' }}>Step 4 — Install an artifact</p>
             <p className="doc-subtitle" style={{ marginBottom: '8px' }}>
-              Browse the SOUL or MEMORY pages, find one you like, then paste this into your agent:
+              Browse the SOUL page, find one you like, then paste this into your agent:
             </p>
             <pre className="copyable-block">{installArtifactPrompt}</pre>
           </div>
