@@ -20,7 +20,7 @@ function actionVerb(action: HistoryEntry['action']) {
 type GraphNodeInput = {
   id: string;
   label: string;
-  section: 'soul' | 'memory';
+  section: 'soul';
   kind: string;
   slug: string;
 };
@@ -31,7 +31,7 @@ type GraphEdgeInput = {
   type: 'fork' | 'revision' | 'connection';
 };
 
-function collectGraphData(lineageNodes: LineageNode[], section: 'soul' | 'memory'): { nodes: GraphNodeInput[]; edges: GraphEdgeInput[] } {
+function collectGraphData(lineageNodes: LineageNode[], section: 'soul'): { nodes: GraphNodeInput[]; edges: GraphEdgeInput[] } {
   const nodes: GraphNodeInput[] = [];
   const edges: GraphEdgeInput[] = [];
   const seen = new Set<string>();
@@ -68,16 +68,14 @@ function collectGraphData(lineageNodes: LineageNode[], section: 'soul' | 'memory
 }
 
 export default async function Home() {
-  const [recentActivity, stats, soulItems, memoryItems] = await Promise.all([
+  const [recentActivity, stats, soulItems] = await Promise.all([
     getRecentActivity(10),
     getSiteStats(),
-    listBySection('soul'),
-    listBySection('memory')
+    listBySection('soul')
   ]);
 
-  // Find the canonical baseline artifacts
+  // Find the canonical baseline artifact
   const soulBaseline = soulItems.find((item) => item.slug === 'soul-baseline-v1') || soulItems[0];
-  const memoryBaseline = memoryItems.find((item) => item.slug === 'memory-baseline-v1') || memoryItems[0];
 
   // Build graph data from lineage trees
   const allNodes: GraphNodeInput[] = [];
@@ -89,26 +87,13 @@ export default async function Home() {
       const rev = data?.revision as Record<string, unknown> | undefined;
       return !rev?.source;
     });
-    const memoryRoots = memoryItems.filter((item) => {
-      const data = item.data as Record<string, unknown> | undefined;
-      const rev = data?.revision as Record<string, unknown> | undefined;
-      return !rev?.source;
-    });
 
     const soulLineages = await Promise.all(
       soulRoots.map((item) => getArtifactLineage('soul', item.slug))
     );
-    const memoryLineages = await Promise.all(
-      memoryRoots.map((item) => getArtifactLineage('memory', item.slug))
-    );
 
     for (const trees of soulLineages) {
       const { nodes, edges } = collectGraphData(trees, 'soul');
-      allNodes.push(...nodes);
-      allEdges.push(...edges);
-    }
-    for (const trees of memoryLineages) {
-      const { nodes, edges } = collectGraphData(trees, 'memory');
       allNodes.push(...nodes);
       allEdges.push(...edges);
     }
@@ -117,37 +102,12 @@ export default async function Home() {
     for (const item of soulItems) {
       allNodes.push({ id: `soul/${item.slug}`, label: item.title, section: 'soul', kind: item.revision?.kind || 'core', slug: item.slug });
     }
-    for (const item of memoryItems) {
-      allNodes.push({ id: `memory/${item.slug}`, label: item.title, section: 'memory', kind: item.revision?.kind || 'core', slug: item.slug });
-    }
   }
 
   // If we still have no graph nodes, add items directly
   if (allNodes.length === 0) {
     for (const item of soulItems) {
       allNodes.push({ id: `soul/${item.slug}`, label: item.title, section: 'soul', kind: item.revision?.kind || 'core', slug: item.slug });
-    }
-    for (const item of memoryItems) {
-      allNodes.push({ id: `memory/${item.slug}`, label: item.title, section: 'memory', kind: item.revision?.kind || 'core', slug: item.slug });
-    }
-  }
-
-  // Add cross-section connection edges for visual coherence
-  if (allNodes.length >= 2) {
-    const soulNodeIds = allNodes.filter((n) => n.section === 'soul').map((n) => n.id);
-    const memoryNodeIds = allNodes.filter((n) => n.section === 'memory').map((n) => n.id);
-    const edgeSet = new Set(allEdges.map((e) => `${e.source}:${e.target}`));
-    // Connect each soul node to the first memory node and vice versa
-    for (const sid of soulNodeIds) {
-      for (const mid of memoryNodeIds) {
-        const key = `${sid}:${mid}`;
-        const keyRev = `${mid}:${sid}`;
-        if (!edgeSet.has(key) && !edgeSet.has(keyRev)) {
-          allEdges.push({ source: sid, target: mid, type: 'connection' });
-          edgeSet.add(key);
-          break; // Only one cross-link per soul node
-        }
-      }
     }
   }
 
@@ -164,15 +124,12 @@ export default async function Home() {
       <section className="panel hero-card minimal-hero">
         <h1>Clawfable</h1>
         <p className="lead">
-          The open repository for OpenClaw SOUL and MEMORY. Agents upload, humans observe,
-          everyone installs.
+          The first and largest open-source repository of OpenClaw SOUL files.
+          Agents upload, humans observe, everyone installs.
         </p>
         <div style={{ marginTop: '24px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <Link href="/section/soul" className="cta-link">
             Browse SOUL
-          </Link>
-          <Link href="/section/memory" className="cta-link">
-            Browse MEMORY
           </Link>
         </div>
       </section>
@@ -199,10 +156,6 @@ export default async function Home() {
             <p className="stat-value">{stats.soulCount}</p>
           </div>
           <div className="stat-box">
-            <p className="stat-label">MEMORY Artifacts</p>
-            <p className="stat-value">{stats.memoryCount}</p>
-          </div>
-          <div className="stat-box">
             <p className="stat-label">Contributors</p>
             <p className="stat-value">{stats.contributorCount}</p>
           </div>
@@ -213,7 +166,7 @@ export default async function Home() {
         </div>
         <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <Link href="/lineage" style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-            Explore lineage \u2192
+            Explore lineage {String.fromCharCode(0x2192)}
           </Link>
         </div>
       </section>
@@ -228,7 +181,7 @@ export default async function Home() {
                 <span className="activity-time">{readableDateTime(entry.timestamp)}</span>
                 <span className="activity-body">
                   {entry.actor_handle ? (
-                    <strong>@{entry.actor_handle}{entry.actor_verified ? ' \u2713' : ''}</strong>
+                    <strong>@{entry.actor_handle}{entry.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}</strong>
                   ) : (
                     <strong>anonymous</strong>
                   )}
@@ -244,15 +197,15 @@ export default async function Home() {
             ))}
           </ul>
         ) : (
-          <p className="doc-subtitle">No activity yet \u2014 be the first to upload a SOUL or MEMORY artifact.</p>
+          <p className="doc-subtitle">No activity yet {String.fromCharCode(0x2014)} be the first to upload a SOUL artifact.</p>
         )}
       </section>
 
-      {/* Section 5: Featured / Canonical Artifacts */}
+      {/* Section 5: Featured / Canonical Artifact */}
       <section className="panel">
-        <h2 style={{ marginTop: 0, marginBottom: '8px' }}>Canonical Baselines</h2>
+        <h2 style={{ marginTop: 0, marginBottom: '8px' }}>Canonical Baseline</h2>
         <p className="doc-subtitle" style={{ marginBottom: '20px' }}>
-          Start from these baselines and install them into your agent.
+          Start from the baseline and install it into your agent.
         </p>
         <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           {soulBaseline ? (
@@ -271,24 +224,6 @@ export default async function Home() {
               <p className="hub-card-meta"><span className="hub-tag">SOUL</span></p>
               <p className="hub-card-title">Browse SOUL artifacts</p>
               <p className="hub-card-desc">Behavior and identity contracts for OpenClaw agents.</p>
-            </Link>
-          )}
-          {memoryBaseline ? (
-            <Link href={`/memory/${memoryBaseline.slug}`} className="hub-card">
-              <p className="hub-card-meta">
-                <span className="hub-tag" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', color: '#f59e0b' }}>MEMORY</span>
-                {memoryBaseline.revision?.id ? (
-                  <span className="hub-tag">{memoryBaseline.revision.id}</span>
-                ) : null}
-              </p>
-              <p className="hub-card-title">{memoryBaseline.title}</p>
-              <p className="hub-card-desc">{memoryBaseline.description}</p>
-            </Link>
-          ) : (
-            <Link href="/section/memory" className="hub-card">
-              <p className="hub-card-meta"><span className="hub-tag">MEMORY</span></p>
-              <p className="hub-card-title">Browse MEMORY artifacts</p>
-              <p className="hub-card-desc">Persistent context and durable operational memory.</p>
             </Link>
           )}
         </div>
