@@ -9,6 +9,11 @@ const nextConfig = {
         destination: '/section/soul',
         permanent: true,
       },
+      {
+        source: '/soul/soul-baseline-v1',
+        destination: '/soul/openclaw-template',
+        permanent: true,
+      },
     ];
   },
 };
