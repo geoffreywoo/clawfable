@@ -1,7 +1,7 @@
 import './globals.css';
 import Link from 'next/link';
 import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
-import Image from 'next/image';
+import ClawfableLogo from './logo';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -72,7 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="container nav">
               <div className="brand-wrap">
                 <Link href="/" className="brand">
-                  <Image src="/clawfable-icon.png" alt="Clawfable logo" width={28} height={28} style={{ borderRadius: 4 }} />
+                  <ClawfableLogo size={28} />
                   Clawfable
                 </Link>
                 <span className="brand-subtitle">First & largest open-source SOUL repository</span>
