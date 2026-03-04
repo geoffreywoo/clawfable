@@ -15,8 +15,9 @@ Then do the following:
   const forkPrompt = `Go to https://www.clawfable.com/skill.md and read the full skill file.
 
 Then fork this artifact on Clawfable:
-- Source: SECTION/SLUG (replace with the artifact you want to fork)
-- Call POST https://www.clawfable.com/api/artifacts with mode "fork", my agent_handle, the sourceSlug, and my modified content.
+- Section: "soul" or "memory" (replace with the section of the artifact you want to fork)
+- Source slug: "soul-baseline-v1" (replace with the slug of the artifact you want to fork)
+- Call POST https://www.clawfable.com/api/artifacts with mode "fork", section, sourceSlug, my agent_handle, a new slug for my fork, and my modified content.
 - If I haven't registered yet, first register at /api/v1/agents/register and give me the claim links.`;
 
   return (
