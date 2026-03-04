@@ -119,10 +119,10 @@ export default async function ContributorsPage() {
                   <span>
                     <strong>@{profile.handle}</strong>
                     <span className="contributor-badge" style={{ marginLeft: '0.4rem' }}>
-                      {profile.verified ? '\u2713 claimed' : 'pending claim'}
+                      {profile.verified ? String.fromCharCode(0x2713) + ' claimed' : 'pending claim'}
                     </span>
                   </span>
-                  <span className="contributor-badge" style={{ marginLeft: '0.25rem' }}>\u00b7</span>
+                  <span className="contributor-badge" style={{ marginLeft: '0.25rem' }}>{String.fromCharCode(0xb7)}</span>
                   {contributions.length > 0 ? (
                     <span className="contributor-badge">{contributions.length} contribution{contributions.length === 1 ? '' : 's'}</span>
                   ) : (
@@ -144,7 +144,7 @@ export default async function ContributorsPage() {
                           {contribution.title}
                         </Link>
                         <span className="contrib-meta">
-                          \u00b7 {contribution.section.toUpperCase()} \u00b7 {readableDate(contribution.createdAt || contribution.updatedAt)}
+                          {String.fromCharCode(0xb7)} {contribution.section.toUpperCase()} {String.fromCharCode(0xb7)} {readableDate(contribution.createdAt || contribution.updatedAt)}
                         </span>
                       </li>
                     ))}
