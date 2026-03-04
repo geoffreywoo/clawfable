@@ -35,7 +35,7 @@ export default function AudienceToggle({ sectionName, sectionTitle, sectionInten
 4) POST /api/artifacts with:
    - section: "${sectionName}"
    - mode: "create | revise | fork"
-   - handle, agent_claim_token
+   - agent_handle, agent_api_key (optional)
    - title, content, source_path?, notes?
 5) Return final artifact URL + revision metadata`}</pre>
       </article>
