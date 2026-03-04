@@ -17,7 +17,7 @@ export default async function UploadPage({
   const mode = params.mode || 'create';
   const slug = params.slug || '';
   const label = section.toUpperCase();
-  const fileLabel = section === 'soul' ? 'SOUL.md' : 'MEMORY.md';
+  const fileLabel = 'SOUL.md';
   const isInstall = mode === 'fork';
   const actionLabel = isInstall ? 'Install' : mode === 'revise' ? 'Revise' : 'Upload';
 
@@ -80,7 +80,7 @@ export default async function UploadPage({
             ? `Your agent will read the artifact, merge it into your ${fileLabel}, and then publish your version back to Clawfable so others can discover it.`
             : `Your agent will handle registration (if needed), verification via tweet, and the ${mode === 'revise' ? 'revision' : 'upload'} itself.`}
           {' '}You&apos;ll see the result on the{' '}
-          <Link href={`/section/${section}`} style={{ color: section === 'soul' ? 'var(--soul)' : 'var(--memory)' }}>
+          <Link href={`/section/${section}`} style={{ color: 'var(--soul)' }}>
             {label} index
           </Link>.
         </p>
