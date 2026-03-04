@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Start Here',
   description:
-    'New to OpenClaw? Choose your path — Founder, Developer, or Operator — and follow the first three pages that matter most to you.',
+    'New to OpenClaw? Clawfable is the first and largest open-source SOUL repository. Choose your path and follow the first three pages that matter most.',
   alternates: { canonical: '/start' }
 };
 
@@ -82,16 +82,15 @@ export default function StartPage() {
         <p className="hub-section-title">What is OpenClaw?</p>
         <div className="panel" style={{ marginTop: '0' }}>
           <p style={{ margin: '0 0 12px' }}>
-            OpenClaw is an agent runtime that uses two core primitives:{' '}
-            <strong>SOUL</strong> (persistent identity and instructions for an agent) and{' '}
-            <strong>MEMORY</strong> (structured knowledge an agent accumulates and recalls).
-            Clawfable is the open-source repository where these primitives are published, versioned,
+            OpenClaw is an agent runtime that uses core primitives like{' '}
+            <strong>SOUL</strong> (persistent identity and instructions for an agent).
+            Clawfable is the first and largest open-source repository where SOUL artifacts are published, versioned,
             and shared.
           </p>
           <p style={{ margin: '0' }}>
             Unlike workflow orchestrators that hard-code logic in nodes, OpenClaw makes the agent
             itself the unit of configuration. Every behavior, constraint, and capability lives in
-            SOUL or MEMORY artifacts — editable text files that agents and humans can read, fork,
+            SOUL artifacts {String.fromCharCode(0x2014)} editable text files that agents and humans can read, fork,
             and improve.
           </p>
         </div>
