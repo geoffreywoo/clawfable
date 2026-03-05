@@ -4,6 +4,7 @@ import { createClient } from '@vercel/kv';
 import {
   artifactPayloadFromRequest,
   createArtifact,
+  deleteArtifact,
   forkArtifact,
   isCoreSection,
   listBySection,
@@ -12,7 +13,7 @@ import {
   resolveAgentForUpload
 } from '@/lib/content';
 
-type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear' | 'clear_history';
+type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear' | 'clear_history' | 'delete';
 
 type ArtifactKvClient = {
   get: (key: string) => Promise<unknown>;
@@ -23,7 +24,7 @@ type ArtifactKvClient = {
 };
 
 function isMode(value: string | undefined): value is ArtifactMode {
-  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear' || value === 'clear_history';
+  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear' || value === 'clear_history' || value === 'delete';
 }
 
 function extractStringList(raw: unknown): string[] {
@@ -211,7 +212,7 @@ export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
   const mode = extractValue(body, 'mode');
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, clear, or clear_history.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, delete, clear, or clear_history.' }, { status: 400 });
   }
 
   if (mode === 'clear') {
@@ -235,6 +236,57 @@ export async function POST(request: NextRequest) {
     const report = await clearArtifactsForSections(requested);
     revalidatePath('/section/soul');
     return NextResponse.json({ ok: true, cleared: report });
+  }
+
+  if (mode === 'delete') {
+    const providedToken =
+      request.headers.get('x-admin-token') ||
+      extractValue(body, 'adminToken') ||
+      extractValue(body, 'admin_token');
+    const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
+    if (!providedToken || !expectedToken || providedToken !== expectedToken) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const section = extractValue(body, 'section');
+    const slug = extractValue(body, 'slug');
+    if (!section || !slug) {
+      return NextResponse.json({ error: 'section and slug are required.' }, { status: 400 });
+    }
+    if (!isCoreSection(section)) {
+      return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
+    }
+
+    await deleteArtifact(section, slug);
+
+    // Also clean up history entries
+    const kv = getAdminKvClient();
+    if (kv) {
+      const historyIdxKey = `clawfable:db:history_index:${section}:${slug}`;
+      const rawIdx = await kvGet(kv, historyIdxKey);
+      const timestamps = extractStringList(rawIdx);
+      for (const ts of timestamps) {
+        const entryKey = `clawfable:db:history:${section}:${slug}:${ts}`;
+        await deleteKvKey(kv, entryKey);
+      }
+      await deleteKvKey(kv, historyIdxKey);
+
+      // Clean recent_activity
+      const recentRaw = await kvGet(kv, 'clawfable:db:recent_activity');
+      if (Array.isArray(recentRaw)) {
+        const filtered = recentRaw.filter(
+          (e: any) => !(e && e.section === section && e.slug === slug)
+        );
+        if (typeof kv.set === 'function') {
+          await kv.set('clawfable:db:recent_activity', filtered);
+        }
+      }
+    }
+
+    revalidatePath(`/${section}/${slug}`);
+    revalidatePath(`/section/${section}`);
+    revalidatePath('/lineage');
+    return NextResponse.json({ ok: true, deleted: { section, slug } });
   }
 
   if (mode === 'clear_history') {
