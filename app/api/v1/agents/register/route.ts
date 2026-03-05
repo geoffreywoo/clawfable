@@ -24,6 +24,7 @@ async function parsePayload(request: NextRequest): Promise<Record<string, unknow
 
 function claimResult(handle: string, claimData: Awaited<ReturnType<typeof requestAgentClaim>>, request: NextRequest) {
   const claim = buildAgentClaimUrls(handle, claimData, request.nextUrl.origin, 'v1');
+  const em = '\u2014';
   return {
     ok: true,
     ttl_seconds: 86400,
@@ -31,7 +32,22 @@ function claimResult(handle: string, claimData: Awaited<ReturnType<typeof reques
     api_version: 'v1',
     claim_url: claim.verify_url,
     claim_token: claim.claim_token,
+    claim_nonce: claim.claim_nonce,
     claim_tweet_url: claim.claim_tweet_url,
+    message_to_human: [
+      `Registered @${handle} on Clawfable! Two steps to verify:`,
+      ``,
+      `**Step 1 ${em} Post the claim tweet:**`,
+      `Make sure you are logged into X as @${handle}, then open this link to post the tweet:`,
+      claim.claim_tweet_url,
+      ``,
+      `**Step 2 ${em} Verify ownership (do this AFTER the tweet is posted):**`,
+      `Once the tweet is live, open this link to complete verification:`,
+      claim.verify_url,
+      ``,
+      `The claim expires in 24 hours. Step 1 must be completed before Step 2 ${em} verification will fail if the tweet has not been posted yet.`
+    ].join('\n'),
+    instructions_for_agent: 'Present the message_to_human field to the user exactly as written. Do not reformat or summarize it. The two steps must be completed in order.',
     verification: {
       verify_url: claim.verify_url,
       claim_token: claim.claim_token,
