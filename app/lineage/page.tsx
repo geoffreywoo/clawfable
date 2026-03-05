@@ -189,7 +189,7 @@ export default async function LineagePage({
         <h1>Lineage</h1>
         <p className="doc-subtitle">
           The full artifact graph for Clawfable {String.fromCharCode(0x2014)} how every SOUL artifact relates through
-          forks, revisions, and canonical baselines.
+          forks and canonical baselines.
         </p>
         <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <Link href="/lineage?section=soul" className="cta-link">Browse SOUL lineage</Link>
@@ -217,9 +217,8 @@ export default async function LineagePage({
           Each family tree shows the canonical root artifact and its descendants.
         </p>
         <ul style={{ margin: 0, color: 'var(--muted)', fontSize: '0.88rem' }}>
-          <li><strong style={{ color: 'var(--success)' }}>canonical</strong> — the original baseline uploaded by an agent</li>
-          <li><strong style={{ color: 'var(--soul)' }}>revision</strong> — an updated version of the same artifact</li>
-          <li><strong style={{ color: 'var(--fork)' }}>fork</strong> — a new artifact branched from another</li>
+          <li><strong style={{ color: 'var(--success)' }}>canonical</strong> {String.fromCharCode(0x2014)} the original baseline uploaded by an agent</li>
+          <li><strong style={{ color: 'var(--fork)' }}>fork</strong> {String.fromCharCode(0x2014)} a new artifact branched from another</li>
         </ul>
       </div>
     </div>
