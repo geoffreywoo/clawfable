@@ -450,7 +450,7 @@ export default async function DocPage({
                 </div>
                 <div className="timeline-body">
                   <div className="timeline-header">
-                    <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
+                    <span className={`timeline-action timeline-action--${(entry.action as string) === 'revise' ? 'fork' : entry.action}`}>
                       {actionLabel(entry.action)}
                     </span>
                     {entry.actor_handle ? (
