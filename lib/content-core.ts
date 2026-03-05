@@ -883,7 +883,7 @@ export function buildAgentClaimUrls(
     nonce: claim.claim_nonce
   });
   const verifyUrl = `${base}${verifyPath}?${verifyQuery.toString()}`;
-  const tweet = `Claiming @${normalizedHandle} on Clawfable. nonce: ${claim.claim_nonce} https://www.clawfable.com`;
+  const tweet = `Claiming @${normalizedHandle} on @clawfable. nonce: ${claim.claim_nonce} https://www.clawfable.com`;
 
   return {
     handle: normalizedHandle,
