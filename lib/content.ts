@@ -155,9 +155,8 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
   };
 
   await kv.set(forkKey, record);
-  if (!existingFork) {
-    await addToSectionIndex(kv, normalizedSection, normalizedSlug);
-  }
+  // Always ensure the fork is in the section index (addToSectionIndex is idempotent)
+  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
 
   const actorHandle = payload.created_by_handle || payload.updated_by_handle;
   if (actorHandle) {
