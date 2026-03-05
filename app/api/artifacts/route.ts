@@ -9,14 +9,10 @@ import {
   isCoreSection,
   listBySection,
   recordAgentArtifact,
-  reviseArtifact,
   resolveAgentForUpload
 } from '@/lib/content';
 
-type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear' | 'clear_history' | 'delete';
-
-/** Slugs that cannot be revised via the public API. Only admin-token holders can revise these. */
-const PROTECTED_SLUGS = new Set(['openclaw-template']);
+type ArtifactMode = 'create' | 'fork' | 'clear' | 'clear_history' | 'delete';
 
 type ArtifactKvClient = {
   get: (key: string) => Promise<unknown>;
@@ -27,7 +23,7 @@ type ArtifactKvClient = {
 };
 
 function isMode(value: string | undefined): value is ArtifactMode {
-  return value === 'create' || value === 'revise' || value === 'fork' || value === 'clear' || value === 'clear_history' || value === 'delete';
+  return value === 'create' || value === 'fork' || value === 'clear' || value === 'clear_history' || value === 'delete';
 }
 
 function extractStringList(raw: unknown): string[] {
@@ -223,9 +219,20 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await parsePayload(request);
-  const mode = extractValue(body, 'mode');
+  let mode = extractValue(body, 'mode');
+
+  // Backward compatibility: treat "revise" as "fork" with sourceSlug auto-set
+  if (mode === 'revise') {
+    mode = 'fork';
+    // If no sourceSlug was provided, auto-set it to the slug being "revised"
+    // so forkArtifact sees it as a self-fork (update in place)
+    if (!body.sourceSlug) {
+      body.sourceSlug = body.slug;
+    }
+  }
+
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, revise, fork, delete, clear, or clear_history.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use create, fork, delete, clear, or clear_history.' }, { status: 400 });
   }
 
   if (mode === 'clear') {
@@ -317,7 +324,7 @@ export async function POST(request: NextRequest) {
     if (!section || !slug) {
       return NextResponse.json({ error: 'section and slug are required.' }, { status: 400 });
     }
-    if (section !== 'soul' && section !== 'memory') {
+    if (section !== 'soul') {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
     }
 
@@ -363,7 +370,7 @@ export async function POST(request: NextRequest) {
 
     const rawAgentHandle = extractValue(body, 'agent_handle') || extractValue(body, 'agentHandle');
     if (!rawAgentHandle) {
-      return NextResponse.json({ error: 'agent_handle is required for create/revise/fork uploads.' }, { status: 400 });
+      return NextResponse.json({ error: 'agent_handle is required for create/fork uploads.' }, { status: 400 });
     }
     const agentApiKey = extractAgentApiKey(request, body);
 
@@ -415,53 +422,7 @@ export async function POST(request: NextRequest) {
       return responseWithArtifact(doc.section, doc.slug, request);
     }
 
-    if (mode === 'revise') {
-      // Protected slugs can only be revised with admin token
-      if (PROTECTED_SLUGS.has(payload.slug) && !hasAdminToken(request, body)) {
-        return NextResponse.json(
-          { error: `"${payload.slug}" is a protected baseline artifact and cannot be revised. Use mode "fork" to create your own version instead.` },
-          { status: 403 }
-        );
-      }
-
-      const createdByOverride = extractValue(body, 'created_by_handle')
-        ? {
-            created_by_handle: extractValue(body, 'created_by_handle'),
-            created_by_display_name: extractValue(body, 'created_by_display_name') || undefined,
-            created_by_profile_url: extractValue(body, 'created_by_profile_url') || undefined,
-            created_by_verified: body.created_by_verified === true
-          }
-        : {};
-      const doc = await reviseArtifact({
-        section: payload.section,
-        slug: payload.slug,
-        title: payload.title,
-        description: payload.description,
-        content: payload.content,
-        copy_paste_scope: payload.copy_paste_scope,
-        author_commentary: authorCommentary,
-        user_comments: userComments,
-        ...updatedActor,
-        ...createdByOverride,
-        revision: {
-          id: extractValue(body, 'revision_id') || payload.revision?.id,
-          kind: extractValue(body, 'kind') || 'revision',
-          status: extractValue(body, 'status') || 'review',
-          family: payload.revision?.family,
-          parent_revision: extractValue(body, 'parent_revision') || payload.revision?.parent_revision
-        },
-        sourcePath: payload.sourcePath
-      });
-      try {
-        await recordAgentArtifact(actor.handle, doc.section, doc.slug);
-      } catch {
-        // best-effort tracking
-      }
-      revalidatePath(`/section/${payload.section}`);
-      revalidatePath(`/${payload.section}/${payload.slug}`);
-      return responseWithArtifact(doc.section, doc.slug, request);
-    }
-
+    // mode === 'fork' (the only remaining write path)
     const sourceSlug = extractValue(body, 'sourceSlug');
     if (!sourceSlug) {
       return NextResponse.json({ error: 'sourceSlug is required for fork mode.' }, { status: 400 });
@@ -482,6 +443,7 @@ export async function POST(request: NextRequest) {
       copy_paste_scope: payload.copy_paste_scope,
       author_commentary: authorCommentary,
       user_comments: userComments,
+      ...createdActor,
       ...updatedActor,
       revision: {
         id: extractValue(body, 'revision_id') || payload.revision?.id,
