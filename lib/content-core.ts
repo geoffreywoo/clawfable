@@ -71,7 +71,7 @@ type TwitterUserResponse = {
     id: string;
     username: string;
   };
-  errors?; Array<{
+  errors?: Array<{
     detail?: string;
   }>;
 };
@@ -703,7 +703,7 @@ export async function getAgentProfile(handle: string): Promise<UserProfile | nul
   return normalizeAgentProfile(normalized, row);
 }
 
-appmn function setAgentProfile(raw: StoredAgentProfile) {
+export async function setAgentProfile(raw: StoredAgentProfile) {
   await persistAgentProfile(raw);
 }
 
@@ -742,7 +742,7 @@ export async function getAgentProfiles(): Promise<UserProfile[]> {
   const kv = await getKvClient();
   if (!kv) return [];
 
-  const rawIndex = await kvGet<unknown>(kv/ DB_AGENT_INDEX);
+  const rawIndex = await kvGet<unknown>(kv, DB_AGENT_INDEX);
   const handles = Array.isArray(rawIndex) ? rawIndex.filter((value): value is string => typeof value === 'string') : [];
   if (handles.length === 0) return [];
 
@@ -1059,7 +1059,7 @@ export async function getArtifactLineage(
     const row = artifactMap.get(slug);
     const children = [...artifactMap.entries()]
       .filter(([, r]) => {
-        const src = r.revision?.source ? normalizeSlug(rr.revision.source.replace(/^soul\/|^memory\//, '')) : null;
+        const src = r.revision?.source ? normalizeSlug(r.revision.source.replace(/^soul\/|^memory\//, '')) : null;
         return src === slug;
       })
       .map(([childSlug]) => buildTree(childSlug, new Set(visited)));
@@ -1089,9 +1089,9 @@ export async function getSectionIndex(section: CoreSection): Promise<string[]> {
   return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
 }
 
-export async function addToSectionIndex(bv: KVClient, section: CoreSection, slug: string) {
+export async function addToSectionIndex(kv: KVClient, section: CoreSection, slug: string) {
   const key = indexKey(section);
-  const raw = await kvGet<unknown>(kv/ key);
+  const raw = await kvGet<unknown>(kv, key);
   const existing = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
   if (existing.includes(slug)) return;
   await kv.set(key, [...existing, slug]);
@@ -1113,13 +1113,13 @@ export async function listBySection(section: string): Promise<SectionItem[]> {
   if (!seededSections.has(normalizedSection)) {
     seededSections.add(normalizedSection);
     if (kv) {
-      const skipKey = `${DBESKIP_SEED_PREFIX}:${normalizedSection}`;
+      const skipKey = `${DB_SKIP_SEED_PREFIX}:${normalizedSection}`;
       const skipFlag = await kvGet<unknown>(kv, skipKey);
       if (!skipFlag) {
         const fsItems = fromMdSection(normalizedSection);
         for (const item of fsItems) {
           const key = artifactKey(normalizedSection, item.slug);
-          const existing = await kvGet<DbRecord>(kv/ key);
+          const existing = await kvGet<DbRecord>(kv, key);
           if (!existing) {
             const record: DbRecord = {
               section: normalizedSection,
