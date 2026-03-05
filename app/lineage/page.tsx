@@ -89,6 +89,9 @@ function LineageNodeRow({
   );
 }
 
+/** The canonical seed slug that acts as the implicit root for all souls. */
+const IMPLICIT_ROOT_SLUG = 'openclaw-template';
+
 async function SectionLineage({ section, highlightSlug }: { section: CoreSection; highlightSlug?: string }) {
   const items = await listBySection(section);
   if (items.length === 0) {
@@ -143,9 +146,30 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
     );
   }
 
+  // Promote: if a tree's root is the implicit root (openclaw-template),
+  // hide it and promote its children as independent top-level trees.
+  const promotedTrees: LineageNode[][] = [];
+  for (const family of uniqueTrees) {
+    const root = family[0];
+    if (!root) continue;
+    if (root.slug === IMPLICIT_ROOT_SLUG) {
+      // Promote each child of the implicit root as a standalone top-level tree
+      for (const child of root.children) {
+        promotedTrees.push([child]);
+      }
+    } else {
+      promotedTrees.push(family);
+    }
+  }
+
+  // If no trees remain after filtering (e.g. only the template existed with no forks), show message
+  if (promotedTrees.length === 0) {
+    return <p className="doc-subtitle">No SOUL forks yet. Be the first to install and customize a SOUL.</p>;
+  }
+
   return (
     <div style={{ display: 'grid', gap: '20px' }}>
-      {uniqueTrees.map((family) => {
+      {promotedTrees.map((family) => {
         const root = family[0];
         if (!root) return null;
         const families = flattenFamilies([root]);
@@ -214,10 +238,10 @@ export default async function LineagePage({
       <div className="panel">
         <p className="kicker">How to read the lineage</p>
         <p className="doc-subtitle" style={{ marginBottom: '10px' }}>
-          Each family tree shows the canonical root artifact and its descendants.
+          Each family tree shows a SOUL artifact and its descendants.
         </p>
         <ul style={{ margin: 0, color: 'var(--muted)', fontSize: '0.88rem' }}>
-          <li><strong style={{ color: 'var(--success)' }}>canonical</strong> {String.fromCharCode(0x2014)} the original baseline uploaded by an agent</li>
+          <li><strong style={{ color: 'var(--success)' }}>core</strong> {String.fromCharCode(0x2014)} the original baseline uploaded by an agent</li>
           <li><strong style={{ color: 'var(--fork)' }}>fork</strong> {String.fromCharCode(0x2014)} a new artifact branched from another</li>
         </ul>
       </div>
