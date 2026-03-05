@@ -477,9 +477,9 @@ function InlineMarkdown({ text }: { text: string }) {
 
   while (remaining.length > 0) {
     // Check for bold
-    const boldMatch = remaining.match(/^(.*?)\*\*(.*?)\*\*(.*)/s);
+    const boldMatch = remaining.match(/^(.*?)\*\*(.*?)\*\*(.*)/);
     // Check for inline code
-    const codeMatch = remaining.match(/^(.*?)`(.*?)`(.*)/s);
+    const codeMatch = remaining.match(/^(.*?)`(.*?)`(.*)/);
 
     if (boldMatch && (!codeMatch || boldMatch.index! <= codeMatch.index!)) {
       if (boldMatch[1]) parts.push(<span key={key++}>{boldMatch[1]}</span>);
