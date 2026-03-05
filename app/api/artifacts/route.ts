@@ -12,7 +12,7 @@ import {
   resolveAgentForUpload
 } from '@/lib/content';
 
-type ArtifactMode = 'create' | 'fork' | 'clear' | 'clear_history' | 'delete';
+type ArtifactMode = 'create' | 'fork' | 'clear' | 'clear_history' | 'delete' | 'fix_index' | 'update_title';
 
 type ArtifactKvClient = {
   get: (key: string) => Promise<unknown>;
@@ -23,7 +23,7 @@ type ArtifactKvClient = {
 };
 
 function isMode(value: string | undefined): value is ArtifactMode {
-  return value === 'create' || value === 'fork' || value === 'clear' || value === 'clear_history' || value === 'delete';
+  return value === 'create' || value === 'fork' || value === 'clear' || value === 'clear_history' || value === 'delete' || value === 'fix_index' || value === 'update_title';
 }
 
 function extractStringList(raw: unknown): string[] {
@@ -224,15 +224,13 @@ export async function POST(request: NextRequest) {
   // Backward compatibility: treat "revise" as "fork" with sourceSlug auto-set
   if (mode === 'revise') {
     mode = 'fork';
-    // If no sourceSlug was provided, auto-set it to the slug being "revised"
-    // so forkArtifact sees it as a self-fork (update in place)
     if (!body.sourceSlug) {
       body.sourceSlug = body.slug;
     }
   }
 
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, fork, delete, clear, or clear_history.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use create, fork, delete, clear, clear_history, fix_index, or update_title.' }, { status: 400 });
   }
 
   if (mode === 'clear') {
@@ -259,12 +257,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (mode === 'delete') {
-    const providedToken =
-      request.headers.get('x-admin-token') ||
-      extractValue(body, 'adminToken') ||
-      extractValue(body, 'admin_token');
-    const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
-    if (!providedToken || !expectedToken || providedToken !== expectedToken) {
+    if (!hasAdminToken(request, body)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
 
@@ -279,7 +272,6 @@ export async function POST(request: NextRequest) {
 
     await deleteArtifact(section, slug);
 
-    // Also clean up history entries
     const kv = getAdminKvClient();
     if (kv) {
       const historyIdxKey = `clawfable:db:history_index:${section}:${slug}`;
@@ -291,7 +283,6 @@ export async function POST(request: NextRequest) {
       }
       await deleteKvKey(kv, historyIdxKey);
 
-      // Clean recent_activity
       const recentRaw = await kvGet(kv, 'clawfable:db:recent_activity');
       if (Array.isArray(recentRaw)) {
         const filtered = recentRaw.filter(
@@ -310,12 +301,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (mode === 'clear_history') {
-    const providedToken =
-      request.headers.get('x-admin-token') ||
-      extractValue(body, 'adminToken') ||
-      extractValue(body, 'admin_token');
-    const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
-    if (!providedToken || !expectedToken || providedToken !== expectedToken) {
+    if (!hasAdminToken(request, body)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
 
@@ -358,6 +344,100 @@ export async function POST(request: NextRequest) {
     revalidatePath(`/${section}/${slug}`);
     revalidatePath('/lineage');
     return NextResponse.json({ ok: true, section, slug, history_entries_deleted: deleted });
+  }
+
+  // Admin: fix_index — add slugs to the section index without modifying artifacts
+  if (mode === 'fix_index') {
+    if (!hasAdminToken(request, body)) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const section = extractValue(body, 'section');
+    if (!section || !isCoreSection(section)) {
+      return NextResponse.json({ error: 'Valid section is required.' }, { status: 400 });
+    }
+
+    const slugsRaw = body.slugs;
+    const slugs = Array.isArray(slugsRaw)
+      ? slugsRaw.filter((v): v is string => typeof v === 'string').map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    if (slugs.length === 0) {
+      return NextResponse.json({ error: 'slugs array is required.' }, { status: 400 });
+    }
+
+    const kv = getAdminKvClient();
+    if (!kv) {
+      return NextResponse.json({ error: 'Admin KV unavailable.' }, { status: 500 });
+    }
+
+    const indexKey = `clawfable:db:index:${section}`;
+    const rawIndex = await kvGet(kv, indexKey);
+    const existing = Array.isArray(rawIndex)
+      ? rawIndex.filter((v): v is string => typeof v === 'string')
+      : [];
+
+    const added: string[] = [];
+    const alreadyPresent: string[] = [];
+    for (const slug of slugs) {
+      if (existing.includes(slug)) {
+        alreadyPresent.push(slug);
+      } else {
+        existing.push(slug);
+        added.push(slug);
+      }
+    }
+
+    if (added.length > 0) {
+      if (typeof kv.set === 'function') {
+        await kv.set(indexKey, existing);
+      }
+    }
+
+    revalidatePath('/lineage');
+    revalidatePath(`/section/${section}`);
+    return NextResponse.json({ ok: true, section, added, already_present: alreadyPresent, index: existing });
+  }
+
+  // Admin: update_title — update the title field of an existing artifact in KV
+  if (mode === 'update_title') {
+    if (!hasAdminToken(request, body)) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const section = extractValue(body, 'section');
+    const slug = extractValue(body, 'slug');
+    const title = extractValue(body, 'title');
+    if (!section || !slug || !title) {
+      return NextResponse.json({ error: 'section, slug, and title are required.' }, { status: 400 });
+    }
+    if (!isCoreSection(section)) {
+      return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
+    }
+
+    const kv = getAdminKvClient();
+    if (!kv) {
+      return NextResponse.json({ error: 'Admin KV unavailable.' }, { status: 500 });
+    }
+
+    const key = `clawfable:db:artifact:${section}:${slug}`;
+    const raw = await kvGet(kv, key);
+    if (!raw || typeof raw !== 'object') {
+      return NextResponse.json({ error: `Artifact not found: ${section}/${slug}` }, { status: 404 });
+    }
+
+    const record = raw as Record<string, unknown>;
+    const oldTitle = record.title;
+    record.title = title;
+    record.updated_at = new Date().toISOString();
+
+    if (typeof kv.set === 'function') {
+      await kv.set(key, record);
+    }
+
+    revalidatePath(`/${section}/${slug}`);
+    revalidatePath('/lineage');
+    return NextResponse.json({ ok: true, section, slug, old_title: oldTitle, new_title: title });
   }
 
   try {
