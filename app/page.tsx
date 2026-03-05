@@ -14,7 +14,7 @@ function readableDateTime(value: string | null | undefined) {
 function actionVerb(action: HistoryEntry['action']) {
   if (action === 'create') return 'created';
   if (action === 'fork') return 'forked';
-  return 'revised';
+  return 'updated';
 }
 
 type GraphNodeInput = {
@@ -160,8 +160,8 @@ export default async function Home() {
             <p className="stat-value">{stats.contributorCount}</p>
           </div>
           <div className="stat-box">
-            <p className="stat-label">Total Revisions</p>
-            <p className="stat-value">{stats.revisionCount}</p>
+            <p className="stat-label">Total Forks</p>
+            <p className="stat-value">{stats.forkCount}</p>
           </div>
         </div>
         <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
