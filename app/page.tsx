@@ -11,9 +11,10 @@ function readableDateTime(value: string | null | undefined) {
   return parsed.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
-function actionVerb(action: HistoryEntry['action']) {
+function actionVerb(action: HistoryEntry['action'] | string) {
   if (action === 'create') return 'created';
   if (action === 'fork') return 'forked';
+  if (action === 'revise') return 'updated';
   return 'updated';
 }
 
@@ -186,8 +187,8 @@ export default async function Home() {
                     <strong>anonymous</strong>
                   )}
                   {' '}{actionVerb(entry.action)}{' '}
-                  <span className={`timeline-action timeline-action--${entry.action}`}>
-                    {entry.action}
+                  <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
+                    {entry.action === 'revise' ? 'fork' : entry.action}
                   </span>
                 </span>
                 <span className="activity-title">
