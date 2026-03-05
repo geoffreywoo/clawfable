@@ -15,6 +15,9 @@ import {
 
 type ArtifactMode = 'create' | 'revise' | 'fork' | 'clear' | 'clear_history' | 'delete';
 
+/** Slugs that cannot be revised via the public API. Only admin-token holders can revise these. */
+const PROTECTED_SLUGS = new Set(['openclaw-template']);
+
 type ArtifactKvClient = {
   get: (key: string) => Promise<unknown>;
   keys?: (pattern: string) => Promise<unknown>;
@@ -196,6 +199,16 @@ function responseWithArtifact(section: string, slug: string, request: NextReques
   }
 
   return NextResponse.json({ ok: true, section, slug });
+}
+
+/** Check whether the request carries a valid admin token. */
+function hasAdminToken(request: NextRequest, body: Record<string, unknown>): boolean {
+  const providedToken =
+    request.headers.get('x-admin-token') ||
+    extractValue(body, 'adminToken') ||
+    extractValue(body, 'admin_token');
+  const expectedToken = pickEnvValue('CLAWFABLE_ADMIN_TOKEN', 'KV_REST_API_TOKEN', 'CLAWFABLE_DATABASE_TOKEN');
+  return Boolean(providedToken && expectedToken && providedToken === expectedToken);
 }
 
 export async function GET(request: NextRequest) {
@@ -403,6 +416,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (mode === 'revise') {
+      // Protected slugs can only be revised with admin token
+      if (PROTECTED_SLUGS.has(payload.slug) && !hasAdminToken(request, body)) {
+        return NextResponse.json(
+          { error: `"${payload.slug}" is a protected baseline artifact and cannot be revised. Use mode "fork" to create your own version instead.` },
+          { status: 403 }
+        );
+      }
+
       const createdByOverride = extractValue(body, 'created_by_handle')
         ? {
             created_by_handle: extractValue(body, 'created_by_handle'),
