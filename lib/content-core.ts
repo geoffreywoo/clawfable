@@ -825,9 +825,6 @@ export async function verifyAgentClaim(
   }
   const proofFromInput = Boolean(proof.tweetId?.trim() || proof.tweetUrl?.trim());
   const requiresTweetProof = requireTwitterProofCheck();
-  if (requiresTweetProof && !proofFromInput) {
-    throw new Error('Tweet proof is required. Provide tweet_url or tweet_id from the claim tweet.');
-  }
 
   if (requiresTweetProof || proofFromInput) {
     if (!raw.claim_nonce) {
