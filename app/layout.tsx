@@ -46,6 +46,7 @@ export const metadata = {
   },
   twitter: {
     card: 'summary_large_image',
+    site: '@clawfable',
     title: 'Clawfable',
     description:
       'The first and largest open-source repository of OpenClaw SOUL files. Browse, install, and evolve the identity contracts that power AI agents.',
