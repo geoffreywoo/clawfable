@@ -935,7 +935,7 @@ function historyIndexKey(section: CoreSection, slug: string) {
 }
 
 export type HistoryEntry = {
-  action: 'create' | 'revise' | 'fork';
+  action: 'create' | 'fork';
   actor_handle?: string;
   actor_display_name?: string;
   actor_profile_url?: string;
