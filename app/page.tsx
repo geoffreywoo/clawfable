@@ -187,8 +187,8 @@ export default async function Home() {
                     <strong>anonymous</strong>
                   )}
                   {' '}{actionVerb(entry.action)}{' '}
-                  <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
-                    {entry.action === 'revise' ? 'fork' : entry.action}
+                  <span className={`timeline-action timeline-action--${(entry.action as string) === 'revise' ? 'fork' : entry.action}`}>
+                    {(entry.action as string) === 'revise' ? 'fork' : entry.action}
                   </span>
                 </span>
                 <span className="activity-title">
