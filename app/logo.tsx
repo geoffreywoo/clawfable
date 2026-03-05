@@ -1,44 +1,37 @@
 export default function ClawfableLogo({ size = 28 }: { size?: number }) {
-  /* 
-   * SVG interpretation of the V1 claw-bracket logo.
-   * Shape: two angular bracket arms ({}) forming a claw, 
-   * meeting at a central V, with a vertical stem below.
-   * Violet accent on the upper-right tip.
-   * viewBox tuned so the mark sits in a 64x80 box (tall, narrow).
+  /*
+   * Clawfable logo mark: angular claw/trident with curly-brace arms.
+   * Auto-traced from the approved reference image.
+   * Two cyan (#22d3ee) arms + violet (#a78bfa) accent on upper-right tip.
+   * viewBox 0 0 80 100 (aspect ratio 0.8:1).
    */
   const h = size;
-  const w = size * (64 / 80);
+  const w = size * (80 / 100);
   return (
     <svg
       width={w}
       height={h}
-      viewBox="0 0 64 80"
+      viewBox="0 0 80 100"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-label="Clawfable logo"
       style={{ flexShrink: 0 }}
     >
-      {/* Left bracket-claw arm */}
+      {/* Main body: left arm outer + inner gap + V/stem + right arm inner */}
       <path
-        d="M20 4 L8 20 L16 28 L8 38 L20 60 L28 60 L16 38 L24 28 L16 20 L28 4 Z"
+        d="M25.4,0 L6.7,17.6 L6.3,31.5 L0,37.9 L5.9,42.9 L6.5,54 L27.4,73.6 L31.5,89.9 L31.5,71.6 L10.8,52.2 L7.9,38.2 L10.8,19.6 L21.1,10.7 L21.3,30.8 L29.2,39.3 L25,48.6 L38,61.6 L40.2,100 L42.2,61.6 L55.1,48.6 L51,39.3 L58.7,30.8 L54.6,26.8 L45.6,38.6 L49.7,48 L39.6,57.2 L30.5,48 L34.6,38.6 L25.6,29.2 Z"
         fill="#22d3ee"
         fillRule="evenodd"
       />
-      {/* Right bracket-claw arm */}
+      {/* Right arm outer */}
       <path
-        d="M44 4 L56 20 L48 28 L56 38 L44 60 L36 60 L48 38 L40 28 L48 20 L36 4 Z"
+        d="M73.5,19 L69.4,21 L69.5,31.7 L72.4,37.5 L69.5,43.8 L69.4,52.4 L48.6,71.6 L48.6,89.9 L52.8,85 L52.8,73.6 L73.7,54 L74.2,42.9 L80,37.9 L74.1,32.1 Z"
         fill="#22d3ee"
         fillRule="evenodd"
       />
-      {/* Central V meeting point + stem */}
+      {/* Violet accent: upper-right tip */}
       <path
-        d="M28 4 L32 44 L36 4 L33 4 L32 32 L31 4 Z"
-        fill="#22d3ee"
-      />
-      <rect x="30" y="44" width="4" height="32" rx="1" fill="#22d3ee" />
-      {/* Violet accent - right tip */}
-      <path
-        d="M44 4 L48 0 L56 12 L56 20 L44 4 Z"
+        d="M54.6,0 L54.6,22.5 L58.9,26.8 L59.1,10 L68.8,19 L73,17 Z"
         fill="#a78bfa"
       />
     </svg>
