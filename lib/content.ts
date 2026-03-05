@@ -16,7 +16,7 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
   const existingKey = artifactKey(normalizedSection, normalizedSlug);
   const existing = await kvGet<DbRecord>(kv, existingKey);
   if (existing) {
-    throw new Error(`Artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+    throw new Error(`Artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "fork" to create your own version.`);
   }
 
   const now = nowStamp();
@@ -86,87 +86,6 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
   return record;
 }
 
-export async function reviseArtifact(payload: DbPayload): Promise<DbRecord> {
-  const kv = await getKvClient();
-  if (!kv) throw new Error('No database configured. Cannot revise artifact without a KV store.');
-
-  const normalizedSection = normalizeSection(payload.section);
-  const normalizedSlug = normalizeSlug(payload.slug);
-
-  if (!normalizedSlug) throw new Error('Artifact slug is required.');
-  if (!payload.title?.trim()) throw new Error('Artifact title is required.');
-  if (!payload.content?.trim()) throw new Error('Artifact content is required.');
-
-  const existingKey = artifactKey(normalizedSection, normalizedSlug);
-  const existing = await kvGet<DbRecord>(kv, existingKey);
-  if (!existing) {
-    throw new Error(`Artifact not found: ${normalizedSection}/${normalizedSlug}. Use mode "create" to create a new one.`);
-  }
-
-  const now = nowStamp();
-  const prevRevisionId = existing.revision?.id;
-  const nextRevisionId = bumpRevisionId(existing.revision?.id);
-
-  const record: DbRecord = {
-    ...existing,
-    title: payload.title.trim(),
-    description: payload.description?.trim() || shortDescription(undefined, payload.content),
-    content: payload.content,
-    copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? existing.copy_paste_scope),
-    revision: {
-      ...existing.revision,
-      id: nextRevisionId,
-      kind: payload.revision?.kind || existing.revision?.kind || 'revision',
-      status: payload.revision?.status || existing.revision?.status || 'active',
-      parent_revision: prevRevisionId,
-      source: existing.revision?.source
-    },
-    updated_at: now,
-    author_commentary: payload.author_commentary ?? existing.author_commentary,
-    user_comments: payload.user_comments ?? existing.user_comments,
-    updated_by_handle: payload.updated_by_handle || payload.created_by_handle,
-    updated_by_display_name: payload.updated_by_display_name || payload.created_by_display_name,
-    updated_by_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
-    updated_by_verified: payload.updated_by_verified ?? payload.created_by_verified ?? existing.updated_by_verified
-  };
-
-  await kv.set(existingKey, record);
-
-  const actorHandle = payload.updated_by_handle || payload.created_by_handle;
-  if (actorHandle) {
-    const agentRow = await getAgentProfileRow(actorHandle);
-    const agentBase = parseAgentProfile(agentRow, actorHandle);
-    await persistAgentProfile({
-      ...agentBase,
-      artifact_count: agentBase.artifact_count + 1,
-      last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
-    });
-  }
-
-  await appendHistory(kv, normalizedSection, normalizedSlug, {
-    action: 'revise',
-    actor_handle: actorHandle,
-    actor_display_name: payload.updated_by_display_name || payload.created_by_display_name,
-    actor_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
-    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
-    revision_id: nextRevisionId,
-    diff_summary: payload.author_commentary || `Revision ${prevRevisionId} → ${nextRevisionId}`,
-    timestamp: now,
-    title: payload.title
-  });
-
-  await appendRecentActivity(kv, {
-    action: 'revise',
-    actor_handle: actorHandle,
-    actor_verified: payload.updated_by_verified ?? payload.created_by_verified,
-    revision_id: nextRevisionId,
-    timestamp: now,
-    title: payload.title
-  });
-
-  return record;
-}
-
 export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
   const kv = await getKvClient();
   if (!kv) throw new Error('No database configured. Cannot fork artifact without a KV store.');
@@ -187,11 +106,24 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
 
   const forkKey = artifactKey(normalizedSection, normalizedSlug);
   const existingFork = await kvGet<DbRecord>(kv, forkKey);
+
+  // In the all-forks model, if the fork already exists we allow overwriting
+  // ONLY if the actor is the same handle that created it (self-fork = update).
+  // Otherwise reject as duplicate.
   if (existingFork) {
-    throw new Error(`Fork artifact already exists: ${normalizedSection}/${normalizedSlug}. Use mode "revise" to update it.`);
+    const existingOwner = existingFork.created_by_handle?.toLowerCase();
+    const incomingActor = (payload.created_by_handle || payload.updated_by_handle || '').toLowerCase();
+    if (!incomingActor || existingOwner !== incomingActor) {
+      throw new Error(`Fork artifact already exists: ${normalizedSection}/${normalizedSlug}. Only the original creator can update it.`);
+    }
+    // Self-fork: overwrite allowed \u2014 this is the \"update\" path
   }
 
   const now = nowStamp();
+  const prevRevisionId = existingFork?.revision?.id;
+  const nextRevisionId = existingFork ? bumpForkRevision(prevRevisionId) : 'v1';
+  const isSelfUpdate = Boolean(existingFork);
+
   const record: DbRecord = {
     section: normalizedSection,
     slug: normalizedSlug,
@@ -201,35 +133,39 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     content: payload.content?.trim() || source.content,
     copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? source.copy_paste_scope),
     revision: {
-      id: 'v1',
+      id: nextRevisionId,
       kind: 'fork',
       status: payload.revision?.status || 'active',
-      family: source.revision?.family || normalizedSourceSlug,
-      source: `${normalizedSourceSection}/${normalizedSourceSlug}`
+      family: existingFork?.revision?.family || source.revision?.family || normalizedSourceSlug,
+      source: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+      parent_revision: isSelfUpdate ? prevRevisionId : undefined
     },
-    created_at: now,
+    created_at: existingFork?.created_at || now,
     updated_at: now,
     author_commentary: payload.author_commentary,
     user_comments: payload.user_comments,
-    created_by_handle: payload.created_by_handle,
-    created_by_display_name: payload.created_by_display_name,
-    created_by_profile_url: payload.created_by_profile_url,
-    created_by_verified: payload.created_by_verified,
-    updated_by_handle: payload.updated_by_handle,
-    updated_by_display_name: payload.updated_by_display_name,
-    updated_by_profile_url: payload.updated_by_profile_url,
-    updated_by_verified: payload.updated_by_verified
+    created_by_handle: existingFork?.created_by_handle || payload.created_by_handle,
+    created_by_display_name: existingFork?.created_by_display_name || payload.created_by_display_name,
+    created_by_profile_url: existingFork?.created_by_profile_url || payload.created_by_profile_url,
+    created_by_verified: existingFork?.created_by_verified ?? payload.created_by_verified,
+    updated_by_handle: payload.updated_by_handle || payload.created_by_handle,
+    updated_by_display_name: payload.updated_by_display_name || payload.created_by_display_name,
+    updated_by_profile_url: payload.updated_by_profile_url || payload.created_by_profile_url,
+    updated_by_verified: payload.updated_by_verified ?? payload.created_by_verified
   };
 
   await kv.set(forkKey, record);
-  await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+  if (!existingFork) {
+    await addToSectionIndex(kv, normalizedSection, normalizedSlug);
+  }
 
-  if (payload.created_by_handle) {
-    const agentRow = await getAgentProfileRow(payload.created_by_handle);
-    const agentBase = parseAgentProfile(agentRow, payload.created_by_handle);
+  const actorHandle = payload.created_by_handle || payload.updated_by_handle;
+  if (actorHandle) {
+    const agentRow = await getAgentProfileRow(actorHandle);
+    const agentBase = parseAgentProfile(agentRow, actorHandle);
     await persistAgentProfile({
       ...agentBase,
-      artifact_count: agentBase.artifact_count + 1,
+      artifact_count: agentBase.artifact_count + (existingFork ? 0 : 1),
       last_artifact_ref: `${normalizedSection}/${normalizedSlug}`
     });
   }
@@ -240,8 +176,9 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     actor_display_name: payload.created_by_display_name,
     actor_profile_url: payload.created_by_profile_url,
     actor_verified: payload.created_by_verified,
-    revision_id: 'v1',
+    revision_id: nextRevisionId,
     source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
+    diff_summary: isSelfUpdate ? (payload.author_commentary || `Updated ${prevRevisionId} \u2192 ${nextRevisionId}`) : undefined,
     timestamp: now,
     title: record.title
   });
@@ -250,7 +187,7 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     action: 'fork',
     actor_handle: payload.created_by_handle,
     actor_verified: payload.created_by_verified,
-    revision_id: 'v1',
+    revision_id: nextRevisionId,
     source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
     timestamp: now,
     title: record.title
@@ -259,7 +196,7 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
   return record;
 }
 
-function bumpRevisionId(current?: string) {
+function bumpForkRevision(current?: string) {
   if (!current) return 'v2';
   const match = current.match(/^v(\d+)$/);
   if (!match?.[1]) return `${current}-r2`;
@@ -278,14 +215,14 @@ export async function deleteArtifact(section: CoreSection, slug: string): Promis
   await removeFromSectionIndex(kv, normalizedSection, normalizedSlug);
 }
 
-export async function getSiteStats(): Promise<{ soulCount: number; contributorCount: number; revisionCount: number }> {
+export async function getSiteStats(): Promise<{ soulCount: number; contributorCount: number; forkCount: number }> {
   const kv = await getKvClient();
   if (!kv) {
     const soulItems = fromMdSection('soul');
     return {
       soulCount: soulItems.length,
       contributorCount: 0,
-      revisionCount: 0
+      forkCount: 0
     };
   }
 
@@ -299,14 +236,14 @@ export async function getSiteStats(): Promise<{ soulCount: number; contributorCo
     ? rawAgentIndex.filter((v): v is string => typeof v === 'string').length
     : 0;
 
-  const revisionCount = Array.isArray(rawRecentActivity)
+  const forkCount = Array.isArray(rawRecentActivity)
     ? rawRecentActivity.length
     : 0;
 
   return {
     soulCount: soulIndex.length,
     contributorCount,
-    revisionCount
+    forkCount
   };
 }
 
