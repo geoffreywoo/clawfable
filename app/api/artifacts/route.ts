@@ -3,7 +3,6 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@vercel/kv';
 import {
   artifactPayloadFromRequest,
-  createArtifact,
   decodeEscapedUnicodeLiterals,
   deleteArtifact,
   forkArtifact,
@@ -231,8 +230,8 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isMode(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use create, fork, delete, clear, clear_history, fix_index, or update_title.' }, { status: 400 });
-  }
+      return NextResponse.json({ error: 'Invalid mode. Use fork, delete, clear, clear_history, fix_index, or update_title.' }, { status: 400 });
+    }
 
   if (mode === 'clear') {
     const sections = normalizeTargetSections(body.sections).length
@@ -484,27 +483,12 @@ export async function POST(request: NextRequest) {
     };
 
     if (mode === 'create') {
-      const doc = await createArtifact({
-        section: payload.section,
-        slug: payload.slug,
-        title: payload.title,
-        description: payload.description,
-        content: payload.content,
-        copy_paste_scope: payload.copy_paste_scope,
-        author_commentary: authorCommentary,
-        user_comments: userComments,
-        ...createdActor,
-        ...updatedActor,
-        revision: {
-          kind: extractValue(body, 'kind') || 'core',
-          id: extractValue(body, 'revision_id') || payload.revision?.id,
-          status: extractValue(body, 'status') || 'review',
-          family: payload.revision?.family
+      return NextResponse.json(
+        {
+          error: 'SOUL uploads must fork the canonical root. Use mode "fork" with sourceSlug "openclaw-template".'
         },
-        sourcePath: payload.sourcePath
-      });
-      revalidatePath(`/section/${payload.section}`);
-      return responseWithArtifact(doc.section, doc.slug, request);
+        { status: 400 }
+      );
     }
 
     // mode === 'fork' (the only remaining write path)
@@ -513,15 +497,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'sourceSlug is required for fork mode.' }, { status: 400 });
     }
 
-    const normalizedSlug = payload.slug.startsWith(`forks/${actor.handle}/`)
-      ? payload.slug
-      : `forks/${actor.handle}/${payload.slug}`;
-
     const doc = await forkArtifact({
       section: payload.section,
       sourceSection: payload.section,
       sourceSlug,
-      slug: normalizedSlug,
+      slug: payload.slug,
       title: payload.title,
       description: payload.description,
       content: payload.content,
@@ -531,11 +511,9 @@ export async function POST(request: NextRequest) {
       ...createdActor,
       ...updatedActor,
       revision: {
-        id: extractValue(body, 'revision_id') || payload.revision?.id,
         status: extractValue(body, 'status') || 'review',
         family: payload.revision?.family,
-        source: sourceSlug,
-        parent_revision: extractValue(body, 'parent_revision') || payload.revision?.parent_revision
+        source: sourceSlug
       },
       sourcePath: payload.sourcePath
     });

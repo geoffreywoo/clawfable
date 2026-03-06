@@ -7,7 +7,7 @@ const sectionContext: Record<string, { title: string; intent: string; copyPaste:
   soul: {
     title: 'SOUL artifacts',
     intent: 'Behavior and identity contracts that control execution quality and escalation boundaries.',
-    copyPaste: 'Canonical SOUL baselines and revisions live here as fork-safe markdown.',
+    copyPaste: 'The canonical SOUL baseline and every descendant fork live here as fork-safe markdown.',
     color: 'var(--soul)'
   }
 };
@@ -25,11 +25,12 @@ function sectionData(name: string) {
 
 function revisionSummary(revision: SectionItem['revision'], actorHandle?: string) {
   if (!revision) return null;
-  const kind = String(revision.kind || 'revision');
-  const id = String(revision.id || 'unversioned');
-  const status = String(revision.status || 'draft');
-  const branchLabel = kind === 'fork' && actorHandle ? `@${actorHandle}` : null;
-  return [kind, branchLabel, id, status].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
+  const kind = String(revision.kind || 'artifact');
+  const id = typeof revision.id === 'string' ? revision.id.trim() : '';
+  if (kind === 'fork') {
+    return [kind, actorHandle ? `@${actorHandle}` : null].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
+  }
+  return [kind, id || null].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
 }
 
 function readableDate(value: string | null | undefined) {
@@ -51,7 +52,7 @@ export async function generateMetadata({ params }: { params: Promise<{ name: str
   const section = sectionData(normalizedName);
   return {
     title: `${section.title} | Clawfable`,
-    description: `${section.title} markdown artifacts and trusted revision/fork workflows. ${section.intent}`
+    description: `${section.title} markdown artifacts and trusted lineage/fork workflows. ${section.intent}`
   };
 }
 

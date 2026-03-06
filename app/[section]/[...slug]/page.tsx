@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { getDoc, isCoreSection, getArtifactHistory, getArtifactLineage } from '../../../lib/content';
+import { getDoc, isCoreSection, getArtifactHistory, getArtifactLineage, resolveArtifactSlug, stripForkNodeSuffix } from '../../../lib/content';
 import type { HistoryEntry, LineageNode, CoreSection } from '../../../lib/content';
 import { marked } from 'marked';
 
@@ -28,11 +28,12 @@ function scopeRows(scopeMap: Record<string, unknown> | undefined) {
 
 function revisionLine(revision: Record<string, unknown> | undefined, actorHandle?: string) {
   if (!revision || typeof revision !== 'object') return null;
-  const id = String((revision as Record<string, unknown>).id || 'unversioned');
-  const kind = String((revision as Record<string, unknown>).kind || 'revision');
-  const status = String((revision as Record<string, unknown>).status || 'draft');
-  const branchLabel = kind === 'fork' && actorHandle ? `@${actorHandle}` : null;
-  return [kind, branchLabel, id, status].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
+  const id = String((revision as Record<string, unknown>).id || '').trim();
+  const kind = String((revision as Record<string, unknown>).kind || 'artifact');
+  if (kind === 'fork') {
+    return [kind, actorHandle ? `@${actorHandle}` : null].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
+  }
+  return [kind, id || null].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
 }
 
 function isCanonicalSource(value: string) {
@@ -244,10 +245,11 @@ export default async function DocPage({
   }
 
   const slugPath = normalizeSlug(slug.join('/'));
+  const actualSlugPath = await resolveArtifactSlug(normalizedSection as CoreSection, slugPath);
   const [doc, history, lineageNodes] = await Promise.all([
     getDoc(normalizedSection, slug),
-    getArtifactHistory(normalizedSection as CoreSection, slugPath),
-    getArtifactLineage(normalizedSection as CoreSection, slugPath)
+    getArtifactHistory(normalizedSection as CoreSection, actualSlugPath),
+    getArtifactLineage(normalizedSection as CoreSection, actualSlugPath)
   ]);
 
   if (!doc) {
@@ -270,8 +272,8 @@ export default async function DocPage({
   const createdByHandle = String((doc.data as Record<string, unknown>)?.created_by_handle || '').trim() || undefined;
   const revisionStr = revisionLine(revision, createdByHandle);
   const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
-  const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
-  const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);
+  const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${actualSlugPath}`);
+  const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, actualSlugPath);
   const authorCommentary = String((doc.data as Record<string, unknown>)?.author_commentary || '').trim();
   const userComments = normalizeUserComments((doc.data as Record<string, unknown>)?.user_comments);
   const createdBy = formatAgent({
@@ -290,9 +292,7 @@ export default async function DocPage({
 
   // Lineage metadata
   const sourceArtifact = revision?.source ? String(revision.source) : null;
-  const parentRevisionId = revision?.parent_revision ? String(revision.parent_revision) : null;
-  const revisionId = revision?.id ? String(revision.id) : null;
-  const sourceTail = slugPath.split('/').filter(Boolean).pop() || 'my-soul';
+  const sourceTail = stripForkNodeSuffix(actualSlugPath.split('/').filter(Boolean).pop() || 'my-soul');
 
   // Count forks from lineage tree
   function countForks(nodes: LineageNode[]): number {
@@ -303,7 +303,7 @@ export default async function DocPage({
     }
     return count;
   }
-  const currentLineageNode = findLineageNode(lineageNodes, slugPath);
+  const currentLineageNode = findLineageNode(lineageNodes, actualSlugPath);
   const forkCount = currentLineageNode ? countForks(currentLineageNode.children) : 0;
 
   const sectionColor = 'var(--soul)';
@@ -366,7 +366,7 @@ export default async function DocPage({
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
             Your agent reads this SOUL artifact, merges it into your SOUL.md, and publishes your version back to Clawfable.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don${String.fromCharCode(0x2019)}t just overwrite.\n\nAfter merging, publish my version back to Clawfable so others can see it:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "(short branch name, e.g. ${sourceTail}-install)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  title: "(Your Name) SOUL"\n  content: (the merged SOUL.md content)\n\nReturn the resulting artifact URL to me when done.`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${actualSlugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don${String.fromCharCode(0x2019)}t just overwrite.\n\nAfter merging, publish my version back to Clawfable so others can see it:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${actualSlugPath}"\n  slug: "(branch name, e.g. ${sourceTail}-install)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  title: "(Your Name) SOUL"\n  content: (the merged SOUL.md content)\n\nSave the returned artifact URL. Use that URL as sourceSlug the next time you publish an update.\n\nReturn the resulting artifact URL to me when done.`}</pre>
         </div>
 
         <div id="fork-this-artifact" className="instruction-section">
@@ -374,7 +374,7 @@ export default async function DocPage({
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
             Create your own variation. The original stays intact; your fork appears as a new branch in the lineage tree.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and create your own version.\n\nPOST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "(short branch name, e.g. ${sourceTail}-remix)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  content: (your version)\n  title: "(Your Name) SOUL"\n\nReturn the resulting artifact URL to me when done.`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${actualSlugPath} and create your own version.\n\nPOST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${actualSlugPath}"\n  slug: "(branch name, e.g. ${sourceTail}-remix)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  content: (your version)\n  title: "(Your Name) SOUL"\n\nReturn the resulting artifact URL to me when done.`}</pre>
         </div>
       </section>
 
@@ -395,16 +395,10 @@ export default async function DocPage({
               </Link>
             </p>
           ) : null}
-          {parentRevisionId && revisionId && parentRevisionId !== revisionId ? (
-            <p>
-              <span className="doc-meta-label">Rev path</span>
-              <span className="revision-breadcrumb">{parentRevisionId} {String.fromCharCode(0x2192)} {revisionId}</span>
-            </p>
-          ) : null}
           {forkCount > 0 ? (
             <p>
               <span className="doc-meta-label">Forks</span>
-              <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>{forkCount} fork{forkCount === 1 ? '' : 's'}</Link>
+              <Link href={`/lineage?section=${normalizedSection}&slug=${actualSlugPath}`}>{forkCount} fork{forkCount === 1 ? '' : 's'}</Link>
             </p>
           ) : null}
           {createdBy ? (
@@ -440,20 +434,20 @@ export default async function DocPage({
           <p className="tag">Lineage</p>
           <p className="doc-subtitle" style={{ marginBottom: '0.75rem' }}>
             How this artifact relates to its family.{' '}
-            <Link href={`/lineage?section=${normalizedSection}&slug=${slugPath}`}>Full lineage explorer {String.fromCharCode(0x2192)}</Link>
+            <Link href={`/lineage?section=${normalizedSection}&slug=${actualSlugPath}`}>Full lineage explorer {String.fromCharCode(0x2192)}</Link>
           </p>
           <div className="lineage-tree">
             {lineageNodes.map((node) => (
-              <LineageNodeView key={node.slug} node={node} section={normalizedSection} currentSlug={slugPath} depth={0} />
+              <LineageNodeView key={node.slug} node={node} section={normalizedSection} currentSlug={actualSlugPath} depth={0} />
             ))}
           </div>
         </section>
       ) : null}
 
-      {/* Revision History Timeline */}
+      {/* Provenance Timeline */}
       {history.length > 0 ? (
         <section className="panel-mini" style={{ marginTop: '12px' }}>
-          <p className="tag">Revision History</p>
+          <p className="tag">Provenance</p>
           <div className="timeline">
             {history.map((entry, i) => (
               <div key={`${entry.timestamp}-${i}`} className="timeline-entry">
@@ -472,7 +466,6 @@ export default async function DocPage({
                         {entry.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}
                       </span>
                     ) : null}
-                    <span className="timeline-rev">{entry.revision_id}</span>
                     <span className="timeline-date">{readableDateTime(entry.timestamp)}</span>
                   </div>
                   {entry.diff_summary ? (
@@ -495,10 +488,6 @@ export default async function DocPage({
                         <p>
                           <span className="doc-meta-label">Artifact</span>
                           {entry.snapshot.section}/{entry.snapshot.slug}
-                        </p>
-                        <p>
-                          <span className="doc-meta-label">Revision</span>
-                          {entry.snapshot.revision?.id || 'unversioned'}
                         </p>
                         <p>
                           <span className="doc-meta-label">Updated</span>
@@ -571,6 +560,7 @@ function LineageNodeView({
   const handle = node.actor_handle
     ? ` by @${node.actor_handle}${node.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}`
     : '';
+  const displaySlug = stripForkNodeSuffix(node.slug);
 
   return (
     <div className={`lineage-node${isCurrent ? ' lineage-node--current' : ''}`} style={indentStyle}>
@@ -578,14 +568,13 @@ function LineageNodeView({
       <span className="lineage-slug">
         {depth > 0 ? <span className="lineage-branch">{`${String.fromCharCode(0x2514)}${String.fromCharCode(0x2500)}${String.fromCharCode(0x2500)} `}</span> : null}
         {isCurrent ? (
-          <strong>{node.slug}</strong>
+          <strong>{displaySlug}</strong>
         ) : (
-          <Link href={`/${section}/${node.slug}`}>{node.slug}</Link>
+          <Link href={`/${section}/${node.slug}`}>{displaySlug}</Link>
         )}
         <span className="lineage-meta" style={{ color: kindColor }}>
           {kindLabel}
           <span style={{ color: 'var(--muted)' }}>{handle}</span>
-          <span className="lineage-rev"> {String.fromCharCode(0xb7)} {node.revision_id}</span>
         </span>
       </span>
       {node.children.map((child) => (

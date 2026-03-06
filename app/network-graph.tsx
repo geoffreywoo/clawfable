@@ -29,7 +29,17 @@ type GraphNode = {
 type GraphEdge = {
   source: string;
   target: string;
-  type: 'fork' | 'revision' | 'connection';
+  type: 'fork' | 'connection';
+};
+
+type DragState = {
+  nodeId: string;
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
 };
 
 type Props = {
@@ -43,7 +53,7 @@ type Props = {
   edges: {
     source: string;
     target: string;
-    type: 'fork' | 'revision' | 'connection';
+    type: 'fork' | 'connection';
   }[];
 };
 
@@ -51,7 +61,6 @@ const COLORS = {
   soul: '#22d3ee',
   memory: '#f59e0b',
   fork: '#a78bfa',
-  revision: '#3d4150',
   connection: '#2a2d40',
   bg: '#08090d',
   grid: '#0f1117',
@@ -63,6 +72,7 @@ const COLORS = {
 const NODE_RADIUS = 8;
 const HOVER_RADIUS = 12;
 const LABEL_ALWAYS_THRESHOLD = 8;
+const DRAG_THRESHOLD = 4;
 
 function hashString(value: string) {
   let hash = 0;
@@ -81,6 +91,10 @@ function rgba(hex: string, alpha: number) {
   const g = Number.parseInt(value.slice(2, 4), 16);
   const b = Number.parseInt(value.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function baseNodeRadius(node: Pick<GraphNode, 'pinned' | 'degree'>) {
+  return node.pinned ? NODE_RADIUS * 2.1 : NODE_RADIUS + Math.min(node.degree, 4) * 0.55;
 }
 
 function buildTargetLayout(
@@ -187,11 +201,56 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
   const nodesRef = useRef<GraphNode[]>([]);
   const edgesRef = useRef<GraphEdge[]>([]);
   const hoveredRef = useRef<GraphNode | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const suppressClickRef = useRef(false);
   const mouseRef = useRef<{ x: number; y: number }>({ x: -1000, y: -1000 });
   const sizeRef = useRef<{ w: number; h: number }>({ w: 800, h: 400 });
   const router = useRouter();
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string; section: string } | null>(null);
   const [layoutSize, setLayoutSize] = useState<{ w: number; h: number }>({ w: 800, h: 400 });
+
+  const findNodeAt = useCallback((x: number, y: number) => {
+    let closest: GraphNode | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (const node of nodesRef.current) {
+      const radius = Math.max(HOVER_RADIUS, baseNodeRadius(node) + 3);
+      const dx = node.x - x;
+      const dy = node.y - y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= radius && distance < closestDistance) {
+        closest = node;
+        closestDistance = distance;
+      }
+    }
+
+    return closest;
+  }, []);
+
+  const setTooltipForNode = useCallback((node: GraphNode | null, x: number, y: number) => {
+    if (!node) {
+      setTooltip(null);
+      return;
+    }
+
+    setTooltip({
+      x,
+      y,
+      text: node.label,
+      section: node.section,
+    });
+  }, []);
+
+  const canvasPoint = useCallback((event: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      rect,
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }, []);
 
   useEffect(() => {
     const layout = buildTargetLayout(inputNodes, inputEdges, layoutSize.w, layoutSize.h);
@@ -275,6 +334,14 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     }
 
     for (const node of nodes) {
+      if (dragRef.current?.nodeId === node.id) {
+        node.x = node.tx;
+        node.y = node.ty;
+        node.vx = 0;
+        node.vy = 0;
+        continue;
+      }
+
       if (node.pinned) {
         node.x = node.tx;
         node.y = node.ty;
@@ -376,9 +443,6 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       } else if (edge.type === 'connection') {
         ctx.strokeStyle = isHighlighted ? COLORS.soul : rgba(COLORS.soul, 0.16);
         ctx.lineWidth = isHighlighted ? 1.8 * dpr : 0.9 * dpr;
-      } else {
-        ctx.strokeStyle = isHighlighted ? COLORS.muted : 'rgba(61, 65, 80, 0.3)';
-        ctx.lineWidth = isHighlighted ? 1.5 * dpr : 0.5 * dpr;
       }
 
       if (!isHighlighted) {
@@ -405,9 +469,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         ctx.arc(px, py, (isHighlighted ? 2.6 : 1.7) * dpr, 0, Math.PI * 2);
         ctx.fillStyle = edge.type === 'fork'
           ? (isHighlighted ? COLORS.fork : rgba(COLORS.fork, 0.55))
-          : edge.type === 'connection'
-            ? (isHighlighted ? COLORS.soul : rgba(COLORS.soul, 0.45))
-            : (isHighlighted ? COLORS.muted : rgba(COLORS.muted, 0.35));
+          : (isHighlighted ? COLORS.soul : rgba(COLORS.soul, 0.45));
         ctx.fill();
       }
     }
@@ -420,7 +482,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         (e) => (e.source === hovered.id && e.target === node.id) || (e.target === hovered.id && e.source === node.id)
       );
       const color = node.section === 'soul' ? COLORS.soul : COLORS.memory;
-      const baseRadius = node.pinned ? NODE_RADIUS * 2.1 : NODE_RADIUS + Math.min(node.degree, 4) * 0.55;
+      const baseRadius = baseNodeRadius(node);
       const radius = (isHovered ? Math.max(HOVER_RADIUS, baseRadius + 2) : baseRadius) * dpr;
       const pulseRadius = node.pinned ? (1 + Math.sin(time * 2.2) * 0.08) : 1;
 
@@ -513,35 +575,124 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     return () => observer.disconnect();
   }, []);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    mouseRef.current = { x, y };
+    const point = canvasPoint(event);
+    if (!canvas || !point) return;
 
-    const hovered = hoveredRef.current;
-    if (hovered) {
-      canvas.style.cursor = 'pointer';
-      setTooltip({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-        text: hovered.label,
-        section: hovered.section,
-      });
-    } else {
+    mouseRef.current = { x: point.x, y: point.y };
+
+    const drag = dragRef.current;
+    if (drag && drag.pointerId === event.pointerId) {
+      const nextX = Math.max(30, Math.min(sizeRef.current.w - 30, point.x - drag.offsetX));
+      const nextY = Math.max(30, Math.min(sizeRef.current.h - 30, point.y - drag.offsetY));
+      const node = nodesRef.current.find((candidate) => candidate.id === drag.nodeId) || null;
+
+      if (node) {
+        node.tx = nextX;
+        node.ty = nextY;
+        node.x = nextX;
+        node.y = nextY;
+        node.vx = 0;
+        node.vy = 0;
+      }
+
+      if (!drag.moved) {
+        const dx = point.x - drag.startX;
+        const dy = point.y - drag.startY;
+        if (Math.sqrt(dx * dx + dy * dy) >= DRAG_THRESHOLD) {
+          drag.moved = true;
+          suppressClickRef.current = true;
+        }
+      }
+
+      canvas.style.cursor = 'grabbing';
+      hoveredRef.current = node;
+      setTooltipForNode(node, point.x, point.y);
+      return;
+    }
+
+    const hovered = findNodeAt(point.x, point.y);
+    hoveredRef.current = hovered;
+    canvas.style.cursor = hovered ? 'grab' : 'default';
+    setTooltipForNode(hovered, point.x, point.y);
+  }, [canvasPoint, findNodeAt, setTooltipForNode]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const point = canvasPoint(event);
+    if (!canvas || !point) return;
+
+    const node = findNodeAt(point.x, point.y);
+    hoveredRef.current = node;
+    mouseRef.current = { x: point.x, y: point.y };
+
+    if (!node) {
       canvas.style.cursor = 'default';
       setTooltip(null);
+      return;
     }
-  }, []);
 
-  const handleMouseLeave = useCallback(() => {
+    dragRef.current = {
+      nodeId: node.id,
+      pointerId: event.pointerId,
+      offsetX: point.x - node.x,
+      offsetY: point.y - node.y,
+      startX: point.x,
+      startY: point.y,
+      moved: false
+    };
+    suppressClickRef.current = false;
+    canvas.style.cursor = 'grabbing';
+    setTooltipForNode(node, point.x, point.y);
+    canvas.setPointerCapture(event.pointerId);
+  }, [canvasPoint, findNodeAt, setTooltipForNode]);
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const point = canvasPoint(event);
+    if (!canvas) return;
+
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+
+    const drag = dragRef.current;
+    dragRef.current = null;
+
+    if (!point) {
+      canvas.style.cursor = 'default';
+      setTooltip(null);
+      return;
+    }
+
+    mouseRef.current = { x: point.x, y: point.y };
+    const hovered = findNodeAt(point.x, point.y);
+    hoveredRef.current = hovered;
+    canvas.style.cursor = hovered ? 'grab' : 'default';
+    setTooltipForNode(hovered, point.x, point.y);
+
+    if (drag?.moved) {
+      suppressClickRef.current = true;
+    }
+  }, [canvasPoint, findNodeAt, setTooltipForNode]);
+
+  const handlePointerLeave = useCallback(() => {
+    if (dragRef.current) return;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.style.cursor = 'default';
+    }
     mouseRef.current = { x: -1000, y: -1000 };
+    hoveredRef.current = null;
     setTooltip(null);
   }, []);
 
   const handleClick = useCallback(() => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const hovered = hoveredRef.current;
     if (hovered) {
       router.push(hovered.href);
@@ -552,8 +703,11 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     <div className="network-graph-container" ref={containerRef}>
       <canvas
         ref={canvasRef}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
         onClick={handleClick}
       />
       {tooltip && (

@@ -16,7 +16,7 @@ function readableDateTime(value: string | null | undefined) {
 function actionVerb(action: HistoryEntry['action'] | string) {
   if (action === 'create') return 'created';
   if (action === 'fork') return 'forked';
-  if (action === 'revise') return 'updated';
+  if (action === 'revise') return 'forked';
   return 'updated';
 }
 
@@ -31,7 +31,7 @@ type GraphNodeInput = {
 type GraphEdgeInput = {
   source: string;
   target: string;
-  type: 'fork' | 'revision' | 'connection';
+  type: 'fork' | 'connection';
 };
 
 function collectGraphData(lineageNodes: LineageNode[], section: 'soul'): { nodes: GraphNodeInput[]; edges: GraphEdgeInput[] } {
@@ -57,7 +57,7 @@ function collectGraphData(lineageNodes: LineageNode[], section: 'soul'): { nodes
       edges.push({
         source: id,
         target: childId,
-        type: child.kind === 'fork' ? 'fork' : 'revision',
+        type: 'fork',
       });
       traverse(child);
     }

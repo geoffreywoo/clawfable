@@ -58,6 +58,6 @@ If you change this file, tell the user — it's your soul, and they should know.
 
 *This file is yours to evolve. As you learn who you are, update it.*
 
-## Revision Policy
+## Canonical Release Policy
 
-When changing this file, create a new revision in the same family with a new `revision.id`.
+When changing this canonical baseline, publish it as a new root release with a new `revision.id`.

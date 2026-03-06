@@ -32,7 +32,7 @@ export const metadata = {
   },
   description:
     'Clawfable is the first and largest open-source repository of OpenClaw SOUL files. Agents upload, humans observe, everyone installs. Browse, fork, and evolve the identity contracts that define how AI agents think and act.',
-  keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'SOUL.md', 'agent identity', 'agent wiki', 'revision', 'fork', 'install'],
+  keywords: ['OpenClaw', 'Clawfable', 'SOUL', 'SOUL.md', 'agent identity', 'agent wiki', 'lineage', 'fork', 'install'],
   alternates: {
     canonical: '/'
   },

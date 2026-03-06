@@ -199,6 +199,7 @@ const DB_SKIP_SEED_PREFIX = 'clawfable:admin:skip_seed';
 const DB_HISTORY_PREFIX = 'clawfable:db:history';
 const DB_HISTORY_INDEX_PREFIX = 'clawfable:db:history_index';
 export const DB_RECENT_ACTIVITY_KEY = 'clawfable:db:recent_activity';
+const DB_BRANCH_HEAD_PREFIX = 'clawfable:db:branch_head';
 const RECENT_ACTIVITY_CAP = 100;
 const OPENCLAW_CANONICAL_TEMPLATES: Record<CoreSection, string> = {
   soul: 'https://docs.openclaw.ai/reference/templates/SOUL.md'
@@ -279,6 +280,49 @@ export function decodeEscapedUnicodeLiterals(value: string) {
   return value.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) =>
     String.fromCodePoint(Number.parseInt(hex, 16))
   );
+}
+
+const FORK_NODE_SUFFIX_PATTERN = /--\d{8}t\d{6}z(?:-[a-z0-9]{4})?$/i;
+
+function branchHeadKey(section: CoreSection, aliasSlug: string) {
+  return `${DB_BRANCH_HEAD_PREFIX}:${section}:${normalizeSlug(aliasSlug)}`;
+}
+
+function forkNodeTimestampToken(value = nowStamp()) {
+  const parsed = new Date(value);
+  const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return base
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'z')
+    .toLowerCase();
+}
+
+export function stripForkNodeSuffix(slug: string) {
+  return normalizeSlug(slug).replace(FORK_NODE_SUFFIX_PATTERN, '');
+}
+
+export function normalizeForkBranchSlug(handle: string, slug: string) {
+  const normalizedHandle = normalizeAgentHandle(handle);
+  const normalizedSlug = normalizeSlug(slug);
+  const ownPrefix = `forks/${normalizedHandle}/`;
+  const branchSlug = normalizedSlug.startsWith(ownPrefix)
+    ? normalizedSlug.slice(ownPrefix.length)
+    : normalizedSlug;
+  const cleaned = stripForkNodeSuffix(branchSlug).replace(/^\/+/, '').replace(/\/+$/, '');
+  return cleaned || normalizedHandle;
+}
+
+export function branchAliasSlug(handle: string, slug: string) {
+  const normalizedHandle = normalizeAgentHandle(handle);
+  const branchSlug = normalizeForkBranchSlug(normalizedHandle, slug);
+  return `forks/${normalizedHandle}/${branchSlug}`;
+}
+
+export function buildForkArtifactSlug(handle: string, slug: string, timestamp = nowStamp()) {
+  const aliasSlug = branchAliasSlug(handle, slug);
+  const suffix = `${forkNodeTimestampToken(timestamp)}-${randomBytes(2).toString('hex')}`;
+  return `${aliasSlug}--${suffix}`;
 }
 
 function isWithinRange(createdAt: string | undefined, issuedAt: string | undefined, expiresAt: string | undefined) {
@@ -471,6 +515,63 @@ export function artifactKey(section: CoreSection, slug: string) {
   return `${DB_ARTIFACT_PREFIX}:${section}:${slug}`;
 }
 
+async function resolveArtifactSlugWithKv(kv: KVClient, section: CoreSection, slug: string) {
+  const normalizedSlug = normalizeSlug(slug);
+  const aliasTarget = await kvGet<unknown>(kv, branchHeadKey(section, normalizedSlug));
+  if (typeof aliasTarget === 'string' && aliasTarget.trim()) {
+    const resolvedSlug = normalizeSlug(aliasTarget);
+    const resolved = await kvGet<DbRecord>(kv, artifactKey(section, resolvedSlug));
+    if (resolved) {
+      return {
+        slug: resolvedSlug,
+        record: resolved
+      };
+    }
+  }
+
+  const direct = await kvGet<DbRecord>(kv, artifactKey(section, normalizedSlug));
+  if (!direct) return null;
+
+  return {
+    slug: normalizedSlug,
+    record: direct
+  };
+}
+
+export async function resolveArtifactSlug(section: CoreSection, slug: string) {
+  const kv = await getKvClient();
+  if (!kv) return normalizeSlug(slug);
+  const resolved = await resolveArtifactSlugWithKv(kv, normalizeSection(section), slug);
+  return resolved?.slug || normalizeSlug(slug);
+}
+
+export async function getArtifactRecord(section: CoreSection, slug: string): Promise<DbRecord | null> {
+  const kv = await getKvClient();
+  if (!kv) return null;
+  const resolved = await resolveArtifactSlugWithKv(kv, normalizeSection(section), slug);
+  return resolved?.record || null;
+}
+
+export async function resolveArtifactReference(
+  kv: KVClient,
+  section: CoreSection,
+  slug: string
+): Promise<{ slug: string; record: DbRecord } | null> {
+  return resolveArtifactSlugWithKv(kv, normalizeSection(section), slug);
+}
+
+export async function setBranchHeadArtifact(
+  kv: KVClient,
+  section: CoreSection,
+  handle: string,
+  slug: string,
+  artifactSlug: string
+) {
+  const aliasSlug = branchAliasSlug(handle, slug);
+  await kv.set(branchHeadKey(section, aliasSlug), normalizeSlug(artifactSlug));
+  return aliasSlug;
+}
+
 export function isCanonicalSeedArtifact(section: CoreSection, slug: string) {
   const normalizedSection = normalizeSection(section);
   return normalizeSlug(slug).toLowerCase() === OPENCLAW_CANONICAL_SEEDS[normalizedSection];
@@ -605,8 +706,8 @@ function extractRevision(meta: Record<string, unknown> | undefined) {
 
   return {
     family: String(revision.family || '').trim() || undefined,
-    id: String(revision.id || revision.version || 'v1').trim() || undefined,
-    kind: String(revision.kind || revision.type || 'revision').trim() || undefined,
+    id: String(revision.id || revision.version || '').trim() || undefined,
+    kind: String(revision.kind || revision.type || 'artifact').trim() || undefined,
     status: String(revision.status || 'draft').trim() || undefined,
     parent_revision: revision.parent_revision ? String(revision.parent_revision) : undefined,
     source: revision.fork_of
@@ -748,7 +849,6 @@ export function toDoc(row: DbRecord): { data: Record<string, unknown>; content: 
         id: row.revision?.id,
         kind: row.revision?.kind,
         status: row.revision?.status,
-        parent_revision: row.revision?.parent_revision,
         source: row.revision?.source
       },
       author_commentary: authorCommentary,
@@ -1189,8 +1289,9 @@ export async function getArtifactHistory(
   const kv = await getKvClient();
   if (!kv) return [];
 
-  const key = historyKey(section, slug);
-  const idxKey = historyIndexKey(section, slug);
+  const resolvedSlug = (await resolveArtifactSlugWithKv(kv, section, slug))?.slug || normalizeSlug(slug);
+  const key = historyKey(section, resolvedSlug);
+  const idxKey = historyIndexKey(section, resolvedSlug);
   const rawIndex = await kvGet<unknown>(kv, idxKey);
   const index = Array.isArray(rawIndex)
     ? rawIndex.filter((v): v is string => typeof v === 'string')
@@ -1222,7 +1323,6 @@ export type LineageNode = {
   slug: string;
   title: string;
   kind: string;
-  revision_id?: string;
   actor_handle?: string;
   actor_verified?: boolean;
   created_at?: string;
@@ -1265,11 +1365,12 @@ export function buildLineageForest(items: SectionItem[], section: CoreSection): 
   const attachedChildren = new Set<string>();
 
   for (const item of items) {
+    const itemRevision = item.data?.revision as Record<string, unknown> | undefined;
+    const sourceArtifact = typeof itemRevision?.source === 'string' ? itemRevision.source : undefined;
     nodeMap.set(item.slug, {
       slug: item.slug,
       title: item.title,
-      kind: item.revision?.kind || 'revision',
-      revision_id: item.revision?.id,
+      kind: item.revision?.kind || (sourceArtifact ? 'fork' : isCanonicalSeedArtifact(section, item.slug) ? 'core' : 'artifact'),
       actor_handle: typeof item.data?.created_by_handle === 'string' ? item.data.created_by_handle : undefined,
       actor_verified: item.data?.created_by_verified === true,
       created_at: typeof item.data?.created_at === 'string' ? item.data.created_at : undefined,
@@ -1316,7 +1417,7 @@ export async function getLineageForest(section: CoreSection): Promise<LineageNod
 }
 
 export async function getArtifactLineage(section: CoreSection, slug: string): Promise<LineageNode[]> {
-  const normalizedSlug = normalizeSlug(slug);
+  const normalizedSlug = await resolveArtifactSlug(section, slug);
   const forest = await getLineageForest(section);
   return forest.filter((root) => lineageContains(root, normalizedSlug));
 }
@@ -1425,9 +1526,8 @@ export async function getDoc(
     if (isCanonicalSeedArtifact(normalizedSection, normalizedSlug)) {
       await ensureCanonicalSeedRecord(kv, normalizedSection);
     }
-    const key = artifactKey(normalizedSection, normalizedSlug);
-    const row = await kvGet<DbRecord>(kv, key);
-    if (row) return toDoc(row);
+    const resolved = await resolveArtifactSlugWithKv(kv, normalizedSection, normalizedSlug);
+    if (resolved?.record) return toDoc(resolved.record);
   }
 
   // Fallback to filesystem

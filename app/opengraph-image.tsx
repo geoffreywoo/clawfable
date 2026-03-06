@@ -65,7 +65,7 @@ export default function OpenGraphImage() {
                 color: '#cbd5e1'
               }}
             >
-              Track canonical baselines, forks, and revision history over time.
+              Track the canonical baseline, descendant forks, and provenance over time.
             </div>
           </div>
           <div

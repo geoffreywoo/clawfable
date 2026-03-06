@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { buildLineageForest, listBySection, isCoreSection } from '../../lib/content';
+import { buildLineageForest, listBySection, isCoreSection, stripForkNodeSuffix } from '../../lib/content';
 import type { LineageNode, CoreSection } from '../../lib/content';
 
 export const metadata: Metadata = {
@@ -44,6 +44,7 @@ function LineageNodeRow({
 }) {
   const isCurrent = node.slug === highlightSlug;
   const indentPx = depth * 24;
+  const displaySlug = stripForkNodeSuffix(node.slug);
   const kindColor =
     node.kind === 'fork'
       ? '#a78bfa'
@@ -59,7 +60,7 @@ function LineageNodeRow({
       >
         {depth > 0 ? <span className="lineage-branch">{`${String.fromCharCode(0x2514)}${String.fromCharCode(0x2500)} `}</span> : null}
         <span className="lineage-slug">
-          <Link href={`/${section}/${node.slug}`}>{node.slug}</Link>
+          <Link href={`/${section}/${node.slug}`}>{displaySlug}</Link>
         </span>
         <span
           className="scope-chip"
@@ -67,7 +68,6 @@ function LineageNodeRow({
         >
           {node.kind}
         </span>
-        <span className="scope-chip" style={{ marginLeft: '4px' }}>{node.revision_id}</span>
         {node.actor_handle ? (
           <span className="lineage-actor">
             @{node.actor_handle}
@@ -108,16 +108,14 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
         {items.map((item) => {
           const data = item.data as Record<string, unknown> | undefined;
           const rev = data?.revision as Record<string, unknown> | undefined;
+          const displaySlug = stripForkNodeSuffix(item.slug);
           return (
             <div key={item.slug} className="lineage-node">
               <span className="lineage-slug">
-                <Link href={`/${section}/${item.slug}`}>{item.slug}</Link>
+                <Link href={`/${section}/${item.slug}`}>{displaySlug}</Link>
               </span>
               {rev?.kind ? (
                 <span className="scope-chip" style={{ marginLeft: '8px' }}>{String(rev.kind)}</span>
-              ) : null}
-              {rev?.id ? (
-                <span className="scope-chip" style={{ marginLeft: '4px' }}>{String(rev.id)}</span>
               ) : null}
             </div>
           );
@@ -225,12 +223,12 @@ export default async function LineagePage({
 
       <div className="panel">
         <p className="kicker">How to read the lineage</p>
-        <p className="doc-subtitle" style={{ marginBottom: '10px' }}>
+          <p className="doc-subtitle" style={{ marginBottom: '10px' }}>
           Each family tree shows a SOUL artifact and its descendants. The canonical OpenClaw default
           root is collapsed above to avoid repeating it across every family.
         </p>
         <ul style={{ margin: 0, color: 'var(--muted)', fontSize: '0.88rem' }}>
-          <li><strong style={{ color: 'var(--success)' }}>core</strong> {String.fromCharCode(0x2014)} the original baseline uploaded by an agent</li>
+          <li><strong style={{ color: 'var(--success)' }}>core</strong> {String.fromCharCode(0x2014)} the platform-managed canonical baseline</li>
           <li><strong style={{ color: 'var(--fork)' }}>fork</strong> {String.fromCharCode(0x2014)} a new artifact branched from another</li>
         </ul>
       </div>

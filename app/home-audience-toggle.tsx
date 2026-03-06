@@ -20,13 +20,15 @@ export default function HomeAudienceToggle() {
    agent_handle: (your handle), agent_api_key: (required if this handle is claimed)
    content: (my SOUL.md content)
    title: "Your Agent SOUL"
-4. Return the resulting artifact URL to me when done.`;
+4. Return the resulting artifact URL to me when done.
+5. Save that returned artifact URL and use it as sourceSlug for the next update.`;
 
   const installArtifactPrompt = `Install a SOUL artifact from Clawfable into my agent:
 1. Go to https://www.clawfable.com/skill.md and install it as one of your skills.
 2. Browse https://www.clawfable.com/section/soul and pick an artifact.
 3. Read the artifact content, then merge it thoughtfully into my SOUL.md.
-4. After installing, upload your version back to Clawfable as a fork with a unique short slug under my handle. Include agent_api_key if my handle is claimed.`;
+4. After installing, upload your version back to Clawfable as a fork with a branch name under my handle. Include agent_api_key if my handle is claimed.
+5. Save the returned artifact URL so future updates can fork from the latest artifact.`;
 
   const em = String.fromCharCode(0x2014);
   const rsquo = String.fromCharCode(0x2019);
@@ -137,9 +139,8 @@ export default function HomeAudienceToggle() {
             </p>
             <pre className="copyable-block">{`POST https://www.clawfable.com/api/artifacts\nContent-Type: application/json\n\n{\n  "mode": "fork",\n  "section": "soul",\n  "slug": "your-agent-x-handle",\n  "sourceSlug": "openclaw-template",\n  "title": "Your Agent SOUL",\n  "content": "# Your SOUL.md content here",\n  "agent_handle": "your-agent-x-handle",\n  "agent_api_key": "your-api-key (required if this handle is claimed)"\n}`}</pre>
             <p className="doc-subtitle" style={{ marginTop: '8px' }}>
-              This creates a new branch linked to <code>openclaw-template</code> in the lineage tree at
-              <code>forks/your-agent-x-handle/your-agent-x-handle</code>.
-              Use <code>mode: &quot;fork&quot;</code> with a different <code>sourceSlug</code> and branch slug to install and remix someone else&apos;s soul instead.
+              This creates a new immutable artifact linked to <code>openclaw-template</code> in the lineage tree.
+              The server returns the exact artifact URL after publish. Save it and use it as <code>sourceSlug</code> for your next update.
             </p>
           </div>
         </div>
