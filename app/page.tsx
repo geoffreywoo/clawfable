@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { buildLineageForest, getRecentActivity, getSiteStats, listBySection } from '../lib/content';
-import type { HistoryEntry, LineageNode } from '../lib/content';
+import { buildLineageForest, getSiteStats, listBySection, stripForkNodeSuffix } from '../lib/content';
+import type { LineageNode, SectionItem } from '../lib/content';
 import HomeAudienceToggle from './home-audience-toggle';
 import NetworkGraph from './network-graph';
 
@@ -13,11 +13,87 @@ function readableDateTime(value: string | null | undefined) {
   return parsed.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
-function actionVerb(action: HistoryEntry['action'] | string) {
-  if (action === 'create') return 'created';
-  if (action === 'fork') return 'forked';
-  if (action === 'revise') return 'forked';
-  return 'updated';
+type HomeActivityEntry = {
+  action: 'create' | 'fork';
+  section: 'soul';
+  slug: string;
+  title: string;
+  actor_handle?: string;
+  actor_verified?: boolean;
+  source_artifact?: string;
+  timestamp: string;
+};
+
+function actionVerb(action: HomeActivityEntry['action']) {
+  if (action === 'create') return 'seeded';
+  return 'published';
+}
+
+function activityTimestamp(item: SectionItem) {
+  const createdAt = typeof item.data?.created_at === 'string' ? item.data.created_at : '';
+  const updatedAt = typeof item.data?.updated_at === 'string' ? item.data.updated_at : '';
+  return createdAt || updatedAt || '';
+}
+
+function activitySource(item: SectionItem) {
+  const revision = item.data?.revision as Record<string, unknown> | undefined;
+  return typeof revision?.source === 'string' ? revision.source : undefined;
+}
+
+function branchKey(item: SectionItem) {
+  return item.revision?.kind === 'fork' ? stripForkNodeSuffix(item.slug) : item.slug;
+}
+
+function sourceLabel(sourceArtifact?: string) {
+  if (!sourceArtifact) return null;
+  const normalized = sourceArtifact.replace(/\.md$/i, '').trim();
+  if (!normalized) return null;
+  if (normalized === 'soul/openclaw-template') return 'OpenClaw Default SOUL';
+  const tail = stripForkNodeSuffix(normalized.split('/').filter(Boolean).pop() || normalized);
+  return tail
+    .replace(/^forks\//i, '')
+    .replace(/[-_/]+/g, ' ')
+    .trim();
+}
+
+function buildRecentBranchActivity(items: SectionItem[], limit = 10): HomeActivityEntry[] {
+  const sorted = [...items]
+    .map((item) => ({ item, timestamp: activityTimestamp(item) }))
+    .filter((entry) => entry.timestamp)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  const seen = new Set<string>();
+  const result: HomeActivityEntry[] = [];
+
+  for (const { item, timestamp } of sorted) {
+    const key = branchKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const actorHandle =
+      typeof item.data?.updated_by_handle === 'string' && item.data.updated_by_handle.trim()
+        ? item.data.updated_by_handle
+        : typeof item.data?.created_by_handle === 'string' && item.data.created_by_handle.trim()
+          ? item.data.created_by_handle
+          : undefined;
+    const actorVerified =
+      item.data?.updated_by_verified === true || item.data?.created_by_verified === true;
+
+    result.push({
+      action: item.revision?.kind === 'fork' ? 'fork' : 'create',
+      section: 'soul',
+      slug: item.slug,
+      title: item.title,
+      actor_handle: actorHandle,
+      actor_verified: actorVerified,
+      source_artifact: activitySource(item),
+      timestamp
+    });
+
+    if (result.length >= limit) break;
+  }
+
+  return result;
 }
 
 type GraphNodeInput = {
@@ -71,11 +147,8 @@ function collectGraphData(lineageNodes: LineageNode[], section: 'soul'): { nodes
 }
 
 export default async function Home() {
-  const [recentActivity, stats, soulItems] = await Promise.all([
-    getRecentActivity(10),
-    getSiteStats(),
-    listBySection('soul')
-  ]);
+  const [stats, soulItems] = await Promise.all([getSiteStats(), listBySection('soul')]);
+  const recentActivity = buildRecentBranchActivity(soulItems, 10);
   const lineageForest = buildLineageForest(soulItems, 'soul');
 
   // Find the canonical baseline artifact
@@ -186,21 +259,22 @@ export default async function Home() {
                   {entry.actor_handle ? (
                     <strong>@{entry.actor_handle}{entry.actor_verified ? ` ${String.fromCharCode(0x2713)}` : ''}</strong>
                   ) : (
-                    <strong>anonymous</strong>
+                    <strong>Clawfable</strong>
                   )}
-                  {' '}{actionVerb(entry.action)}{' '}
-                  <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
-                    {entry.action === 'revise' ? 'fork' : entry.action}
-                  </span>
+                  {' '}{actionVerb(entry.action)}
+                  {entry.source_artifact ? (
+                    <>
+                      {' '}from{' '}
+                      <span className="timeline-action timeline-action--fork">
+                        {sourceLabel(entry.source_artifact) || 'parent artifact'}
+                      </span>
+                    </>
+                  ) : null}
                 </span>
                 <span className="activity-title">
-                  {entry.section && entry.slug ? (
-                    <Link href={`/${entry.section}/${entry.slug}`}>
-                      {entry.title || `${entry.section}/${entry.slug}`}
-                    </Link>
-                  ) : (
-                    entry.title || 'Untitled artifact'
-                  )}
+                  <Link href={`/${entry.section}/${entry.slug}`}>
+                    {entry.title || `${entry.section}/${entry.slug}`}
+                  </Link>
                 </span>
               </li>
             ))}
