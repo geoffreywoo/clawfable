@@ -274,6 +274,13 @@ function scopeFlagsFromMap(scopeMap?: Record<string, unknown>): string[] {
   return scopeOrder.filter((key) => scopeMap[key] === true);
 }
 
+export function decodeEscapedUnicodeLiterals(value: string) {
+  if (!value || !value.includes('\\u')) return value;
+  return value.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) =>
+    String.fromCodePoint(Number.parseInt(hex, 16))
+  );
+}
+
 function isWithinRange(createdAt: string | undefined, issuedAt: string | undefined, expiresAt: string | undefined) {
   if (!issuedAt || !expiresAt || !createdAt) return true;
   const parsedCreatedAt = parseIsoDate(createdAt);
@@ -464,6 +471,129 @@ export function artifactKey(section: CoreSection, slug: string) {
   return `${DB_ARTIFACT_PREFIX}:${section}:${slug}`;
 }
 
+export function isCanonicalSeedArtifact(section: CoreSection, slug: string) {
+  const normalizedSection = normalizeSection(section);
+  return normalizeSlug(slug).toLowerCase() === OPENCLAW_CANONICAL_SEEDS[normalizedSection];
+}
+
+function getCanonicalSeedDocument(section: CoreSection): ArtifactDocument | null {
+  const canonicalSlug = OPENCLAW_CANONICAL_SEEDS[section];
+  return fromMdSection(section).find((item) => item.slug === canonicalSlug) || null;
+}
+
+function sameRevisionMeta(a?: RevisionMeta | null, b?: RevisionMeta | null) {
+  return (
+    (a?.family || '') === (b?.family || '') &&
+    (a?.id || '') === (b?.id || '') &&
+    (a?.kind || '') === (b?.kind || '') &&
+    (a?.status || '') === (b?.status || '') &&
+    (a?.parent_revision || '') === (b?.parent_revision || '') &&
+    (a?.source || '') === (b?.source || '')
+  );
+}
+
+function sameScopeMap(a?: ScopeMap, b?: ScopeMap) {
+  return scopeOrder.every((key) => Boolean(a?.[key]) === Boolean(b?.[key]));
+}
+
+function buildCanonicalSeedRecord(section: CoreSection, existing?: DbRecord | null): DbRecord | null {
+  const canonical = getCanonicalSeedDocument(section);
+  if (!canonical) return existing || null;
+
+  const now = nowStamp();
+  return {
+    section,
+    slug: canonical.slug,
+    sourcePath: canonicalSourcePath(section, canonical.slug, canonical.sourcePath),
+    title: canonical.title,
+    description: canonical.description,
+    content: canonical.content,
+    copy_paste_scope: sanitizeScope(canonical.copy_paste_scope),
+    revision: canonical.revision || { id: 'v1', kind: 'core', status: 'active' },
+    created_at: existing?.created_at || now,
+    updated_at: existing?.updated_at || now,
+    author_commentary: canonical.author_commentary,
+    user_comments: canonical.user_comments,
+    created_by_handle: undefined,
+    created_by_display_name: undefined,
+    created_by_profile_url: undefined,
+    created_by_verified: undefined,
+    updated_by_handle: undefined,
+    updated_by_display_name: undefined,
+    updated_by_profile_url: undefined,
+    updated_by_verified: undefined
+  };
+}
+
+function canonicalSeedNeedsRepair(existing: DbRecord, canonical: DbRecord) {
+  return (
+    existing.title !== canonical.title ||
+    existing.description !== canonical.description ||
+    existing.content !== canonical.content ||
+    existing.sourcePath !== canonical.sourcePath ||
+    !sameScopeMap(existing.copy_paste_scope, canonical.copy_paste_scope) ||
+    !sameRevisionMeta(existing.revision, canonical.revision) ||
+    existing.author_commentary !== canonical.author_commentary ||
+    JSON.stringify(existing.user_comments ?? null) !== JSON.stringify(canonical.user_comments ?? null) ||
+    Boolean(existing.created_by_handle) ||
+    Boolean(existing.created_by_display_name) ||
+    Boolean(existing.created_by_profile_url) ||
+    Boolean(existing.created_by_verified) ||
+    Boolean(existing.updated_by_handle) ||
+    Boolean(existing.updated_by_display_name) ||
+    Boolean(existing.updated_by_profile_url) ||
+    Boolean(existing.updated_by_verified)
+  );
+}
+
+export async function ensureCanonicalSeedRecord(kv: KVClient, section: CoreSection): Promise<DbRecord | null> {
+  const canonicalSlug = OPENCLAW_CANONICAL_SEEDS[section];
+  const key = artifactKey(section, canonicalSlug);
+  const existing = await kvGet<DbRecord>(kv, key);
+  const canonical = buildCanonicalSeedRecord(section, existing);
+  if (!canonical) return existing || null;
+
+  let ensured = existing;
+  if (!existing || canonicalSeedNeedsRepair(existing, canonical)) {
+    const repairedAt = nowStamp();
+    ensured = {
+      ...canonical,
+      created_at: existing?.created_at || canonical.created_at,
+      updated_at: repairedAt
+    };
+    await kv.set(key, ensured);
+  }
+
+  if (ensured) {
+    await addToSectionIndex(kv, section, canonicalSlug);
+
+    const rawHistoryIndex = await kvGet<unknown>(kv, historyIndexKey(section, canonicalSlug));
+    const historyIndex = Array.isArray(rawHistoryIndex)
+      ? rawHistoryIndex.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    if (historyIndex.length === 0) {
+      await appendHistory(kv, section, canonicalSlug, {
+        action: 'create',
+        section,
+        slug: canonicalSlug,
+        revision_id: ensured.revision?.id,
+        timestamp: ensured.created_at,
+        title: ensured.title,
+        snapshot: buildHistorySnapshot(ensured)
+      });
+    }
+  }
+
+  return ensured || canonical;
+}
+
+export async function repairCanonicalSeed(section: CoreSection): Promise<DbRecord | null> {
+  const kv = await getKvClient();
+  if (!kv) return null;
+  return ensureCanonicalSeedRecord(kv, normalizeSection(section));
+}
+
 function indexKey(section: CoreSection) {
   return `${DB_ARTIFACT_INDEX_PREFIX}:${section}`;
 }
@@ -555,6 +685,8 @@ export function sanitizeScope(scope?: ScopeMap) {
 }
 
 function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
+  const title = decodeEscapedUnicodeLiterals(row.title);
+  const description = decodeEscapedUnicodeLiterals(row.description);
   const revision =
     'revision' in row && row.revision
       ? {
@@ -567,13 +699,13 @@ function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
   return {
     slug: row.slug,
     sourcePath: row.sourcePath,
-    title: row.title,
-    description: row.description,
+    title,
+    description,
     scopeFlags: scopeFlagsFromMap((row as DbRecord).copy_paste_scope),
     revision,
     data: {
-      title: row.title,
-      description: row.description,
+      title,
+      description,
         copy_paste_scope: (row as DbRecord).copy_paste_scope,
       revision: (row as DbRecord).revision,
       created_by_handle: (row as DbRecord).created_by_handle,
@@ -584,7 +716,12 @@ function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
       updated_by_display_name: (row as DbRecord).updated_by_display_name,
       updated_by_profile_url: (row as DbRecord).updated_by_profile_url,
       updated_by_verified: (row as DbRecord).updated_by_verified,
-      author_commentary: (row as Record<string, unknown>).author_commentary || (row as Record<string, unknown>).author_comment,
+      author_commentary:
+        typeof (row as Record<string, unknown>).author_commentary === 'string'
+          ? decodeEscapedUnicodeLiterals((row as Record<string, unknown>).author_commentary as string)
+          : typeof (row as Record<string, unknown>).author_comment === 'string'
+            ? decodeEscapedUnicodeLiterals((row as Record<string, unknown>).author_comment as string)
+            : undefined,
       user_comments: (row as Record<string, unknown>).user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       updated_at: 'updated_at' in row ? row.updated_at : nowStamp(),
       created_at: 'created_at' in row ? (row as DbRecord).created_at : nowStamp()
@@ -593,10 +730,18 @@ function mapRecordToSectionItem(row: DbRecord | ArtifactDocument): SectionItem {
 }
 
 export function toDoc(row: DbRecord): { data: Record<string, unknown>; content: string } {
+  const title = decodeEscapedUnicodeLiterals(row.title);
+  const description = decodeEscapedUnicodeLiterals(row.description);
+  const authorCommentary =
+    typeof row.author_commentary === 'string'
+      ? decodeEscapedUnicodeLiterals(row.author_commentary)
+      : typeof (row as Record<string, unknown>).author_comment === 'string'
+        ? decodeEscapedUnicodeLiterals((row as Record<string, unknown>).author_comment as string)
+        : undefined;
   return {
     data: {
-      title: row.title,
-      description: row.description,
+      title,
+      description,
       copy_paste_scope: row.copy_paste_scope,
       revision: {
         family: row.revision?.family,
@@ -606,7 +751,7 @@ export function toDoc(row: DbRecord): { data: Record<string, unknown>; content: 
         parent_revision: row.revision?.parent_revision,
         source: row.revision?.source
       },
-      author_commentary: row.author_commentary || (row as Record<string, unknown>).author_comment,
+      author_commentary: authorCommentary,
       user_comments: row.user_comments || (row as Record<string, unknown>).author_comments || (row as Record<string, unknown>).comments,
       source_path: row.sourcePath,
       created_by_handle: row.created_by_handle,
@@ -620,7 +765,7 @@ export function toDoc(row: DbRecord): { data: Record<string, unknown>; content: 
       created_at: row.created_at,
       updated_at: row.updated_at
     },
-    content: row.content
+    content: decodeEscapedUnicodeLiterals(row.content)
   };
 }
 
@@ -629,14 +774,14 @@ export function buildHistorySnapshot(row: DbRecord): ArtifactSnapshot {
     section: row.section,
     slug: row.slug,
     sourcePath: row.sourcePath,
-    title: row.title,
-    description: row.description,
-    content: row.content,
+    title: decodeEscapedUnicodeLiterals(row.title),
+    description: decodeEscapedUnicodeLiterals(row.description),
+    content: decodeEscapedUnicodeLiterals(row.content),
     copy_paste_scope: row.copy_paste_scope,
     revision: row.revision || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    author_commentary: row.author_commentary,
+    author_commentary: typeof row.author_commentary === 'string' ? decodeEscapedUnicodeLiterals(row.author_commentary) : row.author_commentary,
     user_comments: row.user_comments,
     created_by_handle: row.created_by_handle,
     created_by_display_name: row.created_by_display_name,
@@ -1247,6 +1392,7 @@ export async function listBySection(section: string): Promise<SectionItem[]> {
   }
 
   if (kv) {
+    await ensureCanonicalSeedRecord(kv, normalizedSection);
     const index = await getSectionIndex(normalizedSection);
     if (index.length > 0) {
       const rows = await Promise.all(
@@ -1276,6 +1422,9 @@ export async function getDoc(
 
   const kv = await getKvClient();
   if (kv) {
+    if (isCanonicalSeedArtifact(normalizedSection, normalizedSlug)) {
+      await ensureCanonicalSeedRecord(kv, normalizedSection);
+    }
     const key = artifactKey(normalizedSection, normalizedSlug);
     const row = await kvGet<DbRecord>(kv, key);
     if (row) return toDoc(row);

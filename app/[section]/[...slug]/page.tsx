@@ -26,12 +26,13 @@ function scopeRows(scopeMap: Record<string, unknown> | undefined) {
     .map((k) => k.toUpperCase());
 }
 
-function revisionLine(revision: Record<string, unknown> | undefined) {
+function revisionLine(revision: Record<string, unknown> | undefined, actorHandle?: string) {
   if (!revision || typeof revision !== 'object') return null;
   const id = String((revision as Record<string, unknown>).id || 'unversioned');
   const kind = String((revision as Record<string, unknown>).kind || 'revision');
   const status = String((revision as Record<string, unknown>).status || 'draft');
-  return `${kind} ${String.fromCharCode(0xb7)} ${id} ${String.fromCharCode(0xb7)} ${status}`;
+  const branchLabel = kind === 'fork' && actorHandle ? `@${actorHandle}` : null;
+  return [kind, branchLabel, id, status].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
 }
 
 function isCanonicalSource(value: string) {
@@ -266,7 +267,8 @@ export default async function DocPage({
     | Record<string, unknown>
     | undefined);
   const revision = (doc.data as Record<string, unknown> | undefined)?.revision as Record<string, unknown> | undefined;
-  const revisionStr = revisionLine(revision);
+  const createdByHandle = String((doc.data as Record<string, unknown>)?.created_by_handle || '').trim() || undefined;
+  const revisionStr = revisionLine(revision, createdByHandle);
   const createdAt = readableDate((doc.data as Record<string, unknown>)?.created_at as string);
   const sourcePath = String((doc.data as Record<string, unknown>)?.source_path || `${normalizedSection}/${slugPath}`);
   const canonicalSource = seedSourceOverride(normalizedSection, sourcePath, slugPath);

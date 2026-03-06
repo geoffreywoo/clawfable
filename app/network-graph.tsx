@@ -16,6 +16,9 @@ type GraphNode = {
   ty: number;
   pinned: boolean;
   degree: number;
+  orbitRadius: number;
+  orbitPhase: number;
+  orbitSpeed: number;
   // Physics state
   x: number;
   y: number;
@@ -67,6 +70,17 @@ function hashString(value: string) {
     hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
   }
   return hash;
+}
+
+function rgba(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '');
+  const value = normalized.length === 3
+    ? normalized.split('').map((char) => char + char).join('')
+    : normalized;
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function buildTargetLayout(
@@ -189,6 +203,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
 
     nodesRef.current = inputNodes.map((n) => {
       const target = layout.get(n.id) || { x: layoutSize.w / 2, y: layoutSize.h / 2, pinned: false };
+      const seed = hashString(n.id);
       return {
         ...n,
         href: `/${n.section}/${n.slug}`,
@@ -196,6 +211,9 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         ty: target.y,
         pinned: target.pinned,
         degree: degreeMap.get(n.id) || 0,
+        orbitRadius: target.pinned ? 0 : 3 + (seed % 5),
+        orbitPhase: ((seed % 360) * Math.PI) / 180,
+        orbitSpeed: 0.45 + (((seed >> 3) % 1000) / 1000) * 0.55,
         x: target.x,
         y: target.y,
         vx: 0,
@@ -220,6 +238,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const repulsion = 900;
     const attraction = 0.016;
     const tether = 0.026;
+    const time = Date.now() / 1000;
 
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
@@ -264,8 +283,14 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         continue;
       }
 
-      node.vx += (node.tx - node.x) * tether;
-      node.vy += (node.ty - node.y) * tether;
+      const desiredX = node.tx + Math.cos(time * node.orbitSpeed + node.orbitPhase) * node.orbitRadius;
+      const desiredY =
+        node.ty +
+        Math.sin(time * node.orbitSpeed * 0.82 + node.orbitPhase * 1.4) *
+          (node.orbitRadius * 0.78);
+
+      node.vx += (desiredX - node.x) * tether;
+      node.vy += (desiredY - node.y) * tether;
       node.vx *= damping;
       node.vy *= damping;
       node.x += node.vx;
@@ -290,6 +315,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const w = canvas.width;
     const h = canvas.height;
     const dpr = window.devicePixelRatio || 1;
+    const time = Date.now() / 1000;
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = COLORS.bg;
@@ -345,29 +371,43 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       ctx.lineTo(tx, ty);
 
       if (edge.type === 'fork') {
-        ctx.strokeStyle = isHighlighted ? COLORS.fork : 'rgba(167, 139, 250, 0.2)';
+        ctx.strokeStyle = isHighlighted ? COLORS.fork : rgba(COLORS.fork, 0.2);
         ctx.lineWidth = isHighlighted ? 2 * dpr : 1 * dpr;
+      } else if (edge.type === 'connection') {
+        ctx.strokeStyle = isHighlighted ? COLORS.soul : rgba(COLORS.soul, 0.16);
+        ctx.lineWidth = isHighlighted ? 1.8 * dpr : 0.9 * dpr;
       } else {
         ctx.strokeStyle = isHighlighted ? COLORS.muted : 'rgba(61, 65, 80, 0.3)';
         ctx.lineWidth = isHighlighted ? 1.5 * dpr : 0.5 * dpr;
       }
 
       if (!isHighlighted) {
-        ctx.setLineDash([4 * dpr, 4 * dpr]);
+        ctx.setLineDash(edge.type === 'connection' ? [8 * dpr, 8 * dpr] : [4 * dpr, 4 * dpr]);
+        ctx.lineDashOffset = -(time * (edge.type === 'connection' ? 16 : 28)) * dpr;
       } else {
         ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
       }
 
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
 
-      if (isHighlighted) {
-        const t = (Date.now() % 2000) / 2000;
+      const pulseCount = isHighlighted ? 2 : 1;
+      for (let index = 0; index < pulseCount; index++) {
+        const seed = hashString(`${edge.source}:${edge.target}:${index}`);
+        const offset = (seed % 1000) / 1000;
+        const speed = edge.type === 'connection' ? 0.11 : edge.type === 'fork' ? 0.17 : 0.13;
+        const t = (time * speed + offset) % 1;
         const px = sx + (tx - sx) * t;
         const py = sy + (ty - sy) * t;
         ctx.beginPath();
-        ctx.arc(px, py, 2 * dpr, 0, Math.PI * 2);
-        ctx.fillStyle = edge.type === 'fork' ? COLORS.fork : COLORS.soul;
+        ctx.arc(px, py, (isHighlighted ? 2.6 : 1.7) * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = edge.type === 'fork'
+          ? (isHighlighted ? COLORS.fork : rgba(COLORS.fork, 0.55))
+          : edge.type === 'connection'
+            ? (isHighlighted ? COLORS.soul : rgba(COLORS.soul, 0.45))
+            : (isHighlighted ? COLORS.muted : rgba(COLORS.muted, 0.35));
         ctx.fill();
       }
     }
@@ -382,6 +422,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       const color = node.section === 'soul' ? COLORS.soul : COLORS.memory;
       const baseRadius = node.pinned ? NODE_RADIUS * 2.1 : NODE_RADIUS + Math.min(node.degree, 4) * 0.55;
       const radius = (isHovered ? Math.max(HOVER_RADIUS, baseRadius + 2) : baseRadius) * dpr;
+      const pulseRadius = node.pinned ? (1 + Math.sin(time * 2.2) * 0.08) : 1;
 
       if (isHovered || isConnected) {
         const gradient = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius * 3);
@@ -394,7 +435,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       }
 
       ctx.beginPath();
-      ctx.arc(nx, ny, radius, 0, Math.PI * 2);
+      ctx.arc(nx, ny, radius * pulseRadius, 0, Math.PI * 2);
 
       if (node.pinned) {
         ctx.fillStyle = isHovered ? '#7dd3fc' : 'rgba(34, 211, 238, 0.9)';
@@ -410,6 +451,16 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       ctx.fill();
       ctx.lineWidth = 1.5 * dpr;
       ctx.stroke();
+
+      if (node.pinned) {
+        const halo = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius * 4.5);
+        halo.addColorStop(0, rgba(COLORS.soul, 0.2));
+        halo.addColorStop(1, rgba(COLORS.soul, 0));
+        ctx.beginPath();
+        ctx.arc(nx, ny, radius * 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = halo;
+        ctx.fill();
+      }
 
       if (node.kind === 'core' || node.kind === 'canonical') {
         ctx.beginPath();
@@ -443,16 +494,16 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
 
-      const resize = () => {
-        const rect = container.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const w = rect.width;
-        const h = 400;
-        sizeRef.current = { w, h };
-        setLayoutSize((current) => (current.w === w && current.h === h ? current : { w, h }));
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        canvas.style.width = `${w}px`;
+    const resize = () => {
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = rect.width;
+      const h = 400;
+      sizeRef.current = { w, h };
+      setLayoutSize((current) => (current.w === w && current.h === h ? current : { w, h }));
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
     };
 

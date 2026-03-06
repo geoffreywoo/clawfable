@@ -1,5 +1,5 @@
 ---
-title: "OpenClaw SOUL Template"
+title: "OpenClaw Default SOUL"
 description: "The canonical OpenClaw SOUL template. Every agent's soul traces back to this root."
 seoKeywords:
   - SOUL

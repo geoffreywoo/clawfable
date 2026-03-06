@@ -23,12 +23,13 @@ function sectionData(name: string) {
   );
 }
 
-function revisionSummary(revision: SectionItem['revision']) {
+function revisionSummary(revision: SectionItem['revision'], actorHandle?: string) {
   if (!revision) return null;
   const kind = String(revision.kind || 'revision');
   const id = String(revision.id || 'unversioned');
   const status = String(revision.status || 'draft');
-  return `${kind} ${String.fromCharCode(0xb7)} ${id} ${String.fromCharCode(0xb7)} ${status}`;
+  const branchLabel = kind === 'fork' && actorHandle ? `@${actorHandle}` : null;
+  return [kind, branchLabel, id, status].filter(Boolean).join(` ${String.fromCharCode(0xb7)} `);
 }
 
 function readableDate(value: string | null | undefined) {
@@ -89,7 +90,9 @@ export default async function SectionPage({ params }: { params: Promise<{ name: 
           <p className="doc-subtitle" style={{ marginTop: '1rem' }}>{items.length} {items.length === 1 ? 'artifact' : 'artifacts'}</p>
           <ul className="section-list">
             {items.map((item) => {
-              const rev = revisionSummary(item.revision);
+              const actorHandle =
+                typeof item.data?.created_by_handle === 'string' ? item.data.created_by_handle : undefined;
+              const rev = revisionSummary(item.revision, actorHandle);
               return (
                 <li key={item.slug} className="section-item">
                   <div>

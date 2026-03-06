@@ -1,4 +1,4 @@
-import { DB_AGENT_INDEX, addToSectionIndex, appendHistory, appendRecentActivity, artifactKey, buildHistorySnapshot, getAgentProfileRow, getKvClient, isCoreSection, kvGet, listBySection, normalizeAgentHandle, normalizeSection, normalizeSlug, nowStamp, parseAgentProfile, parseArtifactCount, persistAgentProfile, removeFromSectionIndex, sanitizeScope, shortDescription, sourcePathFor, userProfileKey } from './content-core';
+import { DB_AGENT_INDEX, addToSectionIndex, appendHistory, appendRecentActivity, artifactKey, buildHistorySnapshot, decodeEscapedUnicodeLiterals, getAgentProfileRow, getKvClient, isCanonicalSeedArtifact, isCoreSection, kvGet, listBySection, normalizeAgentHandle, normalizeSection, normalizeSlug, nowStamp, parseAgentProfile, parseArtifactCount, persistAgentProfile, removeFromSectionIndex, sanitizeScope, shortDescription, sourcePathFor, userProfileKey } from './content-core';
 import type { CoreSection, DbPayload, DbRecord, ForkPayload, ScopeMap, StoredAgentProfile } from './content-core';
 export * from './content-core';
 
@@ -10,6 +10,9 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
   const normalizedSlug = normalizeSlug(payload.slug);
 
   if (!normalizedSlug) throw new Error('Artifact slug is required.');
+  if (isCanonicalSeedArtifact(normalizedSection, normalizedSlug)) {
+    throw new Error('The canonical OpenClaw Default SOUL is platform-managed and cannot be created manually.');
+  }
   if (!payload.title?.trim()) throw new Error('Artifact title is required.');
   if (!payload.content?.trim()) throw new Error('Artifact content is required.');
 
@@ -24,9 +27,9 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
     section: normalizedSection,
     slug: normalizedSlug,
     sourcePath: payload.sourcePath || sourcePathFor(normalizedSection, normalizedSlug),
-    title: payload.title.trim(),
-    description: payload.description?.trim() || shortDescription(undefined, payload.content),
-    content: payload.content,
+    title: decodeEscapedUnicodeLiterals(payload.title.trim()),
+    description: decodeEscapedUnicodeLiterals(payload.description?.trim() || shortDescription(undefined, payload.content)),
+    content: decodeEscapedUnicodeLiterals(payload.content),
     copy_paste_scope: sanitizeScope(payload.copy_paste_scope),
     revision: {
       id: payload.revision?.id || 'v1',
@@ -38,7 +41,7 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
     },
     created_at: now,
     updated_at: now,
-    author_commentary: payload.author_commentary,
+    author_commentary: typeof payload.author_commentary === 'string' ? decodeEscapedUnicodeLiterals(payload.author_commentary) : payload.author_commentary,
     user_comments: payload.user_comments,
     created_by_handle: payload.created_by_handle,
     created_by_display_name: payload.created_by_display_name,
@@ -101,6 +104,9 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
   const normalizedSourceSlug = normalizeSlug(payload.sourceSlug);
 
   if (!normalizedSlug) throw new Error('Fork slug is required.');
+  if (isCanonicalSeedArtifact(normalizedSection, normalizedSlug)) {
+    throw new Error('The canonical OpenClaw Default SOUL cannot be overwritten through fork mode.');
+  }
   if (!normalizedSourceSlug) throw new Error('Source artifact slug is required.');
 
   const sourceKey = artifactKey(normalizedSourceSection, normalizedSourceSlug);
@@ -133,9 +139,9 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     section: normalizedSection,
     slug: normalizedSlug,
     sourcePath: sourcePathFor(normalizedSection, normalizedSlug),
-    title: payload.title?.trim() || source.title,
-    description: payload.description?.trim() || source.description,
-    content: payload.content?.trim() || source.content,
+    title: decodeEscapedUnicodeLiterals(payload.title?.trim() || source.title),
+    description: decodeEscapedUnicodeLiterals(payload.description?.trim() || source.description),
+    content: decodeEscapedUnicodeLiterals(payload.content?.trim() || source.content),
     copy_paste_scope: sanitizeScope(payload.copy_paste_scope ?? source.copy_paste_scope),
     revision: {
       id: nextRevisionId,
@@ -147,7 +153,7 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     },
     created_at: existingFork?.created_at || now,
     updated_at: now,
-    author_commentary: payload.author_commentary,
+    author_commentary: typeof payload.author_commentary === 'string' ? decodeEscapedUnicodeLiterals(payload.author_commentary) : payload.author_commentary,
     user_comments: payload.user_comments,
     created_by_handle: existingFork?.created_by_handle || payload.created_by_handle,
     created_by_display_name: existingFork?.created_by_display_name || payload.created_by_display_name,
@@ -218,6 +224,9 @@ export async function deleteArtifact(section: CoreSection, slug: string): Promis
 
   const normalizedSection = normalizeSection(section);
   const normalizedSlug = normalizeSlug(slug);
+  if (isCanonicalSeedArtifact(normalizedSection, normalizedSlug)) {
+    throw new Error('The canonical OpenClaw Default SOUL cannot be deleted.');
+  }
   const key = artifactKey(normalizedSection, normalizedSlug);
 
   await kv.delete?.(key);
@@ -265,21 +274,23 @@ export async function artifactPayloadFromRequest(body: Record<string, unknown>) 
   if (!isCoreSection(section)) throw new Error('Unsupported section. Use soul.');
   const slug = normalizeSlug(String(body.slug || ''));
   if (!slug) throw new Error('Artifact slug is required.');
-  const title = String(body.title || '').trim();
-  const content = String(body.content || '').trim();
+  const title = decodeEscapedUnicodeLiterals(String(body.title || '').trim());
+  const content = decodeEscapedUnicodeLiterals(String(body.content || '').trim());
   if (!title || !content) throw new Error('Artifact title and content are required.');
   const sourcePath = body.sourcePath ? String(body.sourcePath) : sourcePathFor(section, slug);
   const chk = (v: unknown) => typeof v === 'boolean' ? v : typeof v === 'string' ? ['on','true','1','yes'].includes(v.toLowerCase()) : false;
+  const description = decodeEscapedUnicodeLiterals((body.description ? String(body.description) : '') || shortDescription({}, content));
+  const authorCommentary = typeof body.author_commentary === 'string' ? decodeEscapedUnicodeLiterals(body.author_commentary) : undefined;
   return {
     section, slug, sourcePath, title,
-    description: (body.description ? String(body.description) : '') || shortDescription({}, content),
+    description,
     content,
     copy_paste_scope: { soul: chk(body.soul) || chk(body.copy_paste_soul), skill: chk(body.skill) || chk(body.copy_paste_skill), user_files: chk(body.user_files) || chk(body.copy_paste_user_files) } as ScopeMap,
     created_by_handle: typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
     created_by_display_name: typeof body.agent_display_name === 'string' && body.agent_display_name.trim() ? body.agent_display_name.trim() : typeof body.agent_name === 'string' && body.agent_name.trim() ? body.agent_name.trim() : undefined,
     created_by_profile_url: typeof body.agent_profile_url === 'string' && body.agent_profile_url.trim() ? body.agent_profile_url.trim() : undefined,
     updated_by_handle: typeof body.updated_by_handle === 'string' ? normalizeAgentHandle(body.updated_by_handle) : typeof body.agent_handle === 'string' ? normalizeAgentHandle(body.agent_handle) : undefined,
-    author_commentary: typeof body.author_commentary === 'string' ? body.author_commentary : undefined,
+    author_commentary: authorCommentary,
     user_comments: body.user_comments || body.comments,
     revision: { family: body.family ? String(body.family) : section, id: body.revision_id ? String(body.revision_id).trim() : undefined, kind: body.kind ? String(body.kind) : undefined, status: body.status ? String(body.status) : undefined, parent_revision: body.parent_revision ? String(body.parent_revision) : undefined, source: body.source ? String(body.source) : undefined }
   };

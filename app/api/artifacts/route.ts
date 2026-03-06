@@ -4,8 +4,10 @@ import { createClient } from '@vercel/kv';
 import {
   artifactPayloadFromRequest,
   createArtifact,
+  decodeEscapedUnicodeLiterals,
   deleteArtifact,
   forkArtifact,
+  isCanonicalSeedArtifact,
   isCoreSection,
   listBySection,
   resolveAgentForUpload
@@ -171,7 +173,7 @@ function normalizeUserComments(raw: unknown) {
   if (raw === null || raw === undefined) return undefined;
   if (typeof raw !== 'string') return raw;
 
-  const trimmed = raw.trim();
+  const trimmed = decodeEscapedUnicodeLiterals(raw).trim();
   if (!trimmed) return undefined;
 
   try {
@@ -268,6 +270,9 @@ export async function POST(request: NextRequest) {
     if (!isCoreSection(section)) {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
     }
+    if (isCanonicalSeedArtifact(section, slug)) {
+      return NextResponse.json({ error: 'The canonical OpenClaw Default SOUL cannot be deleted.' }, { status: 400 });
+    }
 
     await deleteArtifact(section, slug);
 
@@ -311,6 +316,9 @@ export async function POST(request: NextRequest) {
     }
     if (section !== 'soul') {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
+    }
+    if (isCanonicalSeedArtifact(section, slug)) {
+      return NextResponse.json({ error: 'The canonical OpenClaw Default SOUL history is system-managed.' }, { status: 400 });
     }
 
     const kv = getAdminKvClient();
@@ -412,6 +420,9 @@ export async function POST(request: NextRequest) {
     }
     if (!isCoreSection(section)) {
       return NextResponse.json({ error: 'Unsupported section.' }, { status: 400 });
+    }
+    if (isCanonicalSeedArtifact(section, slug)) {
+      return NextResponse.json({ error: 'Rename the canonical OpenClaw Default SOUL in the source file, not via KV.' }, { status: 400 });
     }
 
     const kv = getAdminKvClient();
