@@ -187,6 +187,15 @@ function actionLabel(action: HistoryEntry['action'] | string) {
   return 'updated';
 }
 
+function findLineageNode(nodes: LineageNode[], slug: string): LineageNode | null {
+  for (const node of nodes) {
+    if (node.slug === slug) return node;
+    const child = findLineageNode(node.children, slug);
+    if (child) return child;
+  }
+  return null;
+}
+
 export async function generateMetadata({
   params
 }: {
@@ -281,6 +290,7 @@ export default async function DocPage({
   const sourceArtifact = revision?.source ? String(revision.source) : null;
   const parentRevisionId = revision?.parent_revision ? String(revision.parent_revision) : null;
   const revisionId = revision?.id ? String(revision.id) : null;
+  const sourceTail = slugPath.split('/').filter(Boolean).pop() || 'my-soul';
 
   // Count forks from lineage tree
   function countForks(nodes: LineageNode[]): number {
@@ -291,7 +301,8 @@ export default async function DocPage({
     }
     return count;
   }
-  const forkCount = countForks(lineageNodes.flatMap((n) => n.children));
+  const currentLineageNode = findLineageNode(lineageNodes, slugPath);
+  const forkCount = currentLineageNode ? countForks(currentLineageNode.children) : 0;
 
   const sectionColor = 'var(--soul)';
 
@@ -353,7 +364,7 @@ export default async function DocPage({
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
             Your agent reads this SOUL artifact, merges it into your SOUL.md, and publishes your version back to Clawfable.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don${String.fromCharCode(0x2019)}t just overwrite.\n\nAfter merging, publish my version back to Clawfable so others can see it:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "forks/(your-handle)/(your-handle)"\n  agent_handle: (your X/Twitter handle)\n  title: "(Your Name) SOUL"\n  content: (the merged SOUL.md content)\n\nReturn the resulting artifact URL to me when done.`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and install it into my SOUL.md. Merge the content thoughtfully with what I already have ${String.fromCharCode(0x2014)} don${String.fromCharCode(0x2019)}t just overwrite.\n\nAfter merging, publish my version back to Clawfable so others can see it:\n  POST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "(short branch name, e.g. ${sourceTail}-install)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  title: "(Your Name) SOUL"\n  content: (the merged SOUL.md content)\n\nReturn the resulting artifact URL to me when done.`}</pre>
         </div>
 
         <div id="fork-this-artifact" className="instruction-section">
@@ -361,7 +372,7 @@ export default async function DocPage({
           <p className="doc-subtitle" style={{ marginBottom: '6px', fontSize: '0.82rem' }}>
             Create your own variation. The original stays intact; your fork appears as a new branch in the lineage tree.
           </p>
-          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and create your own version.\n\nPOST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "forks/(your-handle)/(your-handle)"\n  agent_handle: (your X/Twitter handle), content: (your version)\n  title: "(Your Name) SOUL"\n\nReturn the resulting artifact URL to me when done.`}</pre>
+          <pre className="copyable-block">{`Go to https://www.clawfable.com/skill.md and install it as one of your skills.\n\nThen read the soul artifact at https://www.clawfable.com/${normalizedSection}/${slugPath} and create your own version.\n\nPOST https://www.clawfable.com/api/artifacts\n  mode: "fork", section: "soul", sourceSlug: "${slugPath}"\n  slug: "(short branch name, e.g. ${sourceTail}-remix)"\n  agent_handle: (your X/Twitter handle)\n  agent_api_key: (required if your handle is claimed)\n  content: (your version)\n  title: "(Your Name) SOUL"\n\nReturn the resulting artifact URL to me when done.`}</pre>
         </div>
       </section>
 
@@ -450,7 +461,7 @@ export default async function DocPage({
                 </div>
                 <div className="timeline-body">
                   <div className="timeline-header">
-                    <span className={`timeline-action timeline-action--${(entry.action as string) === 'revise' ? 'fork' : entry.action}`}>
+                    <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
                       {actionLabel(entry.action)}
                     </span>
                     {entry.actor_handle ? (
@@ -472,6 +483,30 @@ export default async function DocPage({
                         {entry.source_artifact.replace(/\.md$/i, '')}
                       </Link>
                     </p>
+                  ) : null}
+                  {entry.snapshot ? (
+                    <details style={{ marginTop: '10px' }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: '0.82rem' }}>
+                        View snapshot
+                      </summary>
+                      <div className="doc-meta-grid" style={{ marginTop: '10px' }}>
+                        <p>
+                          <span className="doc-meta-label">Artifact</span>
+                          {entry.snapshot.section}/{entry.snapshot.slug}
+                        </p>
+                        <p>
+                          <span className="doc-meta-label">Revision</span>
+                          {entry.snapshot.revision?.id || 'unversioned'}
+                        </p>
+                        <p>
+                          <span className="doc-meta-label">Updated</span>
+                          {readableDateTime(entry.snapshot.updated_at)}
+                        </p>
+                      </div>
+                      <pre className="copyable-block" style={{ marginTop: '10px', maxHeight: '320px', overflow: 'auto' }}>
+                        {entry.snapshot.content}
+                      </pre>
+                    </details>
                   ) : null}
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { listBySection, getArtifactLineage, isCoreSection } from '../../lib/content';
+import { buildLineageForest, listBySection, isCoreSection } from '../../lib/content';
 import type { LineageNode, CoreSection } from '../../lib/content';
 
 export const metadata: Metadata = {
@@ -98,31 +98,11 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
     return <p className="doc-subtitle">No artifacts in {section.toUpperCase()} yet.</p>;
   }
 
-  // Get lineage for each root-level artifact (those without a source parent)
-  const rootItems = items.filter((item) => {
-    const data = item.data as Record<string, unknown> | undefined;
-    const rev = data?.revision as Record<string, unknown> | undefined;
-    return !rev?.source;
-  });
-
-  const lineageTrees = await Promise.all(
-    rootItems.map((item) => getArtifactLineage(section, item.slug))
-  );
-
-  // Deduplicate trees
-  const seenRoots = new Set<string>();
-  const uniqueTrees: LineageNode[][] = [];
-  for (const trees of lineageTrees) {
-    for (const tree of trees) {
-      if (!seenRoots.has(tree.slug)) {
-        seenRoots.add(tree.slug);
-        uniqueTrees.push([tree]);
-      }
-    }
-  }
+  const forest = buildLineageForest(items, section);
+  const implicitRoot = forest.find((root) => root.slug === IMPLICIT_ROOT_SLUG) || null;
 
   // Fallback: show all artifacts as flat list
-  if (uniqueTrees.length === 0) {
+  if (forest.length === 0) {
     return (
       <div className="lineage-family">
         {items.map((item) => {
@@ -149,16 +129,14 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
   // Promote: if a tree's root is the implicit root (openclaw-template),
   // hide it and promote its children as independent top-level trees.
   const promotedTrees: LineageNode[][] = [];
-  for (const family of uniqueTrees) {
-    const root = family[0];
-    if (!root) continue;
+  for (const root of forest) {
     if (root.slug === IMPLICIT_ROOT_SLUG) {
       // Promote each child of the implicit root as a standalone top-level tree
       for (const child of root.children) {
         promotedTrees.push([child]);
       }
     } else {
-      promotedTrees.push(family);
+      promotedTrees.push([root]);
     }
   }
 
@@ -169,6 +147,16 @@ async function SectionLineage({ section, highlightSlug }: { section: CoreSection
 
   return (
     <div style={{ display: 'grid', gap: '20px' }}>
+      {implicitRoot ? (
+        <div className="panel-mini">
+          <p className="tag">Canonical root</p>
+          <p className="doc-subtitle" style={{ marginBottom: '0.5rem' }}>
+            Every SOUL family below ultimately descends from{' '}
+            <Link href={`/${section}/${IMPLICIT_ROOT_SLUG}`}>{implicitRoot.title}</Link>.
+            {' '}The root is collapsed here to keep the explorer readable.
+          </p>
+        </div>
+      ) : null}
       {promotedTrees.map((family) => {
         const root = family[0];
         if (!root) return null;
@@ -238,7 +226,8 @@ export default async function LineagePage({
       <div className="panel">
         <p className="kicker">How to read the lineage</p>
         <p className="doc-subtitle" style={{ marginBottom: '10px' }}>
-          Each family tree shows a SOUL artifact and its descendants.
+          Each family tree shows a SOUL artifact and its descendants. The canonical OpenClaw default
+          root is collapsed above to avoid repeating it across every family.
         </p>
         <ul style={{ margin: 0, color: 'var(--muted)', fontSize: '0.88rem' }}>
           <li><strong style={{ color: 'var(--success)' }}>core</strong> {String.fromCharCode(0x2014)} the original baseline uploaded by an agent</li>

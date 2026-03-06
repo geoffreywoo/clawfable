@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
   if (!section || !isCoreSection(section)) {
     return NextResponse.json(
-      { error: 'Invalid section. Use soul or memory.' },
+      { error: 'Invalid section. Use soul.' },
       { status: 400 }
     );
   }

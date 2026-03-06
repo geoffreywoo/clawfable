@@ -160,6 +160,29 @@ export type DbPayload = {
   updated_by_verified?: boolean;
 };
 
+export type ArtifactSnapshot = {
+  section: CoreSection;
+  slug: string;
+  sourcePath: string;
+  title: string;
+  description: string;
+  content: string;
+  copy_paste_scope: ScopeMap;
+  revision: RevisionMeta | null;
+  created_at: string;
+  updated_at: string;
+  author_commentary?: string;
+  user_comments?: unknown;
+  created_by_handle?: string;
+  created_by_display_name?: string;
+  created_by_profile_url?: string;
+  created_by_verified?: boolean;
+  updated_by_handle?: string;
+  updated_by_display_name?: string;
+  updated_by_profile_url?: string;
+  updated_by_verified?: boolean;
+};
+
 export type ForkPayload = DbPayload & {
   sourceSection: CoreSection;
   sourceSlug: string;
@@ -601,6 +624,31 @@ export function toDoc(row: DbRecord): { data: Record<string, unknown>; content: 
   };
 }
 
+export function buildHistorySnapshot(row: DbRecord): ArtifactSnapshot {
+  return {
+    section: row.section,
+    slug: row.slug,
+    sourcePath: row.sourcePath,
+    title: row.title,
+    description: row.description,
+    content: row.content,
+    copy_paste_scope: row.copy_paste_scope,
+    revision: row.revision || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    author_commentary: row.author_commentary,
+    user_comments: row.user_comments,
+    created_by_handle: row.created_by_handle,
+    created_by_display_name: row.created_by_display_name,
+    created_by_profile_url: row.created_by_profile_url,
+    created_by_verified: row.created_by_verified,
+    updated_by_handle: row.updated_by_handle,
+    updated_by_display_name: row.updated_by_display_name,
+    updated_by_profile_url: row.updated_by_profile_url,
+    updated_by_verified: row.updated_by_verified
+  };
+}
+
 export async function getKvClient(): Promise<KVClient | null> {
   if (kvClient !== null) return kvClient;
 
@@ -907,13 +955,17 @@ export async function resolveAgentForUpload(
   const normalizedApiKey = metadata.apiKey?.trim();
   const hasValidApiKey = Boolean(base.verified) && Boolean(normalizedApiKey && raw?.api_key && normalizedApiKey === raw.api_key);
 
+  if (base.verified && !hasValidApiKey) {
+    throw new Error(`Uploads for claimed handle @${normalized} require a valid agent_api_key.`);
+  }
+
   const now = nowStamp();
   const updated = {
     ...base,
     handle: normalized,
     display_name: metadata.displayName || base.display_name,
     profile_url: metadata.profileUrl || base.profile_url,
-    verified: hasValidApiKey ? true : base.verified,
+    verified: hasValidApiKey,
     updated_at: now
   };
   await persistAgentProfile(updated);
@@ -935,7 +987,9 @@ function historyIndexKey(section: CoreSection, slug: string) {
 }
 
 export type HistoryEntry = {
-  action: 'create' | 'fork';
+  action: 'create' | 'fork' | 'revise';
+  section?: CoreSection;
+  slug?: string;
   actor_handle?: string;
   actor_display_name?: string;
   actor_profile_url?: string;
@@ -945,6 +999,7 @@ export type HistoryEntry = {
   source_artifact?: string;
   timestamp: string;
   title?: string;
+  snapshot?: ArtifactSnapshot;
 };
 
 export async function appendHistory(
@@ -976,6 +1031,12 @@ export async function appendRecentActivity(
   await kv.set(DB_RECENT_ACTIVITY_KEY, next);
 }
 
+function isHistoryEntry(entry: unknown): entry is HistoryEntry {
+  if (!entry || typeof entry !== 'object') return false;
+  const candidate = entry as Record<string, unknown>;
+  return typeof candidate.timestamp === 'string' && typeof candidate.action === 'string';
+}
+
 export async function getArtifactHistory(
   section: CoreSection,
   slug: string
@@ -995,7 +1056,9 @@ export async function getArtifactHistory(
   const entries = await Promise.all(
     index.map((id) => kvGet<HistoryEntry>(kv, `${key}:${id}`))
   );
-  return entries.filter((e): e is HistoryEntry => Boolean(e));
+  return entries
+    .filter(isHistoryEntry)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 export async function getRecentActivity(limit = 20): Promise<(HistoryEntry & { title?: string })[]> {
@@ -1004,7 +1067,10 @@ export async function getRecentActivity(limit = 20): Promise<(HistoryEntry & { t
 
   const rawActivity = await kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY);
   if (!Array.isArray(rawActivity)) return [];
-  return rawActivity.slice(0, limit);
+  return rawActivity
+    .filter(isHistoryEntry)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, limit);
 }
 
 export type LineageNode = {
@@ -1014,68 +1080,100 @@ export type LineageNode = {
   revision_id?: string;
   actor_handle?: string;
   actor_verified?: boolean;
+  created_at?: string;
   updated_at?: string;
   children: LineageNode[];
 };
 
-export async function getArtifactLineage(
-  section: CoreSection,
-  slug: string
-): Promise<LineageNode[]> {
-  const kv = await getKvClient();
-  if (!kv) return [];
+function lineageSourceSlug(section: CoreSection, source: unknown) {
+  if (typeof source !== 'string') return null;
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+  const sectionPrefix = `${section}/`;
+  return normalizeSlug(trimmed.startsWith(sectionPrefix) ? trimmed.slice(sectionPrefix.length) : trimmed);
+}
 
-  const normalizedSlug = normalizeSlug(slug);
-  const index = await getSectionIndex(section);
+function sortLineageNodes(nodes: LineageNode[], visited = new Set<string>()) {
+  nodes.sort((a, b) => {
+    const aTime = a.created_at || a.updated_at || '';
+    const bTime = b.created_at || b.updated_at || '';
+    if (aTime !== bTime) return aTime.localeCompare(bTime);
+    return a.slug.localeCompare(b.slug);
+  });
 
-  // Build a map of all artifacts
-  const artifactMap = new Map<string, DbRecord>();
-  for (const s of index) {
-    const key = artifactKey(section, s);
-    const row = await kvGet<DbRecord>(kv, key);
-    if (row) artifactMap.set(s, row);
+  for (const node of nodes) {
+    if (visited.has(node.slug)) continue;
+    visited.add(node.slug);
+    sortLineageNodes(node.children, new Set(visited));
+  }
+}
+
+function lineageContains(node: LineageNode, slug: string, visited = new Set<string>()): boolean {
+  if (visited.has(node.slug)) return false;
+  visited.add(node.slug);
+  if (node.slug === slug) return true;
+  return node.children.some((child) => lineageContains(child, slug, new Set(visited)));
+}
+
+export function buildLineageForest(items: SectionItem[], section: CoreSection): LineageNode[] {
+  const nodeMap = new Map<string, LineageNode>();
+  const attachedChildren = new Set<string>();
+
+  for (const item of items) {
+    nodeMap.set(item.slug, {
+      slug: item.slug,
+      title: item.title,
+      kind: item.revision?.kind || 'revision',
+      revision_id: item.revision?.id,
+      actor_handle: typeof item.data?.created_by_handle === 'string' ? item.data.created_by_handle : undefined,
+      actor_verified: item.data?.created_by_verified === true,
+      created_at: typeof item.data?.created_at === 'string' ? item.data.created_at : undefined,
+      updated_at: typeof item.data?.updated_at === 'string' ? item.data.updated_at : undefined,
+      children: []
+    });
   }
 
-  // Find the root of the lineage family for the given slug
-  function findRoot(slug: string, visited = new Set<string>()): string {
-    if (visited.has(slug)) return slug;
-    visited.add(slug);
-    const row = artifactMap.get(slug);
-    if (!row || !row.revision?.source) return slug;
-    const sourceSlug = normalizeSlug(row.revision.source.replace(/^soul\/|^memory\//, ''));
-    return findRoot(sourceSlug, visited);
-  }
+  for (const item of items) {
+    const sourceSlug = lineageSourceSlug(
+      section,
+      (item.data?.revision as Record<string, unknown> | undefined)?.source
+    );
+    if (!sourceSlug) continue;
 
-  // Build subtree
-  function buildTree(slug: string, visited = new Set<string>()): LineageNode {
-    if (visited.has(slug)) {
-      return { slug, title: slug, kind: 'unknown', children: [] };
+    const node = nodeMap.get(item.slug);
+    const parent = nodeMap.get(sourceSlug);
+    if (
+      !node ||
+      !parent ||
+      parent.slug === node.slug ||
+      attachedChildren.has(node.slug) ||
+      lineageContains(node, parent.slug)
+    ) {
+      continue;
     }
-    visited.add(slug);
 
-    const row = artifactMap.get(slug);
-    const children = [...artifactMap.entries()]
-      .filter(([, r]) => {
-        const src = r.revision?.source ? normalizeSlug(r.revision.source.replace(/^soul\/|^memory\//, '')) : null;
-        return src === slug;
-      })
-      .map(([childSlug]) => buildTree(childSlug, new Set(visited)));
-
-    return {
-      slug,
-      title: row?.title || slug,
-      kind: row?.revision?.kind || 'revision',
-      revision_id: row?.revision?.id,
-      actor_handle: row?.created_by_handle,
-      actor_verified: row?.created_by_verified,
-      updated_at: row?.updated_at,
-      children
-    };
+    parent.children.push(node);
+    attachedChildren.add(node.slug);
   }
 
-  const rootSlug = findRoot(normalizedSlug);
-  const tree = buildTree(rootSlug);
-  return [tree];
+  const roots = items
+    .map((item) => nodeMap.get(item.slug))
+    .filter((node): node is LineageNode => Boolean(node) && !attachedChildren.has(node.slug));
+
+  const forest = roots.length > 0 ? roots : Array.from(nodeMap.values());
+  sortLineageNodes(forest);
+  return forest;
+}
+
+export async function getLineageForest(section: CoreSection): Promise<LineageNode[]> {
+  const items = await listBySection(section);
+  return buildLineageForest(items, section);
+}
+
+export async function getArtifactLineage(section: CoreSection, slug: string): Promise<LineageNode[]> {
+  const normalizedSlug = normalizeSlug(slug);
+  const forest = await getLineageForest(section);
+  return forest.filter((root) => lineageContains(root, normalizedSlug));
 }
 
 export async function getSectionIndex(section: CoreSection): Promise<string[]> {

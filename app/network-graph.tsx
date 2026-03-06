@@ -3,6 +3,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+const CANONICAL_ROOT_SLUG = 'openclaw-template';
+
 type GraphNode = {
   id: string;
   label: string;
@@ -10,6 +12,10 @@ type GraphNode = {
   kind: string;
   slug: string;
   href: string;
+  tx: number;
+  ty: number;
+  pinned: boolean;
+  degree: number;
   // Physics state
   x: number;
   y: number;
@@ -55,6 +61,111 @@ const NODE_RADIUS = 8;
 const HOVER_RADIUS = 12;
 const LABEL_ALWAYS_THRESHOLD = 8;
 
+function hashString(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function buildTargetLayout(
+  nodes: Props['nodes'],
+  edges: Props['edges'],
+  width: number,
+  height: number
+) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const rootId = nodes.find((node) => node.slug === CANONICAL_ROOT_SLUG)?.id || nodes[0]?.id || '';
+  const depthMap = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+  const incomingCount = new Map<string, number>();
+
+  for (const node of nodes) {
+    outgoing.set(node.id, []);
+    incomingCount.set(node.id, 0);
+  }
+
+  for (const edge of edges) {
+    const list = outgoing.get(edge.source);
+    if (list) list.push(edge.target);
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
+  }
+
+  if (rootId) {
+    depthMap.set(rootId, 0);
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const currentDepth = depthMap.get(current) || 0;
+      const children = outgoing.get(current) || [];
+      for (const child of children) {
+        if (depthMap.has(child)) continue;
+        depthMap.set(child, currentDepth + 1);
+        queue.push(child);
+      }
+    }
+  }
+
+  const rootCandidates = nodes
+    .filter((node) => !depthMap.has(node.id))
+    .sort((a, b) => {
+      const incomingDelta = (incomingCount.get(a.id) || 0) - (incomingCount.get(b.id) || 0);
+      if (incomingDelta !== 0) return incomingDelta;
+      return a.slug.localeCompare(b.slug);
+    });
+
+  let fallbackDepth = 1;
+  for (const node of rootCandidates) {
+    depthMap.set(node.id, fallbackDepth);
+    fallbackDepth += 1;
+  }
+
+  const layers = new Map<number, Props['nodes']>();
+  for (const node of nodes) {
+    const depth = depthMap.get(node.id) || 0;
+    const layer = layers.get(depth) || [];
+    layer.push(node);
+    layers.set(depth, layer);
+  }
+
+  const layout = new Map<string, { x: number; y: number; pinned: boolean }>();
+  const maxRadius = Math.min(width, height) * 0.42;
+
+  for (const [depth, layer] of layers.entries()) {
+    if (depth === 0) {
+      for (const node of layer) {
+        layout.set(node.id, { x: cx, y: cy, pinned: node.id === rootId });
+      }
+      continue;
+    }
+
+    const sorted = [...layer].sort((a, b) => {
+      const aHash = hashString(a.id);
+      const bHash = hashString(b.id);
+      if (aHash !== bHash) return aHash - bHash;
+      return a.slug.localeCompare(b.slug);
+    });
+
+    const radius = Math.min(maxRadius, 78 + depth * 62);
+    const step = (Math.PI * 2) / Math.max(sorted.length, 1);
+
+    sorted.forEach((node, index) => {
+      const jitter = ((hashString(`${node.id}:angle`) % 1000) / 1000 - 0.5) * 0.18;
+      const radialOffset = ((hashString(`${node.id}:radius`) % 1000) / 1000 - 0.5) * 18;
+      const angle = -Math.PI / 2 + index * step + jitter;
+      layout.set(node.id, {
+        x: cx + Math.cos(angle) * (radius + radialOffset),
+        y: cy + Math.sin(angle) * (radius + radialOffset * 0.7),
+        pinned: false
+      });
+    });
+  }
+
+  return layout;
+}
+
 export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,31 +177,34 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
   const sizeRef = useRef<{ w: number; h: number }>({ w: 800, h: 400 });
   const router = useRouter();
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string; section: string } | null>(null);
+  const [layoutSize, setLayoutSize] = useState<{ w: number; h: number }>({ w: 800, h: 400 });
 
   useEffect(() => {
-    const w = sizeRef.current.w;
-    const h = sizeRef.current.h;
-    const cx = w / 2;
-    const cy = h / 2;
+    const layout = buildTargetLayout(inputNodes, inputEdges, layoutSize.w, layoutSize.h);
+    const degreeMap = new Map<string, number>();
+    for (const edge of inputEdges) {
+      degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1);
+      degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1);
+    }
 
-    nodesRef.current = inputNodes.map((n, i) => {
-      const angle = (i / Math.max(inputNodes.length, 1)) * Math.PI * 2;
-      const baseRadius = inputNodes.length <= 4
-        ? Math.min(w, h) * 0.18
-        : Math.min(w, h) * 0.25;
-      const radius = baseRadius + Math.random() * 40;
+    nodesRef.current = inputNodes.map((n) => {
+      const target = layout.get(n.id) || { x: layoutSize.w / 2, y: layoutSize.h / 2, pinned: false };
       return {
         ...n,
         href: `/${n.section}/${n.slug}`,
-        x: cx + Math.cos(angle) * radius + (Math.random() - 0.5) * 30,
-        y: cy + Math.sin(angle) * radius + (Math.random() - 0.5) * 30,
+        tx: target.x,
+        ty: target.y,
+        pinned: target.pinned,
+        degree: degreeMap.get(n.id) || 0,
+        x: target.x,
+        y: target.y,
         vx: 0,
-        vy: 0,
+        vy: 0
       };
     });
 
     edgesRef.current = inputEdges;
-  }, [inputNodes, inputEdges]);
+  }, [inputNodes, inputEdges, layoutSize]);
 
   const simulate = useCallback(() => {
     const nodes = nodesRef.current;
@@ -102,11 +216,10 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
 
     if (nodes.length === 0) return;
 
-    const damping = 0.92;
-    const repulsion = 1200;
-    const attraction = 0.008;
-    const centerForce = 0.003;
-    const drift = 0.15;
+    const damping = 0.86;
+    const repulsion = 900;
+    const attraction = 0.016;
+    const tether = 0.026;
 
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
@@ -132,7 +245,7 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       const dx = target.x - source.x;
       const dy = target.y - source.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const idealDist = 100;
+      const idealDist = edge.type === 'connection' ? 120 : 88;
       const force = (dist - idealDist) * attraction;
       const fx = (dx / dist) * force;
       const fy = (dy / dist) * force;
@@ -142,12 +255,17 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       target.vy -= fy;
     }
 
-    const time = Date.now() / 5000;
     for (const node of nodes) {
-      node.vx += (cx - node.x) * centerForce;
-      node.vy += (cy - node.y) * centerForce;
-      node.vx += Math.sin(time + node.x * 0.01) * drift;
-      node.vy += Math.cos(time + node.y * 0.01) * drift;
+      if (node.pinned) {
+        node.x = node.tx;
+        node.y = node.ty;
+        node.vx = 0;
+        node.vy = 0;
+        continue;
+      }
+
+      node.vx += (node.tx - node.x) * tether;
+      node.vy += (node.ty - node.y) * tether;
       node.vx *= damping;
       node.vy *= damping;
       node.x += node.vx;
@@ -262,7 +380,8 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         (e) => (e.source === hovered.id && e.target === node.id) || (e.target === hovered.id && e.source === node.id)
       );
       const color = node.section === 'soul' ? COLORS.soul : COLORS.memory;
-      const radius = (isHovered ? HOVER_RADIUS : NODE_RADIUS) * dpr;
+      const baseRadius = node.pinned ? NODE_RADIUS * 2.1 : NODE_RADIUS + Math.min(node.degree, 4) * 0.55;
+      const radius = (isHovered ? Math.max(HOVER_RADIUS, baseRadius + 2) : baseRadius) * dpr;
 
       if (isHovered || isConnected) {
         const gradient = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius * 3);
@@ -277,7 +396,10 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
       ctx.beginPath();
       ctx.arc(nx, ny, radius, 0, Math.PI * 2);
 
-      if (node.kind === 'fork') {
+      if (node.pinned) {
+        ctx.fillStyle = isHovered ? '#7dd3fc' : 'rgba(34, 211, 238, 0.9)';
+        ctx.strokeStyle = '#7dd3fc';
+      } else if (node.kind === 'fork') {
         ctx.fillStyle = isHovered ? COLORS.fork : 'rgba(167, 139, 250, 0.7)';
         ctx.strokeStyle = COLORS.fork;
       } else {
@@ -296,11 +418,11 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
         ctx.fill();
       }
 
-      const alwaysShowLabels = nodes.length < LABEL_ALWAYS_THRESHOLD;
+      const alwaysShowLabels = nodes.length < LABEL_ALWAYS_THRESHOLD || node.pinned;
       if (isHovered || alwaysShowLabels) {
         ctx.font = `${(isHovered ? 13 : 11) * dpr}px "JetBrains Mono", "Fira Code", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillStyle = isHovered ? COLORS.text : COLORS.muted;
+        ctx.fillStyle = isHovered || node.pinned ? COLORS.text : COLORS.muted;
         ctx.fillText(node.label, nx, ny - radius - 8 * dpr);
       }
     }
@@ -321,15 +443,16 @@ export default function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: P
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
 
-    const resize = () => {
-      const rect = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const w = rect.width;
-      const h = 400;
-      sizeRef.current = { w, h };
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-      canvas.style.width = `${w}px`;
+      const resize = () => {
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = rect.width;
+        const h = 400;
+        sizeRef.current = { w, h };
+        setLayoutSize((current) => (current.w === w && current.h === h ? current : { w, h }));
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
     };
 

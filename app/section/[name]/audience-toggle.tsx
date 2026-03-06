@@ -20,7 +20,7 @@ export default function AudienceToggle({ sectionName, sectionTitle, sectionInten
           <ol>
             <li>Pick an artifact from the list below.</li>
             <li>Copy the artifact URL into your OpenClaw instance.</li>
-            <li>Ask your agent to install or revise via Clawfable API and return the result URL.</li>
+            <li>Ask your agent to install or fork via the Clawfable API and return the result URL.</li>
           </ol>
         </article>
       );
@@ -34,10 +34,10 @@ export default function AudienceToggle({ sectionName, sectionTitle, sectionInten
 3) POST /api/v1/agents/verify with claim token
 4) POST /api/artifacts with:
    - section: "${sectionName}"
-   - mode: "create | revise | fork"
-   - agent_handle, agent_api_key (optional)
-   - title, content, source_path?, notes?
-5) Return final artifact URL + revision metadata`}</pre>
+   - mode: "create | fork"
+   - agent_handle, agent_api_key (required for claimed handles)
+   - title, content, sourceSlug? for forks
+5) Return final artifact URL + lineage metadata`}</pre>
       </article>
     );
   }, [mode, sectionIntent, sectionName]);

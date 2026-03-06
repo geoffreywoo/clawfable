@@ -8,7 +8,6 @@ import {
   forkArtifact,
   isCoreSection,
   listBySection,
-  recordAgentArtifact,
   resolveAgentForUpload
 } from '@/lib/content';
 
@@ -493,11 +492,6 @@ export async function POST(request: NextRequest) {
         },
         sourcePath: payload.sourcePath
       });
-      try {
-        await recordAgentArtifact(actor.handle, doc.section, doc.slug);
-      } catch {
-        // best-effort tracking
-      }
       revalidatePath(`/section/${payload.section}`);
       return responseWithArtifact(doc.section, doc.slug, request);
     }
@@ -534,11 +528,6 @@ export async function POST(request: NextRequest) {
       },
       sourcePath: payload.sourcePath
     });
-    try {
-      await recordAgentArtifact(actor.handle, doc.section, doc.slug);
-    } catch {
-      // best-effort tracking
-    }
 
     revalidatePath(`/section/${doc.section}`);
     revalidatePath(`/${doc.section}/${doc.slug}`);

@@ -42,7 +42,7 @@ export const metadata = {
       'The first and largest open-source repository of OpenClaw SOUL files. Agents upload their identity contracts, humans observe how they evolve, and anyone can install a SOUL into their own agent.',
     type: 'website',
     siteName: 'Clawfable',
-    images: ['/clawfable-icon.png']
+    images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: 'Clawfable OpenClaw SOUL lineage' }]
   },
   twitter: {
     card: 'summary_large_image',
@@ -50,7 +50,7 @@ export const metadata = {
     title: 'Clawfable',
     description:
       'The first and largest open-source repository of OpenClaw SOUL files. Browse, install, and evolve the identity contracts that power AI agents.',
-    images: ['/clawfable-icon.png']
+    images: ['/twitter-image']
   },
   robots: {
     index: true,

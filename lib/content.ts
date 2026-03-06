@@ -1,4 +1,4 @@
-import { DB_AGENT_INDEX, DB_RECENT_ACTIVITY_KEY, addToSectionIndex, appendHistory, appendRecentActivity, artifactKey, fromMdSection, getAgentProfileRow, getKvClient, getSectionIndex, isCoreSection, kvGet, normalizeAgentHandle, normalizeSection, normalizeSlug, nowStamp, parseAgentProfile, parseArtifactCount, persistAgentProfile, removeFromSectionIndex, sanitizeScope, shortDescription, sourcePathFor, userProfileKey } from './content-core';
+import { DB_AGENT_INDEX, addToSectionIndex, appendHistory, appendRecentActivity, artifactKey, buildHistorySnapshot, getAgentProfileRow, getKvClient, isCoreSection, kvGet, listBySection, normalizeAgentHandle, normalizeSection, normalizeSlug, nowStamp, parseAgentProfile, parseArtifactCount, persistAgentProfile, removeFromSectionIndex, sanitizeScope, shortDescription, sourcePathFor, userProfileKey } from './content-core';
 import type { CoreSection, DbPayload, DbRecord, ForkPayload, ScopeMap, StoredAgentProfile } from './content-core';
 export * from './content-core';
 
@@ -65,22 +65,27 @@ export async function createArtifact(payload: DbPayload): Promise<DbRecord> {
 
   await appendHistory(kv, normalizedSection, normalizedSlug, {
     action: 'create',
+    section: normalizedSection,
+    slug: normalizedSlug,
     actor_handle: payload.created_by_handle,
     actor_display_name: payload.created_by_display_name,
     actor_profile_url: payload.created_by_profile_url,
     actor_verified: payload.created_by_verified,
     revision_id: record.revision?.id,
     timestamp: now,
-    title: payload.title
+    title: record.title,
+    snapshot: buildHistorySnapshot(record)
   });
 
   await appendRecentActivity(kv, {
     action: 'create',
+    section: normalizedSection,
+    slug: normalizedSlug,
     actor_handle: payload.created_by_handle,
     actor_verified: payload.created_by_verified,
     revision_id: record.revision?.id,
     timestamp: now,
-    title: payload.title
+    title: record.title
   });
 
   return record;
@@ -171,6 +176,8 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
 
   await appendHistory(kv, normalizedSection, normalizedSlug, {
     action: 'fork',
+    section: normalizedSection,
+    slug: normalizedSlug,
     actor_handle: payload.created_by_handle,
     actor_display_name: payload.created_by_display_name,
     actor_profile_url: payload.created_by_profile_url,
@@ -179,11 +186,14 @@ export async function forkArtifact(payload: ForkPayload): Promise<DbRecord> {
     source_artifact: `${normalizedSourceSection}/${normalizedSourceSlug}`,
     diff_summary: isSelfUpdate ? (payload.author_commentary || `Updated ${prevRevisionId} \u2192 ${nextRevisionId}`) : undefined,
     timestamp: now,
-    title: record.title
+    title: record.title,
+    snapshot: buildHistorySnapshot(record)
   });
 
   await appendRecentActivity(kv, {
     action: 'fork',
+    section: normalizedSection,
+    slug: normalizedSlug,
     actor_handle: payload.created_by_handle,
     actor_verified: payload.created_by_verified,
     revision_id: nextRevisionId,
@@ -216,31 +226,25 @@ export async function deleteArtifact(section: CoreSection, slug: string): Promis
 
 export async function getSiteStats(): Promise<{ soulCount: number; contributorCount: number; forkCount: number }> {
   const kv = await getKvClient();
+  const soulItems = await listBySection('soul');
   if (!kv) {
-    const soulItems = fromMdSection('soul');
     return {
       soulCount: soulItems.length,
       contributorCount: 0,
-      forkCount: 0
+      forkCount: soulItems.filter((item) => item.revision?.kind === 'fork').length
     };
   }
 
-  const [soulIndex, rawAgentIndex, rawRecentActivity] = await Promise.all([
-    getSectionIndex('soul'),
-    kvGet<unknown>(kv, DB_AGENT_INDEX),
-    kvGet<unknown>(kv, DB_RECENT_ACTIVITY_KEY)
-  ]);
+  const rawAgentIndex = await kvGet<unknown>(kv, DB_AGENT_INDEX);
 
   const contributorCount = Array.isArray(rawAgentIndex)
     ? rawAgentIndex.filter((v): v is string => typeof v === 'string').length
     : 0;
 
-  const forkCount = Array.isArray(rawRecentActivity)
-    ? rawRecentActivity.length
-    : 0;
+  const forkCount = soulItems.filter((item) => item.revision?.kind === 'fork').length;
 
   return {
-    soulCount: soulIndex.length,
+    soulCount: soulItems.length,
     contributorCount,
     forkCount
   };

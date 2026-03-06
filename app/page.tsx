@@ -1,8 +1,10 @@
 import Link from 'next/link';
-import { getRecentActivity, getSiteStats, listBySection, getArtifactLineage } from '../lib/content';
+import { buildLineageForest, getRecentActivity, getSiteStats, listBySection } from '../lib/content';
 import type { HistoryEntry, LineageNode } from '../lib/content';
 import HomeAudienceToggle from './home-audience-toggle';
 import NetworkGraph from './network-graph';
+
+const CANONICAL_ROOT_SLUG = 'openclaw-template';
 
 function readableDateTime(value: string | null | undefined) {
   if (!value) return '';
@@ -74,6 +76,7 @@ export default async function Home() {
     getSiteStats(),
     listBySection('soul')
   ]);
+  const lineageForest = buildLineageForest(soulItems, 'soul');
 
   // Find the canonical baseline artifact
   const soulBaseline = soulItems.find((item) => item.slug === 'openclaw-template') || soulItems[0];
@@ -82,26 +85,22 @@ export default async function Home() {
   const allNodes: GraphNodeInput[] = [];
   const allEdges: GraphEdgeInput[] = [];
 
-  try {
-    const soulRoots = soulItems.filter((item) => {
-      const data = item.data as Record<string, unknown> | undefined;
-      const rev = data?.revision as Record<string, unknown> | undefined;
-      return !rev?.source;
-    });
+  if (lineageForest.length > 0) {
+    const { nodes, edges } = collectGraphData(lineageForest, 'soul');
+    allNodes.push(...nodes);
+    allEdges.push(...edges);
+  }
 
-    const soulLineages = await Promise.all(
-      soulRoots.map((item) => getArtifactLineage('soul', item.slug))
-    );
-
-    for (const trees of soulLineages) {
-      const { nodes, edges } = collectGraphData(trees, 'soul');
-      allNodes.push(...nodes);
-      allEdges.push(...edges);
-    }
-  } catch {
-    // If lineage fetch fails, add nodes from items directly
-    for (const item of soulItems) {
-      allNodes.push({ id: `soul/${item.slug}`, label: item.title, section: 'soul', kind: item.revision?.kind || 'core', slug: item.slug });
+  const canonicalRootId = `soul/${CANONICAL_ROOT_SLUG}`;
+  const hasCanonicalRoot = allNodes.some((node) => node.id === canonicalRootId);
+  if (hasCanonicalRoot) {
+    for (const root of lineageForest) {
+      if (root.slug === CANONICAL_ROOT_SLUG) continue;
+      allEdges.push({
+        source: canonicalRootId,
+        target: `soul/${root.slug}`,
+        type: 'connection'
+      });
     }
   }
 
@@ -118,6 +117,9 @@ export default async function Home() {
     if (!nodeMap.has(n.id)) nodeMap.set(n.id, n);
   }
   const uniqueNodes = Array.from(nodeMap.values());
+  const uniqueEdges = Array.from(
+    new Map(allEdges.map((edge) => [`${edge.source}->${edge.target}:${edge.type}`, edge])).values()
+  );
 
   return (
     <div className="home-shell">
@@ -141,10 +143,10 @@ export default async function Home() {
           <div style={{ padding: '24px 32px 12px' }}>
             <p className="kicker">Artifact Graph</p>
             <p className="doc-subtitle" style={{ margin: 0 }}>
-              Interactive map of all artifacts and their relationships. Click a node to explore.
+              The canonical OpenClaw default SOUL anchors the center, with descendant families branching outward.
             </p>
           </div>
-          <NetworkGraph nodes={uniqueNodes} edges={allEdges} />
+          <NetworkGraph nodes={uniqueNodes} edges={uniqueEdges} />
         </section>
       )}
 
@@ -161,7 +163,7 @@ export default async function Home() {
             <p className="stat-value">{stats.contributorCount}</p>
           </div>
           <div className="stat-box">
-            <p className="stat-label">Total Forks</p>
+            <p className="stat-label">Forked SOULs</p>
             <p className="stat-value">{stats.forkCount}</p>
           </div>
         </div>
@@ -187,12 +189,18 @@ export default async function Home() {
                     <strong>anonymous</strong>
                   )}
                   {' '}{actionVerb(entry.action)}{' '}
-                  <span className={`timeline-action timeline-action--${(entry.action as string) === 'revise' ? 'fork' : entry.action}`}>
-                    {(entry.action as string) === 'revise' ? 'fork' : entry.action}
+                  <span className={`timeline-action timeline-action--${entry.action === 'revise' ? 'fork' : entry.action}`}>
+                    {entry.action === 'revise' ? 'fork' : entry.action}
                   </span>
                 </span>
                 <span className="activity-title">
-                  {entry.title}
+                  {entry.section && entry.slug ? (
+                    <Link href={`/${entry.section}/${entry.slug}`}>
+                      {entry.title || `${entry.section}/${entry.slug}`}
+                    </Link>
+                  ) : (
+                    entry.title || 'Untitled artifact'
+                  )}
                 </span>
               </li>
             ))}
