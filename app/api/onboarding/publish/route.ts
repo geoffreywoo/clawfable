@@ -1,24 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
-import { forkArtifact, getKvClient, kvGet, resolveAgentForUpload } from '@/lib/content';
-
-type ClaimRecord = {
-  artifact_key: string;
-  claim_url: string;
-  verification_phrase: string;
-  section: 'soul';
-  source_slug: string;
-  author_handle: string;
-  status: 'pending_claim' | 'claimed' | 'active' | 'expired';
-  created_at: string;
-  updated_at: string;
-  expires_at: string;
-  proof_url?: string;
-};
-
-function key(artifactKey: string) {
-  return `clawfable:db:onboarding:claim:${artifactKey}`;
-}
+import { forkArtifact, resolveAgentForUpload } from '@/lib/content';
+import { claimKey, getClaimRecord, isExpired, sanitize } from '@/lib/onboarding';
 
 function extractApiKey(request: NextRequest, body: Record<string, unknown>) {
   const headerValue = request.headers.get('authorization') || request.headers.get('x-agent-api-key') || '';
@@ -30,10 +13,10 @@ function extractApiKey(request: NextRequest, body: Record<string, unknown>) {
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const artifactKey = String(body.artifact_key || '').trim();
-  const title = String(body.title || '').trim();
-  const content = String(body.content || '').trim();
-  const description = String(body.description || '').trim();
+  const artifactKey = sanitize(body.artifact_key);
+  const title = sanitize(body.title);
+  const content = sanitize(body.content);
+  const description = sanitize(body.description);
 
   if (!artifactKey || !title || !content) {
     return NextResponse.json(
@@ -42,22 +25,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const kv = await getKvClient();
-  if (!kv) {
+  let kv;
+  let claim;
+  try {
+    ({ kv, record: claim } = await getClaimRecord(artifactKey));
+  } catch {
     return NextResponse.json({ error: 'Onboarding store unavailable.', code: 'KV_UNAVAILABLE' }, { status: 503 });
   }
-
-  const claim = await kvGet<ClaimRecord | null>(kv, key(artifactKey));
   if (!claim) {
     return NextResponse.json({ error: 'Claim record not found.', code: 'NOT_FOUND' }, { status: 404 });
   }
   if (claim.status !== 'claimed') {
     return NextResponse.json({ error: 'Artifact must be claimed before publish.', code: 'NOT_CLAIMED' }, { status: 400 });
   }
-  if (new Date(claim.expires_at).getTime() < Date.now()) {
+  if (isExpired(claim)) {
     claim.status = 'expired';
     claim.updated_at = new Date().toISOString();
-    await kv.set(key(artifactKey), claim);
+    await kv.set(claimKey(artifactKey), claim);
     return NextResponse.json({ error: 'Claim token expired.', code: 'CLAIM_EXPIRED' }, { status: 410 });
   }
 
@@ -93,7 +77,7 @@ export async function POST(request: NextRequest) {
 
   claim.status = 'active';
   claim.updated_at = new Date().toISOString();
-  await kv.set(key(artifactKey), claim);
+  await kv.set(claimKey(artifactKey), claim);
 
   revalidatePath(`/section/${doc.section}`);
   revalidatePath(`/${doc.section}/${doc.slug}`);

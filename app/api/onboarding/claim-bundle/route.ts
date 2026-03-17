@@ -1,60 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getKvClient, kvGet } from '@/lib/content';
-
-type ClaimStatus = 'pending_claim' | 'claimed' | 'active' | 'expired';
-
-type OnboardingClaimRecord = {
-  artifact_key: string;
-  claim_token: string;
-  claim_url: string;
-  verification_phrase: string;
-  section: string;
-  source_slug: string;
-  author_handle: string;
-  proof_url?: string;
-  status: ClaimStatus;
-  created_at: string;
-  updated_at: string;
-  expires_at: string;
-  request_ip?: string;
-};
-
-const CLAIM_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-const RATE_LIMIT_WINDOW_MS = 1000 * 60; // 1m
-const RATE_LIMIT_MAX = 20;
-
-function sanitize(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function expiresIso() {
-  return new Date(Date.now() + CLAIM_TTL_MS).toISOString();
-}
-
-function claimKey(artifactKey: string) {
-  return `clawfable:db:onboarding:claim:${artifactKey}`;
-}
-
-function rateLimitKey(ip: string) {
-  const slot = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS);
-  return `clawfable:db:onboarding:rl:${ip}:${slot}`;
-}
-
-async function enforceRateLimit(ip: string) {
-  const kv = await getKvClient();
-  if (!kv || !ip) return;
-  const key = rateLimitKey(ip);
-  const raw = await kvGet<number | string | null>(kv, key);
-  const count = typeof raw === 'number' ? raw : Number(raw || 0);
-  if (count >= RATE_LIMIT_MAX) {
-    throw new Error('RATE_LIMITED');
-  }
-  await kv.set(key, count + 1);
-}
+import { getKvClient } from '@/lib/content';
+import { OnboardingClaimRecord, claimKey, enforceRateLimit, expiresIso, nowIso, sanitize } from '@/lib/onboarding';
 
 function validateInput(sourceSlug: string, authorHandle: string) {
   if (!sourceSlug) {
