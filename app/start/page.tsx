@@ -121,6 +121,12 @@ export default function StartPage() {
               Honest decision matrices against n8n, LangGraph, and DIY stacks.
             </p>
           </Link>
+          <Link href="/soul-studio" className="hub-card">
+            <p className="hub-card-title">SOUL Studio</p>
+            <p className="hub-card-desc">
+              Human/AI draft paths to create SOUL.md from scratch, then publish with lineage.
+            </p>
+          </Link>
         </div>
       </section>
     </div>
