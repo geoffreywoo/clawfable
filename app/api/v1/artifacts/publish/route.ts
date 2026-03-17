@@ -2,33 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { forkArtifact, resolveAgentForUpload } from '@/lib/content';
 import { claimKey, getClaimRecord, isExpired, sanitize } from '@/lib/onboarding';
-
-function extractValue(payload: Record<string, unknown>, key: string) {
-  const value = payload[key];
-  if (value === undefined || value === null) return '';
-  return String(value);
-}
-
-async function parsePayload(request: NextRequest): Promise<Record<string, unknown>> {
-  const contentType = request.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    return (await request.json()) as Record<string, unknown>;
-  }
-  const form = await request.formData();
-  const data: Record<string, unknown> = {};
-  for (const [key, value] of form.entries()) {
-    data[key] = typeof value === 'string' ? value : String(value);
-  }
-  return data;
-}
-
-function extractApiKey(request: NextRequest, payload: Record<string, unknown>) {
-  const headerValue = request.headers.get('authorization') || request.headers.get('x-agent-api-key') || '';
-  const authMatch = headerValue.toLowerCase().startsWith('bearer ')
-    ? headerValue.slice(7).trim()
-    : headerValue.trim();
-  return authMatch || extractValue(payload, 'agent_api_key');
-}
+import { extractApiKey, parseBody } from '@/lib/http';
 
 async function execute(request: NextRequest, payload: Record<string, unknown>) {
   const artifactKey = sanitize(payload.artifact_key);
@@ -58,7 +32,13 @@ async function execute(request: NextRequest, payload: Record<string, unknown>) {
   }
 
   const apiKey = extractApiKey(request, payload);
-  const actor = await resolveAgentForUpload(claim.author_handle, { apiKey });
+  let actor;
+  try {
+    actor = await resolveAgentForUpload(claim.author_handle, { apiKey });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unauthorized upload actor';
+    return NextResponse.json({ error: message, code: 'UNAUTHORIZED_ACTOR' }, { status: 401 });
+  }
 
   const doc = await forkArtifact({
     section: claim.section as 'soul',
@@ -107,6 +87,6 @@ async function execute(request: NextRequest, payload: Record<string, unknown>) {
 }
 
 export async function POST(request: NextRequest) {
-  const payload = await parsePayload(request);
+  const payload = await parseBody(request);
   return execute(request, payload);
 }

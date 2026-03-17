@@ -1,26 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClaimBundle, sanitize, validateOnboardingInput } from '@/lib/onboarding';
-
-function extractValue(payload: Record<string, unknown>, key: string) {
-  const value = payload[key];
-  if (value === undefined || value === null) return '';
-  return String(value);
-}
-
-async function parsePayload(request: NextRequest): Promise<Record<string, unknown>> {
-  const contentType = request.headers.get('content-type') || '';
-
-  if (contentType.includes('application/json')) {
-    return (await request.json()) as Record<string, unknown>;
-  }
-
-  const form = await request.formData();
-  const data: Record<string, unknown> = {};
-  for (const [key, value] of form.entries()) {
-    data[key] = typeof value === 'string' ? value : String(value);
-  }
-  return data;
-}
+import { parseBody, pickString } from '@/lib/http';
 
 function buildClaimTweetUrl(verificationPhrase: string, claimUrl: string) {
   const text = `${verificationPhrase}\n\nclaim url: ${claimUrl}`;
@@ -91,7 +71,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const payload = await parsePayload(request);
-  payload.author_handle = extractValue(payload, 'author_handle') || extractValue(payload, 'handle');
+  const payload = await parseBody(request);
+  payload.author_handle = pickString(payload, 'author_handle') || pickString(payload, 'handle');
   return execute(request, payload);
 }

@@ -1,24 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { claimKey, getClaimRecord, isExpired, sanitize } from '@/lib/onboarding';
-
-function extractValue(payload: Record<string, unknown>, key: string) {
-  const value = payload[key];
-  if (value === undefined || value === null) return '';
-  return String(value);
-}
-
-async function parsePayload(request: NextRequest): Promise<Record<string, unknown>> {
-  const contentType = request.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    return (await request.json()) as Record<string, unknown>;
-  }
-  const form = await request.formData();
-  const data: Record<string, unknown> = {};
-  for (const [key, value] of form.entries()) {
-    data[key] = typeof value === 'string' ? value : String(value);
-  }
-  return data;
-}
+import { parseBody, pickString } from '@/lib/http';
 
 async function execute(artifactKey: string, proofUrl: string, proofHandleRaw: string) {
   const proofHandle = proofHandleRaw.replace(/^@/, '');
@@ -69,10 +51,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const payload = await parsePayload(request);
-  const artifactKey = sanitize(extractValue(payload, 'artifact_key'));
-  const proofUrl = sanitize(extractValue(payload, 'proof_url'));
-  const proofHandle = sanitize(extractValue(payload, 'proof_handle'));
+  const payload = await parseBody(request);
+  const artifactKey = sanitize(pickString(payload, 'artifact_key'));
+  const proofUrl = sanitize(pickString(payload, 'proof_url'));
+  const proofHandle = sanitize(pickString(payload, 'proof_handle'));
 
   if (!artifactKey) return NextResponse.json({ error: 'artifact_key is required.' }, { status: 400 });
   if (!proofUrl) return NextResponse.json({ error: 'proof_url is required.', code: 'NO_CLAIM_PROOF' }, { status: 400 });
