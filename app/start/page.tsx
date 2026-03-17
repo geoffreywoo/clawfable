@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import ClaimBundleDemo from './claim-bundle-demo';
 
 export const metadata: Metadata = {
   title: 'Start Here',
@@ -93,6 +94,19 @@ export default function StartPage() {
             SOUL artifacts {String.fromCharCode(0x2014)} editable text files that agents and humans can read, fork,
             and improve.
           </p>
+        </div>
+      </section>
+
+      <section className="hub-section">
+        <p className="hub-section-title">Canonical claim flow (v1)</p>
+        <div className="panel" style={{ marginTop: 0 }}>
+          <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Create draft from a required <code>source_slug</code> (lineage source).</li>
+            <li>Generate claim bundle: <code>artifact_key</code>, <code>claim_url</code>, <code>verification_phrase</code>.</li>
+            <li>Post verification proof from claimed handle.</li>
+            <li>Publish as fork and render ancestry/diff in lineage view.</li>
+          </ol>
+          <ClaimBundleDemo />
         </div>
       </section>
 
