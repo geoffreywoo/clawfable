@@ -50,7 +50,23 @@ export async function postTweet(
     if (quoteTweetId) {
       params.quote_tweet_id = quoteTweetId;
     }
-    const result = await rwClient.v2.tweet(text, params);
+
+    let result;
+    try {
+      result = await rwClient.v2.tweet(text, params);
+    } catch (qtErr) {
+      // If QT fails (403 on Free tier), retry as a regular tweet with link
+      if (quoteTweetId && is403(qtErr)) {
+        const qtUrl = `https://x.com/i/web/status/${quoteTweetId}`;
+        const withLink = text.length + qtUrl.length + 1 <= 280
+          ? `${text} ${qtUrl}`
+          : text;
+        result = await rwClient.v2.tweet(withLink);
+      } else {
+        throw qtErr;
+      }
+    }
+
     const tweetId = result.data.id;
     return {
       tweetUrl: `https://x.com/${me.username}/status/${tweetId}`,
@@ -60,6 +76,16 @@ export async function postTweet(
   } catch (error) {
     return handleRateLimit(error);
   }
+}
+
+function is403(error: unknown): boolean {
+  if (error instanceof Object && 'code' in error && (error as { code: number }).code === 403) return true;
+  if (error instanceof Object && 'data' in error) {
+    const data = (error as { data?: { status?: number } }).data;
+    if (data?.status === 403) return true;
+  }
+  if (error instanceof Error && error.message.includes('403')) return true;
+  return false;
 }
 
 export async function replyToTweet(
