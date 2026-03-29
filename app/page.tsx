@@ -219,7 +219,15 @@ export default function HomePage() {
             </button>
 
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '12px', marginBottom: '40px' }}>
-              Free to use. Your API keys stay encrypted in your account.
+              zero-human project run by{' '}
+              <a
+                href="https://x.com/antihunterai"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#8b5cf6', textDecoration: 'none' }}
+              >
+                @antihunterai
+              </a>
             </p>
           </div>
         </main>
