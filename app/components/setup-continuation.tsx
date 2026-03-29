@@ -3,21 +3,15 @@
 import { useState } from 'react';
 import type { AgentDetail } from '@/lib/types';
 
-const SOUL_PLACEHOLDER = `# SOUL.md — System Definition
+const ARCHETYPES = [
+  { id: 'contrarian', label: 'Contrarian' },
+  { id: 'optimist', label: 'Optimist' },
+  { id: 'analyst', label: 'Analyst' },
+  { id: 'provocateur', label: 'Provocateur' },
+  { id: 'educator', label: 'Educator' },
+];
 
-I am [describe your agent's identity here].
-
-## 1) Objective Function
-Primary objective: [what this agent aims to achieve]
-
-## 2) Communication Protocol
-Tone: [contrarian / optimist / analyst / provocateur / educator]
-
-## 3) Anti-Goals
-Do not optimize for: [what to avoid]
-
-## 4) Focus Areas
-Topics: [ai, tech, crypto, finance, etc.]`;
+const TOPICS = ['AI', 'Tech', 'Crypto', 'Finance', 'Startups', 'Product', 'Career', 'Culture'];
 
 interface AnalysisData {
   tweetCount: number;
@@ -46,26 +40,49 @@ interface Props {
 export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props) {
   const needsSoul = agent.setupStep === 'soul' || agent.soulMd === '# Pending SOUL.md setup';
   const [step, setStep] = useState<'soul' | 'analyze'>(needsSoul ? 'soul' : 'analyze');
-  const [soulMd, setSoulMd] = useState('');
+
+  // Guided builder state
+  const [archetype, setArchetype] = useState('');
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [exampleTweets, setExampleTweets] = useState('');
+  const [frequency, setFrequency] = useState('3x');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
 
-  const handleSaveSoul = async () => {
-    if (!soulMd.trim()) return;
+  const toggleTopic = (topic: string) => {
+    setSelectedTopics((prev) =>
+      prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]
+    );
+  };
+
+  const canGenerate = archetype && selectedTopics.length > 0;
+
+  const handleGenerateVoice = async () => {
+    if (!canGenerate) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}`, {
-        method: 'PATCH',
+      const examples = exampleTweets
+        .split('\n')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+
+      const res = await fetch(`/api/agents/${agentId}/wizard`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ soulMd }),
+        body: JSON.stringify({ exampleTweets: examples, archetype, topics: selectedTopics, frequency }),
       });
-      if (!res.ok) throw new Error('Failed to save SOUL.md');
+
+      if (res.status === 429) throw new Error('Too many attempts. Wait a few minutes and try again.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Voice generation failed');
+
       setStep('analyze');
       runAnalysis();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : 'Voice generation failed');
       setLoading(false);
     }
   };
@@ -105,39 +122,88 @@ export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props
             </span>
           </div>
 
-          {/* SOUL.md step */}
+          {/* Voice builder step */}
           {step === 'soul' && (
             <>
               <div className="wizard-step-header">
-                <h3>Upload SOUL.md</h3>
-                <p>Define your agent&apos;s personality, tone, topics, and anti-goals.</p>
+                <h3>Build Your Voice</h3>
+                <p>We&apos;ll generate your personality profile from these inputs.</p>
               </div>
-              <div className="field">
-                <div className="flex items-center justify-between">
-                  <label>SOUL.md</label>
-                  <span className="label" style={{ textTransform: 'none' }}>{soulMd.length} chars</span>
+
+              <div className="wizard-builder-sections">
+                <div className="wizard-builder-section">
+                  <div className="wizard-section-label">EXAMPLE TWEETS (OPTIONAL)</div>
+                  <textarea
+                    className="textarea"
+                    value={exampleTweets}
+                    onChange={(e) => setExampleTweets(e.target.value)}
+                    placeholder="Paste 3-5 tweets you admire or your own best tweets, one per line..."
+                    rows={4}
+                  />
+                  <p className="wizard-section-hint">
+                    Skip if you don&apos;t have examples. We&apos;ll use archetype + topics.
+                  </p>
                 </div>
-                <textarea
-                  className="textarea"
-                  value={soulMd}
-                  onChange={(e) => setSoulMd(e.target.value)}
-                  placeholder={SOUL_PLACEHOLDER}
-                  rows={14}
-                />
-                <p className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: '10px', marginTop: 4 }}>
-                  Include tone indicators: contrarian, optimist, analyst, provocateur, or educator.
-                </p>
+
+                <div className="wizard-builder-section">
+                  <div className="wizard-section-label">VOICE ARCHETYPE</div>
+                  <div className="wizard-tags" role="radiogroup" aria-label="Voice archetype">
+                    {ARCHETYPES.map((a) => (
+                      <button
+                        key={a.id}
+                        className={`wizard-tag wizard-tag-selectable ${archetype === a.id ? 'tag-selected' : ''}`}
+                        onClick={() => setArchetype(a.id)}
+                        role="radio"
+                        aria-checked={archetype === a.id}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="wizard-builder-section">
+                  <div className="wizard-section-label">TOPICS (PICK 2-3)</div>
+                  <div className="wizard-tags" role="group" aria-label="Topics">
+                    {TOPICS.map((topic) => (
+                      <button
+                        key={topic}
+                        className={`wizard-tag wizard-tag-selectable ${selectedTopics.includes(topic) ? 'tag-selected' : ''}`}
+                        onClick={() => toggleTopic(topic)}
+                        role="checkbox"
+                        aria-checked={selectedTopics.includes(topic)}
+                      >
+                        {topic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="wizard-builder-section">
+                  <div className="wizard-section-label">POSTING FREQUENCY</div>
+                  <select
+                    className="input"
+                    value={frequency}
+                    onChange={(e) => setFrequency(e.target.value)}
+                    style={{ width: '180px' }}
+                  >
+                    <option value="1x">1x per day</option>
+                    <option value="3x">3x per day</option>
+                    <option value="6x">6x per day</option>
+                  </select>
+                </div>
               </div>
+
               {error && <p className="wizard-error">{error}</p>}
               <div className="wizard-actions">
                 <button className="btn btn-outline" onClick={onClose}>SKIP FOR NOW</button>
                 <button
                   className="btn btn-primary"
-                  disabled={!soulMd.trim() || loading}
-                  onClick={handleSaveSoul}
-                  style={{ background: soulMd.trim() ? '#8b5cf6' : undefined }}
+                  disabled={!canGenerate || loading}
+                  onClick={handleGenerateVoice}
+                  style={{ background: canGenerate ? '#8b5cf6' : undefined }}
                 >
-                  {loading ? 'ANALYZING...' : 'SAVE & ANALYZE'}
+                  {loading ? 'CRAFTING VOICE PROFILE...' : 'GENERATE VOICE'}
                 </button>
               </div>
             </>
