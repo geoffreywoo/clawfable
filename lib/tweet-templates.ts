@@ -251,18 +251,6 @@ const REPLY_TEMPLATES: Record<string, Array<(handle: string) => string>> = {
   ],
 };
 
-// ─── Trending topics (static list) ───────────────────────────────────────────
-
-export const TRENDING_TOPICS = [
-  { id: 1, headline: "OpenAI Announces GPT-5 with 'Unprecedented Reasoning Capabilities'", source: 'TechCrunch', relevanceScore: 98, category: 'openai', timestamp: new Date(Date.now() - 1800000).toISOString() },
-  { id: 2, headline: 'Google DeepMind Claims Breakthrough in AI Agent Autonomy', source: 'The Verge', relevanceScore: 94, category: 'agents', timestamp: new Date(Date.now() - 3600000).toISOString() },
-  { id: 3, headline: 'AI Startup Raises $500M Series B With No Revenue, Only Vibes', source: 'Bloomberg', relevanceScore: 91, category: 'funding', timestamp: new Date(Date.now() - 5400000).toISOString() },
-  { id: 4, headline: 'EU Proposes New AI Regulation Framework Targeting Foundation Models', source: 'Reuters', relevanceScore: 87, category: 'regulation', timestamp: new Date(Date.now() - 7200000).toISOString() },
-  { id: 5, headline: 'McKinsey Report: AI Will Displace 30% of Knowledge Workers by 2028', source: 'Financial Times', relevanceScore: 85, category: 'jobs', timestamp: new Date(Date.now() - 9000000).toISOString() },
-  { id: 6, headline: "Anthropic's Claude Achieves State-of-the-Art on New Reasoning Benchmarks", source: 'Ars Technica', relevanceScore: 82, category: 'default', timestamp: new Date(Date.now() - 10800000).toISOString() },
-  { id: 7, headline: 'Microsoft Integrates AI Copilot Into Every Office Product', source: 'Wired', relevanceScore: 79, category: 'agents', timestamp: new Date(Date.now() - 14400000).toISOString() },
-  { id: 8, headline: 'Meta Open-Sources New 400B Parameter Language Model', source: 'VentureBeat', relevanceScore: 76, category: 'default', timestamp: new Date(Date.now() - 18000000).toISOString() },
-];
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
