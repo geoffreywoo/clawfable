@@ -1,4 +1,4 @@
-import type { AccountAnalysis, JobSuggestion } from './types';
+import type { AccountAnalysis, JobSuggestion, TweetJob } from './types';
 
 function formatHour(h: number): string {
   if (h === 0) return '12AM';
@@ -9,14 +9,17 @@ function formatHour(h: number): string {
 
 /**
  * Generate job suggestions based on account analysis.
- * Returns 3-5 suggestions tailored to the account's engagement patterns.
+ * Filters out suggestions that match already-active jobs.
  */
-export function generateJobSuggestions(analysis: AccountAnalysis): JobSuggestion[] {
+export function generateJobSuggestions(analysis: AccountAnalysis, activeJobs: TweetJob[] = []): JobSuggestion[] {
   const { engagementPatterns, followingProfile } = analysis;
   const suggestions: JobSuggestion[] = [];
 
-  // 1. Peak Hour Posts — always suggest if we have top hours
-  if (engagementPatterns.topHours.length > 0) {
+  // Names of active jobs — used to skip redundant suggestions
+  const activeNames = new Set(activeJobs.map((j) => j.name.toLowerCase()));
+
+  // 1. Peak Hour Posts
+  if (engagementPatterns.topHours.length > 0 && !activeNames.has('peak hour posts')) {
     const hours = engagementPatterns.topHours.slice(0, 3);
     const hoursStr = hours.map(formatHour).join(', ');
     suggestions.push({
@@ -26,15 +29,15 @@ export function generateJobSuggestions(analysis: AccountAnalysis): JobSuggestion
       postsPerRun: 1,
       topics: [],
       formats: [],
-      reason: `Your tweets get ${Math.round(engagementPatterns.avgLikes * 1.5)}+ avg likes during these hours — ${Math.round(engagementPatterns.avgLikes * 0.5)} more than off-peak.`,
+      reason: `Your tweets get ${Math.round(engagementPatterns.avgLikes * 1.5)}+ avg likes during these hours.`,
     });
   }
 
-  // 2. Hot Take Blitz — if hot_take or short_punch is a top format
+  // 2. Hot Take Blitz
   const aggressiveFormats = engagementPatterns.topFormats.filter(
     (f) => f === 'hot_take' || f === 'short_punch'
   );
-  if (aggressiveFormats.length > 0) {
+  if (aggressiveFormats.length > 0 && !activeNames.has('hot take blitz')) {
     suggestions.push({
       name: 'Hot Take Blitz',
       description: `Fire off ${aggressiveFormats.join(' + ')} format tweets — your highest-performing style.`,
@@ -42,49 +45,54 @@ export function generateJobSuggestions(analysis: AccountAnalysis): JobSuggestion
       postsPerRun: 2,
       topics: [],
       formats: aggressiveFormats,
-      reason: `${aggressiveFormats.join(', ')} tweets outperform your other formats. Lean into what works.`,
+      reason: `${aggressiveFormats.join(', ')} tweets outperform your other formats.`,
     });
   }
 
-  // 3. Quote Tweet Reactor — always useful for engagement
-  suggestions.push({
-    name: 'Quote Tweet Reactor',
-    description: 'React to trending posts from accounts you follow with contrarian takes.',
-    schedule: 'every 4h',
-    postsPerRun: 1,
-    topics: engagementPatterns.topTopics.slice(0, 2),
-    formats: ['qt_contrarian', 'qt_reframe'],
-    reason: 'Quote tweets get 2-3x more reach than originals. Piggyback off trending conversations.',
-  });
+  // 3. Quote Tweet Reactor
+  if (!activeNames.has('quote tweet reactor')) {
+    suggestions.push({
+      name: 'Quote Tweet Reactor',
+      description: 'React to trending posts from accounts you follow with sharp takes.',
+      schedule: 'every 4h',
+      postsPerRun: 1,
+      topics: engagementPatterns.topTopics.slice(0, 2),
+      formats: ['qt_contrarian', 'qt_reframe'],
+      reason: 'Quote tweets get 2-3x more reach than originals.',
+    });
+  }
 
-  // 4. Topic Deep Dive — for the #1 top topic
+  // 4. Topic Deep Dive
   if (engagementPatterns.topTopics.length > 0) {
     const topTopic = engagementPatterns.topTopics[0];
-    suggestions.push({
-      name: `${topTopic} Alpha`,
-      description: `Focused ${topTopic} content — your audience's #1 topic.`,
-      schedule: '3x/day',
-      postsPerRun: 1,
-      topics: [topTopic],
-      formats: engagementPatterns.topFormats.slice(0, 2),
-      reason: `${topTopic} is your best-performing topic. ${followingProfile.categories[0]?.count || 'Most'} of the accounts you follow are in this space.`,
-    });
+    const jobName = `${topTopic} Alpha`;
+    if (!activeNames.has(jobName.toLowerCase())) {
+      suggestions.push({
+        name: jobName,
+        description: `Focused ${topTopic} content — your audience's #1 topic.`,
+        schedule: '3x/day',
+        postsPerRun: 1,
+        topics: [topTopic],
+        formats: engagementPatterns.topFormats.slice(0, 2),
+        reason: `${topTopic} is your best-performing topic.`,
+      });
+    }
   }
 
-  // 5. Morning/Evening Routine — based on peak hours spread
-  if (engagementPatterns.topHours.length >= 2) {
+  // 5. AM/PM Cadence
+  if (engagementPatterns.topHours.length >= 2 && !activeNames.has('am/pm cadence')) {
     const sorted = [...engagementPatterns.topHours].sort((a, b) => a - b);
     const morning = sorted.find((h) => h < 12);
     const evening = sorted.find((h) => h >= 17);
     if (morning !== undefined && evening !== undefined) {
       suggestions.push({
         name: 'AM/PM Cadence',
-        description: `Morning post at ${formatHour(morning)} + evening post at ${formatHour(evening)} UTC — bracket the day.`,
+        description: `Morning post at ${formatHour(morning)} + evening post at ${formatHour(evening)} UTC.`,
         schedule: `daily ${morning}:00,${evening}:00`,
         postsPerRun: 1,
         topics: [],
         formats: [],
-        reason: `You have engagement peaks in both AM and PM. Consistent presence compounds follower growth.`,
+        reason: 'Engagement peaks in both AM and PM. Consistent presence compounds growth.',
       });
     }
   }

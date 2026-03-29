@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnalysis } from '@/lib/kv-storage';
+import { getAnalysis, getJobs } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { generateJobSuggestions } from '@/lib/job-suggestions';
 
@@ -16,7 +16,8 @@ export async function GET(
       return NextResponse.json({ suggestions: [], reason: 'No account analysis — run analysis first' });
     }
 
-    const suggestions = generateJobSuggestions(analysis);
+    const activeJobs = await getJobs(id);
+    const suggestions = generateJobSuggestions(analysis, activeJobs);
     return NextResponse.json({ suggestions });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
