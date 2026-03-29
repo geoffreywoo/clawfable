@@ -18,6 +18,12 @@ interface CronLogEntry {
   }>;
 }
 
+interface AgentInfo {
+  id: string;
+  name: string;
+  handle: string;
+}
+
 function getTimeAgo(ts: string): string {
   const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
   if (secs < 60) return `${secs}s ago`;
@@ -46,20 +52,28 @@ function actionColor(action: string): string {
 export default function CronDashboard() {
   const router = useRouter();
   const [log, setLog] = useState<CronLogEntry[]>([]);
+  const [agents, setAgents] = useState<Record<string, AgentInfo>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/cron/log')
-      .then((r) => {
+    Promise.all([
+      fetch('/api/cron/log').then((r) => {
         if (r.status === 401) { router.push('/'); return []; }
         return r.ok ? r.json() : [];
-      })
-      .then((data) => { if (Array.isArray(data)) setLog(data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      }),
+      fetch('/api/agents').then((r) => r.ok ? r.json() : []),
+    ]).then(([logData, agentData]) => {
+      if (Array.isArray(logData)) setLog(logData);
+      if (Array.isArray(agentData)) {
+        const map: Record<string, AgentInfo> = {};
+        for (const a of agentData) map[String(a.id)] = { id: a.id, name: a.name, handle: a.handle };
+        setAgents(map);
+      }
+    })
+    .catch(() => {})
+    .finally(() => setLoading(false));
   }, [router]);
 
-  // Auto-refresh every 60s
   useEffect(() => {
     const interval = setInterval(() => {
       fetch('/api/cron/log')
@@ -69,6 +83,11 @@ export default function CronDashboard() {
     }, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  const getAgentLabel = (agentId: string) => {
+    const a = agents[String(agentId)];
+    return a ? `@${a.handle}` : `Agent #${agentId}`;
+  };
 
   return (
     <div className="dashboard-shell">
@@ -84,7 +103,7 @@ export default function CronDashboard() {
               CRON DASHBOARD
             </h1>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.12em' }}>
-              Runs every 30 minutes
+              Your agents · runs every 30 min
             </p>
           </div>
         </div>
@@ -103,19 +122,16 @@ export default function CronDashboard() {
         ) : log.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px' }}>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-              No cron runs recorded yet. The cron job runs every 30 minutes.
+              No cron runs recorded yet. Enable autopilot on an agent to start.
             </p>
           </div>
         ) : (
           <div className="space-y-2">
             {log.map((entry) => (
               <div key={entry.id} className="protocol-card" style={{ padding: '12px 14px' }}>
-                {/* Header row */}
                 <div className="flex items-center justify-between" style={{ marginBottom: '8px' }}>
                   <div className="flex items-center gap-3">
-                    <span style={{
-                      fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)',
-                    }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
                       {formatTime(entry.timestamp)}
                     </span>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
@@ -128,13 +144,9 @@ export default function CronDashboard() {
                         +{entry.mentionsRefreshed} mentions
                       </span>
                     )}
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      {entry.autopilotProcessed} agent{entry.autopilotProcessed !== 1 ? 's' : ''} processed
-                    </span>
                   </div>
                 </div>
 
-                {/* Results */}
                 {entry.results.length > 0 ? (
                   <div className="space-y-1">
                     {entry.results.map((r, i) => (
@@ -153,8 +165,11 @@ export default function CronDashboard() {
                           {r.action.toUpperCase()}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
-                            Agent #{r.agentId}
+                          <span
+                            style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', cursor: 'pointer' }}
+                            onClick={() => router.push(`/agent/${r.agentId}`)}
+                          >
+                            {getAgentLabel(r.agentId)}
                           </span>
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginLeft: '8px' }}>
                             {r.reason}
@@ -178,7 +193,7 @@ export default function CronDashboard() {
                   </div>
                 ) : (
                   <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                    No agents with autopilot enabled
+                    Mentions refreshed, no autopilot actions
                   </p>
                 )}
               </div>
