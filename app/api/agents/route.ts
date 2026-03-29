@@ -20,6 +20,7 @@ export async function GET() {
         soulMdPreview: a.soulMd.split('\n').find((l) => l.trim() && !l.startsWith('#')) || '',
         isConnected: a.isConnected,
         xUserId: a.xUserId,
+        setupStep: a.setupStep || 'ready',
         createdAt: a.createdAt,
         tweetCount: (await getTweets(a.id)).length,
         mentionCount: (await getMentions(a.id)).length,
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
       accessSecret: null,
       isConnected: 0,
       xUserId: null,
+      setupStep: 'oauth',
     });
     return NextResponse.json(agent);
   } catch (err) {

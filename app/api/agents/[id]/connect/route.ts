@@ -22,15 +22,20 @@ export async function POST(
     const keys = { appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret };
     const user = await getMe(keys);
 
-    // Store encoded
-    await updateAgent(id, {
+    // Store encoded and advance setup step
+    const updates: Record<string, unknown> = {
       apiKey: Buffer.from(apiKey).toString('base64'),
       apiSecret: Buffer.from(apiSecret).toString('base64'),
       accessToken: Buffer.from(accessToken).toString('base64'),
       accessSecret: Buffer.from(accessSecret).toString('base64'),
       isConnected: 1,
       xUserId: user.id,
-    });
+    };
+    // Advance setup if on oauth step
+    if (agent.setupStep === 'oauth') {
+      updates.setupStep = 'soul';
+    }
+    await updateAgent(id, updates as Parameters<typeof updateAgent>[1]);
 
     return NextResponse.json({ success: true, user: { name: user.name, username: user.username } });
   } catch (err) {

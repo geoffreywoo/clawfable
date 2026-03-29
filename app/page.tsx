@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Logo } from './components/logo';
 import { AgentCard } from './components/agent-card';
-import { AgentCreateModal } from './components/agent-create-modal';
+import { SetupWizard } from './components/setup-wizard';
 import type { AgentSummary } from '@/lib/types';
 
 export default function HomePage() {
@@ -23,16 +23,9 @@ export default function HomePage() {
     }
   }, []);
 
-  // Seed on mount if empty, then load
+  // Load agents on mount
   useEffect(() => {
-    (async () => {
-      try {
-        await fetch('/api/seed', { method: 'POST' });
-      } catch {
-        // Seed may fail — ignore
-      }
-      await loadAgents();
-    })();
+    loadAgents();
   }, [loadAgents]);
 
   // Poll every 30 seconds
@@ -129,7 +122,7 @@ export default function HomePage() {
                       marginTop: '4px',
                     }}
                   >
-                    Add a SOUL.md + Twitter handle
+                    Connect X + Upload SOUL.md
                   </p>
                 </div>
               </div>
@@ -138,7 +131,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      <AgentCreateModal
+      <SetupWizard
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={loadAgents}

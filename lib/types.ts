@@ -12,6 +12,7 @@ export interface Agent {
   accessSecret: string | null;
   isConnected: number; // 0 | 1
   xUserId: string | null;
+  setupStep: string; // 'oauth' | 'soul' | 'analyze' | 'ready'
   createdAt: string;
 }
 
@@ -23,6 +24,7 @@ export interface AgentSummary {
   soulMdPreview: string;
   isConnected: number;
   xUserId: string | null;
+  setupStep: string;
   createdAt: string;
   tweetCount: number;
   mentionCount: number;
@@ -36,6 +38,7 @@ export interface AgentDetail {
   soulSummary: string | null;
   isConnected: number;
   xUserId: string | null;
+  setupStep: string;
   createdAt: string;
   hasKeys: boolean;
 }
@@ -87,4 +90,44 @@ export interface MetricInput {
   metricName: string;
   value: number;
   date: string;
+}
+
+// ─── Account analysis types ─────────────────────────────────────────────────
+
+export interface ViralTweet {
+  id: string;
+  text: string;
+  likes: number;
+  retweets: number;
+  replies: number;
+  impressions: number;
+  engagementRate: number;
+  createdAt: string;
+}
+
+export interface EngagementPattern {
+  avgLikes: number;
+  avgRetweets: number;
+  avgReplies: number;
+  avgImpressions: number;
+  topHours: number[];       // hours of day with highest engagement
+  topFormats: string[];     // e.g. 'hot_take', 'thread_hook', 'question', 'data_point'
+  topTopics: string[];      // extracted topic clusters
+  viralThreshold: number;   // likes count that defines "viral" for this account
+}
+
+export interface FollowingProfile {
+  totalFollowing: number;
+  topAccounts: Array<{ username: string; name: string; description: string; followersCount: number }>;
+  categories: Array<{ label: string; count: number; handles: string[] }>;
+}
+
+export interface AccountAnalysis {
+  agentId: string;
+  analyzedAt: string;
+  tweetCount: number;
+  viralTweets: ViralTweet[];
+  engagementPatterns: EngagementPattern;
+  followingProfile: FollowingProfile;
+  contentFingerprint: string;  // summary of what makes this account's content perform
 }

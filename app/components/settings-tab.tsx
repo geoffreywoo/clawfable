@@ -16,17 +16,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const [agentHandle, setAgentHandle] = useState(agent.handle);
   const [soulMd, setSoulMd] = useState(agent.soulMd);
 
-  // X API keys
-  const [apiKey, setApiKey] = useState('');
-  const [apiSecret, setApiSecret] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [accessSecret, setAccessSecret] = useState('');
-  const [showFields, setShowFields] = useState({
-    apiKey: false,
-    apiSecret: false,
-    accessToken: false,
-    accessSecret: false,
-  });
+  // OAuth
 
   // UI state
   const [savingSoul, setSavingSoul] = useState(false);
@@ -38,7 +28,6 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
-  const canConnect = apiKey && apiSecret && accessToken && accessSecret;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -63,25 +52,20 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
     }
   };
 
-  const handleConnect = async () => {
+  const handleOAuthConnect = async () => {
     setConnecting(true);
     try {
-      const res = await fetch(`/api/agents/${agentId}/connect`, {
+      const res = await fetch('/api/auth/twitter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, apiSecret, accessToken, accessSecret }),
+        body: JSON.stringify({ agentId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast(`Connected as @${data.user?.username}`);
-      setApiKey('');
-      setApiSecret('');
-      setAccessToken('');
-      setAccessSecret('');
-      onAgentUpdated?.();
+      // Redirect to Twitter for authorization
+      window.location.href = data.url;
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Connection failed');
-    } finally {
+      showToast(err instanceof Error ? err.message : 'Failed to start OAuth');
       setConnecting(false);
     }
   };
@@ -109,10 +93,6 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       showToast('Delete failed');
       setDeleting(false);
     }
-  };
-
-  const toggleField = (field: keyof typeof showFields) => {
-    setShowFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
   return (
@@ -266,83 +246,26 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           </p>
         </div>
 
-        {/* API key form */}
-        <div className="flex items-center justify-between" style={{ marginBottom: '16px' }}>
-          <p className="settings-section-label" style={{ marginBottom: 0 }}>X API Credentials</p>
-          <a
-            href="https://developer.x.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              color: 'var(--primary)',
-              textDecoration: 'none',
-              letterSpacing: '0.1em',
-            }}
-          >
-            <svg viewBox="0 0 12 12" width="10" height="10" fill="none"><path d="M9 3H3v6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /><path d="M9 3L5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
-            X DEVELOPER PORTAL
-          </a>
-        </div>
-
-        <div className="space-y-4">
-          {[
-            { key: 'apiKey', label: 'API Key (Consumer Key)', value: apiKey, setter: setApiKey },
-            { key: 'apiSecret', label: 'API Secret (Consumer Secret)', value: apiSecret, setter: setApiSecret },
-            { key: 'accessToken', label: 'Access Token', value: accessToken, setter: setAccessToken },
-            { key: 'accessSecret', label: 'Access Token Secret', value: accessSecret, setter: setAccessSecret },
-          ].map(({ key, label, value, setter }) => (
-            <div key={key} className="field">
-              <label>{label}</label>
-              <div className="input-with-suffix">
-                <input
-                  type={showFields[key as keyof typeof showFields] ? 'text' : 'password'}
-                  className="input"
-                  style={{ paddingRight: '40px' }}
-                  value={value}
-                  onChange={(e) => setter(e.target.value)}
-                  placeholder={`Enter ${label}...`}
-                  data-testid={`input-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`}
-                />
-                <button
-                  type="button"
-                  className="suffix"
-                  onClick={() => toggleField(key as keyof typeof showFields)}
-                >
-                  {showFields[key as keyof typeof showFields] ? (
-                    <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M1 7s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.2" /><line x1="2" y1="2" x2="12" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
-                  ) : (
-                    <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M1 7s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.2" /><circle cx="7" cy="7" r="1.5" stroke="currentColor" strokeWidth="1.2" /></svg>
-                  )}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ marginTop: '16px' }}>
-          <button
-            className="btn btn-primary btn-wide"
-            disabled={!canConnect || connecting}
-            onClick={handleConnect}
-            data-testid="button-connect"
-            style={{ background: canConnect ? '#dc2626' : undefined }}
-          >
-            {connecting ? 'CONNECTING...' : 'CONNECT TO X'}
-          </button>
-        </div>
-
-        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
-          Keys are stored in base64 encoding. Requires OAuth 1.0a User Context (Read + Write). Create your app at{' '}
-          <a href="https://developer.x.com/en/portal/projects-and-apps" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>
-            developer.x.com
-          </a>
-          .
-        </p>
+        {/* OAuth connect button */}
+        {!isConnected && (
+          <div style={{ marginTop: '12px' }}>
+            <button
+              className="btn btn-primary btn-wide"
+              disabled={connecting}
+              onClick={handleOAuthConnect}
+              data-testid="button-connect"
+              style={{ background: '#dc2626' }}
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
+                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+              </svg>
+              {connecting ? 'REDIRECTING...' : 'AUTHORIZE WITH X'}
+            </button>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
+              You&apos;ll be redirected to X to authorize this agent. Requires Read + Write permissions.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ─── Danger zone ──────────────────────────────────────────────────────── */}

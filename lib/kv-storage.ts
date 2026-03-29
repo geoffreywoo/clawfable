@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -205,6 +205,8 @@ const KEYS = {
   agentQueue: (id: string) => `agent:${id}:queue`,
   agentMentions: (id: string) => `agent:${id}:mentions`,
   agentMetrics: (id: string) => `agent:${id}:metrics`,
+  agentAnalysis: (id: string) => `agent:${id}:analysis`,
+  oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
   counterAgent: () => 'counter:agent',
@@ -248,6 +250,7 @@ export async function createAgent(data: Omit<CreateAgentInput, 'id'>): Promise<A
     accessSecret: data.accessSecret ?? null,
     isConnected: data.isConnected ?? 0,
     xUserId: data.xUserId ?? null,
+    setupStep: data.setupStep ?? 'oauth',
     createdAt: new Date().toISOString(),
   };
   await kvHset(KEYS.agent(id), agent as unknown as Record<string, unknown>);
@@ -290,6 +293,9 @@ export async function deleteAgent(id: string): Promise<void> {
 
   // Cascade: delete metrics hash
   await kvDel(KEYS.agentMetrics(id));
+
+  // Cascade: delete analysis
+  await kvDel(KEYS.agentAnalysis(id));
 
   // Remove agent
   await kvDel(KEYS.agent(id));
@@ -410,4 +416,28 @@ export async function getMetricsArray(agentId: string): Promise<Metric[]> {
     value: Number(value),
     date: new Date().toISOString(),
   }));
+}
+
+// ─── Analysis storage ────────────────────────────────────────────────────────
+
+export async function getAnalysis(agentId: string): Promise<AccountAnalysis | null> {
+  return kvGet<AccountAnalysis>(KEYS.agentAnalysis(agentId));
+}
+
+export async function saveAnalysis(agentId: string, analysis: AccountAnalysis): Promise<void> {
+  await kvSet(KEYS.agentAnalysis(agentId), analysis);
+}
+
+// ─── OAuth temp storage ──────────────────────────────────────────────────────
+
+export async function saveOAuthTemp(oauthToken: string, data: { oauthTokenSecret: string; agentId: string }): Promise<void> {
+  await kvSet(KEYS.oauthTemp(oauthToken), data);
+}
+
+export async function getOAuthTemp(oauthToken: string): Promise<{ oauthTokenSecret: string; agentId: string } | null> {
+  return kvGet<{ oauthTokenSecret: string; agentId: string }>(KEYS.oauthTemp(oauthToken));
+}
+
+export async function deleteOAuthTemp(oauthToken: string): Promise<void> {
+  await kvDel(KEYS.oauthTemp(oauthToken));
 }

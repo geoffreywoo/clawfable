@@ -15,6 +15,7 @@ export function AgentCard({ agent }: AgentCardProps) {
   const router = useRouter();
   const hue = getAgentHue(agent.name);
   const isConnected = agent.isConnected === 1;
+  const inSetup = agent.setupStep && agent.setupStep !== 'ready';
 
   const handleOpen = () => {
     router.push(`/agent/${agent.id}`);
@@ -59,11 +60,11 @@ export function AgentCard({ agent }: AgentCardProps) {
         </div>
         <div className="status-dot">
           <div
-            className={`status-dot-indicator ${isConnected ? 'live' : 'offline'}`}
-            title={isConnected ? 'X API Connected' : 'Not connected'}
+            className={`status-dot-indicator ${inSetup ? 'setup' : isConnected ? 'live' : 'offline'}`}
+            title={inSetup ? 'Setup in progress' : isConnected ? 'X API Connected' : 'Not connected'}
           />
-          <span className={`status-label ${isConnected ? 'live' : 'offline'}`}>
-            {isConnected ? 'LIVE' : 'OFFLINE'}
+          <span className={`status-label ${inSetup ? 'setup' : isConnected ? 'live' : 'offline'}`}>
+            {inSetup ? 'SETUP' : isConnected ? 'LIVE' : 'OFFLINE'}
           </span>
         </div>
       </div>

@@ -19,6 +19,7 @@ export async function GET(
       soulSummary: agent.soulSummary,
       isConnected: agent.isConnected,
       xUserId: agent.xUserId,
+      setupStep: agent.setupStep || 'ready',
       createdAt: agent.createdAt,
       hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
     });
@@ -46,6 +47,10 @@ export async function PATCH(
       updates.soulMd = soulMd;
       const profile = parseSoulMd(name ?? existing.name, soulMd);
       updates.soulSummary = profile.summary;
+      // Advance setup if on soul step
+      if (existing.setupStep === 'soul') {
+        updates.setupStep = 'analyze';
+      }
     }
 
     const updated = await updateAgent(id, updates as Parameters<typeof updateAgent>[1]);
