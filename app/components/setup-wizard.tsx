@@ -201,18 +201,27 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
     if (!agentId) return;
     setPreviewLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const res = await fetch(`/api/agents/${agentId}/generate-tweet`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ count: 5, topic: 'general' }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Preview generation failed');
       setPreviewTweets(data.tweets || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Preview generation failed');
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Preview timed out. Claude is slow right now — click Retry.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Preview generation failed');
+      }
     } finally {
+      clearTimeout(timeout);
       setPreviewLoading(false);
     }
   };

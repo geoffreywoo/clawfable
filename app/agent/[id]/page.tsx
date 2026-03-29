@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Logo } from '@/app/components/logo';
 import { ComposeTab } from '@/app/components/compose-tab';
@@ -9,7 +9,7 @@ import { MentionsTab } from '@/app/components/mentions-tab';
 import { AutopilotTab } from '@/app/components/autopilot-tab';
 import { SettingsTab } from '@/app/components/settings-tab';
 import { SetupContinuation } from '@/app/components/setup-continuation';
-import type { AgentDetail } from '@/lib/types';
+import type { AgentDetail, AgentSummary } from '@/lib/types';
 
 const TABS = [
   { id: 'compose', label: 'COMPOSE', hasPulse: true },
@@ -35,6 +35,9 @@ export default function AgentDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('compose');
   const [showSetupContinuation, setShowSetupContinuation] = useState(false);
+  const [otherAgents, setOtherAgents] = useState<AgentSummary[]>([]);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const switcherRef = useRef<HTMLDivElement>(null);
 
   // Detect OAuth return — if ?oauth=success, agent just connected, show setup continuation
   useEffect(() => {
@@ -67,6 +70,30 @@ export default function AgentDashboard() {
     const interval = setInterval(loadAgent, 30000);
     return () => clearInterval(interval);
   }, [loadAgent]);
+
+  // Fetch other agents for the switcher
+  useEffect(() => {
+    fetch('/api/agents')
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setOtherAgents(data.filter((a: AgentSummary) => a.id !== agentId));
+        }
+      })
+      .catch(() => {});
+  }, [agentId]);
+
+  // Close switcher on outside click
+  useEffect(() => {
+    if (!switcherOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) {
+        setSwitcherOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [switcherOpen]);
 
   if (loading) {
     return (
@@ -144,16 +171,96 @@ export default function AgentDashboard() {
             {agent.name.charAt(0).toUpperCase()}
           </div>
 
-          <div>
-            <h1
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600, letterSpacing: '0.08em' }}
-              data-testid="text-agent-name"
+          <div style={{ position: 'relative' }} ref={switcherRef}>
+            <button
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: otherAgents.length > 0 ? 'pointer' : 'default',
+                textAlign: 'left',
+              }}
+              onClick={() => otherAgents.length > 0 && setSwitcherOpen((v) => !v)}
+              aria-haspopup={otherAgents.length > 0 ? 'listbox' : undefined}
+              aria-expanded={switcherOpen}
             >
-              {agent.name.toUpperCase()}
-            </h1>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.12em' }}>
-              Agent Dashboard
-            </p>
+              <h1
+                style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600, letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '5px' }}
+                data-testid="text-agent-name"
+              >
+                {agent.name.toUpperCase()}
+                {otherAgents.length > 0 && (
+                  <svg viewBox="0 0 10 6" width="9" height="6" fill="none" style={{ marginTop: '1px', opacity: 0.5 }}>
+                    <polyline points="1,1 5,5 9,1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </h1>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.12em' }}>
+                Agent Dashboard{otherAgents.length > 0 ? ` · ${otherAgents.length + 1} agents` : ''}
+              </p>
+            </button>
+
+            {switcherOpen && (
+              <div
+                role="listbox"
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: 0,
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  minWidth: '180px',
+                  zIndex: 50,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  overflow: 'hidden',
+                }}
+              >
+                {otherAgents.map((a) => {
+                  const h = getAgentHue(a.name);
+                  return (
+                    <button
+                      key={a.id}
+                      role="option"
+                      onClick={() => { setSwitcherOpen(false); router.push(`/agent/${a.id}`); }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: '1px solid var(--border)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                    >
+                      <div style={{
+                        width: '22px', height: '22px', borderRadius: '5px', flexShrink: 0,
+                        background: `hsla(${h}, 60%, 22%, 0.5)`,
+                        border: `1px solid hsla(${h}, 60%, 40%, 0.3)`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700,
+                        color: `hsl(${h}, 60%, 65%)`,
+                      }}>
+                        {a.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {a.name}
+                        </div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)' }}>
+                          @{a.handle}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

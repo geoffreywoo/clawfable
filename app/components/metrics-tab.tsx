@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Metric } from '@/lib/types';
+import type { Metric, AgentLearnings } from '@/lib/types';
 
 interface MetricsTabProps {
   agentId: string;
@@ -26,12 +26,20 @@ const METRIC_CONFIG: Record<string, {
 
 export function MetricsTab({ agentId }: MetricsTabProps) {
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [learnings, setLearnings] = useState<AgentLearnings | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/agents/${agentId}/metrics`)
-      .then((r) => r.ok ? r.json() : [])
-      .then((data) => { if (Array.isArray(data)) setMetrics(data); })
+    Promise.all([
+      fetch(`/api/agents/${agentId}/metrics`).then((r) => r.ok ? r.json() : []),
+      fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null),
+    ])
+      .then(([metricsData, learningsData]) => {
+        if (Array.isArray(metricsData)) setMetrics(metricsData);
+        if (learningsData && typeof learningsData === 'object' && learningsData.totalTracked > 0) {
+          setLearnings(learningsData);
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [agentId]);
@@ -82,6 +90,87 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {learnings && (
+        <div className="perf-section">
+          <div className="section-title mb-4" style={{ marginTop: '32px' }}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <h2>PERFORMANCE LEARNINGS</h2>
+            <span className="section-count">{learnings.totalTracked} tweets tracked</span>
+          </div>
+
+          {learnings.formatRankings.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">FORMAT RANKINGS</p>
+              <div className="perf-rows">
+                {learnings.formatRankings.slice(0, 5).map((f) => (
+                  <div key={f.format} className="perf-row">
+                    <span className="perf-row-name">{f.format.replace(/_/g, ' ')}</span>
+                    <span className="perf-row-stat">{f.avgEngagement} avg likes</span>
+                    <span className="perf-row-count">{f.count} posts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {learnings.topicRankings.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">TOPIC RANKINGS</p>
+              <div className="perf-rows">
+                {learnings.topicRankings.slice(0, 5).map((t) => (
+                  <div key={t.topic} className="perf-row">
+                    <span className="perf-row-name">{t.topic}</span>
+                    <span className="perf-row-stat">{t.avgEngagement} avg likes</span>
+                    <span className="perf-row-count">{t.count} posts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {learnings.bestPerformers.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">TOP TWEETS</p>
+              <div className="perf-tweets">
+                {learnings.bestPerformers.slice(0, 3).map((t) => (
+                  <div key={t.tweetId} className="perf-tweet perf-tweet-best">
+                    <span className="perf-tweet-stat">{t.likes} likes</span>
+                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {learnings.worstPerformers.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">LOWEST PERFORMERS</p>
+              <div className="perf-tweets">
+                {learnings.worstPerformers.slice(0, 3).map((t) => (
+                  <div key={t.tweetId} className="perf-tweet perf-tweet-worst">
+                    <span className="perf-tweet-stat">{t.likes} likes</span>
+                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {learnings.insights.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">AI INSIGHTS</p>
+              <ul className="perf-insights">
+                {learnings.insights.map((insight, i) => (
+                  <li key={i} className="perf-insight">{insight}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
