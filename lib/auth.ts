@@ -48,7 +48,7 @@ export async function requireAgentAccess(agentId: string): Promise<{ user: User;
   const agent = await getAgent(agentId);
   if (!agent) throw new NotFoundError('Agent not found');
   const agentIds = await getUserAgentIds(user.id);
-  if (!agentIds.includes(agentId)) throw new AuthError();
+  if (!agentIds.map(String).includes(String(agentId))) throw new AuthError();
   return { user, agent };
 }
 

@@ -50,6 +50,10 @@ export default function AgentDashboard() {
   const loadAgent = useCallback(async () => {
     try {
       const res = await fetch(`/api/agents/${agentId}`);
+      if (res.status === 401) {
+        router.push('/');
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAgent(data);
@@ -58,7 +62,7 @@ export default function AgentDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, router]);
 
   useEffect(() => {
     loadAgent();
