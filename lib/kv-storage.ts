@@ -382,7 +382,9 @@ export async function deleteTweet(id: string): Promise<void> {
 export async function getMentions(agentId: string): Promise<Mention[]> {
   const ids = await kvLrange(KEYS.agentMentions(agentId), 0, -1);
   const mentions = await Promise.all(ids.map((id) => kvHgetall<Mention>(KEYS.mention(id))));
-  return mentions.filter((m): m is Mention => m !== null);
+  return mentions
+    .filter((m): m is Mention => m !== null)
+    .map((m) => ({ ...m, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }));
 }
 
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
