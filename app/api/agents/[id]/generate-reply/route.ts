@@ -62,10 +62,9 @@ ${agent.soulMd}`);
 6. ALWAYS stay in character as @${agent.handle}. Never break the fourth wall about being AI.
 
 ## RULES
-- Under 280 characters. Hard limit.
 - Output ONLY the reply text. No quotes, no "Reply:" prefix, nothing else.
 - Be specific to what they actually said — don't give generic responses.
-- Shorter is usually better for replies. Punchy > verbose.`);
+- Replies can be any length. Short and punchy (under 100 chars) often hits hardest. But go longer if the clapback or explanation needs room. X supports up to 4000 chars.`);
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -83,7 +82,7 @@ ${agent.soulMd}`);
 
     const tweet = await createTweet({
       agentId: id,
-      content: replyContent.slice(0, 280),
+      content: replyContent,
       type: 'reply',
       status: 'draft',
       topic: `Reply to ${authorHandle}`,

@@ -118,7 +118,7 @@ function buildSystemPrompt(
 5. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
 
 ## RULES
-1. Every tweet MUST be under 280 characters. Hard limit.
+1. VARY tweet length naturally. Short punchy tweets (under 100 chars) are great. Medium takes (150-280 chars) work well. Longer posts (300-800+ chars) are fine when the idea needs room — X supports up to 4000 chars. Don't pad short ideas or truncate long ones. Let the content dictate the length.
 2. Write in this account's exact voice. Match the style of the top performing tweets.
 3. No threads, no "1/", no emojis unless the account uses them.
 4. Never use hashtags unless the account's viral tweets use them.
@@ -155,7 +155,7 @@ Prioritize QTs — they get more reach. Output ONLY JSON objects, one per line, 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
@@ -171,7 +171,7 @@ Prioritize QTs — they get more reach. Output ONLY JSON objects, one per line, 
       if (!trimmed || !trimmed.startsWith('{')) continue;
       try {
         const parsed = JSON.parse(trimmed);
-        if (parsed.content && parsed.content.length <= 280) {
+        if (parsed.content && parsed.content.length > 0) {
           tweets.push({
             content: parsed.content,
             format: parsed.format || 'hot_take',

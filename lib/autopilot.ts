@@ -271,7 +271,7 @@ async function generateReply(
 - TROLLS/ATTACKERS: Maximum snark. Be the funnier one. Savage clapbacks.
 - GENUINE QUESTIONS: Helpful but in-voice.
 - COMPLIMENTS: Acknowledge briefly, stay cool.
-- Under 280 characters. Shorter is better for replies.
+- Replies can be any length. Short and punchy often hits hardest, but go longer if needed. X supports up to 4000 chars.
 - Output ONLY the reply text.`);
 
   try {
@@ -289,7 +289,7 @@ async function generateReply(
       .trim()
       .replace(/^["']|["']$/g, '');
 
-    return text.length > 0 && text.length <= 280 ? text : null;
+    return text.length > 0 ? text : null;
   } catch {
     return null;
   }

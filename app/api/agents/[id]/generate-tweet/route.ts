@@ -62,8 +62,8 @@ export async function POST(
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
-      system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle}. Write a single tweet about the given topic. Under 280 characters. No hashtags. Be specific and opinionated.`,
+      max_tokens: 1024,
+      system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle}. Write a single tweet about the given topic. Vary the length naturally — short punchy takes or longer structured posts. No hashtags. Be specific and opinionated.`,
       messages: [{ role: 'user', content: `Write one tweet about: ${topicText}` }],
     });
 
@@ -76,7 +76,7 @@ export async function POST(
 
     const tweet = await createTweet({
       agentId: id,
-      content: content.slice(0, 280),
+      content,
       type: 'original',
       status: 'draft',
       topic: topicText,

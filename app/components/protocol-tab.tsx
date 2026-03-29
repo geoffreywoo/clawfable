@@ -784,8 +784,8 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                       </div>
                     )}
                     <div className="tweet-footer">
-                      <span className={`char-count ${tweet.content.length > 280 ? 'over' : ''}`}>
-                        {tweet.content.length}/280
+                      <span className="char-count">
+                        {tweet.content.length} chars
                       </span>
                       <div className="tweet-actions">
                         <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet.content)}>COPY</button>
