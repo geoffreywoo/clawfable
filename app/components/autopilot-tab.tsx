@@ -276,19 +276,38 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-REPLY</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Reply to new mentions · {settings.totalAutoReplied || 0} replied
-                      {settings.autoReply && ` · max ${settings.maxRepliesPerRun || 3}/run`}
                       {settings.lastRepliedAt && ` · last ${getTimeAgo(settings.lastRepliedAt)}`}
                     </p>
                   </div>
                 </div>
-                {settings.autoReply && (
-                  <select className="input" style={{ fontSize: '11px', padding: '4px 6px', width: '60px' }}
-                    value={settings.maxRepliesPerRun || 3}
-                    onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
-                    {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}/run</option>)}
-                  </select>
-                )}
               </div>
+              {settings.autoReply && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
+                  <div className="field">
+                    <label>CHECK EVERY</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.replyIntervalMins || 30}
+                      onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
+                      {[
+                        { v: 30, l: '30 min' },
+                        { v: 60, l: '1 hour' },
+                        { v: 120, l: '2 hours' },
+                        { v: 240, l: '4 hours' },
+                        { v: 480, l: '8 hours' },
+                        { v: 720, l: '12 hours' },
+                      ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>MAX REPLIES/RUN</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.maxRepliesPerRun || 3}
+                      onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
+                      {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Always-on jobs */}

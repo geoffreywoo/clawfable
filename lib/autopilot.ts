@@ -62,10 +62,18 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // --- Auto-reply to mentions (runs regardless of active hours) ---
   let repliesSent = 0;
   if (settings.autoReply) {
-    try {
-      repliesSent = await runAutoReply(agent, keys, settings);
-    } catch {
-      // Don't fail the whole run if replies fail
+    // Check reply cooldown
+    const replyInterval = (settings.replyIntervalMins || 30) * 60 * 1000;
+    const replyElapsed = settings.lastRepliedAt
+      ? Date.now() - new Date(settings.lastRepliedAt).getTime()
+      : Infinity;
+
+    if (replyElapsed >= replyInterval) {
+      try {
+        repliesSent = await runAutoReply(agent, keys, settings);
+      } catch {
+        // Don't fail the whole run if replies fail
+      }
     }
   }
 

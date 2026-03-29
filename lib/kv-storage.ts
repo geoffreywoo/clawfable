@@ -471,6 +471,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   minQueueSize: 5,
   autoReply: false,
   maxRepliesPerRun: 3,
+  replyIntervalMins: 30,
   lastPostedAt: null,
   lastRepliedAt: null,
   totalAutoPosted: 0,
