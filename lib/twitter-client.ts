@@ -118,7 +118,7 @@ export async function getMentionsFromTwitter(
   keys: TwitterKeys,
   userId: string,
   sinceId?: string
-): Promise<Array<{ id: string; text: string; authorId: string; createdAt: string }>> {
+): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string }>> {
   const client = createClient(keys);
   try {
     const params: Record<string, unknown> = {
@@ -132,12 +132,28 @@ export async function getMentionsFromTwitter(
       userId,
       params as Parameters<typeof client.v2.userMentionTimeline>[1]
     );
-    return (result.data.data || []).map((tweet) => ({
-      id: tweet.id,
-      text: tweet.text,
-      authorId: tweet.author_id || '',
-      createdAt: tweet.created_at || new Date().toISOString(),
-    }));
+
+    // Build a map of author IDs to user info from expansions
+    const userMap = new Map<string, { name: string; username: string }>();
+    const includes = (result as any).includes;
+    if (includes?.users) {
+      for (const u of includes.users) {
+        userMap.set(u.id, { name: u.name || u.id, username: u.username || u.id });
+      }
+    }
+
+    return (result.data.data || []).map((tweet) => {
+      const authorId = tweet.author_id || '';
+      const user = userMap.get(authorId);
+      return {
+        id: tweet.id,
+        text: tweet.text,
+        authorId,
+        authorName: user?.name || authorId,
+        authorUsername: user?.username || authorId,
+        createdAt: tweet.created_at || new Date().toISOString(),
+      };
+    });
   } catch (error) {
     return handleRateLimit(error);
   }

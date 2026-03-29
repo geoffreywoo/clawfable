@@ -40,8 +40,8 @@ export async function GET(
     for (const m of rawMentions) {
       await createMention({
         agentId: id,
-        author: String(m.authorId),
-        authorHandle: `@${String(m.authorId)}`,
+        author: String(m.authorName || m.authorId),
+        authorHandle: `@${String(m.authorUsername || m.authorId)}`,
         content: m.text,
         tweetId: m.id,
         engagementLikes: 0,
