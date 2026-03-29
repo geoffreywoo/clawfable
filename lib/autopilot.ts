@@ -92,7 +92,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       accessSecret: agent.accessSecret,
     });
 
-    const result = await postTweet(keys, tweet.content);
+    const result = await postTweet(keys, tweet.content, tweet.quoteTweetId || undefined);
 
     // Update tweet status
     await updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId });
@@ -162,10 +162,12 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       await createTweet({
         agentId: agent.id,
         content: item.content,
-        type: 'original',
+        type: item.quoteTweetId ? 'quote' : 'original',
         status: 'queued',
         topic: item.targetTopic,
         xTweetId: null,
+        quoteTweetId: item.quoteTweetId || null,
+        quoteTweetAuthor: item.quoteTweetAuthor || null,
         scheduledAt: null,
       });
       added++;

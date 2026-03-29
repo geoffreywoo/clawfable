@@ -37,6 +37,8 @@ export async function POST(
       status: 'queued',
       topic: topic || null,
       xTweetId: null,
+      quoteTweetId: body.quoteTweetId || null,
+      quoteTweetAuthor: body.quoteTweetAuthor || null,
       scheduledAt: null,
     });
     return NextResponse.json(tweet);

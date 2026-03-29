@@ -65,6 +65,8 @@ export interface Tweet {
   status: string; // draft | queued | posted
   topic: string | null;
   xTweetId: string | null;
+  quoteTweetId: string | null;  // X tweet ID to quote (for QTs)
+  quoteTweetAuthor: string | null;
   scheduledAt: string | null;
   createdAt: string;
 }

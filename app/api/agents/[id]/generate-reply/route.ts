@@ -27,6 +27,8 @@ export async function POST(
       status: 'draft',
       topic: `Reply to ${authorHandle}`,
       xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
       scheduledAt: null,
     });
     return NextResponse.json(tweet);

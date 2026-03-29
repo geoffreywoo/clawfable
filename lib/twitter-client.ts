@@ -39,13 +39,18 @@ function handleRateLimit(error: unknown): never {
 
 export async function postTweet(
   keys: TwitterKeys,
-  text: string
+  text: string,
+  quoteTweetId?: string
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
     const me = await getMe(keys);
     const rwClient = client.readWrite;
-    const result = await rwClient.v2.tweet(text);
+    const params: Record<string, unknown> = {};
+    if (quoteTweetId) {
+      params.quote_tweet_id = quoteTweetId;
+    }
+    const result = await rwClient.v2.tweet(text, params);
     const tweetId = result.data.id;
     return {
       tweetUrl: `https://x.com/${me.username}/status/${tweetId}`,

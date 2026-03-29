@@ -1,7 +1,6 @@
 /**
  * Viral content generator powered by Claude.
- * Produces tweets informed by the agent's soul profile, account analysis,
- * engagement patterns, and what's trending in their network.
+ * Optimized for Quote Tweets — piggybacks on viral posts from the agent's network.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -16,10 +15,42 @@ export interface ProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  quoteTweetId: string | null;
+  quoteTweetAuthor: string | null;
 }
 
 /**
- * Build the system prompt that instructs Claude to generate tweets.
+ * Collect quotable tweets from trending topics — high-engagement posts
+ * from the agent's network that are worth QTing.
+ */
+function collectQuotableTweets(trending: TrendingTopic[]): Array<{
+  id: string;
+  text: string;
+  author: string;
+  likes: number;
+  category: string;
+}> {
+  const quotable: Array<{ id: string; text: string; author: string; likes: number; category: string }> = [];
+
+  for (const topic of trending) {
+    if (topic.topTweet && topic.topTweet.id) {
+      quotable.push({
+        id: topic.topTweet.id,
+        text: topic.topTweet.text,
+        author: topic.topTweet.author,
+        likes: topic.topTweet.likes,
+        category: topic.category,
+      });
+    }
+  }
+
+  // Sort by engagement — most quotable first
+  quotable.sort((a, b) => b.likes - a.likes);
+  return quotable.slice(0, 12);
+}
+
+/**
+ * Build the system prompt for Claude.
  */
 function buildSystemPrompt(
   voiceProfile: VoiceProfile,
@@ -28,8 +59,7 @@ function buildSystemPrompt(
 ): string {
   const parts: string[] = [];
 
-  // Soul / voice identity
-  parts.push(`You are a tweet ghostwriter for a Twitter account. Your job is to write tweets that sound authentic to this account's voice and are optimized for engagement based on what has historically worked.`);
+  parts.push(`You are a tweet ghostwriter for a Twitter account. Your PRIMARY strategy is Quote Tweets (QTs) — adding sharp commentary on high-engagement posts from the network. QTs get significantly more reach because they ride existing viral content.`);
 
   parts.push(`\n## VOICE PROFILE
 - Tone: ${voiceProfile.tone}
@@ -38,7 +68,6 @@ function buildSystemPrompt(
 - Anti-goals (never do these): ${voiceProfile.antiGoals.join('; ') || 'none specified'}
 - Summary: ${voiceProfile.summary}`);
 
-  // Engagement patterns from analysis
   const ep = analysis.engagementPatterns;
   parts.push(`\n## ENGAGEMENT DATA
 - Average likes: ${ep.avgLikes}, Average RTs: ${ep.avgRetweets}
@@ -48,47 +77,61 @@ function buildSystemPrompt(
 - Peak posting hours (UTC): ${ep.topHours.join(', ') || 'unknown'}
 - Content fingerprint: ${analysis.contentFingerprint}`);
 
-  // Viral tweet examples — the account's actual best posts
   if (analysis.viralTweets.length > 0) {
-    parts.push(`\n## TOP PERFORMING TWEETS (study the style, length, format, and tone)`);
+    parts.push(`\n## THIS ACCOUNT'S TOP POSTS (study the style, length, and tone — match it)`);
     for (const vt of analysis.viralTweets.slice(0, 5)) {
       parts.push(`- [${vt.likes} likes, ${vt.retweets} RTs] "${vt.text}"`);
     }
   }
 
-  // Following context
   if (analysis.followingProfile.categories.length > 0) {
-    parts.push(`\n## AUDIENCE CONTEXT (who this account follows — write content that resonates with this audience)`);
+    parts.push(`\n## AUDIENCE CONTEXT`);
     for (const cat of analysis.followingProfile.categories.slice(0, 5)) {
       parts.push(`- ${cat.label}: ${cat.count} accounts (e.g. ${cat.handles?.slice(0, 3).map(h => '@' + h).join(', ') || 'various'})`);
     }
   }
 
-  // Trending in their network
+  // Quotable tweets — the key data for QT generation
   if (trending && trending.length > 0) {
-    parts.push(`\n## CURRENTLY TRENDING IN THEIR NETWORK (use these as inspiration for timely takes)`);
+    const quotable = collectQuotableTweets(trending);
+    if (quotable.length > 0) {
+      parts.push(`\n## QUOTABLE TWEETS (high-engagement posts from the network — WRITE QT COMMENTARY FOR THESE)`);
+      parts.push(`Each has an ID. When you write a QT, include the "quoteTweetId" field with the exact ID.`);
+      for (const qt of quotable) {
+        parts.push(`- ID: "${qt.id}" | @${qt.author} (${qt.likes} likes) [${qt.category}]: "${qt.text.slice(0, 200)}${qt.text.length > 200 ? '...' : ''}"`);
+      }
+    }
+
+    // Also show general trending context
+    parts.push(`\n## TRENDING TOPICS IN NETWORK`);
     for (const t of trending.slice(0, 8)) {
-      const topTweetInfo = t.topTweet ? ` — top post by @${t.topTweet.author}: "${t.topTweet.text.slice(0, 100)}" (${t.topTweet.likes} likes)` : '';
-      parts.push(`- [${t.category}] ${t.headline} (${t.source}, ${t.tweetCount} posts)${topTweetInfo}`);
+      parts.push(`- [${t.category}] ${t.headline} (${t.source}, ${t.tweetCount} posts)`);
     }
   }
 
-  parts.push(`\n## RULES
-1. Every tweet MUST be under 280 characters. This is a hard limit.
-2. Write in the exact voice/tone described above. Match the style of the top performing tweets.
-3. Make each tweet a standalone post — no threads, no "1/", no emojis unless the account uses them.
-4. Prioritize formats that have historically performed well for this account.
-5. Reference current trending topics when relevant — timely takes get more engagement.
-6. Never use hashtags unless the account's viral tweets use them.
-7. Never be generic. Every tweet should have a specific, opinionated point of view.
-8. Vary the format: mix hot takes, questions, data points, short punches, and structured posts.
-9. Never violate the anti-goals.`);
+  parts.push(`\n## STRATEGY
+1. **PRIORITIZE QUOTE TWEETS.** At least 60-70% of output should be QTs of the quotable tweets listed above.
+2. QT commentary should be SHORT (under 200 chars ideally), OPINIONATED, and add a new angle the original didn't cover.
+3. Great QT patterns: contrarian take on the original, adding missing context, a one-liner that reframes it, asking a sharp question the original doesn't answer, connecting it to a bigger trend.
+4. The remaining 30-40% should be original standalone tweets on trending topics.
+5. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
+
+## RULES
+1. Every tweet MUST be under 280 characters. Hard limit.
+2. Write in this account's exact voice. Match the style of the top performing tweets.
+3. No threads, no "1/", no emojis unless the account uses them.
+4. Never use hashtags unless the account's viral tweets use them.
+5. Never be generic. Every tweet needs a specific, opinionated point of view.
+6. For QTs: don't just agree with the original — add value, challenge it, or reframe it.
+7. Vary formats across the batch.
+8. Never violate the anti-goals.
+9. Set "quoteTweetAuthor" to the @handle of the person being quoted (for QTs only).`);
 
   return parts.join('\n');
 }
 
 /**
- * Generate a batch of tweets using Claude.
+ * Generate a batch of tweets using Claude, optimized for QTs.
  */
 export async function generateViralBatch(
   voiceProfile: VoiceProfile,
@@ -100,11 +143,13 @@ export async function generateViralBatch(
 
   const userPrompt = `Generate exactly ${count} tweets. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (MUST be under 280 characters)
-- "format": one of: hot_take, question, data_point, short_punch, thread_hook, explainer, structured, observation
+- "format": one of: qt_contrarian, qt_reframe, qt_question, qt_context, qt_one_liner, hot_take, question, data_point, short_punch, observation
 - "targetTopic": what topic this tweet is about
-- "rationale": 1 sentence explaining why this tweet should perform well based on the engagement data
+- "rationale": 1 sentence on why this should perform well
+- "quoteTweetId": the ID of the tweet being quoted (from the quotable list), or null for originals
+- "quoteTweetAuthor": the @handle of the author being quoted, or null for originals
 
-Output ONLY the JSON objects, one per line, no markdown fencing, no other text.`;
+Prioritize QTs — they get more reach. Output ONLY JSON objects, one per line, no markdown fencing.`;
 
   try {
     const response = await anthropic.messages.create({
@@ -119,7 +164,6 @@ Output ONLY the JSON objects, one per line, no markdown fencing, no other text.`
       .map((block) => block.text)
       .join('');
 
-    // Parse line-by-line JSON
     const tweets: ProtocolTweet[] = [];
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
@@ -132,6 +176,8 @@ Output ONLY the JSON objects, one per line, no markdown fencing, no other text.`
             format: parsed.format || 'hot_take',
             targetTopic: parsed.targetTopic || 'general',
             rationale: parsed.rationale || '',
+            quoteTweetId: parsed.quoteTweetId || null,
+            quoteTweetAuthor: parsed.quoteTweetAuthor || null,
           });
         }
       } catch {

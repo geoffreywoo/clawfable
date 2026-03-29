@@ -15,7 +15,7 @@ export interface TrendingTopic {
   category: string;
   timestamp: string;
   tweetCount: number;
-  topTweet: { text: string; likes: number; author: string };
+  topTweet: { id: string; text: string; likes: number; author: string };
 }
 
 // Topic keyword clusters — used to group tweets into topics
@@ -35,6 +35,7 @@ const TOPIC_CLUSTERS: Record<string, { label: string; keywords: string[] }> = {
 };
 
 interface RawTweet {
+  id: string;
   text: string;
   likes: number;
   retweets: number;
@@ -67,6 +68,7 @@ export async function fetchTrendingFromFollowing(
       batch.map((account) =>
         getUserTimeline(keys, account.id, 10).then((tweets) =>
           tweets.map((t) => ({
+            id: t.id,
             text: t.text,
             likes: t.likes,
             retweets: t.retweets,
@@ -131,7 +133,7 @@ export async function fetchTrendingFromFollowing(
       category: key,
       timestamp: top.createdAt,
       tweetCount: tweets.length,
-      topTweet: { text: top.text, likes: top.likes, author: top.author },
+      topTweet: { id: top.id, text: top.text, likes: top.likes, author: top.author },
     });
   }
 

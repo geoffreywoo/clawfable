@@ -167,7 +167,11 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
       const res = await fetch(`/api/agents/${agentId}/twitter/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
+        body: JSON.stringify({
+          content: tweet.content,
+          tweetId: tweet.id,
+          quoteTweetId: tweet.quoteTweetId || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -525,6 +529,15 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               <div className="space-y-3">
                 {generatedTweets.map((tweet) => (
                   <div key={tweet.id} className="protocol-generated-card">
+                    {tweet.quoteTweetId && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px',
+                        fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)',
+                      }}>
+                        <span className="protocol-tag tag-topic" style={{ fontSize: '9px' }}>QT</span>
+                        <span>quoting {tweet.quoteTweetAuthor || 'unknown'}</span>
+                      </div>
+                    )}
                     <p className="tweet-content">{tweet.content}</p>
                     {(tweet.format || tweet.rationale) && (
                       <div className="protocol-tweet-meta">

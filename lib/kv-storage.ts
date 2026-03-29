@@ -333,6 +333,8 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     status: data.status ?? 'draft',
     topic: data.topic ?? null,
     xTweetId: data.xTweetId ?? null,
+    quoteTweetId: data.quoteTweetId ?? null,
+    quoteTweetAuthor: data.quoteTweetAuthor ?? null,
     scheduledAt: data.scheduledAt ?? null,
     createdAt: new Date().toISOString(),
   };

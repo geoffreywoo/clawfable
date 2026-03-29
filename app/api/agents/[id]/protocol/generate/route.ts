@@ -53,10 +53,12 @@ export async function POST(
         createTweet({
           agentId: id,
           content: item.content,
-          type: 'original',
+          type: item.quoteTweetId ? 'quote' : 'original',
           status: 'draft',
           topic: item.targetTopic,
           xTweetId: null,
+          quoteTweetId: item.quoteTweetId || null,
+          quoteTweetAuthor: item.quoteTweetAuthor || null,
           scheduledAt: null,
         }).then((tweet) => ({
           ...tweet,
