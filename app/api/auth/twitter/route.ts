@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
 
-    // Build callback URL from the request origin
-    const origin = request.headers.get('origin') || request.nextUrl.origin;
+    // Build callback URL — use NEXTAUTH_URL or APP_URL env var if set, else derive from request
+    const origin = process.env.APP_URL || request.headers.get('origin') || request.nextUrl.origin;
     const callbackUrl = `${origin}/api/auth/twitter/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
