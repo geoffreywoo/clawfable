@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -207,6 +207,9 @@ const KEYS = {
   agentMetrics: (id: string) => `agent:${id}:metrics`,
   agentAnalysis: (id: string) => `agent:${id}:analysis`,
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
+  user: (xUserId: string) => `user:${xUserId}`,
+  userAgents: (xUserId: string) => `user:${xUserId}:agents`,
+  session: (token: string) => `session:${token}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
   counterAgent: () => 'counter:agent',
@@ -430,14 +433,74 @@ export async function saveAnalysis(agentId: string, analysis: AccountAnalysis): 
 
 // ─── OAuth temp storage ──────────────────────────────────────────────────────
 
-export async function saveOAuthTemp(oauthToken: string, data: { oauthTokenSecret: string; agentId: string }): Promise<void> {
+export interface OAuthTempData {
+  oauthTokenSecret: string;
+  agentId: string | null;
+  purpose: 'login' | 'connect';
+}
+
+export async function saveOAuthTemp(oauthToken: string, data: OAuthTempData): Promise<void> {
   await kvSet(KEYS.oauthTemp(oauthToken), data);
 }
 
-export async function getOAuthTemp(oauthToken: string): Promise<{ oauthTokenSecret: string; agentId: string } | null> {
-  return kvGet<{ oauthTokenSecret: string; agentId: string }>(KEYS.oauthTemp(oauthToken));
+export async function getOAuthTemp(oauthToken: string): Promise<OAuthTempData | null> {
+  return kvGet<OAuthTempData>(KEYS.oauthTemp(oauthToken));
 }
 
 export async function deleteOAuthTemp(oauthToken: string): Promise<void> {
   await kvDel(KEYS.oauthTemp(oauthToken));
+}
+
+// ─── User storage ────────────────────────────────────────────────────────────
+
+export async function getUser(xUserId: string): Promise<User | null> {
+  return kvHgetall<User>(KEYS.user(xUserId));
+}
+
+export async function getOrCreateUser(xUserId: string, username: string, name: string): Promise<User> {
+  const existing = await getUser(xUserId);
+  if (existing) return existing;
+  const user: User = { id: xUserId, username, name, createdAt: new Date().toISOString() };
+  await kvHset(KEYS.user(xUserId), user as unknown as Record<string, unknown>);
+  return user;
+}
+
+// ─── Session storage ─────────────────────────────────────────────────────────
+
+export async function createSession(userId: string): Promise<string> {
+  const token = crypto.randomUUID();
+  const session: Session = { userId, createdAt: new Date().toISOString() };
+  await kvSet(KEYS.session(token), session);
+  return token;
+}
+
+export async function getSession(token: string): Promise<Session | null> {
+  return kvGet<Session>(KEYS.session(token));
+}
+
+export async function deleteSession(token: string): Promise<void> {
+  await kvDel(KEYS.session(token));
+}
+
+// ─── User-agent mapping ──────────────────────────────────────────────────────
+
+export async function getUserAgentIds(userId: string): Promise<string[]> {
+  return kvSmembers(KEYS.userAgents(userId));
+}
+
+export async function getUserAgents(userId: string): Promise<Agent[]> {
+  const ids = await getUserAgentIds(userId);
+  if (ids.length === 0) return [];
+  const agents = await Promise.all(ids.map((id) => kvHgetall<Agent>(KEYS.agent(id))));
+  return agents
+    .filter((a): a is Agent => a !== null)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function addAgentToUser(userId: string, agentId: string): Promise<void> {
+  await kvSadd(KEYS.userAgents(userId), agentId);
+}
+
+export async function removeAgentFromUser(userId: string, agentId: string): Promise<void> {
+  await kvSrem(KEYS.userAgents(userId), agentId);
 }

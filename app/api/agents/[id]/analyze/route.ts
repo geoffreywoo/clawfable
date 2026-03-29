@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, saveAnalysis, updateAgent } from '@/lib/kv-storage';
+import { saveAnalysis, updateAgent } from '@/lib/kv-storage';
 import { decodeKeys } from '@/lib/twitter-client';
 import { analyzeAccount } from '@/lib/analysis';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/analyze — run account analysis
 export async function POST(
@@ -10,8 +11,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
 
     if (!agent.isConnected || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) {
       return NextResponse.json({ error: 'Twitter API not connected' }, { status: 400 });
@@ -37,6 +37,7 @@ export async function POST(
 
     return NextResponse.json(analysis);
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Analysis failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, updateAgent, deleteAgent, getTweets, getMentions } from '@/lib/kv-storage';
+import { updateAgent, deleteAgent, removeAgentFromUser } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]
 export async function GET(
@@ -9,8 +10,7 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
     return NextResponse.json({
       id: agent.id,
       handle: agent.handle,
@@ -23,7 +23,8 @@ export async function GET(
       createdAt: agent.createdAt,
       hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
     });
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch agent' }, { status: 500 });
   }
 }
@@ -35,10 +36,9 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const { agent: existing } = await requireAgentAccess(id);
     const body = await request.json();
     const { name, soulMd, handle } = body;
-    const existing = await getAgent(id);
-    if (!existing) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
 
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
@@ -47,7 +47,6 @@ export async function PATCH(
       updates.soulMd = soulMd;
       const profile = parseSoulMd(name ?? existing.name, soulMd);
       updates.soulSummary = profile.summary;
-      // Advance setup if on soul step
       if (existing.setupStep === 'soul') {
         updates.setupStep = 'analyze';
       }
@@ -62,7 +61,8 @@ export async function PATCH(
       soulSummary: updated.soulSummary,
       isConnected: updated.isConnected,
     });
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to update agent' }, { status: 500 });
   }
 }
@@ -74,9 +74,12 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
+    const { user } = await requireAgentAccess(id);
     await deleteAgent(id);
+    await removeAgentFromUser(user.id, id);
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to delete agent' }, { status: 500 });
   }
 }

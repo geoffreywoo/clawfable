@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQueuedTweets, createTweet } from '@/lib/kv-storage';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/queue
 export async function GET(
@@ -8,9 +9,11 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
+    await requireAgentAccess(id);
     const tweets = await getQueuedTweets(id);
     return NextResponse.json(tweets);
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch queue' }, { status: 500 });
   }
 }
@@ -22,6 +25,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
+    await requireAgentAccess(id);
     const body = await request.json();
     const { content, topic, type } = body;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
@@ -36,7 +40,8 @@ export async function POST(
       scheduledAt: null,
     });
     return NextResponse.json(tweet);
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to add to queue' }, { status: 500 });
   }
 }

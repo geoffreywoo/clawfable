@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, updateAgent } from '@/lib/kv-storage';
+import { updateAgent } from '@/lib/kv-storage';
 import { getMe } from '@/lib/twitter-client';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/connect
 export async function POST(
@@ -9,8 +10,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
 
     const body = await request.json();
     const { apiKey, apiSecret, accessToken, accessSecret } = body;
@@ -39,6 +39,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, user: { name: user.name, username: user.username } });
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Invalid API keys';
     return NextResponse.json({ error: `Failed to validate keys: ${message}` }, { status: 401 });
   }

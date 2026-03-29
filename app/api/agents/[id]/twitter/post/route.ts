@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, updateTweet } from '@/lib/kv-storage';
+import { updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -9,8 +10,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
 
     if (!agent.isConnected || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) {
       return NextResponse.json({ error: 'Twitter API not configured for this agent' }, { status: 503 });
@@ -40,6 +40,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, tweetUrl: result.tweetUrl, tweetId: result.tweetId });
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to post tweet';
     return NextResponse.json({ error: message }, { status: 500 });
   }

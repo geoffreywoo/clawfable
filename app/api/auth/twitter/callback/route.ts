@@ -2,36 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOAuthTemp, deleteOAuthTemp, getAgent, updateAgent } from '@/lib/kv-storage';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 
-// GET /api/auth/twitter/callback — Twitter redirects here after user authorizes
-// Query params: oauth_token, oauth_verifier
+// GET /api/auth/twitter/callback — Twitter redirects here after user authorizes agent connection
 export async function GET(request: NextRequest) {
   const oauthToken = request.nextUrl.searchParams.get('oauth_token');
   const oauthVerifier = request.nextUrl.searchParams.get('oauth_verifier');
   const denied = request.nextUrl.searchParams.get('denied');
+  const origin = process.env.APP_URL || request.nextUrl.origin;
 
-  // User denied access
   if (denied) {
-    return NextResponse.redirect(new URL('/?oauth=denied', request.nextUrl.origin));
+    return NextResponse.redirect(new URL('/?oauth=denied', origin));
   }
 
   if (!oauthToken || !oauthVerifier) {
-    return NextResponse.redirect(new URL('/?oauth=error', request.nextUrl.origin));
+    return NextResponse.redirect(new URL('/?oauth=error', origin));
   }
 
   try {
-    // Look up the temp data we stored when starting the flow
     const temp = await getOAuthTemp(oauthToken);
-    if (!temp) {
-      return NextResponse.redirect(new URL('/?oauth=expired', request.nextUrl.origin));
+    if (!temp || temp.purpose !== 'connect' || !temp.agentId) {
+      return NextResponse.redirect(new URL('/?oauth=expired', origin));
     }
 
     const { oauthTokenSecret, agentId } = temp;
 
-    // Exchange for permanent access tokens
     const { accessToken, accessSecret, userId, screenName } =
       await exchangeOAuthTokens(oauthToken, oauthTokenSecret, oauthVerifier);
 
-    // Store on the agent (base64 encoded, using app consumer key/secret)
     const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
     const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
 
@@ -45,23 +41,18 @@ export async function GET(request: NextRequest) {
       xUserId: userId,
     };
 
-    // Advance setup step if needed
     if (agent && (agent.setupStep === 'oauth' || !agent.setupStep)) {
       updates.setupStep = 'soul';
     }
 
     await updateAgent(agentId, updates as Parameters<typeof updateAgent>[1]);
-
-    // Clean up temp token
     await deleteOAuthTemp(oauthToken);
 
-    // Redirect to the agent dashboard
     return NextResponse.redirect(
-      new URL(`/agent/${agentId}?oauth=success&username=${screenName}`, request.nextUrl.origin)
+      new URL(`/agent/${agentId}?oauth=success&username=${screenName}`, origin)
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'OAuth failed';
-    console.error('OAuth callback error:', message);
-    return NextResponse.redirect(new URL('/?oauth=error', request.nextUrl.origin));
+    console.error('OAuth callback error:', err instanceof Error ? err.message : err);
+    return NextResponse.redirect(new URL('/?oauth=error', origin));
   }
 }

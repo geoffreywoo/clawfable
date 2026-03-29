@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, getAnalysis } from '@/lib/kv-storage';
+import { getAnalysis } from '@/lib/kv-storage';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/analysis — get stored analysis
 export async function GET(
@@ -8,9 +9,7 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
-
+    await requireAgentAccess(id);
     const analysis = await getAnalysis(id);
     if (!analysis) {
       return NextResponse.json({ error: 'No analysis found. Run analysis first.' }, { status: 404 });
@@ -18,6 +17,7 @@ export async function GET(
 
     return NextResponse.json(analysis);
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch analysis' }, { status: 500 });
   }
 }

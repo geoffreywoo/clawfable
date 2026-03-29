@@ -1,28 +1,25 @@
-# Clawfable — Multi-Agent Twitter Bot Ops Platform
+# Clawfable
 
-A Next.js 14+ App Router platform for managing multiple Twitter bot agents, each with a unique SOUL.md personality profile and live X API integration.
+AI agent fleet for Twitter. Create agents with unique voice profiles, analyze account performance, generate viral content, and post to X.
 
-## Overview
+## How It Works
 
-Clawfable lets you create, configure, and operate Twitter bots — each with its own voice, tone, and topic focus defined via a markdown SOUL.md file. Generate on-brand tweets, manage a post queue, respond to mentions, and track engagement metrics.
+1. **Create an agent** — give it a name, connect your X account via OAuth
+2. **Define its voice** — write a SOUL.md that defines personality, tone, and topic focus
+3. **Analyze your account** — Clawfable reads your timeline to find what content performs best
+4. **Generate + post** — produce format-matched, topic-weighted tweets and post them to X
 
 ## Features
 
-- **Multi-agent management** — create and manage unlimited Twitter bot agents
-- **SOUL.md voice profiles** — define tone (contrarian, optimist, analyst, provocateur, educator) and topic focus
-- **Tweet generation** — generate on-voice takes for trending AI/tech topics
+- **Setup wizard** — guided 3-step onboarding: connect X, define SOUL.md, run account analysis
+- **Account analysis** — detects top-performing content formats (hot takes, threads, questions, data points, etc.), extracts topic distribution, identifies viral tweets, and maps peak engagement hours
+- **Protocol tab** — real-time dashboard showing engagement metrics, top formats/topics, following graph, and generated content feed
+- **Viral content generation** — produces tweets weighted toward your best-performing formats and topics, with rationale for each
+- **SOUL.md voice profiles** — define tone (contrarian, optimist, analyst, provocateur, educator) and topic focus via markdown
 - **Post queue** — queue, edit, and batch-post tweets to X
 - **Mentions & replies** — view mentions, generate in-voice replies, post back to X
 - **Engagement metrics** — track tweets generated, posted, engagement rate, follower growth
-- **Live X API integration** — connect per-agent OAuth 1.0a credentials to post live
-
-## Tech Stack
-
-- **Framework:** Next.js 14+ App Router (TypeScript)
-- **Storage:** Vercel KV (Redis-compatible) with in-memory fallback for local dev
-- **Twitter API:** `twitter-api-v2`
-- **Fonts:** Space Grotesk (headings) · Inter (body) · JetBrains Mono (data/labels)
-- **Styling:** Plain CSS with dark terminal aesthetic (no Tailwind, no shadcn/ui)
+- **Multi-agent** — run multiple agents with independent X accounts, voices, and strategies
 
 ## Getting Started
 
@@ -31,48 +28,58 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The seed data (Anti Hunter agent) will be created automatically on first load.
+Open [http://localhost:3000](http://localhost:3000) and create your first agent via the setup wizard.
 
 ## Project Structure
 
 ```
 app/
-  layout.tsx              — Root layout
-  globals.css             — Dark terminal CSS design system
-  page.tsx                — Agent list landing page
-  agent/[id]/page.tsx     — Agent dashboard (tabs: feed, queue, mentions, metrics, settings)
+  layout.tsx                — Root layout
+  globals.css               — Dark terminal CSS design system
+  page.tsx                  — Agent fleet landing page
+  agent/[id]/page.tsx       — Agent dashboard (tabs: protocol, feed, queue, mentions, metrics, settings)
   api/
-    agents/route.ts       — GET list + POST create
-    agents/[id]/route.ts  — GET + PATCH + DELETE agent
-    agents/[id]/connect/  — POST: connect X API keys
-    agents/[id]/disconnect/— POST: remove keys
-    agents/[id]/topics/   — GET: trending topics
-    agents/[id]/generate-tweet/ — POST: generate tweet
-    agents/[id]/generate-reply/ — POST: generate reply
-    agents/[id]/queue/    — GET + POST queue
-    agents/[id]/queue/[tweetId]/ — PATCH + DELETE tweet
-    agents/[id]/mentions/ — GET stored mentions
-    agents/[id]/metrics/  — GET metrics
-    agents/[id]/twitter/post/    — POST: post to X live
-    agents/[id]/twitter/mentions/— GET: fetch from X
-    agents/[id]/twitter/search/  — GET: search X
-    agents/[id]/twitter/like/    — POST: like tweet
-    seed/route.ts         — POST: seed demo data
+    agents/                 — CRUD for agents
+    agents/[id]/connect/    — Connect X API keys (manual)
+    agents/[id]/disconnect/ — Remove X API keys
+    agents/[id]/analyze/    — Run account analysis
+    agents/[id]/analysis/   — Get stored analysis results
+    agents/[id]/protocol/generate/ — Generate viral tweets from analysis + SOUL.md
+    agents/[id]/topics/     — Trending topics
+    agents/[id]/generate-tweet/  — Generate single tweet
+    agents/[id]/generate-reply/  — Generate reply to mention
+    agents/[id]/queue/      — Tweet queue management
+    agents/[id]/twitter/    — Live X API (post, mentions, search, like)
+    auth/twitter/           — OAuth 1.0a flow (initiate + callback)
   components/
-    logo.tsx, agent-card.tsx, agent-create-modal.tsx
-    feed-tab.tsx, queue-tab.tsx, mentions-tab.tsx
-    metrics-tab.tsx, settings-tab.tsx
+    setup-wizard.tsx        — 3-step agent onboarding
+    setup-continuation.tsx  — Resume incomplete setup
+    protocol-tab.tsx        — Analysis dashboard + content generation
+    feed-tab.tsx            — Generated tweet feed
+    queue-tab.tsx           — Post queue management
+    mentions-tab.tsx        — Mentions inbox + reply generation
+    metrics-tab.tsx         — Engagement metrics
+    settings-tab.tsx        — Agent config, X API credentials, SOUL.md editor
 lib/
-  types.ts         — TypeScript types
-  kv-storage.ts    — Vercel KV storage layer
-  soul-parser.ts   — SOUL.md parser
-  twitter-client.ts— Twitter API client (stateless/serverless)
-  tweet-templates.ts— 5 voice × 7 topic template matrix
+  kv-storage.ts             — Vercel KV with in-memory fallback
+  soul-parser.ts            — SOUL.md → voice profile (tone, topics, anti-goals)
+  analysis.ts               — Account analyzer (formats, topics, virality, peak hours)
+  viral-generator.ts        — Format-weighted tweet generation with rationale
+  tweet-templates.ts        — 5 tone x 7 topic template matrix
+  twitter-client.ts         — Stateless Twitter API client (serverless-safe)
+  types.ts                  — TypeScript types
 ```
 
-## Vercel KV Setup
+## Tech Stack
 
-Set these environment variables in your Vercel project:
+- **Next.js 16** App Router, TypeScript
+- **Vercel KV** (Redis) with automatic in-memory fallback for local dev
+- **twitter-api-v2** for X API integration
+- **Plain CSS** — dark terminal aesthetic, no Tailwind
+
+## Environment
+
+Production requires Vercel KV env vars:
 
 ```
 KV_URL
@@ -81,24 +88,6 @@ KV_REST_API_TOKEN
 KV_REST_API_READ_ONLY_TOKEN
 ```
 
-In local dev without KV credentials, the app falls back to an in-memory store automatically.
+Local dev works without them — the app falls back to in-memory storage automatically.
 
-## X API Setup
-
-For each agent, you need OAuth 1.0a credentials with Read + Write permissions:
-
-1. Go to [developer.x.com](https://developer.x.com)
-2. Create an app with User Authentication (OAuth 1.0a)
-3. Set Read + Write permissions
-4. Copy: API Key, API Secret, Access Token, Access Token Secret
-5. Enter these in the agent's Settings tab → X API Credentials
-
-## Design System
-
-Dark terminal aesthetic:
-- Background: `#0a0a0a`
-- Surface: `#141414`
-- Accent: `#dc2626` (crimson red)
-- Primary text: `#e5e5e5`
-- Muted text: `#737373`
-- Fonts: Space Grotesk / Inter / JetBrains Mono
+X API connection is handled via OAuth 1.0a through the setup wizard — no manual key entry required.

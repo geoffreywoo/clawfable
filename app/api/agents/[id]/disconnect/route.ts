@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateAgent } from '@/lib/kv-storage';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/disconnect
 export async function POST(
@@ -8,6 +9,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
+    await requireAgentAccess(id);
     await updateAgent(id, {
       apiKey: null,
       apiSecret: null,
@@ -17,7 +19,8 @@ export async function POST(
       xUserId: null,
     });
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to disconnect' }, { status: 500 });
   }
 }

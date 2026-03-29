@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, createTweet } from '@/lib/kv-storage';
+import { createTweet } from '@/lib/kv-storage';
 import { getToneFromSummary, getRandomReply } from '@/lib/tweet-templates';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -9,8 +10,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
 
     const body = await request.json();
     const { content, authorHandle } = body;
@@ -30,7 +30,8 @@ export async function POST(
       scheduledAt: null,
     });
     return NextResponse.json(tweet);
-  } catch {
+  } catch (err) {
+    try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to generate reply' }, { status: 500 });
   }
 }

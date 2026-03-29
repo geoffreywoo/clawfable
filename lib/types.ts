@@ -1,3 +1,17 @@
+// ─── User types ──────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;          // X user ID
+  username: string;    // X screen name
+  name: string;        // X display name
+  createdAt: string;
+}
+
+export interface Session {
+  userId: string;
+  createdAt: string;
+}
+
 // ─── Core domain types ────────────────────────────────────────────────────────
 
 export interface Agent {

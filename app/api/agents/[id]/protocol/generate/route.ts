@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgent, getAnalysis, createTweet } from '@/lib/kv-storage';
+import { getAnalysis, createTweet } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
+import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/protocol/generate — generate viral content
 export async function POST(
@@ -10,8 +11,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const agent = await getAgent(id);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    const { agent } = await requireAgentAccess(id);
 
     const analysis = await getAnalysis(id);
     if (!analysis) {
@@ -45,6 +45,7 @@ export async function POST(
 
     return NextResponse.json({ tweets, analysis: { contentFingerprint: analysis.contentFingerprint } });
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Generation failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }
