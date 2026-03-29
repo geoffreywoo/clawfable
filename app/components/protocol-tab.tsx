@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Tweet, AccountAnalysis, ProtocolSettings, PostLogEntry } from '@/lib/types';
+import type { Tweet, AccountAnalysis, ProtocolSettings, PostLogEntry, TweetJob, JobSuggestion } from '@/lib/types';
 
 interface ProtocolTweet extends Tweet {
   format?: string;
@@ -41,19 +41,26 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
   const [postingId, setPostingId] = useState<string | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<TweetJob[]>([]);
+  const [suggestions, setSuggestions] = useState<JobSuggestion[]>([]);
+  const [activatingIdx, setActivatingIdx] = useState<number | null>(null);
 
   useEffect(() => {
     Promise.all([
       fetch(`/api/agents/${agentId}/analysis`).then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
       fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([a, agent, protocolData]) => {
+      fetch(`/api/agents/${agentId}/jobs`).then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch(`/api/agents/${agentId}/jobs/suggest`).then((r) => r.ok ? r.json() : { suggestions: [] }).catch(() => ({ suggestions: [] })),
+    ]).then(([a, agent, protocolData, jobsData, suggestData]) => {
       setAnalysis(a);
       setAgentConnected(agent?.isConnected === 1);
       if (protocolData) {
         setSettings(protocolData.settings);
         setPostLog(protocolData.postLog || []);
       }
+      setJobs(jobsData || []);
+      setSuggestions(suggestData.suggestions || []);
       setLoadingAnalysis(false);
     });
   }, [agentId]);
@@ -181,6 +188,60 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
       showToast(err instanceof Error ? err.message : 'Post failed');
     } finally {
       setPostingId(null);
+    }
+  };
+
+  const handleActivateSuggestion = async (suggestion: JobSuggestion, idx: number) => {
+    setActivatingIdx(idx);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: suggestion.name,
+          description: suggestion.description,
+          schedule: suggestion.schedule,
+          postsPerRun: suggestion.postsPerRun,
+          topics: suggestion.topics,
+          formats: suggestion.formats,
+          source: 'suggested',
+        }),
+      });
+      const job = await res.json();
+      if (!res.ok) throw new Error(job.error);
+      setJobs((prev) => [job, ...prev]);
+      setSuggestions((prev) => prev.filter((_, i) => i !== idx));
+      showToast(`Job "${suggestion.name}" activated`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to activate job');
+    } finally {
+      setActivatingIdx(null);
+    }
+  };
+
+  const handleToggleJob = async (job: TweetJob) => {
+    try {
+      const res = await fetch(`/api/agents/${agentId}/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !job.enabled }),
+      });
+      const updated = await res.json();
+      if (!res.ok) throw new Error(updated.error);
+      setJobs((prev) => prev.map((j) => j.id === job.id ? updated : j));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to update job');
+    }
+  };
+
+  const handleDeleteJob = async (job: TweetJob) => {
+    try {
+      const res = await fetch(`/api/agents/${agentId}/jobs/${job.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Delete failed');
+      setJobs((prev) => prev.filter((j) => j.id !== job.id));
+      showToast(`Job "${job.name}" deleted`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete job');
     }
   };
 
@@ -317,6 +378,134 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                 Last auto-post: {getTimeAgo(settings.lastPostedAt)}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Suggested jobs ──────────────────────────────────────────────── */}
+      {suggestions.length > 0 && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 1l2 4h4l-3 3 1 4-4-2-4 2 1-4-3-3h4l2-4z" stroke="#8b5cf6" strokeWidth="1.2" fill="none" />
+              </svg>
+              <h2>SUGGESTED JOBS</h2>
+              <span className="section-count">{suggestions.length} recommendations</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {suggestions.map((s, idx) => (
+              <div key={idx} className="protocol-card" style={{ padding: '12px 14px' }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)' }}>
+                      {s.name}
+                    </span>
+                    <span className="protocol-tag" style={{ fontSize: '9px' }}>{s.schedule}</span>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#8b5cf6', color: '#fff', border: '1px solid #8b5cf6', fontSize: '10px' }}
+                    onClick={() => handleActivateSuggestion(s, idx)}
+                    disabled={activatingIdx === idx}
+                  >
+                    {activatingIdx === idx ? 'ACTIVATING...' : 'ACTIVATE'}
+                  </button>
+                </div>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                  {s.description}
+                </p>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px', lineHeight: '1.5' }}>
+                  {s.reason}
+                </p>
+                {(s.topics.length > 0 || s.formats.length > 0) && (
+                  <div className="protocol-tags" style={{ marginTop: '6px' }}>
+                    {s.topics.map((t) => (
+                      <span key={t} className="protocol-tag tag-topic" style={{ fontSize: '9px' }}>{t}</span>
+                    ))}
+                    {s.formats.map((f) => (
+                      <span key={f} className="protocol-tag" style={{ fontSize: '9px' }}>{f.replace(/_/g, ' ')}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Active jobs ─────────────────────────────────────────────────── */}
+      {jobs.length > 0 && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+                <polyline points="5,8 7,10 11,6" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <h2>ACTIVE JOBS</h2>
+              <span className="section-count">{jobs.filter((j) => j.enabled).length} running · {jobs.length} total</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {jobs.map((job) => (
+              <div key={job.id} className="protocol-card" style={{ padding: '10px 14px', opacity: job.enabled ? 1 : 0.5 }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn btn-sm"
+                      style={{
+                        background: job.enabled ? '#22c55e' : 'var(--surface-2)',
+                        color: job.enabled ? '#fff' : 'var(--text-muted)',
+                        border: `1px solid ${job.enabled ? '#22c55e' : 'var(--border)'}`,
+                        fontSize: '9px',
+                        padding: '2px 8px',
+                        minWidth: 0,
+                      }}
+                      onClick={() => handleToggleJob(job)}
+                    >
+                      {job.enabled ? 'ON' : 'OFF'}
+                    </button>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)' }}>
+                      {job.name}
+                    </span>
+                    <span className="protocol-tag" style={{ fontSize: '9px' }}>{job.schedule}</span>
+                    {job.source === 'suggested' && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>suggested</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      {job.totalPosted} posted
+                      {job.lastRunAt && ` · last ${getTimeAgo(job.lastRunAt)}`}
+                    </span>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: '10px', color: '#ef4444' }}
+                      onClick={() => handleDeleteJob(job)}
+                    >
+                      DELETE
+                    </button>
+                  </div>
+                </div>
+                {job.description && (
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {job.description}
+                  </p>
+                )}
+                {(job.topics.length > 0 || job.formats.length > 0) && (
+                  <div className="protocol-tags" style={{ marginTop: '6px' }}>
+                    {job.topics.map((t) => (
+                      <span key={t} className="protocol-tag tag-topic" style={{ fontSize: '9px' }}>{t}</span>
+                    ))}
+                    {job.formats.map((f) => (
+                      <span key={f} className="protocol-tag" style={{ fontSize: '9px' }}>{f.replace(/_/g, ' ')}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
