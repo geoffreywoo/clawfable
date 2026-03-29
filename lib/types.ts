@@ -99,7 +99,7 @@ export type UpdateAgentInput = Partial<Omit<Agent, 'id' | 'createdAt'>>;
 export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt'>;
 export type UpdateTweetInput = Partial<Omit<Tweet, 'id' | 'agentId' | 'createdAt'>>;
 
-export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt'>;
+export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt'> & { createdAt?: string };
 
 export interface MetricInput {
   agentId: string;

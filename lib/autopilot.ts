@@ -193,6 +193,7 @@ async function runAutoReply(
         tweetId: mention.id,
         engagementLikes: 0,
         engagementRetweets: 0,
+        createdAt: mention.createdAt,
       });
 
       // Generate reply via Claude

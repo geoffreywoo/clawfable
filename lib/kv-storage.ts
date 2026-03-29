@@ -399,7 +399,7 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
     tweetId: data.tweetId ?? null,
     engagementLikes: data.engagementLikes ?? 0,
     engagementRetweets: data.engagementRetweets ?? 0,
-    createdAt: new Date().toISOString(),
+    createdAt: data.createdAt || new Date().toISOString(),
   };
   await kvHset(KEYS.mention(id), mention as unknown as Record<string, unknown>);
   await kvLpush(KEYS.agentMentions(data.agentId), id);

@@ -46,6 +46,7 @@ export async function GET(
         tweetId: m.id,
         engagementLikes: 0,
         engagementRetweets: 0,
+        createdAt: m.createdAt,
       });
     }
 
