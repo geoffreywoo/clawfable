@@ -44,9 +44,9 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Run autopilot for enabled agents
+      // Run autopilot if auto-post OR auto-reply is enabled
       const settings = await getProtocolSettings(agent.id);
-      if (!settings.enabled) continue;
+      if (!settings.enabled && !settings.autoReply) continue;
 
       const result = await runAutopilot(agent);
       autopilotResults.push(result);

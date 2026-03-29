@@ -48,13 +48,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   const settings = await getProtocolSettings(agentId);
-  if (!settings.enabled) {
-    return { agentId, action: 'skipped', reason: 'Autopilot disabled' };
-  }
-
-  const nowUtc = new Date().getUTCHours();
-  if (!isWithinActiveHours(nowUtc, settings.activeHoursStart, settings.activeHoursEnd)) {
-    return { agentId, action: 'skipped', reason: `Outside active hours (${settings.activeHoursStart}-${settings.activeHoursEnd} UTC)` };
+  if (!settings.enabled && !settings.autoReply) {
+    return { agentId, action: 'skipped', reason: 'Auto-post and auto-reply both disabled' };
   }
 
   const keys = decodeKeys({
@@ -64,7 +59,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     accessSecret: agent.accessSecret,
   });
 
-  // --- Auto-reply to mentions ---
+  // --- Auto-reply to mentions (runs regardless of active hours) ---
   let repliesSent = 0;
   if (settings.autoReply) {
     try {
@@ -74,7 +69,28 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     }
   }
 
-  // --- Auto-post from queue ---
+  // --- Auto-post from queue (respects active hours + cooldown) ---
+  if (!settings.enabled) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0 ? `Sent ${repliesSent} replies (auto-post disabled)` : 'Auto-post disabled',
+      repliesSent,
+    };
+  }
+
+  const nowUtc = new Date().getUTCHours();
+  if (!isWithinActiveHours(nowUtc, settings.activeHoursStart, settings.activeHoursEnd)) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. Post skipped: outside active hours`
+        : `Outside active hours (${settings.activeHoursStart}-${settings.activeHoursEnd} UTC)`,
+      repliesSent,
+    };
+  }
+
   const minIntervalMs = (24 / settings.postsPerDay) * 60 * 60 * 1000;
   if (settings.lastPostedAt) {
     const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
