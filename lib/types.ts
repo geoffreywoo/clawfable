@@ -163,7 +163,9 @@ export interface PostLogEntry {
   format: string;
   topic: string;
   postedAt: string;
-  source: 'autopilot' | 'manual';
+  source: 'autopilot' | 'manual' | 'cron';
+  action?: 'posted' | 'replied' | 'skipped' | 'error' | 'mentions_refreshed';
+  reason?: string;
 }
 
 export interface AccountAnalysis {

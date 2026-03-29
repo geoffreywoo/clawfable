@@ -566,19 +566,52 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
             </div>
           </div>
           <div className="space-y-2">
-            {postLog.map((entry) => (
-              <div key={entry.id} className="protocol-viral-card">
-                <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
-                  <span className="protocol-tag" style={{ fontSize: '9px' }}>
-                    {entry.source === 'autopilot' ? 'AUTO' : 'MANUAL'}
-                  </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                    {getTimeAgo(entry.postedAt)}
-                  </span>
+            {postLog.map((entry) => {
+              const isPost = entry.action === 'posted' || (!entry.action && entry.xTweetId);
+              const tagLabel = entry.source === 'cron' ? 'CRON'
+                : entry.source === 'autopilot' ? 'AUTO'
+                : 'MANUAL';
+              const tagColor = entry.action === 'posted' ? '#22c55e'
+                : entry.action === 'replied' ? '#3b82f6'
+                : entry.action === 'error' ? '#ef4444'
+                : entry.action === 'mentions_refreshed' ? '#3b82f6'
+                : entry.action === 'skipped' ? 'var(--text-dim)'
+                : isPost ? '#22c55e'
+                : 'var(--text-dim)';
+
+              return (
+                <div key={entry.id} className="protocol-viral-card">
+                  <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="protocol-tag" style={{
+                        fontSize: '9px',
+                        background: `${tagColor}15`,
+                        borderColor: `${tagColor}40`,
+                        color: tagColor,
+                      }}>
+                        {tagLabel}
+                      </span>
+                      {entry.action && entry.action !== 'posted' && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: tagColor, textTransform: 'uppercase' }}>
+                          {entry.action.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      {getTimeAgo(entry.postedAt)}
+                    </span>
+                  </div>
+                  {entry.content && (
+                    <p className="protocol-viral-text" style={{ fontSize: '11px' }}>{entry.content}</p>
+                  )}
+                  {entry.reason && (
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      {entry.reason}
+                    </p>
+                  )}
                 </div>
-                <p className="protocol-viral-text" style={{ fontSize: '11px' }}>{entry.content}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

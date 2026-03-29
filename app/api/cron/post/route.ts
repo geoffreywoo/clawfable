@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addCronLogEntry } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client';
 
 // GET /api/cron/post — called by Vercel Cron every 30 minutes
-// 1. Refreshes mentions for all connected agents
-// 2. Runs autopilot (auto-post + auto-reply) for enabled agents
 export async function GET(request: NextRequest) {
-  // Verify caller — check CRON_SECRET if set
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const authBearer = request.headers.get('authorization');
-    const isAuthorized =
-      authBearer === `Bearer ${cronSecret}` ||
-      request.headers.get('x-vercel-signature') !== null; // Vercel internal calls
-    if (!isAuthorized) {
+    if (authBearer !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
   }
@@ -31,6 +25,20 @@ export async function GET(request: NextRequest) {
         try {
           const refreshed = await refreshMentions(agent.id);
           mentionsRefreshed += refreshed;
+          if (refreshed > 0) {
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: `Fetched ${refreshed} new mention${refreshed !== 1 ? 's' : ''} from X`,
+              format: 'cron',
+              topic: 'mentions',
+              postedAt: new Date().toISOString(),
+              source: 'cron',
+              action: 'mentions_refreshed',
+              reason: `${refreshed} new`,
+            });
+          }
         } catch {
           // Don't fail the whole run
         }
@@ -42,21 +50,24 @@ export async function GET(request: NextRequest) {
 
       const result = await runAutopilot(agent);
       autopilotResults.push(result);
-    }
 
-    // Log the cron run
-    await addCronLogEntry({
-      timestamp: new Date().toISOString(),
-      mentionsRefreshed,
-      autopilotProcessed: autopilotResults.length,
-      results: autopilotResults.map((r) => ({
-        agentId: r.agentId,
-        action: r.action,
-        reason: r.reason,
-        content: r.content,
-        repliesSent: r.repliesSent,
-      })),
-    });
+      // Log the result to the agent's post log (skips, errors, etc.)
+      if (result.action !== 'posted') {
+        // Posted tweets are already logged by runAutopilot itself
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: result.tweetId || '',
+          xTweetId: result.xTweetId || '',
+          content: result.content || '',
+          format: 'cron',
+          topic: '',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: result.action,
+          reason: result.reason,
+        });
+      }
+    }
 
     return NextResponse.json({
       timestamp: new Date().toISOString(),
@@ -70,9 +81,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * Fetch new mentions from X and store them. Returns count of new mentions stored.
- */
 async function refreshMentions(agentId: string): Promise<number> {
   const agent = await getAgent(agentId);
   if (!agent || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) return 0;
@@ -100,7 +108,6 @@ async function refreshMentions(agentId: string): Promise<number> {
   let added = 0;
   for (const m of rawMentions) {
     if (storedTweetIds.has(m.id)) continue;
-
     await createMention({
       agentId,
       author: String(m.authorName || m.authorId),
