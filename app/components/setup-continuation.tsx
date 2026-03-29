@@ -135,7 +135,7 @@ export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props
                   className="btn btn-primary"
                   disabled={!soulMd.trim() || loading}
                   onClick={handleSaveSoul}
-                  style={{ background: soulMd.trim() ? '#dc2626' : undefined }}
+                  style={{ background: soulMd.trim() ? '#8b5cf6' : undefined }}
                 >
                   {loading ? 'ANALYZING...' : 'SAVE & ANALYZE'}
                 </button>
@@ -216,7 +216,7 @@ export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props
                   className="btn btn-primary"
                   disabled={!analysis || loading}
                   onClick={onComplete}
-                  style={{ background: analysis ? '#dc2626' : undefined }}
+                  style={{ background: analysis ? '#8b5cf6' : undefined }}
                 >
                   LAUNCH PROTOCOL
                 </button>

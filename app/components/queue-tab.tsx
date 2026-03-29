@@ -174,7 +174,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /></svg>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
           <h2>TWEET QUEUE</h2>
           <span className="section-count">{queue.length} items</span>
         </div>

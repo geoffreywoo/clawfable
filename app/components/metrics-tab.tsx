@@ -87,7 +87,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="section-title mb-4">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><rect x="1" y="8" width="3" height="7" rx="1" fill="#dc2626" /><rect x="6" y="5" width="3" height="10" rx="1" fill="#dc2626" /><rect x="11" y="2" width="3" height="13" rx="1" fill="#dc2626" /></svg>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><rect x="1" y="8" width="3" height="7" rx="1" fill="#8b5cf6" /><rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" /><rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" /></svg>
         <h2>ENGAGEMENT METRICS</h2>
       </div>
 

@@ -153,7 +153,7 @@ export function FeedTab({ agentId }: FeedTabProps) {
       <div>
         <div className="section-header">
           <div className="section-title">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polyline points="1,12 5,7 9,9 15,3" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polyline points="1,12 5,7 9,9 15,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
             <h2>TRENDING TOPICS</h2>
             <span className="section-count">{topics.length} items</span>
           </div>
@@ -178,7 +178,7 @@ export function FeedTab({ agentId }: FeedTabProps) {
                     className="topic-score"
                     style={{
                       background: `rgba(220,38,38,${topic.relevanceScore / 200})`,
-                      color: topic.relevanceScore > 85 ? '#dc2626' : '#888',
+                      color: topic.relevanceScore > 85 ? '#8b5cf6' : '#888',
                     }}
                     data-testid={`text-score-${topic.id}`}
                   >
@@ -205,7 +205,7 @@ export function FeedTab({ agentId }: FeedTabProps) {
         <div>
           <div className="section-header">
             <div className="section-title">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#dc2626" /></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#8b5cf6" /></svg>
               <h2>GENERATED TAKES</h2>
               <span className="section-count">{generatedTweets.length} drafts</span>
             </div>
@@ -232,7 +232,7 @@ export function FeedTab({ agentId }: FeedTabProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-sm"
-                      style={{ color: '#dc2626' }}
+                      style={{ color: '#8b5cf6' }}
                       onClick={() => handleQueue(tweet)}
                       data-testid={`button-queue-${tweet.id}`}
                     >

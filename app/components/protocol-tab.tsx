@@ -160,8 +160,8 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
       {!analysis ? (
         <div className="protocol-empty">
           <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
-            <circle cx="24" cy="24" r="20" stroke="#dc2626" strokeWidth="1.5" strokeDasharray="4 3" />
-            <path d="M24 14v10l7 4" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="20" stroke="#8b5cf6" strokeWidth="1.5" strokeDasharray="4 3" />
+            <path d="M24 14v10l7 4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>
             No account analysis yet. Run analysis to study your posting history and engagement patterns.
@@ -170,7 +170,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
             className="btn btn-primary"
             onClick={handleReanalyze}
             disabled={analyzing}
-            style={{ marginTop: '12px', background: '#dc2626' }}
+            style={{ marginTop: '12px', background: '#8b5cf6' }}
           >
             {analyzing ? 'ANALYZING...' : 'RUN ANALYSIS'}
           </button>
@@ -182,8 +182,8 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
             <div className="section-header">
               <div className="section-title">
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                  <circle cx="8" cy="8" r="6" stroke="#dc2626" strokeWidth="1.5" />
-                  <path d="M8 4v4l3 2" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" />
+                  <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.5" />
+                  <path d="M8 4v4l3 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
                 <h2>ACCOUNT INTELLIGENCE</h2>
                 <span className="section-count">analyzed {getTimeAgo(analysis.analyzedAt)}</span>
@@ -278,7 +278,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               <div className="section-header">
                 <div className="section-title">
                   <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                    <polygon points="8,1 10,6 16,6 11,9.5 13,15 8,11.5 3,15 5,9.5 0,6 6,6" fill="#dc2626" />
+                    <polygon points="8,1 10,6 16,6 11,9.5 13,15 8,11.5 3,15 5,9.5 0,6 6,6" fill="#8b5cf6" />
                   </svg>
                   <h2>TOP VIRAL POSTS</h2>
                   <span className="section-count">{analysis.viralTweets.length} posts above {analysis.engagementPatterns.viralThreshold} likes</span>
@@ -305,7 +305,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
             <div className="section-header">
               <div className="section-title">
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                  <polygon points="2,2 14,8 2,14" fill="#dc2626" />
+                  <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
                 </svg>
                 <h2>PROTOCOL GENERATION</h2>
               </div>
@@ -319,7 +319,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                 className="btn btn-primary"
                 onClick={() => handleGenerate(3)}
                 disabled={generating}
-                style={{ background: '#dc2626' }}
+                style={{ background: '#8b5cf6' }}
               >
                 {generating ? 'GENERATING...' : 'GENERATE 3'}
               </button>
@@ -327,7 +327,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                 className="btn btn-primary"
                 onClick={() => handleGenerate(5)}
                 disabled={generating}
-                style={{ background: '#dc2626' }}
+                style={{ background: '#8b5cf6' }}
               >
                 GENERATE 5
               </button>
@@ -346,7 +346,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
             <div>
               <div className="section-header">
                 <div className="section-title">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#dc2626" /></svg>
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#8b5cf6" /></svg>
                   <h2>GENERATED CONTENT</h2>
                   <span className="section-count">{generatedTweets.length} drafts</span>
                 </div>
@@ -375,7 +375,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                       </span>
                       <div className="tweet-actions">
                         <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet.content)}>COPY</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
+                        <button className="btn btn-ghost btn-sm" style={{ color: '#8b5cf6' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
                         <button
                           className="btn btn-ghost btn-sm"
                           style={{

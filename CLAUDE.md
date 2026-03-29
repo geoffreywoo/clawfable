@@ -42,10 +42,10 @@ Draft -> Queued -> Posted (to X via OAuth 1.0a). Each status transition is a PAT
 
 ## Styling
 
-Plain CSS only (`globals.css`) — no Tailwind, no component library. Dark terminal aesthetic with CSS variables. Accent color is crimson red (`#dc2626`). Fonts: Space Grotesk (headings), Inter (body), JetBrains Mono (data/labels).
+Plain CSS only (`globals.css`) — no Tailwind, no component library. Dark terminal aesthetic with CSS variables. Accent color is violet (`#8b5cf6`). Fonts: Space Grotesk (headings), Inter (body), JetBrains Mono (data/labels).
 
 ## Environment
 
-Production requires Vercel KV env vars (`KV_URL`, `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_REST_API_READ_ONLY_TOKEN`). Local dev works without them via in-memory fallback. Seed data (Anti Hunter agent) is created automatically on first load.
+Production requires Vercel KV env vars (`KV_URL`, `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_REST_API_READ_ONLY_TOKEN`). Local dev works without them via in-memory fallback. Agents are created via the setup wizard.
 
 TypeScript strict mode is off. No linter is configured.

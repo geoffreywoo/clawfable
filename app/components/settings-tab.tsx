@@ -119,7 +119,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
       {/* Header */}
       <div className="section-title">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="#dc2626" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="#8b5cf6" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
         <h2>AGENT SETTINGS</h2>
       </div>
 
@@ -192,7 +192,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             disabled={!soulChanged || savingSoul}
             onClick={handleSaveSoul}
             data-testid="button-save-soul"
-            style={{ background: soulChanged ? '#dc2626' : undefined }}
+            style={{ background: soulChanged ? '#8b5cf6' : undefined }}
           >
             {savingSoul ? 'SAVING...' : 'SAVE CHANGES'}
           </button>
@@ -208,7 +208,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               {isConnected ? (
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#22c55e" strokeWidth="1.5" /><polyline points="4,8 7,11 12,5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               ) : (
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#dc2626" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#8b5cf6" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
               )}
               <span
                 style={{
@@ -216,7 +216,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontSize: '11px',
                   fontWeight: 700,
                   letterSpacing: '0.08em',
-                  color: isConnected ? '#22c55e' : '#dc2626',
+                  color: isConnected ? '#22c55e' : '#8b5cf6',
                 }}
               >
                 {isConnected ? 'X API CONNECTED' : 'X API DISCONNECTED'}
@@ -254,7 +254,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               disabled={connecting}
               onClick={handleOAuthConnect}
               data-testid="button-connect"
-              style={{ background: '#dc2626' }}
+              style={{ background: '#8b5cf6' }}
             >
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                 <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
@@ -292,7 +292,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#ef4444' }}>Are you sure?</p>
             <button
               className="btn btn-sm"
-              style={{ background: '#dc2626', color: '#fff', border: '1px solid #dc2626' }}
+              style={{ background: '#8b5cf6', color: '#fff', border: '1px solid #8b5cf6' }}
               disabled={deleting}
               onClick={handleDelete}
               data-testid="button-delete-agent-final"

@@ -211,7 +211,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                   className="btn btn-primary"
                   disabled={!handle.trim() || !name.trim() || loading}
                   onClick={handleCreateAndAuth}
-                  style={{ background: handle.trim() && name.trim() ? '#dc2626' : undefined }}
+                  style={{ background: handle.trim() && name.trim() ? '#8b5cf6' : undefined }}
                 >
                   <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                     <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
@@ -254,7 +254,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                   className="btn btn-primary"
                   disabled={!soulMd.trim() || loading}
                   onClick={handleSaveSoul}
-                  style={{ background: soulMd.trim() ? '#dc2626' : undefined }}
+                  style={{ background: soulMd.trim() ? '#8b5cf6' : undefined }}
                 >
                   {loading ? 'ANALYZING ACCOUNT...' : 'SAVE & ANALYZE ACCOUNT'}
                 </button>
@@ -376,7 +376,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                   className="btn btn-primary"
                   disabled={!analysis || loading}
                   onClick={handleLaunch}
-                  style={{ background: analysis ? '#dc2626' : undefined }}
+                  style={{ background: analysis ? '#8b5cf6' : undefined }}
                 >
                   LAUNCH PROTOCOL
                 </button>

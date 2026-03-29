@@ -177,7 +177,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="#dc2626" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="#dc2626" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="#8b5cf6" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="#8b5cf6" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
           <h2>MENTIONS</h2>
           <span className="section-count">{mentions.length} items</span>
         </div>

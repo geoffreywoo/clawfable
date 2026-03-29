@@ -42,7 +42,7 @@ export default function HomePage() {
           <Logo size={32} />
           <div className="site-header-text">
             <h1>CLAWFABLE</h1>
-            <p>Multi-Agent Twitter Bot Ops</p>
+            <p>AI Agent Fleet</p>
           </div>
         </div>
         <div className="site-header-right">
@@ -61,9 +61,9 @@ export default function HomePage() {
           <div className="section-header mb-6">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ flexShrink: 0 }}>
-                <rect x="1" y="4" width="14" height="8" rx="2" stroke="#dc2626" strokeWidth="1.5" />
-                <circle cx="5" cy="8" r="1.5" fill="#dc2626" />
-                <line x1="9" y1="8" x2="13" y2="8" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" />
+                <rect x="1" y="4" width="14" height="8" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+                <circle cx="5" cy="8" r="1.5" fill="#8b5cf6" />
+                <line x1="9" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <h2>AGENTS</h2>
               {!loading && (
@@ -97,8 +97,8 @@ export default function HomePage() {
               >
                 <div className="plus-ring">
                   <svg viewBox="0 0 16 16" width="18" height="18" fill="none">
-                    <line x1="8" y1="3" x2="8" y2="13" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" />
-                    <line x1="3" y1="8" x2="13" y2="8" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" />
+                    <line x1="8" y1="3" x2="8" y2="13" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+                    <line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
                   </svg>
                 </div>
                 <div style={{ textAlign: 'center' }}>

@@ -73,8 +73,8 @@ export function AgentCreateModal({ open, onClose, onCreated }: AgentCreateModalP
         <div className="modal-header">
           <div className="modal-title">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ flexShrink: 0 }}>
-              <rect x="2" y="2" width="12" height="12" rx="2" stroke="#dc2626" strokeWidth="1.5" />
-              <circle cx="8" cy="8" r="2.5" stroke="#dc2626" strokeWidth="1.5" />
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+              <circle cx="8" cy="8" r="2.5" stroke="#8b5cf6" strokeWidth="1.5" />
             </svg>
             New Agent
           </div>
@@ -150,7 +150,7 @@ export function AgentCreateModal({ open, onClose, onCreated }: AgentCreateModalP
               disabled={!canCreate || loading}
               onClick={handleCreate}
               data-testid="button-create-agent"
-              style={{ background: canCreate ? '#dc2626' : undefined }}
+              style={{ background: canCreate ? '#8b5cf6' : undefined }}
             >
               {loading ? 'CREATING...' : 'CREATE AGENT'}
             </button>

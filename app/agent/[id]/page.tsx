@@ -150,7 +150,7 @@ export default function AgentDashboard() {
               {agent.name.toUpperCase()}
             </h1>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.12em' }}>
-              Engagement Ops
+              Agent Dashboard
             </p>
           </div>
         </div>
