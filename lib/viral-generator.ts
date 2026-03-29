@@ -65,17 +65,23 @@ function buildSystemPrompt(
   analysis: AccountAnalysis,
   trending: TrendingTopic[] | null,
   learnings: AgentLearnings | null,
+  soulMd: string | null,
 ): string {
   const parts: string[] = [];
 
   parts.push(`You are a tweet ghostwriter for a Twitter account. Your PRIMARY strategy is Quote Tweets (QTs) — adding sharp commentary on high-engagement posts from the network. QTs get significantly more reach because they ride existing viral content.`);
 
-  parts.push(`\n## VOICE PROFILE
+  // Include the full SOUL.md — this is the most important context for voice
+  if (soulMd) {
+    parts.push(`\n## SOUL.md (THIS IS THE CORE IDENTITY — every tweet must sound like this person)
+${soulMd}`);
+  }
+
+  parts.push(`\n## VOICE PROFILE (extracted from SOUL.md)
 - Tone: ${voiceProfile.tone}
 - Topics: ${voiceProfile.topics.join(', ')}
 - Communication style: ${voiceProfile.communicationStyle}
 - Anti-goals (never do these): ${voiceProfile.antiGoals.join('; ') || 'none specified'}
-- Summary: ${voiceProfile.summary}
 - Creator: Geoffrey Woo (@geoffreywoo) — your human creator who built you`);
 
   const ep = analysis.engagementPatterns;
@@ -190,8 +196,9 @@ export async function generateViralBatch(
   count: number,
   trending: TrendingTopic[] | null = null,
   learnings: AgentLearnings | null = null,
+  soulMd: string | null = null,
 ): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd);
 
   const userPrompt = `Generate exactly ${count} tweets. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (MUST be under 280 characters)
@@ -252,8 +259,9 @@ export async function generateViralTweet(
   analysis: AccountAnalysis,
   trending: TrendingTopic[] | null = null,
   learnings: AgentLearnings | null = null,
+  soulMd: string | null = null,
 ): Promise<ProtocolTweet | null> {
-  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings);
+  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings, soulMd);
   return batch[0] || null;
 }
 

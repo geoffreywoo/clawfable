@@ -41,7 +41,7 @@ export async function POST(
 
       const n = Math.min(batchCount, 5);
       if (analysis) {
-        const batch = await generateViralBatch(voiceProfile, analysis, n, null);
+        const batch = await generateViralBatch(voiceProfile, analysis, n, null, null, agent.soulMd);
         const tweets = [];
         for (const item of batch) {
           const tweet = await createTweet({
@@ -95,7 +95,7 @@ export async function POST(
         topTweet: null as any,
       }];
 
-      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending);
+      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, null, agent.soulMd);
       if (batch.length > 0) {
         const item = batch[0];
         const tweet = await createTweet({

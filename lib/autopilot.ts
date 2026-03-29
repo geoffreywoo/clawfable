@@ -345,7 +345,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     }
 
     const learnings = await getLearnings(agent.id);
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd);
 
     let added = 0;
     for (const item of batch) {

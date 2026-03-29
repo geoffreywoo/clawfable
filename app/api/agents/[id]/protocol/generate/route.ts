@@ -42,7 +42,7 @@ export async function POST(
     }
 
     const learnings = await getLearnings(id);
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd);
 
     if (batch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
