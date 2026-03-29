@@ -95,8 +95,40 @@ export default function HomePage() {
     );
   }
 
-  // Not logged in — show login screen
+  // Not logged in — show intro + login
   if (!user) {
+    const features = [
+      {
+        icon: (
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+            <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.5" />
+            <path d="M8 4v4l3 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        ),
+        title: 'ANALYZE',
+        desc: 'Study your posting history — top formats, peak hours, viral patterns, audience graph.',
+      },
+      {
+        icon: (
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+            <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
+          </svg>
+        ),
+        title: 'GENERATE',
+        desc: 'AI produces tweets weighted to your best-performing formats, topics, and voice.',
+      },
+      {
+        icon: (
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+            <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+            <polyline points="5,8 7,10 11,6" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ),
+        title: 'AUTOMATE',
+        desc: 'Set up recurring jobs, autopilot scheduling, and let your agents post on cadence.',
+      },
+    ];
+
     return (
       <div className="page-shell">
         <header className="site-header">
@@ -109,27 +141,86 @@ export default function HomePage() {
           </div>
         </header>
         <main className="page-main">
-          <div className="content-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '100px' }}>
-            <div style={{ textAlign: 'center', maxWidth: '400px' }}>
-              <Logo size={48} />
-              <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, letterSpacing: '0.08em', marginTop: '16px' }}>
-                CLAWFABLE
+          <div className="content-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '60px' }}>
+            {/* Hero */}
+            <div style={{ textAlign: 'center', maxWidth: '520px' }}>
+              <Logo size={56} />
+              <h2 style={{ fontFamily: 'var(--font-space)', fontSize: '22px', fontWeight: 700, letterSpacing: '0.04em', marginTop: '20px', color: 'var(--text)' }}>
+                Your AI-powered Twitter fleet
               </h2>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: '1.7' }}>
-                Multi-agent Twitter bot ops platform. Sign in with X to create and manage your agents.
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px', lineHeight: '1.8', maxWidth: '420px', margin: '12px auto 0' }}>
+                Create agents with unique voice profiles. Clawfable analyzes your account, learns what performs, and generates content that sounds like you — on autopilot.
               </p>
-              <button
-                className="btn btn-primary btn-wide"
-                onClick={handleLogin}
-                disabled={loginLoading}
-                style={{ marginTop: '24px', background: '#8b5cf6', height: '40px', fontSize: '12px' }}
-              >
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ marginRight: '4px' }}>
-                  <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-                </svg>
-                {loginLoading ? 'REDIRECTING...' : 'SIGN IN WITH X'}
-              </button>
             </div>
+
+            {/* Feature cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '40px', maxWidth: '560px', width: '100%' }}>
+              {features.map((f) => (
+                <div
+                  key={f.title}
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '16px 14px',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}>{f.icon}</div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: '#8b5cf6', marginBottom: '6px' }}>
+                    {f.title}
+                  </p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                    {f.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* How it works */}
+            <div style={{ marginTop: '36px', maxWidth: '420px', width: '100%' }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.14em', color: 'var(--text-dim)', textAlign: 'center', marginBottom: '14px' }}>
+                HOW IT WORKS
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {[
+                  'Connect your X account via OAuth',
+                  'Define your agent\'s voice with a SOUL.md',
+                  'Run account analysis to find your winning patterns',
+                  'Generate + schedule tweets that match your style',
+                ].map((step, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                      fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, color: '#8b5cf6',
+                      width: '20px', height: '20px', borderRadius: '50%',
+                      border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      {i + 1}
+                    </span>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                      {step}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* CTA */}
+            <button
+              className="btn btn-primary btn-wide"
+              onClick={handleLogin}
+              disabled={loginLoading}
+              style={{ marginTop: '32px', background: '#8b5cf6', height: '42px', fontSize: '12px', maxWidth: '280px' }}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ marginRight: '6px' }}>
+                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+              </svg>
+              {loginLoading ? 'REDIRECTING...' : 'SIGN IN WITH X TO START'}
+            </button>
+
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '12px', marginBottom: '40px' }}>
+              Free to use. Your API keys stay encrypted in your account.
+            </p>
           </div>
         </main>
       </div>
