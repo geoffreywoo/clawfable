@@ -3,21 +3,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Logo } from '@/app/components/logo';
-import { FeedTab } from '@/app/components/feed-tab';
+import { ComposeTab } from '@/app/components/compose-tab';
 import { QueueTab } from '@/app/components/queue-tab';
 import { MentionsTab } from '@/app/components/mentions-tab';
-import { MetricsTab } from '@/app/components/metrics-tab';
+import { AutopilotTab } from '@/app/components/autopilot-tab';
 import { SettingsTab } from '@/app/components/settings-tab';
-import { ProtocolTab } from '@/app/components/protocol-tab';
 import { SetupContinuation } from '@/app/components/setup-continuation';
 import type { AgentDetail } from '@/lib/types';
 
 const TABS = [
-  { id: 'protocol', label: 'PROTOCOL', hasPulse: true },
-  { id: 'feed', label: 'FEED' },
+  { id: 'compose', label: 'COMPOSE', hasPulse: true },
   { id: 'queue', label: 'QUEUE' },
   { id: 'mentions', label: 'MENTIONS' },
-  { id: 'metrics', label: 'METRICS' },
+  { id: 'autopilot', label: 'AUTOPILOT' },
   { id: 'settings', label: 'SETTINGS' },
 ] as const;
 
@@ -35,7 +33,7 @@ export default function AgentDashboard() {
 
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>('protocol');
+  const [activeTab, setActiveTab] = useState<TabId>('compose');
   const [showSetupContinuation, setShowSetupContinuation] = useState(false);
 
   // Detect OAuth return — if ?oauth=success, agent just connected, show setup continuation
@@ -226,11 +224,10 @@ export default function AgentDashboard() {
 
       {/* Content */}
       <main className="dashboard-content">
-        {activeTab === 'protocol' && <ProtocolTab agentId={agentId} />}
-        {activeTab === 'feed' && <FeedTab agentId={agentId} />}
+        {activeTab === 'compose' && <ComposeTab agentId={agentId} />}
         {activeTab === 'queue' && <QueueTab agentId={agentId} />}
         {activeTab === 'mentions' && <MentionsTab agentId={agentId} />}
-        {activeTab === 'metrics' && <MetricsTab agentId={agentId} />}
+        {activeTab === 'autopilot' && <AutopilotTab agentId={agentId} />}
         {activeTab === 'settings' && (
           <SettingsTab
             agentId={agentId}
