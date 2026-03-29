@@ -136,6 +136,30 @@ export interface FollowingProfile {
   categories: Array<{ label: string; count: number; handles: string[] }>;
 }
 
+// ─── Autopilot types ─────────────────────────────────────────────────────────
+
+export interface ProtocolSettings {
+  enabled: boolean;
+  postsPerDay: number;        // 1-12
+  activeHoursStart: number;   // UTC hour 0-23
+  activeHoursEnd: number;     // UTC hour 0-23
+  minQueueSize: number;       // auto-generate when queue drops below this
+  lastPostedAt: string | null;
+  totalAutoPosted: number;
+}
+
+export interface PostLogEntry {
+  id: string;
+  agentId: string;
+  tweetId: string;           // internal tweet ID
+  xTweetId: string;          // X post ID
+  content: string;
+  format: string;
+  topic: string;
+  postedAt: string;
+  source: 'autopilot' | 'manual';
+}
+
 export interface AccountAnalysis {
   agentId: string;
   analyzedAt: string;

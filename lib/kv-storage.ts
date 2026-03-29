@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -207,6 +207,8 @@ const KEYS = {
   agentMetrics: (id: string) => `agent:${id}:metrics`,
   agentAnalysis: (id: string) => `agent:${id}:analysis`,
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
+  agentProtocol: (id: string) => `agent:${id}:protocol`,
+  agentPostLog: (id: string) => `agent:${id}:postlog`,
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
   session: (token: string) => `session:${token}`,
@@ -449,6 +451,47 @@ export async function getOAuthTemp(oauthToken: string): Promise<OAuthTempData | 
 
 export async function deleteOAuthTemp(oauthToken: string): Promise<void> {
   await kvDel(KEYS.oauthTemp(oauthToken));
+}
+
+// ─── Protocol settings storage ────────────────────────────────────────────────
+
+const DEFAULT_PROTOCOL: ProtocolSettings = {
+  enabled: false,
+  postsPerDay: 3,
+  activeHoursStart: 14,  // 2 PM UTC
+  activeHoursEnd: 23,    // 11 PM UTC
+  minQueueSize: 5,
+  lastPostedAt: null,
+  totalAutoPosted: 0,
+};
+
+export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {
+  const stored = await kvGet<ProtocolSettings>(KEYS.agentProtocol(agentId));
+  return stored ? { ...DEFAULT_PROTOCOL, ...stored } : { ...DEFAULT_PROTOCOL };
+}
+
+export async function updateProtocolSettings(agentId: string, updates: Partial<ProtocolSettings>): Promise<ProtocolSettings> {
+  const current = await getProtocolSettings(agentId);
+  const merged = { ...current, ...updates };
+  await kvSet(KEYS.agentProtocol(agentId), merged);
+  return merged;
+}
+
+// ─── Post log storage ────────────────────────────────────────────────────────
+
+export async function addPostLogEntry(agentId: string, entry: Omit<PostLogEntry, 'id'>): Promise<PostLogEntry> {
+  const id = `${agentId}:${Date.now()}`;
+  const full: PostLogEntry = { ...entry, id };
+  await kvLpush(KEYS.agentPostLog(agentId), JSON.stringify(full));
+  return full;
+}
+
+export async function getPostLog(agentId: string, limit = 20): Promise<PostLogEntry[]> {
+  const raw = await kvLrange(KEYS.agentPostLog(agentId), 0, limit - 1);
+  return raw.map((s) => {
+    try { return JSON.parse(s) as PostLogEntry; }
+    catch { return null; }
+  }).filter((e): e is PostLogEntry => e !== null);
 }
 
 // ─── User storage ────────────────────────────────────────────────────────────

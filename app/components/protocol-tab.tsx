@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Tweet, AccountAnalysis } from '@/lib/types';
+import type { Tweet, AccountAnalysis, ProtocolSettings, PostLogEntry } from '@/lib/types';
 
 interface ProtocolTweet extends Tweet {
   format?: string;
@@ -22,28 +22,38 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatHour(h: number): string {
+  if (h === 0) return '12AM';
+  if (h < 12) return `${h}AM`;
+  if (h === 12) return '12PM';
+  return `${h - 12}PM`;
+}
+
 export function ProtocolTab({ agentId }: ProtocolTabProps) {
   const [analysis, setAnalysis] = useState<AccountAnalysis | null>(null);
+  const [settings, setSettings] = useState<ProtocolSettings | null>(null);
+  const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [runningAutopilot, setRunningAutopilot] = useState(false);
   const [generatedTweets, setGeneratedTweets] = useState<ProtocolTweet[]>([]);
   const [postingId, setPostingId] = useState<string | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load analysis + agent status
     Promise.all([
-      fetch(`/api/agents/${agentId}/analysis`)
-        .then((r) => r.ok ? r.json() : null)
-        .catch(() => null),
-      fetch(`/api/agents/${agentId}`)
-        .then((r) => r.json())
-        .catch(() => ({})),
-    ]).then(([a, agent]) => {
+      fetch(`/api/agents/${agentId}/analysis`).then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
+      fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([a, agent, protocolData]) => {
       setAnalysis(a);
       setAgentConnected(agent?.isConnected === 1);
+      if (protocolData) {
+        setSettings(protocolData.settings);
+        setPostLog(protocolData.postLog || []);
+      }
       setLoadingAnalysis(false);
     });
   }, [agentId]);
@@ -84,6 +94,47 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
       showToast(err instanceof Error ? err.message : 'Generation failed');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleUpdateSettings = async (updates: Partial<ProtocolSettings>) => {
+    try {
+      const res = await fetch(`/api/agents/${agentId}/protocol/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSettings(data);
+      showToast('Settings updated');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Update failed');
+    }
+  };
+
+  const handleRunAutopilot = async () => {
+    setRunningAutopilot(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/protocol/run`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      if (data.action === 'posted') {
+        showToast(`Posted: "${data.content?.slice(0, 60)}..."`);
+      } else {
+        showToast(`Skipped: ${data.reason}`);
+      }
+      // Refresh post log
+      const logRes = await fetch(`/api/agents/${agentId}/protocol/settings`);
+      if (logRes.ok) {
+        const logData = await logRes.json();
+        setSettings(logData.settings);
+        setPostLog(logData.postLog || []);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Run failed');
+    } finally {
+      setRunningAutopilot(false);
     }
   };
 
@@ -156,7 +207,149 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
         </div>
       )}
 
-      {/* Analysis overview */}
+      {/* ─── Autopilot controls ─────────────────────────────────────────── */}
+      {settings && agentConnected && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <circle cx="8" cy="8" r="6" stroke={settings.enabled ? '#22c55e' : '#8b5cf6'} strokeWidth="1.5" />
+                <circle cx="8" cy="8" r="2" fill={settings.enabled ? '#22c55e' : 'var(--text-dim)'} />
+              </svg>
+              <h2>AUTOPILOT</h2>
+              <span className="section-count">
+                {settings.enabled ? 'ACTIVE' : 'OFF'} · {settings.totalAutoPosted} auto-posted
+              </span>
+            </div>
+          </div>
+
+          <div className="protocol-card" style={{ marginTop: '8px' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: '12px' }}>
+              <div className="flex items-center gap-3">
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    background: settings.enabled ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.enabled ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
+                  }}
+                  onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}
+                >
+                  {settings.enabled ? 'ON' : 'OFF'}
+                </button>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {settings.enabled
+                    ? `Posting ~${settings.postsPerDay}x/day, ${formatHour(settings.activeHoursStart)}–${formatHour(settings.activeHoursEnd)} UTC`
+                    : 'Enable to auto-generate and post tweets on schedule'}
+                </span>
+              </div>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={handleRunAutopilot}
+                disabled={runningAutopilot || !settings.enabled}
+              >
+                {runningAutopilot ? 'RUNNING...' : 'RUN NOW'}
+              </button>
+            </div>
+
+            {/* Config row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+              <div className="field">
+                <label>POSTS/DAY</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '12px', padding: '6px 8px' }}
+                  value={settings.postsPerDay}
+                  onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}
+                >
+                  {[1, 2, 3, 4, 6, 8, 12].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>START (UTC)</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '12px', padding: '6px 8px' }}
+                  value={settings.activeHoursStart}
+                  onChange={(e) => handleUpdateSettings({ activeHoursStart: Number(e.target.value) })}
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{formatHour(i)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>END (UTC)</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '12px', padding: '6px 8px' }}
+                  value={settings.activeHoursEnd}
+                  onChange={(e) => handleUpdateSettings({ activeHoursEnd: Number(e.target.value) })}
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{formatHour(i)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>MIN QUEUE</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '12px', padding: '6px 8px' }}
+                  value={settings.minQueueSize}
+                  onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}
+                >
+                  {[3, 5, 10, 15, 20].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {settings.lastPostedAt && (
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
+                Last auto-post: {getTimeAgo(settings.lastPostedAt)}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Post log ───────────────────────────────────────────────────── */}
+      {postLog.length > 0 && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+                <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+              <h2>POST LOG</h2>
+              <span className="section-count">{postLog.length} recent</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {postLog.map((entry) => (
+              <div key={entry.id} className="protocol-viral-card">
+                <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+                  <span className="protocol-tag" style={{ fontSize: '9px' }}>
+                    {entry.source === 'autopilot' ? 'AUTO' : 'MANUAL'}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    {getTimeAgo(entry.postedAt)}
+                  </span>
+                </div>
+                <p className="protocol-viral-text" style={{ fontSize: '11px' }}>{entry.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Analysis overview ──────────────────────────────────────────── */}
       {!analysis ? (
         <div className="protocol-empty">
           <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
@@ -197,7 +390,6 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               </button>
             </div>
 
-            {/* Stats row */}
             <div className="protocol-stats-grid">
               <div className="protocol-stat">
                 <span className="protocol-stat-value">{analysis.tweetCount}</span>
@@ -229,7 +421,6 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
           {/* Engagement patterns */}
           <div className="protocol-section">
             <div className="protocol-section-grid">
-              {/* Top formats */}
               <div className="protocol-card">
                 <p className="protocol-card-label">TOP FORMATS</p>
                 <div className="protocol-tags">
@@ -238,8 +429,6 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                   ))}
                 </div>
               </div>
-
-              {/* Top topics */}
               <div className="protocol-card">
                 <p className="protocol-card-label">BEST TOPICS</p>
                 <div className="protocol-tags">
@@ -248,8 +437,6 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                   ))}
                 </div>
               </div>
-
-              {/* Following categories */}
               <div className="protocol-card">
                 <p className="protocol-card-label">FOLLOWING GRAPH</p>
                 <div className="protocol-categories">
@@ -263,7 +450,6 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               </div>
             </div>
 
-            {/* Content fingerprint */}
             <div className="protocol-fingerprint">
               <p className="protocol-card-label">CONTENT FINGERPRINT</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text)', lineHeight: '1.7' }}>
@@ -307,35 +493,20 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
                   <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
                 </svg>
-                <h2>PROTOCOL GENERATION</h2>
+                <h2>MANUAL GENERATION</h2>
               </div>
             </div>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.7', marginBottom: '12px' }}>
-              Generate viral content based on your soul profile + engagement patterns + following context.
-              Content is weighted toward your top-performing formats and topics.
+              Generate content manually. Autopilot auto-generates when the queue runs low.
             </p>
             <div className="flex gap-3">
-              <button
-                className="btn btn-primary"
-                onClick={() => handleGenerate(3)}
-                disabled={generating}
-                style={{ background: '#8b5cf6' }}
-              >
+              <button className="btn btn-primary" onClick={() => handleGenerate(3)} disabled={generating} style={{ background: '#8b5cf6' }}>
                 {generating ? 'GENERATING...' : 'GENERATE 3'}
               </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => handleGenerate(5)}
-                disabled={generating}
-                style={{ background: '#8b5cf6' }}
-              >
+              <button className="btn btn-primary" onClick={() => handleGenerate(5)} disabled={generating} style={{ background: '#8b5cf6' }}>
                 GENERATE 5
               </button>
-              <button
-                className="btn btn-outline"
-                onClick={() => handleGenerate(10)}
-                disabled={generating}
-              >
+              <button className="btn btn-outline" onClick={() => handleGenerate(10)} disabled={generating}>
                 GENERATE 10
               </button>
             </div>
