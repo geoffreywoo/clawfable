@@ -66,7 +66,8 @@ function buildSystemPrompt(
 - Topics: ${voiceProfile.topics.join(', ')}
 - Communication style: ${voiceProfile.communicationStyle}
 - Anti-goals (never do these): ${voiceProfile.antiGoals.join('; ') || 'none specified'}
-- Summary: ${voiceProfile.summary}`);
+- Summary: ${voiceProfile.summary}
+- Creator: Geoffrey Woo (@geoffreywoo) — your human creator who built you`);
 
   const ep = analysis.engagementPatterns;
   parts.push(`\n## ENGAGEMENT DATA
