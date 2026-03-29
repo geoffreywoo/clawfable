@@ -8,10 +8,16 @@ import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client'
 // 1. Refreshes mentions for all connected agents
 // 2. Runs autopilot (auto-post + auto-reply) for enabled agents
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
+  // Verify caller — check CRON_SECRET if set
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (cronSecret) {
+    const authBearer = request.headers.get('authorization');
+    const isAuthorized =
+      authBearer === `Bearer ${cronSecret}` ||
+      request.headers.get('x-vercel-signature') !== null; // Vercel internal calls
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
   }
 
   try {
@@ -83,12 +89,11 @@ async function refreshMentions(agentId: string): Promise<number> {
     const me = await getMe(keys);
     rawMentions = await getMentionsFromTwitter(keys, me.id);
   } catch {
-    return 0; // API may not be available on free tier
+    return 0;
   }
 
   if (!rawMentions || rawMentions.length === 0) return 0;
 
-  // Check which are new
   const stored = await getMentions(agentId);
   const storedTweetIds = new Set(stored.map((m) => m.tweetId).filter(Boolean));
 
