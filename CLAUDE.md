@@ -49,3 +49,17 @@ Plain CSS only (`globals.css`) — no Tailwind, no component library. Dark termi
 Production requires Vercel KV env vars (`KV_URL`, `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_REST_API_READ_ONLY_TOKEN`). Local dev works without them via in-memory fallback. Agents are created via the setup wizard.
 
 TypeScript strict mode is off. No linter is configured.
+
+## gstack
+
+Use the `/browse` skill from gstack for all web browsing. Never use `mcp__Claude_in_Chrome__*` tools.
+
+Available gstack skills:
+- `/office-hours` - `/plan-ceo-review` - `/plan-eng-review` - `/plan-design-review`
+- `/design-consultation` - `/review` - `/ship` - `/land-and-deploy`
+- `/canary` - `/benchmark` - `/browse` - `/qa` - `/qa-only`
+- `/design-review` - `/setup-browser-cookies` - `/setup-deploy` - `/retro`
+- `/investigate` - `/document-release` - `/codex` - `/cso`
+- `/careful` - `/freeze` - `/guard` - `/unfreeze` - `/gstack-upgrade`
+
+If gstack skills aren't working, run `cd .claude/skills/gstack && ./setup` to build the binary and register skills.
