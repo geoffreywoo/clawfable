@@ -161,6 +161,15 @@ export function FeedTab({ agentId }: FeedTabProps) {
           </div>
         </div>
 
+        {topics.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
+              {agentConnected
+                ? 'No trending topics found. Your following graph may be too small, or the X API rate limit was hit. Try again later.'
+                : 'Connect your X API in Settings to see what\'s trending in your network.'}
+            </p>
+          </div>
+        ) : (
         <div className="topic-grid">
           {topics.map((topic) => (
             <div key={topic.id} className="topic-card" data-testid={`card-topic-${topic.id}`}>
@@ -206,6 +215,7 @@ export function FeedTab({ agentId }: FeedTabProps) {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Generated tweets */}

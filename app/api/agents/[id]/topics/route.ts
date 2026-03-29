@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { decodeKeys } from '@/lib/twitter-client';
 import { fetchTrendingFromFollowing } from '@/lib/trending';
-import { TRENDING_TOPICS } from '@/lib/tweet-templates';
 
 // GET /api/agents/[id]/topics — fetch trending topics from following graph
 export async function GET(
@@ -32,8 +31,8 @@ export async function GET(
       }
     }
 
-    // Fallback to static topics
-    return NextResponse.json(TRENDING_TOPICS);
+    // No data available
+    return NextResponse.json([]);
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch topics' }, { status: 500 });
