@@ -24,7 +24,18 @@ export async function GET(
     });
 
     const me = await getMe(keys);
-    const rawMentions = await getMentionsFromTwitter(keys, me.id);
+
+    let rawMentions: Awaited<ReturnType<typeof getMentionsFromTwitter>> = [];
+    try {
+      rawMentions = await getMentionsFromTwitter(keys, me.id);
+    } catch (apiErr) {
+      // Mention timeline may not be available on Free tier
+      const msg = apiErr instanceof Error ? apiErr.message : '';
+      if (msg.includes('403') || msg.includes('Rate limit')) {
+        return NextResponse.json(await getMentions(id));
+      }
+      throw apiErr;
+    }
 
     for (const m of rawMentions) {
       await createMention({

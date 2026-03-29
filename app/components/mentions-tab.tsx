@@ -37,7 +37,9 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     try {
       const res = await fetch(`/api/agents/${agentId}/mentions`);
       const data = await res.json();
-      setMentions(data);
+      if (Array.isArray(data)) {
+        setMentions(data);
+      }
     } catch {}
   };
 
@@ -103,9 +105,14 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     try {
       const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      await loadMentions();
-      showToast(`${Array.isArray(data) ? data.length : 0} mentions loaded`);
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch mentions');
+      if (Array.isArray(data)) {
+        setMentions(data);
+        showToast(`${data.length} mentions loaded`);
+      } else {
+        await loadMentions();
+        showToast('Mentions refreshed');
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Refresh failed');
     } finally {

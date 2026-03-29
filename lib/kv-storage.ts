@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -214,9 +214,12 @@ const KEYS = {
   session: (token: string) => `session:${token}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
+  agentJobs: (id: string) => `agent:${id}:jobs`,
+  job: (id: string) => `job:${id}`,
   counterAgent: () => 'counter:agent',
   counterTweet: () => 'counter:tweet',
   counterMention: () => 'counter:mention',
+  counterJob: () => 'counter:job',
 };
 
 // ─── Agent storage ────────────────────────────────────────────────────────────
@@ -548,4 +551,57 @@ export async function addAgentToUser(userId: string, agentId: string): Promise<v
 
 export async function removeAgentFromUser(userId: string, agentId: string): Promise<void> {
   await kvSrem(KEYS.userAgents(userId), agentId);
+}
+
+// ─── Tweet job storage ──────────────────────────────────────────────────────
+
+export async function getJobs(agentId: string): Promise<TweetJob[]> {
+  const ids = await kvSmembers(KEYS.agentJobs(agentId));
+  if (ids.length === 0) return [];
+  const jobs = await Promise.all(ids.map((id) => kvHgetall<TweetJob>(KEYS.job(id))));
+  return jobs
+    .filter((j): j is TweetJob => j !== null)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getJob(id: string): Promise<TweetJob | null> {
+  return kvHgetall<TweetJob>(KEYS.job(id));
+}
+
+export async function createJob(data: CreateTweetJobInput): Promise<TweetJob> {
+  const counter = await kvIncr(KEYS.counterJob());
+  const id = String(counter);
+  const job: TweetJob = {
+    id,
+    agentId: data.agentId,
+    name: data.name,
+    description: data.description,
+    schedule: data.schedule,
+    postsPerRun: data.postsPerRun,
+    topics: data.topics,
+    formats: data.formats,
+    enabled: data.enabled,
+    lastRunAt: null,
+    totalPosted: 0,
+    createdAt: new Date().toISOString(),
+    source: data.source,
+  };
+  await kvHset(KEYS.job(id), job as unknown as Record<string, unknown>);
+  await kvSadd(KEYS.agentJobs(data.agentId), id);
+  return job;
+}
+
+export async function updateJob(id: string, data: UpdateTweetJobInput): Promise<TweetJob> {
+  const existing = await getJob(id);
+  if (!existing) throw new Error(`Job ${id} not found`);
+  const updated = { ...existing, ...data };
+  await kvHset(KEYS.job(id), updated as unknown as Record<string, unknown>);
+  return updated;
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  const job = await getJob(id);
+  if (!job) return;
+  await kvDel(KEYS.job(id));
+  await kvSrem(KEYS.agentJobs(job.agentId), id);
 }

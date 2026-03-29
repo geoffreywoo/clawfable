@@ -171,3 +171,34 @@ export interface AccountAnalysis {
   followingProfile: FollowingProfile;
   contentFingerprint: string;  // summary of what makes this account's content perform
 }
+
+// ─── Tweet job types ────────────────────────────────────────────────────────
+
+export interface TweetJob {
+  id: string;
+  agentId: string;
+  name: string;                // e.g. "Peak Hour Hot Takes"
+  description: string;         // human-readable explanation
+  schedule: string;            // e.g. "every 4h", "3x/day", "daily 14:00"
+  postsPerRun: number;         // 1-5
+  topics: string[];            // filter to these topics, empty = any
+  formats: string[];           // filter to these formats, empty = any
+  enabled: boolean;
+  lastRunAt: string | null;
+  totalPosted: number;
+  createdAt: string;
+  source: 'user' | 'suggested';
+}
+
+export type CreateTweetJobInput = Omit<TweetJob, 'id' | 'createdAt' | 'lastRunAt' | 'totalPosted'>;
+export type UpdateTweetJobInput = Partial<Omit<TweetJob, 'id' | 'agentId' | 'createdAt'>>;
+
+export interface JobSuggestion {
+  name: string;
+  description: string;
+  schedule: string;
+  postsPerRun: number;
+  topics: string[];
+  formats: string[];
+  reason: string;              // why this job is suggested
+}
