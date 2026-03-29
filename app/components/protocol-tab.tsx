@@ -272,7 +272,7 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
         </div>
       )}
 
-      {/* ─── Autopilot controls ─────────────────────────────────────────── */}
+      {/* ─── Background Jobs Dashboard ──────────────────────────────────── */}
       {settings && agentConnected && (
         <div>
           <div className="section-header">
@@ -281,144 +281,182 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
                 <circle cx="8" cy="8" r="6" stroke={settings.enabled ? '#22c55e' : '#8b5cf6'} strokeWidth="1.5" />
                 <circle cx="8" cy="8" r="2" fill={settings.enabled ? '#22c55e' : 'var(--text-dim)'} />
               </svg>
-              <h2>AUTOPILOT</h2>
-              <span className="section-count">
-                {settings.enabled ? 'ACTIVE' : 'OFF'} · {settings.totalAutoPosted} auto-posted
-              </span>
+              <h2>BACKGROUND JOBS</h2>
+              <span className="section-count">cron runs every 30 min</span>
             </div>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={handleRunAutopilot}
+              disabled={runningAutopilot || !settings.enabled}
+            >
+              {runningAutopilot ? 'RUNNING...' : 'RUN ALL NOW'}
+            </button>
           </div>
 
-          <div className="protocol-card" style={{ marginTop: '8px' }}>
-            <div className="flex items-center justify-between" style={{ marginBottom: '12px' }}>
-              <div className="flex items-center gap-3">
-                <button
-                  className="btn btn-sm"
-                  style={{
-                    background: settings.enabled ? '#22c55e' : 'var(--surface-2)',
-                    color: settings.enabled ? '#fff' : 'var(--text-muted)',
-                    border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
-                  }}
-                  onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}
-                >
-                  {settings.enabled ? 'ON' : 'OFF'}
-                </button>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-                  {settings.enabled
-                    ? `Posting ~${settings.postsPerDay}x/day, ${formatHour(settings.activeHoursStart)}–${formatHour(settings.activeHoursEnd)} UTC`
-                    : 'Enable to auto-generate and post tweets on schedule'}
-                </span>
-              </div>
-              <button
-                className="btn btn-outline btn-sm"
-                onClick={handleRunAutopilot}
-                disabled={runningAutopilot || !settings.enabled}
-              >
-                {runningAutopilot ? 'RUNNING...' : 'RUN NOW'}
-              </button>
-            </div>
-
-            {/* Config row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-              <div className="field">
-                <label>POSTS/DAY</label>
-                <select
-                  className="input"
-                  style={{ fontSize: '12px', padding: '6px 8px' }}
-                  value={settings.postsPerDay}
-                  onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}
-                >
-                  {[1, 2, 3, 4, 6, 8, 12].map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>START (UTC)</label>
-                <select
-                  className="input"
-                  style={{ fontSize: '12px', padding: '6px 8px' }}
-                  value={settings.activeHoursStart}
-                  onChange={(e) => handleUpdateSettings({ activeHoursStart: Number(e.target.value) })}
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{formatHour(i)}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>END (UTC)</label>
-                <select
-                  className="input"
-                  style={{ fontSize: '12px', padding: '6px 8px' }}
-                  value={settings.activeHoursEnd}
-                  onChange={(e) => handleUpdateSettings({ activeHoursEnd: Number(e.target.value) })}
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{formatHour(i)}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>MIN QUEUE</label>
-                <select
-                  className="input"
-                  style={{ fontSize: '12px', padding: '6px 8px' }}
-                  value={settings.minQueueSize}
-                  onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}
-                >
-                  {[3, 5, 10, 15, 20].map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Auto-reply row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
-              <button
-                className="btn btn-sm"
-                style={{
-                  background: settings.autoReply ? '#22c55e' : 'var(--surface-2)',
-                  color: settings.autoReply ? '#fff' : 'var(--text-muted)',
-                  border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
-                  minWidth: '44px',
-                }}
-                onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}
-              >
-                {settings.autoReply ? 'ON' : 'OFF'}
-              </button>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-                  AUTO-REPLY TO MENTIONS
-                </span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginLeft: '8px' }}>
-                  {settings.autoReply
-                    ? `Up to ${settings.maxRepliesPerRun || 3}/run · ${settings.totalAutoReplied || 0} total`
-                    : 'Generates + posts replies to new mentions automatically'}
-                </span>
-              </div>
-              {settings.autoReply && (
-                <div className="field" style={{ width: '80px' }}>
-                  <label style={{ fontSize: '8px' }}>MAX/RUN</label>
-                  <select
-                    className="input"
-                    style={{ fontSize: '12px', padding: '4px 6px' }}
-                    value={settings.maxRepliesPerRun || 3}
-                    onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}
+          {/* Job cards */}
+          <div className="space-y-2" style={{ marginTop: '8px' }}>
+            {/* Auto-Post Job */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '8px' }}>
+                <div className="flex items-center gap-3">
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: settings.enabled ? '#22c55e' : 'var(--surface-2)',
+                      color: settings.enabled ? '#fff' : 'var(--text-muted)',
+                      border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
+                      minWidth: '40px',
+                    }}
+                    onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}
                   >
-                    {[1, 2, 3, 5].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
+                    {settings.enabled ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
+                      AUTO-POST
+                    </p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Generate + post tweets from queue on schedule
+                    </p>
+                  </div>
                 </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                  {settings.totalAutoPosted} posted
+                </span>
+              </div>
+              {settings.enabled && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                  <div className="field">
+                    <label>POSTS/DAY</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.postsPerDay}
+                      onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}
+                    >
+                      {[1, 2, 3, 4, 6, 8, 12].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>START (UTC)</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.activeHoursStart}
+                      onChange={(e) => handleUpdateSettings({ activeHoursStart: Number(e.target.value) })}
+                    >
+                      {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{formatHour(i)}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>END (UTC)</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.activeHoursEnd}
+                      onChange={(e) => handleUpdateSettings({ activeHoursEnd: Number(e.target.value) })}
+                    >
+                      {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{formatHour(i)}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>MIN QUEUE</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.minQueueSize}
+                      onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}
+                    >
+                      {[3, 5, 10, 15, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              {settings.lastPostedAt && (
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '6px' }}>
+                  Last run: {getTimeAgo(settings.lastPostedAt)}
+                </p>
               )}
             </div>
 
-            {settings.lastPostedAt && (
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
-                Last auto-post: {getTimeAgo(settings.lastPostedAt)}
-              </p>
-            )}
+            {/* Auto-Reply Job */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: settings.autoReply ? '#22c55e' : 'var(--surface-2)',
+                      color: settings.autoReply ? '#fff' : 'var(--text-muted)',
+                      border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
+                      minWidth: '40px',
+                    }}
+                    onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}
+                  >
+                    {settings.autoReply ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
+                      AUTO-REPLY
+                    </p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Fetch mentions + generate + post replies
+                      {settings.autoReply && ` · max ${settings.maxRepliesPerRun || 3}/run`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    {settings.totalAutoReplied || 0} replied
+                  </span>
+                  {settings.autoReply && (
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px', width: '60px' }}
+                      value={settings.maxRepliesPerRun || 3}
+                      onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}
+                    >
+                      {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}/run</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+              {settings.lastRepliedAt && (
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '6px' }}>
+                  Last run: {getTimeAgo(settings.lastRepliedAt)}
+                </p>
+              )}
+            </div>
+
+            {/* Mention Refresh Job — always on for connected agents */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center gap-3">
+                <span className="btn btn-sm" style={{
+                  background: '#22c55e', color: '#fff', border: '1px solid #22c55e',
+                  minWidth: '40px', cursor: 'default', pointerEvents: 'none' as const,
+                }}>
+                  ON
+                </span>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
+                    MENTION SYNC
+                  </p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    Fetch new mentions from X every 30 min · always on for connected agents
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Trending Refresh — always on for connected agents */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center gap-3">
+                <span className="btn btn-sm" style={{
+                  background: '#22c55e', color: '#fff', border: '1px solid #22c55e',
+                  minWidth: '40px', cursor: 'default', pointerEvents: 'none' as const,
+                }}>
+                  ON
+                </span>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
+                    TRENDING SYNC
+                  </p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    Pull trending topics from following graph on each generation · feeds into auto-post content
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
