@@ -12,7 +12,7 @@ npm run build        # Next.js production build
 npm start            # Start production server
 ```
 
-No test runner is configured. Use `npm run typecheck` as the primary validation step.
+Test runner: Vitest. Run `npm test` to execute all tests, `npm run test:watch` for watch mode. Use `npm run typecheck` for type checking.
 
 ## Architecture
 
