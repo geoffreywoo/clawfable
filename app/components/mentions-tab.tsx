@@ -226,11 +226,11 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="mention-avatar">
-                      {(mention.author || '?').charAt(0).toUpperCase()}
+                      {String(mention.author || '?').charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <span className="mention-author-name">{mention.author || 'Unknown'}</span>
-                      <span className="mention-author-handle">{mention.authorHandle || ''}</span>
+                      <span className="mention-author-name">{String(mention.author || 'Unknown')}</span>
+                      <span className="mention-author-handle">{String(mention.authorHandle || '')}</span>
                     </div>
                   </div>
                   <p className="mention-text">{mention.content}</p>
