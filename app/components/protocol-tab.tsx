@@ -552,19 +552,25 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
       )}
 
       {/* ─── Post log ───────────────────────────────────────────────────── */}
-      {postLog.length > 0 && (
-        <div>
-          <div className="section-header">
-            <div className="section-title">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-                <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-              </svg>
-              <h2>POST LOG</h2>
-              <span className="section-count">{postLog.length} recent</span>
-            </div>
+      <div>
+        <div className="section-header">
+          <div className="section-title">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+              <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+              <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            <h2>ACTIVITY LOG</h2>
+            <span className="section-count">{postLog.length} events</span>
           </div>
+        </div>
+        {postLog.length === 0 ? (
+          <div style={{ padding: '24px 16px', textAlign: 'center', background: 'var(--surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
+              No activity yet. Enable autopilot or hit RUN NOW to see cron events, auto-posts, and replies here.
+            </p>
+          </div>
+        ) : (
           <div className="space-y-2">
             {postLog.map((entry) => {
               const isPost = entry.action === 'posted' || (!entry.action && entry.xTweetId);
@@ -613,8 +619,8 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ─── Analysis overview ──────────────────────────────────────────── */}
       {!analysis ? (
