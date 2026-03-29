@@ -46,26 +46,16 @@ export async function postTweet(
   try {
     const me = await getMe(keys);
     const rwClient = client.readWrite;
-    const params: Record<string, unknown> = {};
+    // Always use URL embed for QTs (works on all API tiers)
+    let tweetText = text;
     if (quoteTweetId) {
-      params.quote_tweet_id = quoteTweetId;
-    }
-
-    let result;
-    try {
-      result = await rwClient.v2.tweet(text, params);
-    } catch (qtErr) {
-      // If QT fails (403 on Free tier), retry as a regular tweet with link
-      if (quoteTweetId && is403(qtErr)) {
-        const qtUrl = `https://x.com/i/web/status/${quoteTweetId}`;
-        const withLink = text.length + qtUrl.length + 1 <= 280
-          ? `${text} ${qtUrl}`
-          : text;
-        result = await rwClient.v2.tweet(withLink);
-      } else {
-        throw qtErr;
+      const qtUrl = `https://x.com/i/web/status/${quoteTweetId}`;
+      if (text.length + qtUrl.length + 1 <= 280) {
+        tweetText = `${text} ${qtUrl}`;
       }
     }
+
+    const result = await rwClient.v2.tweet(tweetText);
 
     const tweetId = result.data.id;
     return {
@@ -78,15 +68,6 @@ export async function postTweet(
   }
 }
 
-function is403(error: unknown): boolean {
-  if (error instanceof Object && 'code' in error && (error as { code: number }).code === 403) return true;
-  if (error instanceof Object && 'data' in error) {
-    const data = (error as { data?: { status?: number } }).data;
-    if (data?.status === 403) return true;
-  }
-  if (error instanceof Error && error.message.includes('403')) return true;
-  return false;
-}
 
 export async function replyToTweet(
   keys: TwitterKeys,
