@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -223,6 +223,12 @@ const KEYS = {
   counterTweet: () => 'counter:tweet',
   counterMention: () => 'counter:mention',
   counterJob: () => 'counter:job',
+  agentWizard: (id: string) => `agent:${id}:wizard`,
+  agentStyle: (id: string) => `agent:${id}:style`,
+  agentFeedback: (id: string) => `agent:${id}:feedback`,
+  agentEvents: (id: string) => `agent:${id}:events`,
+  agentSoulBackup: (id: string) => `agent:${id}:soul_backup`,
+  agentRateLimit: (id: string, action: string) => `ratelimit:${id}:${action}`,
 };
 
 // ─── Agent storage ────────────────────────────────────────────────────────────
@@ -307,6 +313,13 @@ export async function deleteAgent(id: string): Promise<void> {
 
   // Cascade: delete analysis
   await kvDel(KEYS.agentAnalysis(id));
+
+  // Cascade: delete activation funnel data
+  await kvDel(KEYS.agentWizard(id));
+  await kvDel(KEYS.agentStyle(id));
+  await kvDel(KEYS.agentFeedback(id));
+  await kvDel(KEYS.agentEvents(id));
+  await kvDel(KEYS.agentSoulBackup(id));
 
   // Remove agent
   await kvDel(KEYS.agent(id));
@@ -659,4 +672,76 @@ export async function deleteJob(id: string): Promise<void> {
   if (!job) return;
   await kvDel(KEYS.job(id));
   await kvSrem(KEYS.agentJobs(job.agentId), id);
+}
+
+// ─── Wizard data storage ────────────────────────────────────────────────────
+
+export async function saveWizardData(agentId: string, data: WizardData): Promise<void> {
+  await kvSet(KEYS.agentWizard(agentId), data);
+}
+
+export async function getWizardData(agentId: string): Promise<WizardData | null> {
+  return kvGet<WizardData>(KEYS.agentWizard(agentId));
+}
+
+// ─── Style signals storage ──────────────────────────────────────────────────
+
+export async function saveStyleSignals(agentId: string, signals: StyleSignals): Promise<void> {
+  await kvSet(KEYS.agentStyle(agentId), signals);
+}
+
+export async function getStyleSignals(agentId: string): Promise<StyleSignals | null> {
+  return kvGet<StyleSignals>(KEYS.agentStyle(agentId));
+}
+
+// ─── Feedback storage ───────────────────────────────────────────────────────
+
+export async function saveFeedback(agentId: string, entry: FeedbackEntry): Promise<void> {
+  const existing = await getFeedback(agentId);
+  // Prune on write: keep only last 30 days and max 20 entries
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const pruned = existing.filter(e => new Date(e.generatedAt).getTime() > thirtyDaysAgo);
+  pruned.push(entry);
+  const capped = pruned.slice(-20);
+  await kvSet(KEYS.agentFeedback(agentId), capped);
+}
+
+export async function getFeedback(agentId: string): Promise<FeedbackEntry[]> {
+  const data = await kvGet<FeedbackEntry[]>(KEYS.agentFeedback(agentId));
+  return data ?? [];
+}
+
+export async function getRecentNegativeFeedback(agentId: string, limit = 5): Promise<string[]> {
+  const all = await getFeedback(agentId);
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return all
+    .filter(e => e.rating === 'down' && new Date(e.generatedAt).getTime() > thirtyDaysAgo)
+    .slice(-limit)
+    .map(e => e.tweetText);
+}
+
+// ─── Soul backup storage ────────────────────────────────────────────────────
+
+export async function saveSoulBackup(agentId: string, soulMd: string): Promise<void> {
+  await kvSet(KEYS.agentSoulBackup(agentId), soulMd);
+}
+
+// ─── Funnel event storage ───────────────────────────────────────────────────
+
+export async function logFunnelEvent(agentId: string, event: string, meta?: Record<string, unknown>): Promise<void> {
+  const entry: FunnelEvent = { event, ts: new Date().toISOString(), meta };
+  await kvLpush(KEYS.agentEvents(agentId), JSON.stringify(entry));
+}
+
+// ─── Rate limiting ──────────────────────────────────────────────────────────
+
+export async function checkRateLimit(agentId: string, action: string, maxPerHour: number): Promise<boolean> {
+  const key = KEYS.agentRateLimit(agentId, action);
+  const current = await kvGet<number>(key);
+  if (current !== null && current >= maxPerHour) return false;
+  const newVal = (current ?? 0) + 1;
+  await kvSet(key, newVal);
+  // In production KV, we'd set a TTL. In-memory fallback doesn't expire,
+  // but that's acceptable for local dev.
+  return true;
 }

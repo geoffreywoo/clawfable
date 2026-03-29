@@ -20,7 +20,7 @@ describe('kv-storage', () => {
         handle: 'testagent',
         name: 'Test Agent',
         soulMd: '# Test soul',
-      });
+      } as any);
       expect(agent.id).toBeDefined();
       expect(agent.handle).toBe('testagent');
       expect(agent.setupStep).toBe('oauth');
@@ -35,7 +35,7 @@ describe('kv-storage', () => {
         handle: 'updatetest',
         name: 'Update Test',
         soulMd: '# Original',
-      });
+      } as any);
       const updated = await updateAgent(agent.id, {
         soulMd: '# Updated',
         setupStep: 'ready',
@@ -49,7 +49,7 @@ describe('kv-storage', () => {
         handle: 'deletetest',
         name: 'Delete Test',
         soulMd: '# Will be deleted',
-      });
+      } as any);
       const tweet = await createTweet({
         agentId: agent.id,
         content: 'test tweet',

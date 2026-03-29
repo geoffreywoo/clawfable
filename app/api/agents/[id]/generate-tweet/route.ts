@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createTweet, getAnalysis } from '@/lib/kv-storage';
+import { createTweet, getAnalysis, getStyleSignals, getRecentNegativeFeedback } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
@@ -14,13 +14,71 @@ export async function POST(
     const { agent } = await requireAgentAccess(id);
 
     const body = await request.json();
-    const { topic, headline } = body;
-    if (!topic && !headline) {
+    const { topic, headline, count: batchCount } = body;
+
+    // Batch mode skips topic requirement (preview uses no topic)
+    if (!batchCount && !topic && !headline) {
       return NextResponse.json({ error: 'topic or headline required' }, { status: 400 });
+    }
+
+    // Batch mode for preview: generate multiple tweets in one call
+    if (batchCount && batchCount > 1) {
+      const analysis = await getAnalysis(id);
+      const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+
+      // Enhance voice profile with style signals and feedback
+      const [styleSignals, negatives] = await Promise.all([
+        getStyleSignals(id),
+        getRecentNegativeFeedback(id),
+      ]);
+
+      if (styleSignals?.rawExtraction) {
+        voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
+      }
+      if (negatives.length > 0) {
+        voiceProfile.communicationStyle += `\n\n## REJECTED DRAFTS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
+      }
+
+      const n = Math.min(batchCount, 5);
+      if (analysis) {
+        const batch = await generateViralBatch(voiceProfile, analysis, n, null);
+        const tweets = [];
+        for (const item of batch) {
+          const tweet = await createTweet({
+            agentId: id,
+            content: item.content,
+            type: item.quoteTweetId ? 'quote' : 'original',
+            status: 'draft',
+            topic: item.targetTopic || 'general',
+            xTweetId: null,
+            quoteTweetId: item.quoteTweetId || null,
+            quoteTweetAuthor: item.quoteTweetAuthor || null,
+            scheduledAt: null,
+          });
+          tweets.push(tweet);
+        }
+        return NextResponse.json({ tweets });
+      }
+
+      // Fallback for batch without analysis
+      return NextResponse.json({ tweets: [] });
     }
 
     const analysis = await getAnalysis(id);
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+
+    // Enhance voice profile with style signals and feedback
+    const [styleSignals, negatives] = await Promise.all([
+      getStyleSignals(id),
+      getRecentNegativeFeedback(id),
+    ]);
+
+    if (styleSignals?.rawExtraction) {
+      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
+    }
+    if (negatives.length > 0) {
+      voiceProfile.communicationStyle += `\n\n## REJECTED DRAFTS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
+    }
 
     // Use Claude if analysis exists, with the topic as trending context
     if (analysis) {

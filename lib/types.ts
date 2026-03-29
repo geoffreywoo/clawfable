@@ -241,3 +241,33 @@ export interface JobSuggestion {
   formats: string[];
   reason: string;              // why this job is suggested
 }
+
+// ─── Activation funnel types ────────────────────────────────────────────────
+
+export interface WizardData {
+  exampleTweets: string[];     // 0-5 example tweets (optional)
+  archetype: string;           // contrarian | optimist | analyst | provocateur | educator
+  topics: string[];            // 2-3 selected topics
+  frequency: string;           // '1x' | '3x' | '6x'
+  createdAt: string;
+}
+
+export interface StyleSignals {
+  sentenceLength: string;      // short | medium | long | mixed
+  vocabulary: string;          // casual | technical | mixed
+  toneMarkers: string[];       // e.g. ['sarcastic', 'data-driven']
+  topicPreferences: string[];
+  rawExtraction: string;       // Claude's full style analysis text
+}
+
+export interface FeedbackEntry {
+  tweetText: string;
+  rating: 'up' | 'down';
+  generatedAt: string;
+}
+
+export interface FunnelEvent {
+  event: string;
+  ts: string;
+  meta?: Record<string, unknown>;
+}

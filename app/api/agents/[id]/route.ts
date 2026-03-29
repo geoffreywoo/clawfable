@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateAgent, deleteAgent, removeAgentFromUser } from '@/lib/kv-storage';
+import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelEvent } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -38,9 +38,23 @@ export async function PATCH(
   try {
     const { agent: existing } = await requireAgentAccess(id);
     const body = await request.json();
-    const { name, soulMd, handle } = body;
+
+    // Handle feedback action
+    if (body.action === 'feedback' && body.feedback) {
+      await saveFeedback(id, body.feedback);
+      return NextResponse.json({ success: true });
+    }
+
+    // Handle funnel event action
+    if (body.action === 'funnel_event' && body.event) {
+      await logFunnelEvent(id, body.event, body.meta);
+      return NextResponse.json({ success: true });
+    }
+
+    const { name, soulMd, handle, setupStep } = body;
 
     const updates: Record<string, unknown> = {};
+    if (setupStep !== undefined) updates.setupStep = setupStep;
     if (name !== undefined) updates.name = name;
     if (handle !== undefined) updates.handle = handle.replace(/^@/, '').trim();
     if (soulMd !== undefined) {

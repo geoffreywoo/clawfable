@@ -4,11 +4,19 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { AccountAnalysis, AgentLearnings } from './types';
+import type { AccountAnalysis, AgentLearnings, StyleSignals } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 
 const anthropic = new Anthropic();
+
+const DEFAULT_STYLE_SIGNALS: StyleSignals = {
+  sentenceLength: 'mixed',
+  vocabulary: 'mixed',
+  toneMarkers: [],
+  topicPreferences: [],
+  rawExtraction: '',
+};
 
 export interface ProtocolTweet {
   content: string;
@@ -247,4 +255,125 @@ export async function generateViralTweet(
 ): Promise<ProtocolTweet | null> {
   const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings);
   return batch[0] || null;
+}
+
+// ─── Voice training: extract style signals from example tweets ──────────────
+
+export async function extractStyleSignals(exampleTweets: string[]): Promise<StyleSignals> {
+  if (exampleTweets.length === 0) return DEFAULT_STYLE_SIGNALS;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
+      messages: [{
+        role: 'user',
+        content: `Analyze these tweets and extract the writing style:
+
+${exampleTweets.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+Output a JSON object with:
+- "sentenceLength": "short" | "medium" | "long" | "mixed"
+- "vocabulary": "casual" | "technical" | "mixed"
+- "toneMarkers": array of tone descriptors (e.g. ["sarcastic", "data-driven", "provocative"])
+- "topicPreferences": array of main topics discussed
+- "rawExtraction": one paragraph describing the overall voice and style`,
+      }],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+
+    // Strip markdown code fences if Claude wraps the JSON
+    const cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      sentenceLength: parsed.sentenceLength || 'mixed',
+      vocabulary: parsed.vocabulary || 'mixed',
+      toneMarkers: Array.isArray(parsed.toneMarkers) ? parsed.toneMarkers : [],
+      topicPreferences: Array.isArray(parsed.topicPreferences) ? parsed.topicPreferences : [],
+      rawExtraction: parsed.rawExtraction || '',
+    };
+  } catch (err) {
+    console.error('Style extraction failed:', err);
+    return DEFAULT_STYLE_SIGNALS;
+  }
+}
+
+// ─── SOUL.md generation from wizard inputs ──────────────────────────────────
+
+export async function generateSoulMd(
+  archetype: string,
+  topics: string[],
+  exampleTweets: string[],
+  agentName: string,
+): Promise<string> {
+  try {
+    const examplesSection = exampleTweets.length > 0
+      ? `\n\nExample tweets this agent admires or has written:\n${exampleTweets.map(t => `- "${t}"`).join('\n')}`
+      : '';
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: 'You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.',
+      messages: [{
+        role: 'user',
+        content: `Generate a SOUL.md for a Twitter agent named "${agentName}".
+
+Voice archetype: ${archetype}
+Topics: ${topics.join(', ')}${examplesSection}
+
+Use this format:
+# SOUL.md — System Definition
+
+I am [identity].
+
+## 1) Objective Function
+Primary objective: [what this agent aims to achieve]
+
+## 2) Communication Protocol
+Default output: [how this agent communicates]
+Tone: ${archetype}
+
+## 3) Anti-Goals
+Do not optimize for: [what to avoid — be specific]
+
+## 4) Focus Areas
+Topics: ${topics.join(', ')}`,
+      }],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+
+    return text;
+  } catch (err) {
+    console.error('SOUL.md generation failed, using template:', err);
+    // Template fallback
+    return `# SOUL.md — System Definition
+
+I am ${agentName}, a ${archetype} voice on Twitter.
+
+## 1) Objective Function
+Primary objective: Share sharp, opinionated takes on ${topics.join(', ')}
+
+## 2) Communication Protocol
+Default output: Tweets and quote tweets
+Tone: ${archetype}
+
+## 3) Anti-Goals
+Do not optimize for: engagement bait, generic platitudes, thread spam
+
+## 4) Focus Areas
+Topics: ${topics.join(', ')}`;
+  }
 }
