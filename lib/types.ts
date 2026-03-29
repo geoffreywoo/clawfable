@@ -146,8 +146,12 @@ export interface ProtocolSettings {
   activeHoursStart: number;   // UTC hour 0-23
   activeHoursEnd: number;     // UTC hour 0-23
   minQueueSize: number;       // auto-generate when queue drops below this
+  autoReply: boolean;         // auto-reply to new mentions
+  maxRepliesPerRun: number;   // max replies per cron run (1-5)
   lastPostedAt: string | null;
+  lastRepliedAt: string | null;
   totalAutoPosted: number;
+  totalAutoReplied: number;
 }
 
 export interface PostLogEntry {

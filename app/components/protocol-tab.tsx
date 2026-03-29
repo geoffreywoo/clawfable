@@ -373,6 +373,47 @@ export function ProtocolTab({ agentId }: ProtocolTabProps) {
               </div>
             </div>
 
+            {/* Auto-reply row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: settings.autoReply ? '#22c55e' : 'var(--surface-2)',
+                  color: settings.autoReply ? '#fff' : 'var(--text-muted)',
+                  border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
+                  minWidth: '44px',
+                }}
+                onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}
+              >
+                {settings.autoReply ? 'ON' : 'OFF'}
+              </button>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  AUTO-REPLY TO MENTIONS
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginLeft: '8px' }}>
+                  {settings.autoReply
+                    ? `Up to ${settings.maxRepliesPerRun || 3}/run · ${settings.totalAutoReplied || 0} total`
+                    : 'Generates + posts replies to new mentions automatically'}
+                </span>
+              </div>
+              {settings.autoReply && (
+                <div className="field" style={{ width: '80px' }}>
+                  <label style={{ fontSize: '8px' }}>MAX/RUN</label>
+                  <select
+                    className="input"
+                    style={{ fontSize: '12px', padding: '4px 6px' }}
+                    value={settings.maxRepliesPerRun || 3}
+                    onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}
+                  >
+                    {[1, 2, 3, 5].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             {settings.lastPostedAt && (
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
                 Last auto-post: {getTimeAgo(settings.lastPostedAt)}

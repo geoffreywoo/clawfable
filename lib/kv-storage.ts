@@ -468,8 +468,12 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   activeHoursStart: 14,  // 2 PM UTC
   activeHoursEnd: 23,    // 11 PM UTC
   minQueueSize: 5,
+  autoReply: false,
+  maxRepliesPerRun: 3,
   lastPostedAt: null,
+  lastRepliedAt: null,
   totalAutoPosted: 0,
+  totalAutoReplied: 0,
 };
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {
