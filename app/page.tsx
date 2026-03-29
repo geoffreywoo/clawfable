@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Logo } from './components/logo';
 import { AgentCard } from './components/agent-card';
 import { SetupWizard } from './components/setup-wizard';
@@ -13,6 +14,7 @@ interface AuthUser {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -228,6 +230,13 @@ export default function HomePage() {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
             @{user.username}
           </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => router.push('/cron')}
+            style={{ fontSize: '10px' }}
+          >
+            CRON LOG
+          </button>
           <button
             className="btn btn-ghost btn-sm"
             onClick={handleLogout}

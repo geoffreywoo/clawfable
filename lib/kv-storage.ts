@@ -209,6 +209,7 @@ const KEYS = {
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
   agentProtocol: (id: string) => `agent:${id}:protocol`,
   agentPostLog: (id: string) => `agent:${id}:postlog`,
+  cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
   session: (token: string) => `session:${token}`,
@@ -503,6 +504,29 @@ export async function getPostLog(agentId: string, limit = 20): Promise<PostLogEn
     try { return JSON.parse(s) as PostLogEntry; }
     catch { return null; }
   }).filter((e): e is PostLogEntry => e !== null);
+}
+
+// ─── Cron log storage ─────────────────────────────────────────────────────────
+
+export interface CronLogEntry {
+  id: string;
+  timestamp: string;
+  mentionsRefreshed: number;
+  autopilotProcessed: number;
+  results: Array<{ agentId: string; action: string; reason: string; content?: string; repliesSent?: number }>;
+}
+
+export async function addCronLogEntry(entry: Omit<CronLogEntry, 'id'>): Promise<void> {
+  const id = `cron:${Date.now()}`;
+  await kvLpush(KEYS.cronLog(), JSON.stringify({ ...entry, id }));
+}
+
+export async function getCronLog(limit = 30): Promise<CronLogEntry[]> {
+  const raw = await kvLrange(KEYS.cronLog(), 0, limit - 1);
+  return raw.map((s) => {
+    try { return JSON.parse(s) as CronLogEntry; }
+    catch { return null; }
+  }).filter((e): e is CronLogEntry => e !== null);
 }
 
 // ─── User storage ────────────────────────────────────────────────────────────

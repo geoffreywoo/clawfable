@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addCronLogEntry } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client';
@@ -37,6 +37,20 @@ export async function GET(request: NextRequest) {
       const result = await runAutopilot(agent);
       autopilotResults.push(result);
     }
+
+    // Log the cron run
+    await addCronLogEntry({
+      timestamp: new Date().toISOString(),
+      mentionsRefreshed,
+      autopilotProcessed: autopilotResults.length,
+      results: autopilotResults.map((r) => ({
+        agentId: r.agentId,
+        action: r.action,
+        reason: r.reason,
+        content: r.content,
+        repliesSent: r.repliesSent,
+      })),
+    });
 
     return NextResponse.json({
       timestamp: new Date().toISOString(),
