@@ -13,6 +13,7 @@ import {
   updateProtocolSettings,
   getQueuedTweets,
   getAnalysis,
+  getLearnings,
   createTweet,
   updateTweet,
   createMention,
@@ -343,7 +344,8 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       }
     }
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending);
+    const learnings = await getLearnings(agent.id);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings);
 
     let added = 0;
     for (const item of batch) {

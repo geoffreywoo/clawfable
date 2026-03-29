@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnalysis, createTweet } from '@/lib/kv-storage';
+import { getAnalysis, getLearnings, createTweet } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { decodeKeys } from '@/lib/twitter-client';
@@ -41,7 +41,8 @@ export async function POST(
       }
     }
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending);
+    const learnings = await getLearnings(id);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings);
 
     if (batch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });

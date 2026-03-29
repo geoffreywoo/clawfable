@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -209,6 +209,8 @@ const KEYS = {
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
   agentProtocol: (id: string) => `agent:${id}:protocol`,
   agentPostLog: (id: string) => `agent:${id}:postlog`,
+  agentPerformance: (id: string) => `agent:${id}:performance`,
+  agentLearnings: (id: string) => `agent:${id}:learnings`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -528,6 +530,28 @@ export async function getCronLog(limit = 30): Promise<CronLogEntry[]> {
     try { return JSON.parse(s) as CronLogEntry; }
     catch { return null; }
   }).filter((e): e is CronLogEntry => e !== null);
+}
+
+// ─── Performance tracking storage ─────────────────────────────────────────────
+
+export async function addPerformanceEntry(agentId: string, entry: TweetPerformance): Promise<void> {
+  await kvLpush(KEYS.agentPerformance(agentId), JSON.stringify(entry));
+}
+
+export async function getPerformanceHistory(agentId: string, limit = 50): Promise<TweetPerformance[]> {
+  const raw = await kvLrange(KEYS.agentPerformance(agentId), 0, limit - 1);
+  return raw.map((s) => {
+    try { return JSON.parse(s) as TweetPerformance; }
+    catch { return null; }
+  }).filter((e): e is TweetPerformance => e !== null);
+}
+
+export async function getLearnings(agentId: string): Promise<AgentLearnings | null> {
+  return kvGet<AgentLearnings>(KEYS.agentLearnings(agentId));
+}
+
+export async function saveLearnings(agentId: string, learnings: AgentLearnings): Promise<void> {
+  await kvSet(KEYS.agentLearnings(agentId), learnings);
 }
 
 // ─── User storage ────────────────────────────────────────────────────────────

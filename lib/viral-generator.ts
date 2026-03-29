@@ -4,7 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { AccountAnalysis } from './types';
+import type { AccountAnalysis, AgentLearnings } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 
@@ -56,6 +56,7 @@ function buildSystemPrompt(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
   trending: TrendingTopic[] | null,
+  learnings: AgentLearnings | null,
 ): string {
   const parts: string[] = [];
 
@@ -110,6 +111,47 @@ function buildSystemPrompt(
     }
   }
 
+  // Learnings from actual performance of our generated tweets
+  if (learnings && learnings.totalTracked > 0) {
+    parts.push(`\n## LEARNINGS FROM OUR POSTED TWEETS (THIS IS CRITICAL — adapt based on what actually worked)`);
+    parts.push(`Tracked ${learnings.totalTracked} tweets we posted. Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
+
+    if (learnings.formatRankings.length > 0) {
+      parts.push(`\nFormat performance (our tweets, not historical):`);
+      for (const f of learnings.formatRankings.slice(0, 5)) {
+        parts.push(`- ${f.format}: avg ${f.avgEngagement} engagement (${f.count} tweets)`);
+      }
+    }
+
+    if (learnings.topicRankings.length > 0) {
+      parts.push(`\nTopic performance (our tweets):`);
+      for (const t of learnings.topicRankings.slice(0, 5)) {
+        parts.push(`- ${t.topic}: avg ${t.avgEngagement} engagement (${t.count} tweets)`);
+      }
+    }
+
+    if (learnings.bestPerformers.length > 0) {
+      parts.push(`\nOUR BEST tweets (do MORE like these):`);
+      for (const t of learnings.bestPerformers.slice(0, 3)) {
+        parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
+      }
+    }
+
+    if (learnings.worstPerformers.length > 0) {
+      parts.push(`\nOUR WORST tweets (do LESS like these):`);
+      for (const t of learnings.worstPerformers.slice(0, 3)) {
+        parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
+      }
+    }
+
+    if (learnings.insights.length > 0) {
+      parts.push(`\nAI-generated insights from our performance:`);
+      for (const insight of learnings.insights) {
+        parts.push(`- ${insight}`);
+      }
+    }
+  }
+
   parts.push(`\n## STRATEGY
 1. **PRIORITIZE QUOTE TWEETS.** At least 60-70% of output should be QTs of the quotable tweets listed above.
 2. QT commentary should be SHORT (under 200 chars ideally), OPINIONATED, and add a new angle the original didn't cover.
@@ -139,8 +181,9 @@ export async function generateViralBatch(
   analysis: AccountAnalysis,
   count: number,
   trending: TrendingTopic[] | null = null,
+  learnings: AgentLearnings | null = null,
 ): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings);
 
   const userPrompt = `Generate exactly ${count} tweets. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (MUST be under 280 characters)
@@ -200,7 +243,8 @@ export async function generateViralTweet(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
   trending: TrendingTopic[] | null = null,
+  learnings: AgentLearnings | null = null,
 ): Promise<ProtocolTweet | null> {
-  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending);
+  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings);
   return batch[0] || null;
 }

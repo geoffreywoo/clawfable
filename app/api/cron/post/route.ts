@@ -3,6 +3,7 @@ import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, a
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client';
+import { checkPerformance, buildLearnings } from '@/lib/performance';
 
 // GET /api/cron/post — called by Vercel Cron every 30 minutes
 export async function GET(request: NextRequest) {
@@ -18,10 +19,13 @@ export async function GET(request: NextRequest) {
     const agents = await getAgents();
     const autopilotResults: AutopilotResult[] = [];
     let mentionsRefreshed = 0;
+    let performanceTracked = 0;
 
     for (const agent of agents) {
-      // Refresh mentions for all connected agents
-      if (agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
+      const isConnected = agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId;
+
+      if (isConnected) {
+        // Refresh mentions
         try {
           const refreshed = await refreshMentions(agent.id);
           mentionsRefreshed += refreshed;
@@ -39,9 +43,16 @@ export async function GET(request: NextRequest) {
               reason: `${refreshed} new`,
             });
           }
-        } catch {
-          // Don't fail the whole run
-        }
+        } catch {}
+
+        // Track performance of posted tweets + rebuild learnings
+        try {
+          const tracked = await checkPerformance(agent);
+          performanceTracked += tracked;
+          if (tracked > 0) {
+            await buildLearnings(agent);
+          }
+        } catch {}
       }
 
       // Run autopilot if auto-post OR auto-reply is enabled
@@ -72,6 +83,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       mentionsRefreshed,
+      performanceTracked,
       autopilotProcessed: autopilotResults.length,
       results: autopilotResults,
     });

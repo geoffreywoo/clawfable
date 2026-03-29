@@ -169,6 +169,38 @@ export interface PostLogEntry {
   reason?: string;
 }
 
+// ─── Performance tracking types ──────────────────────────────────────────────
+
+export interface TweetPerformance {
+  tweetId: string;         // internal ID
+  xTweetId: string;        // X post ID
+  content: string;
+  format: string;
+  topic: string;
+  postedAt: string;
+  checkedAt: string;
+  likes: number;
+  retweets: number;
+  replies: number;
+  impressions: number;
+  engagementRate: number;  // (likes+RTs+replies) / impressions
+  wasViral: boolean;       // exceeded the viral threshold
+  source: 'autopilot' | 'manual';
+}
+
+export interface AgentLearnings {
+  agentId: string;
+  updatedAt: string;
+  totalTracked: number;
+  avgLikes: number;
+  avgRetweets: number;
+  bestPerformers: TweetPerformance[];    // top 10 by engagement
+  worstPerformers: TweetPerformance[];   // bottom 5 by engagement
+  formatRankings: Array<{ format: string; avgEngagement: number; count: number }>;
+  topicRankings: Array<{ topic: string; avgEngagement: number; count: number }>;
+  insights: string[];                     // AI-generated learnings
+}
+
 export interface AccountAnalysis {
   agentId: string;
   analyzedAt: string;
