@@ -302,3 +302,4 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     </div>
   );
 }
+
