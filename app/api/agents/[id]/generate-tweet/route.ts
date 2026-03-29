@@ -88,6 +88,8 @@ export async function POST(
     return NextResponse.json(tweet);
   } catch (err) {
     try { return handleAuthError(err); } catch {}
-    return NextResponse.json({ error: 'Failed to generate tweet' }, { status: 500 });
+    const message = err instanceof Error ? err.message : 'Failed to generate tweet';
+    console.error('generate-tweet error:', err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -187,8 +187,8 @@ Prioritize QTs — they get more reach. Output ONLY JSON objects, one per line, 
 
     return tweets.slice(0, count);
   } catch (err) {
-    console.error('Claude generation error:', err instanceof Error ? err.message : err);
-    return [];
+    console.error('Claude generation error:', err);
+    throw err; // Don't swallow — let the caller handle it
   }
 }
 
