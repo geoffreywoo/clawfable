@@ -50,6 +50,12 @@ Production requires Vercel KV env vars (`KV_URL`, `KV_REST_API_URL`, `KV_REST_AP
 
 TypeScript strict mode is off. No linter is configured.
 
+## Design System
+Always read DESIGN.md before making any visual or UI decisions.
+All font choices, colors, spacing, and aesthetic direction are defined there.
+Do not deviate without explicit user approval.
+In QA mode, flag any code that doesn't match DESIGN.md.
+
 ## gstack
 
 Use the `/browse` skill from gstack for all web browsing. Never use `mcp__Claude_in_Chrome__*` tools.
