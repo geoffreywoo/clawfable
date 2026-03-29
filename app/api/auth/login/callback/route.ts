@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, updateAgent } from '@/lib/kv-storage';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { oauthTokenSecret } = temp;
-    const { userId, screenName } = await exchangeOAuthTokens(
+    const { accessToken, accessSecret, userId, screenName } = await exchangeOAuthTokens(
       oauthToken, oauthTokenSecret, oauthVerifier
     );
 
@@ -37,11 +37,38 @@ export async function GET(request: NextRequest) {
     // Create session
     const sessionToken = await createSession(userId);
 
-    // Clean up
+    // Clean up temp
     await deleteOAuthTemp(oauthToken);
 
-    // Redirect with session cookie
-    const response = NextResponse.redirect(new URL('/', origin));
+    // If first login (no agents), auto-create an agent connected to their X account
+    const existingAgents = await getUserAgentIds(userId);
+    let redirectPath = '/';
+
+    if (existingAgents.length === 0) {
+      const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
+      const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
+
+      const agent = await createAgent({
+        handle: screenName,
+        name: screenName,
+        soulMd: '# Pending SOUL.md setup',
+        soulSummary: null,
+        apiKey: Buffer.from(consumerKey).toString('base64'),
+        apiSecret: Buffer.from(consumerSecret).toString('base64'),
+        accessToken: Buffer.from(accessToken).toString('base64'),
+        accessSecret: Buffer.from(accessSecret).toString('base64'),
+        isConnected: 1,
+        xUserId: userId,
+        setupStep: 'soul',
+      });
+
+      await addAgentToUser(userId, agent.id);
+
+      // Redirect to agent dashboard with setup continuation
+      redirectPath = `/agent/${agent.id}?oauth=success&username=${screenName}`;
+    }
+
+    const response = NextResponse.redirect(new URL(redirectPath, origin));
     response.cookies.set(COOKIE_NAME, sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
