@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Tweet } from '@/lib/types';
+import type { Tweet, ProtocolSettings } from '@/lib/types';
 
 interface QueueTabProps {
   agentId: string;
@@ -16,6 +16,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [postingId, setPostingId] = useState<string | null>(null);
   const [isPostingAll, setIsPostingAll] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [autopilotSettings, setAutopilotSettings] = useState<ProtocolSettings | null>(null);
 
   const loadQueue = async () => {
     try {
@@ -31,6 +32,10 @@ export function QueueTab({ agentId }: QueueTabProps) {
       try {
         const a = await fetch(`/api/agents/${agentId}`).then((r) => r.json());
         setAgentConnected(a.isConnected === 1);
+      } catch {}
+      try {
+        const p = await fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null);
+        if (p?.settings) setAutopilotSettings(p.settings);
       } catch {}
       setLoading(false);
     })();
@@ -168,6 +173,42 @@ export function QueueTab({ agentId }: QueueTabProps) {
           }}
         >
           {toast}
+        </div>
+      )}
+
+      {/* Autopilot status banner */}
+      {autopilotSettings && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '10px 14px', borderRadius: 'var(--radius)',
+          background: autopilotSettings.enabled ? 'rgba(34, 197, 94, 0.08)' : 'var(--surface)',
+          border: `1px solid ${autopilotSettings.enabled ? 'rgba(34, 197, 94, 0.2)' : 'var(--border)'}`,
+        }}>
+          <div style={{
+            width: '8px', height: '8px', borderRadius: '50%',
+            background: autopilotSettings.enabled ? '#22c55e' : 'var(--text-dim)',
+            boxShadow: autopilotSettings.enabled ? '0 0 6px rgba(34, 197, 94, 0.4)' : 'none',
+          }} />
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: autopilotSettings.enabled ? '#22c55e' : 'var(--text-muted)' }}>
+            {autopilotSettings.enabled ? (
+              <>
+                <span style={{ fontWeight: 700 }}>AUTOPILOT ON</span>
+                {' — posting ~'}{autopilotSettings.postsPerDay}x/day from this queue.
+                {autopilotSettings.lastPostedAt && (
+                  <> Next post in ~{Math.max(0, Math.round(
+                    ((24 / autopilotSettings.postsPerDay) * 60) -
+                    ((Date.now() - new Date(autopilotSettings.lastPostedAt).getTime()) / 60000)
+                  ))} min.</>
+                )}
+                {' Queue auto-refills below '}{autopilotSettings.minQueueSize}{' items.'}
+              </>
+            ) : (
+              <>
+                <span style={{ fontWeight: 700 }}>AUTOPILOT OFF</span>
+                {' — tweets in this queue must be posted manually. Enable in the Autopilot tab.'}
+              </>
+            )}
+          </p>
         </div>
       )}
 
