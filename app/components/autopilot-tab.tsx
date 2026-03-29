@@ -199,7 +199,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 <circle cx="8" cy="8" r="2" fill={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--text-dim)'} />
               </svg>
               <h2>BACKGROUND JOBS</h2>
-              <span className="section-count">cron every 30 min</span>
+              <span className="section-count">cron every 10 min</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleRunAutopilot}
               disabled={runningAutopilot || (!settings.enabled && !settings.autoReply)}
@@ -289,6 +289,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                       value={settings.replyIntervalMins || 30}
                       onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
                       {[
+                        { v: 10, l: '10 min' },
                         { v: 30, l: '30 min' },
                         { v: 60, l: '1 hour' },
                         { v: 120, l: '2 hours' },
@@ -314,7 +315,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
             <div className="protocol-card" style={{ padding: '10px 14px', display: 'flex', gap: '12px' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>ALWAYS ON</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                Mention sync (every 30 min) · Trending sync (on generate)
+                Mention sync (every 10 min) · Trending sync (on generate)
               </span>
             </div>
           </div>
