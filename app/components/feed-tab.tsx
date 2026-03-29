@@ -10,6 +10,8 @@ interface Topic {
   relevanceScore: number;
   category: string;
   timestamp: string;
+  tweetCount?: number;
+  topTweet?: { text: string; likes: number; author: string };
 }
 
 interface FeedTabProps {
@@ -167,11 +169,17 @@ export function FeedTab({ agentId }: FeedTabProps) {
                   <p className="topic-headline">{topic.headline}</p>
                   <div className="topic-meta">
                     <span>{topic.source}</span>
+                    {topic.tweetCount && <span>{topic.tweetCount} posts</span>}
                     <span className="flex items-center gap-2">
                       <svg viewBox="0 0 12 12" width="10" height="10" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.2" /><polyline points="6,3.5 6,6 7.5,7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
                       {getTimeAgo(topic.timestamp)}
                     </span>
                   </div>
+                  {topic.topTweet && (
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '6px', lineHeight: '1.5' }}>
+                      @{topic.topTweet.author}: {topic.topTweet.text.slice(0, 120)}{topic.topTweet.text.length > 120 ? '...' : ''} ({topic.topTweet.likes} likes)
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col items-end gap-2" style={{ flexShrink: 0 }}>
                   <span
