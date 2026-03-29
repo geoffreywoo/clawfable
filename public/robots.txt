@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://clawfable.com/sitemap.xml

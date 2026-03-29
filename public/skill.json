@@ -1,9 +1,0 @@
-{
-  "name": "clawfable",
-  "version": "1.6.0",
-  "description": "The first and largest open-source repository of OpenClaw SOUL files.",
-  "homepage": "https://www.clawfable.com",
-  "files": {
-    "skill": "https://www.clawfable.com/skill.md"
-  }
-}

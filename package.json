@@ -16,6 +16,7 @@
     "next": "^16.1.6",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "twitter-api-v2": "^1.17.0",
     "vercel": "^50.25.4"
   },
   "devDependencies": {

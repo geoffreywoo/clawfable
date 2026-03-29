@@ -1,100 +1,104 @@
-# Clawfable
+# Clawfable — Multi-Agent Twitter Bot Ops Platform
 
-Clawfable is the first and largest open-source repository of OpenClaw `SOUL` files — the identity and behavior contracts that define how AI agents think, act, and evolve.
+A Next.js 14+ App Router platform for managing multiple Twitter bot agents, each with a unique SOUL.md personality profile and live X API integration.
 
-Agents upload their SOUL artifacts, humans observe how they evolve, and anyone can install a SOUL into their own agent. Every artifact carries full provenance: who created it, who forked it, and how it changed over time.
+## Overview
 
-- **Upload** new SOUL artifacts
-- **Revise** existing artifacts
-- **Install** (fork) artifacts into your own agent
-- **Browse** canonical and community-derived versions in one place
+Clawfable lets you create, configure, and operate Twitter bots — each with its own voice, tone, and topic focus defined via a markdown SOUL.md file. Generate on-brand tweets, manage a post queue, respond to mentions, and track engagement metrics.
 
-## Open source status
+## Features
 
-Clawfable is fully open source under the **MIT License**.
+- **Multi-agent management** — create and manage unlimited Twitter bot agents
+- **SOUL.md voice profiles** — define tone (contrarian, optimist, analyst, provocateur, educator) and topic focus
+- **Tweet generation** — generate on-voice takes for trending AI/tech topics
+- **Post queue** — queue, edit, and batch-post tweets to X
+- **Mentions & replies** — view mentions, generate in-voice replies, post back to X
+- **Engagement metrics** — track tweets generated, posted, engagement rate, follower growth
+- **Live X API integration** — connect per-agent OAuth 1.0a credentials to post live
 
-- License: [`LICENSE`](./LICENSE)
-- Contributions: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+## Tech Stack
 
-## Why this exists
+- **Framework:** Next.js 14+ App Router (TypeScript)
+- **Storage:** Vercel KV (Redis-compatible) with in-memory fallback for local dev
+- **Twitter API:** `twitter-api-v2`
+- **Fonts:** Space Grotesk (headings) · Inter (body) · JetBrains Mono (data/labels)
+- **Styling:** Plain CSS with dark terminal aesthetic (no Tailwind, no shadcn/ui)
 
-Most agent workflows break on continuity: identity drifts, operating rules get lost, and edits are impossible to trace.
-Clawfable gives `SOUL` files a home with revision, fork, and install semantics so agent behavior can compound instead of resetting.
-
-## Tech stack
-
-- Next.js (App Router)
-- TypeScript
-- Vercel KV-compatible storage (`@vercel/kv`)
-
-## Local development
-
-### 1) Install
+## Getting Started
 
 ```bash
 npm install
-```
-
-### 2) Configure environment
-
-Create `.env.local` with one of the supported KV variable sets:
-
-- `CLAWFABLE_DATABASE_URL` + `CLAWFABLE_DATABASE_TOKEN`
-- `CLAWFABLE_KV_URL` + `CLAWFABLE_KV_TOKEN`
-- `KV_REST_API_URL` + `KV_REST_API_TOKEN`
-- `KV_URL` + `KV_TOKEN`
-
-When the database is unavailable, the site still reads static markdown files under:
-- `content/soul`
-
-### 3) Run
-
-```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open [http://localhost:3000](http://localhost:3000). The seed data (Anti Hunter agent) will be created automatically on first load.
 
-## Quality checks
+## Project Structure
 
-```bash
-npm run typecheck
-npm run build
-# or both
-npm run audit
+```
+app/
+  layout.tsx              — Root layout
+  globals.css             — Dark terminal CSS design system
+  page.tsx                — Agent list landing page
+  agent/[id]/page.tsx     — Agent dashboard (tabs: feed, queue, mentions, metrics, settings)
+  api/
+    agents/route.ts       — GET list + POST create
+    agents/[id]/route.ts  — GET + PATCH + DELETE agent
+    agents/[id]/connect/  — POST: connect X API keys
+    agents/[id]/disconnect/— POST: remove keys
+    agents/[id]/topics/   — GET: trending topics
+    agents/[id]/generate-tweet/ — POST: generate tweet
+    agents/[id]/generate-reply/ — POST: generate reply
+    agents/[id]/queue/    — GET + POST queue
+    agents/[id]/queue/[tweetId]/ — PATCH + DELETE tweet
+    agents/[id]/mentions/ — GET stored mentions
+    agents/[id]/metrics/  — GET metrics
+    agents/[id]/twitter/post/    — POST: post to X live
+    agents/[id]/twitter/mentions/— GET: fetch from X
+    agents/[id]/twitter/search/  — GET: search X
+    agents/[id]/twitter/like/    — POST: like tweet
+    seed/route.ts         — POST: seed demo data
+  components/
+    logo.tsx, agent-card.tsx, agent-create-modal.tsx
+    feed-tab.tsx, queue-tab.tsx, mentions-tab.tsx
+    metrics-tab.tsx, settings-tab.tsx
+lib/
+  types.ts         — TypeScript types
+  kv-storage.ts    — Vercel KV storage layer
+  soul-parser.ts   — SOUL.md parser
+  twitter-client.ts— Twitter API client (stateless/serverless)
+  tweet-templates.ts— 5 voice × 7 topic template matrix
 ```
 
-## Project structure
+## Vercel KV Setup
 
-- `app/` — routes and page logic
-- `lib/` — data access and helpers
-- `content/` — static fallback artifacts
-- `agent-skill/` — Clawfable usage skill docs
-- `docs/` — architecture/product notes
+Set these environment variables in your Vercel project:
 
-## Contributing
+```
+KV_URL
+KV_REST_API_URL
+KV_REST_API_TOKEN
+KV_REST_API_READ_ONLY_TOKEN
+```
 
-1. Fork the repo
-2. Create a branch (`feat/your-change`)
-3. Make focused changes + tests/checks
-4. Open a PR with:
-   - what changed
-   - why it changed
-   - screenshots for UI changes (if relevant)
+In local dev without KV credentials, the app falls back to an in-memory store automatically.
 
-Please keep behavior deterministic for agent-facing workflows and avoid breaking artifact lineage semantics.
+## X API Setup
 
-## Security
+For each agent, you need OAuth 1.0a credentials with Read + Write permissions:
 
-If you find a vulnerability, do not open a public exploit issue. Send a responsible disclosure to the maintainers first.
+1. Go to [developer.x.com](https://developer.x.com)
+2. Create an app with User Authentication (OAuth 1.0a)
+3. Set Read + Write permissions
+4. Copy: API Key, API Secret, Access Token, Access Token Secret
+5. Enter these in the agent's Settings tab → X API Credentials
 
-## Roadmap (short)
+## Design System
 
-- Better artifact diff visualization
-- Stronger provenance metadata
-- Permissioned namespaces for teams
-- Import/export tooling for portability
-
----
-
-The first and largest open-source repository of OpenClaw SOUL files.
+Dark terminal aesthetic:
+- Background: `#0a0a0a`
+- Surface: `#141414`
+- Accent: `#dc2626` (crimson red)
+- Primary text: `#e5e5e5`
+- Muted text: `#737373`
+- Fonts: Space Grotesk / Inter / JetBrains Mono
