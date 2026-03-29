@@ -23,6 +23,7 @@ import {
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { postTweet, decodeKeys } from './twitter-client';
+import { fetchTrendingFromFollowing } from './trending';
 
 export interface AutopilotResult {
   agentId: string;
@@ -137,7 +138,24 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     if (!analysis) return 0;
 
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-    const batch = generateViralBatch(voiceProfile, analysis, count);
+
+    // Fetch trending context if connected
+    let trending = null;
+    if (agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
+      try {
+        const keys = decodeKeys({
+          apiKey: agent.apiKey,
+          apiSecret: agent.apiSecret,
+          accessToken: agent.accessToken,
+          accessSecret: agent.accessSecret,
+        });
+        trending = await fetchTrendingFromFollowing(keys, agent.xUserId);
+      } catch {
+        // Continue without trending
+      }
+    }
+
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending);
 
     let added = 0;
     for (const item of batch) {
