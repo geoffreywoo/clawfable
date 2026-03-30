@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnalysis, getLearnings, getProtocolSettings, createTweet } from '@/lib/kv-storage';
+import { getAnalysis, getLearnings, getProtocolSettings, getTweets, createTweet } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { decodeKeys } from '@/lib/twitter-client';
@@ -48,7 +48,14 @@ export async function POST(
       enabledFormats: settings.enabledFormats || [],
       qtRatio: settings.qtRatio ?? 60,
     };
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style);
+    // Get recent posts to avoid repetition
+    const allTweets = await getTweets(id);
+    const recentPosts = allTweets
+      .filter((t) => t.status === 'posted' || t.status === 'queued')
+      .slice(0, 15)
+      .map((t) => t.content);
+
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style, recentPosts);
 
     if (batch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });

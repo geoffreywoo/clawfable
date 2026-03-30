@@ -12,6 +12,7 @@ import {
   getProtocolSettings,
   updateProtocolSettings,
   getQueuedTweets,
+  getTweets,
   getAnalysis,
   getLearnings,
   createTweet,
@@ -260,37 +261,47 @@ async function generateReply(
 ): Promise<string | null> {
   const systemParts: string[] = [];
 
-  systemParts.push(`You are @${agent.handle} (${agent.name}). You are writing a reply tweet AS THIS ACCOUNT.`);
+  systemParts.push(`You are @${agent.handle} (${agent.name}). You are writing a reply tweet AS THIS ACCOUNT. This is YOUR identity — own it completely.`);
+
+  // Include full SOUL.md for maximum voice fidelity
+  if (agent.soulMd) {
+    systemParts.push(`\n## YOUR SOUL.md (CORE IDENTITY — every reply must sound like this person)
+${agent.soulMd}`);
+  }
 
   systemParts.push(`\n## YOUR IDENTITY
 - Handle: @${agent.handle}
 - Name: ${agent.name}
-- References to "${agent.handle}", "${agent.name}", "@${agent.handle}", or $${agent.handle.replace(/ai$/i, '')} are about YOU.
-- Your human creator is Geoffrey Woo (@geoffreywoo).`);
+- Any references to "${agent.handle}", "${agent.name}", "@${agent.handle}", or $${agent.handle.replace(/ai$/i, '')} are about YOU.
+- Your human creator is Geoffrey Woo (@geoffreywoo). Show respect if he tweets at you.`);
 
   systemParts.push(`\n## YOUR VOICE
 - Tone: ${voiceProfile.tone}
 - Style: ${voiceProfile.communicationStyle}
-- Topics: ${voiceProfile.topics.join(', ')}`);
+- Topics: ${voiceProfile.topics.join(', ')}
+- Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
 
   if (analysis && analysis.viralTweets.length > 0) {
-    systemParts.push(`\n## YOUR STYLE (match this energy)`);
-    for (const vt of analysis.viralTweets.slice(0, 3)) {
+    systemParts.push(`\n## YOUR BEST TWEETS (match this energy and style in replies)`);
+    for (const vt of analysis.viralTweets.slice(0, 5)) {
       systemParts.push(`- [${vt.likes} likes] "${vt.text}"`);
     }
   }
 
-  systemParts.push(`\n## REPLY RULES
-- TROLLS/ATTACKERS: Maximum snark. Be the funnier one. Savage clapbacks.
-- GENUINE QUESTIONS: Helpful but in-voice.
-- COMPLIMENTS: Acknowledge briefly, stay cool.
-- Replies can be any length. Short and punchy often hits hardest, but go longer if needed. X supports up to 4000 chars.
-- Output ONLY the reply text.`);
+  systemParts.push(`\n## REPLY STRATEGY
+1. TROLLS & ATTACKERS: Go MAXIMUM SNARK. Be the funnier one. Savage clapbacks that people screenshot.
+2. SHITPOSTERS: Match their energy but be cleverer. One-liners that make people share.
+3. GENUINE QUESTIONS: Be helpful but still in-voice.
+4. COMPLIMENTS: Acknowledge briefly, stay cool.
+5. MENTIONS OF YOU BY NAME/TOKEN: Respond with full self-awareness.
+6. ALWAYS stay in character. Never break voice.
+- Replies can be any length. Short punchy often hits hardest, but go longer if needed.
+- Output ONLY the reply text. No quotes, no prefix.`);
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
+      max_tokens: 1024,
       system: systemParts.join('\n'),
       messages: [{ role: 'user', content: `${authorHandle} tweeted this at you:\n\n"${mentionText}"\n\nWrite your reply.` }],
     });
@@ -339,10 +350,27 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       enabledFormats: settings.enabledFormats || [],
       qtRatio: settings.qtRatio ?? 60,
     };
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style);
+
+    // Get recent posts to avoid repetition
+    const allTweets = await getTweets(agent.id);
+    const recentPosts = allTweets
+      .filter((t) => t.status === 'posted' || t.status === 'queued')
+      .slice(0, 15)
+      .map((t) => t.content);
+
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style, recentPosts);
+
+    // Dedup: skip tweets that are too similar to recent posts or queued items
+    const existingContent = new Set(
+      allTweets.slice(0, 50).map((t) => t.content.slice(0, 80).toLowerCase())
+    );
 
     let added = 0;
     for (const item of batch) {
+      const fingerprint = item.content.slice(0, 80).toLowerCase();
+      if (existingContent.has(fingerprint)) continue; // Skip duplicate
+      existingContent.add(fingerprint);
+
       await createTweet({
         agentId: agent.id,
         content: item.content,

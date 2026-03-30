@@ -12,9 +12,13 @@ import {
   getLearnings,
   saveLearnings,
   getAnalysis,
+  getProtocolSettings,
+  updateProtocolSettings,
+  saveAnalysis,
   addPostLogEntry,
 } from './kv-storage';
-import { getUserTimeline, decodeKeys, type TwitterKeys } from './twitter-client';
+import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
+import { analyzeAccount } from './analysis';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -229,5 +233,127 @@ What patterns do you see? What should we do more of? What should we stop doing? 
       .slice(0, 5);
   } catch {
     return ['Insight generation failed — will retry on next learning cycle.'];
+  }
+}
+
+/**
+ * Auto-adjust content settings based on learnings.
+ * Called after buildLearnings when we have enough data.
+ */
+export async function autoAdjustSettings(agentId: string, learnings: AgentLearnings): Promise<void> {
+  if (learnings.totalTracked < 10) return; // Need enough data
+
+  const settings = await getProtocolSettings(agentId);
+
+  // Auto-adjust format list — promote top performers, drop worst
+  if (learnings.formatRankings.length >= 3) {
+    const topFormats = learnings.formatRankings
+      .filter((f) => f.count >= 2) // need at least 2 data points
+      .slice(0, 8)
+      .map((f) => f.format);
+
+    // Only auto-adjust if user hasn't manually configured formats
+    if (!settings.enabledFormats || settings.enabledFormats.length === 0) {
+      // Don't restrict — keep all formats but learnings will steer Claude
+    }
+  }
+
+  // Auto-adjust length mix based on what length ranges perform best
+  const shortPerf: number[] = [];
+  const mediumPerf: number[] = [];
+  const longPerf: number[] = [];
+
+  for (const t of learnings.bestPerformers.concat(learnings.worstPerformers)) {
+    const len = t.content.length;
+    const eng = t.likes + t.retweets;
+    if (len < 200) shortPerf.push(eng);
+    else if (len < 500) mediumPerf.push(eng);
+    else longPerf.push(eng);
+  }
+
+  const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const shortAvg = avg(shortPerf);
+  const medAvg = avg(mediumPerf);
+  const longAvg = avg(longPerf);
+  const total = shortAvg + medAvg + longAvg;
+
+  if (total > 0) {
+    const newMix = {
+      short: Math.round((shortAvg / total) * 100),
+      medium: Math.round((medAvg / total) * 100),
+      long: Math.round((longAvg / total) * 100),
+    };
+    // Ensure they sum to 100
+    const sum = newMix.short + newMix.medium + newMix.long;
+    if (sum !== 100) newMix.medium += (100 - sum);
+    // Ensure minimum 10% for each to keep variety
+    if (newMix.short < 10) { newMix.short = 10; newMix.medium -= 5; newMix.long -= 5; }
+    if (newMix.medium < 10) { newMix.medium = 10; newMix.short -= 5; newMix.long -= 5; }
+    if (newMix.long < 10) { newMix.long = 10; newMix.short -= 5; newMix.medium -= 5; }
+
+    await updateProtocolSettings(agentId, { lengthMix: newMix });
+  }
+
+  // Auto-adjust QT ratio based on QT vs original performance
+  const qtPerf: number[] = [];
+  const origPerf: number[] = [];
+  for (const t of [...learnings.bestPerformers, ...learnings.worstPerformers]) {
+    const eng = t.likes + t.retweets;
+    if (t.format?.startsWith('qt_')) qtPerf.push(eng);
+    else origPerf.push(eng);
+  }
+
+  const qtAvg = avg(qtPerf);
+  const origAvg = avg(origPerf);
+  if (qtAvg + origAvg > 0) {
+    const newQtRatio = Math.round((qtAvg / (qtAvg + origAvg)) * 100);
+    // Clamp between 10-90 to keep variety
+    const clamped = Math.max(10, Math.min(90, newQtRatio));
+    await updateProtocolSettings(agentId, { qtRatio: clamped });
+  }
+}
+
+/**
+ * Auto re-analyze account if analysis is stale (older than 7 days).
+ */
+export async function maybeReanalyze(agent: Agent): Promise<boolean> {
+  if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
+    return false;
+  }
+
+  const analysis = await getAnalysis(agent.id);
+  if (!analysis) return false;
+
+  const ageMs = Date.now() - new Date(analysis.analyzedAt).getTime();
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  if (ageMs < sevenDays) return false;
+
+  try {
+    const keys = decodeKeys({
+      apiKey: agent.apiKey,
+      apiSecret: agent.apiSecret,
+      accessToken: agent.accessToken,
+      accessSecret: agent.accessSecret,
+    });
+
+    const newAnalysis = await analyzeAccount(keys, agent.xUserId, agent.id);
+    await saveAnalysis(agent.id, newAnalysis);
+
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: `Auto re-analyzed account: ${newAnalysis.tweetCount} tweets, ${newAnalysis.viralTweets.length} viral, ${newAnalysis.followingProfile.totalFollowing} following`,
+      format: 'system',
+      topic: 'analysis',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'mentions_refreshed',
+      reason: 'Weekly re-analysis',
+    });
+
+    return true;
+  } catch {
+    return false;
   }
 }

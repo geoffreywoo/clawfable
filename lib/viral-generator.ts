@@ -84,6 +84,7 @@ function buildSystemPrompt(
   learnings: AgentLearnings | null,
   soulMd: string | null,
   style: ContentStyleConfig = DEFAULT_STYLE,
+  recentPosts: string[] = [],
 ): string {
   const parts: string[] = [];
 
@@ -184,6 +185,14 @@ ${soulMd}`);
     }
   }
 
+  // Recent posts — avoid repeating
+  if (recentPosts.length > 0) {
+    parts.push(`\n## RECENTLY POSTED (DO NOT repeat these topics, angles, or phrasing — be FRESH)`);
+    for (const post of recentPosts.slice(0, 15)) {
+      parts.push(`- "${post.slice(0, 150)}"`);
+    }
+  }
+
   // Dynamic strategy based on user config
   const { lengthMix, enabledFormats, qtRatio } = style;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
@@ -226,8 +235,9 @@ export async function generateViralBatch(
   learnings: AgentLearnings | null = null,
   soulMd: string | null = null,
   style: ContentStyleConfig = DEFAULT_STYLE,
+  recentPosts: string[] = [],
 ): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd, style);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd, style, recentPosts);
 
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
   const userPrompt = `Generate exactly ${count} tweets. Follow the length distribution and QT ratio in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:

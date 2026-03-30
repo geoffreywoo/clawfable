@@ -3,7 +3,7 @@ import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, a
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client';
-import { checkPerformance, buildLearnings } from '@/lib/performance';
+import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 
 // GET /api/cron/post — called by Vercel Cron every 30 minutes
 export async function GET(request: NextRequest) {
@@ -47,15 +47,24 @@ export async function GET(request: NextRequest) {
           console.error(`[cron] mentions refresh failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
 
-        // Track performance of posted tweets + rebuild learnings
+        // Track performance of posted tweets + rebuild learnings + auto-adjust
         try {
           const tracked = await checkPerformance(agent);
           performanceTracked += tracked;
           if (tracked > 0) {
-            await buildLearnings(agent);
+            const learnings = await buildLearnings(agent);
+            // Auto-adjust content settings based on what actually performed
+            await autoAdjustSettings(agent.id, learnings);
           }
         } catch (err) {
           console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        // Auto re-analyze if analysis is older than 7 days
+        try {
+          await maybeReanalyze(agent);
+        } catch (err) {
+          console.error(`[cron] re-analysis failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
       }
 
