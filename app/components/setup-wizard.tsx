@@ -179,13 +179,12 @@ export function SetupWizard({
 
   const stepIndex = STEPS.findIndex((s) => s.id === step);
   const canGenerateVoice = archetype && selectedTopics.length > 0;
-  const reviewedTweetIds = previewTweets.filter((tweet) => ratings[tweet.id]).map((tweet) => tweet.id);
   const approvedTweetIds = previewTweets
     .filter((tweet) => ratings[tweet.id] === 'up')
     .map((tweet) => tweet.id);
+  // Unrated tweets are treated as rejected on launch — user only needs to approve ≥1
   const canLaunch =
     previewTweets.length > 0 &&
-    reviewedTweetIds.length === previewTweets.length &&
     approvedTweetIds.length > 0 &&
     !previewLoading &&
     !launching;
@@ -399,7 +398,7 @@ export function SetupWizard({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reviewedTweetIds,
+          reviewedTweetIds: previewTweets.map((t) => t.id),
           approvedTweetIds,
           postsPerDay: frequencyToPostsPerDay(frequency),
         }),
@@ -714,7 +713,7 @@ export function SetupWizard({
                 <>
                   <div className="wizard-step-header">
                     <h3>Review Preview Batch</h3>
-                    <p>Every preview tweet needs a decision, and at least one approved tweet must survive before launch.</p>
+                    <p>Approve the tweets you want queued. The rest will be discarded.</p>
                   </div>
 
                   {previewLoading && previewTweets.length === 0 && <TweetPreviewSkeleton count={5} />}
@@ -738,9 +737,9 @@ export function SetupWizard({
                         onRate={handlePreviewRating}
                       />
 
-                      {!canLaunch && (
+                      {!canLaunch && previewTweets.length > 0 && !previewLoading && (
                         <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '12px' }}>
-                          Review every card and approve at least one tweet before autopilot can launch.
+                          Approve at least one tweet to arm autopilot. Unapproved tweets will be discarded.
                         </p>
                       )}
                     </>

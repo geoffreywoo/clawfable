@@ -24,8 +24,8 @@ export function TweetPreview({
   regenerationsLeft,
   onRate,
 }: TweetPreviewProps) {
-  const reviewedCount = tweets.filter((tweet) => ratings[tweet.id]).length;
-  const allReviewed = tweets.length > 0 && reviewedCount === tweets.length;
+  const approvedCount = tweets.filter((tweet) => ratings[tweet.id] === 'up').length;
+  const hasApprovals = approvedCount > 0;
 
   return (
     <div className="tweet-preview-container">
@@ -71,16 +71,16 @@ export function TweetPreview({
       </div>
 
       <div className="tweet-preview-counter">
-        {reviewedCount} of {tweets.length} reviewed
+        {approvedCount} of {tweets.length} approved
       </div>
 
       {regenerationsLeft < 2 && (
         <p className="tweet-preview-regen-count">{regenerationsLeft} regeneration{regenerationsLeft !== 1 ? 's' : ''} remaining</p>
       )}
 
-      {allReviewed && (
+      {hasApprovals && (
         <div className="tweet-preview-ready">
-          <p className="tweet-preview-ready-label">Preview batch reviewed</p>
+          <p className="tweet-preview-ready-label">Ready to launch</p>
         </div>
       )}
     </div>

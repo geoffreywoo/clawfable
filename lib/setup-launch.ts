@@ -47,10 +47,6 @@ export async function launchAgentFromPreview({
   const reviewedIds = dedupeIds(reviewedTweetIds);
   const approvedIds = dedupeIds(approvedTweetIds);
 
-  if (reviewedIds.length !== previewIds.size || reviewedIds.some((id) => !previewIds.has(id))) {
-    throw new SetupLaunchError('Review every preview tweet before launch');
-  }
-
   if (approvedIds.length === 0) {
     throw new SetupLaunchError('Approve at least one preview tweet before launch');
   }
@@ -58,6 +54,9 @@ export async function launchAgentFromPreview({
   if (approvedIds.some((id) => !previewIds.has(id))) {
     throw new SetupLaunchError('Approved tweets must come from the active preview batch');
   }
+
+  // reviewedIds is informational — we no longer require every tweet to be explicitly rated.
+  // Unrated tweets are treated as rejected.
 
   const approvedIdSet = new Set(approvedIds);
   const rejectedIds = previewTweets

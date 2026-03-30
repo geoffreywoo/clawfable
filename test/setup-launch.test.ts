@@ -64,10 +64,10 @@ describe('setup launch flow', () => {
     expect(settings.postsPerDay).toBe(6);
   });
 
-  it('rejects launch if any preview tweet is missing a review decision', async () => {
+  it('allows launch with partial reviews — unrated tweets are discarded', async () => {
     const agent = await createAgent({
-      handle: 'launch-needs-review',
-      name: 'Launch Needs Review',
+      handle: 'launch-partial-review',
+      name: 'Launch Partial Review',
       soulMd: '# soul',
       setupStep: 'preview',
     } as any);
@@ -84,9 +84,42 @@ describe('setup launch flow', () => {
       scheduledAt: null,
     });
 
-    await createTweet({
+    const second = await createTweet({
       agentId: agent.id,
       content: 'preview two',
+      type: 'original',
+      status: 'preview',
+      topic: 'AI',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    // Only approve first, don't review second at all
+    const result = await launchAgentFromPreview({
+      agentId: agent.id,
+      reviewedTweetIds: [first.id],
+      approvedTweetIds: [first.id],
+      postsPerDay: 3,
+    });
+
+    expect(result.queuedCount).toBe(1);
+    expect(result.discardedCount).toBe(1);
+    expect(await getTweet(second.id)).toBeNull(); // unrated = discarded
+  });
+
+  it('rejects launch with zero approvals', async () => {
+    const agent = await createAgent({
+      handle: 'launch-no-approvals',
+      name: 'Launch No Approvals',
+      soulMd: '# soul',
+      setupStep: 'preview',
+    } as any);
+
+    await createTweet({
+      agentId: agent.id,
+      content: 'preview one',
       type: 'original',
       status: 'preview',
       topic: 'AI',
@@ -99,8 +132,8 @@ describe('setup launch flow', () => {
     await expect(
       launchAgentFromPreview({
         agentId: agent.id,
-        reviewedTweetIds: [first.id],
-        approvedTweetIds: [first.id],
+        reviewedTweetIds: [],
+        approvedTweetIds: [],
         postsPerDay: 3,
       })
     ).rejects.toBeInstanceOf(SetupLaunchError);
