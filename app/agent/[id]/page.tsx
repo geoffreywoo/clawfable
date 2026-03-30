@@ -7,6 +7,7 @@ import { ComposeTab } from '@/app/components/compose-tab';
 import { QueueTab } from '@/app/components/queue-tab';
 import { MentionsTab } from '@/app/components/mentions-tab';
 import { AutopilotTab } from '@/app/components/autopilot-tab';
+import { MetricsTab } from '@/app/components/metrics-tab';
 import { SettingsTab } from '@/app/components/settings-tab';
 import { SetupContinuation } from '@/app/components/setup-continuation';
 import type { AgentDetail, AgentSummary } from '@/lib/types';
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'compose', label: 'COMPOSE', hasPulse: true },
   { id: 'queue', label: 'QUEUE' },
   { id: 'mentions', label: 'MENTIONS' },
+  { id: 'metrics', label: 'METRICS' },
   { id: 'autopilot', label: 'AUTOPILOT' },
   { id: 'settings', label: 'SETTINGS' },
 ] as const;
@@ -334,6 +336,7 @@ export default function AgentDashboard() {
         {activeTab === 'compose' && <ComposeTab agentId={agentId} />}
         {activeTab === 'queue' && <QueueTab agentId={agentId} />}
         {activeTab === 'mentions' && <MentionsTab agentId={agentId} />}
+        {activeTab === 'metrics' && <MetricsTab agentId={agentId} />}
         {activeTab === 'autopilot' && <AutopilotTab agentId={agentId} />}
         {activeTab === 'settings' && (
           <SettingsTab

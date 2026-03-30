@@ -369,8 +369,11 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
 }
 
 function isWithinActiveHours(currentHour: number, start: number, end: number): boolean {
-  if (start <= end) {
+  // start === end means "always active" (24h)
+  if (start === end) return true;
+  if (start < end) {
     return currentHour >= start && currentHour < end;
   }
+  // Wraps midnight (e.g., 22-6)
   return currentHour >= start || currentHour < end;
 }
