@@ -29,10 +29,15 @@ export async function POST(
 
     // Save the generated SOUL.md to the agent
     const voiceProfile = parseSoulMd(agent.name, result.soulMd);
-    await updateAgent(id, {
+    const updates: Record<string, unknown> = {
       soulMd: result.soulMd,
       soulSummary: voiceProfile.summary,
-    });
+    };
+    // Advance setup step past soul
+    if (agent.setupStep === 'soul') {
+      updates.setupStep = 'analyze';
+    }
+    await updateAgent(id, updates as Parameters<typeof updateAgent>[1]);
 
     return NextResponse.json(result);
   } catch (err) {
