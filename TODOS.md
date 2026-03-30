@@ -12,11 +12,11 @@ No open P1 items.
 
 **Why:** Logging is useful immediately, but a dashboard with tiny sample size creates false confidence and scope creep.
 
-**Context:** The review kept event logging in the plan but deferred analytics UI. The current repo can store funnel events, but the UI should wait until the data is decision-grade.
+**Context:** Funnel instrumentation is now complete (all 5 milestones wired + `computeFunnelSummary` + metrics API). The UI should wait until the data is decision-grade.
 
 **Effort:** M
 **Priority:** P3
-**Depends on:** Reliable funnel instrumentation for `wizard_start`, `wizard_soul_complete`, `preview_approve`, `first_post`, and `tenth_post`
+**Depends on:** Real user traffic generating event volume
 
 ## Platform
 
@@ -36,4 +36,5 @@ No open P1 items.
 
 - **Launch orchestration** — Already server-side in `lib/setup-launch.ts` (single atomic endpoint)
 - **Survivability guardrails** — `lib/survivability.ts`: posting jitter ±15%, daily hard cap (12), content diversity gate, near-duplicate detection (bigram), postsPerDay clamped to 10 max. Wired into autopilot + protocol settings + launch.
+- **Funnel instrumentation** — All 5 milestones wired (`wizard_start`, `wizard_soul_complete`, `preview_approve`, `first_post`, `tenth_post`). `getFunnelEvents` + `computeFunnelSummary` reader. Funnel summary exposed on metrics API.
 - All earlier ad hoc TODOs were resolved before this review cycle.
