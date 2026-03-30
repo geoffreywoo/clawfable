@@ -142,7 +142,7 @@ export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props
                       RECOMMENDED: GENERATE FROM YOUR TWEETS
                     </p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      Analyzes up to 500 of your tweets to reverse-engineer your voice, tone, topics, and style.
+                      Analyzes up to 1000 of your tweets to reverse-engineer your voice, tone, topics, and style.
                     </p>
                   </div>
                   <button

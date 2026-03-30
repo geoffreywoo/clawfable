@@ -27,8 +27,8 @@ export async function generateSoulFromTweets(
   userId: string,
   agentName: string
 ): Promise<SoulFromTweetsResult> {
-  // Fetch deep history — up to 500 tweets
-  const timeline = await getDeepTimeline(keys, userId, 500);
+  // Fetch deep history — up to 1000 tweets
+  const timeline = await getDeepTimeline(keys, userId, 1000);
 
   if (timeline.length === 0) {
     throw new Error('No tweets found. Post some tweets first, then generate your SOUL.');

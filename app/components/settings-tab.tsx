@@ -198,7 +198,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           }}>
             <div className="wizard-spinner" style={{ margin: '0 auto 8px' }} />
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-              Fetching up to 500 tweets, analyzing voice patterns, generating SOUL.md...
+              Fetching up to 1000 tweets, analyzing voice patterns, generating SOUL.md...
             </p>
           </div>
         )}

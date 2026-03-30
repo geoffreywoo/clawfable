@@ -127,7 +127,7 @@ export async function analyzeAccount(
 ): Promise<AccountAnalysis> {
   // Fetch deep history + following in parallel
   const [timelineTweets, followingList] = await Promise.all([
-    getDeepTimeline(keys, userId, 500),
+    getDeepTimeline(keys, userId, 1000),
     getFollowing(keys, userId, 200),
   ]);
 
