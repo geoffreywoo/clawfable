@@ -32,6 +32,7 @@ export async function PATCH(
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
+      'lengthMix', 'enabledFormats', 'qtRatio',
     ];
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {

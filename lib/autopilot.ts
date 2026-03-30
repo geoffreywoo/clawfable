@@ -333,7 +333,13 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     }
 
     const learnings = await getLearnings(agent.id);
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd);
+    const settings = await getProtocolSettings(agent.id);
+    const style = {
+      lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
+      enabledFormats: settings.enabledFormats || [],
+      qtRatio: settings.qtRatio ?? 60,
+    };
+    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style);
 
     let added = 0;
     for (const item of batch) {

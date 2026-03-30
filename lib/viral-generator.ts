@@ -18,6 +18,23 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   rawExtraction: '',
 };
 
+export interface ContentStyleConfig {
+  lengthMix: { short: number; medium: number; long: number };
+  enabledFormats: string[];
+  qtRatio: number;
+}
+
+const DEFAULT_STYLE: ContentStyleConfig = {
+  lengthMix: { short: 30, medium: 30, long: 40 },
+  enabledFormats: [],
+  qtRatio: 60,
+};
+
+const ALL_FORMATS = [
+  'qt_contrarian', 'qt_reframe', 'qt_question', 'qt_context', 'qt_one_liner',
+  'hot_take', 'question', 'data_point', 'short_punch', 'long_form', 'analysis', 'observation',
+];
+
 export interface ProtocolTweet {
   content: string;
   format: string;
@@ -66,6 +83,7 @@ function buildSystemPrompt(
   trending: TrendingTopic[] | null,
   learnings: AgentLearnings | null,
   soulMd: string | null,
+  style: ContentStyleConfig = DEFAULT_STYLE,
 ): string {
   const parts: string[] = [];
 
@@ -166,23 +184,33 @@ ${soulMd}`);
     }
   }
 
+  // Dynamic strategy based on user config
+  const { lengthMix, enabledFormats, qtRatio } = style;
+  const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
+
   parts.push(`\n## STRATEGY
-1. **PRIORITIZE QUOTE TWEETS.** At least 60-70% of output should be QTs of the quotable tweets listed above.
-2. QT commentary should be SHORT (under 200 chars ideally), OPINIONATED, and add a new angle the original didn't cover.
-3. Great QT patterns: contrarian take on the original, adding missing context, a one-liner that reframes it, asking a sharp question the original doesn't answer, connecting it to a bigger trend.
-4. The remaining 30-40% should be original standalone tweets on trending topics.
-5. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
+1. **QT ratio: ~${qtRatio}% QTs, ~${100 - qtRatio}% originals.** ${qtRatio > 0 ? 'QTs should reference specific quotable tweets listed above.' : 'Focus on original standalone tweets.'}
+2. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
+3. QT commentary should be OPINIONATED and add a new angle the original didn't cover.
+
+## LENGTH DISTRIBUTION (follow this closely)
+- ~${lengthMix.short}% SHORT (under 200 chars): punchy one-liners, sharp observations
+- ~${lengthMix.medium}% MEDIUM (200-500 chars): single-point arguments, hot takes with context
+- ~${lengthMix.long}% LONG-FORM (500-2000+ chars): multi-paragraph analysis, structured breakdowns, storytelling, contrarian arguments with evidence
+${lengthMix.long >= 30 ? 'Long-form posts should go DEEP — use line breaks, build arguments, provide insight that short tweets cannot. X Premium rewards depth.' : ''}
+X supports up to 4000 chars. Use \\n for line breaks in longer posts.
+
+## ALLOWED FORMATS
+${formats.join(', ')}
 
 ## RULES
-1. MIX tweet lengths across the batch. Target distribution: ~30% short punches (under 200 chars), ~30% medium takes (200-500 chars), ~40% long-form posts (500-2000 chars). Longer posts should go deep — multi-paragraph analysis, structured breakdowns, contrarian arguments with evidence, storytelling. X supports up to 4000 chars. Don't default to short — the best-performing tweets on X Premium are often 500-1500 chars because they reward depth and insight. Use line breaks for readability in longer posts.
-2. Write in this account's exact voice. Match the style of the top performing tweets.
-3. No threads, no "1/", no emojis unless the account uses them.
-4. Never use hashtags unless the account's viral tweets use them.
-5. Never be generic. Every tweet needs a specific, opinionated point of view.
-6. For QTs: don't just agree with the original — add value, challenge it, or reframe it.
-7. Vary formats across the batch.
-8. Never violate the anti-goals.
-9. Set "quoteTweetAuthor" to the @handle of the person being quoted (for QTs only).`);
+1. Write in this account's exact voice. Match the style of the top performing tweets.
+2. No threads, no "1/", no emojis unless the account uses them.
+3. Never use hashtags unless the account's viral tweets use them.
+4. Never be generic. Every tweet needs a specific, opinionated point of view.
+5. For QTs: don't just agree with the original — add value, challenge it, or reframe it.
+6. Never violate the anti-goals.
+7. Set "quoteTweetAuthor" to the @handle of the person being quoted (for QTs only).`);
 
   return parts.join('\n');
 }
@@ -197,18 +225,20 @@ export async function generateViralBatch(
   trending: TrendingTopic[] | null = null,
   learnings: AgentLearnings | null = null,
   soulMd: string | null = null,
+  style: ContentStyleConfig = DEFAULT_STYLE,
 ): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd, style);
 
-  const userPrompt = `Generate exactly ${count} tweets. Mix lengths: some short punches, some medium takes, and some long-form posts (500-1500+ chars with line breaks). For each tweet, output a JSON object on its own line with these fields:
+  const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
+  const userPrompt = `Generate exactly ${count} tweets. Follow the length distribution and QT ratio in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
-- "format": one of: qt_contrarian, qt_reframe, qt_question, qt_context, qt_one_liner, hot_take, question, data_point, short_punch, long_form, analysis, observation
+- "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "rationale": 1 sentence on why this should perform well
 - "quoteTweetId": the ID of the tweet being quoted (from the quotable list), or null for originals
 - "quoteTweetAuthor": the @handle of the author being quoted, or null for originals
 
-Prioritize QTs — they get more reach. Include at least 1 long-form post per batch. Output ONLY JSON objects, one per line, no markdown fencing.`;
+Output ONLY JSON objects, one per line, no markdown fencing.`;
 
   try {
     const response = await anthropic.messages.create({
@@ -260,8 +290,9 @@ export async function generateViralTweet(
   trending: TrendingTopic[] | null = null,
   learnings: AgentLearnings | null = null,
   soulMd: string | null = null,
+  style: ContentStyleConfig = DEFAULT_STYLE,
 ): Promise<ProtocolTweet | null> {
-  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings, soulMd);
+  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings, soulMd, style);
   return batch[0] || null;
 }
 

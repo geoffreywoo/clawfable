@@ -481,8 +481,8 @@ export async function deleteOAuthTemp(oauthToken: string): Promise<void> {
 const DEFAULT_PROTOCOL: ProtocolSettings = {
   enabled: false,
   postsPerDay: 3,
-  activeHoursStart: 0,   // midnight UTC (always active by default)
-  activeHoursEnd: 0,     // midnight UTC (wraps = 24h)
+  activeHoursStart: 0,
+  activeHoursEnd: 0,
   minQueueSize: 5,
   autoReply: false,
   maxRepliesPerRun: 3,
@@ -491,6 +491,9 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   lastRepliedAt: null,
   totalAutoPosted: 0,
   totalAutoReplied: 0,
+  lengthMix: { short: 30, medium: 30, long: 40 },
+  enabledFormats: [],  // empty = all formats
+  qtRatio: 60,
 };
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {

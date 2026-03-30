@@ -303,6 +303,177 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         </div>
       )}
 
+      {/* ─── Content Style Controls ──────────────────────────────────────── */}
+      {settings && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+                <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+              <h2>CONTENT STYLE</h2>
+              <span className="section-count">controls generation output</span>
+            </div>
+          </div>
+
+          <div className="space-y-3" style={{ marginTop: '8px' }}>
+            {/* Length mix */}
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                LENGTH MIX
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                <div className="field">
+                  <label>SHORT (&lt;200)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min="0" max="100" step="10"
+                      value={settings.lengthMix?.short ?? 30}
+                      onChange={(e) => {
+                        const short = Number(e.target.value);
+                        const current = settings.lengthMix || { short: 30, medium: 30, long: 40 };
+                        const remaining = 100 - short;
+                        const ratio = current.medium + current.long > 0 ? current.medium / (current.medium + current.long) : 0.5;
+                        handleUpdateSettings({ lengthMix: { short, medium: Math.round(remaining * ratio), long: Math.round(remaining * (1 - ratio)) } });
+                      }}
+                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                    />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
+                      {settings.lengthMix?.short ?? 30}%
+                    </span>
+                  </div>
+                </div>
+                <div className="field">
+                  <label>MEDIUM (200-500)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min="0" max="100" step="10"
+                      value={settings.lengthMix?.medium ?? 30}
+                      onChange={(e) => {
+                        const medium = Number(e.target.value);
+                        const current = settings.lengthMix || { short: 30, medium: 30, long: 40 };
+                        const remaining = 100 - medium;
+                        const ratio = current.short + current.long > 0 ? current.short / (current.short + current.long) : 0.5;
+                        handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium, long: Math.round(remaining * (1 - ratio)) } });
+                      }}
+                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                    />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
+                      {settings.lengthMix?.medium ?? 30}%
+                    </span>
+                  </div>
+                </div>
+                <div className="field">
+                  <label>LONG (500+)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min="0" max="100" step="10"
+                      value={settings.lengthMix?.long ?? 40}
+                      onChange={(e) => {
+                        const long = Number(e.target.value);
+                        const current = settings.lengthMix || { short: 30, medium: 30, long: 40 };
+                        const remaining = 100 - long;
+                        const ratio = current.short + current.medium > 0 ? current.short / (current.short + current.medium) : 0.5;
+                        handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium: Math.round(remaining * (1 - ratio)), long } });
+                      }}
+                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                    />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
+                      {settings.lengthMix?.long ?? 40}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* QT ratio */}
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                QT vs ORIGINAL RATIO
+              </p>
+              <div className="flex items-center gap-3">
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', width: '70px' }}>ORIGINALS</span>
+                <input
+                  type="range" min="0" max="100" step="10"
+                  value={settings.qtRatio ?? 60}
+                  onChange={(e) => handleUpdateSettings({ qtRatio: Number(e.target.value) })}
+                  style={{ flex: 1, accentColor: '#8b5cf6' }}
+                />
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', width: '30px' }}>QTs</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '50px', textAlign: 'right' }}>
+                  {settings.qtRatio ?? 60}% QT
+                </span>
+              </div>
+            </div>
+
+            {/* Format toggles */}
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                  ALLOWED FORMATS
+                </p>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: '9px' }}
+                  onClick={() => handleUpdateSettings({ enabledFormats: [] })}
+                >
+                  {(settings.enabledFormats?.length || 0) === 0 ? 'ALL ENABLED' : 'RESET TO ALL'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {[
+                  { id: 'hot_take', label: 'Hot Take' },
+                  { id: 'question', label: 'Question' },
+                  { id: 'data_point', label: 'Data Point' },
+                  { id: 'short_punch', label: 'Short Punch' },
+                  { id: 'long_form', label: 'Long Form' },
+                  { id: 'analysis', label: 'Analysis' },
+                  { id: 'observation', label: 'Observation' },
+                  { id: 'qt_contrarian', label: 'QT Contrarian' },
+                  { id: 'qt_reframe', label: 'QT Reframe' },
+                  { id: 'qt_question', label: 'QT Question' },
+                  { id: 'qt_context', label: 'QT Context' },
+                  { id: 'qt_one_liner', label: 'QT One-Liner' },
+                ].map((f) => {
+                  const enabled = !settings.enabledFormats || settings.enabledFormats.length === 0 || settings.enabledFormats.includes(f.id);
+                  return (
+                    <button
+                      key={f.id}
+                      className="protocol-tag"
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        background: enabled ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
+                        borderColor: enabled ? 'rgba(139,92,246,0.4)' : 'var(--border)',
+                        color: enabled ? '#8b5cf6' : 'var(--text-dim)',
+                        opacity: enabled ? 1 : 0.5,
+                      }}
+                      onClick={() => {
+                        const current = settings.enabledFormats || [];
+                        if (current.length === 0) {
+                          // Switching from "all" to specific: enable all except this one
+                          const allIds = ['hot_take','question','data_point','short_punch','long_form','analysis','observation','qt_contrarian','qt_reframe','qt_question','qt_context','qt_one_liner'];
+                          handleUpdateSettings({ enabledFormats: allIds.filter((id) => id !== f.id) });
+                        } else if (current.includes(f.id)) {
+                          const next = current.filter((id: string) => id !== f.id);
+                          handleUpdateSettings({ enabledFormats: next.length === 0 ? [] : next });
+                        } else {
+                          handleUpdateSettings({ enabledFormats: [...current, f.id] });
+                        }
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Suggested Jobs ──────────────────────────────────────────────── */}
       {suggestions.length > 0 && (
         <div>

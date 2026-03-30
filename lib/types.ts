@@ -142,17 +142,25 @@ export interface FollowingProfile {
 
 export interface ProtocolSettings {
   enabled: boolean;
-  postsPerDay: number;        // 1-12
-  activeHoursStart: number;   // UTC hour 0-23
-  activeHoursEnd: number;     // UTC hour 0-23
+  postsPerDay: number;        // 1-24
+  activeHoursStart: number;   // legacy, unused
+  activeHoursEnd: number;     // legacy, unused
   minQueueSize: number;       // auto-generate when queue drops below this
   autoReply: boolean;         // auto-reply to new mentions
-  maxRepliesPerRun: number;   // max replies per cron run (1-5)
-  replyIntervalMins: number;  // minimum minutes between reply runs (30-720)
+  maxRepliesPerRun: number;   // max replies per cron run (1-10)
+  replyIntervalMins: number;  // minimum minutes between reply runs
   lastPostedAt: string | null;
   lastRepliedAt: string | null;
   totalAutoPosted: number;
   totalAutoReplied: number;
+  // Content style controls
+  lengthMix: {
+    short: number;   // 0-100, percentage for <200 chars
+    medium: number;  // 0-100, percentage for 200-500 chars
+    long: number;    // 0-100, percentage for 500+ chars
+  };
+  enabledFormats: string[];  // which formats to use, empty = all
+  qtRatio: number;           // 0-100, percentage of QTs vs originals
 }
 
 export interface PostLogEntry {
