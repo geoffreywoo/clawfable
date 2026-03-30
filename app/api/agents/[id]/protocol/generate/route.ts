@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnalysis, getLearnings, getProtocolSettings, getTweets, createTweet } from '@/lib/kv-storage';
+import {
+  createTweet,
+  getAnalysis,
+  getLearnings,
+  getProtocolSettings,
+  getRecentNegativeFeedback,
+  getStyleSignals,
+  getTweets,
+} from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { decodeKeys } from '@/lib/twitter-client';
@@ -24,6 +32,18 @@ export async function POST(
     const count = Math.min(body.count || 5, 20);
 
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+
+    const [styleSignals, negatives] = await Promise.all([
+      getStyleSignals(id),
+      getRecentNegativeFeedback(id),
+    ]);
+
+    if (styleSignals?.rawExtraction) {
+      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
+    }
+    if (negatives.length > 0) {
+      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map((item) => `- "${item}"`).join('\n')}`;
+    }
 
     // Fetch trending topics from following graph if connected
     let trending = null;

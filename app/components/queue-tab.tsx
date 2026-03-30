@@ -20,6 +20,9 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [remixingId, setRemixingId] = useState<string | null>(null);
   const [remixOpenId, setRemixOpenId] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Tweet | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   const loadQueue = async () => {
     try {
@@ -97,12 +100,31 @@ export function QueueTab({ agentId }: QueueTabProps) {
     } catch {}
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (skipReason = false) => {
+    if (!deleteTarget) return;
     try {
-      await fetch(`/api/agents/${agentId}/queue/${id}`, { method: 'DELETE' });
-      showToast('Removed from queue');
+      setDeleteSubmitting(true);
+      const res = await fetch(`/api/agents/${agentId}/queue/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(skipReason ? {} : { reason: deleteReason.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+
+      setDeleteTarget(null);
+      setDeleteReason('');
+      showToast(
+        data.feedbackSource === 'user'
+          ? 'Removed from queue and saved to voice memory'
+          : 'Removed from queue. Intent inferred for voice tuning'
+      );
       loadQueue();
-    } catch {}
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setDeleteSubmitting(false);
+    }
   };
 
   const handlePostToX = async (tweet: Tweet) => {
@@ -434,7 +456,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => handleDelete(tweet.id)}
+                    onClick={() => { setDeleteTarget(tweet); setDeleteReason(''); }}
                     data-testid={`button-delete-${tweet.id}`}
                     title="Remove"
                     style={{ padding: '4px 8px', color: '#ef4444' }}
@@ -447,6 +469,62 @@ export function QueueTab({ agentId }: QueueTabProps) {
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteSubmitting && setDeleteTarget(null)}>
+          <div className="modal" style={{ maxWidth: '460px' }}>
+            <div className="wizard-body">
+              <div className="wizard-step-header">
+                <h3>Why remove this tweet?</h3>
+                <p>We&apos;ll use this signal to tune the agent&apos;s voice. Skip if you want Clawfable to infer intent automatically.</p>
+              </div>
+
+              <div style={{
+                padding: '12px',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                background: 'var(--surface)',
+                marginBottom: '12px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-inter)', fontSize: '13px', color: 'var(--text)', lineHeight: '1.6' }}>
+                  {deleteTarget.content}
+                </p>
+              </div>
+
+              <div className="wizard-builder-section">
+                <div className="wizard-section-label">DELETE REASON (OPTIONAL)</div>
+                <textarea
+                  className="textarea"
+                  value={deleteReason}
+                  onChange={(event) => setDeleteReason(event.target.value)}
+                  placeholder="Examples: too generic, wrong tone, weak hook, not on-topic, sounds forced..."
+                  rows={4}
+                />
+                <p className="wizard-section-hint">
+                  Explicit reasons are strongest. If you skip, we&apos;ll guess likely intent and still store the delete as feedback.
+                </p>
+              </div>
+
+              <div className="wizard-actions">
+                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => setDeleteTarget(null)}>
+                  CANCEL
+                </button>
+                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => handleDelete(true)}>
+                  {deleteSubmitting ? 'REMOVING...' : 'SKIP + INFER'}
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={deleteSubmitting || !deleteReason.trim()}
+                  onClick={() => handleDelete(false)}
+                  style={{ background: deleteReason.trim() ? '#8b5cf6' : undefined }}
+                >
+                  {deleteSubmitting ? 'REMOVING...' : 'SAVE REASON + REMOVE'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

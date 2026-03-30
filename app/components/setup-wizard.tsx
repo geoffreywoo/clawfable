@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { TweetPreview, TweetPreviewSkeleton } from './tweet-preview';
 
 type Step = 'identity' | 'soul' | 'analyze' | 'preview';
+type ResumeStep = Exclude<Step, 'identity'>;
 
 const STEPS: { id: Step; label: string; num: number }[] = [
   { id: 'identity', label: 'IDENTITY + X', num: 1 },
@@ -27,6 +28,8 @@ interface SetupWizardProps {
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  resumeAgentId?: string | null;
+  initialStep?: ResumeStep | null;
 }
 
 interface AnalysisData {
@@ -53,14 +56,30 @@ interface PreviewTweet {
   topic?: string;
 }
 
-export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
+type Rating = 'up' | 'down';
+
+function frequencyToPostsPerDay(frequency: string): number {
+  if (frequency === '1x') return 1;
+  if (frequency === '6x') return 6;
+  return 3;
+}
+
+export function SetupWizard({
+  open,
+  onClose,
+  onCreated,
+  resumeAgentId = null,
+  initialStep = null,
+}: SetupWizardProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const autoRunRef = useRef<{ analyze: string; preview: string }>({ analyze: '', preview: '' });
 
   // Identity
   const [handle, setHandle] = useState('');
   const [name, setName] = useState('');
 
-  // Guided builder (soul step)
+  // Guided builder
   const [exampleTweets, setExampleTweets] = useState('');
   const [archetype, setArchetype] = useState('');
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -77,30 +96,101 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
   const [previewTweets, setPreviewTweets] = useState<PreviewTweet[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [regenerationsLeft, setRegenerationsLeft] = useState(2);
+  const [ratings, setRatings] = useState<Record<string, Rating>>({});
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [launched, setLaunched] = useState(false);
 
-  // Resume from OAuth callback
-  const searchParams = useSearchParams();
   useEffect(() => {
-    const resumeId = searchParams.get('setup');
-    const resumeStep = searchParams.get('step');
-    if (resumeId) {
-      setAgentId(resumeId);
-      if (resumeStep === 'soul' || resumeStep === 'analyze' || resumeStep === 'preview') {
-        setStep(resumeStep);
-      } else {
-        setStep('soul');
-      }
+    if (!open) return;
+
+    const searchResumeId = searchParams.get('setup');
+    const searchResumeStep = searchParams.get('step');
+    const resolvedResumeId = resumeAgentId || searchResumeId;
+    const resolvedResumeStep = initialStep || searchResumeStep;
+    const nextStep: ResumeStep | null =
+      resolvedResumeStep === 'soul' || resolvedResumeStep === 'analyze' || resolvedResumeStep === 'preview'
+        ? resolvedResumeStep
+        : null;
+
+    autoRunRef.current = { analyze: '', preview: '' };
+    setError(null);
+    setLoading(false);
+    setAnalysis(null);
+    setPreviewLoading(false);
+    setPreviewTweets([]);
+    setRatings({});
+    setRegeneratingId(null);
+    setRegenerationsLeft(2);
+    setLaunching(false);
+    setLaunched(false);
+    setExampleTweets('');
+    setArchetype('');
+    setSelectedTopics([]);
+    setFrequency('3x');
+
+    if (resolvedResumeId) {
+      setAgentId(resolvedResumeId);
+      setStep(nextStep ?? 'soul');
+      return;
     }
-  }, [searchParams]);
+
+    setAgentId(null);
+    setStep('identity');
+    setHandle('');
+    setName('');
+  }, [open, resumeAgentId, initialStep, searchParams]);
+
+  useEffect(() => {
+    if (!previewTweets.length) {
+      if (regeneratingId) setRegeneratingId(null);
+      return;
+    }
+
+    const liveIds = new Set(previewTweets.map((tweet) => tweet.id));
+    setRatings((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([tweetId]) => liveIds.has(tweetId))
+      ) as Record<string, Rating>;
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+
+    if (regeneratingId && !liveIds.has(regeneratingId)) {
+      setRegeneratingId(null);
+    }
+  }, [previewTweets, regeneratingId]);
+
+  useEffect(() => {
+    if (!open || !agentId) return;
+
+    const runKey = `${agentId}:${step}`;
+    if (step === 'analyze' && !analysis && !loading && autoRunRef.current.analyze !== runKey) {
+      autoRunRef.current.analyze = runKey;
+      void runAnalysis();
+    }
+
+    if (step === 'preview' && previewTweets.length === 0 && !previewLoading && autoRunRef.current.preview !== runKey) {
+      autoRunRef.current.preview = runKey;
+      void generatePreviewTweets();
+    }
+  }, [open, agentId, step, analysis, loading, previewTweets.length, previewLoading]);
 
   if (!open) return null;
 
   const stepIndex = STEPS.findIndex((s) => s.id === step);
+  const canGenerateVoice = archetype && selectedTopics.length > 0;
+  const reviewedTweetIds = previewTweets.filter((tweet) => ratings[tweet.id]).map((tweet) => tweet.id);
+  const approvedTweetIds = previewTweets
+    .filter((tweet) => ratings[tweet.id] === 'up')
+    .map((tweet) => tweet.id);
+  const canLaunch =
+    previewTweets.length > 0 &&
+    reviewedTweetIds.length === previewTweets.length &&
+    approvedTweetIds.length > 0 &&
+    !previewLoading &&
+    !launching;
 
-  // Step 1: Create agent, then redirect to Twitter OAuth
-  const handleCreateAndAuth = async () => {
+  async function handleCreateAndAuth() {
     if (!handle.trim() || !name.trim()) return;
     setLoading(true);
     setError(null);
@@ -134,18 +224,34 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
       setError(err instanceof Error ? err.message : 'Setup failed');
       setLoading(false);
     }
-  };
+  }
 
-  // Step 2: Submit guided builder to wizard API
-  const handleGenerateVoice = async () => {
-    if (!agentId || !archetype || selectedTopics.length === 0) return;
+  async function handleGenerateSoulFromTweets() {
+    if (!agentId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/generate-soul`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate voice');
+      autoRunRef.current.analyze = `${agentId}:analyze`;
+      setStep('analyze');
+      await runAnalysis();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate voice');
+      setLoading(false);
+    }
+  }
+
+  async function handleGenerateVoice() {
+    if (!agentId || !canGenerateVoice) return;
     setLoading(true);
     setError(null);
     try {
       const examples = exampleTweets
         .split('\n')
-        .map(t => t.trim())
-        .filter(t => t.length > 0);
+        .map((tweet) => tweet.trim())
+        .filter((tweet) => tweet.length > 0);
 
       const res = await fetch(`/api/agents/${agentId}/wizard`, {
         method: 'POST',
@@ -165,58 +271,63 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Voice generation failed');
 
+      autoRunRef.current.analyze = `${agentId}:analyze`;
       setStep('analyze');
-      runAnalysis();
+      await runAnalysis();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Voice generation failed');
       setLoading(false);
     }
-  };
+  }
 
-  // Step 3: Run analysis
-  const runAnalysis = async () => {
+  async function runAnalysis() {
     if (!agentId) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/agents/${agentId}/analyze`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Analysis failed');
       setAnalysis(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  // Transition to preview after analysis
-  const handleGoToPreview = async () => {
+  async function handleGoToPreview() {
+    if (!agentId) return;
+    autoRunRef.current.preview = `${agentId}:preview`;
     setStep('preview');
     await generatePreviewTweets();
-  };
+  }
 
-  // Step 4: Generate preview tweets
-  const generatePreviewTweets = async () => {
+  async function generatePreviewTweets() {
     if (!agentId) return;
     setPreviewLoading(true);
     setError(null);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
+
     try {
       const res = await fetch(`/api/agents/${agentId}/generate-tweet`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: 5, topic: 'general' }),
+        body: JSON.stringify({ count: 5 }),
         signal: controller.signal,
       });
       clearTimeout(timeout);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Preview generation failed');
-      setPreviewTweets(data.tweets || []);
+
+      setPreviewTweets(Array.isArray(data.tweets) ? data.tweets : []);
+      setRatings({});
+      setRegeneratingId(null);
+      setRegenerationsLeft(2);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError('Preview timed out. Claude is slow right now — click Retry.');
+        setError('Preview timed out. Claude is slow right now. Click Retry.');
       } else {
         setError(err instanceof Error ? err.message : 'Preview generation failed');
       }
@@ -224,67 +335,77 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
       clearTimeout(timeout);
       setPreviewLoading(false);
     }
-  };
+  }
 
-  // Regenerate a single tweet
-  const handleRegenerate = async (tweetId: string) => {
+  async function handleRegenerate(tweetId: string) {
     if (!agentId || regenerationsLeft <= 0) return;
-    setRegenerationsLeft(prev => prev - 1);
+
+    const res = await fetch(`/api/agents/${agentId}/generate-tweet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: 1, replaceTweetId: tweetId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Regeneration failed');
+
+    const replacement = Array.isArray(data.tweets) ? data.tweets[0] : null;
+    if (!replacement) {
+      throw new Error('Regeneration returned no replacement tweet');
+    }
+
+    setPreviewTweets((prev) => prev.map((tweet) => (tweet.id === tweetId ? replacement : tweet)));
+    setRegenerationsLeft((prev) => prev - 1);
+    setError(null);
+  }
+
+  async function handlePreviewRating(tweetId: string, rating: Rating) {
+    const tweet = previewTweets.find((item) => item.id === tweetId);
+    if (!tweet || !agentId) return;
+
+    setRatings((prev) => ({ ...prev, [tweetId]: rating }));
+
+    await fetch(`/api/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'feedback',
+        feedback: {
+          tweetText: tweet.content,
+          rating,
+          generatedAt: new Date().toISOString(),
+          source: 'preview_feedback',
+        },
+      }),
+    }).catch(() => {});
+
+    if (rating === 'down' && regenerationsLeft > 0) {
+      setRegeneratingId(tweetId);
+      try {
+        await handleRegenerate(tweetId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Regeneration failed');
+        setRegeneratingId(null);
+      }
+    }
+  }
+
+  async function handleLaunch() {
+    if (!agentId || !canLaunch) return;
+    setLaunching(true);
+    setError(null);
+
     try {
-      const res = await fetch(`/api/agents/${agentId}/generate-tweet`, {
+      const res = await fetch(`/api/agents/${agentId}/launch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: 1, topic: 'general' }),
+        body: JSON.stringify({
+          reviewedTweetIds,
+          approvedTweetIds,
+          postsPerDay: frequencyToPostsPerDay(frequency),
+        }),
       });
       const data = await res.json();
-      if (data.tweets && data.tweets.length > 0) {
-        setPreviewTweets(prev =>
-          prev.map(t => t.id === tweetId ? data.tweets[0] : t)
-        );
-      }
-    } catch {
-      // Keep original tweet on failure
-    }
-  };
-
-  // Final: Launch autopilot
-  const handleLaunch = async () => {
-    if (!agentId) return;
-    setLaunching(true);
-    try {
-      // Queue approved preview tweets so autopilot has content immediately
-      if (previewTweets.length > 0) {
-        await Promise.all(
-          previewTweets.map((t) =>
-            fetch(`/api/agents/${agentId}/queue/${t.id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'queued' }),
-            }).catch(() => {})
-          )
-        );
-      }
-
-      // Enable autopilot protocol
-      await fetch(`/api/agents/${agentId}/protocol/settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true, postsPerDay: frequency === '1x' ? 1 : frequency === '6x' ? 6 : 3 }),
-      });
-
-      // Update setup step to ready
-      await fetch(`/api/agents/${agentId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ setupStep: 'ready' }),
-      });
-
-      // Log funnel event
-      await fetch(`/api/agents/${agentId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'funnel_event', event: 'preview_approve' }),
-      }).catch(() => {});
+      if (!res.ok) throw new Error(data.error || 'Launch failed');
 
       setLaunched(true);
       setTimeout(() => {
@@ -296,32 +417,30 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
       setError(err instanceof Error ? err.message : 'Launch failed');
       setLaunching(false);
     }
-  };
+  }
 
-  const toggleTopic = (topic: string) => {
-    setSelectedTopics(prev =>
-      prev.includes(topic) ? prev.filter(t => t !== topic) : [...prev, topic]
+  function toggleTopic(topic: string) {
+    setSelectedTopics((prev) =>
+      prev.includes(topic) ? prev.filter((item) => item !== topic) : [...prev, topic]
     );
-  };
-
-  const canGenerateVoice = archetype && selectedTopics.length > 0;
+  }
 
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div className="modal" style={{ maxWidth: '520px' }}>
-        {/* Progress bar */}
         <div className="wizard-progress">
-          {STEPS.map((s, i) => (
-            <div key={s.id} className={`wizard-step ${i < stepIndex ? 'done' : ''} ${s.id === step ? 'current' : ''}`}>
-              <div className="wizard-step-num">{i < stepIndex ? '\u2713' : s.num}</div>
-              <span className="wizard-step-label">{s.label}</span>
+          {STEPS.map((item, index) => (
+            <div
+              key={item.id}
+              className={`wizard-step ${index < stepIndex ? 'done' : ''} ${item.id === step ? 'current' : ''}`}
+            >
+              <div className="wizard-step-num">{index < stepIndex ? '\u2713' : item.num}</div>
+              <span className="wizard-step-label">{item.label}</span>
             </div>
           ))}
         </div>
 
-        {/* Step content */}
         <div className="wizard-body">
-          {/* Step 1: Identity + OAuth redirect */}
           {step === 'identity' && (
             <>
               <div className="wizard-step-header">
@@ -337,7 +456,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                       type="text"
                       className="input"
                       value={handle}
-                      onChange={(e) => setHandle(e.target.value.replace(/^@/, ''))}
+                      onChange={(event) => setHandle(event.target.value.replace(/^@/, ''))}
                       placeholder="agenthandle"
                     />
                   </div>
@@ -348,7 +467,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                     type="text"
                     className="input"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(event) => setName(event.target.value)}
                     placeholder="Agent Name"
                   />
                 </div>
@@ -371,22 +490,53 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
             </>
           )}
 
-          {/* Step 2: Guided Voice Builder */}
           {step === 'soul' && (
             <>
               <div className="wizard-step-header">
                 <h3>Build Your Voice</h3>
-                <p>We&apos;ll generate your personality profile from these inputs.</p>
+                <p>Generate from your tweet history or define the voice contract manually below.</p>
               </div>
 
+              {agentId && (
+                <div style={{
+                  padding: '14px',
+                  marginBottom: '16px',
+                  background: 'rgba(139,92,246,0.06)',
+                  border: '1px solid rgba(139,92,246,0.2)',
+                  borderRadius: 'var(--radius-lg)',
+                }}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: '#8b5cf6' }}>
+                        RECOMMENDED: GENERATE FROM YOUR TWEETS
+                      </p>
+                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Analyze your timeline first so the setup contract starts from your real voice patterns.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ background: '#8b5cf6', flexShrink: 0 }}
+                      disabled={loading}
+                      onClick={handleGenerateSoulFromTweets}
+                    >
+                      {loading ? 'ANALYZING...' : 'AUTO-GENERATE'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', textAlign: 'center', marginBottom: '12px' }}>
+                — or build manually —
+              </p>
+
               <div className="wizard-builder-sections">
-                {/* Sub-section A: Example tweets (optional) */}
                 <div className="wizard-builder-section">
                   <div className="wizard-section-label">EXAMPLE TWEETS (OPTIONAL)</div>
                   <textarea
                     className="textarea"
                     value={exampleTweets}
-                    onChange={(e) => setExampleTweets(e.target.value)}
+                    onChange={(event) => setExampleTweets(event.target.value)}
                     placeholder="Paste 3-5 tweets you admire or your own best tweets, one per line..."
                     rows={4}
                   />
@@ -395,25 +545,23 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                   </p>
                 </div>
 
-                {/* Sub-section B: Voice archetype */}
                 <div className="wizard-builder-section">
                   <div className="wizard-section-label">VOICE ARCHETYPE</div>
                   <div className="wizard-tags" role="radiogroup" aria-label="Voice archetype">
-                    {ARCHETYPES.map((a) => (
+                    {ARCHETYPES.map((item) => (
                       <button
-                        key={a.id}
-                        className={`wizard-tag wizard-tag-selectable ${archetype === a.id ? 'tag-selected' : ''}`}
-                        onClick={() => setArchetype(a.id)}
+                        key={item.id}
+                        className={`wizard-tag wizard-tag-selectable ${archetype === item.id ? 'tag-selected' : ''}`}
+                        onClick={() => setArchetype(item.id)}
                         role="radio"
-                        aria-checked={archetype === a.id}
+                        aria-checked={archetype === item.id}
                       >
-                        {a.label}
+                        {item.label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Sub-section C: Topics */}
                 <div className="wizard-builder-section">
                   <div className="wizard-section-label">TOPICS (PICK 2-3)</div>
                   <div className="wizard-tags" role="group" aria-label="Topics">
@@ -431,13 +579,12 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                   </div>
                 </div>
 
-                {/* Sub-section D: Posting frequency */}
                 <div className="wizard-builder-section">
                   <div className="wizard-section-label">POSTING FREQUENCY</div>
                   <select
                     className="input"
                     value={frequency}
-                    onChange={(e) => setFrequency(e.target.value)}
+                    onChange={(event) => setFrequency(event.target.value)}
                     style={{ width: '180px' }}
                   >
                     <option value="1x">1x per day</option>
@@ -462,7 +609,6 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
             </>
           )}
 
-          {/* Step 3: Analysis */}
           {step === 'analyze' && (
             <>
               <div className="wizard-step-header">
@@ -513,8 +659,8 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                     <div className="wizard-analysis-section">
                       <p className="wizard-analysis-label">TOP PERFORMING FORMATS</p>
                       <div className="wizard-tags">
-                        {analysis.engagementPatterns.topFormats.map((f) => (
-                          <span key={f} className="wizard-tag">{f.replace(/_/g, ' ')}</span>
+                        {analysis.engagementPatterns.topFormats.map((format) => (
+                          <span key={format} className="wizard-tag">{format.replace(/_/g, ' ')}</span>
                         ))}
                       </div>
                     </div>
@@ -524,8 +670,8 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
                     <div className="wizard-analysis-section">
                       <p className="wizard-analysis-label">HIGHEST ENGAGEMENT TOPICS</p>
                       <div className="wizard-tags">
-                        {analysis.engagementPatterns.topTopics.map((t) => (
-                          <span key={t} className="wizard-tag tag-topic">{t}</span>
+                        {analysis.engagementPatterns.topTopics.map((topic) => (
+                          <span key={topic} className="wizard-tag tag-topic">{topic}</span>
                         ))}
                       </div>
                     </div>
@@ -556,55 +702,61 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
             </>
           )}
 
-          {/* Step 4: Preview & Feedback */}
           {step === 'preview' && (
             <>
               {launched ? (
                 <div className="wizard-launch-success">
                   <div className="wizard-launch-check">&#10003;</div>
                   <h3>Your agent is live</h3>
-                  <p>First post coming soon.</p>
+                  <p>Autopilot is armed and the approved tweets are queued.</p>
                 </div>
               ) : (
                 <>
                   <div className="wizard-step-header">
-                    <h3>Your Agent&apos;s Voice</h3>
-                    <p>Here&apos;s what your agent will sound like. Approve the ones that hit.</p>
+                    <h3>Review Preview Batch</h3>
+                    <p>Every preview tweet needs a decision, and at least one approved tweet must survive before launch.</p>
                   </div>
 
-                  {previewLoading && previewTweets.length === 0 && (
-                    <TweetPreviewSkeleton count={5} />
-                  )}
+                  {previewLoading && previewTweets.length === 0 && <TweetPreviewSkeleton count={5} />}
 
                   {error && previewTweets.length === 0 && (
                     <div>
                       <p className="wizard-error">{error}</p>
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                        <button className="btn btn-outline btn-sm" onClick={generatePreviewTweets}>RETRY</button>
-                        <button className="btn btn-outline btn-sm" onClick={handleLaunch}>SKIP TO LAUNCH</button>
-                      </div>
+                      <button className="btn btn-outline btn-sm" onClick={generatePreviewTweets} style={{ marginTop: '8px' }}>
+                        RETRY
+                      </button>
                     </div>
                   )}
 
                   {previewTweets.length > 0 && (
-                    <TweetPreview
-                      tweets={previewTweets}
-                      agentId={agentId!}
-                      onAllReviewed={() => {}}
-                      regenerationsLeft={regenerationsLeft}
-                      onRegenerate={handleRegenerate}
-                    />
+                    <>
+                      <TweetPreview
+                        tweets={previewTweets}
+                        ratings={ratings}
+                        regeneratingId={regeneratingId}
+                        regenerationsLeft={regenerationsLeft}
+                        onRate={handlePreviewRating}
+                      />
+
+                      {!canLaunch && (
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '12px' }}>
+                          Review every card and approve at least one tweet before autopilot can launch.
+                        </p>
+                      )}
+                    </>
                   )}
+
+                  {error && previewTweets.length > 0 && <p className="wizard-error">{error}</p>}
 
                   <div className="wizard-actions">
                     <button className="btn btn-outline" onClick={onClose}>CANCEL</button>
                     <button
                       className="btn btn-primary"
-                      disabled={previewLoading || launching}
+                      disabled={!canLaunch}
                       onClick={handleLaunch}
-                      style={{ background: !previewLoading ? '#8b5cf6' : undefined }}
+                      style={{ background: canLaunch ? '#8b5cf6' : undefined }}
                     >
-                      {launching ? 'LAUNCHING...' : 'START AUTOPILOT'}
+                      {launching ? 'LAUNCHING...' : 'APPROVE + ARM AUTOPILOT'}
                     </button>
                   </div>
                 </>

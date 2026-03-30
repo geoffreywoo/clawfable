@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelEvent } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { isSetupStep, normalizeSetupStep } from '@/lib/setup-state';
 
 // GET /api/agents/[id]
 export async function GET(
@@ -19,7 +20,7 @@ export async function GET(
       soulSummary: agent.soulSummary,
       isConnected: agent.isConnected,
       xUserId: agent.xUserId,
-      setupStep: agent.setupStep || 'ready',
+      setupStep: normalizeSetupStep(agent.setupStep),
       createdAt: agent.createdAt,
       hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
     });
@@ -54,7 +55,12 @@ export async function PATCH(
     const { name, soulMd, handle, setupStep } = body;
 
     const updates: Record<string, unknown> = {};
-    if (setupStep !== undefined) updates.setupStep = setupStep;
+    if (setupStep !== undefined) {
+      if (!isSetupStep(setupStep) || setupStep === 'ready') {
+        return NextResponse.json({ error: 'Invalid setup step update' }, { status: 400 });
+      }
+      updates.setupStep = setupStep;
+    }
     if (name !== undefined) updates.name = name;
     if (handle !== undefined) updates.handle = handle.replace(/^@/, '').trim();
     if (soulMd !== undefined) {

@@ -1,3 +1,5 @@
+import type { SetupStep } from './setup-state';
+
 // ─── User types ──────────────────────────────────────────────────────────────
 
 export interface User {
@@ -26,7 +28,7 @@ export interface Agent {
   accessSecret: string | null;
   isConnected: number; // 0 | 1
   xUserId: string | null;
-  setupStep: string; // 'oauth' | 'soul' | 'analyze' | 'ready'
+  setupStep: SetupStep;
   createdAt: string;
 }
 
@@ -38,7 +40,7 @@ export interface AgentSummary {
   soulMdPreview: string;
   isConnected: number;
   xUserId: string | null;
-  setupStep: string;
+  setupStep: SetupStep;
   createdAt: string;
   tweetCount: number;
   mentionCount: number;
@@ -52,17 +54,19 @@ export interface AgentDetail {
   soulSummary: string | null;
   isConnected: number;
   xUserId: string | null;
-  setupStep: string;
+  setupStep: SetupStep;
   createdAt: string;
   hasKeys: boolean;
 }
+
+export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted';
 
 export interface Tweet {
   id: string;
   agentId: string;
   content: string;
   type: string; // original | reply | quote
-  status: string; // draft | queued | posted
+  status: TweetStatus;
   topic: string | null;
   xTweetId: string | null;
   quoteTweetId: string | null;  // X tweet ID to quote (for QTs)
@@ -272,6 +276,10 @@ export interface FeedbackEntry {
   tweetText: string;
   rating: 'up' | 'down';
   generatedAt: string;
+  reason?: string;
+  intentSummary?: string;
+  source?: 'preview_feedback' | 'queue_delete';
+  userProvidedReason?: boolean;
 }
 
 export interface FunnelEvent {

@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createTweet, getAnalysis, getStyleSignals, getRecentNegativeFeedback, checkRateLimit } from '@/lib/kv-storage';
+import {
+  checkRateLimit,
+  createTweet,
+  deleteTweet,
+  getAnalysis,
+  getPreviewTweets,
+  getRecentNegativeFeedback,
+  getStyleSignals,
+} from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
@@ -25,17 +33,30 @@ export async function POST(
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { topic, headline, count: batchCount } = body as { topic?: string; headline?: string; count?: number };
+    const {
+      topic,
+      headline,
+      count: batchCount,
+      replaceTweetId,
+    } = body as { topic?: string; headline?: string; count?: number; replaceTweetId?: string };
+    const isPreviewRequest = batchCount !== undefined && !topic && !headline;
 
-    // Batch mode skips topic requirement (preview uses no topic)
-    if (!batchCount && !topic && !headline) {
+    if (!isPreviewRequest && !batchCount && !topic && !headline) {
       return NextResponse.json({ error: 'topic or headline required' }, { status: 400 });
     }
 
-    // Batch mode for preview: generate multiple tweets in one call
-    if (batchCount && batchCount > 1) {
+    if (isPreviewRequest) {
       const analysis = await getAnalysis(id);
+      if (!analysis) {
+        return NextResponse.json({ error: 'Run account analysis before generating preview tweets' }, { status: 400 });
+      }
+
       const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+      const existingPreviewTweets = await getPreviewTweets(id);
+
+      if (replaceTweetId && !existingPreviewTweets.some((tweet) => tweet.id === replaceTweetId)) {
+        return NextResponse.json({ error: 'Preview tweet not found' }, { status: 404 });
+      }
 
       // Enhance voice profile with style signals and feedback
       const [styleSignals, negatives] = await Promise.all([
@@ -47,32 +68,34 @@ export async function POST(
         voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
       }
       if (negatives.length > 0) {
-        voiceProfile.communicationStyle += `\n\n## REJECTED DRAFTS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
+        voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
       }
 
-      const n = Math.min(batchCount, 5);
-      if (analysis) {
-        const batch = await generateViralBatch(voiceProfile, analysis, n, null, null, agent.soulMd);
-        const tweets = [];
-        for (const item of batch) {
-          const tweet = await createTweet({
-            agentId: id,
-            content: item.content,
-            type: item.quoteTweetId ? 'quote' : 'original',
-            status: 'draft',
-            topic: item.targetTopic || 'general',
-            xTweetId: null,
-            quoteTweetId: item.quoteTweetId || null,
-            quoteTweetAuthor: item.quoteTweetAuthor || null,
-            scheduledAt: null,
-          });
-          tweets.push(tweet);
-        }
-        return NextResponse.json({ tweets });
+      const requestedCount = typeof batchCount === 'number' ? batchCount : 1;
+      const previewCount = Math.min(Math.max(Math.floor(requestedCount), 1), 5);
+      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, null, agent.soulMd);
+      const tweets = [];
+      for (const item of batch) {
+        const tweet = await createTweet({
+          agentId: id,
+          content: item.content,
+          type: item.quoteTweetId ? 'quote' : 'original',
+          status: 'preview',
+          topic: item.targetTopic || 'general',
+          xTweetId: null,
+          quoteTweetId: item.quoteTweetId || null,
+          quoteTweetAuthor: item.quoteTweetAuthor || null,
+          scheduledAt: null,
+        });
+        tweets.push(tweet);
       }
 
-      // Fallback for batch without analysis
-      return NextResponse.json({ tweets: [] });
+      const stalePreviewIds = replaceTweetId
+        ? [replaceTweetId]
+        : existingPreviewTweets.map((tweet) => tweet.id);
+      await Promise.all(stalePreviewIds.map((tweetId) => deleteTweet(tweetId)));
+
+      return NextResponse.json({ tweets });
     }
 
     const analysis = await getAnalysis(id);
@@ -88,7 +111,7 @@ export async function POST(
       voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
     }
     if (negatives.length > 0) {
-      voiceProfile.communicationStyle += `\n\n## REJECTED DRAFTS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
+      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
     }
 
     // Use Claude if analysis exists, with the topic as trending context

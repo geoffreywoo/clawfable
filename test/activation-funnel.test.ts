@@ -89,8 +89,8 @@ describe('Activation Funnel KV Storage', () => {
 
       const negatives = await getRecentNegativeFeedback('f3');
       expect(negatives.length).toBe(2);
-      expect(negatives).toContain('bad tweet 1');
-      expect(negatives).toContain('bad tweet 2');
+      expect(negatives.some((entry) => entry.includes('bad tweet 1'))).toBe(true);
+      expect(negatives.some((entry) => entry.includes('bad tweet 2'))).toBe(true);
     });
   });
 

@@ -761,7 +761,10 @@ export async function getRecentNegativeFeedback(agentId: string, limit = 5): Pro
   return all
     .filter(e => e.rating === 'down' && new Date(e.generatedAt).getTime() > thirtyDaysAgo)
     .slice(-limit)
-    .map(e => e.tweetText);
+    .map((entry) => {
+      const reason = entry.intentSummary?.trim() || entry.reason?.trim();
+      return reason ? `${entry.tweetText} (why it was rejected: ${reason})` : entry.tweetText;
+    });
 }
 
 // ─── Soul backup storage ────────────────────────────────────────────────────

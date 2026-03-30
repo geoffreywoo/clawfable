@@ -3,6 +3,7 @@ import { saveAnalysis, updateAgent, checkRateLimit } from '@/lib/kv-storage';
 import { decodeKeys } from '@/lib/twitter-client';
 import { analyzeAccount } from '@/lib/analysis';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { getPostAnalysisStep } from '@/lib/setup-state';
 
 // POST /api/agents/[id]/analyze — run account analysis
 export async function POST(
@@ -36,9 +37,9 @@ export async function POST(
     const analysis = await analyzeAccount(keys, agent.xUserId, id);
     await saveAnalysis(id, analysis);
 
-    // Advance setup step if in analyze phase
+    // Analysis unlocks preview, but launch approval is what makes the agent ready.
     if (agent.setupStep === 'analyze') {
-      await updateAgent(id, { setupStep: 'ready' });
+      await updateAgent(id, { setupStep: getPostAnalysisStep(agent.setupStep) });
     }
 
     return NextResponse.json(analysis);

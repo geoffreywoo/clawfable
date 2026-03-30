@@ -8,6 +8,7 @@ import {
 } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
+import { normalizeSetupStep } from '@/lib/setup-state';
 
 // GET /api/agents — list current user's agents
 export async function GET() {
@@ -23,9 +24,9 @@ export async function GET() {
         soulMdPreview: a.soulMd.split('\n').find((l) => l.trim() && !l.startsWith('#')) || '',
         isConnected: a.isConnected,
         xUserId: a.xUserId,
-        setupStep: a.setupStep || 'ready',
+        setupStep: normalizeSetupStep(a.setupStep),
         createdAt: a.createdAt,
-        tweetCount: (await getTweets(a.id)).length,
+        tweetCount: (await getTweets(a.id)).filter((tweet) => tweet.status !== 'preview').length,
         mentionCount: (await getMentions(a.id)).length,
       }))
     );

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateTweet, deleteTweet } from '@/lib/kv-storage';
+import { deleteTweet, getTweet, saveFeedback, updateTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { inferDeleteIntent } from '@/lib/delete-intent';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -10,11 +11,21 @@ export async function PATCH(
   const { id, tweetId } = await params;
   try {
     await requireAgentAccess(id);
+    const tweet = await getTweet(tweetId);
+    if (!tweet || tweet.agentId !== id) {
+      return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
+    }
+
     const body = await request.json();
     const { content, status, scheduledAt } = body;
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
-    if (status !== undefined) updates.status = status;
+    if (status !== undefined) {
+      if (!['draft', 'queued', 'posted'].includes(status)) {
+        return NextResponse.json({ error: 'Invalid tweet status' }, { status: 400 });
+      }
+      updates.status = status;
+    }
     if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt;
     const updated = await updateTweet(tweetId, updates as Parameters<typeof updateTweet>[1]);
     return NextResponse.json(updated);
@@ -27,14 +38,41 @@ export async function PATCH(
 
 // DELETE /api/agents/[id]/queue/[tweetId]
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; tweetId: string }> }
 ) {
   const { id, tweetId } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent } = await requireAgentAccess(id);
+    const tweet = await getTweet(tweetId);
+    if (!tweet || tweet.agentId !== id) {
+      return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
+    }
+
+    const body = await request.json().catch(() => null);
+    const userReason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    const intentSummary = userReason || await inferDeleteIntent({
+      agentName: agent.name,
+      soulMd: agent.soulMd,
+      tweetText: tweet.content,
+    });
+
+    await saveFeedback(id, {
+      tweetText: tweet.content,
+      rating: 'down',
+      generatedAt: new Date().toISOString(),
+      reason: userReason || undefined,
+      intentSummary,
+      source: 'queue_delete',
+      userProvidedReason: !!userReason,
+    });
+
     await deleteTweet(tweetId);
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      feedbackSource: userReason ? 'user' : 'inferred',
+      intentSummary,
+    });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to delete tweet' }, { status: 500 });

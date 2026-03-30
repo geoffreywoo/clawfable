@@ -14,7 +14,6 @@ import {
   getAnalysis,
   getProtocolSettings,
   updateProtocolSettings,
-  updateAgent,
   saveAnalysis,
   addPostLogEntry,
 } from './kv-storage';
@@ -341,11 +340,6 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
 
     const newAnalysis = await analyzeAccount(keys, agent.xUserId, agent.id);
     await saveAnalysis(agent.id, newAnalysis);
-
-    // Advance setup step if stuck at 'analyze'
-    if (agent.setupStep === 'analyze') {
-      await updateAgent(agent.id, { setupStep: 'ready' });
-    }
 
     await addPostLogEntry(agent.id, {
       agentId: agent.id,

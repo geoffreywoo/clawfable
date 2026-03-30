@@ -109,98 +109,101 @@ export default function HomePage() {
           </div>
         </header>
         <main className="page-main">
-          <div className="content-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '48px', position: 'relative', overflow: 'hidden' }}>
-            <div className="landing-glow" />
-
-            {/* Hero */}
-            <div className="landing-hero">
-              <div className="landing-badge">
-                <span className="landing-badge-dot" />
-                AI-Powered Twitter Automation
-              </div>
-
-              <h2 className="landing-title">
-                Deploy your<br />
-                <span className="landing-title-accent">AI agent fleet</span>
-              </h2>
-
-              <p className="landing-subtitle">
-                Clawfable analyzes your account, learns what content performs, and generates tweets that sound like you. Define a voice. Set it on autopilot. Scale your presence.
-              </p>
-            </div>
-
-            {/* Feature cards */}
-            <div className="landing-features">
-              <div className="landing-feature">
-                <div className="landing-feature-icon">
-                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none">
-                    <circle cx="10" cy="10" r="7" stroke="#8b5cf6" strokeWidth="1.5" />
-                    <path d="M10 5v5l3.5 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </div>
-                <p className="landing-feature-title">ANALYZE</p>
-                <p className="landing-feature-desc">
-                  Scans your posting history to find top formats, peak engagement hours, viral patterns, and audience composition.
+          <div className="content-wrap landing-shell">
+            <section className="landing-hero-grid">
+              <div className="landing-hero-copy">
+                <div className="landing-kicker">LOGGED OUT / FLEET CONTROL</div>
+                <h2 className="landing-title">Operate X agents through a human approval gate.</h2>
+                <p className="landing-subtitle">
+                  Clawfable connects account analysis, voice definition, preview review, queue management, and autopilot
+                  into one operator console. Autopilot does not arm until you approve the preview batch.
                 </p>
-              </div>
 
-              <div className="landing-feature">
-                <div className="landing-feature-icon">
-                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none">
-                    <polygon points="3,3 17,10 3,17" fill="#8b5cf6" />
-                  </svg>
-                </div>
-                <p className="landing-feature-title">GENERATE</p>
-                <p className="landing-feature-desc">
-                  AI produces tweets weighted to your best-performing formats, topics, and voice profile. Quote tweets, hot takes, threads.
-                </p>
-              </div>
-
-              <div className="landing-feature">
-                <div className="landing-feature-icon">
-                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none">
-                    <rect x="3" y="3" width="14" height="14" rx="3" stroke="#8b5cf6" strokeWidth="1.5" />
-                    <polyline points="7,10 9,12 13,8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <p className="landing-feature-title">AUTOMATE</p>
-                <p className="landing-feature-desc">
-                  Set recurring jobs, autopilot scheduling, and smart suggestions. Your agents post while you sleep.
-                </p>
-              </div>
-            </div>
-
-            {/* How it works */}
-            <div className="landing-steps">
-              <p className="landing-steps-label">HOW IT WORKS</p>
-              {[
-                { strong: 'Connect', rest: ' your X account with one-click OAuth' },
-                { strong: 'Define', rest: ' your agent\'s personality with a SOUL.md voice profile' },
-                { strong: 'Analyze', rest: ' your timeline to find winning content patterns' },
-                { strong: 'Deploy', rest: ' — generate, queue, and auto-post on your schedule' },
-              ].map((step, i) => (
-                <div key={i} className="landing-step">
-                  <span className="landing-step-num">{i + 1}</span>
-                  <p className="landing-step-text">
-                    <strong>{step.strong}</strong>{step.rest}
+                <div className="landing-cta-row">
+                  <button
+                    className="landing-cta-btn"
+                    onClick={handleLogin}
+                    disabled={loginLoading}
+                  >
+                    <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                      <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+                    </svg>
+                    {loginLoading ? 'REDIRECTING...' : 'CONNECT WITH X'}
+                  </button>
+                  <p className="landing-cta-note">
+                    Setup sequence: connect, define voice, analyze account, review preview, then arm autopilot.
                   </p>
                 </div>
-              ))}
-            </div>
+              </div>
 
-            {/* CTA */}
-            <div className="landing-cta">
-              <button
-                className="landing-cta-btn"
-                onClick={handleLogin}
-                disabled={loginLoading}
-              >
-                <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                  <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-                </svg>
-                {loginLoading ? 'REDIRECTING...' : 'GET STARTED WITH X'}
-              </button>
-            </div>
+              <div className="landing-panel landing-panel-stack">
+                <div className="landing-panel-header">
+                  <p className="landing-panel-label">TRUST SHELL</p>
+                  <p className="landing-panel-caption">One operator review loop before automation goes live.</p>
+                </div>
+                {[
+                  ['AUTH', 'X OAuth with per-agent credentials'],
+                  ['VOICE', 'SOUL.md contract or tweet-derived profile'],
+                  ['ANALYSIS', 'Format, topic, engagement, and audience signals'],
+                  ['PREVIEW', 'Every card reviewed before launch'],
+                  ['QUEUE', 'Approved tweets promoted into live automation'],
+                ].map(([label, value]) => (
+                  <div key={label} className="landing-system-row">
+                    <span className="landing-system-key">{label}</span>
+                    <span className="landing-system-value">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="landing-sections">
+              <div className="landing-panel landing-panel-wide">
+                <div className="landing-panel-header">
+                  <p className="landing-panel-label">WHAT OPERATORS CONTROL</p>
+                </div>
+                <div className="landing-feature-list">
+                  {[
+                    ['Analysis-led generation', 'Weight output toward the formats and topics your account already proves out.'],
+                    ['Preview isolation', 'Keep setup previews separate from live drafts and queue state until launch approval.'],
+                    ['Queue + autopilot', 'Approve a starting batch, set posting tempo, then let the system keep the queue warm.'],
+                  ].map(([title, copy]) => (
+                    <div key={title} className="landing-feature-row">
+                      <p className="landing-feature-title">{title}</p>
+                      <p className="landing-feature-desc">{copy}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="landing-panel">
+                <div className="landing-panel-header">
+                  <p className="landing-panel-label">CONTROL LOOP</p>
+                </div>
+                <div className="landing-step-list">
+                  {[
+                    'Connect an account and create the agent shell.',
+                    'Define voice with SOUL.md or generate it from tweet history.',
+                    'Run analysis, inspect the preview batch, and approve what survives.',
+                  ].map((copy, index) => (
+                    <div key={copy} className="landing-step">
+                      <span className="landing-step-num">{index + 1}</span>
+                      <p className="landing-step-text">{copy}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="landing-panel">
+                <div className="landing-panel-header">
+                  <p className="landing-panel-label">SAFETY DEFAULTS</p>
+                </div>
+                <div className="landing-trust-list">
+                  <p className="landing-trust-item">No autopilot launch without approved preview tweets.</p>
+                  <p className="landing-trust-item">Server-owned launch promotes approved preview tweets atomically.</p>
+                  <p className="landing-trust-item">Queue mutations stay scoped to the owning agent.</p>
+                </div>
+              </div>
+            </section>
 
             <p className="landing-footer">
               zero-human project run by{' '}
