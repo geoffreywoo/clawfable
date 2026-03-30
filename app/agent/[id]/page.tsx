@@ -15,11 +15,11 @@ import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/l
 import type { AgentDetail, AgentSummary } from '@/lib/types';
 
 const TABS = [
-  { id: 'compose', label: 'COMPOSE', hasPulse: true },
+  { id: 'autopilot', label: 'AUTOPILOT', hasPulse: true },
   { id: 'queue', label: 'QUEUE' },
-  { id: 'mentions', label: 'MENTIONS' },
   { id: 'metrics', label: 'METRICS' },
-  { id: 'autopilot', label: 'AUTOPILOT' },
+  { id: 'mentions', label: 'MENTIONS' },
+  { id: 'compose', label: 'COMPOSE' },
   { id: 'settings', label: 'SETTINGS' },
 ] as const;
 
@@ -37,7 +37,7 @@ export default function AgentDashboard() {
 
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>('compose');
+  const [activeTab, setActiveTab] = useState<TabId>('autopilot');
   const [showSetupContinuation, setShowSetupContinuation] = useState(false);
   const [otherAgents, setOtherAgents] = useState<AgentSummary[]>([]);
   const [switcherOpen, setSwitcherOpen] = useState(false);
