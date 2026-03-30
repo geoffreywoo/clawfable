@@ -17,13 +17,6 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function formatHour(h: number): string {
-  if (h === 0) return '12AM';
-  if (h < 12) return `${h}AM`;
-  if (h === 12) return '12PM';
-  return `${h - 12}PM`;
-}
-
 export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
@@ -231,23 +224,11 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 </div>
               </div>
               {settings.enabled && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                   <div className="field"><label>POSTS/DAY</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
-                      {[1, 2, 3, 4, 6, 8, 12].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </div>
-                  <div className="field"><label>START</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.activeHoursStart}
-                      onChange={(e) => handleUpdateSettings({ activeHoursStart: Number(e.target.value) })}>
-                      {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{formatHour(i)}</option>)}
-                    </select>
-                  </div>
-                  <div className="field"><label>END</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.activeHoursEnd}
-                      onChange={(e) => handleUpdateSettings({ activeHoursEnd: Number(e.target.value) })}>
-                      {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{formatHour(i)}</option>)}
+                      {[1, 2, 3, 4, 6, 8, 12, 24].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                   <div className="field"><label>MIN QUEUE</label>

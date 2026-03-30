@@ -2150,3 +2150,119 @@ h1, h2, h3, h4 {
     grid-template-columns: repeat(2, 1fr) !important;
   }
 }
+
+/* ─── Mobile Responsive: Dashboard + Grids ──────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Dashboard header: stack vertically */
+  .dashboard-header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  /* Tab nav: horizontal scroll, smaller padding */
+  .dashboard-nav {
+    padding: 6px 12px;
+    gap: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-btn {
+    font-size: 10px;
+    padding: 5px 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Dashboard content: less padding */
+  .dashboard-content {
+    padding: 16px 12px;
+  }
+
+  /* Agent grid: single column */
+  .agent-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Metrics grid: 2 columns */
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .metric-card {
+    padding: 14px;
+  }
+
+  .metric-value {
+    font-size: 20px;
+  }
+
+  /* Page layout */
+  .page-main {
+    padding: 16px 12px;
+  }
+
+  .site-header {
+    padding: 8px 12px;
+  }
+
+  .site-header-right {
+    gap: 10px;
+  }
+
+  /* Section titles */
+  .section-title h2 {
+    font-size: 11px;
+  }
+
+  /* Perf section */
+  .perf-row {
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+
+  .perf-tweet-content {
+    font-size: 11px;
+  }
+
+  /* Mentions */
+  .mention-card {
+    padding: 12px;
+  }
+
+  /* Queue items */
+  .queue-item {
+    padding: 12px;
+  }
+
+  /* Typography scale-down */
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; }
+  h3 { font-size: 14px; }
+
+  /* Touch targets: minimum 44px */
+  .btn, .tab-btn, .tweet-action, .wizard-tag-selectable {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Metric grid: single column on very small screens */
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dashboard header: hide handle on tiny screens */
+  .dashboard-header [data-testid="text-handle"] {
+    display: none;
+  }
+
+  /* Autopilot settings: stack */
+  .autopilot-setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

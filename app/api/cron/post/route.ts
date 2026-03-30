@@ -43,7 +43,9 @@ export async function GET(request: NextRequest) {
               reason: `${refreshed} new`,
             });
           }
-        } catch {}
+        } catch (err) {
+          console.error(`[cron] mentions refresh failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
 
         // Track performance of posted tweets + rebuild learnings
         try {
@@ -52,7 +54,9 @@ export async function GET(request: NextRequest) {
           if (tracked > 0) {
             await buildLearnings(agent);
           }
-        } catch {}
+        } catch (err) {
+          console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
       }
 
       // Run autopilot if auto-post OR auto-reply is enabled

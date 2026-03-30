@@ -30,7 +30,7 @@ export async function PATCH(
     const body = await request.json();
 
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
-      'enabled', 'postsPerDay', 'activeHoursStart', 'activeHoursEnd', 'minQueueSize',
+      'enabled', 'postsPerDay', 'minQueueSize',
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
     ];
     const updates: Record<string, unknown> = {};

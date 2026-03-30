@@ -78,24 +78,12 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     }
   }
 
-  // --- Auto-post from queue (respects active hours + cooldown) ---
+  // --- Auto-post from queue ---
   if (!settings.enabled) {
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0 ? `Sent ${repliesSent} replies (auto-post disabled)` : 'Auto-post disabled',
-      repliesSent,
-    };
-  }
-
-  const nowUtc = new Date().getUTCHours();
-  if (!isWithinActiveHours(nowUtc, settings.activeHoursStart, settings.activeHoursEnd)) {
-    return {
-      agentId,
-      action: repliesSent > 0 ? 'replied' : 'skipped',
-      reason: repliesSent > 0
-        ? `Sent ${repliesSent} replies. Post skipped: outside active hours`
-        : `Outside active hours (${settings.activeHoursStart}-${settings.activeHoursEnd} UTC)`,
       repliesSent,
     };
   }
@@ -368,12 +356,3 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
   }
 }
 
-function isWithinActiveHours(currentHour: number, start: number, end: number): boolean {
-  // start === end means "always active" (24h)
-  if (start === end) return true;
-  if (start < end) {
-    return currentHour >= start && currentHour < end;
-  }
-  // Wraps midnight (e.g., 22-6)
-  return currentHour >= start || currentHour < end;
-}

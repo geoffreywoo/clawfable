@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createTweet, getAnalysis, getStyleSignals, getRecentNegativeFeedback } from '@/lib/kv-storage';
+import { createTweet, getAnalysis, getStyleSignals, getRecentNegativeFeedback, checkRateLimit } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
@@ -13,8 +13,19 @@ export async function POST(
   try {
     const { agent } = await requireAgentAccess(id);
 
-    const body = await request.json();
-    const { topic, headline, count: batchCount } = body;
+    // Rate limit: 20 generations per hour per agent
+    const allowed = await checkRateLimit(id, 'generate', 20);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Rate limit exceeded. Try again later.' }, { status: 429 });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const { topic, headline, count: batchCount } = body as { topic?: string; headline?: string; count?: number };
 
     // Batch mode skips topic requirement (preview uses no topic)
     if (!batchCount && !topic && !headline) {
