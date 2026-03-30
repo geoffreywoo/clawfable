@@ -42,6 +42,9 @@ export async function launchAgentFromPreview({
   const previewIds = new Set(previewTweets.map((tweet) => tweet.id));
   const requestedApprovals = dedupeIds(approvedTweetIds);
 
+  console.log(`[launch] KV preview tweets: ${previewTweets.length} ids=[${[...previewIds].join(',')}] statuses=[${previewTweets.map(t => t.status).join(',')}]`);
+  console.log(`[launch] Client approvals: ${requestedApprovals.length} ids=[${requestedApprovals.join(',')}]`);
+
   // Resolve approved IDs against what actually exists in KV.
   // Client state can drift from server state (regeneration, race conditions),
   // so we accept any valid preview tweet ID and silently drop stale ones.
