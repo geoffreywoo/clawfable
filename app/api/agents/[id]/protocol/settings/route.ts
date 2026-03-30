@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { clampPostsPerDay } from '@/lib/survivability';
 
 // GET /api/agents/[id]/protocol/settings
 export async function GET(
@@ -37,6 +38,11 @@ export async function PATCH(
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {
       if (body[key] !== undefined) updates[key] = body[key];
+    }
+
+    // Enforce safe posting limits
+    if (typeof updates.postsPerDay === 'number') {
+      updates.postsPerDay = clampPostsPerDay(updates.postsPerDay);
     }
 
     // Freeze baseline on first autopilot enable

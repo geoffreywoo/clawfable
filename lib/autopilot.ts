@@ -20,11 +20,18 @@ import {
   createMention,
   getMentions,
   addPostLogEntry,
+  getPostLog,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
 import { fetchTrendingFromFollowing } from './trending';
+import {
+  jitterInterval,
+  isDailyCapReached,
+  pickDiverseTweet,
+  clampPostsPerDay,
+} from './survivability';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -89,7 +96,11 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
-  const minIntervalMs = (24 / settings.postsPerDay) * 60 * 60 * 1000;
+  // Clamp postsPerDay to safe maximum
+  const safePostsPerDay = clampPostsPerDay(settings.postsPerDay);
+  const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
+  // Jitter ±15% so posts don't land at exact intervals (bot detection signal)
+  const minIntervalMs = jitterInterval(baseIntervalMs);
   if (settings.lastPostedAt) {
     const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
     if (elapsed < minIntervalMs) {
@@ -103,6 +114,19 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
         repliesSent,
       };
     }
+  }
+
+  // Daily hard cap — stop posting if we've hit the absolute limit
+  const postLog = await getPostLog(agentId, 50);
+  if (isDailyCapReached(postLog)) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. Daily post cap reached.`
+        : 'Daily post cap reached — pausing until tomorrow',
+      repliesSent,
+    };
   }
 
   // Ensure queue has content
@@ -125,7 +149,12 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
-  const tweet = queue[queue.length - 1]; // oldest first
+  // Pick tweet with diversity awareness (avoids consecutive same-format/topic + near-duplicates)
+  const recentPostEntries = postLog
+    .filter((e) => (!e.action || e.action === 'posted') && e.content)
+    .slice(0, 10)
+    .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
+  const tweet = pickDiverseTweet(queue, recentPostEntries) || queue[queue.length - 1];
 
   try {
     const result = await postTweet(keys, tweet.content, tweet.quoteTweetId || undefined);
