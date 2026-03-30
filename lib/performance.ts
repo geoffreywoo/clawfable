@@ -14,6 +14,7 @@ import {
   getAnalysis,
   getProtocolSettings,
   updateProtocolSettings,
+  updateAgent,
   saveAnalysis,
   addPostLogEntry,
 } from './kv-storage';
@@ -322,11 +323,13 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
   }
 
   const analysis = await getAnalysis(agent.id);
-  if (!analysis) return false;
 
-  const ageMs = Date.now() - new Date(analysis.analyzedAt).getTime();
-  const sevenDays = 7 * 24 * 60 * 60 * 1000;
-  if (ageMs < sevenDays) return false;
+  // Run if: no analysis exists, or analysis is older than 7 days
+  if (analysis) {
+    const ageMs = Date.now() - new Date(analysis.analyzedAt).getTime();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    if (ageMs < sevenDays) return false;
+  }
 
   try {
     const keys = decodeKeys({
@@ -338,6 +341,11 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
 
     const newAnalysis = await analyzeAccount(keys, agent.xUserId, agent.id);
     await saveAnalysis(agent.id, newAnalysis);
+
+    // Advance setup step if stuck at 'analyze'
+    if (agent.setupStep === 'analyze') {
+      await updateAgent(agent.id, { setupStep: 'ready' });
+    }
 
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
