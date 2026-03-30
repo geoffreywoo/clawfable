@@ -45,12 +45,28 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
 
   useEffect(() => {
     (async () => {
+      // Load stored mentions first
       await loadMentions();
+      let connected = false;
       try {
         const a = await fetch(`/api/agents/${agentId}`).then((r) => r.json());
-        setAgentConnected(a.isConnected === 1);
+        connected = a.isConnected === 1;
+        setAgentConnected(connected);
       } catch {}
       setLoading(false);
+
+      // If connected and no stored mentions, auto-fetch from X
+      if (connected && mentions.length === 0) {
+        setIsRefreshing(true);
+        try {
+          const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data)) setMentions(data);
+          }
+        } catch {}
+        setIsRefreshing(false);
+      }
     })();
   }, [agentId]);
 

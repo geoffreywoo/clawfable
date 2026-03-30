@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, updateAgent } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions } from '@/lib/kv-storage';
+import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
 
@@ -63,6 +64,31 @@ export async function GET(request: NextRequest) {
       });
 
       await addAgentToUser(userId, agent.id);
+
+      // Pre-fetch mentions so they're available immediately
+      try {
+        const agentKeys = {
+          appKey: consumerKey,
+          appSecret: consumerSecret,
+          accessToken,
+          accessSecret,
+        };
+        const rawMentions = await getMentionsFromTwitter(agentKeys, userId);
+        for (const m of rawMentions) {
+          await createMention({
+            agentId: agent.id,
+            author: String(m.authorName || m.authorId),
+            authorHandle: `@${String(m.authorUsername || m.authorId)}`,
+            content: m.text,
+            tweetId: m.id,
+            engagementLikes: 0,
+            engagementRetweets: 0,
+            createdAt: m.createdAt,
+          });
+        }
+      } catch {
+        // Non-critical — mentions will be fetched by cron later
+      }
 
       // Redirect to agent dashboard with setup continuation
       redirectPath = `/agent/${agent.id}?oauth=success&username=${screenName}`;
