@@ -174,7 +174,7 @@ ${soulMd}`);
 5. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
 
 ## RULES
-1. VARY tweet length naturally. Short punchy tweets (under 100 chars) are great. Medium takes (150-280 chars) work well. Longer posts (300-800+ chars) are fine when the idea needs room — X supports up to 4000 chars. Don't pad short ideas or truncate long ones. Let the content dictate the length.
+1. MIX tweet lengths across the batch. Target distribution: ~30% short punches (under 200 chars), ~30% medium takes (200-500 chars), ~40% long-form posts (500-2000 chars). Longer posts should go deep — multi-paragraph analysis, structured breakdowns, contrarian arguments with evidence, storytelling. X supports up to 4000 chars. Don't default to short — the best-performing tweets on X Premium are often 500-1500 chars because they reward depth and insight. Use line breaks for readability in longer posts.
 2. Write in this account's exact voice. Match the style of the top performing tweets.
 3. No threads, no "1/", no emojis unless the account uses them.
 4. Never use hashtags unless the account's viral tweets use them.
@@ -200,15 +200,15 @@ export async function generateViralBatch(
 ): Promise<ProtocolTweet[]> {
   const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd);
 
-  const userPrompt = `Generate exactly ${count} tweets. For each tweet, output a JSON object on its own line with these fields:
-- "content": the tweet text (MUST be under 280 characters)
-- "format": one of: qt_contrarian, qt_reframe, qt_question, qt_context, qt_one_liner, hot_take, question, data_point, short_punch, observation
+  const userPrompt = `Generate exactly ${count} tweets. Mix lengths: some short punches, some medium takes, and some long-form posts (500-1500+ chars with line breaks). For each tweet, output a JSON object on its own line with these fields:
+- "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
+- "format": one of: qt_contrarian, qt_reframe, qt_question, qt_context, qt_one_liner, hot_take, question, data_point, short_punch, long_form, analysis, observation
 - "targetTopic": what topic this tweet is about
 - "rationale": 1 sentence on why this should perform well
 - "quoteTweetId": the ID of the tweet being quoted (from the quotable list), or null for originals
 - "quoteTweetAuthor": the @handle of the author being quoted, or null for originals
 
-Prioritize QTs — they get more reach. Output ONLY JSON objects, one per line, no markdown fencing.`;
+Prioritize QTs — they get more reach. Include at least 1 long-form post per batch. Output ONLY JSON objects, one per line, no markdown fencing.`;
 
   try {
     const response = await anthropic.messages.create({
