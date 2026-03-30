@@ -202,7 +202,7 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
     setPreviewLoading(true);
     setError(null);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 25000);
     try {
       const res = await fetch(`/api/agents/${agentId}/generate-tweet`, {
         method: 'POST',
@@ -252,6 +252,19 @@ export function SetupWizard({ open, onClose, onCreated }: SetupWizardProps) {
     if (!agentId) return;
     setLaunching(true);
     try {
+      // Queue approved preview tweets so autopilot has content immediately
+      if (previewTweets.length > 0) {
+        await Promise.all(
+          previewTweets.map((t) =>
+            fetch(`/api/agents/${agentId}/queue/${t.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'queued' }),
+            }).catch(() => {})
+          )
+        );
+      }
+
       // Enable autopilot protocol
       await fetch(`/api/agents/${agentId}/protocol/settings`, {
         method: 'PATCH',

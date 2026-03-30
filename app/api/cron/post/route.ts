@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getJobs, updateJob, createTweet, getAnalysis } from '@/lib/kv-storage';
+import { parseSoulMd } from '@/lib/soul-parser';
+import { generateViralBatch } from '@/lib/viral-generator';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMe, getMentionsFromTwitter } from '@/lib/twitter-client';
@@ -93,11 +95,70 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // --- Execute scheduled jobs ---
+    let jobsExecuted = 0;
+    for (const agent of agents) {
+      try {
+        const jobs = await getJobs(agent.id);
+        for (const job of jobs) {
+          if (!job.enabled) continue;
+          const intervalMs = parseScheduleInterval(job.schedule);
+          if (!intervalMs) continue;
+          const elapsed = job.lastRunAt ? Date.now() - new Date(job.lastRunAt).getTime() : Infinity;
+          if (elapsed < intervalMs) continue;
+
+          // Job is due — generate tweets matching its filters
+          const analysis = await getAnalysis(agent.id);
+          if (!analysis) continue;
+
+          const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+          const count = Math.min(job.postsPerRun || 1, 5);
+
+          const batch = await generateViralBatch(voiceProfile, analysis, count, null, null, agent.soulMd);
+          for (const item of batch) {
+            await createTweet({
+              agentId: agent.id,
+              content: item.content,
+              type: item.quoteTweetId ? 'quote' : 'original',
+              status: 'queued',
+              topic: job.topics[0] || item.targetTopic || 'general',
+              xTweetId: null,
+              quoteTweetId: item.quoteTweetId || null,
+              quoteTweetAuthor: item.quoteTweetAuthor || null,
+              scheduledAt: null,
+            });
+          }
+
+          await updateJob(job.id, {
+            lastRunAt: new Date().toISOString(),
+            totalPosted: (job.totalPosted || 0) + batch.length,
+          });
+          jobsExecuted++;
+
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: `Job "${job.name}" queued ${batch.length} tweet${batch.length !== 1 ? 's' : ''}`,
+            format: 'job',
+            topic: job.topics[0] || 'general',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'job_executed',
+            reason: job.name,
+          });
+        }
+      } catch (err) {
+        console.error(`[cron] job execution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       mentionsRefreshed,
       performanceTracked,
       autopilotProcessed: autopilotResults.length,
+      jobsExecuted,
       results: autopilotResults,
     });
   } catch (err) {
@@ -147,4 +208,23 @@ async function refreshMentions(agentId: string): Promise<number> {
   }
 
   return added;
+}
+
+// Parse human-readable schedule to interval in ms
+function parseScheduleInterval(schedule: string): number | null {
+  const s = schedule.toLowerCase().trim();
+  // "every Xh" or "every X hours"
+  const hourMatch = s.match(/every\s+(\d+)\s*h/);
+  if (hourMatch) return parseInt(hourMatch[1]) * 60 * 60 * 1000;
+  // "Xx/day" e.g. "3x/day", "1x/day"
+  const perDayMatch = s.match(/(\d+)x?\/?(?:per\s*)?day/);
+  if (perDayMatch) return (24 / parseInt(perDayMatch[1])) * 60 * 60 * 1000;
+  // "daily" = once per day
+  if (s.includes('daily')) return 24 * 60 * 60 * 1000;
+  // "hourly"
+  if (s.includes('hourly')) return 60 * 60 * 1000;
+  // "every Xm" or "every X minutes"
+  const minMatch = s.match(/every\s+(\d+)\s*m/);
+  if (minMatch) return parseInt(minMatch[1]) * 60 * 1000;
+  return null;
 }

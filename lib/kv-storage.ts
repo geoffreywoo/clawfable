@@ -321,6 +321,16 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentEvents(id));
   await kvDel(KEYS.agentSoulBackup(id));
 
+  // Cascade: delete protocol, post log, learnings, performance, jobs
+  await kvDel(KEYS.agentProtocol(id));
+  await kvDel(KEYS.agentPostLog(id));
+  await kvDel(KEYS.agentLearnings(id));
+  await kvDel(KEYS.agentPerformance(id));
+  // Delete jobs
+  const jobIds = await kvLrange(KEYS.agentJobs(id), 0, -1);
+  await Promise.all(jobIds.map((jid) => kvDel(`job:${jid}`)));
+  await kvDel(KEYS.agentJobs(id));
+
   // Remove agent
   await kvDel(KEYS.agent(id));
   await kvSrem(KEYS.agentSet(), id);

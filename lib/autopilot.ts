@@ -159,6 +159,22 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Post failed';
+
+    // Detect rate limit (429) or server error (5xx) and back off
+    const isRateLimit = message.includes('429') || message.toLowerCase().includes('rate limit') || message.includes('Too Many');
+    const isServerError = message.includes('503') || message.includes('502');
+    if (isRateLimit || isServerError) {
+      const backoffMins = isRateLimit ? 60 : 15;
+      const pauseUntil = new Date(Date.now() + backoffMins * 60 * 1000).toISOString();
+      await updateProtocolSettings(agentId, { lastPostedAt: pauseUntil });
+      return {
+        agentId,
+        action: 'error',
+        reason: `${isRateLimit ? 'Rate limited' : 'API error'} — pausing ${backoffMins}m. ${message}`,
+        repliesSent,
+      };
+    }
+
     return { agentId, action: 'error', reason: message, repliesSent };
   }
 }

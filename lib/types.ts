@@ -173,7 +173,7 @@ export interface PostLogEntry {
   topic: string;
   postedAt: string;
   source: 'autopilot' | 'manual' | 'cron';
-  action?: 'posted' | 'replied' | 'skipped' | 'error' | 'mentions_refreshed';
+  action?: 'posted' | 'replied' | 'skipped' | 'error' | 'mentions_refreshed' | 'job_executed';
   reason?: string;
 }
 
