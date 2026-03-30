@@ -19,6 +19,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   // OAuth
 
   // UI state
+  const [generatingSoul, setGeneratingSoul] = useState(false);
   const [savingSoul, setSavingSoul] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -28,6 +29,26 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
+
+  const handleGenerateSoul = async () => {
+    if (!isConnected) {
+      showToast('Connect X API first to generate SOUL from tweets');
+      return;
+    }
+    setGeneratingSoul(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/generate-soul`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSoulMd(data.soulMd);
+      showToast(`SOUL generated from ${data.tweetCount} tweets. Review and save.`);
+      onAgentUpdated?.();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to generate SOUL');
+    } finally {
+      setGeneratingSoul(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -155,10 +176,32 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
       {/* ─── SOUL.md ──────────────────────────────────────────────────────────── */}
       <div className="settings-section">
-        <div className="flex items-center justify-between" style={{ marginBottom: '16px' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: '12px' }}>
           <p className="settings-section-label" style={{ marginBottom: 0 }}>SOUL.md</p>
-          <span className="label" style={{ textTransform: 'none' }}>{soulMd.length} chars</span>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={handleGenerateSoul}
+              disabled={generatingSoul || !isConnected}
+              title={isConnected ? 'Analyze your tweet history and auto-generate a SOUL.md' : 'Connect X API first'}
+              style={{ fontSize: '9px' }}
+            >
+              {generatingSoul ? 'ANALYZING TWEETS...' : 'GENERATE FROM MY TWEETS'}
+            </button>
+            <span className="label" style={{ textTransform: 'none' }}>{soulMd.length} chars</span>
+          </div>
         </div>
+        {generatingSoul && (
+          <div style={{
+            padding: '16px', marginBottom: '12px', textAlign: 'center',
+            background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
+          }}>
+            <div className="wizard-spinner" style={{ margin: '0 auto 8px' }} />
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+              Fetching up to 500 tweets, analyzing voice patterns, generating SOUL.md...
+            </p>
+          </div>
+        )}
         <textarea
           className="textarea"
           value={soulMd}

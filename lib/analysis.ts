@@ -11,7 +11,7 @@ import type {
   FollowingProfile,
 } from './types';
 import type { TwitterKeys } from './twitter-client';
-import { getUserTimeline, getFollowing } from './twitter-client';
+import { getDeepTimeline, getFollowing } from './twitter-client';
 
 // ─── Tweet format detection ─────────────────────────────────────────────────
 
@@ -125,9 +125,9 @@ export async function analyzeAccount(
   userId: string,
   agentId: string
 ): Promise<AccountAnalysis> {
-  // Fetch data in parallel
+  // Fetch deep history + following in parallel
   const [timelineTweets, followingList] = await Promise.all([
-    getUserTimeline(keys, userId, 100),
+    getDeepTimeline(keys, userId, 500),
     getFollowing(keys, userId, 200),
   ]);
 

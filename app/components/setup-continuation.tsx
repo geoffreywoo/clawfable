@@ -127,8 +127,51 @@ export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props
             <>
               <div className="wizard-step-header">
                 <h3>Build Your Voice</h3>
-                <p>We&apos;ll generate your personality profile from these inputs.</p>
+                <p>Auto-generate from your tweet history, or build manually below.</p>
               </div>
+
+              {/* Quick path: generate from tweets */}
+              <div style={{
+                padding: '14px', marginBottom: '16px',
+                background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)',
+                borderRadius: 'var(--radius-lg)',
+              }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: '#8b5cf6' }}>
+                      RECOMMENDED: GENERATE FROM YOUR TWEETS
+                    </p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Analyzes up to 500 of your tweets to reverse-engineer your voice, tone, topics, and style.
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ background: '#8b5cf6', flexShrink: 0 }}
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true);
+                      setError(null);
+                      try {
+                        const res = await fetch(`/api/agents/${agentId}/generate-soul`, { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error);
+                        setStep('analyze');
+                        runAnalysis();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Failed to generate');
+                        setLoading(false);
+                      }
+                    }}
+                  >
+                    {loading ? 'ANALYZING...' : 'AUTO-GENERATE'}
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', textAlign: 'center', marginBottom: '12px' }}>
+                — or build manually —
+              </p>
 
               <div className="wizard-builder-sections">
                 <div className="wizard-builder-section">

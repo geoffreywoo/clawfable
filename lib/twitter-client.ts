@@ -252,6 +252,72 @@ export async function getUserTimeline(
   }
 }
 
+type TimelineTweet = {
+  id: string;
+  text: string;
+  createdAt: string;
+  likes: number;
+  retweets: number;
+  replies: number;
+  impressions: number;
+  quotes: number;
+  bookmarks: number;
+};
+
+/**
+ * Fetch deep tweet history with pagination. Gets up to maxTotal tweets.
+ */
+export async function getDeepTimeline(
+  keys: TwitterKeys,
+  userId: string,
+  maxTotal = 500
+): Promise<TimelineTweet[]> {
+  const client = createClient(keys);
+  const all: TimelineTweet[] = [];
+  let paginationToken: string | undefined;
+
+  try {
+    while (all.length < maxTotal) {
+      const batchSize = Math.min(100, maxTotal - all.length);
+      const params: Record<string, unknown> = {
+        max_results: batchSize,
+        'tweet.fields': ['created_at', 'public_metrics'],
+        exclude: ['retweets', 'replies'],
+      };
+      if (paginationToken) params.pagination_token = paginationToken;
+
+      const result = await client.v2.userTimeline(
+        userId,
+        params as Parameters<typeof client.v2.userTimeline>[1]
+      );
+
+      const tweets = result.data.data || [];
+      if (tweets.length === 0) break;
+
+      for (const tweet of tweets) {
+        all.push({
+          id: tweet.id,
+          text: tweet.text,
+          createdAt: tweet.created_at || new Date().toISOString(),
+          likes: tweet.public_metrics?.like_count ?? 0,
+          retweets: tweet.public_metrics?.retweet_count ?? 0,
+          replies: tweet.public_metrics?.reply_count ?? 0,
+          impressions: tweet.public_metrics?.impression_count ?? 0,
+          quotes: tweet.public_metrics?.quote_count ?? 0,
+          bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+        });
+      }
+
+      paginationToken = (result.data as any).meta?.next_token;
+      if (!paginationToken) break;
+    }
+  } catch {
+    // Return what we got so far
+  }
+
+  return all;
+}
+
 /**
  * Fetch accounts the user follows.
  */
