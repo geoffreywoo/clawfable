@@ -237,14 +237,16 @@ const KEYS = {
 export async function getAgents(): Promise<Agent[]> {
   const ids = await kvSmembers(KEYS.agentSet());
   if (ids.length === 0) return [];
-  const agents = await Promise.all(ids.map((id) => kvHgetall<Agent>(KEYS.agent(id))));
+  const agents = await Promise.all(ids.map((id) => kvHgetall<Agent>(KEYS.agent(String(id)))));
   return agents
     .filter((a): a is Agent => a !== null)
+    .map(normalizeId)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {
-  return kvHgetall<Agent>(KEYS.agent(id));
+  const agent = await kvHgetall<Agent>(KEYS.agent(String(id)));
+  return agent ? normalizeId(agent) : null;
 }
 
 export async function getAgentByHandle(handle: string): Promise<Agent | null> {
@@ -341,14 +343,21 @@ export async function deleteAgent(id: string): Promise<void> {
 
 // ─── Tweet storage ────────────────────────────────────────────────────────────
 
+// Vercel KV (Upstash) auto-deserializes numeric strings as numbers.
+// IDs are always strings internally, so coerce on read.
+function normalizeId<T extends { id: unknown }>(obj: T): T & { id: string } {
+  return { ...obj, id: String(obj.id) };
+}
+
 export async function getTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentTweets(agentId), 0, -1);
-  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(id))));
-  return tweets.filter((t): t is Tweet => t !== null);
+  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
+  return tweets.filter((t): t is Tweet => t !== null).map(normalizeId);
 }
 
 export async function getTweet(id: string): Promise<Tweet | null> {
-  return kvHgetall<Tweet>(KEYS.tweet(id));
+  const tweet = await kvHgetall<Tweet>(KEYS.tweet(String(id)));
+  return tweet ? normalizeId(tweet) : null;
 }
 
 export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
@@ -358,8 +367,8 @@ export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
 
 export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentQueue(agentId), 0, -1);
-  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(id))));
-  return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued');
+  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
+  return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued').map(normalizeId);
 }
 
 export async function createTweet(data: CreateTweetInput): Promise<Tweet> {

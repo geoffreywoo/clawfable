@@ -39,21 +39,13 @@ export async function launchAgentFromPreview({
   }
 
   const previewTweets = await getPreviewTweets(agentId);
-  const previewIds = new Set(previewTweets.map((tweet) => tweet.id));
-  const requestedApprovals = dedupeIds(approvedTweetIds);
-
-  console.log(`[launch] KV preview tweets: ${previewTweets.length} ids=[${[...previewIds].join(',')}] statuses=[${previewTweets.map(t => t.status).join(',')}]`);
-  console.log(`[launch] Client approvals: ${requestedApprovals.length} ids=[${requestedApprovals.join(',')}]`);
+  // Vercel KV (Upstash) auto-deserializes numeric strings as numbers.
+  // Client sends "42" (string), KV returns 42 (number). Coerce all IDs to strings.
+  const previewIds = new Set(previewTweets.map((tweet) => String(tweet.id)));
+  const requestedApprovals = dedupeIds(approvedTweetIds).map(String);
 
   // Resolve approved IDs against what actually exists in KV.
-  // Client state can drift from server state (regeneration, race conditions),
-  // so we accept any valid preview tweet ID and silently drop stale ones.
   const approvedIds = requestedApprovals.filter((id) => previewIds.has(id));
-
-  const droppedIds = requestedApprovals.filter((id) => !previewIds.has(id));
-  if (droppedIds.length > 0) {
-    console.warn(`[launch] Dropped ${droppedIds.length} stale approval IDs: ${droppedIds.join(', ')}. KV preview IDs: ${[...previewIds].join(', ')}`);
-  }
 
   // If no valid approvals remain, check if there are any preview tweets at all
   if (previewTweets.length === 0) {
