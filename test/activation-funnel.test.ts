@@ -13,9 +13,11 @@ import {
   getRecentNegativeFeedback,
   saveSoulBackup,
   logFunnelEvent,
+  getFunnelEvents,
+  computeFunnelSummary,
   checkRateLimit,
 } from '@/lib/kv-storage';
-import type { WizardData, StyleSignals, FeedbackEntry } from '@/lib/types';
+import type { WizardData, StyleSignals, FeedbackEntry, FunnelEvent } from '@/lib/types';
 
 describe('Activation Funnel KV Storage', () => {
   describe('Wizard data', () => {
@@ -108,6 +110,50 @@ describe('Activation Funnel KV Storage', () => {
       }
       const blocked = await checkRateLimit('r2', 'wizard', 5);
       expect(blocked).toBe(false);
+    });
+  });
+
+  describe('Funnel events and summary', () => {
+    it('logs and retrieves funnel events', async () => {
+      await logFunnelEvent('funnel1', 'wizard_start', { handle: 'test' });
+      await logFunnelEvent('funnel1', 'wizard_soul_complete', { archetype: 'analyst' });
+      const events = await getFunnelEvents('funnel1');
+      expect(events.length).toBe(2);
+      expect(events[0].event).toBe('wizard_soul_complete'); // lpush = newest first
+      expect(events[1].event).toBe('wizard_start');
+    });
+
+    it('computes funnel summary with partial progress', () => {
+      const events: FunnelEvent[] = [
+        { event: 'wizard_start', ts: '2026-03-01T00:00:00Z' },
+        { event: 'wizard_soul_complete', ts: '2026-03-01T00:05:00Z' },
+        { event: 'preview_approve', ts: '2026-03-01T00:10:00Z' },
+      ];
+      const summary = computeFunnelSummary(events);
+      expect(summary.currentStage).toBe('preview_approve');
+      expect(summary.completionPct).toBe(60); // 3/5
+      expect(summary.milestones[0].reached).toBe(true);
+      expect(summary.milestones[3].reached).toBe(false); // first_post
+      expect(summary.milestones[4].reached).toBe(false); // tenth_post
+    });
+
+    it('computes 100% for fully completed funnel', () => {
+      const events: FunnelEvent[] = [
+        { event: 'wizard_start', ts: '2026-03-01T00:00:00Z' },
+        { event: 'wizard_soul_complete', ts: '2026-03-01T00:05:00Z' },
+        { event: 'preview_approve', ts: '2026-03-01T00:10:00Z' },
+        { event: 'first_post', ts: '2026-03-01T01:00:00Z' },
+        { event: 'tenth_post', ts: '2026-03-05T12:00:00Z' },
+      ];
+      const summary = computeFunnelSummary(events);
+      expect(summary.currentStage).toBe('tenth_post');
+      expect(summary.completionPct).toBe(100);
+    });
+
+    it('returns not_started for empty events', () => {
+      const summary = computeFunnelSummary([]);
+      expect(summary.currentStage).toBe('not_started');
+      expect(summary.completionPct).toBe(0);
     });
   });
 

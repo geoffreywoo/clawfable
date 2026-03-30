@@ -5,6 +5,7 @@ import {
   getMentions,
   createAgent,
   addAgentToUser,
+  logFunnelEvent,
 } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
@@ -64,6 +65,9 @@ export async function POST(request: NextRequest) {
 
     // Link agent to user
     await addAgentToUser(user.id, agent.id);
+
+    // Funnel: wizard started
+    await logFunnelEvent(agent.id, 'wizard_start', { handle: cleanHandle });
 
     return NextResponse.json(agent);
   } catch (err) {

@@ -21,6 +21,7 @@ import {
   getMentions,
   addPostLogEntry,
   getPostLog,
+  logFunnelEvent,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
@@ -176,6 +177,14 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       postedAt: new Date().toISOString(),
       source: 'autopilot',
     });
+
+    // Funnel milestones
+    const newTotal = settings.totalAutoPosted + 1;
+    if (newTotal === 1) {
+      await logFunnelEvent(agentId, 'first_post', { xTweetId: result.tweetId });
+    } else if (newTotal === 10) {
+      await logFunnelEvent(agentId, 'tenth_post', { xTweetId: result.tweetId });
+    }
 
     return {
       agentId,

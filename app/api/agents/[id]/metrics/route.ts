@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets } from '@/lib/kv-storage';
+import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets, getFunnelEvents, computeFunnelSummary } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/metrics — compute live metrics from actual data
@@ -11,12 +11,13 @@ export async function GET(
   try {
     await requireAgentAccess(id);
 
-    const [tweets, mentions, postLog, settings, analysis] = await Promise.all([
+    const [tweets, mentions, postLog, settings, analysis, funnelEvents] = await Promise.all([
       getTweets(id),
       getMentions(id),
       getPostLog(id, 100),
       getProtocolSettings(id),
       getAnalysis(id),
+      getFunnelEvents(id),
     ]);
 
     const liveTweets = tweets.filter((t) => t.status !== 'preview');
@@ -61,7 +62,9 @@ export async function GET(
       health.push({ level: 'warning', message: 'Queue empty. Generate content to keep autopilot running.', cta: { label: 'Compose', tab: 'compose' } });
     }
 
-    return NextResponse.json({ metrics, health });
+    const funnel = computeFunnelSummary(funnelEvents);
+
+    return NextResponse.json({ metrics, health, funnel });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch metrics' }, { status: 500 });

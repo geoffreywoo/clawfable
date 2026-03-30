@@ -780,6 +780,54 @@ export async function logFunnelEvent(agentId: string, event: string, meta?: Reco
   await kvLpush(KEYS.agentEvents(agentId), JSON.stringify(entry));
 }
 
+export async function getFunnelEvents(agentId: string, limit = 100): Promise<FunnelEvent[]> {
+  const raw = await kvLrange(KEYS.agentEvents(agentId), 0, limit - 1);
+  return raw.map((s) => {
+    try { return JSON.parse(s) as FunnelEvent; }
+    catch { return null; }
+  }).filter((e): e is FunnelEvent => e !== null);
+}
+
+/** Milestone names in funnel order. */
+const FUNNEL_MILESTONES = ['wizard_start', 'wizard_soul_complete', 'preview_approve', 'first_post', 'tenth_post'] as const;
+
+export interface FunnelSummary {
+  milestones: Array<{ event: string; reached: boolean; ts: string | null }>;
+  currentStage: string;
+  completionPct: number;
+}
+
+export function computeFunnelSummary(events: FunnelEvent[]): FunnelSummary {
+  const eventMap = new Map<string, string>(); // event -> earliest ts
+  for (const e of events) {
+    if (!eventMap.has(e.event)) {
+      eventMap.set(e.event, e.ts);
+    }
+  }
+
+  const milestones = FUNNEL_MILESTONES.map((event) => ({
+    event,
+    reached: eventMap.has(event),
+    ts: eventMap.get(event) ?? null,
+  }));
+
+  // Current stage = last reached milestone, or 'not_started'
+  let currentStage = 'not_started';
+  let reached = 0;
+  for (const m of milestones) {
+    if (m.reached) {
+      currentStage = m.event;
+      reached++;
+    }
+  }
+
+  return {
+    milestones,
+    currentStage,
+    completionPct: Math.round((reached / FUNNEL_MILESTONES.length) * 100),
+  };
+}
+
 // ─── Rate limiting ──────────────────────────────────────────────────────────
 
 export async function checkRateLimit(agentId: string, action: string, maxPerHour: number): Promise<boolean> {
