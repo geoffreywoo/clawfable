@@ -8,8 +8,10 @@ import { QueueTab } from '@/app/components/queue-tab';
 import { MentionsTab } from '@/app/components/mentions-tab';
 import { AutopilotTab } from '@/app/components/autopilot-tab';
 import { MetricsTab } from '@/app/components/metrics-tab';
+import { HealthAlerts } from '@/app/components/health-alerts';
 import { SettingsTab } from '@/app/components/settings-tab';
 import { SetupContinuation } from '@/app/components/setup-continuation';
+import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/lib/setup-state';
 import type { AgentDetail, AgentSummary } from '@/lib/types';
 
 const TABS = [
@@ -134,13 +136,8 @@ export default function AgentDashboard() {
 
   const isConnected = agent.isConnected === 1;
   const hue = getAgentHue(agent.name);
-  const inSetup = agent.setupStep && agent.setupStep !== 'ready';
-
-  const SETUP_LABELS: Record<string, { title: string; desc: string }> = {
-    oauth: { title: 'CONNECT X API', desc: 'This agent needs X API credentials to continue setup. Go to Settings to connect.' },
-    soul: { title: 'UPLOAD SOUL.MD', desc: 'This agent needs a personality definition. Go to Settings to configure SOUL.md.' },
-    analyze: { title: 'RUN ANALYSIS', desc: 'This agent is connected and has a SOUL.md. Go to the Protocol tab to run account analysis.' },
-  };
+  const setupStep = normalizeSetupStep(agent.setupStep);
+  const inSetup = isSetupIncomplete(setupStep);
 
   return (
     <div className="dashboard-shell">
@@ -286,7 +283,7 @@ export default function AgentDashboard() {
       </header>
 
       {/* Setup banner for incomplete agents */}
-      {inSetup && SETUP_LABELS[agent.setupStep] && (
+      {inSetup && SETUP_BANNER_CONTENT[setupStep] && (
         <div style={{
           padding: '12px 24px',
           background: 'rgba(245, 158, 11, 0.08)',
@@ -294,22 +291,31 @@ export default function AgentDashboard() {
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
+          justifyContent: 'space-between',
         }}>
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-            <path d="M8 2L14 14H2L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinejoin="round" />
-            <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
-            <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
-          </svg>
-          <div>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.08em' }}>
-              SETUP INCOMPLETE: {SETUP_LABELS[agent.setupStep].title}
-            </p>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              {SETUP_LABELS[agent.setupStep].desc}
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="M8 2L14 14H2L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinejoin="round" />
+              <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
+              <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
+            </svg>
+            <div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.08em' }}>
+                SETUP INCOMPLETE: {SETUP_BANNER_CONTENT[setupStep].title}
+              </p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {SETUP_BANNER_CONTENT[setupStep].desc}
+              </p>
+            </div>
           </div>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowSetupContinuation(true)}>
+            CONTINUE SETUP
+          </button>
         </div>
       )}
+
+      {/* Health alerts */}
+      {!inSetup && <HealthAlerts agentId={agentId} onNavigateTab={(tab) => setActiveTab(tab as TabId)} />}
 
       {/* Tab nav */}
       <nav className="dashboard-nav">

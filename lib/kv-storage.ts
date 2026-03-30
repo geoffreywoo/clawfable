@@ -229,6 +229,7 @@ const KEYS = {
   agentEvents: (id: string) => `agent:${id}:events`,
   agentSoulBackup: (id: string) => `agent:${id}:soul_backup`,
   agentRateLimit: (id: string, action: string) => `ratelimit:${id}:${action}`,
+  agentBaseline: (id: string) => `agent:${id}:baseline`,
 };
 
 // ─── Agent storage ────────────────────────────────────────────────────────────
@@ -321,11 +322,12 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentEvents(id));
   await kvDel(KEYS.agentSoulBackup(id));
 
-  // Cascade: delete protocol, post log, learnings, performance, jobs
+  // Cascade: delete protocol, post log, learnings, performance, baseline, jobs
   await kvDel(KEYS.agentProtocol(id));
   await kvDel(KEYS.agentPostLog(id));
   await kvDel(KEYS.agentLearnings(id));
   await kvDel(KEYS.agentPerformance(id));
+  await kvDel(KEYS.agentBaseline(id));
   // Delete jobs
   const jobIds = await kvLrange(KEYS.agentJobs(id), 0, -1);
   await Promise.all(jobIds.map((jid) => kvDel(`job:${jid}`)));
@@ -343,6 +345,15 @@ export async function getTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentTweets(agentId), 0, -1);
   const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(id))));
   return tweets.filter((t): t is Tweet => t !== null);
+}
+
+export async function getTweet(id: string): Promise<Tweet | null> {
+  return kvHgetall<Tweet>(KEYS.tweet(id));
+}
+
+export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
+  const tweets = await getTweets(agentId);
+  return tweets.filter((tweet) => tweet.status === 'preview');
 }
 
 export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
@@ -376,7 +387,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
 }
 
 export async function updateTweet(id: string, data: UpdateTweetInput): Promise<Tweet> {
-  const existing = await kvHgetall<Tweet>(KEYS.tweet(id));
+  const existing = await getTweet(id);
   if (!existing) throw new Error(`Tweet ${id} not found`);
 
   const prevStatus = existing.status;
@@ -396,7 +407,7 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
 }
 
 export async function deleteTweet(id: string): Promise<void> {
-  const tweet = await kvHgetall<Tweet>(KEYS.tweet(id));
+  const tweet = await getTweet(id);
   if (!tweet) return;
   await kvDel(KEYS.tweet(id));
   await kvLrem(KEYS.agentTweets(tweet.agentId), 0, id);
@@ -578,6 +589,26 @@ export async function getLearnings(agentId: string): Promise<AgentLearnings | nu
 
 export async function saveLearnings(agentId: string, learnings: AgentLearnings): Promise<void> {
   await kvSet(KEYS.agentLearnings(agentId), learnings);
+}
+
+// ─── Baseline storage (frozen engagement snapshot) ──────────────────────────
+
+export interface EngagementBaseline {
+  avgLikes: number;
+  avgRetweets: number;
+  tweetCount: number;
+  snapshotDate: string;
+}
+
+export async function getBaseline(agentId: string): Promise<EngagementBaseline | null> {
+  return kvGet<EngagementBaseline>(KEYS.agentBaseline(agentId));
+}
+
+export async function saveBaseline(agentId: string, baseline: EngagementBaseline): Promise<void> {
+  // Never overwrite — baseline is frozen on first autopilot enable
+  const existing = await getBaseline(agentId);
+  if (existing) return;
+  await kvSet(KEYS.agentBaseline(agentId), baseline);
 }
 
 // ─── User storage ────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getProtocolSettings, updateProtocolSettings, getPostLog } from '@/lib/kv-storage';
+import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/protocol/settings
@@ -37,6 +37,19 @@ export async function PATCH(
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {
       if (body[key] !== undefined) updates[key] = body[key];
+    }
+
+    // Freeze baseline on first autopilot enable
+    if (updates.enabled === true) {
+      const analysis = await getAnalysis(id);
+      if (analysis?.engagementPatterns) {
+        await saveBaseline(id, {
+          avgLikes: analysis.engagementPatterns.avgLikes || 0,
+          avgRetweets: analysis.engagementPatterns.avgRetweets || 0,
+          tweetCount: analysis.tweetCount || 0,
+          snapshotDate: new Date().toISOString(),
+        });
+      }
     }
 
     const settings = await updateProtocolSettings(id, updates);
