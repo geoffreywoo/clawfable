@@ -16,13 +16,19 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
+    const approvedTweetIds = Array.isArray(body.approvedTweetIds) ? body.approvedTweetIds : [];
+    const reviewedTweetIds = Array.isArray(body.reviewedTweetIds) ? body.reviewedTweetIds : [];
+
+    console.log(`[launch] agent=${id} approved=${JSON.stringify(approvedTweetIds)} reviewed=${reviewedTweetIds.length} postsPerDay=${body.postsPerDay}`);
+
     const result = await launchAgentFromPreview({
       agentId: id,
-      reviewedTweetIds: Array.isArray(body.reviewedTweetIds) ? body.reviewedTweetIds : [],
-      approvedTweetIds: Array.isArray(body.approvedTweetIds) ? body.approvedTweetIds : [],
+      reviewedTweetIds,
+      approvedTweetIds,
       postsPerDay: body.postsPerDay,
     });
 
+    console.log(`[launch] success: queued=${result.queuedCount} discarded=${result.discardedCount}`);
     return NextResponse.json({ success: true, ...result });
   } catch (err) {
     try { return handleAuthError(err); } catch {}

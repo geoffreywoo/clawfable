@@ -39,24 +39,27 @@ export async function launchAgentFromPreview({
   }
 
   const previewTweets = await getPreviewTweets(agentId);
+  const previewIds = new Set(previewTweets.map((tweet) => tweet.id));
+  const requestedApprovals = dedupeIds(approvedTweetIds);
+
+  // Resolve approved IDs against what actually exists in KV.
+  // Client state can drift from server state (regeneration, race conditions),
+  // so we accept any valid preview tweet ID and silently drop stale ones.
+  const approvedIds = requestedApprovals.filter((id) => previewIds.has(id));
+
+  const droppedIds = requestedApprovals.filter((id) => !previewIds.has(id));
+  if (droppedIds.length > 0) {
+    console.warn(`[launch] Dropped ${droppedIds.length} stale approval IDs: ${droppedIds.join(', ')}. KV preview IDs: ${[...previewIds].join(', ')}`);
+  }
+
+  // If no valid approvals remain, check if there are any preview tweets at all
   if (previewTweets.length === 0) {
     throw new SetupLaunchError('Generate preview tweets before launch');
   }
 
-  const previewIds = new Set(previewTweets.map((tweet) => tweet.id));
-  const reviewedIds = dedupeIds(reviewedTweetIds);
-  const approvedIds = dedupeIds(approvedTweetIds);
-
   if (approvedIds.length === 0) {
     throw new SetupLaunchError('Approve at least one preview tweet before launch');
   }
-
-  if (approvedIds.some((id) => !previewIds.has(id))) {
-    throw new SetupLaunchError('Approved tweets must come from the active preview batch');
-  }
-
-  // reviewedIds is informational — we no longer require every tweet to be explicitly rated.
-  // Unrated tweets are treated as rejected.
 
   const approvedIdSet = new Set(approvedIds);
   const rejectedIds = previewTweets
