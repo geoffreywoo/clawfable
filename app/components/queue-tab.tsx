@@ -17,6 +17,9 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [isPostingAll, setIsPostingAll] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [autopilotSettings, setAutopilotSettings] = useState<ProtocolSettings | null>(null);
+  const [remixingId, setRemixingId] = useState<string | null>(null);
+  const [remixOpenId, setRemixOpenId] = useState<string | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
 
   const loadQueue = async () => {
     try {
@@ -119,6 +122,33 @@ export function QueueTab({ agentId }: QueueTabProps) {
       showToast(err instanceof Error ? err.message : 'Post failed');
     } finally {
       setPostingId(null);
+    }
+  };
+
+  const handleRemix = async (tweet: Tweet, direction: string, prompt?: string) => {
+    setRemixingId(tweet.id);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/remix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tweetId: tweet.id,
+          content: tweet.content,
+          direction: prompt ? undefined : direction,
+          customPrompt: prompt || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Update in local state
+      setQueue((prev) => prev.map((t) => t.id === tweet.id ? { ...t, content: data.content } : t));
+      showToast(`Remixed: ${direction || 'custom'}`);
+      setRemixOpenId(null);
+      setCustomPrompt('');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Remix failed');
+    } finally {
+      setRemixingId(null);
     }
   };
 
@@ -293,6 +323,64 @@ export function QueueTab({ agentId }: QueueTabProps) {
                 )}
               </div>
 
+              {/* Remix panel */}
+              {remixOpenId === tweet.id && editingId !== tweet.id && (
+                <div style={{
+                  padding: '10px 12px', marginTop: '8px', marginBottom: '4px',
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                }}>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    REMIX DIRECTION
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '8px' }}>
+                    {[
+                      { id: 'shorter', label: 'Shorter', icon: '↓' },
+                      { id: 'longer', label: 'Longer', icon: '↑' },
+                      { id: 'spicier', label: 'Spicier', icon: '🔥' },
+                      { id: 'softer', label: 'Softer', icon: '~' },
+                      { id: 'funnier', label: 'Funnier', icon: '😏' },
+                      { id: 'data', label: 'Add Data', icon: '#' },
+                      { id: 'question', label: 'As Question', icon: '?' },
+                      { id: 'contrarian', label: 'Flip Take', icon: '⟲' },
+                    ].map((d) => (
+                      <button
+                        key={d.id}
+                        className="btn btn-outline btn-sm"
+                        style={{ fontSize: '10px', padding: '3px 8px', height: '24px' }}
+                        disabled={remixingId === tweet.id}
+                        onClick={() => handleRemix(tweet, d.id)}
+                      >
+                        {remixingId === tweet.id ? '...' : `${d.icon} ${d.label}`}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      className="input"
+                      style={{ fontSize: '11px', padding: '4px 8px', flex: 1 }}
+                      placeholder="Custom instruction: e.g. 'make it about AI safety' or 'add a metaphor'"
+                      value={customPrompt}
+                      onChange={(e) => setCustomPrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && customPrompt.trim()) {
+                          handleRemix(tweet, 'custom', customPrompt.trim());
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ background: '#8b5cf6', fontSize: '10px', height: '28px' }}
+                      disabled={!customPrompt.trim() || remixingId === tweet.id}
+                      onClick={() => handleRemix(tweet, 'custom', customPrompt.trim())}
+                    >
+                      {remixingId === tweet.id ? '...' : 'REMIX'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Actions */}
               {editingId !== tweet.id && (
                 <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
@@ -317,6 +405,14 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     style={{ padding: '4px 8px' }}
                   >
                     <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><rect x="1" y="3" width="9" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" /><path d="M4 3V2a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-1" stroke="currentColor" strokeWidth="1.3" /></svg>
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { setRemixOpenId(remixOpenId === tweet.id ? null : tweet.id); setCustomPrompt(''); }}
+                    title="Remix"
+                    style={{ padding: '4px 8px', color: remixOpenId === tweet.id ? '#8b5cf6' : undefined }}
+                  >
+                    <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M2 10l3-3 2 2 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 4h4v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
