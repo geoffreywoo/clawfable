@@ -47,20 +47,29 @@ export async function GET(request: NextRequest) {
           console.error(`[cron] mentions refresh failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
 
-        // Track performance of posted tweets + rebuild learnings + auto-adjust
+        // Track performance of posted tweets
         try {
           const tracked = await checkPerformance(agent);
           performanceTracked += tracked;
-          // Build learnings if: new tweets tracked OR learnings don't exist yet but performance data does
-          const needsLearnings = tracked > 0 || (
-            !(await getLearnings(agent.id)) && (await getPerformanceHistory(agent.id, 1)).length > 0
-          );
-          if (needsLearnings) {
+        } catch (err) {
+          console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        // Rebuild learnings once per day (or on first run when null)
+        try {
+          const existingLearnings = await getLearnings(agent.id);
+          const hasPerformanceData = (await getPerformanceHistory(agent.id, 1)).length > 0;
+          const learningsAge = existingLearnings?.updatedAt
+            ? Date.now() - new Date(existingLearnings.updatedAt).getTime()
+            : Infinity;
+          const oneDayMs = 24 * 60 * 60 * 1000;
+
+          if (hasPerformanceData && (!existingLearnings || learningsAge > oneDayMs)) {
             const learnings = await buildLearnings(agent);
             await autoAdjustSettings(agent.id, learnings);
           }
         } catch (err) {
-          console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          console.error(`[cron] learnings build failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
 
         // Auto re-analyze if analysis is older than 7 days
