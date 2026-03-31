@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
@@ -51,9 +51,12 @@ export async function GET(request: NextRequest) {
         try {
           const tracked = await checkPerformance(agent);
           performanceTracked += tracked;
-          if (tracked > 0) {
+          // Build learnings if: new tweets tracked OR learnings don't exist yet but performance data does
+          const needsLearnings = tracked > 0 || (
+            !(await getLearnings(agent.id)) && (await getPerformanceHistory(agent.id, 1)).length > 0
+          );
+          if (needsLearnings) {
             const learnings = await buildLearnings(agent);
-            // Auto-adjust content settings based on what actually performed
             await autoAdjustSettings(agent.id, learnings);
           }
         } catch (err) {
