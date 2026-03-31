@@ -122,7 +122,7 @@ export async function getMentionsFromTwitter(
   const client = createClient(keys);
   try {
     const params: Record<string, unknown> = {
-      max_results: 20,
+      max_results: 100,
       'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
       expansions: ['author_id'],
       'user.fields': ['name', 'username'],

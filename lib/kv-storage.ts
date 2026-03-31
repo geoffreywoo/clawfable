@@ -427,10 +427,11 @@ export async function deleteTweet(id: string): Promise<void> {
 
 export async function getMentions(agentId: string): Promise<Mention[]> {
   const ids = await kvLrange(KEYS.agentMentions(agentId), 0, -1);
-  const mentions = await Promise.all(ids.map((id) => kvHgetall<Mention>(KEYS.mention(id))));
+  const mentions = await Promise.all(ids.map((id) => kvHgetall<Mention>(KEYS.mention(String(id)))));
   return mentions
     .filter((m): m is Mention => m !== null)
-    .map((m) => ({ ...m, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }));
+    .map((m) => normalizeId({ ...m, id: String(m.id), tweetId: m.tweetId != null ? String(m.tweetId) : null, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
