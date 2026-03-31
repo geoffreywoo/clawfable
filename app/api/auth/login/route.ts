@@ -5,12 +5,15 @@ import { generateOAuthLink } from '@/lib/twitter-client';
 // POST /api/auth/login — start login OAuth flow
 export async function POST(request: NextRequest) {
   try {
+    const body = await request.json().catch(() => ({}));
+    const forkHandle = typeof body.forkHandle === 'string' ? body.forkHandle.trim() : undefined;
+
     const origin = process.env.APP_URL || request.headers.get('origin') || request.nextUrl.origin;
     const callbackUrl = `${origin}/api/auth/login/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
 
-    await saveOAuthTemp(oauthToken, { oauthTokenSecret, agentId: null, purpose: 'login' });
+    await saveOAuthTemp(oauthToken, { oauthTokenSecret, agentId: null, purpose: 'login', forkHandle });
 
     return NextResponse.json({ url });
   } catch (err) {

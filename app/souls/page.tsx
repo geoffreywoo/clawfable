@@ -13,6 +13,23 @@ export default function SoulsPage() {
   const [souls, setSouls] = useState<Soul[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedHandle, setExpandedHandle] = useState<string | null>(null);
+  const [forkingHandle, setForkingHandle] = useState<string | null>(null);
+
+  const handleFork = async (handle: string) => {
+    setForkingHandle(handle);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forkHandle: handle }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      window.location.href = data.url;
+    } catch {
+      setForkingHandle(null);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/public/souls')
@@ -119,6 +136,29 @@ export default function SoulsPage() {
                           @{soul.handle}
                         </p>
                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFork(soul.handle);
+                          }}
+                          disabled={forkingHandle === soul.handle}
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            color: '#fff',
+                            background: '#8b5cf6',
+                            border: '1px solid #8b5cf6',
+                            borderRadius: '6px',
+                            padding: '4px 10px',
+                            cursor: forkingHandle === soul.handle ? 'wait' : 'pointer',
+                            letterSpacing: '0.06em',
+                          }}
+                        >
+                          {forkingHandle === soul.handle ? '...' : 'FORK'}
+                        </button>
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <span style={{
                           fontFamily: 'var(--font-mono)',
@@ -159,6 +199,27 @@ export default function SoulsPage() {
                           {soul.soulMd}
                         </pre>
                         <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFork(soul.handle);
+                            }}
+                            disabled={forkingHandle === soul.handle}
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: '#fff',
+                              background: '#8b5cf6',
+                              border: '1px solid #8b5cf6',
+                              borderRadius: '6px',
+                              padding: '6px 14px',
+                              cursor: forkingHandle === soul.handle ? 'wait' : 'pointer',
+                              letterSpacing: '0.06em',
+                            }}
+                          >
+                            {forkingHandle === soul.handle ? 'CONNECTING...' : 'FORK THIS AGENT'}
+                          </button>
                           <a
                             href={`https://x.com/${soul.handle}`}
                             target="_blank"

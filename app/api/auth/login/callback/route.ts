@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
@@ -49,10 +49,21 @@ export async function GET(request: NextRequest) {
       const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
       const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
 
+      // If forking from an existing agent, pre-fill the SOUL.md
+      let soulMd = '# Pending SOUL.md setup';
+      let setupStep: 'soul' | 'analyze' = 'soul';
+      if (temp.forkHandle) {
+        const sourceAgent = await getAgentByHandle(temp.forkHandle);
+        if (sourceAgent && sourceAgent.soulMd && sourceAgent.soulMd.length > 50) {
+          soulMd = sourceAgent.soulMd;
+          setupStep = 'analyze'; // skip voice definition, go straight to analysis
+        }
+      }
+
       const agent = await createAgent({
         handle: screenName,
         name: screenName,
-        soulMd: '# Pending SOUL.md setup',
+        soulMd,
         soulSummary: null,
         apiKey: Buffer.from(consumerKey).toString('base64'),
         apiSecret: Buffer.from(consumerSecret).toString('base64'),
@@ -60,7 +71,7 @@ export async function GET(request: NextRequest) {
         accessSecret: Buffer.from(accessSecret).toString('base64'),
         isConnected: 1,
         xUserId: userId,
-        setupStep: 'soul',
+        setupStep,
       });
 
       await addAgentToUser(userId, agent.id);
