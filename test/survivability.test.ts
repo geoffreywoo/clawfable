@@ -229,7 +229,8 @@ describe('pickDiverseTweet', () => {
 
 describe('clampPostsPerDay', () => {
   it('clamps to MAX_POSTS_PER_DAY_SETTING', () => {
-    expect(clampPostsPerDay(24)).toBe(MAX_POSTS_PER_DAY_SETTING);
+    expect(clampPostsPerDay(50)).toBe(MAX_POSTS_PER_DAY_SETTING);
+    expect(clampPostsPerDay(24)).toBe(24); // 24 is within range
   });
 
   it('clamps minimum to 1', () => {

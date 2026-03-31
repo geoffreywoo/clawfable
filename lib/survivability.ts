@@ -26,10 +26,10 @@ export function jitterInterval(baseMs: number): number {
 // ─── Daily hard cap ─────────────────────────────────────────────────────────
 
 /** Absolute max posts per day, regardless of user settings. */
-export const DAILY_HARD_CAP = 12;
+export const DAILY_HARD_CAP = 30;
 
 /** Absolute max postsPerDay the user can configure. */
-export const MAX_POSTS_PER_DAY_SETTING = 10;
+export const MAX_POSTS_PER_DAY_SETTING = 24;
 
 /**
  * Count how many autopilot posts happened in the last 24 hours.
