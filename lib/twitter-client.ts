@@ -46,8 +46,10 @@ export async function postTweet(
   try {
     const me = await getMe(keys);
     const rwClient = client.readWrite;
+    // Strip any hallucinated x.com/twitter.com status URLs from content
+    // QTs are handled via the quoteTweetId URL append below
+    let tweetText = text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
     // Always use URL embed for QTs (works on all API tiers)
-    let tweetText = text;
     if (quoteTweetId) {
       const qtUrl = `https://x.com/i/web/status/${quoteTweetId}`;
       if (text.length + qtUrl.length + 1 <= 280) {

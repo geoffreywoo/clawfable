@@ -270,8 +270,14 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       try {
         const parsed = JSON.parse(trimmed);
         if (parsed.content && parsed.content.length > 0) {
+          // Strip hallucinated x.com/twitter.com status URLs from content.
+          // QTs are handled via quoteTweetId, not inline URLs.
+          const cleanContent = parsed.content
+            .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
+            .trim();
+          if (!cleanContent) continue;
           tweets.push({
-            content: parsed.content,
+            content: cleanContent,
             format: parsed.format || 'hot_take',
             targetTopic: parsed.targetTopic || 'general',
             rationale: parsed.rationale || '',
