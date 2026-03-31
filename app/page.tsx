@@ -44,8 +44,12 @@ export default function HomePage() {
 
   // Load agents when logged in
   useEffect(() => {
-    if (user) loadAgents();
-    else setLoading(false);
+    if (user) {
+      setLoading(true);
+      loadAgents();
+    } else {
+      setLoading(false);
+    }
   }, [user, loadAgents]);
 
   // Poll every 30 seconds
