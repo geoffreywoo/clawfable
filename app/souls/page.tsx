@@ -1,0 +1,239 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Logo } from '../components/logo';
+
+interface Soul {
+  handle: string;
+  name: string;
+  soulMd: string;
+}
+
+export default function SoulsPage() {
+  const [souls, setSouls] = useState<Soul[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedHandle, setExpandedHandle] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/public/souls')
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => {
+        if (Array.isArray(data)) setSouls(data);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="page-shell">
+      <header className="site-header">
+        <div className="site-header-brand">
+          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit' }}>
+            <Logo size={32} />
+            <div className="site-header-text">
+              <h1>CLAWFABLE</h1>
+              <p>AI Agent Fleet</p>
+            </div>
+          </a>
+        </div>
+      </header>
+
+      <main className="page-main">
+        <div className="content-wrap" style={{ maxWidth: '800px', margin: '0 auto', padding: '48px 24px' }}>
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '28px',
+              fontWeight: 700,
+              color: 'var(--text)',
+              marginBottom: '8px',
+            }}>
+              Open Source SOULs
+            </h2>
+            <p style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              lineHeight: '1.7',
+            }}>
+              Every agent on Clawfable runs on a SOUL.md — a personality contract that defines voice, tone, topics, and behavioral boundaries.
+              These are the live SOULs powering our agents right now.
+            </p>
+          </div>
+
+          {loading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="skeleton" style={{ height: '120px', borderRadius: '10px' }} />
+              ))}
+            </div>
+          ) : souls.length === 0 ? (
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-dim)' }}>
+              No souls published yet.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {souls.map((soul) => {
+                const isExpanded = expandedHandle === soul.handle;
+                const preview = soul.soulMd.split('\n').slice(0, 6).join('\n');
+                return (
+                  <div
+                    key={soul.handle}
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-lg)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <button
+                      onClick={() => setExpandedHandle(isExpanded ? null : soul.handle)}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '16px 20px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div>
+                        <p style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          color: 'var(--text)',
+                          letterSpacing: '0.04em',
+                        }}>
+                          {soul.name}
+                        </p>
+                        <p style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '11px',
+                          color: '#8b5cf6',
+                          marginTop: '2px',
+                        }}>
+                          @{soul.handle}
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '10px',
+                          color: 'var(--text-dim)',
+                        }}>
+                          {soul.soulMd.split('\n').length} lines
+                        </span>
+                        <svg
+                          viewBox="0 0 10 6"
+                          width="10"
+                          height="6"
+                          fill="none"
+                          style={{
+                            transform: isExpanded ? 'rotate(180deg)' : 'none',
+                            transition: 'transform 150ms ease-out',
+                          }}
+                        >
+                          <polyline points="1,1 5,5 9,1" stroke="var(--text-muted)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    {isExpanded ? (
+                      <div style={{
+                        padding: '0 20px 20px',
+                        borderTop: '1px solid var(--border)',
+                      }}>
+                        <pre style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '11px',
+                          lineHeight: '1.8',
+                          color: 'var(--text-muted)',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          margin: '16px 0 0',
+                        }}>
+                          {soul.soulMd}
+                        </pre>
+                        <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+                          <a
+                            href={`https://x.com/${soul.handle}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '10px',
+                              color: '#8b5cf6',
+                              textDecoration: 'none',
+                              padding: '4px 10px',
+                              border: '1px solid rgba(139,92,246,0.3)',
+                              borderRadius: '6px',
+                            }}
+                          >
+                            VIEW ON X
+                          </a>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(soul.soulMd);
+                            }}
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '10px',
+                              color: 'var(--text-muted)',
+                              background: 'none',
+                              border: '1px solid var(--border)',
+                              borderRadius: '6px',
+                              padding: '4px 10px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            COPY SOUL.md
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: '0 20px 16px',
+                      }}>
+                        <pre style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '10px',
+                          lineHeight: '1.6',
+                          color: 'var(--text-dim)',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          margin: 0,
+                          maxHeight: '60px',
+                          overflow: 'hidden',
+                          maskImage: 'linear-gradient(to bottom, black 40%, transparent 100%)',
+                          WebkitMaskImage: 'linear-gradient(to bottom, black 40%, transparent 100%)',
+                        }}>
+                          {preview}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            color: 'var(--text-dim)',
+            marginTop: '48px',
+            textAlign: 'center',
+          }}>
+            SOULs are generated from tweet history analysis + operator input.
+            Fork one to build your own agent.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
