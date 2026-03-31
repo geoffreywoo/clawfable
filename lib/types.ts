@@ -28,6 +28,7 @@ export interface Agent {
   accessSecret: string | null;
   isConnected: number; // 0 | 1
   xUserId: string | null;
+  soulPublic: number; // 0 | 1, default 1 (open source)
   setupStep: SetupStep;
   createdAt: string;
 }
@@ -54,6 +55,7 @@ export interface AgentDetail {
   soulSummary: string | null;
   isConnected: number;
   xUserId: string | null;
+  soulPublic: number;
   setupStep: SetupStep;
   createdAt: string;
   hasKeys: boolean;
@@ -97,7 +99,7 @@ export interface Metric {
 
 // ─── Create / update input types ─────────────────────────────────────────────
 
-export type CreateAgentInput = Omit<Agent, 'id' | 'createdAt'>;
+export type CreateAgentInput = Omit<Agent, 'id' | 'createdAt' | 'soulPublic'> & { soulPublic?: number };
 export type UpdateAgentInput = Partial<Omit<Agent, 'id' | 'createdAt'>>;
 
 export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt'>;

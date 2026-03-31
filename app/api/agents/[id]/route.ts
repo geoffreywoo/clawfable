@@ -20,6 +20,7 @@ export async function GET(
       soulSummary: agent.soulSummary,
       isConnected: agent.isConnected,
       xUserId: agent.xUserId,
+      soulPublic: agent.soulPublic ?? 1,
       setupStep: normalizeSetupStep(agent.setupStep),
       createdAt: agent.createdAt,
       hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
@@ -52,9 +53,10 @@ export async function PATCH(
       return NextResponse.json({ success: true });
     }
 
-    const { name, soulMd, handle, setupStep } = body;
+    const { name, soulMd, handle, setupStep, soulPublic } = body;
 
     const updates: Record<string, unknown> = {};
+    if (soulPublic !== undefined) updates.soulPublic = soulPublic ? 1 : 0;
     if (setupStep !== undefined) {
       if (!isSetupStep(setupStep) || setupStep === 'ready') {
         return NextResponse.json({ error: 'Invalid setup step update' }, { status: 400 });

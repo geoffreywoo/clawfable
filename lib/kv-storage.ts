@@ -270,6 +270,7 @@ export async function createAgent(data: Omit<CreateAgentInput, 'id'>): Promise<A
     accessSecret: data.accessSecret ?? null,
     isConnected: data.isConnected ?? 0,
     xUserId: data.xUserId ?? null,
+    soulPublic: data.soulPublic ?? 1,
     setupStep: data.setupStep ?? 'oauth',
     createdAt: new Date().toISOString(),
   };

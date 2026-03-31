@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const agents = await getAgents();
     const souls = agents
-      .filter((a) => a.setupStep === 'ready' && a.soulMd && a.soulMd.length > 50)
+      .filter((a) => a.setupStep === 'ready' && a.soulMd && a.soulMd.length > 50 && a.soulPublic !== 0)
       .map((a) => ({
         handle: a.handle,
         name: a.name,

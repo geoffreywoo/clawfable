@@ -19,6 +19,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   // OAuth
 
   // UI state
+  const [soulPublic, setSoulPublic] = useState(agent.soulPublic !== 0);
   const [generatingSoul, setGeneratingSoul] = useState(false);
   const [savingSoul, setSavingSoul] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -309,6 +310,53 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             </p>
           </div>
         )}
+      </div>
+
+      {/* ─── Open Source Soul ───────────────────────────────────────────────── */}
+      <div style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '16px 20px',
+        marginBottom: '16px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+              OPEN SOURCE SOUL
+            </p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+              List this agent&apos;s SOUL.md on{' '}
+              <a href="/souls" target="_blank" style={{ color: '#8b5cf6', textDecoration: 'none' }}>clawfable.com/souls</a>
+            </p>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{
+              background: soulPublic ? '#22c55e' : 'var(--surface-2)',
+              color: soulPublic ? '#fff' : 'var(--text-muted)',
+              border: `1px solid ${soulPublic ? '#22c55e' : 'var(--border)'}`,
+              minWidth: '40px',
+            }}
+            onClick={async () => {
+              const next = !soulPublic;
+              setSoulPublic(next);
+              try {
+                await fetch(`/api/agents/${agentId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ soulPublic: next }),
+                });
+                showToast(next ? 'Soul is now public' : 'Soul is now private');
+              } catch {
+                setSoulPublic(!next);
+                showToast('Failed to update');
+              }
+            }}
+          >
+            {soulPublic ? 'ON' : 'OFF'}
+          </button>
+        </div>
       </div>
 
       {/* ─── Danger zone ──────────────────────────────────────────────────────── */}
