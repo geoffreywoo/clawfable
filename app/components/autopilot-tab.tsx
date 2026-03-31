@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { ProtocolSettings, PostLogEntry, TweetJob, JobSuggestion, Metric } from '@/lib/types';
+import type { ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
 
 interface AutopilotTabProps {
   agentId: string;
@@ -21,12 +21,9 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
-  const [jobs, setJobs] = useState<TweetJob[]>([]);
-  const [suggestions, setSuggestions] = useState<JobSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
   const [agentConnected, setAgentConnected] = useState(false);
-  const [activatingIdx, setActivatingIdx] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,17 +31,13 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
       fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch(`/api/agents/${agentId}/metrics`).then((r) => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/agents/${agentId}/jobs`).then((r) => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/agents/${agentId}/jobs/suggest`).then((r) => r.ok ? r.json() : { suggestions: [] }).catch(() => ({ suggestions: [] })),
-    ]).then(([agent, protocolData, metricsData, jobsData, suggestData]) => {
+    ]).then(([agent, protocolData, metricsData]) => {
       setAgentConnected(agent?.isConnected === 1);
       if (protocolData) {
         setSettings(protocolData.settings);
         setPostLog(protocolData.postLog || []);
       }
       if (Array.isArray(metricsData)) setMetrics(metricsData);
-      setJobs(jobsData || []);
-      setSuggestions(suggestData.suggestions || []);
       setLoading(false);
     });
   }, [agentId]);
@@ -89,51 +82,6 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       showToast(err instanceof Error ? err.message : 'Run failed');
     } finally {
       setRunningAutopilot(false);
-    }
-  };
-
-  const handleActivateSuggestion = async (suggestion: JobSuggestion, idx: number) => {
-    setActivatingIdx(idx);
-    try {
-      const res = await fetch(`/api/agents/${agentId}/jobs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...suggestion, source: 'suggested' }),
-      });
-      const job = await res.json();
-      if (!res.ok) throw new Error(job.error);
-      setJobs((prev) => [job, ...prev]);
-      setSuggestions((prev) => prev.filter((_, i) => i !== idx));
-      showToast(`Job "${suggestion.name}" activated`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to activate');
-    } finally {
-      setActivatingIdx(null);
-    }
-  };
-
-  const handleToggleJob = async (job: TweetJob) => {
-    try {
-      const res = await fetch(`/api/agents/${agentId}/jobs/${job.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !job.enabled }),
-      });
-      const updated = await res.json();
-      if (!res.ok) throw new Error(updated.error);
-      setJobs((prev) => prev.map((j) => j.id === job.id ? updated : j));
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to update');
-    }
-  };
-
-  const handleDeleteJob = async (job: TweetJob) => {
-    try {
-      await fetch(`/api/agents/${agentId}/jobs/${job.id}`, { method: 'DELETE' });
-      setJobs((prev) => prev.filter((j) => j.id !== job.id));
-      showToast(`"${job.name}" deleted`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Delete failed');
     }
   };
 
@@ -470,78 +418,6 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 })}
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Suggested Jobs ──────────────────────────────────────────────── */}
-      {suggestions.length > 0 && (
-        <div>
-          <div className="section-header">
-            <div className="section-title">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path d="M8 1l2 4h4l-3 3 1 4-4-2-4 2 1-4-3-3h4l2-4z" stroke="#8b5cf6" strokeWidth="1.2" fill="none" />
-              </svg>
-              <h2>SUGGESTED JOBS</h2>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {suggestions.map((s, idx) => (
-              <div key={idx} className="protocol-card" style={{ padding: '12px 14px' }}>
-                <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>{s.name}</p>
-                  <button className="btn btn-primary btn-sm" style={{ background: '#8b5cf6' }}
-                    disabled={activatingIdx === idx} onClick={() => handleActivateSuggestion(s, idx)}>
-                    {activatingIdx === idx ? 'ACTIVATING...' : 'ACTIVATE'}
-                  </button>
-                </div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', lineHeight: '1.5' }}>{s.description}</p>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>{s.reason}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─── Active Jobs ──────────────────────────────────────────────────── */}
-      {jobs.length > 0 && (
-        <div>
-          <div className="section-header">
-            <div className="section-title">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <polyline points="5,8 7,10 11,6" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <h2>ACTIVE JOBS</h2>
-              <span className="section-count">{jobs.filter((j) => j.enabled).length} running</span>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {jobs.map((job) => (
-              <div key={job.id} className="protocol-card" style={{ padding: '10px 14px' }}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <button className="btn btn-sm" style={{
-                      background: job.enabled ? '#22c55e' : 'var(--surface-2)',
-                      color: job.enabled ? '#fff' : 'var(--text-muted)',
-                      border: `1px solid ${job.enabled ? '#22c55e' : 'var(--border)'}`,
-                      minWidth: '36px', height: '24px', fontSize: '9px',
-                    }} onClick={() => handleToggleJob(job)}>
-                      {job.enabled ? 'ON' : 'OFF'}
-                    </button>
-                    <div>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>{job.name}</p>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>
-                        {job.schedule} · {job.totalPosted} posted
-                        {job.lastRunAt && ` · last ${getTimeAgo(job.lastRunAt)}`}
-                      </p>
-                    </div>
-                  </div>
-                  <button className="btn btn-ghost btn-sm" style={{ color: '#ef4444', fontSize: '9px' }}
-                    onClick={() => handleDeleteJob(job)}>DELETE</button>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
