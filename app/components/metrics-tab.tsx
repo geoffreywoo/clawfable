@@ -39,6 +39,16 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function getTimeAgo(ts: string): string {
+  const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export function MetricsTab({ agentId }: MetricsTabProps) {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [learnings, setLearnings] = useState<AgentLearnings | null>(null);
@@ -52,7 +62,6 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       fetch(`/api/agents/${agentId}/metrics/timeseries`).then((r) => r.ok ? r.json() : null),
     ])
       .then(([metricsData, learningsData, timeseriesData]) => {
-        // Handle both old (array) and new ({ metrics, health }) response shapes
         if (Array.isArray(metricsData)) setMetrics(metricsData);
         else if (metricsData?.metrics && Array.isArray(metricsData.metrics)) setMetrics(metricsData.metrics);
         if (learningsData && typeof learningsData === 'object' && learningsData.totalTracked > 0) {
@@ -78,10 +87,145 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
 
   const maxDailyPosts = timeseries ? Math.max(...timeseries.daily.map((d) => d.tweetsPosted), 1) : 1;
   const maxDailyLikes = timeseries ? Math.max(...timeseries.daily.map((d) => d.avgLikes), 1) : 1;
+  const maxFormatEng = learnings?.formatRankings.length ? Math.max(...learnings.formatRankings.map((f) => f.avgEngagement), 1) : 1;
+  const maxTopicEng = learnings?.topicRankings.length ? Math.max(...learnings.topicRankings.map((t) => t.avgEngagement), 1) : 1;
 
   return (
     <div className="space-y-6">
-      {/* Lift hero */}
+
+      {/* ─── 1. Learning Digest Hero ──────────────────────────────────────── */}
+      {learnings && learnings.insights.length > 0 ? (
+        <div className="learning-digest">
+          <div className="learning-digest-header">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
+              <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            <h2>WHAT THE SYSTEM IS LEARNING</h2>
+            <span className="section-count">updated {getTimeAgo(learnings.updatedAt)}</span>
+          </div>
+          <ul className="learning-insights">
+            {learnings.insights.map((insight, i) => (
+              <li key={i} className="learning-insight">{insight}</li>
+            ))}
+          </ul>
+          <p className="learning-provenance">
+            Based on {learnings.totalTracked} tracked tweets. Avg {learnings.avgLikes} likes, {learnings.avgRetweets} retweets.
+          </p>
+        </div>
+      ) : (
+        <div className="learning-empty">
+          <div className="learning-digest-header">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--text-dim)" strokeWidth="1.3" />
+              <line x1="6" y1="14" x2="10" y2="14" stroke="var(--text-dim)" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            <h2>LEARNING</h2>
+          </div>
+          <div className="learning-progress">
+            <p className="learning-progress-label">
+              Autopilot is gathering data... {timeseries?.postAutopilot?.tweetCount ?? 0} of 5 tweets tracked
+            </p>
+            <div className="lift-progress-bar">
+              <div
+                className="lift-progress-fill"
+                style={{ width: `${Math.min(((timeseries?.postAutopilot?.tweetCount ?? 0) / 5) * 100, 100)}%` }}
+              />
+            </div>
+            <p className="learning-progress-hint">
+              Insights will appear once there&apos;s enough performance data to learn from.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 2. What's Working / What Isn't ──────────────────────────────── */}
+      {learnings && (learnings.formatRankings.length > 0 || learnings.topicRankings.length > 0) && (
+        <div>
+          <div className="section-title mb-4">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <rect x="1" y="8" width="3" height="7" rx="1" fill="#8b5cf6" />
+              <rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" />
+              <rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" />
+            </svg>
+            <h2>WHAT PERFORMS</h2>
+            <span className="section-count">ranked by avg engagement</span>
+          </div>
+
+          <div className="rankings-grid">
+            {learnings.formatRankings.length > 0 && (
+              <div className="perf-block">
+                <p className="perf-block-label">FORMATS</p>
+                <div className="perf-rows">
+                  {learnings.formatRankings.slice(0, 5).map((f) => (
+                    <div key={f.format} className="perf-row">
+                      <span className="perf-row-name">{f.format.replace(/_/g, ' ')}</span>
+                      <div className="ranking-bar-track">
+                        <div className="ranking-bar" style={{ width: `${(f.avgEngagement / maxFormatEng) * 100}%` }} />
+                      </div>
+                      <span className="perf-row-stat">{f.avgEngagement}</span>
+                      <span className="perf-row-count">{f.count}x</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {learnings.topicRankings.length > 0 && (
+              <div className="perf-block">
+                <p className="perf-block-label">TOPICS</p>
+                <div className="perf-rows">
+                  {learnings.topicRankings.slice(0, 5).map((t) => (
+                    <div key={t.topic} className="perf-row">
+                      <span className="perf-row-name">{t.topic}</span>
+                      <div className="ranking-bar-track">
+                        <div className="ranking-bar" style={{ width: `${(t.avgEngagement / maxTopicEng) * 100}%` }} />
+                      </div>
+                      <span className="perf-row-stat">{t.avgEngagement}</span>
+                      <span className="perf-row-count">{t.count}x</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Best vs Worst tweets */}
+      {learnings && (learnings.bestPerformers.length > 0 || learnings.worstPerformers.length > 0) && (
+        <div className="comparison-grid">
+          {learnings.bestPerformers.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">TOP TWEETS</p>
+              <div className="perf-tweets">
+                {learnings.bestPerformers.slice(0, 3).map((t) => (
+                  <div key={t.tweetId} className="perf-tweet perf-tweet-best">
+                    <span className="perf-tweet-stat">{t.likes} likes</span>
+                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {learnings.worstPerformers.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">LOWEST PERFORMERS</p>
+              <div className="perf-tweets">
+                {learnings.worstPerformers.slice(0, 3).map((t) => (
+                  <div key={t.tweetId} className="perf-tweet perf-tweet-worst">
+                    <span className="perf-tweet-stat">{t.likes} likes</span>
+                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── 3. Autopilot Lift ────────────────────────────────────────────── */}
       {timeseries && timeseries.dataReady && timeseries.lift && (
         <div className="lift-section">
           <div className="section-title mb-4">
@@ -128,33 +272,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         </div>
       )}
 
-      {/* Not enough data state */}
-      {timeseries && !timeseries.dataReady && (
-        <div className="lift-gathering">
-          <div className="section-title mb-4">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <h2>AUTOPILOT LIFT</h2>
-          </div>
-          <div className="lift-progress">
-            <p className="lift-progress-label">
-              Gathering data... {timeseries.postAutopilot.tweetCount} of 5 tweets tracked
-            </p>
-            <div className="lift-progress-bar">
-              <div
-                className="lift-progress-fill"
-                style={{ width: `${Math.min((timeseries.postAutopilot.tweetCount / 5) * 100, 100)}%` }}
-              />
-            </div>
-            {!timeseries.baseline && (
-              <p className="lift-progress-hint">Baseline will be set when autopilot is first enabled.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Daily trends */}
+      {/* ─── 4. Activity Trends ───────────────────────────────────────────── */}
       {timeseries && timeseries.daily.some((d) => d.tweetsPosted > 0) && (
         <div className="trend-section">
           <div className="section-title mb-4">
@@ -204,15 +322,14 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         </div>
       )}
 
-      {/* Counter grid */}
+      {/* ─── 5. Live Counters (demoted) ───────────────────────────────────── */}
       <div className="section-title mb-4">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-          <rect x="1" y="8" width="3" height="7" rx="1" fill="#8b5cf6" />
-          <rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" />
-          <rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" />
+          <rect x="1" y="8" width="3" height="7" rx="1" fill="var(--text-dim)" />
+          <rect x="6" y="5" width="3" height="10" rx="1" fill="var(--text-dim)" />
+          <rect x="11" y="2" width="3" height="13" rx="1" fill="var(--text-dim)" />
         </svg>
-        <h2>METRICS</h2>
-        <span className="section-count">live from account data</span>
+        <h2>COUNTERS</h2>
       </div>
 
       {metrics.length === 0 ? (
@@ -239,88 +356,6 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Learnings (existing) */}
-      {learnings && (
-        <div className="perf-section">
-          <div className="section-title mb-4" style={{ marginTop: '32px' }}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <h2>PERFORMANCE LEARNINGS</h2>
-            <span className="section-count">{learnings.totalTracked} tweets tracked</span>
-          </div>
-
-          {learnings.formatRankings.length > 0 && (
-            <div className="perf-block">
-              <p className="perf-block-label">FORMAT RANKINGS</p>
-              <div className="perf-rows">
-                {learnings.formatRankings.slice(0, 5).map((f) => (
-                  <div key={f.format} className="perf-row">
-                    <span className="perf-row-name">{f.format.replace(/_/g, ' ')}</span>
-                    <span className="perf-row-stat">{f.avgEngagement} avg likes</span>
-                    <span className="perf-row-count">{f.count} posts</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {learnings.topicRankings.length > 0 && (
-            <div className="perf-block">
-              <p className="perf-block-label">TOPIC RANKINGS</p>
-              <div className="perf-rows">
-                {learnings.topicRankings.slice(0, 5).map((t) => (
-                  <div key={t.topic} className="perf-row">
-                    <span className="perf-row-name">{t.topic}</span>
-                    <span className="perf-row-stat">{t.avgEngagement} avg likes</span>
-                    <span className="perf-row-count">{t.count} posts</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {learnings.bestPerformers.length > 0 && (
-            <div className="perf-block">
-              <p className="perf-block-label">TOP TWEETS</p>
-              <div className="perf-tweets">
-                {learnings.bestPerformers.slice(0, 3).map((t) => (
-                  <div key={t.tweetId} className="perf-tweet perf-tweet-best">
-                    <span className="perf-tweet-stat">{t.likes} likes</span>
-                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {learnings.worstPerformers.length > 0 && (
-            <div className="perf-block">
-              <p className="perf-block-label">LOWEST PERFORMERS</p>
-              <div className="perf-tweets">
-                {learnings.worstPerformers.slice(0, 3).map((t) => (
-                  <div key={t.tweetId} className="perf-tweet perf-tweet-worst">
-                    <span className="perf-tweet-stat">{t.likes} likes</span>
-                    <p className="perf-tweet-content">{t.content.slice(0, 160)}{t.content.length > 160 ? '...' : ''}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {learnings.insights.length > 0 && (
-            <div className="perf-block">
-              <p className="perf-block-label">AI INSIGHTS</p>
-              <ul className="perf-insights">
-                {learnings.insights.map((insight, i) => (
-                  <li key={i} className="perf-insight">{insight}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
     </div>

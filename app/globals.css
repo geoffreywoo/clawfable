@@ -1177,6 +1177,129 @@ h1, h2, h3, h4 {
 .metric-delta.up { color: var(--green); }
 .metric-delta.down { color: #f87171; }
 
+/* ─── Learning digest ──────────────────────────────────────────────────────── */
+.learning-digest {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #8b5cf6;
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+
+.learning-digest-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.learning-digest-header h2 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text);
+}
+
+.learning-insights {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learning-insight {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  padding-left: 16px;
+  position: relative;
+}
+
+.learning-insight::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8b5cf6;
+}
+
+.learning-provenance {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 14px;
+}
+
+.learning-empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+
+.learning-progress {
+  margin-top: 12px;
+}
+
+.learning-progress-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.learning-progress-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+
+/* ─── Rankings grid ────────────────────────────────────────────────────────── */
+.rankings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.ranking-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.ranking-bar {
+  height: 100%;
+  background: #8b5cf6;
+  border-radius: 3px;
+  min-width: 2px;
+  transition: width 0.3s ease-out;
+}
+
+/* ─── Comparison grid ──────────────────────────────────────────────────────── */
+.comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .rankings-grid,
+  .comparison-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ─── Performance learnings ─────────────────────────────────────────────────── */
 .perf-section { margin-top: 4px; }
 
