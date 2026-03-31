@@ -26,15 +26,23 @@ export function createClient(keys: TwitterKeys): TwitterApi {
   });
 }
 
-function handleRateLimit(error: unknown): never {
-  if (
-    error instanceof Object &&
-    'code' in error &&
-    (error as { code: number }).code === 429
-  ) {
-    throw new Error('Rate limit reached. Please wait before trying again.');
+function handleApiError(error: unknown): never {
+  if (error instanceof Object && 'code' in error) {
+    const code = (error as { code: number }).code;
+    if (code === 429) {
+      throw new Error('Rate limit reached. Please wait before trying again.');
+    }
+    if (code === 403) {
+      // Extract detail from twitter-api-v2 error
+      const detail = 'data' in error ? JSON.stringify((error as { data: unknown }).data) : '';
+      throw new Error(`Request failed with code 403. ${detail || 'Your X API tier may not support this action.'}`);
+    }
   }
-  throw error;
+  // For generic errors, try to extract a useful message
+  if (error instanceof Error) {
+    throw error;
+  }
+  throw new Error(String(error));
 }
 
 export async function postTweet(
@@ -57,7 +65,7 @@ export async function postTweet(
       username: me.username,
     };
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -81,7 +89,7 @@ export async function replyToTweet(
       username: me.username,
     };
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -103,7 +111,7 @@ export async function searchRecentTweets(
       createdAt: tweet.created_at || new Date().toISOString(),
     }));
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -148,7 +156,7 @@ export async function getMentionsFromTwitter(
       };
     });
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -163,7 +171,7 @@ export async function likeTweet(
     const result = await rwClient.v2.like(userId, tweetId);
     return { liked: result.data.liked };
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -179,7 +187,7 @@ export async function getMe(
       username: result.data.username,
     };
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -198,7 +206,7 @@ export async function getUserByUsername(
       username: result.data.username,
     };
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -241,7 +249,7 @@ export async function getUserTimeline(
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
     }));
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
@@ -343,7 +351,7 @@ export async function getFollowing(
       verified: (user as any).verified ?? false,
     }));
   } catch (error) {
-    return handleRateLimit(error);
+    return handleApiError(error);
   }
 }
 
