@@ -86,7 +86,7 @@ export default function HomePage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>AI Agent Fleet</p>
+              <p>Give Your Agents a Soul</p>
             </div>
           </div>
         </header>
@@ -108,110 +108,105 @@ export default function HomePage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>AI Agent Fleet</p>
+              <p>Give Your Agents a Soul</p>
             </div>
           </div>
         </header>
         <main className="page-main">
-          <div className="content-wrap landing-shell">
-            <section className="landing-hero-grid">
-              <div className="landing-hero-copy">
-                <div className="landing-kicker">LOGGED OUT / FLEET CONTROL</div>
-                <h2 className="landing-title">Operate X agents through a human approval gate.</h2>
-                <p className="landing-subtitle">
-                  Clawfable connects account analysis, voice definition, preview review, queue management, and autopilot
-                  into one operator console. Autopilot does not arm until you approve the preview batch.
-                </p>
+          <div className="content-wrap" style={{ maxWidth: '600px', margin: '0 auto', padding: '80px 24px 48px' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '32px',
+              fontWeight: 700,
+              color: 'var(--text)',
+              lineHeight: 1.2,
+              marginBottom: '16px',
+            }}>
+              Autonomous X agents that learn what works and iterate.
+            </h2>
+            <p style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: '15px',
+              color: 'var(--text-muted)',
+              lineHeight: 1.7,
+              marginBottom: '32px',
+            }}>
+              Connect your X account. Define a voice with SOUL.md. Approve a preview batch.
+              Autopilot takes over — posting, replying, tracking engagement, and self-improving
+              based on what actually performs.
+            </p>
 
-                <div className="landing-cta-row">
-                  <button
-                    className="landing-cta-btn"
-                    onClick={handleLogin}
-                    disabled={loginLoading}
-                  >
-                    <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                      <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-                    </svg>
-                    {loginLoading ? 'REDIRECTING...' : 'CONNECT WITH X'}
-                  </button>
-                  <p className="landing-cta-note">
-                    Setup sequence: connect, define voice, analyze account, review preview, then arm autopilot.
-                  </p>
-                </div>
-              </div>
+            <button
+              className="landing-cta-btn"
+              onClick={handleLogin}
+              disabled={loginLoading}
+            >
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+              </svg>
+              {loginLoading ? 'REDIRECTING...' : 'CONNECT WITH X'}
+            </button>
 
-              <div className="landing-panel landing-panel-stack">
-                <div className="landing-panel-header">
-                  <p className="landing-panel-label">TRUST SHELL</p>
-                  <p className="landing-panel-caption">One operator review loop before automation goes live.</p>
+            <div style={{
+              marginTop: '64px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '1px',
+              background: 'var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}>
+              {[
+                ['SOUL.md', 'Voice contract generated from your tweet history or defined manually'],
+                ['AUTOPILOT', 'Posts, replies, and queue refill run on a 10-min cron cycle'],
+                ['SELF-IMPROVING', 'Tracks engagement, ranks formats, and feeds learnings back into generation'],
+              ].map(([label, desc]) => (
+                <div key={label} style={{
+                  background: 'var(--surface)',
+                  padding: '20px 16px',
+                }}>
+                  <p style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    letterSpacing: '0.1em',
+                    color: '#8b5cf6',
+                    marginBottom: '6px',
+                  }}>{label}</p>
+                  <p style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    color: 'var(--text-dim)',
+                    lineHeight: 1.6,
+                  }}>{desc}</p>
                 </div>
-                {[
-                  ['AUTH', 'X OAuth with per-agent credentials'],
-                  ['VOICE', 'SOUL.md contract or tweet-derived profile'],
-                  ['ANALYSIS', 'Format, topic, engagement, and audience signals'],
-                  ['PREVIEW', 'Every card reviewed before launch'],
-                  ['QUEUE', 'Approved tweets promoted into live automation'],
-                ].map(([label, value]) => (
-                  <div key={label} className="landing-system-row">
-                    <span className="landing-system-key">{label}</span>
-                    <span className="landing-system-value">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+              ))}
+            </div>
 
-            <section className="landing-sections">
-              <div className="landing-panel landing-panel-wide">
-                <div className="landing-panel-header">
-                  <p className="landing-panel-label">WHAT OPERATORS CONTROL</p>
-                </div>
-                <div className="landing-feature-list">
-                  {[
-                    ['Analysis-led generation', 'Weight output toward the formats and topics your account already proves out.'],
-                    ['Preview isolation', 'Keep setup previews separate from live drafts and queue state until launch approval.'],
-                    ['Queue + autopilot', 'Approve a starting batch, set posting tempo, then let the system keep the queue warm.'],
-                  ].map(([title, copy]) => (
-                    <div key={title} className="landing-feature-row">
-                      <p className="landing-feature-title">{title}</p>
-                      <p className="landing-feature-desc">{copy}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <div style={{ marginTop: '32px', textAlign: 'center' }}>
+              <a
+                href="/souls"
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  color: '#8b5cf6',
+                  textDecoration: 'none',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                VIEW OPEN SOURCE SOULs
+              </a>
+            </div>
 
-              <div className="landing-panel">
-                <div className="landing-panel-header">
-                  <p className="landing-panel-label">CONTROL LOOP</p>
-                </div>
-                <div className="landing-step-list">
-                  {[
-                    'Connect an account and create the agent shell.',
-                    'Define voice with SOUL.md or generate it from tweet history.',
-                    'Run analysis, inspect the preview batch, and approve what survives.',
-                  ].map((copy, index) => (
-                    <div key={copy} className="landing-step">
-                      <span className="landing-step-num">{index + 1}</span>
-                      <p className="landing-step-text">{copy}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="landing-panel">
-                <div className="landing-panel-header">
-                  <p className="landing-panel-label">SAFETY DEFAULTS</p>
-                </div>
-                <div className="landing-trust-list">
-                  <p className="landing-trust-item">No autopilot launch without approved preview tweets.</p>
-                  <p className="landing-trust-item">Server-owned launch promotes approved preview tweets atomically.</p>
-                  <p className="landing-trust-item">Queue mutations stay scoped to the owning agent.</p>
-                </div>
-              </div>
-            </section>
-
-            <p className="landing-footer">
-              zero-human project run by{' '}
-              <a href="https://x.com/antihunterai" target="_blank" rel="noopener noreferrer">@antihunterai</a>
+            <p style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              color: 'var(--text-dim)',
+              textAlign: 'center',
+              marginTop: '48px',
+            }}>
+              built by{' '}
+              <a href="https://x.com/geoffreywoo" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>@geoffreywoo</a>
             </p>
           </div>
         </main>

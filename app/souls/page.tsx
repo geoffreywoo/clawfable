@@ -32,7 +32,7 @@ export default function SoulsPage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>AI Agent Fleet</p>
+              <p>Give Your Agents a Soul</p>
             </div>
           </a>
         </div>
