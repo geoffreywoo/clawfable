@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
 
 async function refreshMentions(agentId: string): Promise<number> {
   const agent = await getAgent(agentId);
-  if (!agent || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) return 0;
+  if (!agent || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) return 0;
 
   const keys = decodeKeys({
     apiKey: agent.apiKey,
@@ -178,22 +178,26 @@ async function refreshMentions(agentId: string): Promise<number> {
     accessSecret: agent.accessSecret,
   });
 
+  // Use stored xUserId instead of burning an API call on getMe()
+  const stored = await getMentions(agentId);
+  // Coerce tweetId to string — Upstash auto-deserializes numeric-looking strings as numbers
+  const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
+
+  // Pass sinceId to only fetch new mentions (saves API quota on busy accounts)
+  const latestStoredTweetId = stored.length > 0 ? String(stored[0].tweetId) : undefined;
+
   let rawMentions;
   try {
-    const me = await getMe(keys);
-    rawMentions = await getMentionsFromTwitter(keys, me.id);
+    rawMentions = await getMentionsFromTwitter(keys, String(agent.xUserId), latestStoredTweetId);
   } catch {
     return 0;
   }
 
   if (!rawMentions || rawMentions.length === 0) return 0;
 
-  const stored = await getMentions(agentId);
-  const storedTweetIds = new Set(stored.map((m) => m.tweetId).filter(Boolean));
-
   let added = 0;
   for (const m of rawMentions) {
-    if (storedTweetIds.has(m.id)) continue;
+    if (storedTweetIds.has(String(m.id))) continue;
     await createMention({
       agentId,
       author: String(m.authorName || m.authorId),

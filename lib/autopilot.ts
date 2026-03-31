@@ -238,10 +238,11 @@ async function runAutoReply(
 
   // Get existing stored mentions to find which are new
   const storedMentions = await getMentions(agent.id);
-  const storedTweetIds = new Set(storedMentions.map((m) => m.tweetId).filter(Boolean));
+  // Coerce to string — Upstash auto-deserializes numeric-looking strings as numbers
+  const storedTweetIds = new Set(storedMentions.map((m) => String(m.tweetId)).filter(Boolean));
 
   // Filter to new mentions we haven't seen
-  const newMentions = rawMentions.filter((m) => !storedTweetIds.has(m.id));
+  const newMentions = rawMentions.filter((m) => !storedTweetIds.has(String(m.id)));
   if (newMentions.length === 0) return 0;
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
