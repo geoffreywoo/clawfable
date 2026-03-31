@@ -15,7 +15,6 @@ interface Topic {
 }
 
 interface ProtocolTweet extends Tweet {
-  format?: string;
   rationale?: string;
 }
 

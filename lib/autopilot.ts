@@ -22,6 +22,8 @@ import {
   addPostLogEntry,
   getPostLog,
   logFunnelEvent,
+  getStyleSignals,
+  getRecentNegativeFeedback,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
@@ -171,7 +173,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       tweetId: tweet.id,
       xTweetId: result.tweetId,
       content: tweet.content,
-      format: tweet.topic || 'unknown',
+      format: tweet.format || tweet.topic || 'unknown',
       topic: tweet.topic || 'general',
       postedAt: new Date().toISOString(),
       source: 'autopilot',
@@ -422,15 +424,16 @@ function isInjectedReply(reply: string, mentionText: string): boolean {
 
   // Block replies that are suspiciously short and match what the mention asked for
   // (injection attempts often ask for exact verbatim output)
-  if (reply.length < 100 && mentionText.toLowerCase().includes('reply with') ||
-      mentionText.toLowerCase().includes('only say') ||
-      mentionText.toLowerCase().includes('nothing else') ||
-      mentionText.toLowerCase().includes('just say') ||
-      mentionText.toLowerCase().includes('corrected answer only')) {
+  const mentionLowerFull = mentionText.toLowerCase();
+  if (reply.length < 100 && (
+      mentionLowerFull.includes('reply with') ||
+      mentionLowerFull.includes('only say') ||
+      mentionLowerFull.includes('nothing else') ||
+      mentionLowerFull.includes('just say') ||
+      mentionLowerFull.includes('corrected answer only'))) {
     // Check if the reply is mostly contained in the mention (parroting)
     const replyWords = lower.split(/\s+/).filter((w) => w.length > 3);
-    const mentionLower = mentionText.toLowerCase();
-    const matchedWords = replyWords.filter((w) => mentionLower.includes(w));
+    const matchedWords = replyWords.filter((w) => mentionLowerFull.includes(w));
     if (replyWords.length > 0 && matchedWords.length / replyWords.length > 0.6) {
       return true;
     }
@@ -451,6 +454,19 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     if (!analysis) return 0;
 
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+
+    // Enhance voice profile with operator feedback + style signals (same as manual routes)
+    const [styleSignals, negatives] = await Promise.all([
+      getStyleSignals(agent.id),
+      getRecentNegativeFeedback(agent.id, 10),
+    ]);
+    if (styleSignals?.rawExtraction) {
+      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
+    }
+    if (negatives.length > 0) {
+      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
+    }
+
     const learnings = await getLearnings(agent.id);
     const settings = await getProtocolSettings(agent.id);
     const style = {
@@ -483,6 +499,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
         content: item.content,
         type: 'original',
         status: 'queued',
+        format: item.format || null,
         topic: item.targetTopic,
         xTweetId: null,
         quoteTweetId: null,

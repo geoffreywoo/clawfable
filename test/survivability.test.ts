@@ -37,6 +37,7 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     content: 'Default tweet content',
     type: 'original',
     status: 'queued',
+    format: 'hot_take',
     topic: 'AI',
     xTweetId: null,
     quoteTweetId: null,

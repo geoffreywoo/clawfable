@@ -70,6 +70,7 @@ export async function POST(
           content: item.content,
           type: 'original',
           status: 'draft',
+          format: item.format || null,
           topic: item.targetTopic,
           xTweetId: null,
           quoteTweetId: null,
@@ -77,7 +78,7 @@ export async function POST(
           scheduledAt: null,
         }).then((tweet) => ({
           ...tweet,
-          format: item.format,
+          format: tweet.format || item.format,
           rationale: item.rationale,
         }))
       )

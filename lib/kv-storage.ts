@@ -393,6 +393,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     content: data.content,
     type: data.type ?? 'original',
     status: data.status ?? 'draft',
+    format: data.format ?? null,
     topic: data.topic ?? null,
     xTweetId: data.xTweetId ?? null,
     quoteTweetId: data.quoteTweetId ?? null,

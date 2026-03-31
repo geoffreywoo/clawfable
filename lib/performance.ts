@@ -79,7 +79,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       tweetId: tweet.id,
       xTweetId: tweet.xTweetId,
       content: tweet.content,
-      format: tweet.topic || 'unknown',
+      format: tweet.format || tweet.topic || 'unknown',
       topic: tweet.topic || 'general',
       postedAt: tweet.createdAt,
       checkedAt: new Date().toISOString(),

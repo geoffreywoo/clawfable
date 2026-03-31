@@ -69,6 +69,7 @@ export interface Tweet {
   content: string;
   type: string; // original | reply | quote
   status: TweetStatus;
+  format: string | null;  // hot_take | question | data_point | short_punch | long_form | analysis | observation
   topic: string | null;
   xTweetId: string | null;
   quoteTweetId: string | null;  // X tweet ID to quote (for QTs)
@@ -102,7 +103,7 @@ export interface Metric {
 export type CreateAgentInput = Omit<Agent, 'id' | 'createdAt' | 'soulPublic'> & { soulPublic?: number };
 export type UpdateAgentInput = Partial<Omit<Agent, 'id' | 'createdAt'>>;
 
-export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt'>;
+export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt' | 'format'> & { format?: string | null };
 export type UpdateTweetInput = Partial<Omit<Tweet, 'id' | 'agentId' | 'createdAt'>>;
 
 export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt'> & { createdAt?: string };
