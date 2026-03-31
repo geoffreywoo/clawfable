@@ -19,14 +19,20 @@ export default function HomePage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [liveAgents, setLiveAgents] = useState<Array<{ handle: string; name: string; soulSummary: string | null; totalTracked: number; avgLikes: number }>>([]);
 
-  // Check auth on mount
+  // Check auth on mount + fetch public agents for landing
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => setUser(data))
       .catch(() => setUser(null))
       .finally(() => setAuthLoading(false));
+    // Fetch live agents for landing page
+    fetch('/api/public/souls')
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => { if (Array.isArray(data)) setLiveAgents(data); })
+      .catch(() => {});
   }, []);
 
   const loadAgents = useCallback(async () => {
@@ -182,6 +188,56 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
+
+            {/* Live Agents */}
+            {liveAgents.length > 0 && (
+              <div style={{ marginTop: '48px' }}>
+                <p style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  letterSpacing: '0.1em',
+                  color: 'var(--text-muted)',
+                  marginBottom: '12px',
+                  textAlign: 'center',
+                }}>
+                  LIVE AGENTS
+                </p>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${Math.min(liveAgents.length, 4)}, 1fr)`,
+                  gap: '1px',
+                  background: 'var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  overflow: 'hidden',
+                }}>
+                  {liveAgents.map((a) => (
+                    <a
+                      key={a.handle}
+                      href={`/souls/${a.handle}`}
+                      style={{
+                        background: 'var(--surface)',
+                        padding: '16px 14px',
+                        textDecoration: 'none',
+                        display: 'block',
+                      }}
+                    >
+                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)' }}>
+                        {a.name}
+                      </p>
+                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', marginTop: '2px' }}>
+                        @{a.handle}
+                      </p>
+                      {a.totalTracked > 0 && (
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '6px' }}>
+                          {a.totalTracked} tweets · avg {a.avgLikes} likes
+                        </p>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginTop: '32px', textAlign: 'center' }}>
               <a

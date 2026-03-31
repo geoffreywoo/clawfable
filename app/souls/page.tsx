@@ -7,6 +7,9 @@ interface Soul {
   handle: string;
   name: string;
   soulMd: string;
+  soulSummary: string | null;
+  totalTracked: number;
+  avgLikes: number;
 }
 
 export default function SoulsPage() {
@@ -118,15 +121,17 @@ export default function SoulsPage() {
                       }}
                     >
                       <div>
-                        <p style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '13px',
-                          fontWeight: 700,
-                          color: 'var(--text)',
-                          letterSpacing: '0.04em',
-                        }}>
-                          {soul.name}
-                        </p>
+                        <a href={`/souls/${soul.handle}`} onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none' }}>
+                          <p style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            color: 'var(--text)',
+                            letterSpacing: '0.04em',
+                          }}>
+                            {soul.name}
+                          </p>
+                        </a>
                         <p style={{
                           fontFamily: 'var(--font-mono)',
                           fontSize: '11px',
@@ -134,6 +139,11 @@ export default function SoulsPage() {
                           marginTop: '2px',
                         }}>
                           @{soul.handle}
+                          {soul.totalTracked > 0 && (
+                            <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
+                              {soul.totalTracked} tweets, avg {soul.avgLikes} likes
+                            </span>
+                          )}
                         </p>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
