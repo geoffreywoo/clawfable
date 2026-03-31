@@ -349,6 +349,18 @@ function normalizeId<T extends { id: unknown }>(obj: T): T & { id: string } {
   return { ...obj, id: String(obj.id) };
 }
 
+// Upstash auto-deserializes JSON list entries into objects.
+// Local dev (in-memory) stores them as strings. Handle both.
+function parseListEntry<T>(entry: unknown): T | null {
+  if (entry === null || entry === undefined) return null;
+  if (typeof entry === 'object') return entry as T;
+  if (typeof entry === 'string') {
+    try { return JSON.parse(entry) as T; }
+    catch { return null; }
+  }
+  return null;
+}
+
 export async function getTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentTweets(agentId), 0, -1);
   const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
@@ -550,10 +562,7 @@ export async function addPostLogEntry(agentId: string, entry: Omit<PostLogEntry,
 
 export async function getPostLog(agentId: string, limit = 20): Promise<PostLogEntry[]> {
   const raw = await kvLrange(KEYS.agentPostLog(agentId), 0, limit - 1);
-  return raw.map((s) => {
-    try { return JSON.parse(s) as PostLogEntry; }
-    catch { return null; }
-  }).filter((e): e is PostLogEntry => e !== null);
+  return raw.map((s) => parseListEntry<PostLogEntry>(s)).filter((e): e is PostLogEntry => e !== null);
 }
 
 // ─── Cron log storage ─────────────────────────────────────────────────────────
@@ -573,10 +582,7 @@ export async function addCronLogEntry(entry: Omit<CronLogEntry, 'id'>): Promise<
 
 export async function getCronLog(limit = 30): Promise<CronLogEntry[]> {
   const raw = await kvLrange(KEYS.cronLog(), 0, limit - 1);
-  return raw.map((s) => {
-    try { return JSON.parse(s) as CronLogEntry; }
-    catch { return null; }
-  }).filter((e): e is CronLogEntry => e !== null);
+  return raw.map((s) => parseListEntry<CronLogEntry>(s)).filter((e): e is CronLogEntry => e !== null);
 }
 
 // ─── Performance tracking storage ─────────────────────────────────────────────
@@ -587,10 +593,7 @@ export async function addPerformanceEntry(agentId: string, entry: TweetPerforman
 
 export async function getPerformanceHistory(agentId: string, limit = 50): Promise<TweetPerformance[]> {
   const raw = await kvLrange(KEYS.agentPerformance(agentId), 0, limit - 1);
-  return raw.map((s) => {
-    try { return JSON.parse(s) as TweetPerformance; }
-    catch { return null; }
-  }).filter((e): e is TweetPerformance => e !== null);
+  return raw.map((s) => parseListEntry<TweetPerformance>(s)).filter((e): e is TweetPerformance => e !== null);
 }
 
 export async function getLearnings(agentId: string): Promise<AgentLearnings | null> {
@@ -792,10 +795,7 @@ export async function logFunnelEvent(agentId: string, event: string, meta?: Reco
 
 export async function getFunnelEvents(agentId: string, limit = 100): Promise<FunnelEvent[]> {
   const raw = await kvLrange(KEYS.agentEvents(agentId), 0, limit - 1);
-  return raw.map((s) => {
-    try { return JSON.parse(s) as FunnelEvent; }
-    catch { return null; }
-  }).filter((e): e is FunnelEvent => e !== null);
+  return raw.map((s) => parseListEntry<FunnelEvent>(s)).filter((e): e is FunnelEvent => e !== null);
 }
 
 /** Milestone names in funnel order. */
