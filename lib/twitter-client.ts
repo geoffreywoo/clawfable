@@ -40,22 +40,13 @@ function handleRateLimit(error: unknown): never {
 export async function postTweet(
   keys: TwitterKeys,
   text: string,
-  quoteTweetId?: string
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
     const me = await getMe(keys);
     const rwClient = client.readWrite;
     // Strip any hallucinated x.com/twitter.com status URLs from content
-    // QTs are handled via the quoteTweetId URL append below
-    let tweetText = text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
-    // Always use URL embed for QTs (works on all API tiers)
-    if (quoteTweetId) {
-      const qtUrl = `https://x.com/i/web/status/${quoteTweetId}`;
-      if (text.length + qtUrl.length + 1 <= 280) {
-        tweetText = `${text} ${qtUrl}`;
-      }
-    }
+    const tweetText = text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
 
     const result = await rwClient.v2.tweet(tweetText);
 

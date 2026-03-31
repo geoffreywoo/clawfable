@@ -294,23 +294,6 @@ export async function autoAdjustSettings(agentId: string, learnings: AgentLearni
     await updateProtocolSettings(agentId, { lengthMix: newMix });
   }
 
-  // Auto-adjust QT ratio based on QT vs original performance
-  const qtPerf: number[] = [];
-  const origPerf: number[] = [];
-  for (const t of [...learnings.bestPerformers, ...learnings.worstPerformers]) {
-    const eng = t.likes + t.retweets;
-    if (t.format?.startsWith('qt_')) qtPerf.push(eng);
-    else origPerf.push(eng);
-  }
-
-  const qtAvg = avg(qtPerf);
-  const origAvg = avg(origPerf);
-  if (qtAvg + origAvg > 0) {
-    const newQtRatio = Math.round((qtAvg / (qtAvg + origAvg)) * 100);
-    // Clamp between 10-90 to keep variety
-    const clamped = Math.max(10, Math.min(90, newQtRatio));
-    await updateProtocolSettings(agentId, { qtRatio: clamped });
-  }
 }
 
 /**

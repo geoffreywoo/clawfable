@@ -21,17 +21,14 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
 export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
   enabledFormats: string[];
-  qtRatio: number;
 }
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],
-  qtRatio: 60,
 };
 
 const ALL_FORMATS = [
-  'qt_contrarian', 'qt_reframe', 'qt_question', 'qt_context', 'qt_one_liner',
   'hot_take', 'question', 'data_point', 'short_punch', 'long_form', 'analysis', 'observation',
 ];
 
@@ -40,8 +37,6 @@ export interface ProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
-  quoteTweetId: string | null;
-  quoteTweetAuthor: string | null;
 }
 
 /**
@@ -126,18 +121,8 @@ ${soulMd}`);
     }
   }
 
-  // Quotable tweets — the key data for QT generation
+  // Trending context for topical relevance
   if (trending && trending.length > 0) {
-    const quotable = collectQuotableTweets(trending);
-    if (quotable.length > 0) {
-      parts.push(`\n## QUOTABLE TWEETS (high-engagement posts from the network — WRITE QT COMMENTARY FOR THESE)`);
-      parts.push(`Each has an ID. When you write a QT, include the "quoteTweetId" field with the exact ID.`);
-      for (const qt of quotable) {
-        parts.push(`- ID: "${qt.id}" | @${qt.author} (${qt.likes} likes) [${qt.category}]: "${qt.text.slice(0, 200)}${qt.text.length > 200 ? '...' : ''}"`);
-      }
-    }
-
-    // Also show general trending context
     parts.push(`\n## TRENDING TOPICS IN NETWORK`);
     for (const t of trending.slice(0, 8)) {
       parts.push(`- [${t.category}] ${t.headline} (${t.source}, ${t.tweetCount} posts)`);
@@ -194,13 +179,11 @@ ${soulMd}`);
   }
 
   // Dynamic strategy based on user config
-  const { lengthMix, enabledFormats, qtRatio } = style;
+  const { lengthMix, enabledFormats } = style;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
 
   parts.push(`\n## STRATEGY
-1. **QT ratio: ~${qtRatio}% QTs, ~${100 - qtRatio}% originals.** ${qtRatio > 0 ? 'QTs should reference specific quotable tweets listed above.' : 'Focus on original standalone tweets.'}
-2. For QTs: set "quoteTweetId" to the exact ID from the quotable tweets list. For originals: set "quoteTweetId" to null.
-3. QT commentary should be OPINIONATED and add a new angle the original didn't cover.
+All tweets are original standalone posts. No quote tweets.
 
 ## LENGTH DISTRIBUTION (follow this closely)
 - ~${lengthMix.short}% SHORT (under 200 chars): punchy one-liners, sharp observations
@@ -217,9 +200,8 @@ ${formats.join(', ')}
 2. No threads, no "1/", no emojis unless the account uses them.
 3. Never use hashtags unless the account's viral tweets use them.
 4. Never be generic. Every tweet needs a specific, opinionated point of view.
-5. For QTs: don't just agree with the original — add value, challenge it, or reframe it.
-6. Never violate the anti-goals.
-7. Set "quoteTweetAuthor" to the @handle of the person being quoted (for QTs only).`);
+5. Never include links to x.com or twitter.com in tweet text.
+6. Never violate the anti-goals.`);
 
   return parts.join('\n');
 }
@@ -240,13 +222,11 @@ export async function generateViralBatch(
   const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd, style, recentPosts);
 
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
-  const userPrompt = `Generate exactly ${count} tweets. Follow the length distribution and QT ratio in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
+  const userPrompt = `Generate exactly ${count} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "rationale": 1 sentence on why this should perform well
-- "quoteTweetId": the ID of the tweet being quoted (from the quotable list), or null for originals
-- "quoteTweetAuthor": the @handle of the author being quoted, or null for originals
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -281,8 +261,6 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             format: parsed.format || 'hot_take',
             targetTopic: parsed.targetTopic || 'general',
             rationale: parsed.rationale || '',
-            quoteTweetId: parsed.quoteTweetId || null,
-            quoteTweetAuthor: parsed.quoteTweetAuthor || null,
           });
         }
       } catch {

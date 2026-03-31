@@ -26,7 +26,6 @@ import {
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
-import { fetchTrendingFromFollowing } from './trending';
 import {
   jitterInterval,
   isDailyCapReached,
@@ -158,7 +157,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   const tweet = pickDiverseTweet(queue, recentPostEntries) || queue[queue.length - 1];
 
   try {
-    const result = await postTweet(keys, tweet.content, tweet.quoteTweetId || undefined);
+    const result = await postTweet(keys, tweet.content);
 
     await updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId });
 
@@ -452,28 +451,11 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     if (!analysis) return 0;
 
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-
-    let trending = null;
-    if (agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
-      try {
-        const keys = decodeKeys({
-          apiKey: agent.apiKey,
-          apiSecret: agent.apiSecret,
-          accessToken: agent.accessToken,
-          accessSecret: agent.accessSecret,
-        });
-        trending = await fetchTrendingFromFollowing(keys, agent.xUserId);
-      } catch {
-        // Continue without trending
-      }
-    }
-
     const learnings = await getLearnings(agent.id);
     const settings = await getProtocolSettings(agent.id);
     const style = {
       lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
       enabledFormats: settings.enabledFormats || [],
-      qtRatio: settings.qtRatio ?? 60,
     };
 
     // Get recent posts to avoid repetition
@@ -483,7 +465,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       .slice(0, 15)
       .map((t) => t.content);
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style, recentPosts);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
     const existingContent = new Set(
@@ -499,12 +481,12 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       await createTweet({
         agentId: agent.id,
         content: item.content,
-        type: item.quoteTweetId ? 'quote' : 'original',
+        type: 'original',
         status: 'queued',
         topic: item.targetTopic,
         xTweetId: null,
-        quoteTweetId: item.quoteTweetId || null,
-        quoteTweetAuthor: item.quoteTweetAuthor || null,
+        quoteTweetId: null,
+        quoteTweetAuthor: null,
         scheduledAt: null,
       });
       added++;

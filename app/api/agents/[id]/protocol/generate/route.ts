@@ -10,8 +10,6 @@ import {
 } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
-import { decodeKeys } from '@/lib/twitter-client';
-import { fetchTrendingFromFollowing } from '@/lib/trending';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // POST /api/agents/[id]/protocol/generate — generate viral content via Claude
@@ -45,28 +43,11 @@ export async function POST(
       voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map((item) => `- "${item}"`).join('\n')}`;
     }
 
-    // Fetch trending topics from following graph if connected
-    let trending = null;
-    if (agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
-      try {
-        const keys = decodeKeys({
-          apiKey: agent.apiKey,
-          apiSecret: agent.apiSecret,
-          accessToken: agent.accessToken,
-          accessSecret: agent.accessSecret,
-        });
-        trending = await fetchTrendingFromFollowing(keys, agent.xUserId);
-      } catch {
-        // Continue without trending data
-      }
-    }
-
     const learnings = await getLearnings(id);
     const settings = await getProtocolSettings(id);
     const style = {
       lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
       enabledFormats: settings.enabledFormats || [],
-      qtRatio: settings.qtRatio ?? 60,
     };
     // Get recent posts to avoid repetition
     const allTweets = await getTweets(id);
@@ -75,7 +56,7 @@ export async function POST(
       .slice(0, 15)
       .map((t) => t.content);
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, trending, learnings, agent.soulMd, style, recentPosts);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
 
     if (batch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
@@ -87,12 +68,12 @@ export async function POST(
         createTweet({
           agentId: id,
           content: item.content,
-          type: item.quoteTweetId ? 'quote' : 'original',
+          type: 'original',
           status: 'draft',
           topic: item.targetTopic,
           xTweetId: null,
-          quoteTweetId: item.quoteTweetId || null,
-          quoteTweetAuthor: item.quoteTweetAuthor || null,
+          quoteTweetId: null,
+          quoteTweetAuthor: null,
           scheduledAt: null,
         }).then((tweet) => ({
           ...tweet,

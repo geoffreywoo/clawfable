@@ -17,7 +17,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { content, replyToId, quoteTweetId, tweetId: dbTweetId } = body;
+    const { content, replyToId, tweetId: dbTweetId } = body;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
 
     const keys = decodeKeys({
@@ -31,7 +31,7 @@ export async function POST(
     if (replyToId) {
       result = await replyToTweet(keys, content, replyToId);
     } else {
-      result = await postTweet(keys, content, quoteTweetId || undefined);
+      result = await postTweet(keys, content);
     }
 
     if (dbTweetId) {

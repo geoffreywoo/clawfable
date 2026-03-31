@@ -79,12 +79,12 @@ export async function POST(
         const tweet = await createTweet({
           agentId: id,
           content: item.content,
-          type: item.quoteTweetId ? 'quote' : 'original',
+          type: 'original',
           status: 'preview',
           topic: item.targetTopic || 'general',
           xTweetId: null,
-          quoteTweetId: item.quoteTweetId || null,
-          quoteTweetAuthor: item.quoteTweetAuthor || null,
+          quoteTweetId: null,
+          quoteTweetAuthor: null,
           scheduledAt: null,
         });
         tweets.push(tweet);
@@ -135,12 +135,12 @@ export async function POST(
         const tweet = await createTweet({
           agentId: id,
           content: item.content,
-          type: item.quoteTweetId ? 'quote' : 'original',
+          type: 'original',
           status: 'draft',
           topic: topicContext,
           xTweetId: null,
-          quoteTweetId: item.quoteTweetId || null,
-          quoteTweetAuthor: item.quoteTweetAuthor || null,
+          quoteTweetId: null,
+          quoteTweetAuthor: null,
           scheduledAt: null,
         });
         return NextResponse.json(tweet);

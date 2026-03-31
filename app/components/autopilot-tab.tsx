@@ -336,26 +336,6 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               </div>
             </div>
 
-            {/* QT ratio */}
-            <div className="protocol-card" style={{ padding: '14px' }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                QT vs ORIGINAL RATIO
-              </p>
-              <div className="flex items-center gap-3">
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', width: '70px' }}>ORIGINALS</span>
-                <input
-                  type="range" min="0" max="100" step="10"
-                  value={settings.qtRatio ?? 60}
-                  onChange={(e) => handleUpdateSettings({ qtRatio: Number(e.target.value) })}
-                  style={{ flex: 1, accentColor: '#8b5cf6' }}
-                />
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', width: '30px' }}>QTs</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '50px', textAlign: 'right' }}>
-                  {settings.qtRatio ?? 60}% QT
-                </span>
-              </div>
-            </div>
-
             {/* Format toggles */}
             <div className="protocol-card" style={{ padding: '14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
@@ -379,11 +359,6 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                   { id: 'long_form', label: 'Long Form' },
                   { id: 'analysis', label: 'Analysis' },
                   { id: 'observation', label: 'Observation' },
-                  { id: 'qt_contrarian', label: 'QT Contrarian' },
-                  { id: 'qt_reframe', label: 'QT Reframe' },
-                  { id: 'qt_question', label: 'QT Question' },
-                  { id: 'qt_context', label: 'QT Context' },
-                  { id: 'qt_one_liner', label: 'QT One-Liner' },
                 ].map((f) => {
                   const enabled = !settings.enabledFormats || settings.enabledFormats.length === 0 || settings.enabledFormats.includes(f.id);
                   return (
@@ -402,7 +377,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                         const current = settings.enabledFormats || [];
                         if (current.length === 0) {
                           // Switching from "all" to specific: enable all except this one
-                          const allIds = ['hot_take','question','data_point','short_punch','long_form','analysis','observation','qt_contrarian','qt_reframe','qt_question','qt_context','qt_one_liner'];
+                          const allIds = ['hot_take','question','data_point','short_punch','long_form','analysis','observation'];
                           handleUpdateSettings({ enabledFormats: allIds.filter((id) => id !== f.id) });
                         } else if (current.includes(f.id)) {
                           const next = current.filter((id: string) => id !== f.id);
