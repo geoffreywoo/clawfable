@@ -50,6 +50,8 @@ export async function GET(
         authorHandle: `@${String(m.authorUsername || m.authorId)}`,
         content: m.text,
         tweetId: m.id,
+        conversationId: m.conversationId || null,
+        inReplyToTweetId: m.inReplyToTweetId || null,
         engagementLikes: 0,
         engagementRetweets: 0,
         createdAt: m.createdAt,

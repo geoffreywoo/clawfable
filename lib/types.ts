@@ -85,6 +85,8 @@ export interface Mention {
   authorHandle: string;
   content: string;
   tweetId: string | null;
+  conversationId: string | null;
+  inReplyToTweetId: string | null;
   engagementLikes: number;
   engagementRetweets: number;
   createdAt: string;
@@ -106,7 +108,7 @@ export type UpdateAgentInput = Partial<Omit<Agent, 'id' | 'createdAt'>>;
 export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt' | 'format'> & { format?: string | null };
 export type UpdateTweetInput = Partial<Omit<Tweet, 'id' | 'agentId' | 'createdAt'>>;
 
-export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt'> & { createdAt?: string };
+export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt' | 'conversationId' | 'inReplyToTweetId'> & { createdAt?: string; conversationId?: string | null; inReplyToTweetId?: string | null };
 
 export interface MetricInput {
   agentId: string;

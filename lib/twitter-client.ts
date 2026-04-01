@@ -119,12 +119,12 @@ export async function getMentionsFromTwitter(
   keys: TwitterKeys,
   userId: string,
   sinceId?: string
-): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string }>> {
+): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
   const client = createClient(keys);
   try {
     const params: Record<string, unknown> = {
       max_results: 100,
-      'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'conversation_id', 'in_reply_to_user_id', 'referenced_tweets'],
       expansions: ['author_id'],
       'user.fields': ['name', 'username'],
     };
@@ -146,6 +146,9 @@ export async function getMentionsFromTwitter(
     return (result.data.data || []).map((tweet) => {
       const authorId = tweet.author_id || '';
       const user = userMap.get(authorId);
+      // Extract in_reply_to from referenced_tweets
+      const refs = (tweet as any).referenced_tweets as Array<{ type: string; id: string }> | undefined;
+      const repliedTo = refs?.find((r) => r.type === 'replied_to');
       return {
         id: tweet.id,
         text: tweet.text,
@@ -153,6 +156,8 @@ export async function getMentionsFromTwitter(
         authorName: user?.name || authorId,
         authorUsername: user?.username || authorId,
         createdAt: tweet.created_at || new Date().toISOString(),
+        conversationId: (tweet as any).conversation_id || null,
+        inReplyToTweetId: repliedTo?.id || null,
       };
     });
   } catch (error) {

@@ -460,6 +460,8 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
     authorHandle: data.authorHandle,
     content: data.content,
     tweetId: data.tweetId ?? null,
+    conversationId: data.conversationId ?? null,
+    inReplyToTweetId: data.inReplyToTweetId ?? null,
     engagementLikes: data.engagementLikes ?? 0,
     engagementRetweets: data.engagementRetweets ?? 0,
     createdAt: data.createdAt || new Date().toISOString(),
@@ -788,6 +790,71 @@ export async function getRecentNegativeFeedback(agentId: string, limit = 5): Pro
       const reason = entry.intentSummary?.trim() || entry.reason?.trim();
       return reason ? `${entry.tweetText} (why it was rejected: ${reason})` : entry.tweetText;
     });
+}
+
+// ─── Conversation history ────────────────────────────────────────────────────
+
+export interface ConversationTurn {
+  role: 'them' | 'us';
+  author: string;
+  content: string;
+  tweetId: string;
+}
+
+export async function getConversationHistory(
+  agentId: string,
+  conversationId: string,
+  maxTurns = 5,
+): Promise<ConversationTurn[]> {
+  if (!conversationId) return [];
+
+  // Get all stored mentions for this agent
+  const mentions = await getMentions(agentId);
+
+  // Filter to same conversation
+  const inConvo = mentions.filter(
+    (m) => m.conversationId && String(m.conversationId) === String(conversationId)
+  );
+
+  // Get our replies from the post log
+  const postLog = await getPostLog(agentId, 100);
+  const ourReplies = postLog.filter(
+    (e) => (e.action === 'posted' || !e.action) && e.format === 'auto_reply' && e.content
+  );
+
+  // Build conversation turns sorted by time
+  const turns: Array<ConversationTurn & { ts: number }> = [];
+
+  for (const m of inConvo) {
+    turns.push({
+      role: 'them',
+      author: m.authorHandle,
+      content: m.content,
+      tweetId: String(m.tweetId || ''),
+      ts: new Date(m.createdAt).getTime(),
+    });
+  }
+
+  // Match our replies to mentions in this conversation
+  for (const reply of ourReplies) {
+    // Check if this reply's topic matches a mention in this conversation
+    const matchedMention = inConvo.find(
+      (m) => reply.topic?.includes(String(m.authorHandle)) && reply.xTweetId
+    );
+    if (matchedMention) {
+      turns.push({
+        role: 'us',
+        author: 'agent',
+        content: reply.content,
+        tweetId: reply.xTweetId || '',
+        ts: new Date(reply.postedAt).getTime(),
+      });
+    }
+  }
+
+  // Sort by time, take last N turns
+  turns.sort((a, b) => a.ts - b.ts);
+  return turns.slice(-maxTurns).map(({ role, author, content, tweetId }) => ({ role, author, content, tweetId }));
 }
 
 // ─── Soul backup storage ────────────────────────────────────────────────────

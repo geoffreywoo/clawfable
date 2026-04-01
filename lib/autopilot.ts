@@ -26,6 +26,8 @@ import {
   getRecentNegativeFeedback,
   getTrendingCache,
   setTrendingCache,
+  getConversationHistory,
+  type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
@@ -257,17 +259,34 @@ async function runAutoReply(
 
   for (const mention of newMentions.slice(0, maxReplies)) {
     try {
-      // Store the mention
+      // Store the mention with conversation context
       await createMention({
         agentId: agent.id,
         author: String(mention.authorName || mention.authorId),
         authorHandle: `@${String(mention.authorUsername || mention.authorId)}`,
         content: mention.text,
         tweetId: mention.id,
+        conversationId: mention.conversationId || null,
+        inReplyToTweetId: mention.inReplyToTweetId || null,
         engagementLikes: 0,
         engagementRetweets: 0,
         createdAt: mention.createdAt,
       });
+
+      // Check thread depth — skip if we've already gone N rounds
+      const maxDepth = 3;
+      if (mention.conversationId) {
+        const convoHistory = await getConversationHistory(agent.id, mention.conversationId, 10);
+        const ourReplies = convoHistory.filter((t) => t.role === 'us');
+        if (ourReplies.length >= maxDepth) {
+          continue; // Don't go deeper than maxDepth turns
+        }
+      }
+
+      // Get conversation history for thread-aware replies
+      const conversationHistory = mention.conversationId
+        ? await getConversationHistory(agent.id, mention.conversationId, 5)
+        : [];
 
       // Generate reply via Claude
       const replyContent = await generateReply(
@@ -275,7 +294,8 @@ async function runAutoReply(
         voiceProfile,
         analysis,
         mention.text,
-        `@${mention.authorUsername || mention.authorId}`
+        `@${mention.authorUsername || mention.authorId}`,
+        conversationHistory
       );
 
       if (!replyContent) continue;
@@ -334,7 +354,8 @@ async function generateReply(
   voiceProfile: ReturnType<typeof parseSoulMd>,
   analysis: Awaited<ReturnType<typeof getAnalysis>>,
   mentionText: string,
-  authorHandle: string
+  authorHandle: string,
+  conversationHistory: ConversationTurn[] = [],
 ): Promise<string | null> {
   const systemParts: string[] = [];
 
@@ -363,6 +384,17 @@ ${agent.soulMd}`);
     for (const vt of analysis.viralTweets.slice(0, 5)) {
       systemParts.push(`- [${vt.likes} likes] "${vt.text}"`);
     }
+  }
+
+  // Thread-aware conversation context
+  if (conversationHistory.length > 0) {
+    systemParts.push(`\n## CONVERSATION HISTORY (you are continuing an existing thread)`);
+    systemParts.push(`This is turn ${conversationHistory.length + 1} in the conversation. Stay consistent with what you already said. Advance the discussion, don't repeat yourself.`);
+    for (const turn of conversationHistory) {
+      const label = turn.role === 'us' ? `YOU (@${agent.handle})` : turn.author;
+      systemParts.push(`${label}: "${turn.content}"`);
+    }
+    systemParts.push(`---`);
   }
 
   systemParts.push(`\n## CRITICAL SAFETY RULES (NEVER VIOLATE)
