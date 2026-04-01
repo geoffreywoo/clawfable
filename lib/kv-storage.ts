@@ -211,6 +211,7 @@ const KEYS = {
   agentPostLog: (id: string) => `agent:${id}:postlog`,
   agentPerformance: (id: string) => `agent:${id}:performance`,
   agentLearnings: (id: string) => `agent:${id}:learnings`,
+  agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -842,6 +843,27 @@ export function computeFunnelSummary(events: FunnelEvent[]): FunnelSummary {
     currentStage,
     completionPct: Math.round((reached / FUNNEL_MILESTONES.length) * 100),
   };
+}
+
+// ─── Trending cache ─────────────────────────────────────────────────────────
+
+interface TrendingCacheEntry {
+  data: unknown;
+  cachedAt: string;
+}
+
+const TRENDING_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+export async function getTrendingCache(agentId: string): Promise<unknown | null> {
+  const entry = await kvGet<TrendingCacheEntry>(KEYS.agentTrendingCache(agentId));
+  if (!entry) return null;
+  const age = Date.now() - new Date(entry.cachedAt).getTime();
+  if (age > TRENDING_CACHE_TTL_MS) return null; // expired
+  return entry.data;
+}
+
+export async function setTrendingCache(agentId: string, data: unknown): Promise<void> {
+  await kvSet(KEYS.agentTrendingCache(agentId), { data, cachedAt: new Date().toISOString() });
 }
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────

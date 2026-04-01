@@ -121,12 +121,19 @@ ${soulMd}`);
     }
   }
 
-  // Trending context for topical relevance
+  // Trending context + viral tweet styles to study
   if (trending && trending.length > 0) {
-    parts.push(`\n## TRENDING TOPICS IN NETWORK`);
+    parts.push(`\n## WHAT'S TRENDING RIGHT NOW (ride these waves — timely content outperforms generic takes)`);
     for (const t of trending.slice(0, 8)) {
-      parts.push(`- [${t.category}] ${t.headline} (${t.source}, ${t.tweetCount} posts)`);
+      parts.push(`\n### [${t.category}] ${t.headline}`);
+      parts.push(`Source: ${t.source} · ${t.tweetCount} posts in network`);
+      if (t.topTweet) {
+        parts.push(`VIRAL TWEET (${t.topTweet.likes} likes by @${t.topTweet.author}):`);
+        parts.push(`"${t.topTweet.text.slice(0, 300)}"`);
+        parts.push(`^ Study this tweet's style, hook, and angle. Write something that rides the same wave but adds YOUR unique perspective.`);
+      }
     }
+    parts.push(`\nIMPORTANT: At least 30-50% of your tweets should reference or riff on these trending topics. Don't just acknowledge the topic — add a take that makes people engage.`);
   }
 
   // Learnings from actual performance of our generated tweets

@@ -24,10 +24,13 @@ import {
   logFunnelEvent,
   getStyleSignals,
   getRecentNegativeFeedback,
+  getTrendingCache,
+  setTrendingCache,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
+import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
   jitterInterval,
   isDailyCapReached,
@@ -474,6 +477,30 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       enabledFormats: settings.enabledFormats || [],
     };
 
+    // Fetch trending topics (cached, 4h TTL)
+    let trending: TrendingTopic[] | null = null;
+    if (agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
+      try {
+        const cached = await getTrendingCache(agent.id);
+        if (cached) {
+          trending = cached as TrendingTopic[];
+        } else {
+          const keys = decodeKeys({
+            apiKey: agent.apiKey,
+            apiSecret: agent.apiSecret,
+            accessToken: agent.accessToken,
+            accessSecret: agent.accessSecret,
+          });
+          trending = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
+          if (trending && trending.length > 0) {
+            await setTrendingCache(agent.id, trending);
+          }
+        }
+      } catch {
+        // Continue without trending
+      }
+    }
+
     // Get recent posts to avoid repetition
     const allTweets = await getTweets(agent.id);
     const recentPosts = allTweets
@@ -489,7 +516,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
 
     // Generate organic tweets
     const batch = organicCount > 0
-      ? await generateViralBatch(voiceProfile, analysis, organicCount, null, learnings, agent.soulMd, style, recentPosts)
+      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, style, recentPosts)
       : [];
 
     // Generate marketing tweets (promotional content for clawfable.com)
