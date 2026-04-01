@@ -481,7 +481,23 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       .slice(0, 15)
       .map((t) => t.content);
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
+    // Determine how many should be marketing tweets
+    const marketingCount = settings.marketingEnabled && settings.marketingMix > 0
+      ? Math.max(1, Math.round(count * (settings.marketingMix / 100)))
+      : 0;
+    const organicCount = count - marketingCount;
+
+    // Generate organic tweets
+    const batch = organicCount > 0
+      ? await generateViralBatch(voiceProfile, analysis, organicCount, null, learnings, agent.soulMd, style, recentPosts)
+      : [];
+
+    // Generate marketing tweets (promotional content for clawfable.com)
+    const marketingBatch = marketingCount > 0
+      ? await generateMarketingTweets(agent, voiceProfile, learnings, settings.marketingRole || 'product', marketingCount, recentPosts)
+      : [];
+
+    const allBatch = [...batch, ...marketingBatch];
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
     const existingContent = new Set(
@@ -489,7 +505,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     );
 
     let added = 0;
-    for (const item of batch) {
+    for (const item of allBatch) {
       const fingerprint = item.content.slice(0, 80).toLowerCase();
       if (existingContent.has(fingerprint)) continue; // Skip duplicate
       existingContent.add(fingerprint);
@@ -511,6 +527,131 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     return added;
   } catch {
     return 0;
+  }
+}
+
+// ─── Marketing tweet generation ─────────────────────────────────────────────
+
+const MARKETING_ANGLES = [
+  'product_demo',      // show a specific feature working
+  'social_proof',      // highlight agent stats, user count, performance
+  'pain_point',        // describe the problem clawfable solves
+  'behind_the_scenes', // how the AI learns and iterates
+  'comparison',        // why clawfable vs doing it manually
+  'call_to_action',    // direct invite to try clawfable.com
+  'milestone',         // celebrate a product achievement
+  'user_story',        // talk about what an agent accomplished
+];
+
+interface MarketingTweet {
+  content: string;
+  format: string;
+  targetTopic: string;
+  rationale: string;
+}
+
+async function generateMarketingTweets(
+  agent: Agent,
+  voiceProfile: ReturnType<typeof parseSoulMd>,
+  learnings: Awaited<ReturnType<typeof getLearnings>>,
+  role: string,
+  count: number,
+  recentPosts: string[],
+): Promise<MarketingTweet[]> {
+  try {
+    const roleContext = role === 'ceo'
+      ? `You are the CEO of Clawfable (@antihunterai). You speak with authority about the vision, the product, and why autonomous agents are the future. You share real metrics, product updates, and your perspective on the AI agent space. You are building in public.`
+      : role === 'service'
+      ? `You are the official Clawfable account (@clawfable). You showcase what the product does, share agent success stories, announce features, and invite people to try it. You are the product's voice.`
+      : `You represent Clawfable. You promote the platform naturally, mixing product updates with genuine insight about AI agents.`;
+
+    const productFacts = [
+      'Clawfable gives X agents a soul — a SOUL.md personality contract that defines voice, tone, topics, and boundaries',
+      'Agents self-improve: track engagement, learn what works, auto-adjust content strategy daily',
+      'The learning loop tracks ALL tweets (manual + auto), classifies by hook/tone/format, computes a style fingerprint',
+      'Setup takes 3 minutes: connect X, define voice (or auto-generate from tweet history), approve preview batch, arm autopilot',
+      'Autopilot posts, replies to mentions, and refills the queue automatically on a 10-min cron cycle',
+      'Survivability guardrails: posting jitter, content diversity, duplicate detection, daily caps',
+      'Prompt injection defense: blocks attempts to manipulate auto-replies into executing commands',
+      'Open source SOULs at clawfable.com/souls — fork any agent\'s personality in one click',
+      'Built by @geoffreywoo',
+      'clawfable.com',
+    ];
+
+    // Include performance data if available
+    const perfContext = learnings && learnings.totalTracked > 0
+      ? `\nYour own account stats: ${learnings.totalTracked} tweets tracked, avg ${learnings.avgLikes} likes. Top format: ${learnings.formatRankings[0]?.format || 'unknown'}. Your style fingerprint shows ${learnings.styleFingerprint?.topHooks?.join('/') || 'varied'} hooks work best.`
+      : '';
+
+    const angles = MARKETING_ANGLES.sort(() => Math.random() - 0.5).slice(0, 4);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: `${roleContext}
+
+## PRODUCT FACTS (use these, they are real)
+${productFacts.map((f) => `- ${f}`).join('\n')}
+${perfContext}
+
+## YOUR VOICE (stay in character)
+Tone: ${voiceProfile.tone}
+Style: ${voiceProfile.communicationStyle.slice(0, 500)}
+
+## RULES
+- Write promotional tweets that feel natural, not salesy. They should sound like a builder sharing what they built, not an ad.
+- Include clawfable.com or /souls link in ~50% of tweets.
+- Use real product facts and metrics. Never make up numbers.
+- Each tweet should use a different marketing angle.
+- Stay in your voice — a promotional tweet from @${agent.handle} should sound like @${agent.handle}, not generic marketing.
+- Never use hashtags. Never be cringe. Never say "game-changer" or "revolutionary".
+- Output ONLY JSON objects, one per line.`,
+      messages: [{
+        role: 'user',
+        content: `Generate ${count} promotional tweet${count > 1 ? 's' : ''} for Clawfable. Use these angles: ${angles.join(', ')}.
+
+RECENT POSTS (don't repeat):
+${recentPosts.slice(0, 5).map((p) => `- "${p.slice(0, 100)}"`).join('\n')}
+
+For each tweet, output a JSON object on its own line:
+- "content": the tweet text
+- "format": one of: announcement, social_proof, behind_the_scenes, pain_point, call_to_action
+- "targetTopic": "clawfable_marketing"
+- "rationale": why this angle should work`,
+      }],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+
+    const tweets: MarketingTweet[] = [];
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('{')) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.content) {
+          // Strip hallucinated URLs
+          const clean = parsed.content
+            .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
+            .trim();
+          if (clean) {
+            tweets.push({
+              content: clean,
+              format: parsed.format || 'announcement',
+              targetTopic: 'clawfable_marketing',
+              rationale: parsed.rationale || '',
+            });
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    return tweets.slice(0, count);
+  } catch {
+    return [];
   }
 }
 

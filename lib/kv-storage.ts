@@ -540,6 +540,9 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],  // empty = all formats
   qtRatio: 60,
+  marketingEnabled: false,
+  marketingMix: 0,
+  marketingRole: '',
 };
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {

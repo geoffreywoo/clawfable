@@ -168,6 +168,10 @@ export interface ProtocolSettings {
   };
   enabledFormats: string[];  // which formats to use, empty = all
   qtRatio: number;           // 0-100, percentage of QTs vs originals
+  // Marketing track
+  marketingEnabled: boolean;   // generate promotional tweets for clawfable.com
+  marketingMix: number;        // 0-100, percentage of tweets that are promotional
+  marketingRole: string;       // e.g. "ceo", "product", "service"
 }
 
 export interface PostLogEntry {

@@ -240,11 +240,53 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               )}
             </div>
 
+            {/* Marketing Track */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: settings.marketingEnabled ? '8px' : '0' }}>
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.marketingEnabled ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.marketingEnabled ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.marketingEnabled ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} onClick={() => handleUpdateSettings({ marketingEnabled: !settings.marketingEnabled })}>
+                    {settings.marketingEnabled ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>MARKETING</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Auto-generate promotional tweets for clawfable.com
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {settings.marketingEnabled && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                  <div className="field"><label>MIX %</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.marketingMix || 20}
+                      onChange={(e) => handleUpdateSettings({ marketingMix: Number(e.target.value) })}>
+                      {[10, 20, 30, 40, 50].map((n) => <option key={n} value={n}>{n}% promotional</option>)}
+                    </select>
+                  </div>
+                  <div className="field"><label>ROLE</label>
+                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                      value={settings.marketingRole || 'product'}
+                      onChange={(e) => handleUpdateSettings({ marketingRole: e.target.value })}>
+                      <option value="ceo">CEO / Founder</option>
+                      <option value="service">Official Product</option>
+                      <option value="product">Product Evangelist</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Always-on jobs */}
             <div className="protocol-card" style={{ padding: '10px 14px', display: 'flex', gap: '12px' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>ALWAYS ON</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                Mention sync (every 10 min) · Trending sync (on generate)
+                Mention sync (every 10 min) · Self-learning (daily)
               </span>
             </div>
           </div>
