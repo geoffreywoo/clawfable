@@ -53,6 +53,8 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [learnings, setLearnings] = useState<AgentLearnings | null>(null);
   const [timeseries, setTimeseries] = useState<TimeseriesData | null>(null);
+  const [healthScore, setHealthScore] = useState<number>(0);
+  const [funnel, setFunnel] = useState<{ milestones: Array<{ event: string; reached: boolean; ts: string | null }>; currentStage: string; completionPct: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -64,6 +66,8 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       .then(([metricsData, learningsData, timeseriesData]) => {
         if (Array.isArray(metricsData)) setMetrics(metricsData);
         else if (metricsData?.metrics && Array.isArray(metricsData.metrics)) setMetrics(metricsData.metrics);
+        if (metricsData?.healthScore !== undefined) setHealthScore(metricsData.healthScore);
+        if (metricsData?.funnel) setFunnel(metricsData.funnel);
         if (learningsData && typeof learningsData === 'object' && learningsData.totalTracked > 0) {
           setLearnings(learningsData);
         }
@@ -90,8 +94,110 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
   const maxFormatEng = learnings?.formatRankings.length ? Math.max(...learnings.formatRankings.map((f) => f.avgEngagement), 1) : 1;
   const maxTopicEng = learnings?.topicRankings.length ? Math.max(...learnings.topicRankings.map((t) => t.avgEngagement), 1) : 1;
 
+  // Compute weekly comparison from timeseries
+  const thisWeek = timeseries?.daily.slice(0, 7) || [];
+  const lastWeek = timeseries?.daily.slice(7, 14) || [];
+  const thisWeekPosts = thisWeek.reduce((s, d) => s + d.tweetsPosted, 0);
+  const lastWeekPosts = lastWeek.reduce((s, d) => s + d.tweetsPosted, 0);
+  const thisWeekAvgLikes = thisWeek.length > 0 ? Math.round(thisWeek.reduce((s, d) => s + d.avgLikes, 0) / Math.max(thisWeek.filter((d) => d.avgLikes > 0).length, 1)) : 0;
+  const lastWeekAvgLikes = lastWeek.length > 0 ? Math.round(lastWeek.reduce((s, d) => s + d.avgLikes, 0) / Math.max(lastWeek.filter((d) => d.avgLikes > 0).length, 1)) : 0;
+
+  const pctChange = (curr: number, prev: number) => {
+    if (prev === 0) return curr > 0 ? '+100' : '0';
+    return `${curr >= prev ? '+' : ''}${Math.round(((curr - prev) / prev) * 100)}`;
+  };
+
   return (
     <div className="space-y-6">
+
+      {/* ─── 0. Health Score + Weekly Comparison ──────────────────────────── */}
+      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+        {/* Health score */}
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '20px 24px',
+          textAlign: 'center',
+          minWidth: '120px',
+        }}>
+          <p style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '36px',
+            fontWeight: 700,
+            color: healthScore >= 70 ? '#22c55e' : healthScore >= 40 ? '#f59e0b' : '#ef4444',
+          }}>{healthScore}</p>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>HEALTH SCORE</p>
+        </div>
+
+        {/* Weekly comparison */}
+        {timeseries && thisWeekPosts > 0 && (
+          <div style={{
+            flex: 1,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '14px 20px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '16px',
+            minWidth: '280px',
+          }}>
+            <div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>POSTS</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekPosts}</p>
+              {lastWeekPosts > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekPosts >= lastWeekPosts ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekPosts, lastWeekPosts)}% vs last week</p>}
+            </div>
+            <div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>AVG LIKES</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekAvgLikes}</p>
+              {lastWeekAvgLikes > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekAvgLikes >= lastWeekAvgLikes ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekAvgLikes, lastWeekAvgLikes)}% vs last week</p>}
+            </div>
+            <div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>THIS WEEK</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {thisWeek.filter((d) => d.tweetsPosted > 0).length} active days
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Funnel visualization */}
+      {funnel && funnel.milestones.length > 0 && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '14px 20px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)' }}>ACTIVATION FUNNEL</p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>{funnel.completionPct}% complete</p>
+          </div>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            {funnel.milestones.map((m, i) => (
+              <div key={m.event} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                <div style={{
+                  width: '100%',
+                  height: '6px',
+                  borderRadius: '3px',
+                  background: m.reached ? '#8b5cf6' : 'var(--surface-2)',
+                }} />
+                <span style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '8px',
+                  color: m.reached ? '#8b5cf6' : 'var(--text-dim)',
+                  letterSpacing: '0.05em',
+                  textAlign: 'center',
+                }}>
+                  {m.event.replace(/_/g, ' ').replace('wizard ', '').toUpperCase()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─── 1. Learning Digest Hero ──────────────────────────────────────── */}
       {learnings && learnings.insights.length > 0 ? (

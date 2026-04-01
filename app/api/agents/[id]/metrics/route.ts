@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets, getFunnelEvents, computeFunnelSummary } from '@/lib/kv-storage';
+import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets, getFunnelEvents, computeFunnelSummary, getLearnings, getBaseline } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/metrics — compute live metrics from actual data
@@ -64,7 +64,21 @@ export async function GET(
 
     const funnel = computeFunnelSummary(funnelEvents);
 
-    return NextResponse.json({ metrics, health, funnel });
+    // Health score (0-100)
+    const learnings = await getLearnings(id);
+    const baseline = await getBaseline(id);
+    let healthScore = 0;
+    if (settings.enabled) healthScore += 20;
+    const recentPosts = postLog.filter((e) => (!e.action || e.action === 'posted') && new Date(e.postedAt).getTime() > Date.now() - 24 * 60 * 60 * 1000);
+    if (recentPosts.length > 0) healthScore += 20;
+    if (baseline && learnings && learnings.avgLikes > baseline.avgLikes) healthScore += 20;
+    if (queuedTweets.length > 0) healthScore += 10;
+    if (learnings && new Date(learnings.updatedAt).getTime() > Date.now() - 48 * 60 * 60 * 1000) healthScore += 10;
+    if (health.length === 0) healthScore += 10;
+    if (agent.soulPublic !== 0) healthScore += 5;
+    if (settings.marketingEnabled) healthScore += 5;
+
+    return NextResponse.json({ metrics, health, funnel, healthScore });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch metrics' }, { status: 500 });
