@@ -297,6 +297,87 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         </div>
       )}
 
+      {/* ─── Proactive Engagement ──────────────────────────────────────── */}
+      {settings && agentConnected && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 1l2.5 5H15l-4 3.5L12.5 15 8 11.5 3.5 15 5 9.5 1 6h4.5L8 1z" stroke="#8b5cf6" strokeWidth="1.3" fill="none" />
+              </svg>
+              <h2>GROWTH ENGINE</h2>
+            </div>
+          </div>
+          <div className="space-y-2" style={{ marginTop: '8px' }}>
+            {/* Proactive replies */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.proactiveReplies ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.proactiveReplies ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.proactiveReplies ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} onClick={() => handleUpdateSettings({ proactiveReplies: !settings.proactiveReplies })}>
+                    {settings.proactiveReplies ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>REPLY TO VIRAL</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Jump into viral threads in your network for visibility
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Proactive likes */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.proactiveLikes ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.proactiveLikes ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.proactiveLikes ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} onClick={() => handleUpdateSettings({ proactiveLikes: !settings.proactiveLikes })}>
+                    {settings.proactiveLikes ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-LIKE</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Like relevant tweets from your network
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Agent shoutouts */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.agentShoutouts ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.agentShoutouts ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.agentShoutouts ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} onClick={() => handleUpdateSettings({ agentShoutouts: !settings.agentShoutouts })}>
+                    {settings.agentShoutouts ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AGENT SHOUTOUTS</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Cross-promote other Clawfable agents (~15% chance per queue refill)
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Content Style Controls ──────────────────────────────────────── */}
       {settings && (
         <div>

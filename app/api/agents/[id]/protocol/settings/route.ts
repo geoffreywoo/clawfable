@@ -36,6 +36,8 @@ export async function PATCH(
       'lengthMix', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
       'soulEvolutionMode',
+      'proactiveReplies', 'proactiveLikes', 'agentShoutouts',
+      'contentCalendar',
     ];
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {

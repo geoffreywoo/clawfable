@@ -4,6 +4,9 @@ import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
+import { replyToViralTweets, likeNetworkTweets } from '@/lib/proactive-engagement';
+import { getMe } from '@/lib/twitter-client';
+import { addFollowerSnapshot } from '@/lib/kv-storage';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 
 // GET /api/cron/post — called by Vercel Cron every 30 minutes
@@ -88,6 +91,39 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] soul evolution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        // Follower count snapshot (once per cron run)
+        try {
+          const agentKeys = decodeKeys({
+            apiKey: agent.apiKey!,
+            apiSecret: agent.apiSecret!,
+            accessToken: agent.accessToken!,
+            accessSecret: agent.accessSecret!,
+          });
+          const me = await getMe(agentKeys);
+          // getMe returns id/name/username but we need follower count from the timeline API
+          // For now, store 0 — will be populated when we add the followers_count field
+        } catch { /* non-critical */ }
+
+        // Proactive engagement (reply to viral tweets + like network content)
+        const proactiveSettings = await getProtocolSettings(agent.id);
+        if (proactiveSettings.proactiveReplies || proactiveSettings.proactiveLikes) {
+          try {
+            const agentKeys = decodeKeys({
+              apiKey: agent.apiKey!,
+              apiSecret: agent.apiSecret!,
+              accessToken: agent.accessToken!,
+              accessSecret: agent.accessSecret!,
+            });
+            const viralReplies = await replyToViralTweets(agent, agentKeys, proactiveSettings);
+            const likes = await likeNetworkTweets(agent, agentKeys, proactiveSettings);
+            if (viralReplies > 0 || likes > 0) {
+              console.log(`[cron] proactive engagement for agent ${agent.id}: ${viralReplies} viral replies, ${likes} likes`);
+            }
+          } catch (err) {
+            console.error(`[cron] proactive engagement failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          }
         }
       }
 

@@ -177,6 +177,13 @@ export interface ProtocolSettings {
   // Soul evolution
   soulEvolutionMode: 'auto' | 'approval' | 'off';
   lastEvolvedAt: string | null;
+  // Proactive engagement
+  proactiveReplies: boolean;     // reply to viral tweets in network
+  proactiveLikes: boolean;       // like relevant tweets in network
+  agentShoutouts: boolean;       // cross-promote other Clawfable agents
+  // Posting schedule
+  peakHours: number[];           // hours of day with best engagement (auto-detected)
+  contentCalendar: Record<string, string>; // day-of-week -> topic focus (e.g. "monday": "analysis")
 }
 
 export interface SoulVersion {

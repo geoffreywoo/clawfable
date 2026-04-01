@@ -213,6 +213,7 @@ const KEYS = {
   agentLearnings: (id: string) => `agent:${id}:learnings`,
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
+  agentFollowerHistory: (id: string) => `agent:${id}:followers`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -549,6 +550,11 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   marketingRole: '',
   soulEvolutionMode: 'auto',
   lastEvolvedAt: null,
+  proactiveReplies: false,
+  proactiveLikes: false,
+  agentShoutouts: false,
+  peakHours: [],
+  contentCalendar: {},
 };
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {
@@ -935,6 +941,23 @@ export function computeFunnelSummary(events: FunnelEvent[]): FunnelSummary {
     currentStage,
     completionPct: Math.round((reached / FUNNEL_MILESTONES.length) * 100),
   };
+}
+
+// ─── Follower tracking ──────────────────────────────────────────────────────
+
+export interface FollowerSnapshot {
+  count: number;
+  ts: string;
+}
+
+export async function addFollowerSnapshot(agentId: string, count: number): Promise<void> {
+  const entry: FollowerSnapshot = { count, ts: new Date().toISOString() };
+  await kvLpush(KEYS.agentFollowerHistory(agentId), JSON.stringify(entry));
+}
+
+export async function getFollowerHistory(agentId: string, limit = 30): Promise<FollowerSnapshot[]> {
+  const raw = await kvLrange(KEYS.agentFollowerHistory(agentId), 0, limit - 1);
+  return raw.map((s) => parseListEntry<FollowerSnapshot>(s)).filter((e): e is FollowerSnapshot => e !== null);
 }
 
 // ─── Trending cache ─────────────────────────────────────────────────────────

@@ -136,6 +136,31 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
+  // Time-of-day optimization: prefer posting during peak engagement hours
+  if (settings.peakHours && settings.peakHours.length > 0) {
+    const currentHour = new Date().getUTCHours();
+    const isPeakHour = settings.peakHours.includes(currentHour);
+    // During off-peak: only post if we're significantly past cooldown (2x interval)
+    // This naturally shifts posts toward peak hours without hard-blocking
+    if (!isPeakHour && settings.lastPostedAt) {
+      const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
+      if (elapsed < minIntervalMs * 2) {
+        return {
+          agentId,
+          action: repliesSent > 0 ? 'replied' : 'skipped',
+          reason: repliesSent > 0
+            ? `Sent ${repliesSent} replies. Waiting for peak hour (off-peak, deferring)`
+            : `Off-peak hour — deferring post to peak hours`,
+          repliesSent,
+        };
+      }
+    }
+  }
+
+  // Content calendar: if today has a topic focus, pass it to generation
+  const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()];
+  const todaysTopic = settings.contentCalendar?.[dayOfWeek] || null;
+
   // Ensure queue has content
   let queue = await getQueuedTweets(agentId);
   if (queue.length < settings.minQueueSize) {
@@ -588,7 +613,25 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       ? await generateMarketingTweets(agent, voiceProfile, learnings, settings.marketingRole || 'product', marketingCount, recentPosts)
       : [];
 
-    const allBatch = [...batch, ...marketingBatch];
+    // Generate agent shoutout (cross-promotion with other Clawfable agents)
+    const shoutoutBatch: Array<{ content: string; format: string; targetTopic: string; rationale: string }> = [];
+    if (settings.agentShoutouts && Math.random() < 0.15) {
+      // 15% chance per refill to include a shoutout
+      try {
+        const { generateAgentShoutout } = await import('./proactive-engagement');
+        const shoutout = await generateAgentShoutout(agent);
+        if (shoutout) {
+          shoutoutBatch.push({
+            content: shoutout.content,
+            format: 'shoutout',
+            targetTopic: `shoutout_${shoutout.targetHandle}`,
+            rationale: `Cross-promote @${shoutout.targetHandle}`,
+          });
+        }
+      } catch { /* non-critical */ }
+    }
+
+    const allBatch = [...batch, ...marketingBatch, ...shoutoutBatch];
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
     const existingContent = new Set(
