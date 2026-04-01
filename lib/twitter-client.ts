@@ -399,7 +399,7 @@ export async function generateOAuthLink(
   const { appKey, appSecret } = getConsumerKeys();
   const client = new TwitterApi({ appKey, appSecret });
   const result = await client.generateAuthLink(callbackUrl, {
-    linkMode: 'authorize',
+    linkMode: 'authenticate',
     authAccessType: 'write',
   });
   return {
