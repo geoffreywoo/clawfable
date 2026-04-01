@@ -234,13 +234,31 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       )}
 
       <div className="space-y-4">
-        {mentions.map((mention) => (
+        {mentions.map((mention, idx) => {
+          // Thread indicator: check if other mentions share the same conversation
+          const convoId = (mention as unknown as Record<string, unknown>).conversationId;
+          const threadCount = convoId ? mentions.filter((m) => (m as unknown as Record<string, unknown>).conversationId === convoId).length : 0;
+          const isThread = threadCount > 1;
+
+          return (
           <div key={mention.id} className="space-y-2">
             {/* Mention card */}
-            <div className="mention-card" data-testid={`card-mention-${mention.id}`}>
+            <div className="mention-card" data-testid={`card-mention-${mention.id}`} style={isThread ? { borderLeft: '3px solid #8b5cf6' } : undefined}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
+                    {isThread && (
+                      <span style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '9px',
+                        color: '#8b5cf6',
+                        background: 'rgba(139,92,246,0.1)',
+                        border: '1px solid rgba(139,92,246,0.3)',
+                        borderRadius: '4px',
+                        padding: '1px 6px',
+                        flexShrink: 0,
+                      }}>THREAD ({threadCount})</span>
+                    )}
                     <div className="mention-avatar">
                       {String(mention.author || '?').charAt(0).toUpperCase()}
                     </div>
@@ -313,7 +331,8 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

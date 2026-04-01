@@ -242,25 +242,33 @@ async function runAutoReply(
 
   if (!rawMentions || rawMentions.length === 0) return 0;
 
-  // Get existing stored mentions to find which are new
+  // Get existing stored mentions
   const storedMentions = await getMentions(agent.id);
-  // Coerce to string — Upstash auto-deserializes numeric-looking strings as numbers
   const storedTweetIds = new Set(storedMentions.map((m) => String(m.tweetId)).filter(Boolean));
 
-  // Filter to new mentions we haven't seen
-  const newMentions = rawMentions.filter((m) => !storedTweetIds.has(String(m.id)));
-  if (newMentions.length === 0) return 0;
+  // Track which mentions we've already replied to (check post log for reply entries)
+  const postLog = await getPostLog(agent.id, 200);
+  const repliedToTweetIds = new Set(
+    postLog
+      .filter((e) => e.format === 'auto_reply' && e.tweetId)
+      .map((e) => String(e.tweetId))
+  );
+
+  // Filter to mentions we haven't replied to yet (regardless of whether they're stored)
+  const unrepliedMentions = rawMentions.filter((m) => !repliedToTweetIds.has(String(m.id)));
+  if (unrepliedMentions.length === 0) return 0;
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
   const analysis = await getAnalysis(agent.id);
-  const maxReplies = Math.min(newMentions.length, settings.maxRepliesPerRun || 3);
+  const maxReplies = Math.min(unrepliedMentions.length, settings.maxRepliesPerRun || 3);
 
   let repliesSent = 0;
 
-  for (const mention of newMentions.slice(0, maxReplies)) {
+  for (const mention of unrepliedMentions.slice(0, maxReplies)) {
     try {
-      // Store the mention with conversation context
-      await createMention({
+      // Store the mention if not already stored
+      if (!storedTweetIds.has(String(mention.id))) {
+        await createMention({
         agentId: agent.id,
         author: String(mention.authorName || mention.authorId),
         authorHandle: `@${String(mention.authorUsername || mention.authorId)}`,
@@ -272,6 +280,7 @@ async function runAutoReply(
         engagementRetweets: 0,
         createdAt: mention.createdAt,
       });
+      }
 
       // Check thread depth — skip if we've already gone N rounds
       const maxDepth = 3;
