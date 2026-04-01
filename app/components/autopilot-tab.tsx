@@ -24,6 +24,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
   const [agentConnected, setAgentConnected] = useState(false);
+  const [agentHandle, setAgentHandle] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,6 +34,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       fetch(`/api/agents/${agentId}/metrics`).then((r) => r.ok ? r.json() : []).catch(() => []),
     ]).then(([agent, protocolData, metricsData]) => {
       setAgentConnected(agent?.isConnected === 1);
+      setAgentHandle(agent?.handle || '');
       if (protocolData) {
         setSettings(protocolData.settings);
         setPostLog(protocolData.postLog || []);
@@ -240,7 +242,8 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               )}
             </div>
 
-            {/* Marketing Track */}
+            {/* Marketing Track — only for spokesperson accounts */}
+            {['antihunterai', 'clawfable'].includes(agentHandle.toLowerCase()) && (
             <div className="protocol-card" style={{ padding: '12px 14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: settings.marketingEnabled ? '8px' : '0' }}>
                 <div className="flex items-center gap-3">
@@ -281,6 +284,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 </div>
               )}
             </div>
+            )}
 
             {/* Always-on jobs */}
             <div className="protocol-card" style={{ padding: '10px 14px', display: 'flex', gap: '12px' }}>

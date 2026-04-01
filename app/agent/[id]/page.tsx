@@ -206,12 +206,12 @@ export default function AgentDashboard() {
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
                   left: 0,
-                  background: 'var(--surface-1)',
+                  background: '#1a1a1a',
                   border: '1px solid var(--border)',
                   borderRadius: '8px',
                   minWidth: '180px',
                   zIndex: 50,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
                   overflow: 'hidden',
                 }}
               >
@@ -234,8 +234,8 @@ export default function AgentDashboard() {
                         cursor: 'pointer',
                         textAlign: 'left',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#222')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <div style={{
                         width: '22px', height: '22px', borderRadius: '5px', flexShrink: 0,
