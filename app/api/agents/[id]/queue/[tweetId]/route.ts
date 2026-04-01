@@ -11,8 +11,8 @@ export async function PATCH(
   const { id, tweetId } = await params;
   try {
     await requireAgentAccess(id);
-    const tweet = await getTweet(tweetId);
-    if (!tweet || tweet.agentId !== id) {
+    const tweet = await getTweet(String(tweetId));
+    if (!tweet || String(tweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
     }
 
@@ -44,8 +44,8 @@ export async function DELETE(
   const { id, tweetId } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-    const tweet = await getTweet(tweetId);
-    if (!tweet || tweet.agentId !== id) {
+    const tweet = await getTweet(String(tweetId));
+    if (!tweet || String(tweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
     }
 
