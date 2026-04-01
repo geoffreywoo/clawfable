@@ -16,12 +16,17 @@ import {
   updateProtocolSettings,
   saveAnalysis,
   addPostLogEntry,
+  getPostLog,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
+
+function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
+  return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
+}
 
 /**
  * Check performance of ALL recent tweets on the timeline.
@@ -60,6 +65,15 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
   const ourTweetMap = new Map(allTweets.filter((t) => t.xTweetId).map((t) => [String(t.xTweetId), t]));
 
+  // Also include reply xTweetIds from the post log (replies aren't in getTweets)
+  const postLog = await getPostLog(agent.id, 200);
+  const replyXIds = new Set(
+    postLog
+      .filter((e) => (e.format === 'auto_reply' || e.format === 'proactive_reply') && e.xTweetId)
+      .map((e) => String(e.xTweetId))
+  );
+  for (const xid of replyXIds) ourXIds.add(xid);
+
   const analysis = await getAnalysis(agent.id);
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
 
@@ -87,8 +101,8 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       tweetId: ourTweet?.id || '',
       xTweetId: String(timelineTweet.id),
       content: timelineTweet.text,
-      format: ourTweet?.format || classification?.format || 'unknown',
-      topic: ourTweet?.topic || classification?.topic || 'general',
+      format: ourTweet?.format || replyLogEntry(postLog, String(timelineTweet.id))?.format || classification?.format || 'unknown',
+      topic: ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general',
       hook: classification?.hook,
       tone: classification?.tone,
       specificity: classification?.specificity,

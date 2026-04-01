@@ -32,10 +32,24 @@ export async function replyToViralTweets(
   const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
   if (!trending || trending.length === 0) return 0;
 
-  // Find viral tweets worth replying to (500+ likes, in agent's topic areas)
+  // Find RISING tweets — posted recently with high engagement velocity.
+  // A tweet at 100 likes in 2 hours is about to blow up.
+  // A tweet at 500 likes from 3 days ago is a dead thread.
+  const now = Date.now();
   const viralTweets = trending
-    .filter((t) => t.topTweet && t.topTweet.likes >= 100)
-    .sort((a, b) => (b.topTweet?.likes || 0) - (a.topTweet?.likes || 0))
+    .filter((t) => {
+      if (!t.topTweet || t.topTweet.likes < 50) return false;
+      const tweetAge = now - new Date(t.timestamp).getTime();
+      const hoursOld = tweetAge / (1000 * 60 * 60);
+      // Rising = posted within last 6 hours with 50+ likes, OR within 12 hours with 200+ likes
+      return (hoursOld < 6 && t.topTweet.likes >= 50) || (hoursOld < 12 && t.topTweet.likes >= 200);
+    })
+    // Sort by engagement velocity (likes per hour)
+    .sort((a, b) => {
+      const ageA = Math.max(1, (now - new Date(a.timestamp).getTime()) / (1000 * 60 * 60));
+      const ageB = Math.max(1, (now - new Date(b.timestamp).getTime()) / (1000 * 60 * 60));
+      return (b.topTweet!.likes / ageB) - (a.topTweet!.likes / ageA);
+    })
     .slice(0, 5);
 
   if (viralTweets.length === 0) return 0;
@@ -220,5 +234,61 @@ export async function generateAgentShoutout(
     return content.length > 0 ? { content, targetHandle: target.handle } : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Peer study: analyze what top accounts in the agent's network are doing
+ * that gets high engagement, and extract style patterns the agent should learn from.
+ * Returns insights that get injected into the generation prompt.
+ */
+export async function studyPeerStyles(
+  agent: Agent,
+): Promise<string[]> {
+  const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
+  if (!trending || trending.length === 0) return [];
+
+  // Collect the top tweets from different authors
+  const topTweetsByAuthor = new Map<string, { text: string; likes: number; author: string }>();
+  for (const topic of trending) {
+    if (!topic.topTweet || topic.topTweet.likes < 50) continue;
+    const existing = topTweetsByAuthor.get(topic.topTweet.author);
+    if (!existing || topic.topTweet.likes > existing.likes) {
+      topTweetsByAuthor.set(topic.topTweet.author, topic.topTweet);
+    }
+  }
+
+  const topTweets = [...topTweetsByAuthor.values()]
+    .sort((a, b) => b.likes - a.likes)
+    .slice(0, 8);
+
+  if (topTweets.length < 3) return [];
+
+  try {
+    const tweetList = topTweets
+      .map((t) => `@${t.author} (${t.likes} likes): "${t.text.slice(0, 200)}"`)
+      .join('\n');
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 512,
+      system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
+      messages: [{
+        role: 'user',
+        content: `These are the top-performing tweets from accounts in this agent's network right now:\n\n${tweetList}\n\nWhat style patterns are working? Be specific and actionable.`,
+      }],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+
+    return text.split('\n')
+      .map((l) => l.replace(/^[-•*]\s*/, '').trim())
+      .filter((l) => l.length > 15)
+      .slice(0, 5);
+  } catch {
+    return [];
   }
 }
