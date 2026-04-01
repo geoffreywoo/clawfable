@@ -312,6 +312,53 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
         )}
       </div>
 
+      {/* ─── Soul Evolution ────────────────────────────────────────────────── */}
+      <div style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderLeft: '3px solid #8b5cf6',
+        borderRadius: 'var(--radius-lg)',
+        padding: '16px 20px',
+        marginBottom: '16px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+              SOUL EVOLUTION
+            </p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+              Auto-update SOUL.md based on what the learning loop discovers
+            </p>
+          </div>
+          <select
+            className="input"
+            style={{ fontSize: '11px', padding: '4px 8px', width: 'auto' }}
+            value={(agent as unknown as Record<string, unknown>).soulEvolutionMode as string || 'auto'}
+            onChange={async (e) => {
+              try {
+                await fetch(`/api/agents/${agentId}/protocol/settings`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ soulEvolutionMode: e.target.value }),
+                });
+                showToast(`Soul evolution: ${e.target.value}`);
+              } catch {
+                showToast('Failed to update');
+              }
+            }}
+          >
+            <option value="auto">Auto (apply weekly)</option>
+            <option value="approval">Approval (review first)</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          When enabled, the system evolves your SOUL.md weekly based on performance data:
+          which formats work, which topics engage, which hooks and tones perform best.
+          The core identity is preserved. Version history keeps the last 10 snapshots.
+        </p>
+      </div>
+
       {/* ─── Open Source Soul ───────────────────────────────────────────────── */}
       <div style={{
         background: 'var(--surface)',

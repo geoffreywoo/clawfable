@@ -3,6 +3,7 @@ import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, a
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
+import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 
 // GET /api/cron/post — called by Vercel Cron every 30 minutes
@@ -77,6 +78,16 @@ export async function GET(request: NextRequest) {
           await maybeReanalyze(agent);
         } catch (err) {
           console.error(`[cron] re-analysis failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        // Evolve soul if conditions are met (weekly, 50+ tweets tracked)
+        try {
+          const evoResult = await maybeEvolveSoul(agent);
+          if (evoResult.evolved) {
+            console.log(`[cron] soul evolved for agent ${agent.id}: ${evoResult.changeSummary}`);
+          }
+        } catch (err) {
+          console.error(`[cron] soul evolution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
       }
 

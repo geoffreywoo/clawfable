@@ -172,6 +172,16 @@ export interface ProtocolSettings {
   marketingEnabled: boolean;   // generate promotional tweets for clawfable.com
   marketingMix: number;        // 0-100, percentage of tweets that are promotional
   marketingRole: string;       // e.g. "ceo", "product", "service"
+  // Soul evolution
+  soulEvolutionMode: 'auto' | 'approval' | 'off';
+  lastEvolvedAt: string | null;
+}
+
+export interface SoulVersion {
+  version: number;
+  soulMd: string;
+  updatedAt: string;
+  reason: string;             // summary of what changed
 }
 
 export interface PostLogEntry {

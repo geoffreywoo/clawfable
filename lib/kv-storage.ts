@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -212,6 +212,7 @@ const KEYS = {
   agentPerformance: (id: string) => `agent:${id}:performance`,
   agentLearnings: (id: string) => `agent:${id}:learnings`,
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
+  agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -544,6 +545,8 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   marketingEnabled: false,
   marketingMix: 0,
   marketingRole: '',
+  soulEvolutionMode: 'auto',
+  lastEvolvedAt: null,
 };
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {
@@ -791,6 +794,28 @@ export async function getRecentNegativeFeedback(agentId: string, limit = 5): Pro
 
 export async function saveSoulBackup(agentId: string, soulMd: string): Promise<void> {
   await kvSet(KEYS.agentSoulBackup(agentId), soulMd);
+}
+
+// ─── Soul version stack ─────────────────────────────────────────────────────
+
+export async function pushSoulVersion(agentId: string, soulMd: string, reason: string): Promise<void> {
+  const versions = await getSoulVersions(agentId);
+  const nextVersion = versions.length > 0 ? Math.max(...versions.map((v) => v.version)) + 1 : 1;
+  const entry: SoulVersion = { version: nextVersion, soulMd, updatedAt: new Date().toISOString(), reason };
+  await kvLpush(KEYS.agentSoulVersions(agentId), JSON.stringify(entry));
+  // Trim to last 10 versions
+  const current = await kvLrange(KEYS.agentSoulVersions(agentId), 0, -1);
+  if (current.length > 10) {
+    // Remove oldest entries beyond 10
+    for (let i = 10; i < current.length; i++) {
+      await kvLrem(KEYS.agentSoulVersions(agentId), -1, current[i] as string);
+    }
+  }
+}
+
+export async function getSoulVersions(agentId: string): Promise<SoulVersion[]> {
+  const raw = await kvLrange(KEYS.agentSoulVersions(agentId), 0, 9);
+  return raw.map((s) => parseListEntry<SoulVersion>(s)).filter((e): e is SoulVersion => e !== null);
 }
 
 // ─── Funnel event storage ───────────────────────────────────────────────────

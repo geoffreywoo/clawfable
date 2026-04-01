@@ -35,6 +35,7 @@ export async function PATCH(
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
       'lengthMix', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
+      'soulEvolutionMode',
     ];
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {
