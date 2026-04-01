@@ -131,8 +131,8 @@ ${soulMd}`);
 
   // Learnings from actual performance of our generated tweets
   if (learnings && learnings.totalTracked > 0) {
-    parts.push(`\n## LEARNINGS FROM OUR POSTED TWEETS (THIS IS CRITICAL — adapt based on what actually worked)`);
-    parts.push(`Tracked ${learnings.totalTracked} tweets we posted. Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
+    parts.push(`\n## LEARNINGS FROM ACCOUNT PERFORMANCE (THIS IS CRITICAL — adapt based on what actually works)`);
+    parts.push(`Tracked ${learnings.totalTracked} tweets (both manually written and auto-generated). Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
 
     if (learnings.formatRankings.length > 0) {
       parts.push(`\nFormat performance (our tweets, not historical):`);
@@ -163,9 +163,28 @@ ${soulMd}`);
     }
 
     if (learnings.insights.length > 0) {
-      parts.push(`\nAI-generated insights from our performance:`);
+      parts.push(`\nPRESCRIPTIVE RULES (follow these — they are derived from real performance data):`);
       for (const insight of learnings.insights) {
         parts.push(`- ${insight}`);
+      }
+    }
+
+    // Style fingerprint — computed from top 30 performing tweets
+    if (learnings.styleFingerprint) {
+      const fp = learnings.styleFingerprint;
+      parts.push(`\n## STYLE FINGERPRINT (how the BEST tweets are written — match this)`);
+      parts.push(`- Sweet spot length: ${fp.avgLength} chars (${fp.shortPct}% short, ${fp.mediumPct}% medium, ${fp.longPct}% long)`);
+      if (fp.questionRatio > 20) parts.push(`- ${fp.questionRatio}% of top tweets ask questions — include questions`);
+      if (fp.usesNumbers) parts.push(`- Top tweets use specific numbers and data — be data-driven`);
+      if (fp.usesLineBreaks) parts.push(`- Top tweets use line breaks for structure — use \\n`);
+      if (!fp.usesEmojis) parts.push(`- Top tweets do NOT use emojis — avoid them`);
+      if (fp.topHooks.length > 0) parts.push(`- Best opening hooks: ${fp.topHooks.join(', ')}`);
+      if (fp.topTones.length > 0) parts.push(`- Best-performing tones: ${fp.topTones.join(', ')}`);
+      if (fp.antiPatterns.length > 0) {
+        parts.push(`\nANTI-PATTERNS (these consistently underperform — AVOID):`);
+        for (const ap of fp.antiPatterns) {
+          parts.push(`- ${ap}`);
+        }
       }
     }
   }

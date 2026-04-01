@@ -187,11 +187,14 @@ export interface PostLogEntry {
 // ─── Performance tracking types ──────────────────────────────────────────────
 
 export interface TweetPerformance {
-  tweetId: string;         // internal ID
+  tweetId: string;         // internal ID (empty for timeline-tracked tweets)
   xTweetId: string;        // X post ID
   content: string;
   format: string;
   topic: string;
+  hook?: string;           // opening hook type: question, bold_claim, data_point, story, observation
+  tone?: string;           // sarcastic, earnest, analytical, provocative, educational
+  specificity?: string;    // abstract, concrete, data_driven
   postedAt: string;
   checkedAt: string;
   likes: number;
@@ -200,7 +203,22 @@ export interface TweetPerformance {
   impressions: number;
   engagementRate: number;  // (likes+RTs+replies) / impressions
   wasViral: boolean;       // exceeded the viral threshold
-  source: 'autopilot' | 'manual';
+  source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline
+}
+
+export interface StyleFingerprint {
+  avgLength: number;
+  shortPct: number;        // % tweets under 200 chars
+  mediumPct: number;       // % tweets 200-500 chars
+  longPct: number;         // % tweets 500+ chars
+  questionRatio: number;   // % tweets that are questions
+  usesLineBreaks: boolean;
+  usesEmojis: boolean;
+  usesNumbers: boolean;    // data-driven style
+  topHooks: string[];      // most common opening hook types
+  topTones: string[];      // most common tone types
+  antiPatterns: string[];  // patterns that consistently underperform
+  updatedAt: string;
 }
 
 export interface AgentLearnings {
@@ -213,7 +231,8 @@ export interface AgentLearnings {
   worstPerformers: TweetPerformance[];   // bottom 5 by engagement
   formatRankings: Array<{ format: string; avgEngagement: number; count: number }>;
   topicRankings: Array<{ topic: string; avgEngagement: number; count: number }>;
-  insights: string[];                     // AI-generated learnings
+  insights: string[];                     // AI-generated prescriptive rules
+  styleFingerprint?: StyleFingerprint;    // computed from top performers
 }
 
 export interface AccountAnalysis {

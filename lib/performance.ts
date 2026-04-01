@@ -4,7 +4,7 @@
  * and feeds insights back into generation.
  */
 
-import type { Agent, TweetPerformance, AgentLearnings } from './types';
+import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint } from './types';
 import {
   getTweets,
   getPerformanceHistory,
@@ -24,8 +24,10 @@ import Anthropic from '@anthropic-ai/sdk';
 const anthropic = new Anthropic();
 
 /**
- * Check performance of recently posted tweets.
- * Fetches the agent's timeline from X and matches against our posted tweets.
+ * Check performance of ALL recent tweets on the timeline.
+ * Tracks both Clawfable-posted and manually written tweets.
+ * Manually written tweets are the richest training signal — they show
+ * what the human operator writes when they want maximum engagement.
  */
 export async function checkPerformance(agent: Agent): Promise<number> {
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
@@ -39,57 +41,66 @@ export async function checkPerformance(agent: Agent): Promise<number> {
     accessSecret: agent.accessSecret,
   });
 
-  // Get our posted tweets that have X tweet IDs
-  const allTweets = await getTweets(agent.id);
-  const posted = allTweets.filter((t) => t.status === 'posted' && t.xTweetId);
-
-  if (posted.length === 0) return 0;
-
   // Get existing performance entries to avoid re-checking
-  const existing = await getPerformanceHistory(agent.id, 200);
-  const checkedXIds = new Set(existing.map((e) => e.xTweetId));
+  const existing = await getPerformanceHistory(agent.id, 500);
+  const checkedXIds = new Set(existing.map((e) => String(e.xTweetId)));
 
-  // Fetch recent timeline with engagement metrics
+  // Fetch full recent timeline (all tweets, not just ours)
   let timeline;
   try {
-    timeline = await getUserTimeline(keys, agent.xUserId, 100);
+    timeline = await getUserTimeline(keys, String(agent.xUserId), 100);
   } catch {
     return 0;
   }
 
-  type TimelineEntry = typeof timeline[number];
-  const timelineMap = new Map<string, TimelineEntry>(timeline.map((t) => [t.id, t]));
+  if (timeline.length === 0) return 0;
+
+  // Build a map of our Clawfable-posted tweets for source detection
+  const allTweets = await getTweets(agent.id);
+  const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
+  const ourTweetMap = new Map(allTweets.filter((t) => t.xTweetId).map((t) => [String(t.xTweetId), t]));
+
   const analysis = await getAnalysis(agent.id);
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
 
+  // Collect new tweets to track
+  const newTweets = timeline.filter((t) => !checkedXIds.has(String(t.id)));
+  if (newTweets.length === 0) return 0;
+
+  // Batch classify manually written tweets via Claude (up to 20 at a time)
+  const manualTweets = newTweets.filter((t) => !ourXIds.has(String(t.id)));
+  const classifications = await batchClassifyTweets(manualTweets.slice(0, 20));
+
   let tracked = 0;
 
-  for (const tweet of posted) {
-    if (!tweet.xTweetId || checkedXIds.has(tweet.xTweetId)) continue;
+  for (const timelineTweet of newTweets) {
+    const isOurs = ourXIds.has(String(timelineTweet.id));
+    const ourTweet = isOurs ? ourTweetMap.get(String(timelineTweet.id)) : null;
+    const classification = classifications.get(String(timelineTweet.id));
 
-    const metrics = timelineMap.get(tweet.xTweetId);
-    if (!metrics) continue; // Not in recent timeline yet or too old
-
-    const totalEngagement = metrics.likes + metrics.retweets + metrics.replies;
-    const engagementRate = metrics.impressions > 0
-      ? Math.round((totalEngagement / metrics.impressions) * 10000) / 100
+    const totalEngagement = timelineTweet.likes + timelineTweet.retweets + (timelineTweet.replies ?? 0);
+    const engagementRate = timelineTweet.impressions > 0
+      ? Math.round((totalEngagement / timelineTweet.impressions) * 10000) / 100
       : 0;
 
     const entry: TweetPerformance = {
-      tweetId: tweet.id,
-      xTweetId: tweet.xTweetId,
-      content: tweet.content,
-      format: tweet.format || tweet.topic || 'unknown',
-      topic: tweet.topic || 'general',
-      postedAt: tweet.createdAt,
+      tweetId: ourTweet?.id || '',
+      xTweetId: String(timelineTweet.id),
+      content: timelineTweet.text,
+      format: ourTweet?.format || classification?.format || 'unknown',
+      topic: ourTweet?.topic || classification?.topic || 'general',
+      hook: classification?.hook,
+      tone: classification?.tone,
+      specificity: classification?.specificity,
+      postedAt: timelineTweet.createdAt,
       checkedAt: new Date().toISOString(),
-      likes: metrics.likes,
-      retweets: metrics.retweets,
-      replies: metrics.replies,
-      impressions: metrics.impressions,
+      likes: timelineTweet.likes,
+      retweets: timelineTweet.retweets,
+      replies: timelineTweet.replies ?? 0,
+      impressions: timelineTweet.impressions ?? 0,
       engagementRate,
-      wasViral: metrics.likes >= viralThreshold,
-      source: 'autopilot', // Could be refined
+      wasViral: timelineTweet.likes >= viralThreshold,
+      source: isOurs ? 'autopilot' : 'timeline',
     };
 
     await addPerformanceEntry(agent.id, entry);
@@ -100,11 +111,72 @@ export async function checkPerformance(agent: Agent): Promise<number> {
 }
 
 /**
+ * Batch classify tweets using Claude. Extracts format, topic, hook type,
+ * tone, and specificity for each tweet. This is the key to learning from
+ * manually written tweets — we can't learn from them without knowing what
+ * dimensions they express.
+ */
+async function batchClassifyTweets(
+  tweets: Array<{ id: string; text: string }>
+): Promise<Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>> {
+  const result = new Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>();
+  if (tweets.length === 0) return result;
+
+  try {
+    const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
+- "idx": the tweet index number
+- "format": one of: hot_take, question, data_point, short_punch, long_form, analysis, observation, thread_hook, story, announcement
+- "topic": the primary topic (e.g. AI, crypto, startups, product, engineering, culture, personal, humor)
+- "hook": opening hook type: question, bold_claim, data_point, story, observation, contrarian, listicle, callout
+- "tone": sarcastic, earnest, analytical, provocative, educational, casual, urgent
+- "specificity": abstract, concrete, data_driven
+
+Output ONLY JSON objects, one per line, no other text.`,
+      messages: [{ role: 'user', content: `Classify these tweets:\n${tweetList}` }],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('{')) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        const idx = parsed.idx;
+        if (typeof idx === 'number' && idx >= 0 && idx < tweets.length) {
+          result.set(String(tweets[idx].id), {
+            format: parsed.format || 'unknown',
+            topic: parsed.topic || 'general',
+            hook: parsed.hook || 'observation',
+            tone: parsed.tone || 'casual',
+            specificity: parsed.specificity || 'concrete',
+          });
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  } catch {
+    // Classification failed — tweets still get tracked without dimensions
+  }
+
+  return result;
+}
+
+/**
  * Build learnings from performance history.
- * Analyzes what worked vs what didn't, ranks formats/topics, generates insights.
+ * Analyzes ALL tracked tweets (both autopilot and manual/timeline).
+ * Computes style fingerprint from top performers, ranks all dimensions,
+ * and generates prescriptive rules for generation.
  */
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
-  const history = await getPerformanceHistory(agent.id, 200);
+  const history = await getPerformanceHistory(agent.id, 500);
 
   if (history.length === 0) {
     return {
@@ -131,6 +203,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const formatMap: Record<string, { total: number; count: number }> = {};
   for (const h of history) {
     const f = h.format || 'unknown';
+    if (f === 'unknown') continue; // skip unclassified
     if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
     formatMap[f].total += h.likes + h.retweets;
     formatMap[f].count++;
@@ -143,6 +216,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const topicMap: Record<string, { total: number; count: number }> = {};
   for (const h of history) {
     const t = h.topic || 'general';
+    if (t === 'general' || t === 'unknown') continue;
     if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
     topicMap[t].total += h.likes + h.retweets;
     topicMap[t].count++;
@@ -151,8 +225,11 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     .map(([topic, d]) => ({ topic, avgEngagement: Math.round(d.total / d.count), count: d.count }))
     .sort((a, b) => b.avgEngagement - a.avgEngagement);
 
-  // Generate AI insights from the data
-  const insights = await generateInsights(history, sorted, formatRankings, topicRankings);
+  // Compute style fingerprint from top 30 tweets
+  const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
+
+  // Generate prescriptive insights
+  const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint);
 
   const learnings: AgentLearnings = {
     agentId: agent.id,
@@ -165,6 +242,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     formatRankings,
     topicRankings,
     insights,
+    styleFingerprint,
   };
 
   await saveLearnings(agent.id, learnings);
@@ -186,39 +264,133 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   return learnings;
 }
 
+/**
+ * Compute a style fingerprint from the top-performing tweets.
+ * This captures HOW the best content is written, not just what topic it covers.
+ */
+function computeStyleFingerprint(
+  topPerformers: TweetPerformance[],
+  worstPerformers: TweetPerformance[]
+): StyleFingerprint {
+  const top = topPerformers.filter((t) => t.content);
+  if (top.length === 0) {
+    return {
+      avgLength: 0, shortPct: 0, mediumPct: 0, longPct: 0,
+      questionRatio: 0, usesLineBreaks: false, usesEmojis: false, usesNumbers: false,
+      topHooks: [], topTones: [], antiPatterns: [], updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const lengths = top.map((t) => t.content.length);
+  const avgLength = Math.round(lengths.reduce((a, b) => a + b, 0) / lengths.length);
+  const shortPct = Math.round((lengths.filter((l) => l < 200).length / lengths.length) * 100);
+  const mediumPct = Math.round((lengths.filter((l) => l >= 200 && l < 500).length / lengths.length) * 100);
+  const longPct = Math.round((lengths.filter((l) => l >= 500).length / lengths.length) * 100);
+
+  const questionCount = top.filter((t) => t.content.includes('?')).length;
+  const questionRatio = Math.round((questionCount / top.length) * 100);
+
+  const usesLineBreaks = top.filter((t) => t.content.includes('\n')).length > top.length * 0.3;
+  const usesEmojis = top.filter((t) => /[\u{1F000}-\u{1FFFF}]/u.test(t.content)).length > top.length * 0.3;
+  const usesNumbers = top.filter((t) => /\d+[%xX$]|\$\d/.test(t.content)).length > top.length * 0.3;
+
+  // Count hook types from classified tweets
+  const hookCounts: Record<string, number> = {};
+  for (const t of top) {
+    if (t.hook) { hookCounts[t.hook] = (hookCounts[t.hook] || 0) + 1; }
+  }
+  const topHooks = Object.entries(hookCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([h]) => h);
+
+  const toneCounts: Record<string, number> = {};
+  for (const t of top) {
+    if (t.tone) { toneCounts[t.tone] = (toneCounts[t.tone] || 0) + 1; }
+  }
+  const topTones = Object.entries(toneCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([h]) => h);
+
+  // Detect anti-patterns from worst performers
+  const antiPatterns: string[] = [];
+  const worst = worstPerformers.filter((t) => t.content);
+  if (worst.length >= 3) {
+    const worstAvgLen = worst.reduce((s, t) => s + t.content.length, 0) / worst.length;
+    if (worstAvgLen > avgLength * 1.5) antiPatterns.push('Worst tweets are significantly longer than best');
+    if (worstAvgLen < avgLength * 0.5) antiPatterns.push('Worst tweets are significantly shorter than best');
+
+    const worstGeneric = worst.filter((t) =>
+      /^(I think|In my opinion|Here's|The thing is|It's important)/i.test(t.content)
+    );
+    if (worstGeneric.length > worst.length * 0.3) antiPatterns.push('Generic openings ("I think", "Here\'s") underperform');
+
+    const worstNoQuestion = worst.filter((t) => !t.content.includes('?'));
+    if (worstNoQuestion.length > worst.length * 0.7 && questionRatio > 30) {
+      antiPatterns.push('Tweets without questions underperform — your best work asks questions');
+    }
+  }
+
+  return {
+    avgLength, shortPct, mediumPct, longPct, questionRatio,
+    usesLineBreaks, usesEmojis, usesNumbers,
+    topHooks, topTones, antiPatterns,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 async function generateInsights(
   history: TweetPerformance[],
   sorted: TweetPerformance[],
   formatRankings: AgentLearnings['formatRankings'],
   topicRankings: AgentLearnings['topicRankings'],
+  styleFingerprint: StyleFingerprint,
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
-  const best = sorted.slice(0, 5);
-  const worst = sorted.slice(-5);
+  const best = sorted.slice(0, 10);
+  const worst = sorted.slice(-10);
+  const timelineTweets = history.filter((t) => t.source === 'timeline');
+  const autopilotTweets = history.filter((t) => t.source === 'autopilot');
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 512,
-      system: 'You analyze tweet performance data and produce actionable insights. Be specific and data-driven. Output 3-5 bullet points, one per line, no numbering.',
+      max_tokens: 1024,
+      system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
+1. Specific and actionable (not "post more engaging content")
+2. Grounded in the data (reference actual numbers)
+3. Written as a direct instruction ("Write X" not "Consider writing X")
+
+Include at least one rule about what to STOP doing.
+Include at least one rule comparing autopilot vs manual tweet performance (if both exist).
+Output bullet points, one per line, no numbering.`,
       messages: [{
         role: 'user',
-        content: `Here's performance data from ${history.length} posted tweets:
+        content: `PERFORMANCE DATA: ${history.length} tweets (${timelineTweets.length} manual, ${autopilotTweets.length} autopilot)
 
-FORMAT RANKINGS (by avg engagement):
-${formatRankings.map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
+STYLE FINGERPRINT (computed from top 30 tweets):
+- Avg length: ${styleFingerprint.avgLength} chars (${styleFingerprint.shortPct}% short, ${styleFingerprint.mediumPct}% medium, ${styleFingerprint.longPct}% long)
+- Questions: ${styleFingerprint.questionRatio}% of top tweets ask questions
+- Uses line breaks: ${styleFingerprint.usesLineBreaks}, Emojis: ${styleFingerprint.usesEmojis}, Numbers/data: ${styleFingerprint.usesNumbers}
+- Top opening hooks: ${styleFingerprint.topHooks.join(', ') || 'unknown'}
+- Top tones: ${styleFingerprint.topTones.join(', ') || 'unknown'}
+- Anti-patterns: ${styleFingerprint.antiPatterns.join('; ') || 'none detected'}
+
+FORMAT RANKINGS:
+${formatRankings.slice(0, 8).map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
 
 TOPIC RANKINGS:
-${topicRankings.map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
+${topicRankings.slice(0, 8).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
 
-TOP 5 TWEETS:
-${best.map((t) => `- [${t.likes} likes, ${t.retweets} RTs] "${t.content.slice(0, 100)}..."`).join('\n')}
+TOP 10 TWEETS (with full text so you can analyze style):
+${best.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
 
-BOTTOM 5 TWEETS:
-${worst.map((t) => `- [${t.likes} likes, ${t.retweets} RTs] "${t.content.slice(0, 100)}..."`).join('\n')}
+BOTTOM 10 TWEETS:
+${worst.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
 
-What patterns do you see? What should we do more of? What should we stop doing? Be specific.`,
+Generate prescriptive rules for improving content quality. Focus on style patterns, not just topics.`,
       }],
     });
 
@@ -230,7 +402,7 @@ What patterns do you see? What should we do more of? What should we stop doing? 
     return text.split('\n')
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())
       .filter((l) => l.length > 10)
-      .slice(0, 5);
+      .slice(0, 7);
   } catch {
     return ['Insight generation failed — will retry on next learning cycle.'];
   }
@@ -245,16 +417,17 @@ export async function autoAdjustSettings(agentId: string, learnings: AgentLearni
 
   const settings = await getProtocolSettings(agentId);
 
-  // Auto-adjust format list — promote top performers, drop worst
-  if (learnings.formatRankings.length >= 3) {
-    const topFormats = learnings.formatRankings
-      .filter((f) => f.count >= 2) // need at least 2 data points
-      .slice(0, 8)
+  // Auto-adjust format list — enable top performers, drop consistent underperformers
+  // Only auto-adjust if user hasn't manually configured formats
+  if ((!settings.enabledFormats || settings.enabledFormats.length === 0) && learnings.formatRankings.length >= 4) {
+    const avgEngagement = learnings.formatRankings.reduce((s, f) => s + f.avgEngagement, 0) / learnings.formatRankings.length;
+    // Keep formats that perform at least 30% of average (very loose filter — just drops truly dead formats)
+    const viableFormats = learnings.formatRankings
+      .filter((f) => f.count >= 3 && f.avgEngagement >= avgEngagement * 0.3)
       .map((f) => f.format);
-
-    // Only auto-adjust if user hasn't manually configured formats
-    if (!settings.enabledFormats || settings.enabledFormats.length === 0) {
-      // Don't restrict — keep all formats but learnings will steer Claude
+    // Only restrict if we have a meaningful distinction (keep at least 4 formats)
+    if (viableFormats.length >= 4 && viableFormats.length < learnings.formatRankings.length) {
+      await updateProtocolSettings(agentId, { enabledFormats: viableFormats });
     }
   }
 
