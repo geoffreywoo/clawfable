@@ -178,7 +178,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                   <div className="field"><label>POSTS/DAY</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
-                      {[1, 2, 3, 4, 6, 8, 12, 24].map((n) => <option key={n} value={n}>{n}</option>)}
+                      {[1, 2, 3, 4, 6, 8, 12, 24, 48].map((n) => <option key={n} value={n}>{n}{n === 48 ? ' (every 30m)' : ''}</option>)}
                     </select>
                   </div>
                   <div className="field"><label>MIN QUEUE</label>
