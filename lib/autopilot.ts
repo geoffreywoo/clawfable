@@ -28,6 +28,7 @@ import {
   setTrendingCache,
   getConversationHistory,
   getPerformanceHistory,
+  getRemixPatterns,
   type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
@@ -569,6 +570,14 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     if (negatives.length > 0) {
       voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
     }
+
+    // Remix memory: operator's consistent remix patterns become standing rules
+    try {
+      const remixPatterns = await getRemixPatterns(agent.id);
+      if (remixPatterns.length > 0) {
+        voiceProfile.communicationStyle += `\n\n## OPERATOR STYLE PREFERENCES (from remix history — follow these)\n${remixPatterns.map(p => `- ${p}`).join('\n')}`;
+      }
+    } catch { /* non-critical */ }
 
     const learnings = await getLearnings(agent.id);
     const settings = await getProtocolSettings(agent.id);

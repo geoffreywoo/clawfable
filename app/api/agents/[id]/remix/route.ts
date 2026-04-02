@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateTweet } from '@/lib/kv-storage';
+import { updateTweet, addRemixEntry } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -57,6 +57,15 @@ export async function POST(
     if (tweetId) {
       await updateTweet(String(tweetId), { content: remixed });
     }
+
+    // Store remix direction in memory for future generation learning
+    await addRemixEntry(id, {
+      direction: direction || 'custom',
+      customPrompt: customPrompt || undefined,
+      originalContent: content,
+      remixedContent: remixed,
+      ts: new Date().toISOString(),
+    });
 
     return NextResponse.json({ content: remixed, direction: direction || 'custom' });
   } catch (err) {

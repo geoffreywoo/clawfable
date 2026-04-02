@@ -214,6 +214,7 @@ const KEYS = {
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
   agentFollowerHistory: (id: string) => `agent:${id}:followers`,
+  agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -941,6 +942,72 @@ export function computeFunnelSummary(events: FunnelEvent[]): FunnelSummary {
     currentStage,
     completionPct: Math.round((reached / FUNNEL_MILESTONES.length) * 100),
   };
+}
+
+// ─── Remix memory ───────────────────────────────────────────────────────────
+
+export interface RemixEntry {
+  direction: string;       // 'shorter' | 'spicier' | 'custom' etc
+  customPrompt?: string;   // the actual instruction if custom
+  originalContent: string;
+  remixedContent: string;
+  ts: string;
+}
+
+export async function addRemixEntry(agentId: string, entry: RemixEntry): Promise<void> {
+  await kvLpush(KEYS.agentRemixMemory(agentId), JSON.stringify(entry));
+}
+
+export async function getRemixMemory(agentId: string, limit = 30): Promise<RemixEntry[]> {
+  const raw = await kvLrange(KEYS.agentRemixMemory(agentId), 0, limit - 1);
+  return raw.map((s) => parseListEntry<RemixEntry>(s)).filter((e): e is RemixEntry => e !== null);
+}
+
+/**
+ * Analyze remix patterns: if the operator consistently uses the same direction
+ * or similar custom prompts, extract them as standing rules.
+ */
+export async function getRemixPatterns(agentId: string): Promise<string[]> {
+  const entries = await getRemixMemory(agentId, 30);
+  if (entries.length < 3) return [];
+
+  // Count direction frequency
+  const dirCounts: Record<string, number> = {};
+  const customPrompts: string[] = [];
+  for (const e of entries) {
+    dirCounts[e.direction] = (dirCounts[e.direction] || 0) + 1;
+    if (e.customPrompt) customPrompts.push(e.customPrompt);
+  }
+
+  const patterns: string[] = [];
+
+  // If a direction is used 3+ times, it's a standing preference
+  for (const [dir, count] of Object.entries(dirCounts)) {
+    if (count >= 3 && dir !== 'custom') {
+      const labels: Record<string, string> = {
+        shorter: 'Keep tweets short and punchy (under 200 chars)',
+        longer: 'Prefer longer, detailed posts with analysis',
+        spicier: 'Be more provocative and attention-grabbing',
+        softer: 'Keep tone thoughtful and nuanced',
+        funnier: 'Add more wit and humor',
+        data: 'Include data, numbers, and concrete evidence',
+        question: 'Frame more tweets as questions',
+        contrarian: 'Take more contrarian angles',
+      };
+      if (labels[dir]) patterns.push(`Operator preference (${count}x): ${labels[dir]}`);
+    }
+  }
+
+  // Extract common themes from custom prompts
+  if (customPrompts.length >= 2) {
+    // Simple: include the last 3 custom prompts as direct instructions
+    const recent = customPrompts.slice(0, 3);
+    for (const p of recent) {
+      patterns.push(`Operator custom direction: "${p}"`);
+    }
+  }
+
+  return patterns;
 }
 
 // ─── Follower tracking ──────────────────────────────────────────────────────
