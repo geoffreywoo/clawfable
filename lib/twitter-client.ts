@@ -96,11 +96,11 @@ export async function replyToTweet(
 export async function fetchTweetById(
   keys: TwitterKeys,
   tweetId: string
-): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string } | null> {
+): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string; inReplyToId: string | null } | null> {
   const client = createClient(keys);
   try {
     const result = await client.v2.singleTweet(tweetId, {
-      'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'conversation_id'],
       expansions: ['author_id'],
       'user.fields': ['username'],
     });
@@ -108,6 +108,8 @@ export async function fetchTweetById(
     if (!tweet) return null;
     const includes = (result as any).includes;
     const author = includes?.users?.[0];
+    const refs = (tweet as any).referenced_tweets as Array<{ type: string; id: string }> | undefined;
+    const repliedTo = refs?.find((r) => r.type === 'replied_to');
     return {
       id: tweet.id,
       text: tweet.text,
@@ -115,6 +117,7 @@ export async function fetchTweetById(
       authorUsername: author?.username || '',
       likes: tweet.public_metrics?.like_count ?? 0,
       createdAt: tweet.created_at || new Date().toISOString(),
+      inReplyToId: repliedTo?.id || null,
     };
   } catch {
     return null;

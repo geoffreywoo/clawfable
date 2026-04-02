@@ -334,16 +334,37 @@ async function runAutoReply(
         ? await getConversationHistory(agent.id, mention.conversationId, 5)
         : [];
 
-      // Fetch parent tweet context — what was the original tweet this mention is replying to?
-      // This gives Claude the full context of the conversation, not just the @-mention text.
+      // Walk up the reply chain to get FULL thread context, not just the immediate parent.
+      // This is critical for understanding what the conversation is actually about.
       let parentContext: string | null = null;
       if (mention.inReplyToTweetId) {
         try {
           const { fetchTweetById } = await import('./twitter-client');
-          const parentTweet = await fetchTweetById(keys, mention.inReplyToTweetId);
-          if (parentTweet && parentTweet.text) {
-            parentContext = `@${parentTweet.authorUsername}: "${parentTweet.text.slice(0, 300)}"`;
+          const threadTweets: Array<{ author: string; text: string }> = [];
+          let currentTweetId: string | null = mention.inReplyToTweetId;
+          let depth = 0;
+
+          // Walk up the reply chain (max 4 levels to bound API calls)
+          while (currentTweetId && depth < 4) {
+            const tweet = await fetchTweetById(keys, currentTweetId);
+            if (!tweet || !tweet.text) break;
+            threadTweets.unshift({ author: tweet.authorUsername, text: tweet.text.slice(0, 300) });
+            // If this tweet is itself a reply, keep walking up
+            currentTweetId = tweet.inReplyToId;
+            depth++;
           }
+
+          // Also prepend any conversation history we have from stored mentions
+          if (conversationHistory.length > 0) {
+            const historyContext = conversationHistory
+              .map((t) => `${t.role === 'us' ? `@${agent.handle}` : t.author}: "${t.content.slice(0, 200)}"`)
+              .join('\n');
+            parentContext = historyContext + '\n' + threadTweets.map((t) => `@${t.author}: "${t.text}"`).join('\n');
+          } else {
+            parentContext = threadTweets.map((t) => `@${t.author}: "${t.text}"`).join('\n');
+          }
+
+          if (!parentContext.trim()) parentContext = null;
         } catch { /* non-critical */ }
       }
 
