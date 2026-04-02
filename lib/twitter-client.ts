@@ -165,6 +165,21 @@ export async function getMentionsFromTwitter(
   }
 }
 
+export async function followUser(
+  keys: TwitterKeys,
+  sourceUserId: string,
+  targetUserId: string
+): Promise<{ following: boolean }> {
+  const client = createClient(keys);
+  try {
+    const rwClient = client.readWrite;
+    const result = await rwClient.v2.follow(sourceUserId, targetUserId);
+    return { following: result.data.following };
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 export async function likeTweet(
   keys: TwitterKeys,
   userId: string,

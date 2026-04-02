@@ -180,6 +180,7 @@ export interface ProtocolSettings {
   // Proactive engagement
   proactiveReplies: boolean;     // reply to viral tweets in network
   proactiveLikes: boolean;       // like relevant tweets in network
+  autoFollow: boolean;           // follow relevant accounts to expand network
   agentShoutouts: boolean;       // cross-promote other Clawfable agents
   // Posting schedule
   peakHours: number[];           // hours of day with best engagement (auto-detected)

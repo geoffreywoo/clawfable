@@ -553,6 +553,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   lastEvolvedAt: null,
   proactiveReplies: false,
   proactiveLikes: false,
+  autoFollow: false,
   agentShoutouts: false,
   peakHours: [],
   contentCalendar: {},

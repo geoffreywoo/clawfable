@@ -353,6 +353,28 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               </div>
             </div>
 
+            {/* Auto-follow */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.autoFollow ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.autoFollow ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.autoFollow ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} onClick={() => handleUpdateSettings({ autoFollow: !settings.autoFollow })}>
+                    {settings.autoFollow ? 'ON' : 'OFF'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>SMART FOLLOW</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Follow relevant accounts for better trending data and inspiration (max 3/run)
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Agent shoutouts */}
             <div className="protocol-card" style={{ padding: '10px 14px' }}>
               <div className="flex items-center justify-between">

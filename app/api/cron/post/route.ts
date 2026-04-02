@@ -4,7 +4,7 @@ import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
-import { replyToViralTweets, likeNetworkTweets } from '@/lib/proactive-engagement';
+import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
 import { getMe } from '@/lib/twitter-client';
 import { addFollowerSnapshot } from '@/lib/kv-storage';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
@@ -118,8 +118,9 @@ export async function GET(request: NextRequest) {
             });
             const viralReplies = await replyToViralTweets(agent, agentKeys, proactiveSettings);
             const likes = await likeNetworkTweets(agent, agentKeys, proactiveSettings);
-            if (viralReplies > 0 || likes > 0) {
-              console.log(`[cron] proactive engagement for agent ${agent.id}: ${viralReplies} viral replies, ${likes} likes`);
+            const follows = await discoverAndFollow(agent, agentKeys, proactiveSettings);
+            if (viralReplies > 0 || likes > 0 || follows > 0) {
+              console.log(`[cron] proactive engagement for agent ${agent.id}: ${viralReplies} viral replies, ${likes} likes, ${follows} follows`);
             }
           } catch (err) {
             console.error(`[cron] proactive engagement failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
