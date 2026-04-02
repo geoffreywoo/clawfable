@@ -93,6 +93,34 @@ export async function replyToTweet(
   }
 }
 
+export async function fetchTweetById(
+  keys: TwitterKeys,
+  tweetId: string
+): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string } | null> {
+  const client = createClient(keys);
+  try {
+    const result = await client.v2.singleTweet(tweetId, {
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
+      expansions: ['author_id'],
+      'user.fields': ['username'],
+    });
+    const tweet = result.data;
+    if (!tweet) return null;
+    const includes = (result as any).includes;
+    const author = includes?.users?.[0];
+    return {
+      id: tweet.id,
+      text: tweet.text,
+      authorId: tweet.author_id || '',
+      authorUsername: author?.username || '',
+      likes: tweet.public_metrics?.like_count ?? 0,
+      createdAt: tweet.created_at || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function searchRecentTweets(
   keys: TwitterKeys,
   query: string,
