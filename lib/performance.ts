@@ -207,8 +207,12 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     };
   }
 
-  // Sort by engagement
-  const sorted = [...history].sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets));
+  // Weighted engagement score: replies count 2x because they signal deeper engagement
+  // and the X algorithm amplifies reply-generating content more than passive likes
+  const weightedScore = (t: TweetPerformance) => t.likes + t.retweets + (t.replies * 2);
+
+  // Sort by weighted engagement
+  const sorted = [...history].sort((a, b) => weightedScore(b) - weightedScore(a));
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
@@ -219,7 +223,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     const f = h.format || 'unknown';
     if (f === 'unknown') continue; // skip unclassified
     if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
-    formatMap[f].total += h.likes + h.retweets;
+    formatMap[f].total += weightedScore(h);
     formatMap[f].count++;
   }
   const formatRankings = Object.entries(formatMap)
@@ -232,7 +236,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     const t = h.topic || 'general';
     if (t === 'general' || t === 'unknown') continue;
     if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
-    topicMap[t].total += h.likes + h.retweets;
+    topicMap[t].total += weightedScore(h);
     topicMap[t].count++;
   }
   const topicRankings = Object.entries(topicMap)
@@ -344,6 +348,40 @@ function computeStyleFingerprint(
     if (worstNoQuestion.length > worst.length * 0.7 && questionRatio > 30) {
       antiPatterns.push('Tweets without questions underperform — your best work asks questions');
     }
+
+    // Extract common opening phrases from worst performers (hard blocklist)
+    const openingPhrases: Record<string, number> = {};
+    for (const t of worst) {
+      // Extract first 5 words as the opening phrase
+      const opening = t.content.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
+      if (opening.length > 10) {
+        openingPhrases[opening] = (openingPhrases[opening] || 0) + 1;
+      }
+    }
+    for (const [phrase, count] of Object.entries(openingPhrases)) {
+      if (count >= 2) {
+        antiPatterns.push(`NEVER start with: "${phrase}" (appeared ${count}x in worst tweets)`);
+      }
+    }
+
+    // Detect topics that consistently get 0 engagement
+    const worstTopics: Record<string, number> = {};
+    for (const t of worst) {
+      if (t.topic && t.topic !== 'general' && t.topic !== 'unknown') {
+        worstTopics[t.topic] = (worstTopics[t.topic] || 0) + 1;
+      }
+    }
+    for (const [topic, count] of Object.entries(worstTopics)) {
+      if (count >= 3) {
+        antiPatterns.push(`Topic "${topic}" consistently underperforms (${count}x in bottom tweets)`);
+      }
+    }
+
+    // Detect if worst tweets have a consistent length pattern
+    const worstAllLong = worst.filter((t) => t.content.length > 500).length > worst.length * 0.6;
+    const worstAllShort = worst.filter((t) => t.content.length < 100).length > worst.length * 0.6;
+    if (worstAllLong) antiPatterns.push('Long tweets (500+ chars) consistently bomb — keep it concise');
+    if (worstAllShort) antiPatterns.push('Very short tweets (<100 chars) consistently bomb — add substance');
   }
 
   return {

@@ -83,7 +83,26 @@ function buildSystemPrompt(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`You are a tweet ghostwriter for a Twitter account. Your PRIMARY strategy is Quote Tweets (QTs) — adding sharp commentary on high-engagement posts from the network. QTs get significantly more reach because they ride existing viral content.`);
+  parts.push(`You are a tweet ghostwriter for a Twitter account. Write original tweets that sound exactly like this person and drive maximum engagement (likes, replies, retweets).`);
+
+  // Time-of-day awareness: match content tone to audience mood
+  const hour = new Date().getUTCHours();
+  const timeSlot =
+    (hour >= 13 && hour <= 18) ? 'morning-US' :  // 5am-10am PT
+    (hour >= 18 && hour <= 22) ? 'midday-US' :    // 10am-2pm PT
+    (hour >= 22 || hour <= 2) ? 'afternoon-US' :   // 2pm-6pm PT
+    (hour >= 2 && hour <= 6) ? 'evening-US' :      // 6pm-10pm PT
+    'late-night';                                    // 10pm-5am PT
+
+  const timeGuidance: Record<string, string> = {
+    'morning-US': 'Morning audience: professionals scrolling before work. Lead with sharp insights, data-driven takes, and professional observations. Set the agenda for the day.',
+    'midday-US': 'Midday audience: people on lunch breaks and between meetings. Hot takes, quick opinions, and reaction-worthy content. Higher energy, more provocative.',
+    'afternoon-US': 'Afternoon audience: winding down, looking for interesting discussions. Longer-form analysis, thoughtful threads, and engaging questions that spark debate.',
+    'evening-US': 'Evening audience: casual browsing, relaxed mood. Personal observations, humor, behind-the-scenes, lighter takes. More conversational tone.',
+    'late-night': 'Late-night audience: degen hours. Unfiltered takes, shitposts, bold predictions, contrarian views. The most engaged niche audience.',
+  };
+
+  parts.push(`\n## TIME CONTEXT: ${timeGuidance[timeSlot] || timeGuidance['midday-US']}`);
 
   // Include the full SOUL.md — this is the most important context for voice
   if (soulMd) {
@@ -188,10 +207,11 @@ ${soulMd}`);
       if (fp.topHooks.length > 0) parts.push(`- Best opening hooks: ${fp.topHooks.join(', ')}`);
       if (fp.topTones.length > 0) parts.push(`- Best-performing tones: ${fp.topTones.join(', ')}`);
       if (fp.antiPatterns.length > 0) {
-        parts.push(`\nANTI-PATTERNS (these consistently underperform — AVOID):`);
+        parts.push(`\n## HARD BLOCKLIST (violating these WILL produce low-engagement content — derived from your worst-performing tweets):`);
         for (const ap of fp.antiPatterns) {
           parts.push(`- ${ap}`);
         }
+        parts.push(`These are not suggestions. They are patterns that have been PROVEN to fail for this account. Do not use them under any circumstances.`);
       }
     }
   }
