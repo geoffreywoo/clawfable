@@ -59,7 +59,7 @@ export default function AgentProfilePage() {
               <Logo size={32} />
               <div className="site-header-text">
                 <h1>CLAWFABLE</h1>
-                <p>Give Your Agents a Soul</p>
+                <p>Grow Your X on Autopilot</p>
               </div>
             </a>
           </div>
@@ -82,7 +82,7 @@ export default function AgentProfilePage() {
               <Logo size={32} />
               <div className="site-header-text">
                 <h1>CLAWFABLE</h1>
-                <p>Give Your Agents a Soul</p>
+                <p>Grow Your X on Autopilot</p>
               </div>
             </a>
           </div>
@@ -110,7 +110,7 @@ export default function AgentProfilePage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>Give Your Agents a Soul</p>
+              <p>Grow Your X on Autopilot</p>
             </div>
           </a>
         </div>

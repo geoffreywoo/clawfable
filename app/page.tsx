@@ -92,7 +92,7 @@ export default function HomePage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>Give Your Agents a Soul</p>
+              <p>Grow Your X on Autopilot</p>
             </div>
           </div>
         </header>
@@ -114,84 +114,118 @@ export default function HomePage() {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>Give Your Agents a Soul</p>
+              <p>Grow Your X on Autopilot</p>
             </div>
           </div>
         </header>
         <main className="page-main">
-          <div className="content-wrap" style={{ maxWidth: '600px', margin: '0 auto', padding: '80px 24px 48px' }}>
+          <div className="content-wrap" style={{ maxWidth: '560px', margin: '0 auto', padding: '60px 24px 48px' }}>
+            {/* Hero */}
             <h2 style={{
               fontFamily: 'var(--font-display)',
-              fontSize: '32px',
+              fontSize: '36px',
               fontWeight: 700,
               color: 'var(--text)',
-              lineHeight: 1.2,
-              marginBottom: '16px',
+              lineHeight: 1.15,
+              marginBottom: '20px',
+              textAlign: 'center',
             }}>
-              Autonomous X agents that learn what works and iterate.
+              Your X account,<br />
+              posting while you sleep.
             </h2>
             <p style={{
               fontFamily: 'var(--font-body)',
-              fontSize: '15px',
+              fontSize: '16px',
               color: 'var(--text-muted)',
               lineHeight: 1.7,
-              marginBottom: '32px',
+              marginBottom: '36px',
+              textAlign: 'center',
             }}>
-              Connect your X account. Define a voice with SOUL.md. Approve a preview batch.
-              Autopilot takes over — posting, replying, tracking engagement, and self-improving
-              based on what actually performs.
+              Clawfable learns your voice, posts in your style, replies to mentions,
+              and gets smarter every day based on what actually gets engagement.
             </p>
 
-            <button
-              className="landing-cta-btn"
-              onClick={handleLogin}
-              disabled={loginLoading}
-            >
-              <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-              </svg>
-              {loginLoading ? 'REDIRECTING...' : 'CONNECT WITH X'}
-            </button>
+            {/* CTA */}
+            <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+              <button
+                className="landing-cta-btn"
+                onClick={handleLogin}
+                disabled={loginLoading}
+                style={{ fontSize: '14px', padding: '12px 32px' }}
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                  <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+                </svg>
+                {loginLoading ? 'REDIRECTING...' : 'GET STARTED FREE'}
+              </button>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
+                Connect your X account. Takes 3 minutes to set up.
+              </p>
+            </div>
 
+            {/* How it works */}
+            <div style={{ marginBottom: '48px' }}>
+              <p style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                marginBottom: '20px',
+              }}>HOW IT WORKS</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {[
+                  ['1', 'Connect your X account', 'One-click OAuth. Your credentials stay encrypted.'],
+                  ['2', 'We learn your voice', 'AI analyzes your best tweets to capture your tone, style, and topics.'],
+                  ['3', 'Review and launch', 'Approve a batch of sample tweets. If they sound like you, turn on autopilot.'],
+                  ['4', 'It gets smarter every day', 'Tracks what gets likes and replies, then writes more of what works.'],
+                ].map(([num, title, desc]) => (
+                  <div key={num} style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                    <div style={{
+                      width: '28px', height: '28px', borderRadius: '50%',
+                      background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: '#8b5cf6',
+                      flexShrink: 0,
+                    }}>{num}</div>
+                    <div>
+                      <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>{title}</p>
+                      <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text-dim)', lineHeight: 1.5, marginTop: '2px' }}>{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Benefits */}
             <div style={{
-              marginTop: '64px',
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '1px',
-              background: 'var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '12px',
+              marginBottom: '48px',
             }}>
               {[
-                ['SOUL.md', 'Voice contract generated from your tweet history or defined manually'],
-                ['AUTOPILOT', 'Posts, replies, and queue refill run on a 10-min cron cycle'],
-                ['SELF-IMPROVING', 'Tracks engagement, ranks formats, and feeds learnings back into generation'],
-              ].map(([label, desc]) => (
-                <div key={label} style={{
+                ['Posts for you 24/7', 'Never miss a day. Your account stays active while you focus on building.'],
+                ['Replies automatically', 'Responds to mentions in your voice. Handles trolls with humor.'],
+                ['Learns what works', 'Tracks every tweet. Doubles down on what gets engagement.'],
+                ['Sounds like you', 'Not generic AI slop. Trained on YOUR writing style and opinions.'],
+              ].map(([title, desc]) => (
+                <div key={title} style={{
                   background: 'var(--surface)',
-                  padding: '20px 16px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  padding: '16px',
                 }}>
-                  <p style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.1em',
-                    color: '#8b5cf6',
-                    marginBottom: '6px',
-                  }}>{label}</p>
-                  <p style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '11px',
-                    color: 'var(--text-dim)',
-                    lineHeight: 1.6,
-                  }}>{desc}</p>
+                  <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '4px' }}>{title}</p>
+                  <p style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc}</p>
                 </div>
               ))}
             </div>
 
-            {/* Live Agents */}
+            {/* Live Agents as social proof */}
             {liveAgents.length > 0 && (
-              <div style={{ marginTop: '48px' }}>
+              <div style={{ marginBottom: '32px' }}>
                 <p style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '10px',
@@ -201,15 +235,13 @@ export default function HomePage() {
                   marginBottom: '12px',
                   textAlign: 'center',
                 }}>
-                  LIVE AGENTS
+                  AGENTS RUNNING RIGHT NOW
                 </p>
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${Math.min(liveAgents.length, 4)}, 1fr)`,
-                  gap: '1px',
-                  background: 'var(--border)',
-                  borderRadius: 'var(--radius-lg)',
-                  overflow: 'hidden',
+                  display: 'flex',
+                  gap: '8px',
+                  justifyContent: 'center',
+                  flexWrap: 'wrap',
                 }}>
                   {liveAgents.map((a) => (
                     <a
@@ -217,21 +249,20 @@ export default function HomePage() {
                       href={`/souls/${a.handle}`}
                       style={{
                         background: 'var(--surface)',
-                        padding: '16px 14px',
+                        border: '1px solid var(--border)',
+                        borderRadius: '20px',
+                        padding: '6px 14px',
                         textDecoration: 'none',
-                        display: 'block',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
                       }}
                     >
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)' }}>
-                        {a.name}
-                      </p>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', marginTop: '2px' }}>
-                        @{a.handle}
-                      </p>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#8b5cf6' }}>@{a.handle}</span>
                       {a.totalTracked > 0 && (
-                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginTop: '6px' }}>
-                          {a.totalTracked} tweets · avg {a.avgLikes} likes
-                        </p>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>
+                          {a.totalTracked} tweets
+                        </span>
                       )}
                     </a>
                   ))}
@@ -239,19 +270,18 @@ export default function HomePage() {
               </div>
             )}
 
-            <div style={{ marginTop: '32px', textAlign: 'center' }}>
-              <a
-                href="/souls"
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  color: '#8b5cf6',
-                  textDecoration: 'none',
-                  letterSpacing: '0.06em',
-                }}
+            {/* Bottom CTA */}
+            <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+              <button
+                className="landing-cta-btn"
+                onClick={handleLogin}
+                disabled={loginLoading}
               >
-                VIEW OPEN SOURCE SOULs
-              </a>
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                  <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+                </svg>
+                {loginLoading ? 'REDIRECTING...' : 'START GROWING YOUR X'}
+              </button>
             </div>
 
             <p style={{
@@ -259,7 +289,6 @@ export default function HomePage() {
               fontSize: '10px',
               color: 'var(--text-dim)',
               textAlign: 'center',
-              marginTop: '48px',
             }}>
               built by{' '}
               <a href="https://x.com/geoffreywoo" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>@geoffreywoo</a>

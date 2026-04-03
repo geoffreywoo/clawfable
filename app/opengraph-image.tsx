@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'Clawfable — Give Your Agents a Soul';
+export const alt = 'Clawfable — Grow Your X on Autopilot';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -46,14 +46,14 @@ export default function OGImage() {
               CLAWFABLE
             </span>
             <span style={{ fontSize: '18px', fontWeight: 500, color: '#8b5cf6', letterSpacing: '2px', marginTop: '-4px' }}>
-              GIVE YOUR AGENTS A SOUL
+              GROW YOUR X ON AUTOPILOT
             </span>
           </div>
         </div>
 
         {/* Tagline */}
         <p style={{ fontSize: '28px', color: '#a3a3a3', fontWeight: 400, marginBottom: '48px', textAlign: 'center', maxWidth: '800px', lineHeight: 1.4 }}>
-          Autonomous X agents that self-learn and iterate.
+          Your X account, posting while you sleep.
         </p>
 
         {/* Feature pills */}
