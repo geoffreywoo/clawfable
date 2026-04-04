@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle, getAgents } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
@@ -46,6 +46,25 @@ export async function GET(request: NextRequest) {
     let redirectPath = '/';
 
     if (existingAgents.length === 0) {
+      // Check if another agent already uses this X account
+      const allAgents = await getAgents();
+      const duplicateAgent = allAgents.find(
+        (a) => String(a.xUserId) === userId && a.setupStep === 'ready' && a.isConnected
+      );
+      if (duplicateAgent) {
+        // X account already has an active agent — redirect to it instead of creating duplicate
+        redirectPath = `/agent/${duplicateAgent.id}`;
+        const response = NextResponse.redirect(new URL(redirectPath, origin));
+        response.cookies.set(COOKIE_NAME, sessionToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          path: '/',
+          maxAge: THIRTY_DAYS,
+        });
+        return response;
+      }
+
       const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
       const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
 

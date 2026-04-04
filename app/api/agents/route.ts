@@ -6,6 +6,7 @@ import {
   createAgent,
   addAgentToUser,
   logFunnelEvent,
+  getAgentByHandle,
 } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
@@ -48,6 +49,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'handle, name, and soulMd are required' }, { status: 400 });
     }
     const cleanHandle = handle.replace(/^@/, '').trim();
+
+    // Prevent duplicate agents for the same X handle
+    const existingAgent = await getAgentByHandle(cleanHandle);
+    if (existingAgent && existingAgent.setupStep === 'ready' && existingAgent.isConnected) {
+      return NextResponse.json({ error: `An agent for @${cleanHandle} already exists and is active.` }, { status: 409 });
+    }
+
     const voiceProfile = parseSoulMd(name, soulMd);
     const agent = await createAgent({
       handle: cleanHandle,
