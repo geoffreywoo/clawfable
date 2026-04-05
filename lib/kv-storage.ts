@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -215,6 +215,8 @@ const KEYS = {
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
   agentFollowerHistory: (id: string) => `agent:${id}:followers`,
   agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
+  agentVoiceChat: (id: string) => `agent:${id}:voice_chat`,
+  agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -944,6 +946,27 @@ export function computeFunnelSummary(events: FunnelEvent[]): FunnelSummary {
     currentStage,
     completionPct: Math.round((reached / FUNNEL_MILESTONES.length) * 100),
   };
+}
+
+// ─── Voice coaching chat + directives ────────────────────────────────────
+
+export async function addVoiceChatMessage(agentId: string, message: VoiceDirective): Promise<void> {
+  await kvLpush(KEYS.agentVoiceChat(agentId), JSON.stringify(message));
+}
+
+export async function getVoiceChat(agentId: string, limit = 50): Promise<VoiceDirective[]> {
+  const raw = await kvLrange(KEYS.agentVoiceChat(agentId), 0, limit - 1);
+  return raw.map((s) => parseListEntry<VoiceDirective>(s)).filter((e): e is VoiceDirective => e !== null).reverse();
+}
+
+/** Standing directives extracted from operator coaching. Fed into every generation. */
+export async function addVoiceDirective(agentId: string, directive: string): Promise<void> {
+  await kvLpush(KEYS.agentVoiceDirectives(agentId), directive);
+}
+
+export async function getVoiceDirectives(agentId: string): Promise<string[]> {
+  const raw = await kvLrange(KEYS.agentVoiceDirectives(agentId), 0, 19);
+  return raw.map((s) => typeof s === 'string' ? s : String(s)).filter((s) => s.length > 0);
 }
 
 // ─── Remix memory ───────────────────────────────────────────────────────────

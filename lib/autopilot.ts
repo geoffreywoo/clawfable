@@ -29,6 +29,7 @@ import {
   getConversationHistory,
   getPerformanceHistory,
   getRemixPatterns,
+  getVoiceDirectives,
   type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
@@ -617,6 +618,14 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       const remixPatterns = await getRemixPatterns(agent.id);
       if (remixPatterns.length > 0) {
         voiceProfile.communicationStyle += `\n\n## OPERATOR STYLE PREFERENCES (from remix history — follow these)\n${remixPatterns.map(p => `- ${p}`).join('\n')}`;
+      }
+    } catch { /* non-critical */ }
+
+    // Voice coaching directives: standing rules from operator chat sessions
+    try {
+      const directives = await getVoiceDirectives(agent.id);
+      if (directives.length > 0) {
+        voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching sessions — ALWAYS follow these)\n${directives.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
       }
     } catch { /* non-critical */ }
 

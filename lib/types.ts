@@ -188,6 +188,15 @@ export interface ProtocolSettings {
   contentCalendar: Record<string, string>; // day-of-week -> topic focus (e.g. "monday": "analysis")
 }
 
+export interface VoiceDirective {
+  id: string;
+  role: 'operator' | 'agent';
+  content: string;
+  // For operator messages: the extracted directive that persists into generation
+  directive?: string;
+  ts: string;
+}
+
 export interface SoulVersion {
   version: number;
   soulMd: string;

@@ -26,6 +26,12 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [agentConnected, setAgentConnected] = useState(false);
   const [agentHandle, setAgentHandle] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+  // Voice coaching chat
+  const [voiceChat, setVoiceChat] = useState<Array<{ id: string; role: string; content: string; directive?: string; ts: string }>>([]);
+  const [voiceDirectives, setVoiceDirectives] = useState<string[]>([]);
+  const [voiceInput, setVoiceInput] = useState('');
+  const [voiceSending, setVoiceSending] = useState(false);
+  const [voiceChatOpen, setVoiceChatOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -42,11 +48,48 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       if (Array.isArray(metricsData)) setMetrics(metricsData);
       setLoading(false);
     });
+    // Load voice chat
+    fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).then((data) => {
+      if (data?.chat) setVoiceChat(data.chat);
+      if (data?.directives) setVoiceDirectives(data.directives);
+    }).catch(() => {});
   }, [agentId]);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const handleVoiceSend = async () => {
+    if (!voiceInput.trim() || voiceSending) return;
+    const msg = voiceInput.trim();
+    setVoiceInput('');
+    setVoiceSending(true);
+    // Optimistic: add operator message immediately
+    setVoiceChat((prev) => [...prev, { id: `op-${Date.now()}`, role: 'operator', content: msg, ts: new Date().toISOString() }]);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/voice-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Add agent response
+      setVoiceChat((prev) => [...prev, {
+        id: `agent-${Date.now()}`,
+        role: 'agent',
+        content: data.reply,
+        directive: data.directive || undefined,
+        ts: new Date().toISOString(),
+      }]);
+      if (data.directives) setVoiceDirectives(data.directives);
+      if (data.directive) showToast(`New directive locked in: ${data.directive.slice(0, 60)}`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Voice chat failed');
+    } finally {
+      setVoiceSending(false);
+    }
   };
 
   const handleUpdateSettings = async (updates: Partial<ProtocolSettings>) => {
@@ -294,6 +337,142 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ─── Voice Coaching ─────────────────────────────────────────────── */}
+      {settings && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
+                <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+              <h2>VOICE COACHING</h2>
+              <span className="section-count">{voiceDirectives.length} active directive{voiceDirectives.length !== 1 ? 's' : ''}</span>
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={() => setVoiceChatOpen(!voiceChatOpen)}>
+              {voiceChatOpen ? 'CLOSE' : 'OPEN CHAT'}
+            </button>
+          </div>
+
+          {/* Active directives */}
+          {voiceDirectives.length > 0 && !voiceChatOpen && (
+            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {voiceDirectives.slice(0, 5).map((d, i) => (
+                <span key={i} style={{
+                  fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#8b5cf6',
+                  background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)',
+                  borderRadius: '4px', padding: '3px 8px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {d.slice(0, 60)}{d.length > 60 ? '...' : ''}
+                </span>
+              ))}
+              {voiceDirectives.length > 5 && (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>
+                  +{voiceDirectives.length - 5} more
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Chat interface */}
+          {voiceChatOpen && (
+            <div style={{
+              marginTop: '12px',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}>
+              {/* Chat messages */}
+              <div style={{ maxHeight: '300px', overflowY: 'auto', padding: '12px' }}>
+                {voiceChat.length === 0 && (
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-dim)', textAlign: 'center', padding: '20px 0' }}>
+                    Tell the agent how to adjust its voice. Each message becomes a permanent directive.
+                  </p>
+                )}
+                {voiceChat.map((msg) => (
+                  <div key={msg.id} style={{
+                    marginBottom: '10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: msg.role === 'operator' ? 'flex-end' : 'flex-start',
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      background: msg.role === 'operator' ? 'rgba(139,92,246,0.15)' : 'var(--surface-2)',
+                      border: `1px solid ${msg.role === 'operator' ? 'rgba(139,92,246,0.3)' : 'var(--border)'}`,
+                    }}>
+                      <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text)', lineHeight: 1.5 }}>
+                        {msg.content}
+                      </p>
+                      {msg.directive && (
+                        <p style={{
+                          fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#22c55e',
+                          marginTop: '6px', padding: '3px 6px',
+                          background: 'rgba(34,197,94,0.1)', borderRadius: '4px',
+                        }}>
+                          LOCKED IN: {msg.directive}
+                        </p>
+                      )}
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      {msg.role === 'operator' ? 'you' : agentHandle ? `@${agentHandle}` : 'agent'}
+                    </span>
+                  </div>
+                ))}
+                {voiceSending && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0' }}>
+                    <div className="wizard-spinner" style={{ width: '14px', height: '14px' }} />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>thinking...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
+              <div style={{
+                display: 'flex', gap: '8px', padding: '10px 12px',
+                borderTop: '1px solid var(--border)',
+              }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g. Be more contrarian, use more data points, stop saying 'democratizing'..."
+                  value={voiceInput}
+                  onChange={(e) => setVoiceInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleVoiceSend(); } }}
+                  disabled={voiceSending}
+                  style={{ flex: 1, fontSize: '12px' }}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ background: '#8b5cf6', flexShrink: 0 }}
+                  disabled={!voiceInput.trim() || voiceSending}
+                  onClick={handleVoiceSend}
+                >
+                  SEND
+                </button>
+              </div>
+
+              {/* Active directives list */}
+              {voiceDirectives.length > 0 && (
+                <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'rgba(139,92,246,0.03)' }}>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em', marginBottom: '6px' }}>
+                    ACTIVE DIRECTIVES ({voiceDirectives.length})
+                  </p>
+                  {voiceDirectives.map((d, i) => (
+                    <p key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', marginBottom: '3px' }}>
+                      {i + 1}. {d}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
