@@ -12,6 +12,8 @@ import {
   updateProtocolSettings,
   updateAgent,
   pushSoulVersion,
+  getVoiceDirectives,
+  getRecentNegativeFeedback,
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
@@ -79,6 +81,12 @@ async function evolveSoul(
       return { evolved: false, reason: 'No SOUL.md to evolve' };
     }
 
+    // Gather operator signals that soul evolution should respect
+    const [directives, negFeedback] = await Promise.all([
+      getVoiceDirectives(agent.id),
+      getRecentNegativeFeedback(agent.id, 5),
+    ]);
+
     // Build the evolution prompt
     const fp = learnings.styleFingerprint;
     const topTweets = learnings.bestPerformers.slice(0, 5)
@@ -134,7 +142,13 @@ ${topTweets}
 WORST 3 TWEETS (do LESS like these):
 ${worstTweets}
 
-Evolve this SOUL.md to incorporate what actually works. Output the complete updated SOUL.md, then a CHANGES: line.`,
+${directives.length > 0 ? `OPERATOR VOICE DIRECTIVES (from coaching sessions — these MUST be respected in the evolved soul):
+${directives.map((d, i) => `${i + 1}. ${d}`).join('\n')}` : ''}
+
+${negFeedback.length > 0 ? `CONTENT THE OPERATOR REJECTED (the soul should steer AWAY from these patterns):
+${negFeedback.map((f) => `- ${f}`).join('\n')}` : ''}
+
+Evolve this SOUL.md to incorporate what actually works. Respect operator directives. Output the complete updated SOUL.md, then a CHANGES: line.`,
       }],
     });
 

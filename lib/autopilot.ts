@@ -22,7 +22,6 @@ import {
   addPostLogEntry,
   getPostLog,
   logFunnelEvent,
-  getStyleSignals,
   getRecentNegativeFeedback,
   getTrendingCache,
   setTrendingCache,
@@ -601,14 +600,10 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
 
     const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
 
-    // Enhance voice profile with operator feedback + style signals (same as manual routes)
-    const [styleSignals, negatives] = await Promise.all([
-      getStyleSignals(agent.id),
-      getRecentNegativeFeedback(agent.id, 10),
-    ]);
-    if (styleSignals?.rawExtraction) {
-      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
-    }
+    // Enhance voice profile with operator feedback
+    // NOTE: Stale style signals from wizard removed — the style fingerprint in learnings
+    // is the live version computed from actual performance data
+    const negatives = await getRecentNegativeFeedback(agent.id, 10);
     if (negatives.length > 0) {
       voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
     }
@@ -621,11 +616,15 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       }
     } catch { /* non-critical */ }
 
-    // Voice coaching directives: standing rules from operator chat sessions
+    // Voice coaching directives: standing rules from operator chat sessions (cap at 10 most recent)
     try {
       const directives = await getVoiceDirectives(agent.id);
       if (directives.length > 0) {
-        voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching sessions — ALWAYS follow these)\n${directives.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
+        const capped = directives.slice(0, 10);
+        voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)\n${capped.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
+        if (capped.length > 5) {
+          voiceProfile.communicationStyle += `\nNote: If any directives seem contradictory, prefer the MORE RECENT ones (higher numbers).`;
+        }
       }
     } catch { /* non-critical */ }
 
@@ -660,10 +659,21 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       }
     }
 
-    // Peer study: analyze what top accounts in the network are doing
+    // Peer study: analyze what top accounts in the network are doing (cached 4h alongside trending)
     try {
       const { studyPeerStyles } = await import('./proactive-engagement');
-      const peerInsights = await studyPeerStyles(agent);
+      // Try to get cached peer insights first, fall back to fresh analysis
+      const cacheKey = `peer_insights_${agent.id}`;
+      let peerInsights: string[] = [];
+      const cached = await getTrendingCache(agent.id + '_peer') as string[] | null;
+      if (cached && Array.isArray(cached)) {
+        peerInsights = cached;
+      } else {
+        peerInsights = await studyPeerStyles(agent);
+        if (peerInsights.length > 0) {
+          await setTrendingCache(agent.id + '_peer', peerInsights);
+        }
+      }
       if (peerInsights.length > 0) {
         voiceProfile.communicationStyle += `\n\n## PEER INSIGHTS (what's working for top accounts in your network RIGHT NOW)\n${peerInsights.map(i => `- ${i}`).join('\n')}`;
       }

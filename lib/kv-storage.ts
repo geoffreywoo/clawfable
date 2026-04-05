@@ -1023,12 +1023,19 @@ export async function getRemixPatterns(agentId: string): Promise<string[]> {
     }
   }
 
-  // Extract common themes from custom prompts
-  if (customPrompts.length >= 2) {
-    // Simple: include the last 3 custom prompts as direct instructions
-    const recent = customPrompts.slice(0, 3);
-    for (const p of recent) {
-      patterns.push(`Operator custom direction: "${p}"`);
+  // Extract REPEATED custom prompts (3+ similar uses = standing pattern, not one-offs)
+  if (customPrompts.length >= 3) {
+    // Group similar prompts by first 30 chars (catches "make it shorter" variants)
+    const promptGroups: Record<string, string[]> = {};
+    for (const p of customPrompts) {
+      const key = p.slice(0, 30).toLowerCase();
+      if (!promptGroups[key]) promptGroups[key] = [];
+      promptGroups[key].push(p);
+    }
+    for (const [, group] of Object.entries(promptGroups)) {
+      if (group.length >= 2) {
+        patterns.push(`Operator custom direction (${group.length}x): "${group[0]}"`);
+      }
     }
   }
 
