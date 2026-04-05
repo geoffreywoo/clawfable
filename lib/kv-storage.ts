@@ -403,6 +403,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     quoteTweetId: data.quoteTweetId ?? null,
     quoteTweetAuthor: data.quoteTweetAuthor ?? null,
     scheduledAt: data.scheduledAt ?? null,
+    deletionReason: null,
     createdAt: new Date().toISOString(),
   };
   await kvHset(KEYS.tweet(id), tweet as unknown as Record<string, unknown>);

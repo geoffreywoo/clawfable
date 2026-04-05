@@ -23,6 +23,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<Tweet | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deletionFeedback, setDeletionFeedback] = useState<Record<string, string>>({});
+  const [submittingDeletionId, setSubmittingDeletionId] = useState<string | null>(null);
 
   const loadQueue = async () => {
     try {
@@ -174,6 +176,46 @@ export function QueueTab({ agentId }: QueueTabProps) {
     }
   };
 
+  const handleDeletionFeedback = async (tweetId: string) => {
+    const reason = deletionFeedback[tweetId]?.trim();
+    if (!reason) return;
+    setSubmittingDeletionId(tweetId);
+    try {
+      // Update the tweet with the deletion reason
+      await fetch(`/api/agents/${agentId}/queue/${tweetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletionReason: reason }),
+      });
+      // Also save as feedback for the learning loop
+      const tweet = queue.find((t) => t.id === tweetId);
+      if (tweet) {
+        await fetch(`/api/agents/${agentId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'feedback',
+            feedback: {
+              tweetText: tweet.content,
+              rating: 'down',
+              generatedAt: tweet.createdAt,
+              reason,
+              intentSummary: reason,
+              source: 'queue_delete',
+              userProvidedReason: true,
+            },
+          }),
+        });
+      }
+      setQueue((prev) => prev.filter((t) => t.id !== tweetId));
+      showToast('Feedback saved — voice will adapt');
+    } catch {
+      showToast('Failed to save feedback');
+    } finally {
+      setSubmittingDeletionId(null);
+    }
+  };
+
   const handlePostAll = async () => {
     if (!queue.length || !agentConnected) return;
     setIsPostingAll(true);
@@ -295,8 +337,67 @@ export function QueueTab({ agentId }: QueueTabProps) {
         )}
       </div>
 
+      {/* Deleted from X — needs feedback */}
+      {queue.filter((t) => t.status === 'deleted_from_x').length > 0 && (
+        <div style={{ marginBottom: '24px' }}>
+          <div className="section-header" style={{ marginBottom: '8px' }}>
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 2L14 14H2L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinejoin="round" />
+                <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
+                <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
+              </svg>
+              <h2>DELETED FROM X</h2>
+              <span className="section-count">Tell us why so the AI can learn</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {queue.filter((t) => t.status === 'deleted_from_x').map((tweet) => (
+              <div key={tweet.id} style={{
+                background: 'rgba(245, 158, 11, 0.05)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '14px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '10px' }}>
+                  {tweet.content.slice(0, 200)}{tweet.content.length > 200 ? '...' : ''}
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Why did you delete this? (e.g. off-topic, too aggressive, factually wrong)"
+                    value={deletionFeedback[tweet.id] || ''}
+                    onChange={(e) => setDeletionFeedback((prev) => ({ ...prev, [tweet.id]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeletionFeedback(tweet.id); }}
+                    style={{ flex: 1, fontSize: '12px' }}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ background: '#f59e0b', flexShrink: 0 }}
+                    disabled={!deletionFeedback[tweet.id]?.trim() || submittingDeletionId === tweet.id}
+                    onClick={() => handleDeletionFeedback(tweet.id)}
+                  >
+                    {submittingDeletionId === tweet.id ? '...' : 'SAVE'}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: '9px', flexShrink: 0 }}
+                    onClick={() => {
+                      setQueue((prev) => prev.filter((t) => t.id !== tweet.id));
+                    }}
+                  >
+                    SKIP
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
-      {queue.length === 0 && (
+      {queue.filter((t) => t.status !== 'deleted_from_x').length === 0 && queue.filter((t) => t.status === 'deleted_from_x').length === 0 && (
         <div className="empty-state">
           <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><line x1="5" y1="8" x2="27" y2="8" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="16" x2="27" y2="16" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="24" x2="18" y2="24" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /></svg>
           <p>Queue empty</p>

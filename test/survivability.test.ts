@@ -39,6 +39,7 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     status: 'queued',
     format: 'hot_take',
     topic: 'AI',
+    deletionReason: null,
     xTweetId: null,
     quoteTweetId: null,
     quoteTweetAuthor: null,

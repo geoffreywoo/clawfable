@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getQueuedTweets, createTweet } from '@/lib/kv-storage';
+import { getQueuedTweets, getTweets, createTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
 // GET /api/agents/[id]/queue
@@ -10,8 +10,11 @@ export async function GET(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const tweets = await getQueuedTweets(id);
-    return NextResponse.json(tweets);
+    const queued = await getQueuedTweets(id);
+    // Also include tweets deleted from X that need operator feedback
+    const allTweets = await getTweets(id);
+    const deletedFromX = allTweets.filter((t) => t.status === 'deleted_from_x' && !t.deletionReason);
+    return NextResponse.json([...deletedFromX, ...queued]);
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch queue' }, { status: 500 });

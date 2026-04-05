@@ -17,6 +17,8 @@ import {
   saveAnalysis,
   addPostLogEntry,
   getPostLog,
+  updateTweet,
+  saveFeedback,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
@@ -119,6 +121,44 @@ export async function checkPerformance(agent: Agent): Promise<number> {
 
     await addPerformanceEntry(agent.id, entry);
     tracked++;
+  }
+
+  // Detect manual deletions: posted tweets whose xTweetId is no longer on the timeline
+  // Only check tweets posted in the last 7 days (older tweets naturally fall off the timeline API)
+  const timelineXIds = new Set(timeline.map((t) => String(t.id)));
+  const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const postedTweets = allTweets.filter(
+    (t) => t.status === 'posted' && t.xTweetId && new Date(t.createdAt).getTime() > recentCutoff
+  );
+
+  for (const tweet of postedTweets) {
+    if (!timelineXIds.has(String(tweet.xTweetId))) {
+      // Tweet was deleted from X — mark it
+      try {
+        await updateTweet(tweet.id, { status: 'deleted_from_x' as any });
+        // Save as negative feedback so the learning loop can learn from it
+        await saveFeedback(agent.id, {
+          tweetText: tweet.content,
+          rating: 'down',
+          generatedAt: tweet.createdAt,
+          reason: 'Manually deleted from X by operator',
+          source: 'queue_delete',
+          userProvidedReason: false,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: tweet.id,
+          xTweetId: tweet.xTweetId || '',
+          content: tweet.content,
+          format: 'deletion_detected',
+          topic: tweet.topic || 'general',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: 'skipped',
+          reason: 'Tweet deleted from X — awaiting operator feedback',
+        });
+      } catch { /* non-critical */ }
+    }
   }
 
   return tracked;

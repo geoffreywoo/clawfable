@@ -61,7 +61,7 @@ export interface AgentDetail {
   hasKeys: boolean;
 }
 
-export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted';
+export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted' | 'deleted_from_x';
 
 export interface Tweet {
   id: string;
@@ -75,6 +75,7 @@ export interface Tweet {
   quoteTweetId: string | null;  // X tweet ID to quote (for QTs)
   quoteTweetAuthor: string | null;
   scheduledAt: string | null;
+  deletionReason: string | null;  // why the operator deleted this from X
   createdAt: string;
 }
 
@@ -105,7 +106,7 @@ export interface Metric {
 export type CreateAgentInput = Omit<Agent, 'id' | 'createdAt' | 'soulPublic'> & { soulPublic?: number };
 export type UpdateAgentInput = Partial<Omit<Agent, 'id' | 'createdAt'>>;
 
-export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt' | 'format'> & { format?: string | null };
+export type CreateTweetInput = Omit<Tweet, 'id' | 'createdAt' | 'format' | 'deletionReason'> & { format?: string | null; deletionReason?: string | null };
 export type UpdateTweetInput = Partial<Omit<Tweet, 'id' | 'agentId' | 'createdAt'>>;
 
 export type CreateMentionInput = Omit<Mention, 'id' | 'createdAt' | 'conversationId' | 'inReplyToTweetId'> & { createdAt?: string; conversationId?: string | null; inReplyToTweetId?: string | null };

@@ -17,7 +17,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { content, status, scheduledAt } = body;
+    const { content, status, scheduledAt, deletionReason } = body;
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
     if (status !== undefined) {
@@ -27,6 +27,7 @@ export async function PATCH(
       updates.status = status;
     }
     if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt;
+    if (deletionReason !== undefined) updates.deletionReason = deletionReason;
     const updated = await updateTweet(tweetId, updates as Parameters<typeof updateTweet>[1]);
     return NextResponse.json(updated);
   } catch (err) {
