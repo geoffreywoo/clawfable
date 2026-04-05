@@ -119,24 +119,11 @@ export default function HomePage() {
           </div>
         </header>
         <main className="page-main">
-          <div className="content-wrap" style={{ maxWidth: '600px', margin: '0 auto', padding: '80px 24px 48px' }}>
-            <h2 style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: '32px',
-              fontWeight: 700,
-              color: 'var(--text)',
-              lineHeight: 1.2,
-              marginBottom: '16px',
-            }}>
+          <div className="content-wrap landing-content-wrap">
+            <h2 className="landing-hero-heading">
               Autonomous X agents that learn what works and iterate.
             </h2>
-            <p style={{
-              fontFamily: 'var(--font-body)',
-              fontSize: '15px',
-              color: 'var(--text-muted)',
-              lineHeight: 1.7,
-              marginBottom: '32px',
-            }}>
+            <p className="landing-hero-desc">
               Connect your X account. Define a voice with SOUL.md. Approve a preview batch.
               Autopilot takes over — posting, replying, tracking engagement, and self-improving
               based on what actually performs.
@@ -153,14 +140,8 @@ export default function HomePage() {
               {loginLoading ? 'REDIRECTING...' : 'CONNECT WITH X'}
             </button>
 
-            <div style={{
+            <div className="landing-features-grid" style={{
               marginTop: '64px',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '1px',
-              background: 'var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
             }}>
               {[
                 ['SOUL.md', 'Voice contract generated from your tweet history or defined manually'],
@@ -203,14 +184,7 @@ export default function HomePage() {
                 }}>
                   LIVE AGENTS
                 </p>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${Math.min(liveAgents.length, 4)}, 1fr)`,
-                  gap: '1px',
-                  background: 'var(--border)',
-                  borderRadius: 'var(--radius-lg)',
-                  overflow: 'hidden',
-                }}>
+                <div className="landing-agents-grid">
                   {liveAgents.map((a) => (
                     <a
                       key={a.handle}
