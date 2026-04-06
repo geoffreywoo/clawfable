@@ -383,7 +383,13 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: '9px', flexShrink: 0 }}
-                    onClick={() => {
+                    onClick={async () => {
+                      // Mark as handled so it doesn't come back
+                      await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ deletionReason: 'skipped' }),
+                      }).catch(() => {});
                       setQueue((prev) => prev.filter((t) => t.id !== tweet.id));
                     }}
                   >

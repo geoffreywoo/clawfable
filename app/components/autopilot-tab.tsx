@@ -32,6 +32,10 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [voiceInput, setVoiceInput] = useState('');
   const [voiceSending, setVoiceSending] = useState(false);
   const [voiceChatOpen, setVoiceChatOpen] = useState(false);
+  // Learned rules
+  const [learnedInsights, setLearnedInsights] = useState<string[]>([]);
+  const [antiPatterns, setAntiPatterns] = useState<string[]>([]);
+  const [remixPatterns, setRemixPatterns] = useState<string[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -48,10 +52,14 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       if (Array.isArray(metricsData)) setMetrics(metricsData);
       setLoading(false);
     });
-    // Load voice chat
+    // Load voice chat + learnings
     fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).then((data) => {
       if (data?.chat) setVoiceChat(data.chat);
       if (data?.directives) setVoiceDirectives(data.directives);
+    }).catch(() => {});
+    fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null).then((data) => {
+      if (data?.insights) setLearnedInsights(data.insights);
+      if (data?.styleFingerprint?.antiPatterns) setAntiPatterns(data.styleFingerprint.antiPatterns);
     }).catch(() => {});
   }, [agentId]);
 
@@ -473,6 +481,83 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ─── Active Rules (all learned + coached) ──────────────────────── */}
+      {(voiceDirectives.length > 0 || learnedInsights.length > 0 || antiPatterns.length > 0) && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
+                <polyline points="5,8 7,10 11,6" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <h2>ACTIVE RULES</h2>
+              <span className="section-count">{voiceDirectives.length + learnedInsights.length + antiPatterns.length} total</span>
+            </div>
+          </div>
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {/* Voice coaching directives (operator-directed) */}
+            {voiceDirectives.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid #8b5cf6',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#8b5cf6', marginBottom: '8px' }}>
+                  FROM VOICE COACHING ({voiceDirectives.length})
+                </p>
+                {voiceDirectives.map((d, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(139,92,246,0.3)' }}>
+                    {d}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Learned insights (from performance data) */}
+            {learnedInsights.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid #22c55e',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#22c55e', marginBottom: '8px' }}>
+                  FROM PERFORMANCE DATA ({learnedInsights.length})
+                </p>
+                {learnedInsights.map((insight, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(34,197,94,0.3)' }}>
+                    {insight}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Anti-patterns (from worst performers) */}
+            {antiPatterns.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid #ef4444',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#ef4444', marginBottom: '8px' }}>
+                  BLOCKLIST ({antiPatterns.length})
+                </p>
+                {antiPatterns.map((ap, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(239,68,68,0.3)' }}>
+                    {ap}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -11,9 +11,14 @@ export async function GET(
   try {
     await requireAgentAccess(id);
     const queued = await getQueuedTweets(id);
-    // Also include tweets deleted from X that need operator feedback
+    // Include tweets deleted from X in last 7 days that need feedback (no reason yet)
     const allTweets = await getTweets(id);
-    const deletedFromX = allTweets.filter((t) => t.status === 'deleted_from_x' && !t.deletionReason);
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const deletedFromX = allTweets.filter((t) =>
+      t.status === 'deleted_from_x' &&
+      !t.deletionReason &&
+      new Date(t.createdAt).getTime() > sevenDaysAgo
+    );
     return NextResponse.json([...deletedFromX, ...queued]);
   } catch (err) {
     try { return handleAuthError(err); } catch {}
