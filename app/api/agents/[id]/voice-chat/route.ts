@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives } from '@/lib/kv-storage';
+import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
 import type { VoiceDirective } from '@/lib/types';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -114,14 +114,100 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
     };
     await addVoiceChatMessage(id, agentMsg);
 
+    // If a new directive was locked in, audit the queue for stale tweets that violate it
+    let queueAudit: { purged: number; rewritten: number } = { purged: 0, rewritten: 0 };
+    if (extractedDirective) {
+      try {
+        queueAudit = await auditQueueAgainstDirective(id, agent, extractedDirective);
+      } catch { /* non-critical */ }
+    }
+
     return NextResponse.json({
-      reply: agentReply,
+      reply: agentReply + (queueAudit.purged > 0 || queueAudit.rewritten > 0
+        ? `\n\n(Audited queue: ${queueAudit.rewritten} tweets rewritten, ${queueAudit.purged} removed)`
+        : ''),
       directive: extractedDirective,
       directives: await getVoiceDirectives(id),
+      queueAudit,
     });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Voice chat failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/**
+ * Audit all queued tweets against a new directive.
+ * Tweets that violate the directive get rewritten in-place.
+ * Tweets that can't be salvaged get purged.
+ */
+async function auditQueueAgainstDirective(
+  agentId: string,
+  agent: { name: string; handle: string; soulMd: string },
+  directive: string,
+): Promise<{ purged: number; rewritten: number }> {
+  const queue = await getQueuedTweets(agentId);
+  if (queue.length === 0) return { purged: 0, rewritten: 0 };
+
+  // Send all queued tweets to Claude for audit
+  const tweetList = queue.map((t, i) => `[${i}] "${t.content.slice(0, 250)}"`).join('\n');
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2048,
+    system: `You audit queued tweets against a new voice directive. For each tweet, decide:
+- PASS: tweet already complies with the directive
+- REWRITE: tweet violates the directive but can be fixed. Output the rewritten version.
+- PURGE: tweet fundamentally conflicts and should be removed
+
+Output one JSON line per tweet: {"idx": N, "action": "pass|rewrite|purge", "rewritten": "new text if rewrite"}
+Only output JSON lines, no other text.
+
+Voice: @${agent.handle} (${agent.name})`,
+    messages: [{
+      role: 'user',
+      content: `NEW DIRECTIVE: ${directive}
+
+QUEUED TWEETS TO AUDIT:
+${tweetList}
+
+Audit each tweet against the directive. Be strict — if it violates the spirit of the directive, rewrite or purge it.`,
+    }],
+  });
+
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
+
+  let purged = 0;
+  let rewritten = 0;
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith('{')) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const idx = parsed.idx;
+      if (typeof idx !== 'number' || idx < 0 || idx >= queue.length) continue;
+      const tweet = queue[idx];
+
+      if (parsed.action === 'rewrite' && parsed.rewritten) {
+        const cleanRewritten = parsed.rewritten
+          .replace(/^["']|["']$/g, '')
+          .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
+          .trim();
+        if (cleanRewritten.length > 10) {
+          await updateTweet(tweet.id, { content: cleanRewritten });
+          rewritten++;
+        }
+      } else if (parsed.action === 'purge') {
+        await deleteTweet(tweet.id);
+        purged++;
+      }
+    } catch { /* skip malformed */ }
+  }
+
+  return { purged, rewritten };
 }
