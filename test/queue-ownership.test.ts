@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgent, createTweet, getFeedback, getTweet } from '@/lib/kv-storage';
+import { createAgent, createTweet, getFeedback, getTweet, saveFeedback } from '@/lib/kv-storage';
 
 vi.mock('@/lib/auth', () => ({
   requireAgentAccess: vi.fn(async (id: string) => ({
     user: { id: 'user-1' },
-    agent: { id },
+    agent: { id, name: `Agent ${id}`, soulMd: '# soul' },
   })),
   handleAuthError: vi.fn((err: unknown) => {
     throw err;
   }),
+}));
+
+vi.mock('@/lib/delete-intent', () => ({
+  inferDeleteIntent: vi.fn(async ({ tweetText }: { tweetText: string }) => `Inferred intent for: ${tweetText}`),
 }));
 
 import { DELETE, PATCH } from '@/app/api/agents/[id]/queue/[tweetId]/route';
@@ -115,6 +119,7 @@ describe('queue ownership route guard', () => {
     const feedback = await getFeedback(agent.id);
     expect(feedback.some((entry) =>
       entry.source === 'queue_delete' &&
+      entry.tweetId === queuedTweet.id &&
       entry.reason === 'Too generic and sounds unlike the operator.' &&
       entry.userProvidedReason === true
     )).toBe(true);
@@ -150,9 +155,96 @@ describe('queue ownership route guard', () => {
     const feedback = await getFeedback(agent.id);
     expect(feedback.some((entry) =>
       entry.source === 'queue_delete' &&
+      entry.tweetId === queuedTweet.id &&
       entry.userProvidedReason === false &&
       typeof entry.intentSummary === 'string' &&
       entry.intentSummary.length > 0
+    )).toBe(true);
+  });
+
+  it('upserts deleted-from-X feedback when the operator supplies a better reason later', async () => {
+    const agent = await createAgent({
+      handle: 'queue-delete-from-x-explicit',
+      name: 'Queue Delete From X Explicit',
+      soulMd: '# soul',
+    } as any);
+    const deletedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'tweet deleted from x',
+      type: 'original',
+      status: 'deleted_from_x',
+      topic: 'AI',
+      xTweetId: 'x-123',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    await saveFeedback(agent.id, {
+      tweetId: deletedTweet.id,
+      tweetText: deletedTweet.content,
+      rating: 'down',
+      generatedAt: '2026-04-01T00:00:00.000Z',
+      intentSummary: 'Inferred intent',
+      source: 'queue_delete',
+      userProvidedReason: false,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletionReason: 'Too promotional' }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: deletedTweet.id }) }
+    );
+
+    expect(response.status).toBe(200);
+
+    const feedback = await getFeedback(agent.id);
+    const matching = feedback.filter((entry) => entry.tweetId === deletedTweet.id);
+    expect(matching.length).toBe(1);
+    expect(matching[0].reason).toBe('Too promotional');
+    expect(matching[0].userProvidedReason).toBe(true);
+  });
+
+  it('stores inferred feedback when a deleted-from-X tweet is skipped', async () => {
+    const agent = await createAgent({
+      handle: 'queue-delete-from-x-skip',
+      name: 'Queue Delete From X Skip',
+      soulMd: '# soul',
+    } as any);
+    const deletedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'tweet skipped after deletion',
+      type: 'original',
+      status: 'deleted_from_x',
+      topic: 'AI',
+      xTweetId: 'x-456',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletionReason: 'skipped' }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: deletedTweet.id }) }
+    );
+
+    expect(response.status).toBe(200);
+
+    const updatedTweet = await getTweet(deletedTweet.id);
+    expect(updatedTweet?.deletionReason).toBe('skipped');
+
+    const feedback = await getFeedback(agent.id);
+    expect(feedback.some((entry) =>
+      entry.tweetId === deletedTweet.id &&
+      entry.userProvidedReason === false &&
+      entry.intentSummary === `Inferred intent for: ${deletedTweet.content}`
     )).toBe(true);
   });
 });

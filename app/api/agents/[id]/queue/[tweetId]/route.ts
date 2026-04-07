@@ -10,7 +10,7 @@ export async function PATCH(
 ) {
   const { id, tweetId } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent } = await requireAgentAccess(id);
     const tweet = await getTweet(String(tweetId));
     if (!tweet || String(tweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
@@ -29,6 +29,38 @@ export async function PATCH(
     if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt;
     if (deletionReason !== undefined) updates.deletionReason = deletionReason;
     const updated = await updateTweet(tweetId, updates as Parameters<typeof updateTweet>[1]);
+
+    if (deletionReason !== undefined && tweet.status === 'deleted_from_x') {
+      const trimmedReason = typeof deletionReason === 'string' ? deletionReason.trim() : '';
+      if (trimmedReason && trimmedReason !== 'skipped') {
+        await saveFeedback(id, {
+          tweetId: tweet.id,
+          tweetText: tweet.content,
+          rating: 'down',
+          generatedAt: new Date().toISOString(),
+          reason: trimmedReason,
+          intentSummary: trimmedReason,
+          source: 'queue_delete',
+          userProvidedReason: true,
+        });
+      } else if (trimmedReason === 'skipped') {
+        const inferredReason = await inferDeleteIntent({
+          agentName: agent.name,
+          soulMd: agent.soulMd,
+          tweetText: tweet.content,
+        });
+        await saveFeedback(id, {
+          tweetId: tweet.id,
+          tweetText: tweet.content,
+          rating: 'down',
+          generatedAt: new Date().toISOString(),
+          intentSummary: inferredReason,
+          source: 'queue_delete',
+          userProvidedReason: false,
+        });
+      }
+    }
+
     return NextResponse.json(updated);
   } catch (err) {
     try { return handleAuthError(err); } catch {}
@@ -59,6 +91,7 @@ export async function DELETE(
     });
 
     await saveFeedback(id, {
+      tweetId: tweet.id,
       tweetText: tweet.content,
       rating: 'down',
       generatedAt: new Date().toISOString(),

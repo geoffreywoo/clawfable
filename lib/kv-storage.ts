@@ -781,8 +781,11 @@ export async function saveFeedback(agentId: string, entry: FeedbackEntry): Promi
   // Prune on write: keep only last 30 days and max 20 entries
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const pruned = existing.filter(e => new Date(e.generatedAt).getTime() > thirtyDaysAgo);
-  pruned.push(entry);
-  const capped = pruned.slice(-20);
+  const deduped = entry.tweetId
+    ? pruned.filter((e) => !(e.tweetId === entry.tweetId && e.source === entry.source))
+    : pruned;
+  deduped.push(entry);
+  const capped = deduped.slice(-20);
   await kvSet(KEYS.agentFeedback(agentId), capped);
 }
 

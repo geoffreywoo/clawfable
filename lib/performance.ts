@@ -22,6 +22,7 @@ import {
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
+import { inferDeleteIntent } from './delete-intent';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -127,21 +128,33 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // Only check tweets posted in the last 7 days (older tweets naturally fall off the timeline API)
   const timelineXIds = new Set(timeline.map((t) => String(t.id)));
   const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const postedTweets = allTweets.filter(
-    (t) => t.status === 'posted' && t.xTweetId && new Date(t.createdAt).getTime() > recentCutoff
+  const postedEntries = new Map(
+    postLog
+      .filter((entry) => entry.action === 'posted' && entry.tweetId)
+      .map((entry) => [String(entry.tweetId), entry])
   );
+  const postedTweets = allTweets.filter((t) => {
+    if (t.status !== 'posted' || !t.xTweetId) return false;
+    const postedAt = postedEntries.get(String(t.id))?.postedAt || t.createdAt;
+    return new Date(postedAt).getTime() > recentCutoff;
+  });
 
   for (const tweet of postedTweets) {
     if (!timelineXIds.has(String(tweet.xTweetId))) {
       // Tweet was deleted from X — mark it
       try {
         await updateTweet(tweet.id, { status: 'deleted_from_x' as any });
-        // Save as negative feedback so the learning loop can learn from it
+        const inferredReason = await inferDeleteIntent({
+          agentName: agent.name,
+          soulMd: agent.soulMd,
+          tweetText: tweet.content,
+        });
         await saveFeedback(agent.id, {
+          tweetId: tweet.id,
           tweetText: tweet.content,
           rating: 'down',
-          generatedAt: tweet.createdAt,
-          reason: 'Manually deleted from X by operator',
+          generatedAt: new Date().toISOString(),
+          intentSummary: inferredReason,
           source: 'queue_delete',
           userProvidedReason: false,
         });
@@ -155,7 +168,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
           postedAt: new Date().toISOString(),
           source: 'cron',
           action: 'skipped',
-          reason: 'Tweet deleted from X — awaiting operator feedback',
+          reason: 'Tweet deleted from X — inferred reason captured, operator can still override it',
         });
       } catch { /* non-critical */ }
     }
@@ -251,15 +264,27 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   // and the X algorithm amplifies reply-generating content more than passive likes
   const weightedScore = (t: TweetPerformance) => t.likes + t.retweets + (t.replies * 2);
 
+  const autopilotHistory = history.filter((t) => t.source === 'autopilot');
+  const manualHistory = history.filter((t) => t.source === 'manual');
+  const timelineHistory = history.filter((t) => t.source === 'timeline');
+  const trainingHistory = autopilotHistory.length >= 10 ? autopilotHistory : history;
+  const sourceBreakdown = {
+    autopilot: autopilotHistory.length,
+    manual: manualHistory.length,
+    timeline: timelineHistory.length,
+    trainingCount: trainingHistory.length,
+    trainingSource: autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
+  };
+
   // Sort by weighted engagement
-  const sorted = [...history].sort((a, b) => weightedScore(b) - weightedScore(a));
+  const sorted = [...trainingHistory].sort((a, b) => weightedScore(b) - weightedScore(a));
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
 
   // Format rankings
   const formatMap: Record<string, { total: number; count: number }> = {};
-  for (const h of history) {
+  for (const h of trainingHistory) {
     const f = h.format || 'unknown';
     if (f === 'unknown') continue; // skip unclassified
     if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
@@ -272,7 +297,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
 
   // Topic rankings
   const topicMap: Record<string, { total: number; count: number }> = {};
-  for (const h of history) {
+  for (const h of trainingHistory) {
     const t = h.topic || 'general';
     if (t === 'general' || t === 'unknown') continue;
     if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
@@ -287,7 +312,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
 
   // Generate prescriptive insights
-  const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint);
+  const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
 
   const learnings: AgentLearnings = {
     agentId: agent.id,
@@ -301,6 +326,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     topicRankings,
     insights,
     styleFingerprint,
+    sourceBreakdown,
   };
 
   await saveLearnings(agent.id, learnings);
@@ -438,12 +464,13 @@ async function generateInsights(
   formatRankings: AgentLearnings['formatRankings'],
   topicRankings: AgentLearnings['topicRankings'],
   styleFingerprint: StyleFingerprint,
+  sourceBreakdown: NonNullable<AgentLearnings['sourceBreakdown']>,
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
   const best = sorted.slice(0, 10);
   const worst = sorted.slice(-10);
-  const timelineTweets = history.filter((t) => t.source === 'timeline');
+  const operatorTweets = history.filter((t) => t.source !== 'autopilot');
   const autopilotTweets = history.filter((t) => t.source === 'autopilot');
 
   try {
@@ -460,7 +487,8 @@ Include at least one rule comparing autopilot vs manual tweet performance (if bo
 Output bullet points, one per line, no numbering.`,
       messages: [{
         role: 'user',
-        content: `PERFORMANCE DATA: ${history.length} tweets (${timelineTweets.length} manual, ${autopilotTweets.length} autopilot)
+        content: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
+TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${sourceBreakdown.trainingSource === 'autopilot' ? 'autopilot only' : 'mixed because autopilot history is still sparse'})
 
 STYLE FINGERPRINT (computed from top 30 tweets):
 - Avg length: ${styleFingerprint.avgLength} chars (${styleFingerprint.shortPct}% short, ${styleFingerprint.mediumPct}% medium, ${styleFingerprint.longPct}% long)
@@ -505,6 +533,7 @@ Generate prescriptive rules for improving content quality. Focus on style patter
  * Called after buildLearnings when we have enough data.
  */
 export async function autoAdjustSettings(agentId: string, learnings: AgentLearnings): Promise<void> {
+  if (learnings.sourceBreakdown?.trainingSource !== 'autopilot') return;
   if (learnings.totalTracked < 10) return; // Need enough data
 
   const settings = await getProtocolSettings(agentId);

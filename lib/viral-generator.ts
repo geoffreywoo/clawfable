@@ -157,32 +157,41 @@ ${soulMd}`);
 
   // Learnings from actual performance of our generated tweets
   if (learnings && learnings.totalTracked > 0) {
+    const breakdown = learnings.sourceBreakdown;
+    const trainingSourceLabel = breakdown?.trainingSource === 'autopilot' ? 'autopilot' : 'training-set';
     parts.push(`\n## LEARNINGS FROM ACCOUNT PERFORMANCE (THIS IS CRITICAL — adapt based on what actually works)`);
-    parts.push(`Tracked ${learnings.totalTracked} tweets (both manually written and auto-generated). Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
+    parts.push(`Tracked ${learnings.totalTracked} tweets total. Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
+    if (breakdown) {
+      if (breakdown.trainingSource === 'autopilot') {
+        parts.push(`Autonomous policy should trust the ${breakdown.trainingCount} autopilot tweets below first. Human reference pool: ${breakdown.manual + breakdown.timeline} timeline/manual tweets for comparison only.`);
+      } else {
+        parts.push(`Autopilot history is still sparse, so the current training set mixes autopilot and human-written tweets. Treat strong manual examples as reference voice, not guaranteed autonomous policy.`);
+      }
+    }
 
     if (learnings.formatRankings.length > 0) {
-      parts.push(`\nFormat performance (our tweets, not historical):`);
+      parts.push(`\nFormat performance (${trainingSourceLabel} tweets):`);
       for (const f of learnings.formatRankings.slice(0, 5)) {
         parts.push(`- ${f.format}: avg ${f.avgEngagement} engagement (${f.count} tweets)`);
       }
     }
 
     if (learnings.topicRankings.length > 0) {
-      parts.push(`\nTopic performance (our tweets):`);
+      parts.push(`\nTopic performance (${trainingSourceLabel} tweets):`);
       for (const t of learnings.topicRankings.slice(0, 5)) {
         parts.push(`- ${t.topic}: avg ${t.avgEngagement} engagement (${t.count} tweets)`);
       }
     }
 
     if (learnings.bestPerformers.length > 0) {
-      parts.push(`\nOUR BEST tweets (do MORE like these):`);
+      parts.push(`\nBEST ${trainingSourceLabel.toUpperCase()} tweets (do MORE like these):`);
       for (const t of learnings.bestPerformers.slice(0, 3)) {
         parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
       }
     }
 
     if (learnings.worstPerformers.length > 0) {
-      parts.push(`\nOUR WORST tweets (do LESS like these):`);
+      parts.push(`\nWORST ${trainingSourceLabel.toUpperCase()} tweets (do LESS like these):`);
       for (const t of learnings.worstPerformers.slice(0, 3)) {
         parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
       }

@@ -7,14 +7,13 @@
  * 2. Auto-reply: fetch new mentions, generate replies, post them
  */
 
-import type { Agent, ProtocolSettings } from './types';
+import type { Agent, AgentLearnings, ProtocolSettings } from './types';
 import {
   getProtocolSettings,
   updateProtocolSettings,
   getQueuedTweets,
   getTweets,
   getAnalysis,
-  getLearnings,
   createTweet,
   updateTweet,
   createMention,
@@ -22,17 +21,15 @@ import {
   addPostLogEntry,
   getPostLog,
   logFunnelEvent,
-  getRecentNegativeFeedback,
   getTrendingCache,
   setTrendingCache,
   getConversationHistory,
   getPerformanceHistory,
-  getRemixPatterns,
-  getVoiceDirectives,
   type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
+import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
@@ -598,42 +595,10 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
 
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-
-    // Enhance voice profile with operator feedback
-    // NOTE: Stale style signals from wizard removed — the style fingerprint in learnings
-    // is the live version computed from actual performance data
-    const negatives = await getRecentNegativeFeedback(agent.id, 10);
-    if (negatives.length > 0) {
-      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
-    }
-
-    // Remix memory: operator's consistent remix patterns become standing rules
-    try {
-      const remixPatterns = await getRemixPatterns(agent.id);
-      if (remixPatterns.length > 0) {
-        voiceProfile.communicationStyle += `\n\n## OPERATOR STYLE PREFERENCES (from remix history — follow these)\n${remixPatterns.map(p => `- ${p}`).join('\n')}`;
-      }
-    } catch { /* non-critical */ }
-
-    // Voice coaching directives: standing rules from operator chat sessions (cap at 10 most recent)
-    try {
-      const directives = await getVoiceDirectives(agent.id);
-      if (directives.length > 0) {
-        const capped = directives.slice(0, 10);
-        voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)\n${capped.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
-        if (capped.length > 5) {
-          voiceProfile.communicationStyle += `\nNote: If any directives seem contradictory, prefer the MORE RECENT ones (higher numbers).`;
-        }
-      }
-    } catch { /* non-critical */ }
-
-    const learnings = await getLearnings(agent.id);
-    const settings = await getProtocolSettings(agent.id);
-    const style = {
-      lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
-      enabledFormats: settings.enabledFormats || [],
-    };
+    const { voiceProfile, learnings, settings, style, recentPosts } = await buildGenerationContext(agent, {
+      negativeLimit: 10,
+      directiveLimit: 10,
+    });
 
     // Fetch trending topics (cached, 4h TTL)
     let trending: TrendingTopic[] | null = null;
@@ -683,12 +648,8 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     // momentumTopic is set in the autopilot's main posting flow and not directly accessible here
     // But the trending data already captures what's hot, so peer study handles this implicitly
 
-    // Get recent posts to avoid repetition
+    // Get recent posts and existing items to avoid repetition
     const allTweets = await getTweets(agent.id);
-    const recentPosts = allTweets
-      .filter((t) => t.status === 'posted' || t.status === 'queued')
-      .slice(0, 15)
-      .map((t) => t.content);
 
     // Determine how many should be marketing tweets
     const marketingCount = settings.marketingEnabled && settings.marketingMix > 0
@@ -780,7 +741,7 @@ interface MarketingTweet {
 async function generateMarketingTweets(
   agent: Agent,
   voiceProfile: ReturnType<typeof parseSoulMd>,
-  learnings: Awaited<ReturnType<typeof getLearnings>>,
+  learnings: AgentLearnings | null,
   role: string,
   count: number,
   recentPosts: string[],
@@ -881,4 +842,3 @@ For each tweet, output a JSON object on its own line:
     return [];
   }
 }
-

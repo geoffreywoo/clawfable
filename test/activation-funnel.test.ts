@@ -94,6 +94,34 @@ describe('Activation Funnel KV Storage', () => {
       expect(negatives.some((entry) => entry.includes('bad tweet 1'))).toBe(true);
       expect(negatives.some((entry) => entry.includes('bad tweet 2'))).toBe(true);
     });
+
+    it('upserts feedback for the same tweet instead of double-counting it', async () => {
+      await saveFeedback('f4', {
+        tweetId: 'tweet-1',
+        tweetText: 'same tweet',
+        rating: 'down',
+        generatedAt: '2026-04-01T00:00:00.000Z',
+        intentSummary: 'Off voice',
+        source: 'queue_delete',
+        userProvidedReason: false,
+      });
+      await saveFeedback('f4', {
+        tweetId: 'tweet-1',
+        tweetText: 'same tweet',
+        rating: 'down',
+        generatedAt: '2026-04-02T00:00:00.000Z',
+        reason: 'Too salesy',
+        intentSummary: 'Too salesy',
+        source: 'queue_delete',
+        userProvidedReason: true,
+      });
+
+      const all = await getFeedback('f4');
+      expect(all.length).toBe(1);
+      expect(all[0].reason).toBe('Too salesy');
+      expect(all[0].userProvidedReason).toBe(true);
+      expect(all[0].generatedAt).toBe('2026-04-02T00:00:00.000Z');
+    });
   });
 
   describe('Rate limiting', () => {

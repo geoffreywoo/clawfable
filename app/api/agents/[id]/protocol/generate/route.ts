@@ -2,15 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   createTweet,
   getAnalysis,
-  getLearnings,
-  getProtocolSettings,
-  getRecentNegativeFeedback,
-  getStyleSignals,
-  getTweets,
 } from '@/lib/kv-storage';
-import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { buildGenerationContext } from '@/lib/generation-context';
 
 // POST /api/agents/[id]/protocol/generate — generate viral content via Claude
 export async function POST(
@@ -29,32 +24,10 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const count = Math.min(body.count || 5, 20);
 
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-
-    const [styleSignals, negatives] = await Promise.all([
-      getStyleSignals(id),
-      getRecentNegativeFeedback(id),
-    ]);
-
-    if (styleSignals?.rawExtraction) {
-      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
-    }
-    if (negatives.length > 0) {
-      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map((item) => `- "${item}"`).join('\n')}`;
-    }
-
-    const learnings = await getLearnings(id);
-    const settings = await getProtocolSettings(id);
-    const style = {
-      lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
-      enabledFormats: settings.enabledFormats || [],
-    };
-    // Get recent posts to avoid repetition
-    const allTweets = await getTweets(id);
-    const recentPosts = allTweets
-      .filter((t) => t.status === 'posted' || t.status === 'queued')
-      .slice(0, 15)
-      .map((t) => t.content);
+    const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+      negativeLimit: 10,
+      directiveLimit: 10,
+    });
 
     const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
 

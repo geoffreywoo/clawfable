@@ -267,6 +267,13 @@ export interface AgentLearnings {
   topicRankings: Array<{ topic: string; avgEngagement: number; count: number }>;
   insights: string[];                     // AI-generated prescriptive rules
   styleFingerprint?: StyleFingerprint;    // computed from top performers
+  sourceBreakdown?: {
+    autopilot: number;
+    manual: number;
+    timeline: number;
+    trainingCount: number;
+    trainingSource: 'autopilot' | 'mixed';
+  };
 }
 
 export interface AccountAnalysis {
@@ -329,9 +336,10 @@ export interface StyleSignals {
 }
 
 export interface FeedbackEntry {
+  tweetId?: string;
   tweetText: string;
   rating: 'up' | 'down';
-  generatedAt: string;
+  generatedAt: string; // when the feedback signal was recorded
   reason?: string;
   intentSummary?: string;
   source?: 'preview_feedback' | 'queue_delete';

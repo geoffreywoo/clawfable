@@ -5,12 +5,10 @@ import {
   deleteTweet,
   getAnalysis,
   getPreviewTweets,
-  getRecentNegativeFeedback,
-  getStyleSignals,
 } from '@/lib/kv-storage';
-import { parseSoulMd } from '@/lib/soul-parser';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { buildGenerationContext } from '@/lib/generation-context';
 
 // POST /api/agents/[id]/generate-tweet
 export async function POST(
@@ -51,29 +49,19 @@ export async function POST(
         return NextResponse.json({ error: 'Run account analysis before generating preview tweets' }, { status: 400 });
       }
 
-      const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+      const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+        negativeLimit: 10,
+        directiveLimit: 10,
+      });
       const existingPreviewTweets = await getPreviewTweets(id);
 
       if (replaceTweetId && !existingPreviewTweets.some((tweet) => tweet.id === replaceTweetId)) {
         return NextResponse.json({ error: 'Preview tweet not found' }, { status: 404 });
       }
 
-      // Enhance voice profile with style signals and feedback
-      const [styleSignals, negatives] = await Promise.all([
-        getStyleSignals(id),
-        getRecentNegativeFeedback(id),
-      ]);
-
-      if (styleSignals?.rawExtraction) {
-        voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
-      }
-      if (negatives.length > 0) {
-        voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
-      }
-
       const requestedCount = typeof batchCount === 'number' ? batchCount : 1;
       const previewCount = Math.min(Math.max(Math.floor(requestedCount), 1), 5);
-      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, null, agent.soulMd);
+      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts);
       const tweets = [];
       for (const item of batch) {
         const tweet = await createTweet({
@@ -100,20 +88,10 @@ export async function POST(
     }
 
     const analysis = await getAnalysis(id);
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-
-    // Enhance voice profile with style signals and feedback
-    const [styleSignals, negatives] = await Promise.all([
-      getStyleSignals(id),
-      getRecentNegativeFeedback(id),
-    ]);
-
-    if (styleSignals?.rawExtraction) {
-      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
-    }
-    if (negatives.length > 0) {
-      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map(n => `- "${n}"`).join('\n')}`;
-    }
+    const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+      negativeLimit: 10,
+      directiveLimit: 10,
+    });
 
     // Use Claude if analysis exists, with the topic as trending context
     if (analysis) {
@@ -130,7 +108,7 @@ export async function POST(
         topTweet: null as any,
       }];
 
-      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, null, agent.soulMd);
+      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts);
       if (batch.length > 0) {
         const item = batch[0];
         const tweet = await createTweet({

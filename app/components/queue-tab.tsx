@@ -181,36 +181,17 @@ export function QueueTab({ agentId }: QueueTabProps) {
     if (!reason) return;
     setSubmittingDeletionId(tweetId);
     try {
-      // Update the tweet with the deletion reason
-      await fetch(`/api/agents/${agentId}/queue/${tweetId}`, {
+      const res = await fetch(`/api/agents/${agentId}/queue/${tweetId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deletionReason: reason }),
       });
-      // Also save as feedback for the learning loop
-      const tweet = queue.find((t) => t.id === tweetId);
-      if (tweet) {
-        await fetch(`/api/agents/${agentId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'feedback',
-            feedback: {
-              tweetText: tweet.content,
-              rating: 'down',
-              generatedAt: tweet.createdAt,
-              reason,
-              intentSummary: reason,
-              source: 'queue_delete',
-              userProvidedReason: true,
-            },
-          }),
-        });
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save feedback');
       setQueue((prev) => prev.filter((t) => t.id !== tweetId));
       showToast('Feedback saved — voice will adapt');
-    } catch {
-      showToast('Failed to save feedback');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to save feedback');
     } finally {
       setSubmittingDeletionId(null);
     }
@@ -384,13 +365,17 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: '9px', flexShrink: 0 }}
                     onClick={async () => {
-                      // Mark as handled so it doesn't come back
-                      await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
+                      const res = await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ deletionReason: 'skipped' }),
-                      }).catch(() => {});
-                      setQueue((prev) => prev.filter((t) => t.id !== tweet.id));
+                      }).catch(() => null);
+                      if (res?.ok) {
+                        setQueue((prev) => prev.filter((t) => t.id !== tweet.id));
+                        showToast('Skipped — inferred reason kept for learning');
+                      } else {
+                        showToast('Failed to skip');
+                      }
                     }}
                   >
                     SKIP
