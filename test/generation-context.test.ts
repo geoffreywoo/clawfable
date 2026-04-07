@@ -83,6 +83,8 @@ describe('generation context', () => {
     expect(context.voiceProfile.communicationStyle).toContain('1. Use calmer endings.');
     expect(context.voiceProfile.communicationStyle).toContain('2. Lead with specifics.');
     expect(context.recentPosts).toContain('already queued tweet');
+    expect(context.style.exploration.rate).toBe(35);
+    expect(context.style.exploration.underusedFormats).toContain('question');
   });
 
   it('stops injecting stale wizard style once live learnings are established', async () => {

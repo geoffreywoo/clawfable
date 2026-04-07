@@ -213,6 +213,19 @@ describe('pickDiverseTweet', () => {
     expect(picked?.id).toBe('diverse');
   });
 
+  it('penalizes repeated formats even when the topic changes', () => {
+    const queue = [
+      makeTweet({ id: 'same-format', format: 'hot_take', topic: 'Startups', content: 'Hot take about startups' }),
+      makeTweet({ id: 'fresh-format', format: 'question', topic: 'Startups', content: 'Question about startups' }),
+    ];
+    const recent = [
+      { format: 'hot_take', topic: 'AI', content: 'AI hot take one' },
+      { format: 'hot_take', topic: 'Crypto', content: 'AI hot take two' },
+    ];
+    const picked = pickDiverseTweet(queue, recent);
+    expect(picked?.id).toBe('fresh-format');
+  });
+
   it('returns null for empty queue', () => {
     expect(pickDiverseTweet([], [])).toBeNull();
   });

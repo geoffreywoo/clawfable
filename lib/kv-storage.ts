@@ -632,6 +632,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   totalAutoPosted: 0,
   totalAutoReplied: 0,
   lengthMix: { short: 30, medium: 30, long: 40 },
+  explorationRate: 35,
   enabledFormats: [],  // empty = all formats
   qtRatio: 60,
   marketingEnabled: false,

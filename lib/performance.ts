@@ -538,17 +538,19 @@ export async function autoAdjustSettings(agentId: string, learnings: AgentLearni
   if (learnings.totalTracked < 10) return; // Need enough data
 
   const settings = await getProtocolSettings(agentId);
+  const trainingCount = learnings.sourceBreakdown?.trainingCount || 0;
 
   // Auto-adjust format list — enable top performers, drop consistent underperformers
-  // Only auto-adjust if user hasn't manually configured formats
-  if ((!settings.enabledFormats || settings.enabledFormats.length === 0) && learnings.formatRankings.length >= 4) {
+  // Only auto-adjust if user hasn't manually configured formats, and only after
+  // we have enough autonomous data to avoid collapsing variety too early.
+  if ((!settings.enabledFormats || settings.enabledFormats.length === 0) && trainingCount >= 24 && learnings.formatRankings.length >= 5) {
     const avgEngagement = learnings.formatRankings.reduce((s, f) => s + f.avgEngagement, 0) / learnings.formatRankings.length;
     // Keep formats that perform at least 30% of average (very loose filter — just drops truly dead formats)
     const viableFormats = learnings.formatRankings
       .filter((f) => f.count >= 3 && f.avgEngagement >= avgEngagement * 0.3)
       .map((f) => f.format);
-    // Only restrict if we have a meaningful distinction (keep at least 4 formats)
-    if (viableFormats.length >= 4 && viableFormats.length < learnings.formatRankings.length) {
+    // Only restrict if we still preserve enough room for experimentation.
+    if (viableFormats.length >= 5 && viableFormats.length < learnings.formatRankings.length) {
       await updateProtocolSettings(agentId, { enabledFormats: viableFormats });
     }
   }

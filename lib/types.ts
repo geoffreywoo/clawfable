@@ -169,6 +169,7 @@ export interface ProtocolSettings {
     medium: number;  // 0-100, percentage for 200-500 chars
     long: number;    // 0-100, percentage for 500+ chars
   };
+  explorationRate: number;    // 0-100, percentage of batch reserved for exploratory ideas
   enabledFormats: string[];  // which formats to use, empty = all
   qtRatio: number;           // 0-100, percentage of QTs vs originals
   // Marketing track

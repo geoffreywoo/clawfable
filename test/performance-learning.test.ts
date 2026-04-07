@@ -161,7 +161,7 @@ describe('performance learning smoke', () => {
     });
 
     const updated = await getProtocolSettings(autopilotAgent.id);
-    expect(updated.enabledFormats).toEqual(['hot_take', 'question', 'data_point', 'observation']);
+    expect(updated.enabledFormats).toEqual([]);
     expect(updated.lengthMix.short).toBeGreaterThan(updated.lengthMix.long);
   });
 });

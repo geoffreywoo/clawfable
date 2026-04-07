@@ -34,6 +34,7 @@ import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
   jitterInterval,
   isDailyCapReached,
+  isNearDuplicate,
   pickDiverseTweet,
   clampPostsPerDay,
 } from './survivability';
@@ -172,7 +173,10 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // Ensure queue has content
   let queue = await getQueuedTweets(agentId);
   if (queue.length < settings.minQueueSize) {
-    const generated = await refillQueue(agent, settings.minQueueSize - queue.length + 3);
+    const generated = await refillQueue(agent, settings.minQueueSize - queue.length + 3, {
+      scheduledTopic: todaysTopic,
+      momentumTopic,
+    });
     if (generated > 0) {
       queue = await getQueuedTweets(agentId);
     }
@@ -595,7 +599,11 @@ function isInjectedReply(reply: string, mentionText: string): boolean {
 
 // ─── Queue refill ────────────────────────────────────────────────────────────
 
-async function refillQueue(agent: Agent, count: number): Promise<number> {
+async function refillQueue(
+  agent: Agent,
+  count: number,
+  bias: { scheduledTopic?: string | null; momentumTopic?: string | null } = {},
+): Promise<number> {
   try {
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
@@ -649,19 +657,25 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
       }
     } catch { /* non-critical */ }
 
-    // If momentum detected (fast feedback), bias generation toward that topic
-    // momentumTopic is set in the autopilot's main posting flow and not directly accessible here
-    // But the trending data already captures what's hot, so peer study handles this implicitly
+    // If momentum or calendar focus exists, pass those biases into generation
+    // so the batch can explore timely angles instead of repeating evergreen takes.
 
     // Determine how many should be marketing tweets
     const marketingCount = settings.marketingEnabled && settings.marketingMix > 0
       ? Math.max(1, Math.round(count * (settings.marketingMix / 100)))
       : 0;
     const organicCount = count - marketingCount;
+    const generationStyle = {
+      ...style,
+      bias: {
+        scheduledTopic: bias.scheduledTopic ?? style.bias.scheduledTopic,
+        momentumTopic: bias.momentumTopic ?? style.bias.momentumTopic,
+      },
+    };
 
     // Generate organic tweets
     const batch = organicCount > 0
-      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, style, recentPosts)
+      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts)
       : [];
 
     // Generate marketing tweets (promotional content for clawfable.com)
@@ -690,15 +704,12 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     const allBatch = [...batch, ...marketingBatch, ...shoutoutBatch];
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
-    const existingContent = new Set(
-      allTweets.slice(0, 50).map((t) => t.content.slice(0, 80).toLowerCase())
-    );
+    const recentContent = allTweets.slice(0, 50).map((tweet) => tweet.content);
 
     let added = 0;
     for (const item of allBatch) {
-      const fingerprint = item.content.slice(0, 80).toLowerCase();
-      if (existingContent.has(fingerprint)) continue; // Skip duplicate
-      existingContent.add(fingerprint);
+      if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) continue;
+      recentContent.unshift(item.content);
 
       await createTweet({
         agentId: agent.id,

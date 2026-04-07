@@ -101,6 +101,7 @@ describe('generation route wiring', () => {
         totalAutoPosted: 0,
         totalAutoReplied: 0,
         lengthMix: { short: 20, medium: 40, long: 40 },
+        explorationRate: 35,
         enabledFormats: ['hot_take'],
         qtRatio: 0,
         marketingEnabled: false,
@@ -118,6 +119,15 @@ describe('generation route wiring', () => {
       style: {
         lengthMix: { short: 20, medium: 40, long: 40 },
         enabledFormats: ['hot_take'],
+        exploration: {
+          rate: 35,
+          underusedFormats: ['question'],
+          underusedTopics: ['startup'],
+        },
+        bias: {
+          scheduledTopic: null,
+          momentumTopic: null,
+        },
       },
       recentPosts: ['recent tweet'],
     });

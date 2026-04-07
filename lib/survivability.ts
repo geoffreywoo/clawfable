@@ -177,7 +177,7 @@ export function pickDiverseTweet(
 
     // Penalize repetitive format/topic
     const repetitive = isRepetitiveContent(
-      tweet.topic || 'unknown',
+      tweet.format || 'unknown',
       tweet.topic || 'general',
       recentPosts,
       2

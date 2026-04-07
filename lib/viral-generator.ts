@@ -7,6 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AccountAnalysis, AgentLearnings, StyleSignals } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
+import { isNearDuplicate } from './survivability';
 
 const anthropic = new Anthropic();
 
@@ -21,14 +22,32 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
 export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
   enabledFormats: string[];
+  exploration: {
+    rate: number;
+    underusedFormats: string[];
+    underusedTopics: string[];
+  };
+  bias: {
+    scheduledTopic: string | null;
+    momentumTopic: string | null;
+  };
 }
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],
+  exploration: {
+    rate: 35,
+    underusedFormats: [],
+    underusedTopics: [],
+  },
+  bias: {
+    scheduledTopic: null,
+    momentumTopic: null,
+  },
 };
 
-const ALL_FORMATS = [
+export const ALL_FORMATS = [
   'hot_take', 'question', 'data_point', 'short_punch', 'long_form', 'analysis', 'observation',
 ];
 
@@ -75,6 +94,7 @@ function collectQuotableTweets(trending: TrendingTopic[]): Array<{
 function buildSystemPrompt(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
+  count: number,
   trending: TrendingTopic[] | null,
   learnings: AgentLearnings | null,
   soulMd: string | null,
@@ -235,7 +255,32 @@ ${soulMd}`);
 
   // Dynamic strategy based on user config
   const { lengthMix, enabledFormats } = style;
+  const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
+  const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
+
+  if (style.bias.scheduledTopic || style.bias.momentumTopic) {
+    parts.push(`\n## ACTIVE TOPIC BIAS`);
+    if (style.bias.scheduledTopic) {
+      parts.push(`- Today's scheduled focus: ${style.bias.scheduledTopic}`);
+    }
+    if (style.bias.momentumTopic) {
+      parts.push(`- Momentum topic from recent engagement: ${style.bias.momentumTopic}`);
+    }
+    parts.push(`Use these as fuel for 1-2 tweets if they fit the voice, but do not repeat the same angle across the batch.`);
+  }
+
+  if (explorationCount > 0) {
+    const underusedFormats = style.exploration.underusedFormats.slice(0, 4).join(', ') || 'any format that has not been used recently';
+    const underusedTopics = style.exploration.underusedTopics.slice(0, 4).join(', ') || 'stale core topics that deserve another pass';
+    parts.push(`\n## EXPLORATION BUDGET
+- ${explorationCount} of the ${count} tweets in this batch must be deliberate experiments so the account learns faster.
+- Keep those experiments on-brand, but push into fresher territory instead of rewriting the same take.
+- Prefer these underused formats first: ${underusedFormats}
+- Prefer these underused or stale core topics next: ${underusedTopics}
+- If those are exhausted, test adjacent topics one step away from the core voice. Not random. Not off-brand.
+- Never spend the whole batch exploring. The rest should exploit proven winners.`);
+  }
 
   parts.push(`\n## STRATEGY
 All tweets are original standalone posts. No quote tweets.
@@ -256,7 +301,8 @@ ${formats.join(', ')}
 3. Never use hashtags unless the account's viral tweets use them.
 4. Never be generic. Every tweet needs a specific, opinionated point of view.
 5. Never include links to x.com or twitter.com in tweet text.
-6. Never violate the anti-goals.`);
+6. Across a batch, vary format, hook, and target topic. Do not write near-duplicates or multiple tweets that make the same point.
+7. Never violate the anti-goals.`);
 
   return parts.join('\n');
 }
@@ -274,14 +320,18 @@ export async function generateViralBatch(
   style: ContentStyleConfig = DEFAULT_STYLE,
   recentPosts: string[] = [],
 ): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, trending, learnings, soulMd, style, recentPosts);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, trending, learnings, soulMd, style, recentPosts);
 
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
+  const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
+  const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const userPrompt = `Generate exactly ${count} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "rationale": 1 sentence on why this should perform well
+
+${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -299,6 +349,8 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       .join('');
 
     const tweets: ProtocolTweet[] = [];
+    const acceptedContents: string[] = [];
+    const usedFormatTopicCombos = new Set<string>();
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || !trimmed.startsWith('{')) continue;
@@ -311,10 +363,17 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
           if (!cleanContent) continue;
+          const format = parsed.format || 'hot_take';
+          const targetTopic = parsed.targetTopic || 'general';
+          if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) continue;
+          const combo = `${String(format).toLowerCase()}::${String(targetTopic).toLowerCase()}`;
+          if (usedFormatTopicCombos.has(combo)) continue;
+          acceptedContents.push(cleanContent);
+          usedFormatTopicCombos.add(combo);
           tweets.push({
             content: cleanContent,
-            format: parsed.format || 'hot_take',
-            targetTopic: parsed.targetTopic || 'general',
+            format,
+            targetTopic,
             rationale: parsed.rationale || '',
           });
         }
