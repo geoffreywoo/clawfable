@@ -7,8 +7,10 @@ import {
   deleteAgent,
   createTweet,
   getTweets,
+  getQueuedTweets,
   getAnalysis,
   saveAnalysis,
+  updateTweet,
 } from '@/lib/kv-storage';
 
 // Tests run against the in-memory fallback (no KV env vars set)
@@ -97,6 +99,52 @@ describe('kv-storage', () => {
       const retrieved = await getAnalysis('99');
       expect(retrieved).not.toBeNull();
       expect(retrieved!.tweetCount).toBe(100);
+    });
+  });
+
+  describe('Queue membership', () => {
+    it('removes posted tweets from queued reads and re-adds them if re-queued later', async () => {
+      const agent = await createAgent({
+        handle: 'queue-membership',
+        name: 'Queue Membership',
+        soulMd: '# Queue rules',
+      } as any);
+
+      const queuedTweet = await createTweet({
+        agentId: agent.id,
+        content: 'still in queue',
+        type: 'original',
+        status: 'queued',
+        topic: null,
+        xTweetId: null,
+        quoteTweetId: null,
+        quoteTweetAuthor: null,
+        scheduledAt: null,
+      });
+
+      await createTweet({
+        agentId: agent.id,
+        content: 'already posted',
+        type: 'original',
+        status: 'posted',
+        topic: null,
+        xTweetId: 'x-1',
+        quoteTweetId: null,
+        quoteTweetAuthor: null,
+        scheduledAt: null,
+      });
+
+      await expect(getQueuedTweets(agent.id)).resolves.toEqual([
+        expect.objectContaining({ id: queuedTweet.id, status: 'queued' }),
+      ]);
+
+      await updateTweet(queuedTweet.id, { status: 'posted', xTweetId: 'x-2' });
+      await expect(getQueuedTweets(agent.id)).resolves.toEqual([]);
+
+      await updateTweet(queuedTweet.id, { status: 'queued', xTweetId: null });
+      await expect(getQueuedTweets(agent.id)).resolves.toEqual([
+        expect.objectContaining({ id: queuedTweet.id, status: 'queued' }),
+      ]);
     });
   });
 });
