@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
-import { getMe } from '@/lib/twitter-client';
-import { addFollowerSnapshot } from '@/lib/kv-storage';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 
-// GET /api/cron/post — called by Vercel Cron every 30 minutes
+// GET /api/cron/post — called by Vercel Cron every 10 minutes
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -19,6 +17,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Fresh cache per cron tick — request-scoped memoization (cuts duplicate KV reads).
+  resetReadCache();
+
   try {
     const agents = await getAgents();
     const autopilotResults: AutopilotResult[] = [];
@@ -27,6 +28,13 @@ export async function GET(request: NextRequest) {
 
     for (const agent of agents) {
       const isConnected = agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId;
+
+      // Early exit: if agent isn't connected AND has no autopilot config, skip everything.
+      // Saves KV commands on dormant or unconfigured agents.
+      const settings = await getProtocolSettings(agent.id);
+      if (!isConnected && !settings.enabled && !settings.autoReply) {
+        continue;
+      }
 
       if (isConnected) {
         // Refresh mentions
@@ -93,22 +101,9 @@ export async function GET(request: NextRequest) {
           console.error(`[cron] soul evolution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
         }
 
-        // Follower count snapshot (once per cron run)
-        try {
-          const agentKeys = decodeKeys({
-            apiKey: agent.apiKey!,
-            apiSecret: agent.apiSecret!,
-            accessToken: agent.accessToken!,
-            accessSecret: agent.accessSecret!,
-          });
-          const me = await getMe(agentKeys);
-          // getMe returns id/name/username but we need follower count from the timeline API
-          // For now, store 0 — will be populated when we add the followers_count field
-        } catch { /* non-critical */ }
-
         // Proactive engagement (reply to viral tweets + like network content)
-        const proactiveSettings = await getProtocolSettings(agent.id);
-        if (proactiveSettings.proactiveReplies || proactiveSettings.proactiveLikes) {
+        // Reuse `settings` from the early-exit check above instead of refetching.
+        if (settings.proactiveReplies || settings.proactiveLikes || settings.autoFollow) {
           try {
             const agentKeys = decodeKeys({
               apiKey: agent.apiKey!,
@@ -116,9 +111,9 @@ export async function GET(request: NextRequest) {
               accessToken: agent.accessToken!,
               accessSecret: agent.accessSecret!,
             });
-            const viralReplies = await replyToViralTweets(agent, agentKeys, proactiveSettings);
-            const likes = await likeNetworkTweets(agent, agentKeys, proactiveSettings);
-            const follows = await discoverAndFollow(agent, agentKeys, proactiveSettings);
+            const viralReplies = await replyToViralTweets(agent, agentKeys, settings);
+            const likes = await likeNetworkTweets(agent, agentKeys, settings);
+            const follows = await discoverAndFollow(agent, agentKeys, settings);
             if (viralReplies > 0 || likes > 0 || follows > 0) {
               console.log(`[cron] proactive engagement for agent ${agent.id}: ${viralReplies} viral replies, ${likes} likes, ${follows} follows`);
             }
@@ -128,8 +123,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Run autopilot if auto-post OR auto-reply is enabled
-      const settings = await getProtocolSettings(agent.id);
+      // Run autopilot if auto-post OR auto-reply is enabled (settings already loaded above)
       if (!settings.enabled && !settings.autoReply) continue;
 
       const result = await runAutopilot(agent);

@@ -27,7 +27,8 @@ export async function inferDeleteIntent({
     const anthropic = new Anthropic();
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      // Single-sentence inference — Haiku handles this perfectly at ~10x lower cost.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 80,
       temperature: 0,
       system: `You infer why a human operator removed a queued tweet. Return one short sentence under 18 words. Focus on voice, clarity, angle, credibility, usefulness, or timing. Do not mention being an AI.`,

@@ -28,17 +28,63 @@ async function getKvClient(): Promise<any> {
   }
 }
 
+// ─── Request-scoped read cache ────────────────────────────────────────────────
+// Memoizes KV reads within a single function invocation to dramatically cut
+// command counts on hot paths (cron). Writes invalidate the entry.
+// The cache is keyed by KV key string. Reset between requests via resetReadCache().
+const readCache = new Map<string, unknown>();
+
+export function resetReadCache(): void {
+  readCache.clear();
+}
+
+function getCached<T>(key: string): { hit: boolean; value: T | null } {
+  if (readCache.has(key)) {
+    return { hit: true, value: readCache.get(key) as T | null };
+  }
+  return { hit: false, value: null };
+}
+
+function setCached(key: string, value: unknown): void {
+  readCache.set(key, value);
+}
+
+function invalidateCached(key: string): void {
+  readCache.delete(key);
+}
+
+// kvDel can target any value type (string/hash/list/set), so it must clear
+// every namespaced cache entry for that raw key. Otherwise a stale cached
+// hash/list/set survives a delete and `getX` returns the old value.
+function invalidateAllNamespaces(key: string): void {
+  readCache.delete(key);
+  readCache.delete(`hash:${key}`);
+  readCache.delete(`list:${key}`);
+  readCache.delete(`set:${key}`);
+}
+
 async function kvGet<T>(key: string): Promise<T | null> {
+  const cached = getCached<T>(key);
+  if (cached.hit) return cached.value;
   try {
     const client = await getKvClient();
-    if (!client) return (memStore.get(key) as T) ?? null;
-    return (await client.get(key)) as T | null;
+    if (!client) {
+      const value = (memStore.get(key) as T) ?? null;
+      setCached(key, value);
+      return value;
+    }
+    const value = (await client.get(key)) as T | null;
+    setCached(key, value);
+    return value;
   } catch {
-    return (memStore.get(key) as T) ?? null;
+    const value = (memStore.get(key) as T) ?? null;
+    setCached(key, value);
+    return value;
   }
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
+  invalidateCached(key);
   try {
     const client = await getKvClient();
     if (!client) { memStore.set(key, value); return; }
@@ -49,6 +95,7 @@ async function kvSet(key: string, value: unknown): Promise<void> {
 }
 
 async function kvDel(key: string): Promise<void> {
+  invalidateAllNamespaces(key);
   try {
     const client = await getKvClient();
     if (!client) { memStore.delete(key); return; }
@@ -59,6 +106,7 @@ async function kvDel(key: string): Promise<void> {
 }
 
 async function kvSadd(key: string, ...members: string[]): Promise<void> {
+  invalidateCached(`set:${key}`);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -76,20 +124,30 @@ async function kvSadd(key: string, ...members: string[]): Promise<void> {
 }
 
 async function kvSmembers(key: string): Promise<string[]> {
+  const cacheKey = `set:${key}`;
+  const cached = getCached<string[]>(cacheKey);
+  if (cached.hit && cached.value) return cached.value;
   try {
     const client = await getKvClient();
     if (!client) {
       const s = memStore.get(key) as Set<string> | undefined;
-      return s ? Array.from(s) : [];
+      const value = s ? Array.from(s) : [];
+      setCached(cacheKey, value);
+      return value;
     }
-    return (await client.smembers(key)) as string[];
+    const value = (await client.smembers(key)) as string[];
+    setCached(cacheKey, value);
+    return value;
   } catch {
     const s = memStore.get(key) as Set<string> | undefined;
-    return s ? Array.from(s) : [];
+    const value = s ? Array.from(s) : [];
+    setCached(cacheKey, value);
+    return value;
   }
 }
 
 async function kvSrem(key: string, member: string): Promise<void> {
+  invalidateCached(`set:${key}`);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -105,6 +163,7 @@ async function kvSrem(key: string, member: string): Promise<void> {
 }
 
 async function kvIncr(key: string): Promise<number> {
+  invalidateCached(key);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -121,6 +180,7 @@ async function kvIncr(key: string): Promise<number> {
 }
 
 async function kvLpush(key: string, ...values: string[]): Promise<void> {
+  invalidateCached(`list:${key}`);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -138,20 +198,33 @@ async function kvLpush(key: string, ...values: string[]): Promise<void> {
 }
 
 async function kvLrange(key: string, start: number, stop: number): Promise<string[]> {
+  // Cache the full list once per request and slice in-memory for subsequent reads.
+  // This collapses N range reads of the same list into a single KV command.
+  const cacheKey = `list:${key}`;
+  const cached = getCached<string[]>(cacheKey);
+  if (cached.hit && cached.value) {
+    return stop === -1 ? cached.value.slice(start) : cached.value.slice(start, stop + 1);
+  }
   try {
     const client = await getKvClient();
     if (!client) {
       const list = (memStore.get(key) as string[]) ?? [];
+      setCached(cacheKey, list);
       return stop === -1 ? list.slice(start) : list.slice(start, stop + 1);
     }
-    return (await client.lrange(key, start, stop)) as string[];
+    // Fetch the full list once so subsequent ranges are free.
+    const full = (await client.lrange(key, 0, -1)) as string[];
+    setCached(cacheKey, full);
+    return stop === -1 ? full.slice(start) : full.slice(start, stop + 1);
   } catch {
     const list = (memStore.get(key) as string[]) ?? [];
+    setCached(cacheKey, list);
     return stop === -1 ? list.slice(start) : list.slice(start, stop + 1);
   }
 }
 
 async function kvLrem(key: string, count: number, value: string): Promise<void> {
+  invalidateCached(`list:${key}`);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -171,6 +244,7 @@ async function kvLrem(key: string, count: number, value: string): Promise<void> 
 }
 
 async function kvHset(key: string, fields: Record<string, unknown>): Promise<void> {
+  invalidateCached(`hash:${key}`);
   try {
     const client = await getKvClient();
     if (!client) {
@@ -186,12 +260,23 @@ async function kvHset(key: string, fields: Record<string, unknown>): Promise<voi
 }
 
 async function kvHgetall<T>(key: string): Promise<T | null> {
+  const cacheKey = `hash:${key}`;
+  const cached = getCached<T>(cacheKey);
+  if (cached.hit) return cached.value;
   try {
     const client = await getKvClient();
-    if (!client) return (memStore.get(key) as T) ?? null;
-    return (await client.hgetall(key)) as T | null;
+    if (!client) {
+      const value = (memStore.get(key) as T) ?? null;
+      setCached(cacheKey, value);
+      return value;
+    }
+    const value = (await client.hgetall(key)) as T | null;
+    setCached(cacheKey, value);
+    return value;
   } catch {
-    return (memStore.get(key) as T) ?? null;
+    const value = (memStore.get(key) as T) ?? null;
+    setCached(cacheKey, value);
+    return value;
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Agent, AgentLearnings, ProtocolSettings } from './types';
+import type { Agent, AgentLearnings, ProtocolSettings, Tweet } from './types';
 import {
   getLearnings,
   getProtocolSettings,
@@ -27,6 +27,7 @@ export interface GenerationContext {
   settings: ProtocolSettings;
   style: ContentStyleConfig;
   recentPosts: string[];
+  allTweets: Tweet[];
 }
 
 export async function buildGenerationContext(
@@ -92,5 +93,6 @@ export async function buildGenerationContext(
     settings,
     style,
     recentPosts,
+    allTweets,
   };
 }

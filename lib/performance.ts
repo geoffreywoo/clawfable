@@ -193,7 +193,8 @@ async function batchClassifyTweets(
     const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      // Haiku is plenty for structured classification — cuts cost ~10x and latency ~3x.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
 - "idx": the tweet index number

@@ -352,7 +352,8 @@ export async function extractStyleSignals(exampleTweets: string[]): Promise<Styl
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      // Structured style extraction — Haiku is plenty.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
       messages: [{

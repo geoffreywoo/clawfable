@@ -12,7 +12,6 @@ import {
   getProtocolSettings,
   updateProtocolSettings,
   getQueuedTweets,
-  getTweets,
   getAnalysis,
   createTweet,
   updateTweet,
@@ -292,7 +291,13 @@ async function runAutoReply(
   const unrepliedMentions = rawMentions.filter((m) => !repliedToTweetIds.has(String(m.id)));
   if (unrepliedMentions.length === 0) return 0;
 
-  const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+  // Use the full generation context so replies inherit voice directives, negative
+  // feedback patterns, and remix preferences — same voice as auto-posts.
+  // KV reads are request-cached, so this is effectively free if refillQueue runs later.
+  const { voiceProfile } = await buildGenerationContext(agent, {
+    negativeLimit: 5,
+    directiveLimit: 10,
+  });
   const analysis = await getAnalysis(agent.id);
   const maxReplies = Math.min(unrepliedMentions.length, settings.maxRepliesPerRun || 3);
 
@@ -595,7 +600,7 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
 
-    const { voiceProfile, learnings, settings, style, recentPosts } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, settings, style, recentPosts, allTweets } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
@@ -647,9 +652,6 @@ async function refillQueue(agent: Agent, count: number): Promise<number> {
     // If momentum detected (fast feedback), bias generation toward that topic
     // momentumTopic is set in the autopilot's main posting flow and not directly accessible here
     // But the trending data already captures what's hot, so peer study handles this implicitly
-
-    // Get recent posts and existing items to avoid repetition
-    const allTweets = await getTweets(agent.id);
 
     // Determine how many should be marketing tweets
     const marketingCount = settings.marketingEnabled && settings.marketingMix > 0

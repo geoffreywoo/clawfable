@@ -270,7 +270,8 @@ export async function studyPeerStyles(
       .join('\n');
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      // Pattern extraction from a small list — Haiku is sufficient and ~10x cheaper.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
       system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
       messages: [{
