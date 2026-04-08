@@ -5,6 +5,8 @@ import {
   isDailyCapReached,
   isRepetitiveContent,
   isNearDuplicate,
+  getTweetCompletenessIssue,
+  isCompleteTweetDraft,
   pickDiverseTweet,
   clampPostsPerDay,
   DAILY_HARD_CAP,
@@ -194,6 +196,32 @@ describe('isNearDuplicate', () => {
   it('returns false for empty candidate', () => {
     const result = isNearDuplicate('', ['some content']);
     expect(result.isDuplicate).toBe(false);
+  });
+});
+
+// ─── Draft completeness detection ──────────────────────────────────────────
+
+describe('getTweetCompletenessIssue', () => {
+  it('flags dangling trailing fragments like the production truncation case', () => {
+    const issue = getTweetCompletenessIssue(
+      'psa to every founder still raising pre-seed rounds:\n\nyour runway is compressing fast\n\nthe only'
+    );
+    expect(issue).toContain('incomplete trailing fragment');
+  });
+
+  it('flags drafts that end with unfinished delimiters', () => {
+    const issue = getTweetCompletenessIssue('the real opportunity is this:');
+    expect(issue).toContain('unfinished clause');
+  });
+
+  it('accepts complete tweets even without ending punctuation', () => {
+    const issue = getTweetCompletenessIssue(
+      'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
+    );
+    expect(issue).toBeNull();
+    expect(isCompleteTweetDraft(
+      'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
+    )).toBe(true);
   });
 });
 

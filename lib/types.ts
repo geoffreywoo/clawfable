@@ -29,6 +29,7 @@ export interface BillingSummary {
   status: BillingStatus;
   label: string;
   isPaid: boolean;
+  grandfathered: boolean;
   agentCount: number;
   maxAgents: number;
   agentsRemaining: number;

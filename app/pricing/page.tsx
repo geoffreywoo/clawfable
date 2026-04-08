@@ -180,6 +180,21 @@ export default function PricingPage() {
       );
     }
 
+    if (user.billing.grandfathered) {
+      if (isCurrentPlan) {
+        return (
+          <button className="btn btn-primary btn-wide" disabled>
+            GRANDFATHERED ACCESS
+          </button>
+        );
+      }
+      return (
+        <Link href="/" className="btn btn-outline btn-wide">
+          OPEN MISSION CONTROL
+        </Link>
+      );
+    }
+
     if (user.billing.isPaid) {
       return (
         <button className={`btn ${isCurrentPlan ? 'btn-primary' : 'btn-outline'} btn-wide`} onClick={handlePortal} disabled={billingLoading !== null}>
@@ -239,6 +254,11 @@ export default function PricingPage() {
               Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
               hands-off posting, auto-replies, proactive engagement, and multi-agent control.
             </p>
+            {user?.billing.grandfathered && (
+              <p className="pricing-hero-note" style={{ marginTop: '12px' }}>
+                This X account has grandfathered full access, so billing is not required for your own internal fleet.
+              </p>
+            )}
             <div className="pricing-hero-actions">
               {!authLoading && !user ? (
                 <button className="landing-cta-btn" onClick={handleLogin} disabled={loginLoading}>

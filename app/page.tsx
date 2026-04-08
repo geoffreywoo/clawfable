@@ -129,7 +129,9 @@ export default function HomePage() {
   const billing = user?.billing ?? null;
   const canCreateAgent = billing?.canCreateAgent ?? true;
   const planStatusLabel = billing
-    ? billing.plan === 'free'
+    ? billing.grandfathered
+      ? 'GRANDFATHERED ACCESS'
+      : billing.plan === 'free'
       ? 'FREE'
       : `${billing.label.toUpperCase()} · ${billing.status.toUpperCase()}`
     : 'FREE';
@@ -395,7 +397,9 @@ export default function HomePage() {
                         PLAN CAPACITY
                       </p>
                       <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text)', marginTop: '6px', lineHeight: 1.6 }}>
-                        {billing.maxAgents} agent{billing.maxAgents === 1 ? '' : 's'} on {billing.label}. Paid plans unlock the automation loop.
+                        {billing.grandfathered
+                          ? `This account has grandfathered full access with up to ${billing.maxAgents} agents and the automation layer unlocked.`
+                          : `${billing.maxAgents} agent${billing.maxAgents === 1 ? '' : 's'} on ${billing.label}. Paid plans unlock the automation loop.`}
                       </p>
                       {billing.checkoutReady && !billing.isPaid && (
                         <button
@@ -430,6 +434,11 @@ export default function HomePage() {
                       ? 'Open any agent to inspect queue, learnings, and automation settings from one place.'
                       : 'Manual compose, queue review, and learning remain open. Upgrade when you want hands-off posting and reply automation.'}
                 </p>
+                {billing?.grandfathered && (
+                  <p className="home-brief-body" style={{ marginTop: '10px' }}>
+                    This login is grandfathered for full access, so billing limits will not block agent creation or automation for your own accounts.
+                  </p>
+                )}
               </div>
               <div className="home-brief-metrics">
                 <div className="home-brief-metric">
@@ -551,7 +560,9 @@ export default function HomePage() {
                         : 'Spin up another voice and connect X'
                       : billing?.checkoutReady
                         ? 'Upgrade to add more agents and unlock automation'
-                        : `Current plan allows ${billing?.maxAgents ?? 1} agent${billing?.maxAgents === 1 ? '' : 's'}`}
+                        : billing?.grandfathered
+                          ? `Grandfathered full access includes up to ${billing?.maxAgents ?? 25} agents`
+                          : `Current plan allows ${billing?.maxAgents ?? 1} agent${billing?.maxAgents === 1 ? '' : 's'}`}
                   </p>
                 </div>
               </div>

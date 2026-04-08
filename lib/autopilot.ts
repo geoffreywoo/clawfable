@@ -39,6 +39,7 @@ import {
   isNearDuplicate,
   pickDiverseTweet,
   clampPostsPerDay,
+  getTweetCompletenessIssue,
 } from './survivability';
 import { getAutonomyConfidenceThreshold } from './candidate-ranking';
 import Anthropic from '@anthropic-ai/sdk';
@@ -221,12 +222,50 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     .filter((e) => (!e.action || e.action === 'posted') && e.content)
     .slice(0, 10)
     .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
+  const validationPassedQueue = [];
+  for (const queuedTweet of activeQueue) {
+    const completenessIssue = getTweetCompletenessIssue(queuedTweet.content);
+    if (!completenessIssue) {
+      validationPassedQueue.push(queuedTweet);
+      continue;
+    }
+
+    const quarantineReason = `${completenessIssue} Draft quarantined until reviewed.`;
+    await updateTweet(queuedTweet.id, {
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason,
+    });
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: queuedTweet.id,
+      xTweetId: queuedTweet.xTweetId || '',
+      content: queuedTweet.content,
+      format: queuedTweet.format || 'unknown',
+      topic: queuedTweet.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'error',
+      reason: quarantineReason,
+    });
+  }
+
+  if (validationPassedQueue.length === 0) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? 'Sent replies, but all queued tweets failed completeness checks and were quarantined for review.'
+        : 'All queued tweets failed completeness checks and were quarantined for review.',
+      repliesSent,
+    };
+  }
+
   const confidenceThreshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
   const effectiveConfidence = (tweet: { confidenceScore?: number | null; candidateScore?: number | null }) =>
     tweet.confidenceScore ?? (typeof tweet.candidateScore === 'number' ? tweet.candidateScore / 100 : 0.67);
   const confidenceFiltered = settings.autonomyMode === 'explore'
-    ? activeQueue
-    : activeQueue.filter((tweet) => effectiveConfidence(tweet) >= confidenceThreshold);
+    ? validationPassedQueue
+    : validationPassedQueue.filter((tweet) => effectiveConfidence(tweet) >= confidenceThreshold);
 
   if (confidenceFiltered.length === 0) {
     return {

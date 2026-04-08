@@ -28,6 +28,13 @@ const PLAN_ENTITLEMENTS: Record<BillingPlan, BillingEntitlements> = {
   },
 };
 
+const DEFAULT_GRANDFATHERED_USERNAMES = new Set([
+  'geoffreywoo',
+  'antifund',
+  'antihunterai',
+  'clawfable',
+]);
+
 export class BillingError extends Error {
   readonly status: number;
   readonly code: string;
@@ -61,30 +68,76 @@ export function isPaidStatus(status: BillingStatus): boolean {
   return status === 'active' || status === 'trialing';
 }
 
-export function getEntitlementsForUser(user: User): BillingEntitlements {
+function normalizeUsername(username: string | null | undefined): string {
+  return String(username || '').replace(/^@/, '').trim().toLowerCase();
+}
+
+function getGrandfatheredUsernames(): Set<string> {
+  const configured = (process.env.BILLING_GRANDFATHERED_USERNAMES || '')
+    .split(',')
+    .map((entry) => normalizeUsername(entry))
+    .filter(Boolean);
+  return new Set([...DEFAULT_GRANDFATHERED_USERNAMES, ...configured]);
+}
+
+export function isGrandfatheredUser(user: Pick<User, 'username'>): boolean {
+  return getGrandfatheredUsernames().has(normalizeUsername(user.username));
+}
+
+function getEffectiveBillingState(user: User): {
+  grandfathered: boolean;
+  plan: BillingPlan;
+  status: BillingStatus;
+  label: string;
+  isPaid: boolean;
+  entitlements: BillingEntitlements;
+} {
+  const grandfathered = isGrandfatheredUser(user);
   const status = normalizeBillingStatus(user.billingStatus);
   const plan = normalizePlan(user.plan);
+  if (grandfathered) {
+    return {
+      grandfathered: true,
+      plan: 'scale',
+      status: 'active',
+      label: 'Grandfathered',
+      isPaid: true,
+      entitlements: PLAN_ENTITLEMENTS.scale,
+    };
+  }
+
   const effectivePlan = isPaidStatus(status) ? plan : 'free';
-  return PLAN_ENTITLEMENTS[effectivePlan];
+  return {
+    grandfathered: false,
+    plan,
+    status,
+    label: PLAN_LABELS[plan],
+    isPaid: isPaidStatus(status),
+    entitlements: PLAN_ENTITLEMENTS[effectivePlan],
+  };
+}
+
+export function getEntitlementsForUser(user: User): BillingEntitlements {
+  return getEffectiveBillingState(user).entitlements;
 }
 
 export function getBillingSummary(user: User, agentCount: number): BillingSummary {
-  const plan = normalizePlan(user.plan);
-  const status = normalizeBillingStatus(user.billingStatus);
-  const entitlements = getEntitlementsForUser(user);
+  const effective = getEffectiveBillingState(user);
+  const entitlements = effective.entitlements;
   const configured = isStripeConfigured();
-  const checkoutReady = isStripeCheckoutConfigured();
-  const portalReady = configured && Boolean(user.stripeCustomerId);
+  const checkoutReady = effective.grandfathered ? false : isStripeCheckoutConfigured();
+  const portalReady = effective.grandfathered ? false : configured && Boolean(user.stripeCustomerId);
   const agentsRemaining = Math.max(entitlements.maxAgents - agentCount, 0);
 
   return {
     configured,
     checkoutReady,
     portalReady,
-    plan,
-    status,
-    label: PLAN_LABELS[plan],
-    isPaid: isPaidStatus(status),
+    plan: effective.plan,
+    status: effective.status,
+    label: effective.label,
+    isPaid: effective.isPaid,
+    grandfathered: effective.grandfathered,
     agentCount,
     maxAgents: entitlements.maxAgents,
     agentsRemaining,

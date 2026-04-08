@@ -243,8 +243,9 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
             color: 'var(--text)',
             lineHeight: 1.6,
           }}>
-            Free keeps manual compose, queue review, and the learning surfaces open.
-            Paid plans unlock auto-posting, auto-replies, proactive engagement, and hands-off queue execution.
+            {billing.grandfathered
+              ? 'This account has grandfathered full access. Automation stays unlocked without an active paid subscription.'
+              : 'Free keeps manual compose, queue review, and the learning surfaces open. Paid plans unlock auto-posting, auto-replies, proactive engagement, and hands-off queue execution.'}
           </p>
           <p style={{
             fontFamily: 'var(--font-mono)',
@@ -252,7 +253,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
             color: 'var(--text-dim)',
             marginTop: '8px',
           }}>
-            Current plan: {billing.label.toUpperCase()} · {billing.agentCount}/{billing.maxAgents} agents
+            Current access: {billing.label.toUpperCase()} · {billing.agentCount}/{billing.maxAgents} agents
           </p>
           <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
             {billing.checkoutReady && (

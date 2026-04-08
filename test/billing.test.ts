@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { assertCanCreateAgent, assertCanUseAutopilot, BillingError, getBillingSummary } from '@/lib/billing';
+import { assertCanCreateAgent, assertCanUseAutopilot, BillingError, getBillingSummary, isGrandfatheredUser } from '@/lib/billing';
 import type { User } from '@/lib/types';
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: 'user-1',
-    username: 'geoffreywoo',
-    name: 'Geoffrey Woo',
+    username: 'regularuser',
+    name: 'Regular User',
     stripeCustomerId: null,
     stripeSubscriptionId: null,
     billingEmail: null,
@@ -62,5 +62,29 @@ describe('billing entitlements', () => {
 
   it('throws when a free user tries to use automation', () => {
     expect(() => assertCanUseAutopilot(makeUser(), 1)).toThrowError(BillingError);
+  });
+
+  it('recognizes the internal fleet handles as grandfathered', () => {
+    expect(isGrandfatheredUser(makeUser({ username: 'geoffreywoo' }))).toBe(true);
+    expect(isGrandfatheredUser(makeUser({ username: '@antihunterai' }))).toBe(true);
+    expect(isGrandfatheredUser(makeUser({ username: 'someoneelse' }))).toBe(false);
+  });
+
+  it('gives grandfathered accounts full access without an active subscription', () => {
+    const summary = getBillingSummary(makeUser({
+      username: 'clawfable',
+      billingStatus: 'free',
+      plan: 'free',
+    }), 4);
+
+    expect(summary.grandfathered).toBe(true);
+    expect(summary.label).toBe('Grandfathered');
+    expect(summary.plan).toBe('scale');
+    expect(summary.isPaid).toBe(true);
+    expect(summary.maxAgents).toBe(25);
+    expect(summary.canCreateAgent).toBe(true);
+    expect(summary.canUseAutopilot).toBe(true);
+    expect(summary.checkoutReady).toBe(false);
+    expect(summary.portalReady).toBe(false);
   });
 });

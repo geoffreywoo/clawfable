@@ -156,6 +156,63 @@ export function isNearDuplicate(
   return { isDuplicate: false };
 }
 
+// ─── Draft completeness detection ──────────────────────────────────────────
+
+const TERMINAL_PUNCTUATION_RE = /[.!?…'")\]]$/;
+const TRAILING_DELIMITER_RE = /(?:[,:;\/\\([{]|[-–—])$/;
+const INCOMPLETE_FRAGMENT_RE = /^(?:the|a|an)\s+(?:only|best|worst|first|last|next|real|whole|same|main|biggest|smallest|hardest|easiest|most|least|key|problem|point|reason|question|answer|difference)\b|^(?:because|while|if|when|unless|until|although|though|where|which|who|whose|that|than|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across)\b/i;
+
+function hasUnbalancedOpeningDelimiters(text: string): boolean {
+  const delimiterPairs: Array<[string, string]> = [
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+  ];
+
+  for (const [open, close] of delimiterPairs) {
+    const opens = (text.match(new RegExp(`\\${open}`, 'g')) || []).length;
+    const closes = (text.match(new RegExp(`\\${close}`, 'g')) || []).length;
+    if (opens > closes) return true;
+  }
+
+  const doubleQuotes = (text.match(/"/g) || []).length;
+  return doubleQuotes % 2 === 1;
+}
+
+export function getTweetCompletenessIssue(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return 'Draft is empty.';
+
+  if (hasUnbalancedOpeningDelimiters(trimmed)) {
+    return 'Draft ends with an unclosed parenthesis, bracket, or quote.';
+  }
+
+  const lines = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lastLine = lines[lines.length - 1] || trimmed;
+  const lastLineWordCount = lastLine.split(/\s+/).filter(Boolean).length;
+
+  if (TRAILING_DELIMITER_RE.test(lastLine)) {
+    return `Draft ends with an unfinished clause (“${lastLine}”).`;
+  }
+
+  if (
+    !TERMINAL_PUNCTUATION_RE.test(lastLine)
+    && lastLineWordCount <= 4
+    && INCOMPLETE_FRAGMENT_RE.test(lastLine)
+  ) {
+    return `Draft ends with an incomplete trailing fragment (“${lastLine}”).`;
+  }
+
+  return null;
+}
+
+export function isCompleteTweetDraft(text: string): boolean {
+  return getTweetCompletenessIssue(text) === null;
+}
+
 // ─── Queue selection with diversity ─────────────────────────────────────────
 
 /**

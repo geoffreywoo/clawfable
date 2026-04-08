@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   decodeKeys: vi.fn(),
   getMe: vi.fn(),
   getMentionsFromTwitter: vi.fn(),
+  getTweetCompletenessIssue: vi.fn((_: string) => null),
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -81,6 +82,7 @@ vi.mock('@/lib/survivability', () => ({
   isNearDuplicate: vi.fn(() => false),
   pickDiverseTweet: vi.fn((queue: Array<unknown>) => queue[0] ?? null),
   clampPostsPerDay: vi.fn((value: number) => value),
+  getTweetCompletenessIssue: mocks.getTweetCompletenessIssue,
 }));
 
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -156,6 +158,13 @@ const queuedTweet = {
   createdAt: '2026-04-07T00:00:00.000Z',
 };
 
+const validQueuedTweet = {
+  ...queuedTweet,
+  id: '523',
+  content: 'your moat is not distribution if the model can rebuild your feature overnight',
+  topic: 'startup',
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 
@@ -189,6 +198,7 @@ beforeEach(() => {
     },
   });
   mocks.getMentionsFromTwitter.mockResolvedValue([]);
+  mocks.getTweetCompletenessIssue.mockImplementation(() => null);
 });
 
 describe('autopilot remote debug logging', () => {
@@ -257,5 +267,41 @@ describe('autopilot remote debug logging', () => {
     expect(failureEntry.reason).toContain('reply_to_tweet [403 Forbidden]');
     expect(failureEntry.reason).toContain('mentionId=mention-1');
     expect(failureEntry.reason).toContain('author=@alice');
+  });
+
+  it('quarantines incomplete queued drafts before they can post', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([
+      {
+        ...queuedTweet,
+        content: 'while youre pitching vcs on product-market fit\n\nthe only',
+      },
+      validQueuedTweet,
+    ]);
+    mocks.getTweetCompletenessIssue.mockImplementation((text: string) =>
+      text.endsWith('the only')
+        ? 'Draft ends with an incomplete trailing fragment (“the only”).'
+        : null
+    );
+    mocks.postTweet.mockResolvedValue({
+      tweetId: 'x-valid-1',
+      tweetUrl: 'https://x.com/debugbot/status/x-valid-1',
+      username: 'debugbot',
+    });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe('523');
+    expect(mocks.updateTweet).toHaveBeenCalledWith('522', expect.objectContaining({
+      quarantineReason: expect.stringContaining('incomplete trailing fragment'),
+    }));
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), validQueuedTweet.content);
+
+    const quarantineEntry = mocks.addPostLogEntry.mock.calls
+      .map(([, entry]) => entry)
+      .find((entry) => entry.tweetId === '522' && entry.action === 'error');
+
+    expect(quarantineEntry).toBeDefined();
+    expect(quarantineEntry.reason).toContain('Draft quarantined until reviewed');
   });
 });

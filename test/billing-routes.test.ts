@@ -76,6 +76,12 @@ const freeUser = {
   createdAt: '2026-04-08T00:00:00.000Z',
 } as const;
 
+const grandfatheredUser = {
+  ...freeUser,
+  username: 'antifund',
+  name: 'Antifund',
+} as const;
+
 describe('billing route guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -157,5 +163,38 @@ describe('billing route guards', () => {
     expect(response.status).toBe(403);
     expect(data.code).toBe('autopilot_locked');
     expect(mocks.runAutopilot).not.toHaveBeenCalled();
+  });
+
+  it('lets grandfathered users create additional agents without upgrading', async () => {
+    mocks.requireUser.mockResolvedValue(grandfatheredUser);
+    mocks.getUserAgentIds.mockResolvedValue(['agent-1']);
+    mocks.createAgent.mockResolvedValue({ id: 'agent-2' });
+
+    const response = await createAgentPOST(new Request('http://localhost/api/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle: 'newagent', name: 'New Agent', soulMd: '# soul' }),
+    }) as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.createAgent).toHaveBeenCalled();
+  });
+
+  it('lets grandfathered users enable autopilot without billing lock', async () => {
+    mocks.requireAgentAccess.mockResolvedValue({
+      user: grandfatheredUser,
+      agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
+    });
+    mocks.getUserAgentIds.mockResolvedValue(['agent-1']);
+    mocks.updateProtocolSettings.mockResolvedValue({ enabled: true });
+
+    const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateProtocolSettings).toHaveBeenCalled();
   });
 });

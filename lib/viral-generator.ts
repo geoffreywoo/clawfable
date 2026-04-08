@@ -9,7 +9,7 @@ import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
-import { isNearDuplicate } from './survivability';
+import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
 
 const anthropic = new Anthropic();
 
@@ -416,6 +416,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
           if (!cleanContent) continue;
+          if (getTweetCompletenessIssue(cleanContent)) continue;
           const slot = Number(parsed.slot || 0);
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
