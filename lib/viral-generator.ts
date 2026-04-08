@@ -4,10 +4,11 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { AccountAnalysis, AgentLearnings, StyleSignals } from './types';
+import type { AccountAnalysis, AgentLearnings, PersonalizationMemory, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
+import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
 import { isNearDuplicate } from './survivability';
 
 const anthropic = new Anthropic();
@@ -23,6 +24,7 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
 export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
   enabledFormats: string[];
+  autonomyMode: 'safe' | 'balanced' | 'explore';
   exploration: {
     rate: number;
     underusedFormats: string[];
@@ -38,6 +40,7 @@ export interface ContentStyleConfig {
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],
+  autonomyMode: 'balanced',
   exploration: {
     rate: 35,
     underusedFormats: [],
@@ -97,12 +100,14 @@ function collectQuotableTweets(trending: TrendingTopic[]): Array<{
 function buildSystemPrompt(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
-  count: number,
+  finalCount: number,
+  candidateCount: number,
   trending: TrendingTopic[] | null,
   learnings: AgentLearnings | null,
   soulMd: string | null,
   style: ContentStyleConfig = DEFAULT_STYLE,
   recentPosts: string[] = [],
+  memory: PersonalizationMemory | null = null,
 ): string {
   const parts: string[] = [];
 
@@ -259,13 +264,25 @@ ${soulMd}`);
   // Dynamic strategy based on user config
   const { lengthMix, enabledFormats } = style;
   const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
-  const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
+  const explorationCount = finalCount >= 4 ? Math.max(1, Math.round((finalCount * explorationRate) / 100)) : 0;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
   const slotPlan = buildBanditSlotPlan(style.banditPolicy, {
-    count,
+    count: finalCount,
     explorationRate,
     biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
   });
+
+  if (memory) {
+    if (memory.alwaysDoMoreOfThis.length > 0) {
+      parts.push(`\n## PERSONALIZATION: DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.neverDoThisAgain.length > 0) {
+      parts.push(`\n## PERSONALIZATION: AVOID THIS\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.operatorHiddenPreferences.length > 0) {
+      parts.push(`\n## OPERATOR PREFERENCES (inferred from edits/remixes)\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`);
+    }
+  }
 
   if (style.bias.scheduledTopic || style.bias.momentumTopic) {
     parts.push(`\n## ACTIVE TOPIC BIAS`);
@@ -282,7 +299,7 @@ ${soulMd}`);
     const underusedFormats = style.exploration.underusedFormats.slice(0, 4).join(', ') || 'any format that has not been used recently';
     const underusedTopics = style.exploration.underusedTopics.slice(0, 4).join(', ') || 'stale core topics that deserve another pass';
     parts.push(`\n## EXPLORATION BUDGET
-- ${explorationCount} of the ${count} tweets in this batch must be deliberate experiments so the account learns faster.
+- ${explorationCount} of the ${finalCount} tweets in this batch must be deliberate experiments so the account learns faster.
 - Keep those experiments on-brand, but push into fresher territory instead of rewriting the same take.
 - Prefer these underused formats first: ${underusedFormats}
 - Prefer these underused or stale core topics next: ${underusedTopics}
@@ -297,6 +314,13 @@ This batch is allocated by a multi-armed bandit controller. Each slot is an actu
       parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | ${plan.rationale}`);
     }
   }
+
+  parts.push(`\n## AUTONOMY MODE
+- Current operating mode: ${style.autonomyMode.toUpperCase()}
+- SAFE means: tighter quality bar, low policy risk, fewer weird experiments.
+- EXPLORE means: take more calculated novelty bets so the system learns faster.
+- BALANCED means: split the difference.
+- Regardless of mode, stay unmistakably in-voice.`);
 
   parts.push(`\n## STRATEGY
 All tweets are original standalone posts. No quote tweets.
@@ -320,6 +344,8 @@ ${formats.join(', ')}
 6. Across a batch, vary format, hook, and target topic. Do not write near-duplicates or multiple tweets that make the same point.
 7. Never violate the anti-goals.`);
 
+  parts.push(`\nGenerate ${candidateCount} candidates so a downstream ranker can pick the strongest ${finalCount}. That means you should include a few ambitious bets, not just safe paraphrases.`);
+
   return parts.join('\n');
 }
 
@@ -335,8 +361,11 @@ export async function generateViralBatch(
   soulMd: string | null = null,
   style: ContentStyleConfig = DEFAULT_STYLE,
   recentPosts: string[] = [],
-): Promise<ProtocolTweet[]> {
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, trending, learnings, soulMd, style, recentPosts);
+  allTweets: Tweet[] = [],
+  memory: PersonalizationMemory | null = null,
+): Promise<RankedProtocolTweet[]> {
+  const candidateCount = count <= 1 ? 5 : count <= 3 ? 6 : count <= 5 ? 8 : Math.min(12, count + 4);
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, style, recentPosts, memory);
 
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
   const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
@@ -346,7 +375,7 @@ export async function generateViralBatch(
     explorationRate,
     biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
   });
-  const userPrompt = `Generate exactly ${count} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
+  const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
@@ -371,7 +400,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       .map((block) => block.text)
       .join('');
 
-    const tweets: ProtocolTweet[] = [];
+    const tweets: RankedProtocolTweet[] = [];
     const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];
     const acceptedContents: string[] = [];
     const usedFormatTopicCombos = new Set<string>();
@@ -414,9 +443,29 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       if (b.slot > 0) return 1;
       return 0;
     });
-    tweets.push(...stagedTweets.map(({ slot: _slot, ...tweet }) => tweet));
+    const ranked = rankGeneratedTweets(
+      stagedTweets.map(({ slot: _slot, ...tweet }) => tweet),
+      {
+        voiceProfile,
+        learnings,
+        style,
+        recentPosts,
+        allTweets,
+        memory: memory || {
+          alwaysDoMoreOfThis: [],
+          neverDoThisAgain: [],
+          topicsWithMomentum: [],
+          formatsUnderTested: [],
+          operatorHiddenPreferences: [],
+          identityConstraints: [],
+          weeklyChanges: [],
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    );
+    tweets.push(...selectTopRankedTweets(ranked, count));
 
-    return tweets.slice(0, count);
+    return tweets;
   } catch (err) {
     console.error('Claude generation error:', err);
     throw err; // Don't swallow — let the caller handle it
@@ -433,8 +482,11 @@ export async function generateViralTweet(
   learnings: AgentLearnings | null = null,
   soulMd: string | null = null,
   style: ContentStyleConfig = DEFAULT_STYLE,
+  recentPosts: string[] = [],
+  allTweets: Tweet[] = [],
+  memory: PersonalizationMemory | null = null,
 ): Promise<ProtocolTweet | null> {
-  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings, soulMd, style);
+  const batch = await generateViralBatch(voiceProfile, analysis, 1, trending, learnings, soulMd, style, recentPosts, allTweets, memory);
   return batch[0] || null;
 }
 

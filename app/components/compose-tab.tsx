@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { TweetDecisionPanel } from '@/app/components/tweet-decision-panel';
+import type { LearningSnapshot } from '@/lib/learning-snapshot';
 import type { Tweet, AccountAnalysis } from '@/lib/types';
 
 interface Topic {
@@ -35,10 +37,12 @@ function getTimeAgo(ts: string): string {
 export function ComposeTab({ agentId }: ComposeTabProps) {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [analysis, setAnalysis] = useState<AccountAnalysis | null>(null);
+  const [learningSnapshot, setLearningSnapshot] = useState<LearningSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentConnected, setAgentConnected] = useState(false);
   const [generatedTweets, setGeneratedTweets] = useState<ProtocolTweet[]>([]);
+  const [openDecisionId, setOpenDecisionId] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [postingId, setPostingId] = useState<string | null>(null);
@@ -48,10 +52,12 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
     Promise.all([
       fetch(`/api/agents/${agentId}/topics`).then((r) => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/agents/${agentId}/analysis`).then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/agents/${agentId}/learning`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([t, a, agent]) => {
+    ]).then(([t, a, learning, agent]) => {
       if (Array.isArray(t)) setTopics(t);
       setAnalysis(a);
+      setLearningSnapshot(learning);
       setAgentConnected(agent?.isConnected === 1);
       setLoading(false);
     });
@@ -60,6 +66,25 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const trackSignal = async (
+    tweetId: string,
+    signalType: string,
+    rewardDelta: number,
+    metadata?: Record<string, string | number | boolean | null>,
+  ) => {
+    await fetch(`/api/agents/${agentId}/learning-signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tweetId,
+        signalType,
+        surface: 'compose',
+        rewardDelta,
+        metadata,
+      }),
+    }).catch(() => null);
   };
 
   // Generate from a trending topic
@@ -127,8 +152,16 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
     } catch { showToast('Failed to queue'); }
   };
 
-  const handleCopy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); showToast('Copied'); }
+  const handleCopy = async (tweet: ProtocolTweet) => {
+    try {
+      await navigator.clipboard.writeText(tweet.content);
+      void trackSignal(tweet.id, 'copied_to_clipboard', 0.35, {
+        confidenceScore: tweet.confidenceScore ?? null,
+        candidateScore: tweet.candidateScore ?? null,
+        generationMode: tweet.generationMode ?? null,
+      });
+      showToast('Copied');
+    }
     catch { showToast('Copy failed'); }
   };
 
@@ -242,6 +275,21 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                         {tweet.format.replace(/_/g, ' ')}
                       </span>
                     )}
+                    {tweet.generationMode && (
+                      <span className="protocol-tag" style={{
+                        fontSize: '9px',
+                        color: tweet.generationMode === 'safe' ? '#22c55e' : tweet.generationMode === 'explore' ? '#f59e0b' : '#8b5cf6',
+                        borderColor: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.35)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.35)' : 'rgba(139,92,246,0.35)',
+                        background: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.08)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.08)' : 'rgba(139,92,246,0.08)',
+                      }}>
+                        {tweet.generationMode}
+                      </span>
+                    )}
+                    {typeof tweet.confidenceScore === 'number' && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                        conf {(tweet.confidenceScore * 100).toFixed(0)}%
+                      </span>
+                    )}
                     {tweet.rationale && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                         {tweet.rationale}
@@ -249,10 +297,22 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                     )}
                   </div>
                 )}
+                <div className="decision-inline-actions">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ paddingInline: 0, color: openDecisionId === tweet.id ? '#8b5cf6' : 'var(--text-muted)' }}
+                    onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
+                  >
+                    {openDecisionId === tweet.id ? 'HIDE WHY' : 'WHY THIS TWEET'}
+                  </button>
+                </div>
+                {openDecisionId === tweet.id && (
+                  <TweetDecisionPanel tweet={tweet} snapshot={learningSnapshot} />
+                )}
                 <div className="tweet-footer">
                   <span className="char-count">{tweet.content.length} chars</span>
                   <div className="tweet-actions">
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet.content)}>COPY</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>COPY</button>
                     <button className="btn btn-ghost btn-sm" style={{ color: '#8b5cf6' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
                     <button
                       className="btn btn-ghost btn-sm"

@@ -19,6 +19,7 @@ import {
   getPostLog,
   updateTweet,
   saveFeedback,
+  addLearningSignal,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
@@ -157,6 +158,15 @@ export async function checkPerformance(agent: Agent): Promise<number> {
           intentSummary: inferredReason,
           source: 'queue_delete',
           userProvidedReason: false,
+        });
+        await addLearningSignal(agent.id, {
+          tweetId: tweet.id,
+          xTweetId: tweet.xTweetId || undefined,
+          signalType: 'deleted_from_x',
+          surface: 'cron',
+          rewardDelta: -0.8,
+          reason: inferredReason,
+          inferred: true,
         });
         await addPostLogEntry(agent.id, {
           agentId: agent.id,

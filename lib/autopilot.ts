@@ -9,6 +9,7 @@
 
 import type { Agent, AgentLearnings, ProtocolSettings } from './types';
 import {
+  addLearningSignal,
   getProtocolSettings,
   updateProtocolSettings,
   getQueuedTweets,
@@ -39,6 +40,7 @@ import {
   pickDiverseTweet,
   clampPostsPerDay,
 } from './survivability';
+import { getAutonomyConfidenceThreshold } from './candidate-ranking';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -189,23 +191,27 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   // Ensure queue has content
   let queue = await getQueuedTweets(agentId);
-  if (queue.length < settings.minQueueSize) {
-    const generated = await refillQueue(agent, settings.minQueueSize - queue.length + 3, {
+  let activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+  if (activeQueue.length < settings.minQueueSize) {
+    const generated = await refillQueue(agent, settings.minQueueSize - activeQueue.length + 3, {
       scheduledTopic: todaysTopic,
       momentumTopic,
     });
     if (generated > 0) {
       queue = await getQueuedTweets(agentId);
+      activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
     }
   }
 
-  if (queue.length === 0) {
+  if (activeQueue.length === 0) {
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0
-        ? `Sent ${repliesSent} replies. Queue empty for posting.`
-        : 'Queue empty and generation failed',
+        ? `Sent ${repliesSent} replies. No active queued tweet cleared posting filters.`
+        : queue.length > 0
+          ? 'All queued tweets are quarantined. Review the queue before posting again.'
+          : 'Queue empty and generation failed',
       repliesSent,
     };
   }
@@ -215,17 +221,53 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     .filter((e) => (!e.action || e.action === 'posted') && e.content)
     .slice(0, 10)
     .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
-  const tweet = pickDiverseTweet(queue, recentPostEntries) || queue[queue.length - 1];
+  const confidenceThreshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
+  const effectiveConfidence = (tweet: { confidenceScore?: number | null; candidateScore?: number | null }) =>
+    tweet.confidenceScore ?? (typeof tweet.candidateScore === 'number' ? tweet.candidateScore / 100 : 0.67);
+  const confidenceFiltered = settings.autonomyMode === 'explore'
+    ? activeQueue
+    : activeQueue.filter((tweet) => effectiveConfidence(tweet) >= confidenceThreshold);
+
+  if (confidenceFiltered.length === 0) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. No queued tweet cleared the ${settings.autonomyMode || 'balanced'} confidence threshold (${confidenceThreshold.toFixed(2)}).`
+        : `No queued tweet cleared the ${settings.autonomyMode || 'balanced'} confidence threshold (${confidenceThreshold.toFixed(2)}).`,
+      repliesSent,
+    };
+  }
+
+  const rankedQueue = [...confidenceFiltered].sort((a, b) =>
+    (b.candidateScore ?? 0) - (a.candidateScore ?? 0) ||
+    (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0) ||
+    a.createdAt.localeCompare(b.createdAt)
+  );
+  const tweet = pickDiverseTweet(rankedQueue, recentPostEntries) || rankedQueue[0];
 
   try {
     const result = await postTweet(keys, tweet.content);
 
-    await updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId });
+    await updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId, postedAt: new Date().toISOString() });
 
     await updateProtocolSettings(agentId, {
       lastPostedAt: new Date().toISOString(),
       totalAutoPosted: settings.totalAutoPosted + 1,
     });
+
+    await addLearningSignal(agentId, {
+        tweetId: tweet.id,
+        xTweetId: result.tweetId,
+        signalType: 'x_post_succeeded',
+        surface: 'autopilot',
+        rewardDelta: 0.65,
+        metadata: {
+          confidenceScore: effectiveConfidence(tweet),
+          candidateScore: tweet.candidateScore ?? null,
+          generationMode: tweet.generationMode ?? null,
+        },
+      });
 
     await addPostLogEntry(agentId, {
       agentId,
@@ -236,6 +278,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       topic: tweet.topic || 'general',
       postedAt: new Date().toISOString(),
       source: 'autopilot',
+      reason: `Posted with confidence ${effectiveConfidence(tweet).toFixed(2)} in ${settings.autonomyMode || 'balanced'} mode.`,
     });
 
     // Funnel milestones
@@ -282,10 +325,27 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       };
     }
 
+    await updateTweet(tweet.id, {
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: message,
+    });
+    await addLearningSignal(agentId, {
+      tweetId: tweet.id,
+      signalType: 'x_post_rejected',
+      surface: 'autopilot',
+      rewardDelta: -0.75,
+      reason: message,
+      metadata: {
+        confidenceScore: effectiveConfidence(tweet),
+        candidateScore: tweet.candidateScore ?? null,
+        generationMode: tweet.generationMode ?? null,
+      },
+    });
+
     return {
       agentId,
       action: 'error',
-      reason: message,
+      reason: `${message} Draft quarantined until reviewed.`,
       tweetId: tweet.id,
       content: tweet.content,
       format: tweet.format || 'unknown',
@@ -675,7 +735,7 @@ async function refillQueue(
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
 
-    const { voiceProfile, learnings, settings, style, recentPosts, allTweets } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, settings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
@@ -742,7 +802,7 @@ async function refillQueue(
 
     // Generate organic tweets
     const batch = organicCount > 0
-      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts)
+      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory)
       : [];
 
     // Generate marketing tweets (promotional content for clawfable.com)
@@ -751,7 +811,7 @@ async function refillQueue(
       : [];
 
     // Generate agent shoutout (cross-promotion with other Clawfable agents)
-    const shoutoutBatch: Array<{ content: string; format: string; targetTopic: string; rationale: string }> = [];
+    const shoutoutBatch: MarketingTweet[] = [];
     if (settings.agentShoutouts && Math.random() < 0.15) {
       // 15% chance per refill to include a shoutout
       try {
@@ -785,6 +845,16 @@ async function refillQueue(
         status: 'queued',
         format: item.format || null,
         topic: item.targetTopic,
+        rationale: item.rationale,
+        generationMode: item.generationMode,
+        candidateScore: item.candidateScore,
+        confidenceScore: item.confidenceScore,
+        voiceScore: item.voiceScore,
+        noveltyScore: item.noveltyScore,
+        predictedEngagementScore: item.predictedEngagementScore,
+        freshnessScore: item.freshnessScore,
+        repetitionRiskScore: item.repetitionRiskScore,
+        policyRiskScore: item.policyRiskScore,
         xTweetId: null,
         quoteTweetId: null,
         quoteTweetAuthor: null,
@@ -816,6 +886,15 @@ interface MarketingTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationMode?: 'safe' | 'balanced' | 'explore';
+  candidateScore?: number;
+  confidenceScore?: number;
+  voiceScore?: number;
+  noveltyScore?: number;
+  predictedEngagementScore?: number;
+  freshnessScore?: number;
+  repetitionRiskScore?: number;
+  policyRiskScore?: number;
 }
 
 async function generateMarketingTweets(

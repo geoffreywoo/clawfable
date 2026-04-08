@@ -71,9 +71,11 @@ describe('bandit policy', () => {
     const policy = buildBanditPolicy({
       performanceHistory,
       feedback: [],
+      signals: [],
       allTweets: [],
       allowedFormats: ['hot_take', 'analysis', 'question'],
       candidateTopics: ['AI', 'Infra', 'Markets'],
+      baseline: null,
     });
 
     expect(policy.trainingSource).toBe('autopilot');
@@ -130,9 +132,11 @@ describe('bandit policy', () => {
         }),
       ],
       feedback,
+      signals: [],
       allTweets: [questionTweet, hotTakeTweet],
       allowedFormats: ['question', 'hot_take'],
       candidateTopics: ['Startups'],
+      baseline: null,
     });
 
     const questionArm = policy.formatArms.find((arm) => arm.arm === 'question');

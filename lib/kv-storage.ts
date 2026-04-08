@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal } from './types';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -302,6 +302,7 @@ const KEYS = {
   agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
   agentVoiceChat: (id: string) => `agent:${id}:voice_chat`,
   agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
+  agentSignals: (id: string) => `agent:${id}:signals`,
   cronLog: () => 'cron:log',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
@@ -441,6 +442,30 @@ function normalizeId<T extends { id: unknown }>(obj: T): T & { id: string } {
   return { ...obj, id: String(obj.id) };
 }
 
+function normalizeTweetRecord(tweet: Tweet): Tweet {
+  return {
+    ...tweet,
+    id: String(tweet.id),
+    originalContent: tweet.originalContent ?? tweet.content,
+    editCount: tweet.editCount ?? 0,
+    lastEditedAt: tweet.lastEditedAt ?? null,
+    approvedAt: tweet.approvedAt ?? null,
+    postedAt: tweet.postedAt ?? null,
+    rationale: tweet.rationale ?? null,
+    generationMode: tweet.generationMode ?? null,
+    candidateScore: tweet.candidateScore ?? null,
+    confidenceScore: tweet.confidenceScore ?? null,
+    voiceScore: tweet.voiceScore ?? null,
+    noveltyScore: tweet.noveltyScore ?? null,
+    predictedEngagementScore: tweet.predictedEngagementScore ?? null,
+    freshnessScore: tweet.freshnessScore ?? null,
+    repetitionRiskScore: tweet.repetitionRiskScore ?? null,
+    policyRiskScore: tweet.policyRiskScore ?? null,
+    quarantineReason: tweet.quarantineReason ?? null,
+    quarantinedAt: tweet.quarantinedAt ?? null,
+  };
+}
+
 // Upstash auto-deserializes JSON list entries into objects.
 // Local dev (in-memory) stores them as strings. Handle both.
 function parseListEntry<T>(entry: unknown): T | null {
@@ -456,12 +481,12 @@ function parseListEntry<T>(entry: unknown): T | null {
 export async function getTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentTweets(agentId), 0, -1);
   const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
-  return tweets.filter((t): t is Tweet => t !== null).map(normalizeId);
+  return tweets.filter((t): t is Tweet => t !== null).map(normalizeTweetRecord);
 }
 
 export async function getTweet(id: string): Promise<Tweet | null> {
   const tweet = await kvHgetall<Tweet>(KEYS.tweet(String(id)));
-  return tweet ? normalizeId(tweet) : null;
+  return tweet ? normalizeTweetRecord(tweet) : null;
 }
 
 export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
@@ -472,7 +497,7 @@ export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
 export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentQueue(agentId), 0, -1);
   const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
-  return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued').map(normalizeId);
+  return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued').map(normalizeTweetRecord);
 }
 
 export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
@@ -482,6 +507,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     id,
     agentId: data.agentId,
     content: data.content,
+    originalContent: data.content,
     type: data.type ?? 'original',
     status: data.status ?? 'draft',
     format: data.format ?? null,
@@ -491,6 +517,22 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     quoteTweetAuthor: data.quoteTweetAuthor ?? null,
     scheduledAt: data.scheduledAt ?? null,
     deletionReason: null,
+    editCount: 0,
+    lastEditedAt: null,
+    approvedAt: data.status === 'queued' ? new Date().toISOString() : null,
+    postedAt: data.status === 'posted' ? new Date().toISOString() : null,
+    rationale: data.rationale ?? null,
+    generationMode: data.generationMode ?? null,
+    candidateScore: data.candidateScore ?? null,
+    confidenceScore: data.confidenceScore ?? null,
+    voiceScore: data.voiceScore ?? null,
+    noveltyScore: data.noveltyScore ?? null,
+    predictedEngagementScore: data.predictedEngagementScore ?? null,
+    freshnessScore: data.freshnessScore ?? null,
+    repetitionRiskScore: data.repetitionRiskScore ?? null,
+    policyRiskScore: data.policyRiskScore ?? null,
+    quarantineReason: data.quarantineReason ?? null,
+    quarantinedAt: data.quarantinedAt ?? null,
     createdAt: new Date().toISOString(),
   };
   await kvHset(KEYS.tweet(id), tweet as unknown as Record<string, unknown>);
@@ -506,7 +548,30 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
   if (!existing) throw new Error(`Tweet ${id} not found`);
 
   const prevStatus = existing.status;
-  const updated = { ...existing, ...data };
+  const nextData = { ...data };
+
+  if (data.content !== undefined && data.content !== existing.content) {
+    nextData.originalContent = existing.originalContent ?? existing.content;
+    nextData.editCount = (existing.editCount ?? 0) + 1;
+    nextData.lastEditedAt = new Date().toISOString();
+    if (existing.quarantinedAt && data.quarantinedAt === undefined && data.quarantineReason === undefined) {
+      nextData.quarantinedAt = null;
+      nextData.quarantineReason = null;
+    }
+  }
+
+  if (data.status === 'queued' && prevStatus !== 'queued' && !existing.approvedAt) {
+    nextData.approvedAt = new Date().toISOString();
+  }
+
+  if (data.status === 'posted' && prevStatus !== 'posted') {
+    nextData.postedAt = typeof data.postedAt === 'string' ? data.postedAt : new Date().toISOString();
+    if (!existing.approvedAt) {
+      nextData.approvedAt = new Date().toISOString();
+    }
+  }
+
+  const updated = normalizeTweetRecord({ ...existing, ...nextData });
   await kvHset(KEYS.tweet(id), updated as unknown as Record<string, unknown>);
 
   // Sync queue list
@@ -632,6 +697,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   totalAutoPosted: 0,
   totalAutoReplied: 0,
   lengthMix: { short: 30, medium: 30, long: 40 },
+  autonomyMode: 'balanced',
   explorationRate: 35,
   enabledFormats: [],  // empty = all formats
   qtRatio: 60,
@@ -890,6 +956,51 @@ export async function getRecentNegativeFeedback(agentId: string, limit = 5): Pro
       const reason = entry.intentSummary?.trim() || entry.reason?.trim();
       return reason ? `${entry.tweetText} (why it was rejected: ${reason})` : entry.tweetText;
     });
+}
+
+// ─── Learning signal storage ────────────────────────────────────────────────
+
+const UNIQUE_SIGNAL_TYPES = new Set<LearningSignal['signalType']>([
+  'approved_without_edit',
+  'edited_before_queue',
+  'edited_before_post',
+  'reply_generated',
+  'reply_rejected',
+  'reply_posted',
+  'deleted_from_x',
+  'deleted_from_queue',
+  'x_post_rejected',
+  'x_post_succeeded',
+]);
+
+export async function addLearningSignal(
+  agentId: string,
+  signal: Omit<LearningSignal, 'id' | 'agentId' | 'createdAt'> & { createdAt?: string }
+): Promise<LearningSignal> {
+  const createdAt = signal.createdAt || new Date().toISOString();
+  const full: LearningSignal = {
+    id: `${agentId}:${signal.signalType}:${signal.tweetId || signal.xTweetId || crypto.randomUUID()}`,
+    agentId,
+    createdAt,
+    ...signal,
+  };
+
+  const existing = await getLearningSignals(agentId, 250);
+  const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const pruned = existing.filter((entry) => new Date(entry.createdAt).getTime() > ninetyDaysAgo);
+  const deduped = UNIQUE_SIGNAL_TYPES.has(full.signalType) && full.tweetId
+    ? pruned.filter((entry) => !(entry.signalType === full.signalType && entry.tweetId === full.tweetId))
+    : pruned;
+
+  deduped.unshift(full);
+  const capped = deduped.slice(0, 250);
+  await kvSet(KEYS.agentSignals(agentId), capped);
+  return full;
+}
+
+export async function getLearningSignals(agentId: string, limit = 200): Promise<LearningSignal[]> {
+  const data = await kvGet<LearningSignal[]>(KEYS.agentSignals(agentId));
+  return (data ?? []).slice(0, limit);
 }
 
 // ─── Conversation history ────────────────────────────────────────────────────

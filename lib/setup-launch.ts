@@ -1,4 +1,5 @@
 import {
+  addLearningSignal,
   deleteTweet,
   getAgent,
   getPreviewTweets,
@@ -62,6 +63,19 @@ export async function launchAgentFromPreview({
     .map((tweet) => tweet.id);
 
   await Promise.all(approvedIds.map((id) => updateTweet(id, { status: 'queued' })));
+  await Promise.all(approvedIds.map((id) => {
+    const tweet = previewTweets.find((item) => item.id === id);
+    if (!tweet) return Promise.resolve();
+    return addLearningSignal(agentId, {
+      tweetId: tweet.id,
+      signalType: 'approved_without_edit',
+      surface: 'setup',
+      rewardDelta: 0.85,
+      metadata: {
+        timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
+      },
+    });
+  }));
   await Promise.all(rejectedIds.map((id) => deleteTweet(id)));
 
   await updateProtocolSettings(agentId, {

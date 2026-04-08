@@ -61,12 +61,14 @@ export interface AgentDetail {
   hasKeys: boolean;
 }
 
+export type AutonomyMode = 'safe' | 'balanced' | 'explore';
 export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted' | 'deleted_from_x';
 
 export interface Tweet {
   id: string;
   agentId: string;
   content: string;
+  originalContent?: string | null;
   type: string; // original | reply | quote
   status: TweetStatus;
   format: string | null;  // hot_take | question | data_point | short_punch | long_form | analysis | observation
@@ -76,6 +78,22 @@ export interface Tweet {
   quoteTweetAuthor: string | null;
   scheduledAt: string | null;
   deletionReason: string | null;  // why the operator deleted this from X
+  editCount?: number;
+  lastEditedAt?: string | null;
+  approvedAt?: string | null;
+  postedAt?: string | null;
+  rationale?: string | null;
+  generationMode?: AutonomyMode | null;
+  candidateScore?: number | null;
+  confidenceScore?: number | null;
+  voiceScore?: number | null;
+  noveltyScore?: number | null;
+  predictedEngagementScore?: number | null;
+  freshnessScore?: number | null;
+  repetitionRiskScore?: number | null;
+  policyRiskScore?: number | null;
+  quarantineReason?: string | null;
+  quarantinedAt?: string | null;
   createdAt: string;
 }
 
@@ -169,6 +187,7 @@ export interface ProtocolSettings {
     medium: number;  // 0-100, percentage for 200-500 chars
     long: number;    // 0-100, percentage for 500+ chars
   };
+  autonomyMode: AutonomyMode; // safe = higher confidence, explore = learn faster
   explorationRate: number;    // 0-100, percentage of batch reserved for exploratory ideas
   enabledFormats: string[];  // which formats to use, empty = all
   qtRatio: number;           // 0-100, percentage of QTs vs originals
@@ -345,6 +364,45 @@ export interface FeedbackEntry {
   intentSummary?: string;
   source?: 'preview_feedback' | 'queue_delete';
   userProvidedReason?: boolean;
+}
+
+export type LearningSignalType =
+  | 'approved_without_edit'
+  | 'edited_before_queue'
+  | 'edited_before_post'
+  | 'copied_to_clipboard'
+  | 'copied_not_posted'
+  | 'deleted_from_queue'
+  | 'deleted_from_x'
+  | 'reply_generated'
+  | 'reply_rejected'
+  | 'reply_posted'
+  | 'x_post_rejected'
+  | 'x_post_succeeded';
+
+export interface LearningSignal {
+  id: string;
+  agentId: string;
+  tweetId?: string;
+  xTweetId?: string;
+  signalType: LearningSignalType;
+  surface: 'compose' | 'queue' | 'mentions' | 'setup' | 'autopilot' | 'manual_post' | 'cron';
+  rewardDelta: number; // -1 to 1
+  createdAt: string;
+  reason?: string;
+  inferred?: boolean;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface PersonalizationMemory {
+  alwaysDoMoreOfThis: string[];
+  neverDoThisAgain: string[];
+  topicsWithMomentum: string[];
+  formatsUnderTested: string[];
+  operatorHiddenPreferences: string[];
+  identityConstraints: string[];
+  weeklyChanges: string[];
+  updatedAt: string;
 }
 
 export interface FunnelEvent {

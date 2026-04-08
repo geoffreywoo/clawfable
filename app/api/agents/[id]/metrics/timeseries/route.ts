@@ -1,6 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPostLog, getPerformanceHistory, getBaseline } from '@/lib/kv-storage';
+import { getPostLog, getPerformanceHistory, getBaseline, getLearningSignals } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { buildGenerationContext } from '@/lib/generation-context';
+
+function pct(value: number): number {
+  return Math.round(value * 100);
+}
+
+function windowRates(
+  signals: Awaited<ReturnType<typeof getLearningSignals>>,
+  startMs: number,
+  tweetsById: Map<string, { status: string }>,
+  endMs?: number,
+) {
+  const filtered = signals.filter((signal) => {
+    const ts = new Date(signal.createdAt).getTime();
+    return ts >= startMs && (endMs === undefined || ts < endMs);
+  });
+
+  const approvals = filtered.filter((signal) =>
+    ['approved_without_edit', 'edited_before_queue', 'edited_before_post', 'reply_posted'].includes(signal.signalType)
+  ).length;
+  const rejections = filtered.filter((signal) =>
+    ['deleted_from_queue', 'deleted_from_x', 'reply_rejected', 'x_post_rejected'].includes(signal.signalType)
+  ).length;
+  const postSuccesses = filtered.filter((signal) =>
+    ['reply_posted', 'x_post_succeeded'].includes(signal.signalType)
+  ).length;
+  const deletes = filtered.filter((signal) =>
+    ['deleted_from_queue', 'deleted_from_x'].includes(signal.signalType)
+  ).length;
+  const copiedWithoutPost = filtered.filter((signal) => {
+    if (signal.signalType !== 'copied_to_clipboard' || !signal.tweetId) return false;
+    const tweet = tweetsById.get(String(signal.tweetId));
+    return !!tweet && tweet.status !== 'posted';
+  }).length;
+
+  return {
+    approvals,
+    rejections,
+    postSuccesses,
+    deletes,
+    copiedWithoutPost,
+    approvalRate: approvals / Math.max(1, approvals + rejections),
+    deleteRate: deletes / Math.max(1, deletes + postSuccesses),
+  };
+}
 
 // GET /api/agents/[id]/metrics/timeseries
 export async function GET(
@@ -9,12 +54,14 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent } = await requireAgentAccess(id);
 
-    const [postLog, perfHistory, baseline] = await Promise.all([
+    const [postLog, perfHistory, baseline, signals, context] = await Promise.all([
       getPostLog(id, 500),
       getPerformanceHistory(id, 200),
       getBaseline(id),
+      getLearningSignals(id, 250),
+      buildGenerationContext(agent).catch(() => null),
     ]);
 
     // Bucket post log by day (last 14 days)
@@ -100,6 +147,31 @@ export async function GET(
         : 0,
     } : null;
 
+    const nowMs = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const tweetsById = new Map<string, { status: string }>(
+      (context?.allTweets || []).map((tweet) => [String(tweet.id), { status: tweet.status }])
+    );
+    const currentWeek = windowRates(signals, nowMs - sevenDays, tweetsById);
+    const previousWeek = windowRates(signals, nowMs - (sevenDays * 2), tweetsById, nowMs - sevenDays);
+    const compounding = {
+      approvalRate: {
+        currentWeek: pct(currentWeek.approvalRate),
+        previousWeek: pct(previousWeek.approvalRate),
+      },
+      deleteRate: {
+        currentWeek: pct(currentWeek.deleteRate),
+        previousWeek: pct(previousWeek.deleteRate),
+      },
+      copiedWithoutPost: currentWeek.copiedWithoutPost,
+      topLearnedRules: [
+        ...(context?.memory.alwaysDoMoreOfThis || []),
+        ...(context?.memory.operatorHiddenPreferences || []),
+      ].slice(0, 5),
+      weeklyChanges: context?.memory.weeklyChanges || [],
+      memory: context?.memory || null,
+    };
+
     return NextResponse.json({
       baseline: baseline ? {
         avgLikes: baseline.avgLikes,
@@ -118,6 +190,7 @@ export async function GET(
       topicBreakdown: topicBreakdown.slice(0, 5),
       period: '14d',
       dataReady: recentPerf.length >= 5 && baseline !== null,
+      compounding,
     });
   } catch (err) {
     try { return handleAuthError(err); } catch {}

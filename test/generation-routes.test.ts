@@ -101,6 +101,7 @@ describe('generation route wiring', () => {
         totalAutoPosted: 0,
         totalAutoReplied: 0,
         lengthMix: { short: 20, medium: 40, long: 40 },
+        autonomyMode: 'balanced',
         explorationRate: 35,
         enabledFormats: ['hot_take'],
         qtRatio: 0,
@@ -119,6 +120,7 @@ describe('generation route wiring', () => {
       style: {
         lengthMix: { short: 20, medium: 40, long: 40 },
         enabledFormats: ['hot_take'],
+        autonomyMode: 'balanced',
         exploration: {
           rate: 35,
           underusedFormats: ['question'],
@@ -130,10 +132,35 @@ describe('generation route wiring', () => {
         },
       },
       recentPosts: ['recent tweet'],
+      allTweets: [],
+      memory: {
+        alwaysDoMoreOfThis: ['Lead with specifics'],
+        neverDoThisAgain: ['Avoid generic claims'],
+        topicsWithMomentum: ['AI'],
+        formatsUnderTested: ['question needs more data'],
+        operatorHiddenPreferences: ['Question hooks show up in edits'],
+        identityConstraints: ['Never be cringe'],
+        weeklyChanges: ['Approval rate improved this week'],
+        updatedAt: new Date().toISOString(),
+      },
     });
 
     generateViralBatchMock.mockResolvedValue([
-      { content: 'Generated tweet', format: 'hot_take', targetTopic: 'AI', rationale: 'good' },
+      {
+        content: 'Generated tweet',
+        format: 'hot_take',
+        targetTopic: 'AI',
+        rationale: 'good',
+        generationMode: 'balanced',
+        candidateScore: 82,
+        confidenceScore: 0.74,
+        voiceScore: 0.7,
+        noveltyScore: 0.8,
+        predictedEngagementScore: 0.76,
+        freshnessScore: 0.68,
+        repetitionRiskScore: 0.12,
+        policyRiskScore: 0.1,
+      },
     ]);
   });
 
@@ -159,8 +186,10 @@ describe('generation route wiring', () => {
       null,
       expect.objectContaining({ totalTracked: 12 }),
       '# soul',
-      expect.objectContaining({ enabledFormats: ['hot_take'] }),
-      ['recent tweet']
+      expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
+      ['recent tweet'],
+      [],
+      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] })
     );
   });
 
@@ -186,8 +215,10 @@ describe('generation route wiring', () => {
       null,
       expect.objectContaining({ totalTracked: 12 }),
       '# soul',
-      expect.objectContaining({ enabledFormats: ['hot_take'] }),
-      ['recent tweet']
+      expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
+      ['recent tweet'],
+      [],
+      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] })
     );
   });
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createTweet, getAnalysis } from '@/lib/kv-storage';
-import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { buildGenerationContext } from '@/lib/generation-context';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -21,7 +21,10 @@ export async function POST(
       return NextResponse.json({ error: 'content and authorHandle required' }, { status: 400 });
     }
 
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+    const { voiceProfile, memory } = await buildGenerationContext(agent, {
+      negativeLimit: 5,
+      directiveLimit: 10,
+    });
     const analysis = await getAnalysis(id);
 
     // Build a rich system prompt with full identity awareness
@@ -41,6 +44,13 @@ export async function POST(
 - Style: ${voiceProfile.communicationStyle}
 - Topics: ${voiceProfile.topics.join(', ')}
 - Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
+
+    if (memory.alwaysDoMoreOfThis.length > 0) {
+      systemParts.push(`\n## DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.neverDoThisAgain.length > 0) {
+      systemParts.push(`\n## DO NOT DO THIS\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
+    }
 
     systemParts.push(`\n## YOUR SOUL.md
 ${agent.soulMd}`);

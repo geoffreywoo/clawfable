@@ -1,0 +1,357 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import type { LearningSnapshot, LearningEventEntry, LearningBucket, LearningExperimentLane } from '@/lib/learning-snapshot';
+
+interface LearningTabProps {
+  agentId: string;
+}
+
+function getTimeAgo(ts: string): string {
+  const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function deltaLabel(current: number, previous: number): string {
+  const delta = current - previous;
+  return `${delta >= 0 ? '+' : ''}${delta} pts`;
+}
+
+function toneClass(tone: 'positive' | 'neutral' | 'warning' | 'danger'): string {
+  return `learning-tone-${tone}`;
+}
+
+function sourceLabel(source: string): string {
+  return source.replace(/_/g, ' ').toUpperCase();
+}
+
+function OverviewCard({
+  label,
+  value,
+  sublabel,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  sublabel: string;
+  tone?: 'positive' | 'neutral' | 'warning' | 'danger';
+}) {
+  return (
+    <div className={`learning-kpi ${toneClass(tone)}`}>
+      <div className="learning-kpi-label">{label}</div>
+      <div className="learning-kpi-value">{value}</div>
+      <div className="learning-kpi-sub">{sublabel}</div>
+    </div>
+  );
+}
+
+function BeliefBucket({ bucket }: { bucket: LearningBucket }) {
+  return (
+    <div className={`learning-bucket ${toneClass(bucket.tone)}`}>
+      <div className="learning-bucket-header">
+        <div>
+          <p className="learning-bucket-title">{bucket.title}</p>
+          <p className="learning-bucket-subtitle">{bucket.subtitle}</p>
+        </div>
+        <span className="learning-bucket-count">{bucket.items.length}</span>
+      </div>
+      <div className="learning-bucket-items">
+        {bucket.items.map((item) => (
+          <div key={item.id} className="learning-memory-item">
+            <div className="learning-memory-line">
+              <p className="learning-memory-label">{item.label}</p>
+              <span className="learning-memory-confidence">{item.confidence}%</span>
+            </div>
+            <div className="learning-memory-meta">
+              <span className={`learning-source-chip ${toneClass(item.tone)}`}>{sourceLabel(item.source)}</span>
+              {item.note && <span className="learning-memory-note">{item.note}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExperimentLane({ lane }: { lane: LearningExperimentLane }) {
+  return (
+    <div className="experiment-lane">
+      <div className="experiment-lane-header">
+        <p className="experiment-lane-title">{lane.title}</p>
+      </div>
+      <div className="experiment-stack">
+        {lane.exploit && (
+          <div className="experiment-card experiment-card-exploit">
+            <div className="experiment-card-top">
+              <span className="experiment-card-label">EXPLOIT</span>
+              <span className="experiment-arm-name">{lane.exploit.arm}</span>
+            </div>
+            <div className="experiment-metrics">
+              <span>{Math.round(lane.exploit.meanReward * 100)}% reward</span>
+              <span>{Math.round(lane.exploit.pulls)} pulls</span>
+            </div>
+          </div>
+        )}
+        {lane.explore && (
+          <div className="experiment-card experiment-card-explore">
+            <div className="experiment-card-top">
+              <span className="experiment-card-label">EXPLORE</span>
+              <span className="experiment-arm-name">{lane.explore.arm}</span>
+            </div>
+            <div className="experiment-metrics">
+              <span>{lane.explore.coldStart ? 'cold start' : `${Math.round(lane.explore.explorationBonus * 100)} bonus`}</span>
+              <span>ucb {lane.explore.ucbScore.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+        {lane.caution && (
+          <div className="experiment-card experiment-card-caution">
+            <div className="experiment-card-top">
+              <span className="experiment-card-label">CAUTION</span>
+              <span className="experiment-arm-name">{lane.caution.arm}</span>
+            </div>
+            <div className="experiment-metrics">
+              <span>{Math.round(lane.caution.failures)} misses</span>
+              <span>{Math.round(lane.caution.meanReward * 100)}% reward</span>
+            </div>
+          </div>
+        )}
+        {lane.underTest.length > 0 && (
+          <div className="experiment-under-test">
+            <div className="experiment-under-label">UNDER TEST</div>
+            <div className="experiment-chip-row">
+              {lane.underTest.map((arm) => (
+                <span key={`${lane.id}-${arm.arm}`} className="experiment-chip">
+                  {arm.arm}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EventRow({ event }: { event: LearningEventEntry }) {
+  return (
+    <div className={`learning-event ${toneClass(event.tone)}`}>
+      <div className="learning-event-head">
+        <div>
+          <p className="learning-event-title">{event.title}</p>
+          <p className="learning-event-summary">{event.summary}</p>
+        </div>
+        <div className="learning-event-topline">
+          <span className="learning-event-time">{getTimeAgo(event.createdAt)}</span>
+          <span className="learning-event-reward">{event.rewardDelta >= 0 ? '+' : ''}{event.rewardDelta.toFixed(2)}</span>
+        </div>
+      </div>
+      <div className="learning-event-meta">
+        <span className="learning-source-chip">{sourceLabel(event.source)}</span>
+        <span className="learning-source-chip">{sourceLabel(event.surface)}</span>
+        {event.tweetPreview && <span className="learning-event-preview">{event.tweetPreview.slice(0, 88)}{event.tweetPreview.length > 88 ? '...' : ''}</span>}
+      </div>
+      <p className="learning-event-learned">{event.learned}</p>
+    </div>
+  );
+}
+
+export function LearningTab({ agentId }: LearningTabProps) {
+  const [snapshot, setSnapshot] = useState<LearningSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/agents/${agentId}/learning`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!cancelled && res.ok) setSnapshot(data);
+      } catch {
+        if (!cancelled) setSnapshot(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    const interval = window.setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [agentId]);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="skeleton" style={{ height: i === 1 ? '120px' : '96px', borderRadius: '10px' }} />
+        ))}
+      </div>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <div className="learning-empty">
+        <div className="learning-digest-header">
+          <h2>LEARNING</h2>
+        </div>
+        <p className="learning-progress-label">
+          No learning snapshot yet. Generate and review more tweets to expose the learning control room.
+        </p>
+      </div>
+    );
+  }
+
+  const { overview } = snapshot;
+  const explorePct = overview.activeMix.total > 0
+    ? Math.round((overview.activeMix.explore / overview.activeMix.total) * 100)
+    : overview.explorationRate;
+
+  return (
+    <div className="space-y-6">
+      <div className="learning-hero">
+        <div className="learning-hero-head">
+          <div>
+            <p className="learning-hero-label">LEARNING CONTROL ROOM</p>
+            <h2 className="learning-hero-title">Watch what the system believes, what it is testing, and how operator feedback is reshaping future tweets.</h2>
+          </div>
+          <div className="learning-hero-status">
+            <span className={`learning-source-chip ${toneClass(overview.autonomyMode === 'safe' ? 'positive' : overview.autonomyMode === 'explore' ? 'warning' : 'neutral')}`}>
+              MODE {overview.autonomyMode.toUpperCase()}
+            </span>
+            {overview.trainingSource && (
+              <span className="learning-source-chip">
+                TRAINING {sourceLabel(overview.trainingSource)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="learning-kpi-grid">
+          <OverviewCard
+            label="APPROVAL RATE"
+            value={`${overview.approvalRate.currentWeek}%`}
+            sublabel={`${deltaLabel(overview.approvalRate.currentWeek, overview.approvalRate.previousWeek)} vs last week`}
+            tone={overview.approvalRate.currentWeek >= overview.approvalRate.previousWeek ? 'positive' : 'warning'}
+          />
+          <OverviewCard
+            label="DELETE RATE"
+            value={`${overview.deleteRate.currentWeek}%`}
+            sublabel={`${deltaLabel(overview.deleteRate.currentWeek, overview.deleteRate.previousWeek)} vs last week`}
+            tone={overview.deleteRate.currentWeek <= overview.deleteRate.previousWeek ? 'positive' : 'danger'}
+          />
+          <OverviewCard
+            label="ENGAGEMENT LIFT"
+            value={overview.engagementLiftPercent === null ? 'N/A' : `${overview.engagementLiftPercent >= 0 ? '+' : ''}${overview.engagementLiftPercent}%`}
+            sublabel="vs historical baseline"
+            tone={overview.engagementLiftPercent === null ? 'neutral' : overview.engagementLiftPercent >= 0 ? 'positive' : 'warning'}
+          />
+          <OverviewCard
+            label="MODEL CONFIDENCE"
+            value={overview.averageConfidencePercent === null ? 'N/A' : `${overview.averageConfidencePercent}%`}
+            sublabel="avg across live drafts + queue"
+            tone={overview.averageConfidencePercent !== null && overview.averageConfidencePercent >= 70 ? 'positive' : 'neutral'}
+          />
+          <OverviewCard
+            label="EXPLORE MIX"
+            value={`${explorePct}%`}
+            sublabel={`${overview.activeMix.explore}/${Math.max(overview.activeMix.total, 1)} recent candidates`}
+            tone={explorePct >= 35 ? 'warning' : 'neutral'}
+          />
+          <OverviewCard
+            label="LEARNING EVENTS"
+            value={String(overview.recentSignals)}
+            sublabel={`${overview.trainingPulls} training pulls in policy`}
+            tone="neutral"
+          />
+        </div>
+      </div>
+
+      <div className="comparison-grid">
+        <div className="learning-digest">
+          <div className="learning-digest-header">
+            <h2>WHAT CHANGED THIS WEEK</h2>
+          </div>
+          <ul className="learning-insights">
+            {snapshot.weeklyChanges.map((change, index) => (
+              <li key={index} className="learning-insight">{change}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="learning-digest">
+          <div className="learning-digest-header">
+            <h2>TOP LEARNED RULES</h2>
+          </div>
+          <ul className="learning-insights">
+            {snapshot.topRules.map((rule, index) => (
+              <li key={index} className="learning-insight">{rule}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {snapshot.beliefState.length > 0 && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <h2>BELIEF STATE</h2>
+              <span className="section-count">what the model currently believes about your voice and audience</span>
+            </div>
+          </div>
+          <div className="learning-buckets-grid">
+            {snapshot.beliefState.map((bucket) => (
+              <BeliefBucket key={bucket.id} bucket={bucket} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="section-header">
+          <div className="section-title">
+            <h2>EXPERIMENT BOARD</h2>
+            <span className="section-count">what the bandit is exploiting, exploring, and doubting</span>
+          </div>
+        </div>
+        {snapshot.experiments.summary.length > 0 && (
+          <div className="experiment-summary-row">
+            {snapshot.experiments.summary.map((summary, index) => (
+              <span key={index} className="experiment-summary-chip">{summary}</span>
+            ))}
+          </div>
+        )}
+        <div className="experiment-grid">
+          {snapshot.experiments.lanes.map((lane) => (
+            <ExperimentLane key={lane.id} lane={lane} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="section-header">
+          <div className="section-title">
+            <h2>LEARNING EVENT LOG</h2>
+            <span className="section-count">every meaningful interaction becomes a training breadcrumb</span>
+          </div>
+        </div>
+        <div className="learning-event-log">
+          {snapshot.recentEvents.map((event) => (
+            <EventRow key={event.id} event={event} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

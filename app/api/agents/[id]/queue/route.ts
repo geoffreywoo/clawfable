@@ -17,7 +17,7 @@ export async function GET(
     const deletedFromX = allTweets.filter((t) =>
       t.status === 'deleted_from_x' &&
       !t.deletionReason &&
-      new Date(t.createdAt).getTime() > sevenDaysAgo
+      new Date(t.postedAt || t.createdAt).getTime() > sevenDaysAgo
     );
     return NextResponse.json([...deletedFromX, ...queued]);
   } catch (err) {

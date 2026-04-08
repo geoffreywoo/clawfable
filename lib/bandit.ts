@@ -1,4 +1,4 @@
-import type { FeedbackEntry, Tweet, TweetPerformance } from './types';
+import type { FeedbackEntry, LearningSignal, Tweet, TweetPerformance } from './types';
 
 export type BanditLengthBucket = 'short' | 'medium' | 'long';
 export type BanditTrainingSource = 'autopilot' | 'mixed';
@@ -42,9 +42,11 @@ interface BanditObservation {
 interface BuildBanditPolicyOptions {
   performanceHistory: TweetPerformance[];
   feedback: FeedbackEntry[];
+  signals: LearningSignal[];
   allTweets: Tweet[];
   allowedFormats: string[];
   candidateTopics: string[];
+  baseline?: { avgLikes: number; avgRetweets: number } | null;
 }
 
 interface BuildBanditSlotPlanOptions {
@@ -65,6 +67,10 @@ const BANDIT_HALF_LIFE_DAYS = 21;
 
 function weightedScore(entry: TweetPerformance): number {
   return entry.likes + entry.retweets + (entry.replies * 2);
+}
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function recencyWeight(ts: string): number {
@@ -110,7 +116,7 @@ function buildArmScores(candidates: string[], observations: BanditObservation[])
     const current = stats.get(arm)!;
     current.pulls += observation.weight;
     current.rewardSum += observation.reward * observation.weight;
-    if (observation.reward === 0) current.failures += observation.weight;
+    if (observation.reward <= 0.3) current.failures += observation.weight;
   }
 
   const totalPulls = [...stats.values()].reduce((sum, entry) => sum + entry.pulls, 0);
@@ -139,16 +145,19 @@ function buildArmScores(candidates: string[], observations: BanditObservation[])
 export function buildBanditPolicy({
   performanceHistory,
   feedback,
+  signals,
   allTweets,
   allowedFormats,
   candidateTopics,
+  baseline,
 }: BuildBanditPolicyOptions): BanditPolicy {
   const autopilotHistory = performanceHistory.filter((entry) => entry.source === 'autopilot');
   const trainingHistory = autopilotHistory.length >= 10 ? autopilotHistory : performanceHistory;
   const trainingSource: BanditTrainingSource = autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
 
   const scoreThreshold = median(trainingHistory.map(weightedScore));
-  const successThreshold = scoreThreshold > 0 ? scoreThreshold : 1;
+  const baselineScore = baseline ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2)) : 0;
+  const successThreshold = Math.max(1, scoreThreshold || 0, baselineScore);
 
   const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
   const formatObservations: BanditObservation[] = [];
@@ -156,7 +165,7 @@ export function buildBanditPolicy({
   const lengthObservations: BanditObservation[] = [];
 
   for (const entry of trainingHistory) {
-    const reward = weightedScore(entry) >= successThreshold ? 1 : 0;
+    const reward = clamp(weightedScore(entry) / successThreshold, 0, 1);
     const weight = recencyWeight(entry.checkedAt);
     const lengthBucket = getLengthBucketFromText(entry.content);
     if (entry.format && entry.format !== 'unknown') {
@@ -181,6 +190,26 @@ export function buildBanditPolicy({
       topicObservations.push({ arm: tweet.topic, reward: 0, weight });
     }
     lengthObservations.push({ arm: lengthBucket, reward: 0, weight });
+  }
+
+  for (const signal of signals) {
+    if (!signal.tweetId) continue;
+    const tweet = tweetById.get(String(signal.tweetId));
+    if (!tweet) continue;
+    let reward = clamp((signal.rewardDelta + 1) / 2);
+    if (signal.signalType === 'copied_to_clipboard' && tweet.status !== 'posted') {
+      reward = Math.min(reward, 0.45);
+    }
+    const weight = recencyWeight(signal.createdAt);
+    const lengthBucket = getLengthBucketFromText(tweet.content);
+
+    if (tweet.format && tweet.format !== 'unknown') {
+      formatObservations.push({ arm: tweet.format, reward, weight });
+    }
+    if (tweet.topic && tweet.topic !== 'unknown') {
+      topicObservations.push({ arm: tweet.topic, reward, weight });
+    }
+    lengthObservations.push({ arm: lengthBucket, reward, weight });
   }
 
   const formatCandidates = toCandidateList([

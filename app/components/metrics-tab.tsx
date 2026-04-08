@@ -14,6 +14,21 @@ interface TimeseriesData {
   daily: Array<{ date: string; tweetsPosted: number; avgLikes: number }>;
   formatBreakdown: Array<{ format: string; count: number; avgEngagement: number }>;
   topicBreakdown: Array<{ topic: string; count: number; avgEngagement: number }>;
+  compounding?: {
+    approvalRate: { currentWeek: number; previousWeek: number };
+    deleteRate: { currentWeek: number; previousWeek: number };
+    copiedWithoutPost: number;
+    topLearnedRules: string[];
+    weeklyChanges: string[];
+    memory: {
+      alwaysDoMoreOfThis: string[];
+      neverDoThisAgain: string[];
+      topicsWithMomentum: string[];
+      formatsUnderTested: string[];
+      operatorHiddenPreferences: string[];
+      identityConstraints: string[];
+    } | null;
+  };
   dataReady: boolean;
 }
 
@@ -242,6 +257,112 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               Insights will appear once there&apos;s enough performance data to learn from.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* ─── 1B. Visible Compounding ─────────────────────────────────────── */}
+      {timeseries?.compounding && (
+        <div className="space-y-4">
+          <div className="section-title">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <polyline points="2,11 6,7 9,8.5 14,3" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="10,3 14,3 14,7" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <h2>COMPOUNDING</h2>
+            <span className="section-count">how the system is improving from operator feedback</span>
+          </div>
+
+          <div className="rankings-grid">
+            <div className="perf-block">
+              <p className="perf-block-label">APPROVAL RATE</p>
+              <div className="perf-rows">
+                <div className="perf-row">
+                  <span className="perf-row-name">This week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.approvalRate.currentWeek}%</span>
+                </div>
+                <div className="perf-row">
+                  <span className="perf-row-name">Last week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.approvalRate.previousWeek}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="perf-block">
+              <p className="perf-block-label">DELETE RATE</p>
+              <div className="perf-rows">
+                <div className="perf-row">
+                  <span className="perf-row-name">This week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.deleteRate.currentWeek}%</span>
+                </div>
+                <div className="perf-row">
+                  <span className="perf-row-name">Last week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.deleteRate.previousWeek}%</span>
+                </div>
+                {timeseries.compounding.copiedWithoutPost > 0 && (
+                  <div className="perf-row">
+                    <span className="perf-row-name">Copied, not posted</span>
+                    <span className="perf-row-stat">{timeseries.compounding.copiedWithoutPost}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {timeseries.compounding.topLearnedRules.length > 0 && (
+            <div className="learning-digest">
+              <div className="learning-digest-header">
+                <h2>TOP LEARNED RULES</h2>
+              </div>
+              <ul className="learning-insights">
+                {timeseries.compounding.topLearnedRules.map((rule, index) => (
+                  <li key={index} className="learning-insight">{rule}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {timeseries.compounding.weeklyChanges.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">WHAT CHANGED THIS WEEK</p>
+              <div className="perf-tweets">
+                {timeseries.compounding.weeklyChanges.map((change, index) => (
+                  <div key={index} className="perf-tweet">
+                    <p className="perf-tweet-content">{change}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {timeseries.compounding.memory && (
+            <div className="comparison-grid">
+              {timeseries.compounding.memory.alwaysDoMoreOfThis.length > 0 && (
+                <div className="perf-block">
+                  <p className="perf-block-label">DO MORE OF THIS</p>
+                  <div className="perf-tweets">
+                    {timeseries.compounding.memory.alwaysDoMoreOfThis.map((item, index) => (
+                      <div key={index} className="perf-tweet perf-tweet-best">
+                        <p className="perf-tweet-content">{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {timeseries.compounding.memory.neverDoThisAgain.length > 0 && (
+                <div className="perf-block">
+                  <p className="perf-block-label">NEVER DO THIS AGAIN</p>
+                  <div className="perf-tweets">
+                    {timeseries.compounding.memory.neverDoThisAgain.map((item, index) => (
+                      <div key={index} className="perf-tweet perf-tweet-worst">
+                        <p className="perf-tweet-content">{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

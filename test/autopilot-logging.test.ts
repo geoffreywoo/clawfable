@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   setTrendingCache: vi.fn(),
   getConversationHistory: vi.fn(),
   getPerformanceHistory: vi.fn(),
+  addLearningSignal: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
   postTweet: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/lib/kv-storage', () => ({
   setTrendingCache: mocks.setTrendingCache,
   getConversationHistory: mocks.getConversationHistory,
   getPerformanceHistory: mocks.getPerformanceHistory,
+  addLearningSignal: mocks.addLearningSignal,
 }));
 
 vi.mock('@/lib/generation-context', () => ({
@@ -121,6 +123,7 @@ const baseSettings = {
   totalAutoPosted: 0,
   totalAutoReplied: 0,
   lengthMix: { short: 30, medium: 30, long: 40 },
+  autonomyMode: 'balanced',
   explorationRate: 35,
   enabledFormats: [],
   qtRatio: 0,

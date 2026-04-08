@@ -680,6 +680,45 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
           </div>
 
           <div className="space-y-3" style={{ marginTop: '8px' }}>
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                  AUTONOMY MODE
+                </p>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                  changes confidence bar + exploration
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'safe', label: 'SAFE', hint: 'higher trust, fewer risky bets' },
+                  { id: 'balanced', label: 'BALANCED', hint: 'default mix of trust + learning' },
+                  { id: 'explore', label: 'EXPLORE', hint: 'faster learning, more novelty' },
+                ].map((mode) => {
+                  const active = (settings.autonomyMode || 'balanced') === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      className="protocol-tag"
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        padding: '8px 10px',
+                        background: active ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
+                        borderColor: active ? 'rgba(139,92,246,0.4)' : 'var(--border)',
+                        color: active ? '#8b5cf6' : 'var(--text-dim)',
+                        opacity: active ? 1 : 0.7,
+                      }}
+                      onClick={() => handleUpdateSettings({ autonomyMode: mode.id as ProtocolSettings['autonomyMode'] })}
+                      title={mode.hint}
+                    >
+                      {mode.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Length mix */}
             <div className="protocol-card" style={{ padding: '14px' }}>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>

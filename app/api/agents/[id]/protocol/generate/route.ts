@@ -24,12 +24,12 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const count = Math.min(body.count || 5, 20);
 
-    const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
 
     if (batch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
@@ -45,6 +45,16 @@ export async function POST(
           status: 'draft',
           format: item.format || null,
           topic: item.targetTopic,
+          rationale: item.rationale,
+          generationMode: item.generationMode,
+          candidateScore: item.candidateScore,
+          confidenceScore: item.confidenceScore,
+          voiceScore: item.voiceScore,
+          noveltyScore: item.noveltyScore,
+          predictedEngagementScore: item.predictedEngagementScore,
+          freshnessScore: item.freshnessScore,
+          repetitionRiskScore: item.repetitionRiskScore,
+          policyRiskScore: item.policyRiskScore,
           xTweetId: null,
           quoteTweetId: null,
           quoteTweetAuthor: null,

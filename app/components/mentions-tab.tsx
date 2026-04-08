@@ -75,9 +75,34 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     setTimeout(() => setToast(null), 2500);
   };
 
+  const trackSignal = async (
+    tweetId: string,
+    signalType: string,
+    rewardDelta: number,
+    metadata?: Record<string, string | number | boolean | null>,
+  ) => {
+    await fetch(`/api/agents/${agentId}/learning-signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tweetId,
+        signalType,
+        surface: 'mentions',
+        rewardDelta,
+        metadata,
+      }),
+    }).catch(() => null);
+  };
+
   const handleGenerate = async (mention: Mention) => {
     setGeneratingId(mention.id);
     try {
+      const existingDraft = replyDrafts[mention.id];
+      if (existingDraft) {
+        void trackSignal(existingDraft.id, 'reply_rejected', -0.45, {
+          reason: 'Operator regenerated instead of posting the previous reply',
+        });
+      }
       const res = await fetch(`/api/agents/${agentId}/generate-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -85,6 +110,12 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       });
       const tweet = await res.json();
       setReplyDrafts((prev) => ({ ...prev, [mention.id]: tweet }));
+      if (tweet?.id) {
+        void trackSignal(tweet.id, 'reply_generated', 0.1, {
+          confidenceScore: tweet.confidenceScore ?? null,
+          candidateScore: tweet.candidateScore ?? null,
+        });
+      }
     } catch {
       showToast('Failed to generate reply');
     } finally {
@@ -105,9 +136,13 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     }
   };
 
-  const handleCopy = async (text: string) => {
+  const handleCopy = async (tweet: Tweet) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(tweet.content);
+      void trackSignal(tweet.id, 'copied_to_clipboard', 0.35, {
+        confidenceScore: tweet.confidenceScore ?? null,
+        candidateScore: tweet.candidateScore ?? null,
+      });
       showToast('Copied');
     } catch {}
   };
@@ -313,8 +348,18 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                   <span className={`char-count ${replyDrafts[mention.id].content.length > 280 ? 'over' : ''}`}>
                     {replyDrafts[mention.id].content.length}/280
                   </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {replyDrafts[mention.id].generationMode && (
+                      <span className="badge">{replyDrafts[mention.id].generationMode}</span>
+                    )}
+                    {typeof replyDrafts[mention.id].confidenceScore === 'number' && (
+                      <span className="label" style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                        conf {(replyDrafts[mention.id].confidenceScore * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
                   <div className="tweet-actions">
-                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id].content)} data-testid={`button-copy-reply-${mention.id}`}>COPY</button>
+                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id])} data-testid={`button-copy-reply-${mention.id}`}>COPY</button>
                     <button className="btn btn-ghost btn-xs" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(replyDrafts[mention.id])} data-testid={`button-queue-reply-${mention.id}`}>QUEUE</button>
                     <button
                       className="btn btn-ghost btn-xs"
@@ -337,4 +382,3 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     </div>
   );
 }
-

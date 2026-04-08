@@ -33,7 +33,7 @@ export async function PATCH(
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
-      'lengthMix', 'explorationRate', 'enabledFormats',
+      'lengthMix', 'autonomyMode', 'explorationRate', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
       'soulEvolutionMode',
       'proactiveReplies', 'proactiveLikes', 'autoFollow', 'agentShoutouts',

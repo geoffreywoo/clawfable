@@ -1,10 +1,13 @@
-import type { Agent, AgentLearnings, ProtocolSettings, Tweet } from './types';
+import type { Agent, AgentLearnings, PersonalizationMemory, ProtocolSettings, Tweet } from './types';
 import {
+  getBaseline,
   getFeedback,
+  getLearningSignals,
   getLearnings,
   getPerformanceHistory,
   getProtocolSettings,
   getRecentNegativeFeedback,
+  getRemixMemory,
   getRemixPatterns,
   getStyleSignals,
   getTweets,
@@ -13,10 +16,12 @@ import {
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
 import { buildBanditPolicy } from './bandit';
+import { buildPersonalizationMemory } from './learning-loop';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],
+  autonomyMode: 'balanced',
   exploration: {
     rate: 35,
     underusedFormats: [],
@@ -39,6 +44,7 @@ export interface GenerationContext {
   learnings: AgentLearnings | null;
   settings: ProtocolSettings;
   style: ContentStyleConfig;
+  memory: PersonalizationMemory;
   recentPosts: string[];
   allTweets: Tweet[];
 }
@@ -102,21 +108,27 @@ export async function buildGenerationContext(
     settings,
     styleSignals,
     negatives,
+    remixMemory,
     remixPatterns,
     directives,
     allTweets,
     performanceHistory,
     feedback,
+    signals,
+    baseline,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
     getStyleSignals(agent.id),
     getRecentNegativeFeedback(agent.id, negativeLimit),
+    getRemixMemory(agent.id).catch(() => []),
     getRemixPatterns(agent.id).catch(() => []),
     getVoiceDirectives(agent.id).catch(() => []),
     getTweets(agent.id),
     getPerformanceHistory(agent.id, 100),
     getFeedback(agent.id),
+    getLearningSignals(agent.id, 200),
+    getBaseline(agent.id),
   ]);
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
@@ -152,19 +164,59 @@ export async function buildGenerationContext(
   const banditPolicy = buildBanditPolicy({
     performanceHistory,
     feedback,
+    signals,
     allTweets,
     allowedFormats,
     candidateTopics,
+    baseline,
   });
+  const memory = buildPersonalizationMemory({
+    feedback,
+    signals,
+    remixPatterns: remixMemory,
+    directives,
+    learnings,
+    performanceHistory,
+    banditPolicy,
+    voiceProfile,
+    baselineLikes: baseline?.avgLikes || 0,
+  });
+
+  if (memory.alwaysDoMoreOfThis.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## ALWAYS DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.neverDoThisAgain.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## NEVER DO THIS AGAIN\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.operatorHiddenPreferences.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## OPERATOR HIDDEN PREFERENCES\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.identityConstraints.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## IDENTITY CONSTRAINTS\n${memory.identityConstraints.map((item) => `- ${item}`).join('\n')}`;
+  }
+
   const style = {
     lengthMix: settings.lengthMix || DEFAULT_STYLE.lengthMix,
     enabledFormats: settings.enabledFormats || DEFAULT_STYLE.enabledFormats,
+    autonomyMode: settings.autonomyMode || DEFAULT_STYLE.autonomyMode,
     exploration: {
-      rate: Math.max(0, Math.min(100, settings.explorationRate ?? DEFAULT_STYLE.exploration.rate)),
+      rate: Math.max(0, Math.min(100,
+        settings.autonomyMode === 'safe'
+          ? Math.min(settings.explorationRate ?? DEFAULT_STYLE.exploration.rate, 20)
+          : settings.autonomyMode === 'explore'
+            ? Math.max(settings.explorationRate ?? DEFAULT_STYLE.exploration.rate, 45)
+            : settings.explorationRate ?? DEFAULT_STYLE.exploration.rate
+      )),
       underusedFormats: rankUnderusedFormats(allTweets, allowedFormats),
       underusedTopics: rankUnderusedTopics(allTweets, voiceProfile.topics),
     },
-    bias: { ...DEFAULT_STYLE.bias },
+    bias: {
+      ...DEFAULT_STYLE.bias,
+      momentumTopic: memory.topicsWithMomentum[0] || null,
+    },
     banditPolicy,
   };
 
@@ -177,6 +229,7 @@ export async function buildGenerationContext(
     learnings,
     settings,
     style,
+    memory,
     recentPosts,
     allTweets,
   };

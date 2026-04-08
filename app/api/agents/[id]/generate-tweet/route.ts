@@ -49,7 +49,7 @@ export async function POST(
         return NextResponse.json({ error: 'Run account analysis before generating preview tweets' }, { status: 400 });
       }
 
-      const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+      const { voiceProfile, learnings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
         negativeLimit: 10,
         directiveLimit: 10,
       });
@@ -61,7 +61,7 @@ export async function POST(
 
       const requestedCount = typeof batchCount === 'number' ? batchCount : 1;
       const previewCount = Math.min(Math.max(Math.floor(requestedCount), 1), 5);
-      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts);
+      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
       const tweets = [];
       for (const item of batch) {
         const tweet = await createTweet({
@@ -71,6 +71,16 @@ export async function POST(
           status: 'preview',
           format: item.format || null,
           topic: item.targetTopic || 'general',
+          rationale: item.rationale,
+          generationMode: item.generationMode,
+          candidateScore: item.candidateScore,
+          confidenceScore: item.confidenceScore,
+          voiceScore: item.voiceScore,
+          noveltyScore: item.noveltyScore,
+          predictedEngagementScore: item.predictedEngagementScore,
+          freshnessScore: item.freshnessScore,
+          repetitionRiskScore: item.repetitionRiskScore,
+          policyRiskScore: item.policyRiskScore,
           xTweetId: null,
           quoteTweetId: null,
           quoteTweetAuthor: null,
@@ -88,7 +98,7 @@ export async function POST(
     }
 
     const analysis = await getAnalysis(id);
-    const { voiceProfile, learnings, style, recentPosts } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
@@ -108,7 +118,7 @@ export async function POST(
         topTweet: null as any,
       }];
 
-      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts);
+      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
       if (batch.length > 0) {
         const item = batch[0];
         const tweet = await createTweet({
@@ -118,6 +128,16 @@ export async function POST(
           status: 'draft',
           format: item.format || null,
           topic: topicContext,
+          rationale: item.rationale,
+          generationMode: item.generationMode,
+          candidateScore: item.candidateScore,
+          confidenceScore: item.confidenceScore,
+          voiceScore: item.voiceScore,
+          noveltyScore: item.noveltyScore,
+          predictedEngagementScore: item.predictedEngagementScore,
+          freshnessScore: item.freshnessScore,
+          repetitionRiskScore: item.repetitionRiskScore,
+          policyRiskScore: item.policyRiskScore,
           xTweetId: null,
           quoteTweetId: null,
           quoteTweetAuthor: null,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, getTweet, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -9,6 +9,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  let dbTweetId: string | null = null;
   try {
     const { agent } = await requireAgentAccess(id);
 
@@ -17,7 +18,8 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { content, replyToId, tweetId: dbTweetId } = body;
+    const { content, replyToId, tweetId } = body;
+    dbTweetId = tweetId ? String(tweetId) : null;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
 
     const keys = decodeKeys({
@@ -35,11 +37,39 @@ export async function POST(
     }
 
     if (dbTweetId) {
-      await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId });
+      const existingTweet = await getTweet(String(dbTweetId));
+      const updated = await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId, postedAt: new Date().toISOString() });
+      await addLearningSignal(id, {
+        tweetId: String(dbTweetId),
+        xTweetId: result.tweetId,
+        signalType: updated.type === 'reply' ? 'reply_posted' : 'x_post_succeeded',
+        surface: updated.type === 'reply' ? 'mentions' : 'manual_post',
+        rewardDelta: 0.72,
+        metadata: {
+          confidenceScore: updated.confidenceScore ?? null,
+          candidateScore: updated.candidateScore ?? null,
+          generationMode: updated.generationMode ?? null,
+          wasEdited: (existingTweet?.editCount ?? 0) > 0,
+        },
+      });
     }
 
     return NextResponse.json({ success: true, tweetUrl: result.tweetUrl, tweetId: result.tweetId });
   } catch (err) {
+    if (dbTweetId) {
+      const message = err instanceof Error ? err.message : 'Failed to post tweet';
+      await updateTweet(dbTweetId, {
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: message,
+      }).catch(() => null);
+      await addLearningSignal(id, {
+        tweetId: dbTweetId,
+        signalType: 'x_post_rejected',
+        surface: 'manual_post',
+        rewardDelta: -0.75,
+        reason: message,
+      }).catch(() => null);
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to post tweet';
     return NextResponse.json({ error: message }, { status: 500 });
