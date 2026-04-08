@@ -6,6 +6,7 @@ import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
+import { formatActionError } from '@/lib/twitter-debug';
 
 // GET /api/cron/post — called by Vercel Cron every 10 minutes
 export async function GET(request: NextRequest) {
@@ -57,6 +58,20 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] mentions refresh failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_mentions_error',
+            topic: 'mentions',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'refresh_mentions', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Track performance of posted tweets
@@ -119,6 +134,20 @@ export async function GET(request: NextRequest) {
             }
           } catch (err) {
             console.error(`[cron] proactive engagement failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: '',
+              format: 'proactive_engagement_error',
+              topic: 'network_growth',
+              postedAt: new Date().toISOString(),
+              source: 'cron',
+              action: 'error',
+              reason: formatActionError(err, 'proactive_engagement', {
+                handle: `@${agent.handle}`,
+              }),
+            });
           }
         }
       }
@@ -137,8 +166,8 @@ export async function GET(request: NextRequest) {
           tweetId: result.tweetId || '',
           xTweetId: result.xTweetId || '',
           content: result.content || '',
-          format: 'cron',
-          topic: '',
+          format: result.format || 'cron',
+          topic: result.topic || '',
           postedAt: new Date().toISOString(),
           source: 'cron',
           action: result.action,

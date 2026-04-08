@@ -10,6 +10,7 @@ import type { Agent, ProtocolSettings } from './types';
 import type { TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { replyToTweet, likeTweet, followUser, getFollowing } from './twitter-client';
+import { formatActionError } from './twitter-debug';
 import { parseSoulMd } from './soul-parser';
 import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
 import Anthropic from '@anthropic-ai/sdk';
@@ -70,8 +71,9 @@ export async function replyToViralTweets(
     if (repliesSent >= 2) break; // Max 2 proactive replies per run
     if (!topic.topTweet || repliedToIds.has(topic.topTweet.id)) continue;
 
+    let replyContent = '';
     try {
-      const replyContent = await generateViralReply(
+      replyContent = await generateViralReply(
         agent,
         voiceProfile,
         analysis,
@@ -98,8 +100,23 @@ export async function replyToViralTweets(
       });
 
       repliesSent++;
-    } catch {
-      // Skip this tweet on error
+    } catch (err) {
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: topic.topTweet.id,
+        xTweetId: '',
+        content: replyContent || topic.topTweet.text,
+        format: 'proactive_reply_error',
+        topic: topic.category,
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'error',
+        reason: formatActionError(err, 'proactive_reply', {
+          target: `@${topic.topTweet.author}`,
+          targetTweetId: topic.topTweet.id,
+          likes: topic.topTweet.likes,
+        }),
+      });
     }
   }
 
@@ -186,8 +203,23 @@ export async function likeNetworkTweets(
     try {
       await likeTweet(keys, String(agent.xUserId), topic.topTweet.id);
       liked++;
-    } catch {
-      // Rate limit or already liked, skip
+    } catch (err) {
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: topic.topTweet.id,
+        xTweetId: '',
+        content: topic.topTweet.text,
+        format: 'proactive_like_error',
+        topic: topic.category,
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'error',
+        reason: formatActionError(err, 'like_network_tweet', {
+          target: `@${topic.topTweet.author}`,
+          targetTweetId: topic.topTweet.id,
+          likes: topic.topTweet.likes,
+        }),
+      });
     }
   }
 
@@ -322,7 +354,22 @@ export async function discoverAndFollow(
   try {
     const following = await getFollowing(keys, String(agent.xUserId), 200);
     currentFollowing = new Set(following.map((f) => f.id));
-  } catch {
+  } catch (err) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'auto_follow_error',
+      topic: 'network_growth',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'error',
+      reason: formatActionError(err, 'get_following', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      }),
+    });
     return 0;
   }
 
@@ -410,8 +457,22 @@ export async function discoverAndFollow(
 
       currentFollowing.add(user.id);
       followed++;
-    } catch {
-      // Rate limit, already following, or account not found — skip
+    } catch (err) {
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: '',
+        xTweetId: '',
+        content: `Follow @${candidate.username}`,
+        format: 'auto_follow_error',
+        topic: 'network_growth',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'error',
+        reason: formatActionError(err, 'auto_follow', {
+          username: candidate.username,
+          why: candidate.reason,
+        }),
+      });
     }
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { runAutopilot } from '@/lib/autopilot';
-import { addCronLogEntry } from '@/lib/kv-storage';
+import { addCronLogEntry, addPostLogEntry } from '@/lib/kv-storage';
 
 // POST /api/agents/[id]/protocol/run — manually trigger autopilot for one agent
 export async function POST(
@@ -26,6 +26,21 @@ export async function POST(
         repliesSent: result.repliesSent,
       }],
     });
+
+    if (result.action === 'error') {
+      await addPostLogEntry(id, {
+        agentId: id,
+        tweetId: result.tweetId || '',
+        xTweetId: result.xTweetId || '',
+        content: result.content || '',
+        format: result.format || 'manual_run_error',
+        topic: result.topic || '',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        action: result.action,
+        reason: `[manual] ${result.reason}`,
+      });
+    }
 
     return NextResponse.json(result);
   } catch (err) {

@@ -30,6 +30,7 @@ import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
+import { formatActionError, getActionErrorStatusCode, isTransientTwitterError } from './twitter-debug';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
   jitterInterval,
@@ -49,6 +50,8 @@ export interface AutopilotResult {
   tweetId?: string;
   xTweetId?: string;
   content?: string;
+  format?: string;
+  topic?: string;
   repliesSent?: number;
 }
 
@@ -86,7 +89,21 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     if (replyElapsed >= replyInterval) {
       try {
         repliesSent = await runAutoReply(agent, keys, settings);
-      } catch {
+      } catch (err) {
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'auto_reply_error',
+          topic: 'mentions',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'error',
+          reason: formatActionError(err, 'auto_reply_loop', {
+            handle: `@${agent.handle}`,
+          }),
+        });
         // Don't fail the whole run if replies fail
       }
     }
@@ -239,11 +256,16 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       repliesSent,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Post failed';
+    const message = formatActionError(err, 'post_tweet', {
+      draftId: tweet.id,
+      format: tweet.format || 'unknown',
+      topic: tweet.topic || 'general',
+    });
 
     // Detect rate limit (429) or server error (5xx) and back off
-    const isRateLimit = message.includes('429') || message.toLowerCase().includes('rate limit') || message.includes('Too Many');
-    const isServerError = message.includes('503') || message.includes('502');
+    const statusCode = getActionErrorStatusCode(err);
+    const isRateLimit = statusCode === 429 || message.toLowerCase().includes('rate limit');
+    const isServerError = isTransientTwitterError(err) && statusCode !== 429;
     if (isRateLimit || isServerError) {
       const backoffMins = isRateLimit ? 60 : 15;
       const pauseUntil = new Date(Date.now() + backoffMins * 60 * 1000).toISOString();
@@ -252,11 +274,24 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
         agentId,
         action: 'error',
         reason: `${isRateLimit ? 'Rate limited' : 'API error'} — pausing ${backoffMins}m. ${message}`,
+        tweetId: tweet.id,
+        content: tweet.content,
+        format: tweet.format || 'unknown',
+        topic: tweet.topic || 'general',
         repliesSent,
       };
     }
 
-    return { agentId, action: 'error', reason: message, repliesSent };
+    return {
+      agentId,
+      action: 'error',
+      reason: message,
+      tweetId: tweet.id,
+      content: tweet.content,
+      format: tweet.format || 'unknown',
+      topic: tweet.topic || 'general',
+      repliesSent,
+    };
   }
 }
 
@@ -273,7 +308,22 @@ async function runAutoReply(
   let rawMentions;
   try {
     rawMentions = await getMentionsFromTwitter(keys, agent.xUserId);
-  } catch {
+  } catch (err) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'auto_reply_error',
+      topic: 'mentions',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'error',
+      reason: formatActionError(err, 'fetch_mentions', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      }),
+    });
     return 0; // API might not be available on free tier
   }
 
@@ -308,6 +358,7 @@ async function runAutoReply(
   let repliesSent = 0;
 
   for (const mention of unrepliedMentions.slice(0, maxReplies)) {
+    let replyContent = '';
     try {
       // Store the mention if not already stored
       if (!storedTweetIds.has(String(mention.id))) {
@@ -375,7 +426,7 @@ async function runAutoReply(
       }
 
       // Generate reply via Claude
-      const replyContent = await generateReply(
+      replyContent = await generateReply(
         agent,
         voiceProfile,
         analysis,
@@ -421,8 +472,24 @@ async function runAutoReply(
       });
 
       repliesSent++;
-    } catch {
-      // Skip this mention on error, continue with next
+    } catch (err) {
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: mention.id,
+        xTweetId: '',
+        content: replyContent || mention.text,
+        format: 'auto_reply_error',
+        topic: `Reply to @${mention.authorUsername || mention.authorId}`,
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'error',
+        reason: formatActionError(err, 'auto_reply', {
+          mentionId: mention.id,
+          author: `@${mention.authorUsername || mention.authorId}`,
+          conversationId: mention.conversationId || undefined,
+          preview: mention.text,
+        }),
+      });
     }
   }
 

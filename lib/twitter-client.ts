@@ -6,6 +6,7 @@
  */
 
 import TwitterApi from 'twitter-api-v2';
+import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug';
 
 export interface TwitterKeys {
   appKey: string;
@@ -26,23 +27,8 @@ export function createClient(keys: TwitterKeys): TwitterApi {
   });
 }
 
-function handleApiError(error: unknown): never {
-  if (error instanceof Object && 'code' in error) {
-    const code = (error as { code: number }).code;
-    if (code === 429) {
-      throw new Error('Rate limit reached. Please wait before trying again.');
-    }
-    if (code === 403) {
-      // Extract detail from twitter-api-v2 error
-      const detail = 'data' in error ? JSON.stringify((error as { data: unknown }).data) : '';
-      throw new Error(`Request failed with code 403. ${detail || 'Your X API tier may not support this action.'}`);
-    }
-  }
-  // For generic errors, try to extract a useful message
-  if (error instanceof Error) {
-    throw error;
-  }
-  throw new Error(String(error));
+function handleApiError(error: unknown, context: TwitterErrorContext): never {
+  throw normalizeTwitterError(error, context);
 }
 
 export async function postTweet(
@@ -65,7 +51,10 @@ export async function postTweet(
       username: me.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'post_tweet',
+      preview: text,
+    });
   }
 }
 
@@ -89,7 +78,11 @@ export async function replyToTweet(
       username: me.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'reply_to_tweet',
+      preview: text,
+      replyToTweetId,
+    });
   }
 }
 
@@ -142,7 +135,10 @@ export async function searchRecentTweets(
       createdAt: tweet.created_at || new Date().toISOString(),
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'search_recent_tweets',
+      preview: query,
+    });
   }
 }
 
@@ -192,7 +188,10 @@ export async function getMentionsFromTwitter(
       };
     });
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'fetch_mentions',
+      targetUserId: userId,
+    });
   }
 }
 
@@ -207,7 +206,10 @@ export async function followUser(
     const result = await rwClient.v2.follow(sourceUserId, targetUserId);
     return { following: result.data.following };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'follow_user',
+      targetUserId,
+    });
   }
 }
 
@@ -222,7 +224,11 @@ export async function likeTweet(
     const result = await rwClient.v2.like(userId, tweetId);
     return { liked: result.data.liked };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'like_tweet',
+      targetTweetId: tweetId,
+      targetUserId: userId,
+    });
   }
 }
 
@@ -238,7 +244,7 @@ export async function getMe(
       username: result.data.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, { action: 'get_me' });
   }
 }
 
@@ -257,7 +263,10 @@ export async function getUserByUsername(
       username: result.data.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'resolve_user',
+      username,
+    });
   }
 }
 
@@ -300,7 +309,10 @@ export async function getUserTimeline(
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'get_user_timeline',
+      targetUserId: userId,
+    });
   }
 }
 
@@ -402,7 +414,10 @@ export async function getFollowing(
       verified: (user as any).verified ?? false,
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'get_following',
+      targetUserId: userId,
+    });
   }
 }
 
