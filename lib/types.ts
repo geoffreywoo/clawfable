@@ -2,10 +2,55 @@ import type { SetupStep } from './setup-state';
 
 // ─── User types ──────────────────────────────────────────────────────────────
 
+export type BillingPlan = 'free' | 'pro' | 'scale';
+export type BillingStatus =
+  | 'free'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'unpaid'
+  | 'paused';
+
+export interface BillingEntitlements {
+  maxAgents: number;
+  autopilot: boolean;
+  advancedLearning: boolean;
+  prioritySupport: boolean;
+}
+
+export interface BillingSummary {
+  configured: boolean;
+  checkoutReady: boolean;
+  portalReady: boolean;
+  plan: BillingPlan;
+  status: BillingStatus;
+  label: string;
+  isPaid: boolean;
+  agentCount: number;
+  maxAgents: number;
+  agentsRemaining: number;
+  canCreateAgent: boolean;
+  canUseAutopilot: boolean;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  billingEmail: string | null;
+  currentPeriodEnd: string | null;
+  entitlements: BillingEntitlements;
+}
+
 export interface User {
   id: string;          // X user ID
   username: string;    // X screen name
   name: string;        // X display name
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  billingEmail: string | null;
+  billingStatus: BillingStatus;
+  plan: BillingPlan;
+  currentPeriodEnd: string | null;
   createdAt: string;
 }
 
@@ -215,6 +260,38 @@ export interface VoiceDirective {
   // For operator messages: the extracted directive that persists into generation
   directive?: string;
   ts: string;
+}
+
+export type VoiceDirectiveScopeType =
+  | 'general'
+  | 'hook'
+  | 'topic'
+  | 'tone'
+  | 'length'
+  | 'forbidden_phrase'
+  | 'format'
+  | 'structure';
+
+export type VoiceDirectiveScopeOperator = 'prefer' | 'avoid' | 'require' | 'limit' | 'ban';
+
+export interface VoiceDirectiveScope {
+  type: VoiceDirectiveScopeType;
+  operator: VoiceDirectiveScopeOperator;
+  target: string | null;
+}
+
+export interface VoiceDirectiveRule {
+  id: string;
+  rawDirective: string;
+  normalizedRule: string;
+  systemLesson: string;
+  scope: VoiceDirectiveScope;
+  status: 'active' | 'superseded';
+  sourceMessage: string | null;
+  supersedesRuleIds: string[];
+  supersededByRuleId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SoulVersion {

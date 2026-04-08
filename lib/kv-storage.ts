@@ -1,4 +1,5 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule } from './types';
+import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -286,6 +287,7 @@ const KEYS = {
   agentSet: () => 'agents',
   agent: (id: string) => `agent:${id}`,
   agentHandle: (handle: string) => `agent:handle:${handle}`,
+  agentOwner: (id: string) => `agent:${id}:owner`,
   agentTweets: (id: string) => `agent:${id}:tweets`,
   agentQueue: (id: string) => `agent:${id}:queue`,
   agentMentions: (id: string) => `agent:${id}:mentions`,
@@ -302,10 +304,14 @@ const KEYS = {
   agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
   agentVoiceChat: (id: string) => `agent:${id}:voice_chat`,
   agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
+  agentVoiceDirectiveRules: (id: string) => `agent:${id}:voice_directive_rules`,
   agentSignals: (id: string) => `agent:${id}:signals`,
   cronLog: () => 'cron:log',
+  userSet: () => 'users',
   user: (xUserId: string) => `user:${xUserId}`,
   userAgents: (xUserId: string) => `user:${xUserId}:agents`,
+  stripeCustomerUser: (customerId: string) => `stripe:customer:${customerId}:user`,
+  stripeSubscriptionUser: (subscriptionId: string) => `stripe:subscription:${subscriptionId}:user`,
   session: (token: string) => `session:${token}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
@@ -432,6 +438,7 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agent(id));
   await kvSrem(KEYS.agentSet(), id);
   await kvDel(KEYS.agentHandle(agent.handle));
+  await kvDel(KEYS.agentOwner(id));
 }
 
 // ─── Tweet storage ────────────────────────────────────────────────────────────
@@ -440,6 +447,19 @@ export async function deleteAgent(id: string): Promise<void> {
 // IDs are always strings internally, so coerce on read.
 function normalizeId<T extends { id: unknown }>(obj: T): T & { id: string } {
   return { ...obj, id: String(obj.id) };
+}
+
+function normalizeUser(user: User): User {
+  return {
+    ...user,
+    id: String(user.id),
+    stripeCustomerId: user.stripeCustomerId ?? null,
+    stripeSubscriptionId: user.stripeSubscriptionId ?? null,
+    billingEmail: user.billingEmail ?? null,
+    billingStatus: user.billingStatus ?? 'free',
+    plan: user.plan ?? 'free',
+    currentPeriodEnd: user.currentPeriodEnd ?? null,
+  };
 }
 
 function normalizeTweetRecord(tweet: Tweet): Tweet {
@@ -802,15 +822,59 @@ export async function saveBaseline(agentId: string, baseline: EngagementBaseline
 // ─── User storage ────────────────────────────────────────────────────────────
 
 export async function getUser(xUserId: string): Promise<User | null> {
-  return kvHgetall<User>(KEYS.user(xUserId));
+  const user = await kvHgetall<User>(KEYS.user(xUserId));
+  return user ? normalizeUser(user) : null;
 }
 
 export async function getOrCreateUser(xUserId: string, username: string, name: string): Promise<User> {
   const existing = await getUser(xUserId);
   if (existing) return existing;
-  const user: User = { id: xUserId, username, name, createdAt: new Date().toISOString() };
+  const user: User = {
+    id: xUserId,
+    username,
+    name,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    billingEmail: null,
+    billingStatus: 'free',
+    plan: 'free',
+    currentPeriodEnd: null,
+    createdAt: new Date().toISOString(),
+  };
   await kvHset(KEYS.user(xUserId), user as unknown as Record<string, unknown>);
+  await kvSadd(KEYS.userSet(), xUserId);
   return user;
+}
+
+export async function updateUser(xUserId: string, updates: Partial<User>): Promise<User> {
+  const current = await getUser(xUserId);
+  if (!current) {
+    throw new Error(`User ${xUserId} not found`);
+  }
+  const merged = normalizeUser({ ...current, ...updates });
+  await kvHset(KEYS.user(xUserId), merged as unknown as Record<string, unknown>);
+  await kvSadd(KEYS.userSet(), xUserId);
+  return merged;
+}
+
+export async function linkStripeCustomerToUser(userId: string, customerId: string): Promise<void> {
+  await kvSet(KEYS.stripeCustomerUser(customerId), userId);
+}
+
+export async function getUserIdByStripeCustomer(customerId: string): Promise<string | null> {
+  return kvGet<string>(KEYS.stripeCustomerUser(customerId));
+}
+
+export async function linkStripeSubscriptionToUser(userId: string, subscriptionId: string): Promise<void> {
+  await kvSet(KEYS.stripeSubscriptionUser(subscriptionId), userId);
+}
+
+export async function getUserIdByStripeSubscription(subscriptionId: string): Promise<string | null> {
+  return kvGet<string>(KEYS.stripeSubscriptionUser(subscriptionId));
+}
+
+export async function unlinkStripeSubscription(subscriptionId: string): Promise<void> {
+  await kvDel(KEYS.stripeSubscriptionUser(subscriptionId));
 }
 
 // ─── Session storage ─────────────────────────────────────────────────────────
@@ -847,10 +911,16 @@ export async function getUserAgents(userId: string): Promise<Agent[]> {
 
 export async function addAgentToUser(userId: string, agentId: string): Promise<void> {
   await kvSadd(KEYS.userAgents(userId), agentId);
+  await kvSet(KEYS.agentOwner(agentId), userId);
 }
 
 export async function removeAgentFromUser(userId: string, agentId: string): Promise<void> {
   await kvSrem(KEYS.userAgents(userId), agentId);
+  await kvDel(KEYS.agentOwner(agentId));
+}
+
+export async function getAgentOwnerId(agentId: string): Promise<string | null> {
+  return kvGet<string>(KEYS.agentOwner(agentId));
 }
 
 // ─── Tweet job storage ──────────────────────────────────────────────────────
@@ -1159,14 +1229,63 @@ export async function getVoiceChat(agentId: string, limit = 50): Promise<VoiceDi
   return raw.map((s) => parseListEntry<VoiceDirective>(s)).filter((e): e is VoiceDirective => e !== null).reverse();
 }
 
+async function saveVoiceDirectiveRules(agentId: string, rules: VoiceDirectiveRule[]): Promise<void> {
+  await kvSet(KEYS.agentVoiceDirectiveRules(agentId), rules.slice(0, 50));
+}
+
+async function migrateLegacyVoiceDirectiveRules(agentId: string): Promise<VoiceDirectiveRule[]> {
+  const raw = await kvLrange(KEYS.agentVoiceDirectives(agentId), 0, 19);
+  const directives = raw
+    .map((entry) => typeof entry === 'string' ? entry : String(entry))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (directives.length === 0) return [];
+
+  const baseTime = Date.now() - (directives.length * 1000);
+  const chronological = directives.reverse();
+  let migratedRules: VoiceDirectiveRule[] = [];
+  for (const [index, directive] of chronological.entries()) {
+    const compiled = buildVoiceDirectiveRule(directive, {
+      createdAt: new Date(baseTime + (index * 1000)).toISOString(),
+      sourceMessage: 'Legacy directive import',
+    });
+    migratedRules = mergeVoiceDirectiveRule(migratedRules, compiled);
+  }
+
+  await saveVoiceDirectiveRules(agentId, migratedRules);
+  return migratedRules;
+}
+
+export async function getVoiceDirectiveRules(agentId: string): Promise<VoiceDirectiveRule[]> {
+  const stored = await kvGet<VoiceDirectiveRule[]>(KEYS.agentVoiceDirectiveRules(agentId));
+  if (stored && stored.length > 0) {
+    return stored
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  return migrateLegacyVoiceDirectiveRules(agentId);
+}
+
 /** Standing directives extracted from operator coaching. Fed into every generation. */
-export async function addVoiceDirective(agentId: string, directive: string): Promise<void> {
-  await kvLpush(KEYS.agentVoiceDirectives(agentId), directive);
+export async function addVoiceDirective(
+  agentId: string,
+  directive: string,
+  options: { sourceMessage?: string | null; createdAt?: string } = {},
+): Promise<VoiceDirectiveRule> {
+  const existing = await getVoiceDirectiveRules(agentId);
+  const compiled = buildVoiceDirectiveRule(directive, options);
+  const merged = mergeVoiceDirectiveRule(existing, compiled);
+  await saveVoiceDirectiveRules(agentId, merged);
+  return merged.find((rule) => rule.id === compiled.id) || compiled;
 }
 
 export async function getVoiceDirectives(agentId: string): Promise<string[]> {
-  const raw = await kvLrange(KEYS.agentVoiceDirectives(agentId), 0, 19);
-  return raw.map((s) => typeof s === 'string' ? s : String(s)).filter((s) => s.length > 0);
+  const rules = await getVoiceDirectiveRules(agentId);
+  return getActiveVoiceDirectiveRules(rules)
+    .slice(0, 20)
+    .map((rule) => rule.rawDirective);
 }
 
 // ─── Remix memory ───────────────────────────────────────────────────────────

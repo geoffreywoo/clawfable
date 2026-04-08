@@ -132,6 +132,7 @@ Primary objective: Write thoughtful tweets.`,
     expect(createMock).toHaveBeenCalled();
     const prompt = String((createMock as any).mock.calls?.[0]?.[0]?.messages?.[0]?.content || '');
     expect(prompt).toContain('Lead with concrete observations.');
+    expect(prompt).toContain('Lesson: Concrete openings feel more native to the operator than abstract framing.');
     expect(prompt).toContain('generic filler tweet (why it was rejected: Too generic)');
   });
 });

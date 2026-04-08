@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
+import type { BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
 
 interface AutopilotTabProps {
   agentId: string;
@@ -19,10 +19,12 @@ function getTimeAgo(ts: string): string {
 
 export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
+  const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
+  const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [agentHandle, setAgentHandle] = useState('');
   const [toast, setToast] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       setAgentHandle(agent?.handle || '');
       if (protocolData) {
         setSettings(protocolData.settings);
+        setBilling(protocolData.billing || null);
         setPostLog(protocolData.postLog || []);
       }
       if (Array.isArray(metricsData)) setMetrics(metricsData);
@@ -109,7 +112,8 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setSettings(data);
+      setSettings(data.settings || data);
+      if (data.billing) setBilling(data.billing);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Update failed');
     }
@@ -129,6 +133,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       if (logRes.ok) {
         const logData = await logRes.json();
         setSettings(logData.settings);
+        setBilling(logData.billing || null);
         setPostLog(logData.postLog || []);
       }
     } catch (err) {
@@ -138,10 +143,42 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
     }
   };
 
+  const handleCheckout = async () => {
+    setBillingLoading('checkout');
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'pro' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to open checkout');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Billing failed');
+      setBillingLoading(null);
+    }
+  };
+
+  const handlePortal = async () => {
+    setBillingLoading('portal');
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to open billing portal');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Billing failed');
+      setBillingLoading(null);
+    }
+  };
+
   const getMetricValue = (name: string): number => {
     const m = metrics.find((m) => m.metricName === name);
     return m?.value ?? 0;
   };
+
+  const automationLocked = billing ? !billing.canUseAutopilot : false;
 
   if (loading) {
     return (
@@ -182,6 +219,55 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
           </div>
         ))}
       </div>
+
+      {automationLocked && billing && (
+        <div style={{
+          padding: '14px 16px',
+          borderRadius: '10px',
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          background: 'rgba(245, 158, 11, 0.06)',
+        }}>
+          <p style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            fontWeight: 700,
+            letterSpacing: '0.1em',
+            color: '#f59e0b',
+            marginBottom: '6px',
+          }}>
+            AUTOMATION IS A PAID LAYER
+          </p>
+          <p style={{
+            fontFamily: 'var(--font-body)',
+            fontSize: '13px',
+            color: 'var(--text)',
+            lineHeight: 1.6,
+          }}>
+            Free keeps manual compose, queue review, and the learning surfaces open.
+            Paid plans unlock auto-posting, auto-replies, proactive engagement, and hands-off queue execution.
+          </p>
+          <p style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            color: 'var(--text-dim)',
+            marginTop: '8px',
+          }}>
+            Current plan: {billing.label.toUpperCase()} · {billing.agentCount}/{billing.maxAgents} agents
+          </p>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+            {billing.checkoutReady && (
+              <button className="btn btn-sm" onClick={handleCheckout} disabled={billingLoading !== null}>
+                {billingLoading === 'checkout' ? 'LOADING...' : 'UNLOCK AUTOPILOT'}
+              </button>
+            )}
+            {billing.portalReady && (
+              <button className="btn btn-outline btn-sm" onClick={handlePortal} disabled={billingLoading !== null}>
+                {billingLoading === 'portal' ? 'LOADING...' : 'MANAGE BILLING'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {settings && (
         <div className="control-room-intro">
@@ -224,7 +310,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               <span className="section-count">runs every 10 min</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleRunAutopilot}
-              disabled={runningAutopilot || (!settings.enabled && !settings.autoReply)}
+              disabled={automationLocked || runningAutopilot || (!settings.enabled && !settings.autoReply)}
             >
               {runningAutopilot ? 'RUNNING...' : 'RUN ALL NOW'}
             </button>
@@ -240,7 +326,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.enabled ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}>
                     {settings.enabled ? 'ON' : 'OFF'}
                   </button>
                   <div>
@@ -256,12 +342,14 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                   <div className="field"><label>POSTS/DAY</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
                       {[1, 2, 3, 4, 6, 8, 12, 24, 48].map((n) => <option key={n} value={n}>{n}{n === 48 ? ' (every 30m)' : ''}</option>)}
                     </select>
                   </div>
                   <div className="field"><label>MIN QUEUE</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.minQueueSize}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}>
                       {[3, 5, 10, 15, 20].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
@@ -279,7 +367,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.autoReply ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}>
                     {settings.autoReply ? 'ON' : 'OFF'}
                   </button>
                   <div>
@@ -297,6 +385,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     <label>CHECK EVERY</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.replyIntervalMins || 30}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
                       {[
                         { v: 10, l: '10 min' },
@@ -313,6 +402,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     <label>MAX REPLIES/RUN</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.maxRepliesPerRun || 3}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
                       {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
@@ -610,7 +700,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.proactiveReplies ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.proactiveReplies ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ proactiveReplies: !settings.proactiveReplies })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ proactiveReplies: !settings.proactiveReplies })}>
                     {settings.proactiveReplies ? 'ON' : 'OFF'}
                   </button>
                   <div>
@@ -632,7 +722,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.proactiveLikes ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.proactiveLikes ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ proactiveLikes: !settings.proactiveLikes })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ proactiveLikes: !settings.proactiveLikes })}>
                     {settings.proactiveLikes ? 'ON' : 'OFF'}
                   </button>
                   <div>
@@ -654,7 +744,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.autoFollow ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.autoFollow ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ autoFollow: !settings.autoFollow })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoFollow: !settings.autoFollow })}>
                     {settings.autoFollow ? 'ON' : 'OFF'}
                   </button>
                   <div>
@@ -676,7 +766,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.agentShoutouts ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.agentShoutouts ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ agentShoutouts: !settings.agentShoutouts })}>
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ agentShoutouts: !settings.agentShoutouts })}>
                     {settings.agentShoutouts ? 'ON' : 'OFF'}
                   </button>
                   <div>

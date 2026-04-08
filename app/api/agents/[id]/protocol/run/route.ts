@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { runAutopilot } from '@/lib/autopilot';
-import { addCronLogEntry, addPostLogEntry } from '@/lib/kv-storage';
+import { addCronLogEntry, addPostLogEntry, getUserAgentIds } from '@/lib/kv-storage';
+import { assertCanUseAutopilot, BillingError } from '@/lib/billing';
 
 // POST /api/agents/[id]/protocol/run — manually trigger autopilot for one agent
 export async function POST(
@@ -10,7 +11,9 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { user, agent } = await requireAgentAccess(id);
+    const agentCount = (await getUserAgentIds(user.id)).length;
+    assertCanUseAutopilot(user, agentCount);
     const result = await runAutopilot(agent);
 
     // Log to cron log so it shows in the dashboard
@@ -44,6 +47,9 @@ export async function POST(
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof BillingError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Autopilot run failed';
     return NextResponse.json({ error: message }, { status: 500 });

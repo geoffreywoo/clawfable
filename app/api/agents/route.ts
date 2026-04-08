@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getUserAgents,
+  getUserAgentIds,
   getTweets,
   getMentions,
   createAgent,
@@ -11,6 +12,7 @@ import {
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
 import { normalizeSetupStep } from '@/lib/setup-state';
+import { assertCanCreateAgent, BillingError } from '@/lib/billing';
 
 // GET /api/agents — list current user's agents
 export async function GET() {
@@ -43,6 +45,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
+    const agentCount = (await getUserAgentIds(user.id)).length;
+    assertCanCreateAgent(user, agentCount);
+
     const body = await request.json();
     const { handle, name, soulMd } = body;
     if (!handle || !name || !soulMd) {
@@ -79,6 +84,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(agent);
   } catch (err) {
+    if (err instanceof BillingError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to create agent' }, { status: 500 });
   }

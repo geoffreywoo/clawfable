@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
-import type { VoiceDirective } from '@/lib/types';
+import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
+import type { VoiceDirective, VoiceDirectiveRule } from '@/lib/types';
 import Anthropic from '@anthropic-ai/sdk';
+import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
 
 const anthropic = new Anthropic();
 
@@ -14,11 +15,16 @@ export async function GET(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const [chat, directives] = await Promise.all([
+    const [chat, directives, directiveRules] = await Promise.all([
       getVoiceChat(id, 30),
       getVoiceDirectives(id),
+      getVoiceDirectiveRules(id),
     ]);
-    return NextResponse.json({ chat, directives });
+    return NextResponse.json({
+      chat,
+      directives,
+      directiveRules: getActiveVoiceDirectiveRules(directiveRules),
+    });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch voice chat' }, { status: 500 });
@@ -49,10 +55,11 @@ export async function POST(
     await addVoiceChatMessage(id, operatorMsg);
 
     // Get existing directives and chat history for context
-    const [existingDirectives, chatHistory] = await Promise.all([
-      getVoiceDirectives(id),
+    const [existingDirectiveRules, chatHistory] = await Promise.all([
+      getVoiceDirectiveRules(id),
       getVoiceChat(id, 10),
     ]);
+    const activeDirectiveRules = getActiveVoiceDirectiveRules(existingDirectiveRules);
 
     // Claude responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await anthropic.messages.create({
@@ -64,7 +71,7 @@ YOUR SOUL.md:
 ${(agent.soulMd || '').slice(0, 1500)}
 
 EXISTING STANDING DIRECTIVES (already locked in):
-${existingDirectives.length > 0 ? existingDirectives.map((d, i) => `${i + 1}. ${d}`).join('\n') : 'None yet'}
+${activeDirectiveRules.length > 0 ? activeDirectiveRules.map((rule, i) => formatVoiceDirectiveRule(rule, i)).join('\n') : 'None yet'}
 
 The operator is giving you feedback about your voice, style, or content. Your job:
 1. Respond in your agent voice (stay in character, be brief, 1-3 sentences)
@@ -94,13 +101,16 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
     const directiveMatch = responseText.match(/DIRECTIVE:\s*(.+)/i);
     let agentReply = responseText;
     let extractedDirective: string | null = null;
+    let savedRule: VoiceDirectiveRule | null = null;
 
     if (directiveMatch) {
       const directive = directiveMatch[1].trim();
       agentReply = responseText.slice(0, directiveMatch.index).trim();
       if (directive.toLowerCase() !== 'none' && directive.length > 5) {
-        extractedDirective = directive;
-        await addVoiceDirective(id, directive);
+        savedRule = await addVoiceDirective(id, directive, {
+          sourceMessage: message.trim(),
+        });
+        extractedDirective = savedRule.rawDirective;
       }
     }
 
@@ -127,7 +137,9 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
         ? `\n\n(Audited queue: ${queueAudit.rewritten} tweets rewritten, ${queueAudit.purged} removed)`
         : ''),
       directive: extractedDirective,
+      directiveRule: savedRule,
       directives: await getVoiceDirectives(id),
+      directiveRules: getActiveVoiceDirectiveRules(await getVoiceDirectiveRules(id)),
       queueAudit,
     });
   } catch (err) {

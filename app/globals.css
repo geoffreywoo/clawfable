@@ -174,6 +174,11 @@ h1, h2, h3, h4 {
   cursor: not-allowed;
 }
 
+.landing-cta-secondary {
+  min-height: 44px;
+  padding: 0 22px;
+}
+
 .landing-sections {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
@@ -333,10 +338,272 @@ h1, h2, h3, h4 {
   text-decoration: underline;
 }
 
+.pricing-shell {
+  max-width: 1120px;
+}
+
+.pricing-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0 auto 32px;
+  max-width: 760px;
+  text-align: center;
+}
+
+.pricing-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.pricing-title {
+  font-family: var(--font-space);
+  font-size: 42px;
+  line-height: 1.06;
+  color: var(--text);
+}
+
+.pricing-subtitle {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text-muted);
+}
+
+.pricing-hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.pricing-hero-note {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.pricing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pricing-card-recommended {
+  border-color: var(--primary-border);
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.12), rgba(20, 20, 20, 0.98));
+}
+
+.pricing-card-current {
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.25);
+}
+
+.pricing-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pricing-card-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.pricing-card-name {
+  margin-top: 6px;
+  font-family: var(--font-space);
+  font-size: 24px;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.pricing-card-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--primary-border);
+  background: var(--primary-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.pricing-card-badge-current {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--green);
+}
+
+.pricing-card-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pricing-card-price {
+  font-family: var(--font-space);
+  font-size: 40px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.pricing-card-cadence {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pricing-card-headline {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.pricing-card-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.pricing-card-feature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.pricing-card-feature {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.pricing-card-feature-mark {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  padding-top: 1px;
+}
+
+.pricing-card-actions {
+  margin-top: auto;
+}
+
+.pricing-story-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.pricing-compare,
+.pricing-faq {
+  margin-bottom: 24px;
+}
+
+.pricing-compare-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.pricing-compare-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.5fr) repeat(3, minmax(0, 0.8fr));
+  gap: 12px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.pricing-compare-row:first-child {
+  border-top: 0;
+}
+
+.pricing-compare-head {
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.pricing-faq-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.pricing-faq-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pricing-faq-question {
+  font-family: var(--font-space);
+  font-size: 18px;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.pricing-faq-answer {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
 @media (max-width: 960px) {
   .landing-hero-grid,
-  .landing-sections {
+  .landing-sections,
+  .pricing-grid,
+  .pricing-story-grid,
+  .pricing-faq-list {
     grid-template-columns: 1fr;
+  }
+
+  .pricing-compare-row {
+    grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -344,8 +611,15 @@ h1, h2, h3, h4 {
   .landing-title {
     font-size: 28px;
   }
+
+  .pricing-title {
+    font-size: 32px;
+  }
   .landing-subtitle {
     font-size: 13px;
+  }
+  .pricing-subtitle {
+    font-size: 14px;
   }
   .landing-shell {
     padding: 24px 0 32px;
@@ -358,6 +632,24 @@ h1, h2, h3, h4 {
   }
   .landing-system-value {
     text-align: left;
+  }
+
+  .landing-cta-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .pricing-card,
+  .pricing-faq-item {
+    padding: 16px;
+  }
+
+  .pricing-compare-table {
+    overflow-x: auto;
+  }
+
+  .pricing-compare-row {
+    min-width: 640px;
   }
 }
 
@@ -415,6 +707,27 @@ h1, h2, h3, h4 {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.site-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.site-header-nav a {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.site-header-nav a:hover {
+  color: var(--text);
 }
 
 /* ─── Main content ──────────────────────────────────────────────────────────── */
@@ -1484,6 +1797,60 @@ h1, h2, h3, h4 {
   gap: 12px;
 }
 
+.learning-primer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.learning-primer-card,
+.learning-state-note {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.learning-primer-label,
+.learning-memory-kicker,
+.experiment-hypothesis-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.learning-primer-label {
+  margin-bottom: 8px;
+}
+
+.learning-primer-copy,
+.learning-state-note p,
+.learning-bucket-how,
+.learning-bucket-effect,
+.learning-memory-impact,
+.experiment-lane-copy,
+.experiment-hypothesis-copy,
+.experiment-hypothesis-next {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.learning-primer-copy,
+.learning-bucket-how,
+.experiment-lane-copy,
+.experiment-hypothesis-copy {
+  color: var(--text-muted);
+}
+
+.learning-state-note p,
+.learning-memory-impact,
+.experiment-hypothesis-next {
+  color: var(--text);
+}
+
 .learning-kpi {
   border: 1px solid var(--tone-border);
   border-radius: var(--radius);
@@ -1546,6 +1913,14 @@ h1, h2, h3, h4 {
   margin-bottom: 14px;
 }
 
+.learning-bucket-explainer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
 .learning-bucket-title {
   color: var(--text);
   margin-bottom: 6px;
@@ -1566,6 +1941,11 @@ h1, h2, h3, h4 {
   border-radius: 999px;
   padding: 4px 8px;
   white-space: nowrap;
+}
+
+.learning-bucket-effect {
+  color: var(--tone-color);
+  margin-top: 6px;
 }
 
 .learning-bucket-items {
@@ -1593,6 +1973,20 @@ h1, h2, h3, h4 {
 .learning-memory-label {
   font-size: 13px;
   line-height: 1.55;
+  color: var(--text);
+}
+
+.learning-memory-copy,
+.learning-memory-takeaway,
+.learning-memory-impact-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.learning-memory-lesson {
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--text);
 }
 
@@ -1669,12 +2063,30 @@ h1, h2, h3, h4 {
 
 .experiment-lane-title {
   color: var(--text);
+  margin-bottom: 6px;
 }
 
 .experiment-stack {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.experiment-hypothesis-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.experiment-hypothesis-label {
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+.experiment-hypothesis-next {
+  margin-top: 8px;
 }
 
 .experiment-card {
@@ -1924,6 +2336,7 @@ h1, h2, h3, h4 {
 @media (max-width: 768px) {
   .rankings-grid,
   .comparison-grid,
+  .learning-primer-grid,
   .learning-buckets-grid,
   .experiment-grid,
   .learning-kpi-grid,
@@ -3350,6 +3763,14 @@ h1, h2, h3, h4 {
 
   .site-header-right {
     gap: 10px;
+  }
+
+  .site-header-nav {
+    gap: 10px;
+  }
+
+  .site-header-nav a {
+    font-size: 9px;
   }
 
   /* Section titles */

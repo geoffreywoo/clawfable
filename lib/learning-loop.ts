@@ -4,6 +4,7 @@ import type {
   LearningSignal,
   PersonalizationMemory,
   TweetPerformance,
+  VoiceDirectiveRule,
 } from './types';
 import type { RemixEntry } from './kv-storage';
 import type { BanditPolicy } from './bandit';
@@ -146,11 +147,20 @@ function summarizeWeeklyChanges(
   return changes.slice(0, 4);
 }
 
+function summarizeDirectiveRules(rules: VoiceDirectiveRule[]): string[] {
+  return unique(rules.map((rule) => {
+    const scopeLabel = rule.scope.type === 'general'
+      ? 'Voice rule'
+      : `${rule.scope.type.replace(/_/g, ' ')} rule`;
+    return `${scopeLabel}: ${rule.systemLesson} (${rule.normalizedRule})`;
+  })).slice(0, 4);
+}
+
 export interface BuildPersonalizationMemoryOptions {
   feedback: FeedbackEntry[];
   signals: LearningSignal[];
   remixPatterns: RemixEntry[];
-  directives: string[];
+  directiveRules: VoiceDirectiveRule[];
   learnings: AgentLearnings | null;
   performanceHistory: TweetPerformance[];
   banditPolicy: BanditPolicy | null;
@@ -162,7 +172,7 @@ export function buildPersonalizationMemory({
   feedback,
   signals,
   remixPatterns,
-  directives,
+  directiveRules,
   learnings,
   performanceHistory,
   banditPolicy,
@@ -188,7 +198,7 @@ export function buildPersonalizationMemory({
   const operatorHiddenPreferences = summarizeOperatorPreferences(signals, remixPatterns);
 
   const identityConstraints = unique([
-    ...directives.slice(0, 4),
+    ...summarizeDirectiveRules(directiveRules),
     ...voiceProfile.antiGoals.map((goal) => `Never: ${goal}`),
   ]).slice(0, 5);
 

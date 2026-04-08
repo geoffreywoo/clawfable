@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
 
     // If first login (no agents), auto-create an agent connected to their X account
     const existingAgents = await getUserAgentIds(userId);
+    await Promise.all(existingAgents.map((agentId) => addAgentToUser(userId, agentId)));
     let redirectPath = '/';
 
     if (existingAgents.length === 0) {

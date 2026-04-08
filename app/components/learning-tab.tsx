@@ -32,6 +32,25 @@ function sourceLabel(source: string): string {
   return source.replace(/_/g, ' ').toUpperCase();
 }
 
+function bucketEffectLabel(bucketId: LearningBucket['id']): string {
+  switch (bucketId) {
+    case 'always':
+      return 'Used as a positive prior in drafting and ranking';
+    case 'never':
+      return 'Applied as a negative prior and ranking penalty';
+    case 'momentum':
+      return 'Biases more surface area toward rising topics';
+    case 'under-tested':
+      return 'Keeps exploration open until confidence improves';
+    case 'preferences':
+      return 'Quietly nudges future wording and structure';
+    case 'identity':
+      return 'Acts like a durable boundary during generation';
+    default:
+      return 'Feeds the learning loop';
+  }
+}
+
 function OverviewCard({
   label,
   value,
@@ -62,12 +81,27 @@ function BeliefBucket({ bucket }: { bucket: LearningBucket }) {
         </div>
         <span className="learning-bucket-count">{bucket.items.length}</span>
       </div>
+      <div className="learning-bucket-explainer">
+        <p className="learning-bucket-how">{bucket.howToRead}</p>
+        <p className="learning-bucket-effect">{bucketEffectLabel(bucket.id)}</p>
+      </div>
       <div className="learning-bucket-items">
         {bucket.items.map((item) => (
           <div key={item.id} className="learning-memory-item">
             <div className="learning-memory-line">
-              <p className="learning-memory-label">{item.label}</p>
+              <div className="learning-memory-copy">
+                <p className="learning-memory-kicker">Observed pattern</p>
+                <p className="learning-memory-label">{item.label}</p>
+              </div>
               <span className="learning-memory-confidence">{item.confidence}%</span>
+            </div>
+            <div className="learning-memory-takeaway">
+              <p className="learning-memory-kicker">System takeaway</p>
+              <p className="learning-memory-lesson">{item.lesson}</p>
+            </div>
+            <div className="learning-memory-impact-block">
+              <p className="learning-memory-kicker">What changes now</p>
+              <p className="learning-memory-impact">{item.impact}</p>
             </div>
             <div className="learning-memory-meta">
               <span className={`learning-source-chip ${toneClass(item.tone)}`}>{sourceLabel(item.source)}</span>
@@ -85,6 +119,12 @@ function ExperimentLane({ lane }: { lane: LearningExperimentLane }) {
     <div className="experiment-lane">
       <div className="experiment-lane-header">
         <p className="experiment-lane-title">{lane.title}</p>
+        <p className="experiment-lane-copy">{lane.belief}</p>
+      </div>
+      <div className="experiment-hypothesis-card">
+        <p className="experiment-hypothesis-label">HYPOTHESIS</p>
+        <p className="experiment-hypothesis-copy">{lane.hypothesis}</p>
+        <p className="experiment-hypothesis-next">{lane.nextCheck}</p>
       </div>
       <div className="experiment-stack">
         {lane.exploit && (
@@ -281,6 +321,27 @@ export function LearningTab({ agentId }: LearningTabProps) {
         </div>
       </div>
 
+      <div className="learning-primer-grid">
+        <div className="learning-primer-card">
+          <p className="learning-primer-label">LEARNED BELIEFS</p>
+          <p className="learning-primer-copy">
+            These are the system&apos;s current working assumptions about voice, audience taste, and approval patterns. They are compressed memory, not permanent truth.
+          </p>
+        </div>
+        <div className="learning-primer-card">
+          <p className="learning-primer-label">ACTIVE EXPERIMENTS</p>
+          <p className="learning-primer-copy">
+            These are open hypotheses the bandit is still testing. Exploration means the system is intentionally spending reps to reduce uncertainty, not saying the idea already works.
+          </p>
+        </div>
+        <div className="learning-primer-card">
+          <p className="learning-primer-label">AVOID LIST</p>
+          <p className="learning-primer-copy">
+            Avoid items are translated into ranking penalties and prompt constraints. They are the system&apos;s current lesson about what to stop repeating, not just copied user text.
+          </p>
+        </div>
+      </div>
+
       <div className="comparison-grid">
         <div className="learning-digest">
           <div className="learning-digest-header">
@@ -313,6 +374,11 @@ export function LearningTab({ agentId }: LearningTabProps) {
               <span className="section-count">what the model currently believes about your voice and audience</span>
             </div>
           </div>
+          <div className="learning-state-note">
+            <p>
+              Belief state is the compressed memory the system uses during generation and ranking. Positive buckets raise exposure, negative buckets lower it, and identity buckets act like hard guardrails.
+            </p>
+          </div>
           <div className="learning-buckets-grid">
             {snapshot.beliefState.map((bucket) => (
               <BeliefBucket key={bucket.id} bucket={bucket} />
@@ -325,8 +391,13 @@ export function LearningTab({ agentId }: LearningTabProps) {
         <div className="section-header">
           <div className="section-title">
             <h2>EXPERIMENT BOARD</h2>
-            <span className="section-count">what the bandit is exploiting, exploring, and doubting</span>
+            <span className="section-count">current bets, active hypotheses, and weak spots in confidence</span>
           </div>
+        </div>
+        <div className="learning-state-note">
+          <p>
+            Each lane shows the current winner, the challenger the system wants to test, and what evidence it still needs before widening or narrowing the policy.
+          </p>
         </div>
         {snapshot.experiments.summary.length > 0 && (
           <div className="experiment-summary-row">

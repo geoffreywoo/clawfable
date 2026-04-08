@@ -12,12 +12,13 @@ import {
   updateProtocolSettings,
   updateAgent,
   pushSoulVersion,
-  getVoiceDirectives,
+  getVoiceDirectiveRules,
   getRecentNegativeFeedback,
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import Anthropic from '@anthropic-ai/sdk';
+import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 
 const anthropic = new Anthropic();
 
@@ -82,10 +83,11 @@ async function evolveSoul(
     }
 
     // Gather operator signals that soul evolution should respect
-    const [directives, negFeedback] = await Promise.all([
-      getVoiceDirectives(agent.id),
+    const [directiveRules, negFeedback] = await Promise.all([
+      getVoiceDirectiveRules(agent.id),
       getRecentNegativeFeedback(agent.id, 5),
     ]);
+    const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
 
     // Build the evolution prompt
     const fp = learnings.styleFingerprint;
@@ -142,8 +144,8 @@ ${topTweets}
 WORST 3 TWEETS (do LESS like these):
 ${worstTweets}
 
-${directives.length > 0 ? `OPERATOR VOICE DIRECTIVES (from coaching sessions — these MUST be respected in the evolved soul):
-${directives.map((d, i) => `${i + 1}. ${d}`).join('\n')}` : ''}
+${activeDirectiveRules.length > 0 ? `OPERATOR VOICE DIRECTIVES (from coaching sessions — these MUST be respected in the evolved soul):
+${activeDirectiveRules.map((rule, i) => formatVoiceDirectiveRule(rule, i)).join('\n')}` : ''}
 
 ${negFeedback.length > 0 ? `CONTENT THE OPERATOR REJECTED (the soul should steer AWAY from these patterns):
 ${negFeedback.map((f) => `- ${f}`).join('\n')}` : ''}

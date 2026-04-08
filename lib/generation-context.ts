@@ -11,12 +11,13 @@ import {
   getRemixPatterns,
   getStyleSignals,
   getTweets,
-  getVoiceDirectives,
+  getVoiceDirectiveRules,
 } from './kv-storage';
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
 import { buildBanditPolicy } from './bandit';
 import { buildPersonalizationMemory } from './learning-loop';
+import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -110,7 +111,7 @@ export async function buildGenerationContext(
     negatives,
     remixMemory,
     remixPatterns,
-    directives,
+    directiveRules,
     allTweets,
     performanceHistory,
     feedback,
@@ -123,7 +124,7 @@ export async function buildGenerationContext(
     getRecentNegativeFeedback(agent.id, negativeLimit),
     getRemixMemory(agent.id).catch(() => []),
     getRemixPatterns(agent.id).catch(() => []),
-    getVoiceDirectives(agent.id).catch(() => []),
+    getVoiceDirectiveRules(agent.id).catch(() => []),
     getTweets(agent.id),
     getPerformanceHistory(agent.id, 100),
     getFeedback(agent.id),
@@ -147,9 +148,11 @@ export async function buildGenerationContext(
     voiceProfile.communicationStyle += `\n\n## OPERATOR STYLE PREFERENCES (from remix history — follow these)\n${remixPatterns.map((item) => `- ${item}`).join('\n')}`;
   }
 
-  if (directives.length > 0) {
-    const ordered = [...directives.slice(0, directiveLimit)].reverse();
-    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)\n${ordered.map((directive, index) => `${index + 1}. ${directive}`).join('\n')}`;
+  const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
+
+  if (activeDirectiveRules.length > 0) {
+    const ordered = [...activeDirectiveRules.slice(0, directiveLimit)].reverse();
+    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)\n${ordered.map((rule, index) => formatVoiceDirectiveRule(rule, index)).join('\n')}`;
     if (ordered.length > 1) {
       voiceProfile.communicationStyle += `\nNote: If any directives seem contradictory, prefer the MORE RECENT ones (higher numbers).`;
     }
@@ -174,7 +177,7 @@ export async function buildGenerationContext(
     feedback,
     signals,
     remixPatterns: remixMemory,
-    directives,
+    directiveRules: activeDirectiveRules,
     learnings,
     performanceHistory,
     banditPolicy,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addRemixEntry,
   addVoiceDirective,
+  getVoiceDirectiveRules,
   createAgent,
   createTweet,
   saveFeedback,
@@ -76,12 +77,17 @@ describe('generation context', () => {
     });
 
     const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
+    const directiveRules = await getVoiceDirectiveRules(agent.id);
 
     expect(context.voiceProfile.communicationStyle).toContain('Style analysis: Wizard voice fingerprint');
     expect(context.voiceProfile.communicationStyle).toContain('bad tweet (why it was rejected: Too vague)');
     expect(context.voiceProfile.communicationStyle).toContain('Keep tweets short and punchy');
-    expect(context.voiceProfile.communicationStyle).toContain('1. Use calmer endings.');
-    expect(context.voiceProfile.communicationStyle).toContain('2. Lead with specifics.');
+    expect(context.voiceProfile.communicationStyle).toContain('1. Land tweets with calm, restrained endings.');
+    expect(context.voiceProfile.communicationStyle).toContain('2. Open tweets with specific details before abstractions.');
+    expect(context.voiceProfile.communicationStyle).toContain('Raw coaching: Use calmer endings.');
+    expect(context.voiceProfile.communicationStyle).toContain('Lesson: Concrete openings feel more native to the operator than abstract framing.');
+    expect(context.memory.identityConstraints.some((item) => item.includes('Concrete openings feel more native'))).toBe(true);
+    expect(directiveRules.filter((rule) => rule.status === 'active')).toHaveLength(2);
     expect(context.recentPosts).toContain('already queued tweet');
     expect(context.style.exploration.rate).toBe(35);
     expect(context.style.exploration.underusedFormats).toContain('question');

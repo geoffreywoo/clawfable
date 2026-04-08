@@ -15,6 +15,8 @@ type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
 export interface LearningBucketItem {
   id: string;
   label: string;
+  lesson: string;
+  impact: string;
   source: LearningItemSource;
   confidence: number;
   tone: LearningItemTone;
@@ -25,6 +27,7 @@ export interface LearningBucket {
   id: string;
   title: string;
   subtitle: string;
+  howToRead: string;
   tone: LearningItemTone;
   items: LearningBucketItem[];
 }
@@ -50,6 +53,9 @@ export interface LearningOverview {
 export interface LearningExperimentLane {
   id: 'formats' | 'topics' | 'lengths';
   title: string;
+  belief: string;
+  hypothesis: string;
+  nextCheck: string;
   exploit: BanditArmScore | null;
   explore: BanditArmScore | null;
   caution: BanditArmScore | null;
@@ -156,6 +162,8 @@ function activeMix(tweets: Tweet[]) {
 function buildBucketItem(
   id: string,
   label: string,
+  lesson: string,
+  impact: string,
   source: LearningItemSource,
   tone: LearningItemTone,
   confidence: number,
@@ -164,11 +172,137 @@ function buildBucketItem(
   return {
     id,
     label,
+    lesson,
+    impact,
     source,
     tone,
     confidence: Math.round(clamp(confidence) * 100),
     note,
   };
+}
+
+function containsAny(input: string, terms: string[]): boolean {
+  return terms.some((term) => input.includes(term));
+}
+
+function sentenceCaseArm(value: string): string {
+  return value.replace(/_/g, ' ');
+}
+
+function explainAvoidItem(label: string): { lesson: string; impact: string } {
+  const normalized = label.toLowerCase();
+
+  if (containsAny(normalized, ['generic', 'vague', 'abstract'])) {
+    return {
+      lesson: 'Specificity is winning over abstraction.',
+      impact: 'Similar vague drafts get downranked unless they add sharper claims, examples, or numbers.',
+    };
+  }
+
+  if (containsAny(normalized, ['aggressive', 'hostile', 'harsh', 'mean', 'too spicy'])) {
+    return {
+      lesson: 'The voice can keep its edge without sounding needlessly combative.',
+      impact: 'Ranking and generation will steer away from hostility-first phrasing on future drafts.',
+    };
+  }
+
+  if (containsAny(normalized, ['salesy', 'promotional', 'promo', 'shill', 'marketing'])) {
+    return {
+      lesson: 'Insight has to come before promotion.',
+      impact: 'Drafts that read like marketing copy get penalized unless they earn the pitch with a real point of view.',
+    };
+  }
+
+  if (containsAny(normalized, ['off-topic', 'wrong topic', 'not on-topic', 'off brand', 'off-brand'])) {
+    return {
+      lesson: 'The account needs tighter topical alignment.',
+      impact: 'Future drafts get pushed back toward core subjects and away from tangents that do not fit the account.',
+    };
+  }
+
+  if (containsAny(normalized, ['wrong tone', 'not my voice', 'off voice', 'off-voice', 'forced', 'cringe', 'corny'])) {
+    return {
+      lesson: 'Voice fit matters more than novelty.',
+      impact: 'Similar phrasing becomes a negative prior, so future drafts are nudged closer to the native voice before experimenting.',
+    };
+  }
+
+  if (containsAny(normalized, ['factually wrong', 'inaccurate', 'made up', 'incorrect'])) {
+    return {
+      lesson: 'The system needs a higher bar for claims that sound authoritative.',
+      impact: 'Riskier assertions get penalized in ranking and are more likely to be quarantined before posting.',
+    };
+  }
+
+  if (containsAny(normalized, ['weak hook', 'boring', 'flat opening', 'no hook'])) {
+    return {
+      lesson: 'The first line needs more tension, surprise, or curiosity.',
+      impact: 'Future drafts are pushed toward stronger openers before they can score well.',
+    };
+  }
+
+  if (containsAny(normalized, ['too long', 'rambling', 'wordy'])) {
+    return {
+      lesson: 'Compression is improving approval odds.',
+      impact: 'Longer drafts like this lose ranking weight unless the extra depth clearly pays off.',
+    };
+  }
+
+  if (containsAny(normalized, ['too short', 'thin', 'not enough depth', 'underdeveloped'])) {
+    return {
+      lesson: 'Some ideas need a more developed argument before they feel publishable.',
+      impact: 'Future drafts on similar topics can get nudged toward fuller structure instead of one-line takes.',
+    };
+  }
+
+  if (containsAny(normalized, ['repetitive', 'duplicate', 'same take', 'repeated'])) {
+    return {
+      lesson: 'Novelty is part of the quality bar, not just topical fit.',
+      impact: 'The chooser applies stronger repetition penalties to similar drafts going forward.',
+    };
+  }
+
+  return {
+    lesson: 'This pattern is being treated as a negative voice signal.',
+    impact: 'Similar drafts get penalized during generation, ranking, and safety checks until newer evidence proves otherwise.',
+  };
+}
+
+function explainBucketItem(bucketId: LearningBucket['id'], label: string): { lesson: string; impact: string } {
+  switch (bucketId) {
+    case 'always':
+      return {
+        lesson: label,
+        impact: 'This pattern gets positive weighting when the system drafts and ranks future candidates.',
+      };
+    case 'never':
+      return explainAvoidItem(label);
+    case 'momentum':
+      return {
+        lesson: `${label} is outperforming the recent baseline right now.`,
+        impact: 'The generator and bandit both bias more surface area toward this topic while momentum lasts.',
+      };
+    case 'under-tested':
+      return {
+        lesson: `${label.replace(/\s+needs more data$/i, '')} is unresolved, not proven.`,
+        impact: 'The system will keep sampling it deliberately before deciding whether to scale it up or suppress it.',
+      };
+    case 'preferences':
+      return {
+        lesson: label,
+        impact: 'This preference nudges future drafts even if the operator never wrote it down explicitly.',
+      };
+    case 'identity':
+      return {
+        lesson: label,
+        impact: 'This acts like a durable voice boundary. Drafts that conflict with it should score worse or be rewritten.',
+      };
+    default:
+      return {
+        lesson: label,
+        impact: 'This signal now influences future ranking and generation.',
+      };
+  }
 }
 
 function matchFeedbackSource(label: string, feedback: FeedbackEntry[]): { source: LearningItemSource; note?: string; confidence: number } {
@@ -198,56 +332,68 @@ function buildBeliefState(
       id: 'always',
       title: 'DO MORE',
       subtitle: 'Behavior the system is leaning into',
+      howToRead: 'These are active positive priors. They increase the odds that similar structures, tones, or moves show up in future drafts.',
       tone: 'positive',
-      items: memory.alwaysDoMoreOfThis.map((item, index) =>
-        buildBucketItem(`always-${index}`, item, 'performance', 'positive', 0.86, 'backed by performance history')
-      ),
+      items: memory.alwaysDoMoreOfThis.map((item, index) => {
+        const detail = explainBucketItem('always', item);
+        return buildBucketItem(`always-${index}`, item, detail.lesson, detail.impact, 'performance', 'positive', 0.86, 'backed by performance history');
+      }),
     },
     {
       id: 'never',
       title: 'AVOID',
       subtitle: 'Patterns the operator keeps pushing away',
+      howToRead: 'These are not just remembered complaints. They become negative ranking pressure, prompt constraints, and sometimes quarantine signals.',
       tone: 'danger',
       items: memory.neverDoThisAgain.map((item, index) => {
         const matched = matchFeedbackSource(item, feedback);
-        return buildBucketItem(`never-${index}`, item, matched.source, 'danger', matched.confidence, matched.note);
+        const detail = explainBucketItem('never', item);
+        return buildBucketItem(`never-${index}`, item, detail.lesson, detail.impact, matched.source, 'danger', matched.confidence, matched.note);
       }),
     },
     {
       id: 'momentum',
       title: 'TOPICS WITH MOMENTUM',
       subtitle: 'Where audience response is rising right now',
+      howToRead: 'Momentum topics are temporary demand signals. They bias exploration and ranking until the audience cools off.',
       tone: 'positive',
-      items: memory.topicsWithMomentum.map((item, index) =>
-        buildBucketItem(`momentum-${index}`, item, 'performance', 'positive', 0.8, 'outperforming recent baseline')
-      ),
+      items: memory.topicsWithMomentum.map((item, index) => {
+        const detail = explainBucketItem('momentum', item);
+        return buildBucketItem(`momentum-${index}`, item, detail.lesson, detail.impact, 'performance', 'positive', 0.8, 'outperforming recent baseline');
+      }),
     },
     {
       id: 'under-tested',
       title: 'FORMATS UNDER TEST',
       subtitle: 'Experiments that need more volume before the system commits',
+      howToRead: 'These are open questions, not endorsements. The system is deliberately spending reps here to reduce uncertainty.',
       tone: 'warning',
-      items: memory.formatsUnderTested.map((item, index) =>
-        buildBucketItem(`under-${index}`, item, 'bandit', 'warning', 0.62, 'low sample size')
-      ),
+      items: memory.formatsUnderTested.map((item, index) => {
+        const detail = explainBucketItem('under-tested', item);
+        return buildBucketItem(`under-${index}`, item, detail.lesson, detail.impact, 'bandit', 'warning', 0.62, 'low sample size');
+      }),
     },
     {
       id: 'preferences',
       title: 'HIDDEN PREFERENCES',
       subtitle: 'Things operator behavior implies even if never said aloud',
+      howToRead: 'These come from edits, remixes, and approvals. They are softer than hard rules, but they still shape future drafts.',
       tone: 'neutral',
-      items: memory.operatorHiddenPreferences.map((item, index) =>
-        buildBucketItem(`preference-${index}`, item, 'operator', 'neutral', 0.78, 'derived from edits and remixes')
-      ),
+      items: memory.operatorHiddenPreferences.map((item, index) => {
+        const detail = explainBucketItem('preferences', item);
+        return buildBucketItem(`preference-${index}`, item, detail.lesson, detail.impact, 'operator', 'neutral', 0.78, 'derived from edits and remixes');
+      }),
     },
     {
       id: 'identity',
       title: 'IDENTITY CONSTRAINTS',
       subtitle: 'Permanent voice boundaries the model should not cross',
+      howToRead: 'These are treated as durable constraints. The system should respect them even when experimenting elsewhere.',
       tone: 'neutral',
-      items: memory.identityConstraints.map((item, index) =>
-        buildBucketItem(`identity-${index}`, item, 'operator', 'neutral', 0.94, 'treated as durable rule')
-      ),
+      items: memory.identityConstraints.map((item, index) => {
+        const detail = explainBucketItem('identity', item);
+        return buildBucketItem(`identity-${index}`, item, detail.lesson, detail.impact, 'operator', 'neutral', 0.94, 'treated as durable rule');
+      }),
     },
   ];
 
@@ -284,14 +430,35 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
     { id: 'lengths', title: 'LENGTH', arms: policy.lengthArms },
   ];
 
-  return groups.map(({ id, title, arms }) => ({
-    id,
-    title,
-    exploit: sortExploit(arms)[0] || null,
-    explore: sortExplore(arms)[0] || null,
-    caution: sortCaution(arms.filter((arm) => arm.pulls >= 2))[0] || null,
-    underTest: sortExplore(arms).filter((arm) => arm.coldStart || arm.pulls < 3).slice(0, 3),
-  }));
+  return groups.map(({ id, title, arms }) => {
+    const exploit = sortExploit(arms)[0] || null;
+    const explore = sortExplore(arms)[0] || null;
+    const caution = sortCaution(arms.filter((arm) => arm.pulls >= 2))[0] || null;
+    const underTest = sortExplore(arms).filter((arm) => arm.coldStart || arm.pulls < 3).slice(0, 3);
+    const belief = exploit
+      ? `Current belief: ${sentenceCaseArm(exploit.arm)} is the strongest ${title.toLowerCase()} bet right now.`
+      : `Current belief: no strong ${title.toLowerCase()} winner yet.`;
+    const hypothesis = explore
+      ? `Hypothesis: ${sentenceCaseArm(explore.arm)} could outperform ${sentenceCaseArm(exploit?.arm || 'the current default')} if it gets more live reps.`
+      : `Hypothesis: the system is still looking for a meaningful challenger in ${title.toLowerCase()}.`;
+    const nextCheck = underTest.length > 0
+      ? `Next check: gather more evidence on ${underTest.map((arm) => sentenceCaseArm(arm.arm)).join(', ')} before narrowing the policy.`
+      : caution
+        ? `Next check: keep exposure low on ${sentenceCaseArm(caution.arm)} unless newer evidence changes the picture.`
+        : `Next check: keep sampling until a cleaner winner emerges.`;
+
+    return {
+      id,
+      title,
+      belief,
+      hypothesis,
+      nextCheck,
+      exploit,
+      explore,
+      caution,
+      underTest,
+    };
+  });
 }
 
 function summarizeSignalEvent(signal: LearningSignal, tweet: Tweet | undefined): Omit<LearningEventEntry, 'id' | 'createdAt'> {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, getUserAgentIds } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
@@ -7,6 +7,7 @@ import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 import { formatActionError } from '@/lib/twitter-debug';
+import { getBillingSummary } from '@/lib/billing';
 
 // GET /api/cron/post — called by Vercel Cron every 10 minutes
 export async function GET(request: NextRequest) {
@@ -33,6 +34,46 @@ export async function GET(request: NextRequest) {
       // Early exit: if agent isn't connected AND has no autopilot config, skip everything.
       // Saves KV commands on dormant or unconfigured agents.
       const settings = await getProtocolSettings(agent.id);
+      const ownerId = await getAgentOwnerId(agent.id);
+      const owner = ownerId
+        ? await getUser(ownerId)
+        : agent.xUserId
+          ? await getUser(String(agent.xUserId))
+          : null;
+      const billing = owner ? getBillingSummary(owner, (await getUserAgentIds(owner.id)).length) : null;
+      const automationAllowed = billing ? billing.canUseAutopilot : true;
+
+      if (!automationAllowed && (
+        settings.enabled
+        || settings.autoReply
+        || settings.proactiveReplies
+        || settings.proactiveLikes
+        || settings.autoFollow
+        || settings.agentShoutouts
+      )) {
+        await updateProtocolSettings(agent.id, {
+          enabled: false,
+          autoReply: false,
+          proactiveReplies: false,
+          proactiveLikes: false,
+          autoFollow: false,
+          agentShoutouts: false,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'billing_lock',
+          topic: 'billing',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: 'skipped',
+          reason: `Automation disabled on ${billing?.label || 'free'} plan.`,
+        });
+        continue;
+      }
+
       if (!isConnected && !settings.enabled && !settings.autoReply) {
         continue;
       }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
+import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline, getUserAgentIds } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { clampPostsPerDay } from '@/lib/survivability';
+import { assertCanUseAutopilot, BillingError, getBillingSummary } from '@/lib/billing';
 
 // GET /api/agents/[id]/protocol/settings
 export async function GET(
@@ -10,10 +11,11 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { user } = await requireAgentAccess(id);
     const settings = await getProtocolSettings(id);
     const postLog = await getPostLog(id, 10);
-    return NextResponse.json({ settings, postLog });
+    const agentCount = (await getUserAgentIds(user.id)).length;
+    return NextResponse.json({ settings, postLog, billing: getBillingSummary(user, agentCount) });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -27,8 +29,9 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { user } = await requireAgentAccess(id);
     const body = await request.json();
+    const agentCount = (await getUserAgentIds(user.id)).length;
 
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
@@ -49,6 +52,18 @@ export async function PATCH(
       updates.postsPerDay = clampPostsPerDay(updates.postsPerDay);
     }
 
+    const isTryingToEnableAutomation = (
+      updates.enabled === true
+      || updates.autoReply === true
+      || updates.proactiveReplies === true
+      || updates.proactiveLikes === true
+      || updates.autoFollow === true
+      || updates.agentShoutouts === true
+    );
+    if (isTryingToEnableAutomation) {
+      assertCanUseAutopilot(user, agentCount);
+    }
+
     // Freeze baseline on first autopilot enable
     if (updates.enabled === true) {
       const analysis = await getAnalysis(id);
@@ -65,6 +80,9 @@ export async function PATCH(
     const settings = await updateProtocolSettings(id, updates);
     return NextResponse.json(settings);
   } catch (err) {
+    if (err instanceof BillingError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
