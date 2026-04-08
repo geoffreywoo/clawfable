@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { SETUP_BANNER_CONTENT, normalizeSetupStep } from '@/lib/setup-state';
 import type { AgentSummary } from '@/lib/types';
 
 function getAgentHue(name: string): number {
@@ -15,7 +16,14 @@ export function AgentCard({ agent }: AgentCardProps) {
   const router = useRouter();
   const hue = getAgentHue(agent.name);
   const isConnected = agent.isConnected === 1;
-  const inSetup = agent.setupStep && agent.setupStep !== 'ready';
+  const setupStep = normalizeSetupStep(agent.setupStep);
+  const inSetup = setupStep !== 'ready';
+  const setupContent = inSetup ? SETUP_BANNER_CONTENT[setupStep] : null;
+  const soulPreview = agent.soulMdPreview && !agent.soulMdPreview.startsWith('# Pending')
+    ? agent.soulMdPreview
+    : inSetup
+      ? 'Setup is still in progress. Open the control room to finish the voice contract and approve the first batch.'
+      : 'Open the control room to inspect the queue, tune the voice, and watch what the system is learning.';
 
   const handleOpen = () => {
     router.push(`/agent/${agent.id}`);
@@ -71,8 +79,16 @@ export function AgentCard({ agent }: AgentCardProps) {
 
       {/* Soul preview */}
       <p className="agent-soul-preview">
-        {agent.soulMdPreview || 'No soul defined'}
+        {soulPreview}
       </p>
+
+      {setupContent && (
+        <div className="agent-card-next-step">
+          <p className="agent-card-next-label">NEXT STEP</p>
+          <p className="agent-card-next-title">{setupContent.title}</p>
+          <p className="agent-card-next-desc">{setupContent.desc}</p>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="agent-stats mb-4">
@@ -100,7 +116,7 @@ export function AgentCard({ agent }: AgentCardProps) {
         }}
         data-testid={`button-open-agent-${agent.id}`}
       >
-        OPEN DASHBOARD
+        {inSetup ? 'CONTINUE SETUP' : 'OPEN CONTROL ROOM'}
       </button>
     </div>
   );

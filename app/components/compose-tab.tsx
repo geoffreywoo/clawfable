@@ -218,22 +218,22 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
                 <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
               </svg>
-              <h2>GENERATE</h2>
-              <span className="section-count">from your voice + engagement data + trending</span>
+              <h2>DRAFT ON DEMAND</h2>
+              <span className="section-count">voice, learning, and live topic signals</span>
             </div>
           </div>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.7', marginBottom: '12px' }}>
-            AI produces tweets weighted to your top-performing formats, topics, and voice — informed by learnings from what actually engages.
+            Ask for fresh drafts whenever you want. Clawfable uses the voice contract, recent learning signals, proven patterns, and live topics to build a batch you can review.
           </p>
           <div className="flex gap-3">
             <button className="btn btn-primary" onClick={() => handleBatchGenerate(3)} disabled={generating} style={{ background: '#8b5cf6' }}>
-              {generating ? 'GENERATING...' : 'GENERATE 3'}
+              {generating ? 'DRAFTING...' : 'DRAFT 3'}
             </button>
             <button className="btn btn-primary" onClick={() => handleBatchGenerate(5)} disabled={generating} style={{ background: '#8b5cf6' }}>
-              GENERATE 5
+              DRAFT 5
             </button>
             <button className="btn btn-outline" onClick={() => handleBatchGenerate(10)} disabled={generating}>
-              GENERATE 10
+              DRAFT 10
             </button>
           </div>
         </div>
@@ -244,12 +244,12 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
             <path d="M24 14v10l7 4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>
-            Run account analysis to unlock AI-powered generation based on your engagement data.
+            This agent needs one account-learning pass before Clawfable can draft against real voice and engagement data.
           </p>
           <button className="btn btn-primary" onClick={handleReanalyze} disabled={analyzing}
             style={{ marginTop: '12px', background: '#8b5cf6' }}
           >
-            {analyzing ? 'ANALYZING...' : 'RUN ANALYSIS'}
+            {analyzing ? 'LEARNING...' : 'LEARN THIS ACCOUNT'}
           </button>
         </div>
       )}
@@ -261,7 +261,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#8b5cf6" /></svg>
               <h2>DRAFTS</h2>
-              <span className="section-count">{generatedTweets.length} generated</span>
+              <span className="section-count">{generatedTweets.length} ready to review</span>
             </div>
           </div>
           <div className="space-y-3">
@@ -383,7 +383,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                       onClick={() => handleGenerateFromTopic(topic)}
                     >
                       <svg viewBox="0 0 12 12" width="11" height="11" fill="none"><polygon points="2,1 11,6 2,11" fill="#fff" /></svg>
-                      {generatingId === topic.id ? 'GENERATING...' : 'GENERATE'}
+                      {generatingId === topic.id ? 'DRAFTING...' : 'DRAFT'}
                     </button>
                   </div>
                 </div>
@@ -402,11 +402,11 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                 <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.5" />
                 <path d="M8 4v4l3 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
-              <h2>YOUR PATTERNS</h2>
+              <h2>ACCOUNT BASELINE</h2>
               <span className="section-count">analyzed {getTimeAgo(analysis.analyzedAt)}</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleReanalyze} disabled={analyzing}>
-              {analyzing ? 'ANALYZING...' : 'RE-ANALYZE'}
+              {analyzing ? 'LEARNING...' : 'REFRESH ANALYSIS'}
             </button>
           </div>
 

@@ -187,7 +187,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               title={isConnected ? 'Analyze your tweet history and auto-generate a SOUL.md' : 'Connect X API first'}
               style={{ fontSize: '9px' }}
             >
-              {generatingSoul ? 'ANALYZING TWEETS...' : 'GENERATE FROM MY TWEETS'}
+              {generatingSoul ? 'LEARNING FROM X...' : 'DRAFT FROM X HISTORY'}
             </button>
             <span className="label" style={{ textTransform: 'none' }}>{soulMd.length} chars</span>
           </div>
@@ -199,7 +199,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           }}>
             <div className="wizard-spinner" style={{ margin: '0 auto 8px' }} />
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-              Fetching up to 1000 tweets, analyzing voice patterns, generating SOUL.md...
+              Fetching up to 1000 tweets, learning voice patterns, and drafting the contract...
             </p>
           </div>
         )}
@@ -303,10 +303,10 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                 <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
               </svg>
-              {connecting ? 'REDIRECTING...' : 'AUTHORIZE WITH X'}
+              {connecting ? 'REDIRECTING...' : 'CONNECT X'}
             </button>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
-              You&apos;ll be redirected to X to authorize this agent. Requires Read + Write permissions.
+              You&apos;ll be redirected to X to authorize this agent. Requires Read + Write permissions and still does not post anything by itself.
             </p>
           </div>
         )}

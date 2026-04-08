@@ -368,20 +368,20 @@ export function QueueTab({ agentId }: QueueTabProps) {
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: autopilotSettings.enabled ? '#22c55e' : 'var(--text-muted)' }}>
             {autopilotSettings.enabled ? (
               <>
-                <span style={{ fontWeight: 700 }}>AUTOPILOT ON</span>
-                {' — posting ~'}{autopilotSettings.postsPerDay}x/day from this queue.
+                <span style={{ fontWeight: 700 }}>SCHEDULE LIVE</span>
+                {' — pulling approved tweets from this queue about '}{autopilotSettings.postsPerDay}{'x/day.'}
                 {autopilotSettings.lastPostedAt && (
                   <> Next post in ~{Math.max(0, Math.round(
                     ((24 / autopilotSettings.postsPerDay) * 60) -
                     ((Date.now() - new Date(autopilotSettings.lastPostedAt).getTime()) / 60000)
                   ))} min.</>
                 )}
-                {' Queue auto-refills below '}{autopilotSettings.minQueueSize}{' items.'}
+                {' Queue refills when it drops below '}{autopilotSettings.minQueueSize}{' items.'}
               </>
             ) : (
               <>
-                <span style={{ fontWeight: 700 }}>AUTOPILOT OFF</span>
-                {' — tweets in this queue must be posted manually. Enable in the Autopilot tab.'}
+                <span style={{ fontWeight: 700 }}>SCHEDULE PAUSED</span>
+                {' — use this as a manual review lane, or enable automation once the voice feels right.'}
               </>
             )}
           </p>
@@ -392,8 +392,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
       <div className="section-header">
         <div className="section-title">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          <h2>TWEET QUEUE</h2>
-          <span className="section-count">{activeQueuedTweets.length} active{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
+          <h2>APPROVED QUEUE</h2>
+          <span className="section-count">{activeQueuedTweets.length} ready{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
         </div>
         {activeQueuedTweets.length > 0 && (
           <div className="flex gap-2">
@@ -430,7 +430,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                 <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
               </svg>
               <h2>DELETED FROM X</h2>
-              <span className="section-count">Tell us why so the AI can learn</span>
+              <span className="section-count">Explain the miss so future drafts improve</span>
             </div>
           </div>
           <div className="space-y-2">
@@ -448,7 +448,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   <input
                     type="text"
                     className="input"
-                    placeholder="Why did you delete this? (e.g. off-topic, too aggressive, factually wrong)"
+                    placeholder="Examples: off-brand, too generic, wrong topic, too salesy, bad timing"
                     value={deletionFeedback[tweet.id] || ''}
                     onChange={(e) => setDeletionFeedback((prev) => ({ ...prev, [tweet.id]: e.target.value }))}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleDeletionFeedback(tweet.id); }}
@@ -479,7 +479,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       }
                     }}
                   >
-                    SKIP
+                    INFER
                   </button>
                 </div>
               </div>
@@ -533,8 +533,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
       {activeQueuedTweets.length === 0 && feedbackTweets.length === 0 && quarantinedTweets.length === 0 && (
         <div className="empty-state">
           <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><line x1="5" y1="8" x2="27" y2="8" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="16" x2="27" y2="16" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="24" x2="18" y2="24" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          <p>Queue empty</p>
-          <p>Generate takes from the FEED tab and queue them here</p>
+          <p>No approved tweets are waiting here yet.</p>
+          <p>Draft in Compose, finish the first setup review, or let automation refill once the queue minimum is set.</p>
         </div>
       )}
 
@@ -727,8 +727,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
           <div className="modal" style={{ maxWidth: '460px' }}>
             <div className="wizard-body">
               <div className="wizard-step-header">
-                <h3>Why remove this tweet?</h3>
-                <p>We&apos;ll use this signal to tune the agent&apos;s voice. Skip if you want Clawfable to infer intent automatically.</p>
+                <h3>Why remove this draft?</h3>
+                <p>A short reason is the strongest signal. If you skip, Clawfable will infer likely intent and still use the delete as feedback.</p>
               </div>
 
               <div style={{
@@ -749,7 +749,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   className="textarea"
                   value={deleteReason}
                   onChange={(event) => setDeleteReason(event.target.value)}
-                  placeholder="Examples: too generic, wrong tone, weak hook, not on-topic, sounds forced..."
+                  placeholder="Examples: too generic, wrong tone, weak hook, off-topic, sounds forced..."
                   rows={4}
                 />
                 <p className="wizard-section-hint">

@@ -197,7 +197,7 @@ export default function AgentDashboard() {
                 )}
               </h1>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.12em' }}>
-                Agent Dashboard{otherAgents.length > 0 ? ` · ${otherAgents.length + 1} agents` : ''}
+                Control room{otherAgents.length > 0 ? ` · ${otherAgents.length + 1} agents` : ''}
               </p>
             </button>
 

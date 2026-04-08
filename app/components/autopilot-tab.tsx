@@ -183,6 +183,34 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         ))}
       </div>
 
+      {settings && (
+        <div className="control-room-intro">
+          <div className="control-room-intro-head">
+            <div>
+              <p className="control-room-intro-label">CONTROL ROOM</p>
+              <h2 className="control-room-intro-title">This is the operating layer for the agent.</h2>
+            </div>
+            <span className="control-room-intro-chip">
+              {(settings.autonomyMode || 'balanced').toUpperCase()} MODE
+            </span>
+          </div>
+          <div className="control-room-intro-grid">
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">QUEUE</p>
+              <p className="control-room-intro-card-copy">Approved drafts wait there until you post them or the schedule pulls them live.</p>
+            </div>
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">LEARNING</p>
+              <p className="control-room-intro-card-copy">Operator edits, deletes, and live performance all feed the next generation cycle.</p>
+            </div>
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">COMPOSE</p>
+              <p className="control-room-intro-card-copy">Ask for fresh drafts whenever you want a new angle, topic, or experiment lane.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Background Jobs ─────────────────────────────────────────────── */}
       {settings && agentConnected && (
         <div>
@@ -192,8 +220,8 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 <circle cx="8" cy="8" r="6" stroke={settings.enabled || settings.autoReply ? '#22c55e' : '#8b5cf6'} strokeWidth="1.5" />
                 <circle cx="8" cy="8" r="2" fill={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--text-dim)'} />
               </svg>
-              <h2>BACKGROUND JOBS</h2>
-              <span className="section-count">cron every 10 min</span>
+              <h2>AUTOMATION LOOP</h2>
+              <span className="section-count">runs every 10 min</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleRunAutopilot}
               disabled={runningAutopilot || (!settings.enabled && !settings.autoReply)}
@@ -218,7 +246,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                   <div>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-POST</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Generate + post tweets · {settings.totalAutoPosted} posted
+                      Pull from approved queue and post on schedule · {settings.totalAutoPosted} posted
                       {settings.lastPostedAt && ` · last ${getTimeAgo(settings.lastPostedAt)}`}
                     </p>
                   </div>
@@ -257,7 +285,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                   <div>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-REPLY</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Reply to new mentions · {settings.totalAutoReplied || 0} replied
+                      Watch mentions and answer on schedule · {settings.totalAutoReplied || 0} replied
                       {settings.lastRepliedAt && ` · last ${getTimeAgo(settings.lastRepliedAt)}`}
                     </p>
                   </div>
@@ -686,14 +714,14 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                   AUTONOMY MODE
                 </p>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                  changes confidence bar + exploration
+                  choose how cautious or curious the agent should be
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'safe', label: 'SAFE', hint: 'higher trust, fewer risky bets' },
-                  { id: 'balanced', label: 'BALANCED', hint: 'default mix of trust + learning' },
-                  { id: 'explore', label: 'EXPLORE', hint: 'faster learning, more novelty' },
+                  { id: 'safe', label: 'SAFE', hint: 'mostly proven bets with the lowest surprise level' },
+                  { id: 'balanced', label: 'BALANCED', hint: 'blend proven patterns with measured exploration' },
+                  { id: 'explore', label: 'EXPLORE', hint: 'push into new formats and topics to learn faster' },
                 ].map((mode) => {
                   const active = (settings.autonomyMode || 'balanced') === mode.id;
                   return (

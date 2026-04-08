@@ -8,10 +8,10 @@ type Step = 'identity' | 'soul' | 'analyze' | 'preview';
 type ResumeStep = Exclude<Step, 'identity'>;
 
 const STEPS: { id: Step; label: string; num: number }[] = [
-  { id: 'identity', label: 'IDENTITY + X', num: 1 },
-  { id: 'soul', label: 'VOICE', num: 2 },
-  { id: 'analyze', label: 'ANALYZE', num: 3 },
-  { id: 'preview', label: 'PREVIEW', num: 4 },
+  { id: 'identity', label: 'NAME + CONNECT', num: 1 },
+  { id: 'soul', label: 'VOICE CONTRACT', num: 2 },
+  { id: 'analyze', label: 'LEARN ACCOUNT', num: 3 },
+  { id: 'preview', label: 'APPROVE BATCH', num: 4 },
 ];
 
 const ARCHETYPES = [
@@ -431,7 +431,7 @@ export function SetupWizard({
           {STEPS.map((item, index) => (
             <div
               key={item.id}
-              className={`wizard-step ${index < stepIndex ? 'done' : ''} ${item.id === step ? 'current' : ''}`}
+              className={`wizard-step ${index < stepIndex ? 'done active' : ''} ${item.id === step ? 'current' : ''}`}
             >
               <div className="wizard-step-num">{index < stepIndex ? '\u2713' : item.num}</div>
               <span className="wizard-step-label">{item.label}</span>
@@ -443,12 +443,18 @@ export function SetupWizard({
           {step === 'identity' && (
             <>
               <div className="wizard-step-header">
-                <h3>Agent Identity</h3>
-                <p>Name your agent, then authorize with X. You&apos;ll be redirected to X to grant access.</p>
+                <h3>Create the agent shell</h3>
+                <p>Start with the X account this agent will represent. After you connect X, Clawfable can learn the account and draft the first safe batch. Nothing posts during setup.</p>
+              </div>
+              <div className="wizard-callout">
+                <p className="wizard-callout-label">SETUP SAFETY</p>
+                <p className="wizard-callout-text">
+                  Connection only unlocks analysis and drafting. You will still review the first batch before anything can go live.
+                </p>
               </div>
               <div className="space-y-5">
                 <div className="field">
-                  <label>Twitter Handle</label>
+                  <label>X HANDLE</label>
                   <div className="input-with-prefix">
                     <span className="prefix">@</span>
                     <input
@@ -461,7 +467,7 @@ export function SetupWizard({
                   </div>
                 </div>
                 <div className="field">
-                  <label>Display Name</label>
+                  <label>AGENT NAME</label>
                   <input
                     type="text"
                     className="input"
@@ -483,7 +489,7 @@ export function SetupWizard({
                   <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                     <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
                   </svg>
-                  {loading ? 'REDIRECTING...' : 'AUTHORIZE WITH X'}
+                  {loading ? 'REDIRECTING...' : 'CREATE AGENT + CONNECT X'}
                 </button>
               </div>
             </>
@@ -492,25 +498,17 @@ export function SetupWizard({
           {step === 'soul' && (
             <>
               <div className="wizard-step-header">
-                <h3>Build Your Voice</h3>
-                <p>Generate from your tweet history or define the voice contract manually below.</p>
+                <h3>Define the voice contract</h3>
+                <p>Start from the real account if you can. That gives Clawfable a stronger first read on tone, topics, and anti-goals before you tune it manually.</p>
               </div>
 
               {agentId && (
-                <div style={{
-                  padding: '14px',
-                  marginBottom: '16px',
-                  background: 'rgba(139,92,246,0.06)',
-                  border: '1px solid rgba(139,92,246,0.2)',
-                  borderRadius: 'var(--radius-lg)',
-                }}>
+                <div className="wizard-callout">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: '#8b5cf6' }}>
-                        RECOMMENDED: GENERATE FROM YOUR TWEETS
-                      </p>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Analyze your timeline first so the setup contract starts from your real voice patterns.
+                      <p className="wizard-callout-label">FASTEST START: LEARN FROM THE REAL ACCOUNT</p>
+                      <p className="wizard-callout-text">
+                        Pulling from real posts gives the first voice contract a stronger baseline than starting from scratch.
                       </p>
                     </div>
                     <button
@@ -519,19 +517,19 @@ export function SetupWizard({
                       disabled={loading}
                       onClick={handleGenerateSoulFromTweets}
                     >
-                      {loading ? 'ANALYZING...' : 'AUTO-GENERATE'}
+                      {loading ? 'ANALYZING...' : 'DRAFT FROM X HISTORY'}
                     </button>
                   </div>
                 </div>
               )}
 
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', textAlign: 'center', marginBottom: '12px' }}>
-                — or build manually —
+                — or shape it manually —
               </p>
 
               <div className="wizard-builder-sections">
                 <div className="wizard-builder-section">
-                  <div className="wizard-section-label">EXAMPLE TWEETS (OPTIONAL)</div>
+                  <div className="wizard-section-label">REFERENCE TWEETS (OPTIONAL)</div>
                   <textarea
                     className="textarea"
                     value={exampleTweets}
@@ -540,12 +538,12 @@ export function SetupWizard({
                     rows={4}
                   />
                   <p className="wizard-section-hint">
-                    Skip if you don&apos;t have examples. We&apos;ll use archetype + topics.
+                    Paste examples you want this voice to feel close to. Skip if you want archetype + topics to do the shaping.
                   </p>
                 </div>
 
                 <div className="wizard-builder-section">
-                  <div className="wizard-section-label">VOICE ARCHETYPE</div>
+                  <div className="wizard-section-label">BASE VOICE</div>
                   <div className="wizard-tags" role="radiogroup" aria-label="Voice archetype">
                     {ARCHETYPES.map((item) => (
                       <button
@@ -562,7 +560,7 @@ export function SetupWizard({
                 </div>
 
                 <div className="wizard-builder-section">
-                  <div className="wizard-section-label">TOPICS (PICK 2-3)</div>
+                  <div className="wizard-section-label">HOME TOPICS (PICK 2-3)</div>
                   <div className="wizard-tags" role="group" aria-label="Topics">
                     {TOPICS.map((topic) => (
                       <button
@@ -579,7 +577,7 @@ export function SetupWizard({
                 </div>
 
                 <div className="wizard-builder-section">
-                  <div className="wizard-section-label">POSTING FREQUENCY</div>
+                  <div className="wizard-section-label">STARTING CADENCE</div>
                   <select
                     className="input"
                     value={frequency}
@@ -602,7 +600,7 @@ export function SetupWizard({
                   onClick={handleGenerateVoice}
                   style={{ background: canGenerateVoice ? '#8b5cf6' : undefined }}
                 >
-                  {loading ? 'CRAFTING VOICE PROFILE...' : 'GENERATE VOICE'}
+                  {loading ? 'DRAFTING VOICE CONTRACT...' : 'DRAFT VOICE CONTRACT'}
                 </button>
               </div>
             </>
@@ -611,15 +609,15 @@ export function SetupWizard({
           {step === 'analyze' && (
             <>
               <div className="wizard-step-header">
-                <h3>Account Analysis</h3>
-                <p>Studying your account&apos;s posting history, engagement patterns, and following graph.</p>
+                <h3>Learn the account</h3>
+                <p>Clawfable is reading posting history, engagement patterns, and network context so the first batch is grounded in what already works.</p>
               </div>
 
               {loading && !analysis && (
                 <div className="wizard-analyzing">
                   <div className="wizard-spinner" />
                   <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>
-                    Fetching timeline, analyzing engagement, mapping following...
+                    Reading timeline, ranking engagement, and mapping audience signals...
                   </p>
                 </div>
               )}
@@ -695,7 +693,7 @@ export function SetupWizard({
                   onClick={handleGoToPreview}
                   style={{ background: analysis ? '#8b5cf6' : undefined }}
                 >
-                  SEE PREVIEW TWEETS
+                  SHOW FIRST BATCH
                 </button>
               </div>
             </>
@@ -706,14 +704,14 @@ export function SetupWizard({
               {launched ? (
                 <div className="wizard-launch-success">
                   <div className="wizard-launch-check">&#10003;</div>
-                  <h3>Your agent is live</h3>
-                  <p>Autopilot is armed and the approved tweets are queued.</p>
+                  <h3>Your agent is ready</h3>
+                  <p>Approved tweets are in queue and automation can now work from them. You can tune anything from the control room.</p>
                 </div>
               ) : (
                 <>
                   <div className="wizard-step-header">
-                    <h3>Review Preview Batch</h3>
-                    <p>Approve the tweets you want queued. The rest will be discarded.</p>
+                    <h3>Approve the first batch</h3>
+                    <p>Keep the tweets that feel true to the voice. Rejections also teach the system, so the first review cycle improves future drafts immediately.</p>
                   </div>
 
                   {previewLoading && previewTweets.length === 0 && <TweetPreviewSkeleton count={5} />}
@@ -739,7 +737,7 @@ export function SetupWizard({
 
                       {!canLaunch && previewTweets.length > 0 && !previewLoading && (
                         <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '12px' }}>
-                          Approve at least one tweet to arm autopilot. Unapproved tweets will be discarded.
+                          Approve at least one tweet to let the agent go live. Everything else will be discarded and used as feedback.
                         </p>
                       )}
                     </>
@@ -755,7 +753,7 @@ export function SetupWizard({
                       onClick={handleLaunch}
                       style={{ background: canLaunch ? '#8b5cf6' : undefined }}
                     >
-                      {launching ? 'LAUNCHING...' : 'APPROVE + ARM AUTOPILOT'}
+                      {launching ? 'GOING LIVE...' : 'APPROVE SELECTED + GO LIVE'}
                     </button>
                   </div>
                 </>

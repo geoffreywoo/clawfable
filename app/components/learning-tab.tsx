@@ -207,7 +207,10 @@ export function LearningTab({ agentId }: LearningTabProps) {
           <h2>LEARNING</h2>
         </div>
         <p className="learning-progress-label">
-          No learning snapshot yet. Generate and review more tweets to expose the learning control room.
+          No learning snapshot yet. Approve, edit, copy, or delete a few drafts and this room will start showing what changed.
+        </p>
+        <p className="learning-progress-hint">
+          The learning view turns operator actions and live performance into visible rules, experiments, and trend shifts.
         </p>
       </div>
     );
@@ -224,7 +227,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
         <div className="learning-hero-head">
           <div>
             <p className="learning-hero-label">LEARNING CONTROL ROOM</p>
-            <h2 className="learning-hero-title">Watch what the system believes, what it is testing, and how operator feedback is reshaping future tweets.</h2>
+            <h2 className="learning-hero-title">See what the system is learning, which bets it is making, and why future tweets are changing.</h2>
           </div>
           <div className="learning-hero-status">
             <span className={`learning-source-chip ${toneClass(overview.autonomyMode === 'safe' ? 'positive' : overview.autonomyMode === 'explore' ? 'warning' : 'neutral')}`}>
