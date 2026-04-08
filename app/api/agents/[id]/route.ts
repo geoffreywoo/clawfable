@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelEvent } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { isSetupStep, normalizeSetupStep } from '@/lib/setup-state';
+import { isSetupStep } from '@/lib/setup-state';
+import { serializeAgentDetail } from '@/lib/dashboard-data';
 
 // GET /api/agents/[id]
 export async function GET(
@@ -12,19 +13,7 @@ export async function GET(
   const { id } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-    return NextResponse.json({
-      id: agent.id,
-      handle: agent.handle,
-      name: agent.name,
-      soulMd: agent.soulMd,
-      soulSummary: agent.soulSummary,
-      isConnected: agent.isConnected,
-      xUserId: agent.xUserId,
-      soulPublic: agent.soulPublic ?? 1,
-      setupStep: normalizeSetupStep(agent.setupStep),
-      createdAt: agent.createdAt,
-      hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
-    });
+    return NextResponse.json(serializeAgentDetail(agent));
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch agent' }, { status: 500 });

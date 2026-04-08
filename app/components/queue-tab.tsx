@@ -32,47 +32,25 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [deletionFeedback, setDeletionFeedback] = useState<Record<string, string>>({});
   const [submittingDeletionId, setSubmittingDeletionId] = useState<string | null>(null);
 
-  const loadQueue = useCallback(async () => {
+  const refreshQueueState = useCallback(async () => {
     try {
-      const res = await fetch(`/api/agents/${agentId}/queue`, { cache: 'no-store' });
+      const res = await fetch(
+        `/api/agents/${agentId}/dashboard?sections=queue,agent,protocol,learning`,
+        { cache: 'no-store' }
+      );
       const data = await res.json();
-      const visibleTweets = Array.isArray(data)
-        ? data.filter((tweet): tweet is Tweet =>
+      const visibleTweets = Array.isArray(data.queue)
+        ? data.queue.filter((tweet: Tweet): tweet is Tweet =>
             Boolean(tweet) && (tweet.status === 'queued' || tweet.status === 'deleted_from_x'))
         : [];
       setQueue(visibleTweets);
-    } catch {}
+      setAgentConnected(data.agent?.isConnected === 1);
+      setAutopilotSettings(data.protocol?.settings ?? null);
+      setLearningSnapshot(data.learning ?? null);
+    } catch {
+      // ignore
+    }
   }, [agentId]);
-
-  const loadAgentMeta = useCallback(async () => {
-    try {
-      const a = await fetch(`/api/agents/${agentId}`, { cache: 'no-store' }).then((r) => r.json());
-      setAgentConnected(a.isConnected === 1);
-    } catch {}
-  }, [agentId]);
-
-  const loadAutopilotSettings = useCallback(async () => {
-    try {
-      const p = await fetch(`/api/agents/${agentId}/protocol/settings`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null);
-      if (p?.settings) setAutopilotSettings(p.settings);
-    } catch {}
-  }, [agentId]);
-
-  const loadLearningSnapshot = useCallback(async () => {
-    try {
-      const snapshot = await fetch(`/api/agents/${agentId}/learning`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null);
-      setLearningSnapshot(snapshot);
-    } catch {}
-  }, [agentId]);
-
-  const refreshQueueState = useCallback(async () => {
-    await Promise.allSettled([
-      loadQueue(),
-      loadAgentMeta(),
-      loadAutopilotSettings(),
-      loadLearningSnapshot(),
-    ]);
-  }, [loadAgentMeta, loadAutopilotSettings, loadLearningSnapshot, loadQueue]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,7 +147,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       });
       setEditingId(null);
       showToast('Tweet updated');
-      loadQueue();
+      void refreshQueueState();
     } catch {
       showToast('Save failed');
     }
@@ -183,7 +161,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
         body: JSON.stringify({ status: 'posted' }),
       });
       showToast('Marked as posted');
-      loadQueue();
+      void refreshQueueState();
     } catch {}
   };
 
@@ -206,7 +184,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
           ? 'Removed from queue and saved to voice memory'
           : 'Removed from queue. Intent inferred for voice tuning'
       );
-      loadQueue();
+      void refreshQueueState();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Delete failed');
     } finally {
@@ -226,7 +204,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       showToast('Posted to X!');
-      loadQueue();
+      void refreshQueueState();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Post failed');
     } finally {
@@ -312,7 +290,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
     } else if (postableTweets.length > 0) {
       showToast(`Posted all ${postableTweets.length} queued tweets`);
     }
-    loadQueue();
+    void refreshQueueState();
   };
 
   const queuedTweets = queue.filter((tweet) => tweet.status === 'queued');

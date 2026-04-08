@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getQueuedTweets, getTweets, createTweet } from '@/lib/kv-storage';
+import { createTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { getAgentQueueFeed } from '@/lib/dashboard-data';
 
 // GET /api/agents/[id]/queue
 export async function GET(
@@ -10,16 +11,7 @@ export async function GET(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const queued = await getQueuedTweets(id);
-    // Include tweets deleted from X in last 7 days that need feedback (no reason yet)
-    const allTweets = await getTweets(id);
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const deletedFromX = allTweets.filter((t) =>
-      t.status === 'deleted_from_x' &&
-      !t.deletionReason &&
-      new Date(t.postedAt || t.createdAt).getTime() > sevenDaysAgo
-    );
-    return NextResponse.json([...deletedFromX, ...queued]);
+    return NextResponse.json(await getAgentQueueFeed(id));
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch queue' }, { status: 500 });

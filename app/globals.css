@@ -1,6 +1,3 @@
-/* ─── Google Fonts ─────────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
 /* ─── CSS Variables ────────────────────────────────────────────────────────── */
 :root {
   --bg: #0a0a0a;
@@ -20,9 +17,7 @@
   --green-dim: rgba(34, 197, 94, 0.15);
   --green-border: rgba(34, 197, 94, 0.3);
   --red: #ef4444;
-  --font-space: 'Space Grotesk', sans-serif;
-  --font-inter: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-inter: var(--font-body);
   --radius: 6px;
   --radius-lg: 10px;
 }
@@ -43,7 +38,7 @@ html {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-inter);
+  font-family: var(--font-body);
   line-height: 1.6;
   min-height: 100vh;
 }

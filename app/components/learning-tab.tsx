@@ -212,9 +212,9 @@ export function LearningTab({ agentId }: LearningTabProps) {
 
     const load = async () => {
       try {
-        const res = await fetch(`/api/agents/${agentId}/learning`, { cache: 'no-store' });
+        const res = await fetch(`/api/agents/${agentId}/dashboard?sections=learning`, { cache: 'no-store' });
         const data = await res.json();
-        if (!cancelled && res.ok) setSnapshot(data);
+        if (!cancelled && res.ok) setSnapshot(data.learning ?? null);
       } catch {
         if (!cancelled) setSnapshot(null);
       } finally {

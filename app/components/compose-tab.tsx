@@ -49,18 +49,28 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/agents/${agentId}/topics`).then((r) => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/agents/${agentId}/analysis`).then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/agents/${agentId}/learning`, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([t, a, learning, agent]) => {
-      if (Array.isArray(t)) setTopics(t);
-      setAnalysis(a);
-      setLearningSnapshot(learning);
-      setAgentConnected(agent?.isConnected === 1);
-      setLoading(false);
-    });
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/agents/${agentId}/dashboard?sections=topics,analysis,learning,agent`,
+          { cache: 'no-store' }
+        );
+        const data = await res.json();
+        if (cancelled || !res.ok) return;
+        if (Array.isArray(data.topics)) setTopics(data.topics);
+        setAnalysis(data.analysis ?? null);
+        setLearningSnapshot(data.learning ?? null);
+        setAgentConnected(data.agent?.isConnected === 1);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [agentId]);
 
   const showToast = (msg: string) => {

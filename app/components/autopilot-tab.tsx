@@ -5,6 +5,14 @@ import type { BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/l
 
 interface AutopilotTabProps {
   agentId: string;
+  initialData?: {
+    agentConnected: boolean;
+    agentHandle: string;
+    settings: ProtocolSettings;
+    billing: BillingSummary;
+    postLog: PostLogEntry[];
+    metrics: Metric[];
+  };
 }
 
 function getTimeAgo(ts: string): string {
@@ -17,7 +25,7 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function AutopilotTab({ agentId }: AutopilotTabProps) {
+export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
   const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
@@ -40,31 +48,78 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
   const [remixPatterns, setRemixPatterns] = useState<string[]>([]);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/agents/${agentId}/metrics`).then((r) => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([agent, protocolData, metricsData]) => {
-      setAgentConnected(agent?.isConnected === 1);
-      setAgentHandle(agent?.handle || '');
-      if (protocolData) {
-        setSettings(protocolData.settings);
-        setBilling(protocolData.billing || null);
-        setPostLog(protocolData.postLog || []);
-      }
-      if (Array.isArray(metricsData)) setMetrics(metricsData);
+    let cancelled = false;
+
+    const applyInitialData = () => {
+      if (!initialData) return false;
+      setAgentConnected(initialData.agentConnected);
+      setAgentHandle(initialData.agentHandle);
+      setSettings(initialData.settings);
+      setBilling(initialData.billing);
+      setPostLog(initialData.postLog);
+      setMetrics(initialData.metrics);
       setLoading(false);
-    });
-    // Load voice chat + learnings
-    fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).then((data) => {
-      if (data?.chat) setVoiceChat(data.chat);
-      if (data?.directives) setVoiceDirectives(data.directives);
-    }).catch(() => {});
-    fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null).then((data) => {
-      if (data?.insights) setLearnedInsights(data.insights);
-      if (data?.styleFingerprint?.antiPatterns) setAntiPatterns(data.styleFingerprint.antiPatterns);
-    }).catch(() => {});
-  }, [agentId]);
+      return true;
+    };
+
+    const loadPrimaryData = async () => {
+      try {
+        const res = await fetch(`/api/agents/${agentId}/dashboard?sections=agent,protocol,metrics`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+        setAgentConnected(data.agent?.isConnected === 1);
+        setAgentHandle(data.agent?.handle || '');
+        if (data.protocol) {
+          setSettings(data.protocol.settings);
+          setBilling(data.protocol.billing || null);
+          setPostLog(data.protocol.postLog || []);
+        }
+        if (Array.isArray(data.metrics)) setMetrics(data.metrics);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const loadSecondaryData = async () => {
+      try {
+        const [voiceChatData, learningsData] = await Promise.all([
+          fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (voiceChatData?.chat) setVoiceChat(voiceChatData.chat);
+        if (voiceChatData?.directives) setVoiceDirectives(voiceChatData.directives);
+        if (learningsData?.insights) setLearnedInsights(learningsData.insights);
+        if (learningsData?.styleFingerprint?.antiPatterns) setAntiPatterns(learningsData.styleFingerprint.antiPatterns);
+        if (learningsData?.styleFingerprint?.remixPatterns) setRemixPatterns(learningsData.styleFingerprint.remixPatterns);
+      } catch {
+        // ignore
+      }
+    };
+
+    const hasInitialData = applyInitialData();
+    if (!hasInitialData) {
+      void loadPrimaryData();
+    }
+
+    const usedIdleCallback = 'requestIdleCallback' in window;
+    const idleLoader = usedIdleCallback
+      ? window.requestIdleCallback(() => {
+          void loadSecondaryData();
+        })
+      : window.setTimeout(() => {
+          void loadSecondaryData();
+        }, 150);
+
+    return () => {
+      cancelled = true;
+      if (usedIdleCallback && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleLoader);
+      } else {
+        window.clearTimeout(idleLoader);
+      }
+    };
+  }, [agentId, initialData]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -129,12 +184,17 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         ? `Posted: "${(data.content || '').slice(0, 60)}..."`
         : `${data.action}: ${data.reason}`);
       // Refresh
-      const logRes = await fetch(`/api/agents/${agentId}/protocol/settings`);
-      if (logRes.ok) {
-        const logData = await logRes.json();
-        setSettings(logData.settings);
-        setBilling(logData.billing || null);
-        setPostLog(logData.postLog || []);
+      const snapshotRes = await fetch(`/api/agents/${agentId}/dashboard?sections=agent,protocol,metrics`, { cache: 'no-store' });
+      if (snapshotRes.ok) {
+        const snapshot = await snapshotRes.json();
+        setAgentConnected(snapshot.agent?.isConnected === 1);
+        setAgentHandle(snapshot.agent?.handle || '');
+        if (snapshot.protocol) {
+          setSettings(snapshot.protocol.settings);
+          setBilling(snapshot.protocol.billing || null);
+          setPostLog(snapshot.protocol.postLog || []);
+        }
+        if (Array.isArray(snapshot.metrics)) setMetrics(snapshot.metrics);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Run failed');

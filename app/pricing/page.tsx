@@ -1,16 +1,9 @@
-'use client';
-
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
 import { Logo } from '@/app/components/logo';
-import type { BillingSummary } from '@/lib/types';
-
-interface AuthUser {
-  id: string;
-  username: string;
-  name: string;
-  billing: BillingSummary;
-}
+import { CheckoutButton, LoginButton, PortalButton } from '@/app/components/site-actions';
+import { getCurrentUser } from '@/lib/auth';
+import { getBillingSummary } from '@/lib/billing';
+import { getUserAgentIds } from '@/lib/kv-storage';
 
 const PLANS = [
   {
@@ -91,70 +84,14 @@ const FAQS = [
   },
 ];
 
-export default function PricingPage() {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
-
-  const loadCurrentUser = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/me');
-      const data = res.ok ? await res.json() : null;
-      setUser(data);
-    } catch {
-      setUser(null);
-    } finally {
-      setAuthLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadCurrentUser();
-  }, [loadCurrentUser]);
-
-  const handleLogin = async () => {
-    setLoginLoading(true);
-    try {
-      const res = await fetch('/api/auth/login', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      window.location.href = data.url;
-    } catch {
-      setLoginLoading(false);
-    }
-  };
-
-  const handleCheckout = async (plan: 'pro' | 'scale') => {
-    setBillingLoading('checkout');
-    try {
-      const res = await fetch('/api/billing/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to start checkout');
-      window.location.href = data.url;
-    } catch {
-      setBillingLoading(null);
-    }
-  };
-
-  const handlePortal = async () => {
-    setBillingLoading('portal');
-    try {
-      const res = await fetch('/api/billing/portal', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to open billing portal');
-      window.location.href = data.url;
-    } catch {
-      setBillingLoading(null);
-    }
-  };
+export default async function PricingPage() {
+  const user = await getCurrentUser();
+  const billing = user
+    ? getBillingSummary(user, (await getUserAgentIds(user.id)).length)
+    : null;
 
   const renderCta = (planId: 'free' | 'pro' | 'scale') => {
-    const currentPlan = user?.billing.plan || 'free';
+    const currentPlan = billing?.plan || 'free';
     const isCurrentPlan = currentPlan === planId;
 
     if (planId === 'free') {
@@ -166,21 +103,21 @@ export default function PricingPage() {
         );
       }
       return (
-        <button className="btn btn-outline btn-wide" onClick={handleLogin} disabled={loginLoading}>
-          {loginLoading ? 'REDIRECTING...' : 'START FREE'}
-        </button>
+        <LoginButton className="btn btn-outline btn-wide">
+          START FREE
+        </LoginButton>
       );
     }
 
     if (!user) {
       return (
-        <button className="btn btn-primary btn-wide" onClick={handleLogin} disabled={loginLoading}>
-          {loginLoading ? 'REDIRECTING...' : `LOG IN FOR ${planId === 'pro' ? 'PRO' : 'SCALE'}`}
-        </button>
+        <LoginButton className="btn btn-primary btn-wide">
+          LOG IN FOR {planId === 'pro' ? 'PRO' : 'SCALE'}
+        </LoginButton>
       );
     }
 
-    if (user.billing.grandfathered) {
+    if (billing?.grandfathered) {
       if (isCurrentPlan) {
         return (
           <button className="btn btn-primary btn-wide" disabled>
@@ -195,26 +132,21 @@ export default function PricingPage() {
       );
     }
 
-    if (user.billing.isPaid) {
+    if (billing?.isPaid) {
       return (
-        <button className={`btn ${isCurrentPlan ? 'btn-primary' : 'btn-outline'} btn-wide`} onClick={handlePortal} disabled={billingLoading !== null}>
-          {billingLoading === 'portal'
-            ? 'LOADING...'
-            : isCurrentPlan
-              ? 'MANAGE CURRENT PLAN'
-              : 'CHANGE IN BILLING'}
-        </button>
+        <PortalButton className={`btn ${isCurrentPlan ? 'btn-primary' : 'btn-outline'} btn-wide`}>
+          {isCurrentPlan ? 'MANAGE CURRENT PLAN' : 'CHANGE IN BILLING'}
+        </PortalButton>
       );
     }
 
     return (
-      <button className={`btn ${planId === 'pro' ? 'btn-primary' : 'btn-outline'} btn-wide`} onClick={() => handleCheckout(planId)} disabled={billingLoading !== null}>
-        {billingLoading === 'checkout'
-          ? 'LOADING...'
-          : planId === 'pro'
-            ? 'UNLOCK PRO'
-            : 'UNLOCK SCALE'}
-      </button>
+      <CheckoutButton
+        className={`btn ${planId === 'pro' ? 'btn-primary' : 'btn-outline'} btn-wide`}
+        plan={planId}
+      >
+        {planId === 'pro' ? 'UNLOCK PRO' : 'UNLOCK SCALE'}
+      </CheckoutButton>
     );
   };
 
@@ -233,14 +165,12 @@ export default function PricingPage() {
             <Link href="/">HOME</Link>
             <Link href="/souls">PUBLIC SOULS</Link>
           </nav>
-          {authLoading ? null : user ? (
+          {user ? (
             <Link href="/" className="btn btn-outline btn-sm">
               OPEN APP
             </Link>
           ) : (
-            <button className="btn btn-outline btn-sm" onClick={handleLogin} disabled={loginLoading}>
-              {loginLoading ? 'REDIRECTING...' : 'SIGN IN'}
-            </button>
+            <LoginButton className="btn btn-outline btn-sm">SIGN IN</LoginButton>
           )}
         </div>
       </header>
@@ -254,16 +184,14 @@ export default function PricingPage() {
               Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
               hands-off posting, auto-replies, proactive engagement, and multi-agent control.
             </p>
-            {user?.billing.grandfathered && (
+            {billing?.grandfathered && (
               <p className="pricing-hero-note" style={{ marginTop: '12px' }}>
                 This X account has grandfathered full access, so billing is not required for your own internal fleet.
               </p>
             )}
             <div className="pricing-hero-actions">
-              {!authLoading && !user ? (
-                <button className="landing-cta-btn" onClick={handleLogin} disabled={loginLoading}>
-                  {loginLoading ? 'REDIRECTING...' : 'GET STARTED FREE'}
-                </button>
+              {!user ? (
+                <LoginButton className="landing-cta-btn">GET STARTED FREE</LoginButton>
               ) : (
                 <Link href="/" className="landing-cta-btn">
                   OPEN MISSION CONTROL
@@ -277,7 +205,7 @@ export default function PricingPage() {
 
           <section className="pricing-grid">
             {PLANS.map((plan) => {
-              const currentPlan = user?.billing.plan || 'free';
+              const currentPlan = billing?.plan || 'free';
               const isCurrent = currentPlan === plan.id;
 
               return (
