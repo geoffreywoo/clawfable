@@ -85,6 +85,8 @@ describe('generation context', () => {
     expect(context.recentPosts).toContain('already queued tweet');
     expect(context.style.exploration.rate).toBe(35);
     expect(context.style.exploration.underusedFormats).toContain('question');
+    expect(context.style.banditPolicy?.formatArms.length).toBeGreaterThan(0);
+    expect(context.style.banditPolicy?.summary.some((entry) => entry.startsWith('Explore format:'))).toBe(true);
   });
 
   it('stops injecting stale wizard style once live learnings are established', async () => {

@@ -1,6 +1,8 @@
 import type { Agent, AgentLearnings, ProtocolSettings, Tweet } from './types';
 import {
+  getFeedback,
   getLearnings,
+  getPerformanceHistory,
   getProtocolSettings,
   getRecentNegativeFeedback,
   getRemixPatterns,
@@ -10,6 +12,7 @@ import {
 } from './kv-storage';
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
+import { buildBanditPolicy } from './bandit';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -23,6 +26,7 @@ const DEFAULT_STYLE: ContentStyleConfig = {
     scheduledTopic: null,
     momentumTopic: null,
   },
+  banditPolicy: null,
 };
 
 interface BuildGenerationContextOptions {
@@ -101,6 +105,8 @@ export async function buildGenerationContext(
     remixPatterns,
     directives,
     allTweets,
+    performanceHistory,
+    feedback,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -109,6 +115,8 @@ export async function buildGenerationContext(
     getRemixPatterns(agent.id).catch(() => []),
     getVoiceDirectives(agent.id).catch(() => []),
     getTweets(agent.id),
+    getPerformanceHistory(agent.id, 100),
+    getFeedback(agent.id),
   ]);
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
@@ -136,6 +144,18 @@ export async function buildGenerationContext(
   }
 
   const allowedFormats = settings.enabledFormats.length > 0 ? settings.enabledFormats : ALL_FORMATS;
+  const candidateTopics = [...new Set([
+    ...voiceProfile.topics,
+    ...(learnings?.topicRankings.map((entry) => entry.topic) || []),
+    ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic)),
+  ])];
+  const banditPolicy = buildBanditPolicy({
+    performanceHistory,
+    feedback,
+    allTweets,
+    allowedFormats,
+    candidateTopics,
+  });
   const style = {
     lengthMix: settings.lengthMix || DEFAULT_STYLE.lengthMix,
     enabledFormats: settings.enabledFormats || DEFAULT_STYLE.enabledFormats,
@@ -145,6 +165,7 @@ export async function buildGenerationContext(
       underusedTopics: rankUnderusedTopics(allTweets, voiceProfile.topics),
     },
     bias: { ...DEFAULT_STYLE.bias },
+    banditPolicy,
   };
 
   const recentPosts = liveTweets

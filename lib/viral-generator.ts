@@ -7,6 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AccountAnalysis, AgentLearnings, StyleSignals } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
+import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { isNearDuplicate } from './survivability';
 
 const anthropic = new Anthropic();
@@ -31,6 +32,7 @@ export interface ContentStyleConfig {
     scheduledTopic: string | null;
     momentumTopic: string | null;
   };
+  banditPolicy?: BanditPolicy | null;
 }
 
 const DEFAULT_STYLE: ContentStyleConfig = {
@@ -45,6 +47,7 @@ const DEFAULT_STYLE: ContentStyleConfig = {
     scheduledTopic: null,
     momentumTopic: null,
   },
+  banditPolicy: null,
 };
 
 export const ALL_FORMATS = [
@@ -258,6 +261,11 @@ ${soulMd}`);
   const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
+  const slotPlan = buildBanditSlotPlan(style.banditPolicy, {
+    count,
+    explorationRate,
+    biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
+  });
 
   if (style.bias.scheduledTopic || style.bias.momentumTopic) {
     parts.push(`\n## ACTIVE TOPIC BIAS`);
@@ -280,6 +288,14 @@ ${soulMd}`);
 - Prefer these underused or stale core topics next: ${underusedTopics}
 - If those are exhausted, test adjacent topics one step away from the core voice. Not random. Not off-brand.
 - Never spend the whole batch exploring. The rest should exploit proven winners.`);
+  }
+
+  if (style.banditPolicy && slotPlan.length > 0) {
+    parts.push(`\n## BANDIT SLOT PLAN (follow this exactly)
+This batch is allocated by a multi-armed bandit controller. Each slot is an actual traffic bet, not a suggestion.`);
+    for (const plan of slotPlan) {
+      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | ${plan.rationale}`);
+    }
   }
 
   parts.push(`\n## STRATEGY
@@ -325,13 +341,20 @@ export async function generateViralBatch(
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
   const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
+  const slotPlan = buildBanditSlotPlan(style.banditPolicy, {
+    count,
+    explorationRate,
+    biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
+  });
   const userPrompt = `Generate exactly ${count} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
+- "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
+${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned format, targetTopic, length, and mode for each slot.` : ''}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -349,6 +372,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       .join('');
 
     const tweets: ProtocolTweet[] = [];
+    const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];
     const acceptedContents: string[] = [];
     const usedFormatTopicCombos = new Set<string>();
     for (const line of text.split('\n')) {
@@ -363,6 +387,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
           if (!cleanContent) continue;
+          const slot = Number(parsed.slot || 0);
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
           if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) continue;
@@ -370,7 +395,8 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           if (usedFormatTopicCombos.has(combo)) continue;
           acceptedContents.push(cleanContent);
           usedFormatTopicCombos.add(combo);
-          tweets.push({
+          stagedTweets.push({
+            slot,
             content: cleanContent,
             format,
             targetTopic,
@@ -381,6 +407,14 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         // Skip malformed lines
       }
     }
+
+    stagedTweets.sort((a, b) => {
+      if (a.slot > 0 && b.slot > 0) return a.slot - b.slot;
+      if (a.slot > 0) return -1;
+      if (b.slot > 0) return 1;
+      return 0;
+    });
+    tweets.push(...stagedTweets.map(({ slot: _slot, ...tweet }) => tweet));
 
     return tweets.slice(0, count);
   } catch (err) {
