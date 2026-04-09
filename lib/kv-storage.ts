@@ -147,6 +147,42 @@ async function kvSmembers(key: string): Promise<string[]> {
   }
 }
 
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+async function kvScanKeys(match: string): Promise<string[]> {
+  const cacheKey = `scan:${match}`;
+  const cached = getCached<string[]>(cacheKey);
+  if (cached.hit && cached.value) return cached.value;
+  try {
+    const client = await getKvClient();
+    if (!client) {
+      const regex = globToRegExp(match);
+      const value = Array.from(memStore.keys()).filter((key) => regex.test(key));
+      setCached(cacheKey, value);
+      return value;
+    }
+
+    let cursor = '0';
+    const keys: string[] = [];
+    do {
+      const result = await client.scan(cursor, { match, count: 200 }) as [string, string[]];
+      cursor = String(result?.[0] ?? '0');
+      keys.push(...(result?.[1] ?? []).map(String));
+    } while (cursor !== '0');
+
+    setCached(cacheKey, keys);
+    return keys;
+  } catch {
+    const regex = globToRegExp(match);
+    const value = Array.from(memStore.keys()).filter((key) => regex.test(key));
+    setCached(cacheKey, value);
+    return value;
+  }
+}
+
 async function kvSrem(key: string, member: string): Promise<void> {
   invalidateCached(`set:${key}`);
   try {
@@ -827,7 +863,20 @@ export async function getUser(xUserId: string): Promise<User | null> {
 }
 
 export async function getUsers(): Promise<User[]> {
-  const ids = await kvSmembers(KEYS.userSet());
+  let ids = await kvSmembers(KEYS.userSet());
+  if (ids.length === 0) {
+    const scannedIds = Array.from(new Set(
+      (await kvScanKeys('user:*'))
+        .map((key) => key.match(/^user:([^:]+)$/)?.[1] || null)
+        .filter((id): id is string => Boolean(id))
+    ));
+
+    if (scannedIds.length > 0) {
+      await kvSadd(KEYS.userSet(), ...scannedIds);
+      ids = scannedIds;
+    }
+  }
+
   if (ids.length === 0) return [];
   const users = await Promise.all(ids.map((id) => kvHgetall<User>(KEYS.user(String(id)))));
   return users
