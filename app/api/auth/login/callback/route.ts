@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle, getAgents } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
+import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
@@ -48,10 +49,7 @@ export async function GET(request: NextRequest) {
 
     if (existingAgents.length === 0) {
       // Check if another agent already uses this X account
-      const allAgents = await getAgents();
-      const duplicateAgent = allAgents.find(
-        (a) => String(a.xUserId) === userId && a.setupStep === 'ready' && a.isConnected
-      );
+      const duplicateAgent = await findExistingConnectedAgentByXUserId(userId);
       if (duplicateAgent) {
         // X account already has an active agent — redirect to it instead of creating duplicate
         redirectPath = `/agent/${duplicateAgent.id}`;

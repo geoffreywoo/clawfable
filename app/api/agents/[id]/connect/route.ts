@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateAgent } from '@/lib/kv-storage';
 import { getMe } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 
 // POST /api/agents/[id]/connect
 export async function POST(
@@ -21,6 +22,14 @@ export async function POST(
     // Validate keys by calling getMe
     const keys = { appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret };
     const user = await getMe(keys);
+
+    const duplicateAgent = await findExistingConnectedAgentByXUserId(user.id, id);
+    if (duplicateAgent) {
+      return NextResponse.json({
+        error: `This X account is already connected to agent ${duplicateAgent.handle || duplicateAgent.id}.`,
+        duplicateAgentId: duplicateAgent.id,
+      }, { status: 409 });
+    }
 
     // Store encoded and advance setup step
     const updates: Record<string, unknown> = {
