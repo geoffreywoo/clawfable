@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, getUserAgentIds } from '@/lib/kv-storage';
+import { getAccessibleAgentCount } from '@/lib/account-access';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
         : agent.xUserId
           ? await getUser(String(agent.xUserId))
           : null;
-      const billing = owner ? getBillingSummary(owner, (await getUserAgentIds(owner.id)).length) : null;
+      const billing = owner ? getBillingSummary(owner, await getAccessibleAgentCount(owner)) : null;
       const automationAllowed = billing ? billing.canUseAutopilot : true;
 
       if (!automationAllowed && (

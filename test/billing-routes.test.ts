@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
   requireAgentAccess: vi.fn(),
   handleAuthError: vi.fn((err: unknown) => { throw err; }),
-  getUserAgentIds: vi.fn(),
+  getAccessibleAgentCount: vi.fn(),
   getAgentByHandle: vi.fn(),
   createAgent: vi.fn(),
   addAgentToUser: vi.fn(),
@@ -26,7 +26,6 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
-  getUserAgentIds: mocks.getUserAgentIds,
   getAgentByHandle: mocks.getAgentByHandle,
   createAgent: mocks.createAgent,
   addAgentToUser: mocks.addAgentToUser,
@@ -41,6 +40,10 @@ vi.mock('@/lib/kv-storage', () => ({
   getUserAgents: vi.fn(),
   getTweets: vi.fn(),
   getMentions: vi.fn(),
+}));
+
+vi.mock('@/lib/account-access', () => ({
+  getAccessibleAgentCount: mocks.getAccessibleAgentCount,
 }));
 
 vi.mock('@/lib/soul-parser', () => ({
@@ -90,7 +93,7 @@ describe('billing route guards', () => {
       user: freeUser,
       agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
     });
-    mocks.getUserAgentIds.mockResolvedValue(['agent-1']);
+    mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.getAgentByHandle.mockResolvedValue(null);
     mocks.getProtocolSettings.mockResolvedValue({
       enabled: false,
@@ -167,7 +170,7 @@ describe('billing route guards', () => {
 
   it('lets grandfathered users create additional agents without upgrading', async () => {
     mocks.requireUser.mockResolvedValue(grandfatheredUser);
-    mocks.getUserAgentIds.mockResolvedValue(['agent-1']);
+    mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.createAgent.mockResolvedValue({ id: 'agent-2' });
 
     const response = await createAgentPOST(new Request('http://localhost/api/agents', {
@@ -185,7 +188,7 @@ describe('billing route guards', () => {
       user: grandfatheredUser,
       agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
     });
-    mocks.getUserAgentIds.mockResolvedValue(['agent-1']);
+    mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.updateProtocolSettings.mockResolvedValue({ enabled: true });
 
     const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {

@@ -1,5 +1,6 @@
 import type { BillingEntitlements, BillingPlan, BillingStatus, BillingSummary, User } from './types';
 import { isStripeCheckoutConfigured, isStripeConfigured } from './stripe';
+import { getInternalSharedUsernames, normalizeUsername } from './internal-accounts';
 
 const PLAN_LABELS: Record<BillingPlan, string> = {
   free: 'Free',
@@ -27,13 +28,6 @@ const PLAN_ENTITLEMENTS: Record<BillingPlan, BillingEntitlements> = {
     prioritySupport: true,
   },
 };
-
-const DEFAULT_GRANDFATHERED_USERNAMES = new Set([
-  'geoffreywoo',
-  'antifund',
-  'antihunterai',
-  'clawfable',
-]);
 
 export class BillingError extends Error {
   readonly status: number;
@@ -68,16 +62,8 @@ export function isPaidStatus(status: BillingStatus): boolean {
   return status === 'active' || status === 'trialing';
 }
 
-function normalizeUsername(username: string | null | undefined): string {
-  return String(username || '').replace(/^@/, '').trim().toLowerCase();
-}
-
 function getGrandfatheredUsernames(): Set<string> {
-  const configured = (process.env.BILLING_GRANDFATHERED_USERNAMES || '')
-    .split(',')
-    .map((entry) => normalizeUsername(entry))
-    .filter(Boolean);
-  return new Set([...DEFAULT_GRANDFATHERED_USERNAMES, ...configured]);
+  return getInternalSharedUsernames();
 }
 
 export function isGrandfatheredUser(user: Pick<User, 'username'>): boolean {

@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { Logo } from '@/app/components/logo';
 import { CheckoutButton, LoginButton, PortalButton } from '@/app/components/site-actions';
+import { getAccessibleAgentCount } from '@/lib/account-access';
 import { getCurrentUser } from '@/lib/auth';
 import { getBillingSummary } from '@/lib/billing';
-import { getUserAgentIds } from '@/lib/kv-storage';
 
 const PLANS = [
   {
@@ -87,7 +87,7 @@ const FAQS = [
 export default async function PricingPage() {
   const user = await getCurrentUser();
   const billing = user
-    ? getBillingSummary(user, (await getUserAgentIds(user.id)).length)
+    ? getBillingSummary(user, await getAccessibleAgentCount(user))
     : null;
 
   const renderCta = (planId: 'free' | 'pro' | 'scale') => {

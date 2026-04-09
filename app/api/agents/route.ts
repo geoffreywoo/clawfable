@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getUserAgentIds,
   createAgent,
   addAgentToUser,
   logFunnelEvent,
   getAgentByHandle,
 } from '@/lib/kv-storage';
+import { getAccessibleAgentCount } from '@/lib/account-access';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
 import { assertCanCreateAgent, BillingError } from '@/lib/billing';
@@ -15,7 +15,7 @@ import { getAgentSummariesForUser } from '@/lib/dashboard-data';
 export async function GET() {
   try {
     const user = await requireUser();
-    return NextResponse.json(await getAgentSummariesForUser(user.id));
+    return NextResponse.json(await getAgentSummariesForUser(user));
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch agents' }, { status: 500 });
@@ -26,7 +26,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
-    const agentCount = (await getUserAgentIds(user.id)).length;
+    const agentCount = await getAccessibleAgentCount(user);
     assertCanCreateAgent(user, agentCount);
 
     const body = await request.json();

@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getSession, getUser, getUserAgentIds, getAgent } from './kv-storage';
+import { getSession, getUser, getAgent } from './kv-storage';
+import { canAccessAgent } from './account-access';
 import type { User, Agent } from './types';
 
 const COOKIE_NAME = 'clawfable_session';
@@ -47,8 +48,7 @@ export async function requireAgentAccess(agentId: string): Promise<{ user: User;
   const user = await requireUser();
   const agent = await getAgent(agentId);
   if (!agent) throw new NotFoundError('Agent not found');
-  const agentIds = await getUserAgentIds(user.id);
-  if (!agentIds.map(String).includes(String(agentId))) throw new AuthError();
+  if (!(await canAccessAgent(user, agentId))) throw new AuthError();
   return { user, agent };
 }
 

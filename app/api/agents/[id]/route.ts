@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelEvent } from '@/lib/kv-storage';
+import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelEvent, getAgentOwnerId } from '@/lib/kv-storage';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { isSetupStep } from '@/lib/setup-state';
@@ -86,8 +86,9 @@ export async function DELETE(
   const { id } = await params;
   try {
     const { user } = await requireAgentAccess(id);
+    const ownerId = await getAgentOwnerId(id);
     await deleteAgent(id);
-    await removeAgentFromUser(user.id, id);
+    await removeAgentFromUser(ownerId || user.id, id);
     return NextResponse.json({ success: true });
   } catch (err) {
     try { return handleAuthError(err); } catch {}

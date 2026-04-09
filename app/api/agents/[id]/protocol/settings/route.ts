@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline, getUserAgentIds } from '@/lib/kv-storage';
+import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
+import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { clampPostsPerDay } from '@/lib/survivability';
 import { assertCanUseAutopilot, BillingError, getBillingSummary } from '@/lib/billing';
@@ -14,7 +15,7 @@ export async function GET(
     const { user } = await requireAgentAccess(id);
     const settings = await getProtocolSettings(id);
     const postLog = await getPostLog(id, 10);
-    const agentCount = (await getUserAgentIds(user.id)).length;
+    const agentCount = await getAccessibleAgentCount(user);
     return NextResponse.json({ settings, postLog, billing: getBillingSummary(user, agentCount) });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
@@ -31,7 +32,7 @@ export async function PATCH(
   try {
     const { user } = await requireAgentAccess(id);
     const body = await request.json();
-    const agentCount = (await getUserAgentIds(user.id)).length;
+    const agentCount = await getAccessibleAgentCount(user);
 
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',

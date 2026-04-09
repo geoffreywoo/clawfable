@@ -10,7 +10,7 @@ export default async function HomePage() {
   const user = await getCurrentUser();
 
   if (user) {
-    const agents = await getAgentSummariesForUser(user.id);
+    const agents = await getAgentSummariesForUser(user);
     return (
       <HomeMissionControl
         initialUser={{

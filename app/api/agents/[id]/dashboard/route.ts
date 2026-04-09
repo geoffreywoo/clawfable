@@ -58,7 +58,7 @@ export async function GET(
           response.agent = serializeAgentDetail(agent);
           return;
         case 'otherAgents':
-          response.otherAgents = (await getAgentSummariesForUser(user.id)).filter((candidate) => candidate.id !== agent.id);
+          response.otherAgents = (await getAgentSummariesForUser(user)).filter((candidate) => candidate.id !== agent.id);
           return;
         case 'protocol':
           response.protocol = await getProtocolSnapshot(user, agent.id);

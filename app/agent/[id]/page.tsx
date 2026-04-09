@@ -20,7 +20,7 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
   try {
     const { user, agent } = await requireAgentAccess(id);
     const [otherAgents, protocol, metrics] = await Promise.all([
-      getAgentSummariesForUser(user.id).then((agents) => agents.filter((candidate) => candidate.id !== agent.id)),
+      getAgentSummariesForUser(user).then((agents) => agents.filter((candidate) => candidate.id !== agent.id)),
       getProtocolSnapshot(user, agent.id),
       getMetricsArray(agent.id),
     ]);

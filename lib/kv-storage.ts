@@ -826,6 +826,16 @@ export async function getUser(xUserId: string): Promise<User | null> {
   return user ? normalizeUser(user) : null;
 }
 
+export async function getUsers(): Promise<User[]> {
+  const ids = await kvSmembers(KEYS.userSet());
+  if (ids.length === 0) return [];
+  const users = await Promise.all(ids.map((id) => kvHgetall<User>(KEYS.user(String(id)))));
+  return users
+    .filter((user): user is User => user !== null)
+    .map(normalizeUser)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 export async function getOrCreateUser(xUserId: string, username: string, name: string): Promise<User> {
   const existing = await getUser(xUserId);
   if (existing) return existing;

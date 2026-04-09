@@ -1,4 +1,5 @@
 import { unstable_cache } from 'next/cache';
+import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
@@ -19,8 +20,6 @@ import {
   getProtocolSettings,
   getQueuedTweets,
   getTweets,
-  getUserAgentIds,
-  getUserAgents,
 } from './kv-storage';
 import type {
   AccountAnalysis,
@@ -84,8 +83,8 @@ export async function buildAgentSummary(agent: Agent): Promise<AgentSummary> {
   };
 }
 
-export async function getAgentSummariesForUser(userId: string): Promise<AgentSummary[]> {
-  const agents = await getUserAgents(userId);
+export async function getAgentSummariesForUser(user: User): Promise<AgentSummary[]> {
+  const agents = await getAccessibleAgents(user);
   return Promise.all(agents.map(buildAgentSummary));
 }
 
@@ -105,7 +104,7 @@ export async function getProtocolSnapshot(user: User, agentId: string): Promise<
   const [settings, postLog, agentCount] = await Promise.all([
     getProtocolSettings(agentId),
     getPostLog(agentId, 10),
-    getUserAgentIds(user.id).then((ids) => ids.length),
+    getAccessibleAgentCount(user),
   ]);
 
   return {
