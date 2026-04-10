@@ -197,23 +197,46 @@ export async function GET(request: NextRequest) {
       // Run autopilot if auto-post OR auto-reply is enabled (settings already loaded above)
       if (!settings.enabled && !settings.autoReply) continue;
 
-      const result = await runAutopilot(agent);
-      autopilotResults.push(result);
+      try {
+        const result = await runAutopilot(agent);
+        autopilotResults.push(result);
 
-      // Log the result to the agent's post log (skips, errors, etc.)
-      if (result.action !== 'posted') {
-        // Posted tweets are already logged by runAutopilot itself
+        // Log the result to the agent's post log (skips, errors, etc.)
+        if (result.action !== 'posted') {
+          // Posted tweets are already logged by runAutopilot itself
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: result.tweetId || '',
+            xTweetId: result.xTweetId || '',
+            content: result.content || '',
+            format: result.format || 'cron',
+            topic: result.topic || '',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: result.action,
+            reason: result.reason,
+          });
+        }
+      } catch (err) {
+        const reason = formatActionError(err, 'run_autopilot', {
+          handle: `@${agent.handle}`,
+        });
+        autopilotResults.push({
+          agentId: agent.id,
+          action: 'error',
+          reason,
+        });
         await addPostLogEntry(agent.id, {
           agentId: agent.id,
-          tweetId: result.tweetId || '',
-          xTweetId: result.xTweetId || '',
-          content: result.content || '',
-          format: result.format || 'cron',
-          topic: result.topic || '',
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'cron_autopilot_error',
+          topic: 'autopilot',
           postedAt: new Date().toISOString(),
           source: 'cron',
-          action: result.action,
-          reason: result.reason,
+          action: 'error',
+          reason,
         });
       }
     }

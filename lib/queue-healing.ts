@@ -64,6 +64,10 @@ function requiresMaterialRewrite(reason: string): boolean {
   );
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown repair error';
+}
+
 export function classifyQueuedTweetIssue(reason: string | null | undefined): QueueIssueDisposition {
   const lower = (reason || '').toLowerCase();
   if (!lower.trim()) return 'keep';
@@ -152,7 +156,15 @@ export async function resolveQueuedTweetFailure(
     };
   }
 
-  const repaired = await generateRepairCandidate(agent, tweet, reason);
+  let repaired: string | null = null;
+  let repairError: unknown = null;
+
+  try {
+    repaired = await generateRepairCandidate(agent, tweet, reason);
+  } catch (error) {
+    repairError = error;
+  }
+
   if (repaired) {
     const updated = await updateTweet(tweet.id, {
       content: repaired,
@@ -169,6 +181,8 @@ export async function resolveQueuedTweetFailure(
   await deleteTweet(tweet.id);
   return {
     action: 'deleted',
-    detail: 'Auto-repair failed, so the draft was removed from queue and should be replaced.',
+    detail: repairError
+      ? `Auto-repair pipeline failed (${getErrorMessage(repairError)}). Removed the draft from queue so refill can replace it.`
+      : 'Auto-repair failed, so the draft was removed from queue and should be replaced.',
   };
 }
