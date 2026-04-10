@@ -3,11 +3,17 @@ import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
-import { getPresetSoulSummaries, type PublicSoulSummary } from './open-source-souls';
+import {
+  getPresetSoulProfile,
+  getPresetSoulSummaries,
+  type PublicSoulProfile,
+  type PublicSoulSummary,
+} from './open-source-souls';
 import { normalizeSetupStep } from './setup-state';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import { decodeKeys } from './twitter-client';
 import {
+  getAgentByHandle,
   getAgents,
   getAnalysis,
   getBaseline,
@@ -34,6 +40,18 @@ import type {
   Tweet,
   User,
 } from './types';
+
+export interface ControlRoomUserSnapshot {
+  id: string;
+  username: string;
+  name: string;
+  billing: BillingSummary;
+}
+
+export interface ControlRoomSnapshot {
+  user: ControlRoomUserSnapshot;
+  agents: AgentSummary[];
+}
 
 export interface ProtocolSnapshot {
   settings: ProtocolSettings;
@@ -78,6 +96,20 @@ export async function buildAgentSummary(agent: Agent): Promise<AgentSummary> {
 export async function getAgentSummariesForUser(user: User): Promise<AgentSummary[]> {
   const agents = await getAccessibleAgents(user);
   return Promise.all(agents.map(buildAgentSummary));
+}
+
+export async function getControlRoomSnapshot(user: User): Promise<ControlRoomSnapshot> {
+  const agents = await getAgentSummariesForUser(user);
+
+  return {
+    user: {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      billing: getBillingSummary(user, agents.length),
+    },
+    agents,
+  };
 }
 
 export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
@@ -193,7 +225,61 @@ const getCachedPublicSouls = unstable_cache(
   { revalidate: 300 }
 );
 
+const getCachedLivePublicSoulProfile = unstable_cache(
+  async (handle: string): Promise<PublicSoulProfile | null> => {
+    const agent = await getAgentByHandle(handle);
+    if (!agent || agent.setupStep !== 'ready' || agent.soulPublic === 0) {
+      return null;
+    }
+
+    const [learnings, perfHistory] = await Promise.all([
+      getLearnings(agent.id),
+      getPerformanceHistory(agent.id, 50),
+    ]);
+
+    const topTweets = perfHistory
+      .sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets))
+      .slice(0, 5)
+      .map((tweet) => ({
+        content: tweet.content,
+        likes: tweet.likes,
+        retweets: tweet.retweets,
+        format: tweet.format,
+        topic: tweet.topic,
+        postedAt: tweet.postedAt,
+      }));
+
+    return {
+      handle: agent.handle,
+      name: agent.name,
+      soulMd: agent.soulMd,
+      soulSummary: agent.soulSummary,
+      totalTracked: learnings?.totalTracked ?? 0,
+      avgLikes: learnings?.avgLikes ?? 0,
+      avgRetweets: learnings?.avgRetweets ?? 0,
+      sourceType: 'live',
+      category: 'live agent',
+      xHandle: agent.handle,
+      formatRankings: learnings?.formatRankings?.slice(0, 5) ?? [],
+      topicRankings: learnings?.topicRankings?.slice(0, 5) ?? [],
+      insights: learnings?.insights ?? [],
+      topTweets,
+    };
+  },
+  ['public-soul-profile'],
+  { revalidate: 300 }
+);
+
 export async function getPublicSoulSummaries(): Promise<PublicSoulSummary[]> {
   const liveSouls = await getCachedPublicSouls();
   return [...getPresetSoulSummaries(), ...liveSouls];
+}
+
+export async function getPublicSoulProfile(handle: string): Promise<PublicSoulProfile | null> {
+  const presetSoul = getPresetSoulProfile(handle);
+  if (presetSoul) {
+    return presetSoul;
+  }
+
+  return getCachedLivePublicSoulProfile(handle);
 }

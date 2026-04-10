@@ -1,77 +1,13 @@
 import Link from 'next/link';
 import { Logo } from '@/app/components/logo';
-import { CheckoutButton, LoginButton, PortalButton } from '@/app/components/site-actions';
-import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getCurrentUser } from '@/lib/auth';
-import { getBillingSummary } from '@/lib/billing';
+import { LoginButton } from '@/app/components/site-actions';
+import { PricingPlanAction } from '@/app/components/pricing-plan-action';
+import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { MARKETING_COMPARE_ROWS, MARKETING_FAQS, MARKETING_PLANS } from '@/lib/site-marketing';
 
-export default async function PricingPage() {
-  const user = await getCurrentUser();
-  const billing = user
-    ? getBillingSummary(user, await getAccessibleAgentCount(user))
-    : null;
+export const revalidate = 300;
 
-  const renderCta = (planId: 'free' | 'pro' | 'scale') => {
-    const currentPlan = billing?.plan || 'free';
-    const isCurrentPlan = currentPlan === planId;
-
-    if (planId === 'free') {
-      if (user) {
-        return (
-          <Link href="/" className="btn btn-outline btn-wide">
-            OPEN MISSION CONTROL
-          </Link>
-        );
-      }
-      return (
-        <LoginButton className="btn btn-outline btn-wide">
-          START FREE
-        </LoginButton>
-      );
-    }
-
-    if (!user) {
-      return (
-        <LoginButton className="btn btn-primary btn-wide">
-          LOG IN FOR {planId === 'pro' ? 'PRO' : 'SCALE'}
-        </LoginButton>
-      );
-    }
-
-    if (billing?.grandfathered) {
-      if (isCurrentPlan) {
-        return (
-          <button className="btn btn-primary btn-wide" disabled>
-            GRANDFATHERED ACCESS
-          </button>
-        );
-      }
-      return (
-        <Link href="/" className="btn btn-outline btn-wide">
-          OPEN MISSION CONTROL
-        </Link>
-      );
-    }
-
-    if (billing?.isPaid) {
-      return (
-        <PortalButton className={`btn ${isCurrentPlan ? 'btn-primary' : 'btn-outline'} btn-wide`}>
-          {isCurrentPlan ? 'MANAGE CURRENT PLAN' : 'CHANGE IN BILLING'}
-        </PortalButton>
-      );
-    }
-
-    return (
-      <CheckoutButton
-        className={`btn ${planId === 'pro' ? 'btn-primary' : 'btn-outline'} btn-wide`}
-        plan={planId}
-      >
-        {planId === 'pro' ? 'UNLOCK PRO' : 'UNLOCK SCALE'}
-      </CheckoutButton>
-    );
-  };
-
+export default function PricingPage() {
   return (
     <div className="page-shell">
       <header className="site-header">
@@ -87,13 +23,9 @@ export default async function PricingPage() {
             <Link href="/">HOME</Link>
             <Link href="/souls">PUBLIC SOULS</Link>
           </nav>
-          {user ? (
-            <Link href="/" className="btn btn-outline btn-sm">
-              OPEN APP
-            </Link>
-          ) : (
-            <LoginButton className="btn btn-outline btn-sm">SIGN IN</LoginButton>
-          )}
+          <Link href={CONTROL_ROOM_PATH} className="btn btn-outline btn-sm">
+            OPEN APP
+          </Link>
         </div>
       </header>
 
@@ -106,19 +38,8 @@ export default async function PricingPage() {
               Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
               hands-off posting, auto-replies, proactive engagement, and multi-agent control.
             </p>
-            {billing?.grandfathered && (
-              <p className="pricing-hero-note" style={{ marginTop: '12px' }}>
-                This X account has grandfathered full access, so billing is not required for your own internal fleet.
-              </p>
-            )}
             <div className="pricing-hero-actions">
-              {!user ? (
-                <LoginButton className="landing-cta-btn">GET STARTED FREE</LoginButton>
-              ) : (
-                <Link href="/" className="landing-cta-btn">
-                  OPEN MISSION CONTROL
-                </Link>
-              )}
+              <LoginButton className="landing-cta-btn">GET STARTED FREE</LoginButton>
               <p className="pricing-hero-note">
                 Setup is review-first. Nothing posts during calibration.
               </p>
@@ -127,13 +48,10 @@ export default async function PricingPage() {
 
           <section className="pricing-grid">
             {MARKETING_PLANS.map((plan) => {
-              const currentPlan = billing?.plan || 'free';
-              const isCurrent = currentPlan === plan.id;
-
               return (
                 <article
                   key={plan.id}
-                  className={`pricing-card${plan.recommended ? ' pricing-card-recommended' : ''}${isCurrent ? ' pricing-card-current' : ''}`}
+                  className={`pricing-card${plan.recommended ? ' pricing-card-recommended' : ''}`}
                 >
                   <div className="pricing-card-head">
                     <div>
@@ -141,7 +59,6 @@ export default async function PricingPage() {
                       <h2 className="pricing-card-name">{plan.name}</h2>
                     </div>
                     {plan.recommended && <span className="pricing-card-badge">MOST POPULAR</span>}
-                    {isCurrent && <span className="pricing-card-badge pricing-card-badge-current">CURRENT</span>}
                   </div>
                   <div className="pricing-card-price-row">
                     <span className="pricing-card-price">{plan.price}</span>
@@ -158,7 +75,10 @@ export default async function PricingPage() {
                     ))}
                   </div>
                   <div className="pricing-card-actions">
-                    {renderCta(plan.id)}
+                    <PricingPlanAction
+                      planId={plan.id}
+                      className={`btn ${plan.id === 'pro' ? 'btn-primary' : 'btn-outline'} btn-wide`}
+                    />
                   </div>
                 </article>
               );

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HealthAlerts } from '@/app/components/health-alerts';
 import { SetupContinuation } from '@/app/components/setup-continuation';
+import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/lib/setup-state';
 import type { BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
 
@@ -97,7 +98,7 @@ export function AgentDashboardClient({
     try {
       const res = await fetch(`/api/agents/${agentId}/dashboard?sections=agent,otherAgents`, { cache: 'no-store' });
       if (res.status === 401) {
-        router.push('/');
+        router.push(CONTROL_ROOM_PATH);
         return;
       }
       const data: DashboardShellPayload = await res.json();
@@ -110,8 +111,20 @@ export function AgentDashboardClient({
   }, [agentId, router]);
 
   useEffect(() => {
-    const interval = window.setInterval(loadDashboardShell, 30000);
-    return () => window.clearInterval(interval);
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadDashboardShell();
+    };
+
+    const interval = window.setInterval(refreshIfVisible, 60000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
   }, [loadDashboardShell]);
 
   useEffect(() => {
@@ -135,7 +148,7 @@ export function AgentDashboardClient({
         <p style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>
           Agent not found
         </p>
-        <button className="back-btn" onClick={() => router.push('/')}>
+        <button className="back-btn" onClick={() => router.push(CONTROL_ROOM_PATH)}>
           <svg viewBox="0 0 12 12" width="11" height="11" fill="none"><polyline points="7,2 3,6 7,10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           Back to agents
         </button>
@@ -152,7 +165,7 @@ export function AgentDashboardClient({
     <div className="dashboard-shell">
       <header className="dashboard-header">
         <div className="flex items-center gap-3">
-          <button className="back-btn" onClick={() => router.push('/')} data-testid="button-back-to-agents">
+          <button className="back-btn" onClick={() => router.push(CONTROL_ROOM_PATH)} data-testid="button-back-to-agents">
             <svg viewBox="0 0 12 12" width="11" height="11" fill="none"><polyline points="7,2 3,6 7,10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
             ALL AGENTS
           </button>
@@ -352,7 +365,7 @@ export function AgentDashboardClient({
           <SettingsTab
             agentId={agentId}
             agent={agent}
-            onAgentDeleted={() => router.push('/')}
+            onAgentDeleted={() => router.push(CONTROL_ROOM_PATH)}
             onAgentUpdated={loadDashboardShell}
           />
         )}

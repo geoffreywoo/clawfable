@@ -1,10 +1,8 @@
 import Link from 'next/link';
-import { HomeMissionControl } from './components/home-mission-control';
 import { LoginButton } from './components/site-actions';
 import { Logo } from './components/logo';
-import { getCurrentUser } from '@/lib/auth';
-import { getBillingSummary } from '@/lib/billing';
-import { getAgentSummariesForUser, getPublicSoulSummaries } from '@/lib/dashboard-data';
+import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
+import { getPublicSoulSummaries } from '@/lib/dashboard-data';
 import { MARKETING_COMPARE_ROWS, MARKETING_FAQS, MARKETING_PLANS } from '@/lib/site-marketing';
 
 function XMark() {
@@ -15,24 +13,9 @@ function XMark() {
   );
 }
 
+export const revalidate = 300;
+
 export default async function HomePage() {
-  const user = await getCurrentUser();
-
-  if (user) {
-    const agents = await getAgentSummariesForUser(user);
-    return (
-      <HomeMissionControl
-        initialUser={{
-          id: user.id,
-          username: user.username,
-          name: user.name,
-          billing: getBillingSummary(user, agents.length),
-        }}
-        initialAgents={agents}
-      />
-    );
-  }
-
   const publicSouls = await getPublicSoulSummaries();
   const presetSouls = publicSouls.filter((soul) => soul.sourceType === 'preset');
   const liveAgents = publicSouls.filter((soul) => soul.sourceType === 'live');
@@ -53,9 +36,14 @@ export default async function HomePage() {
             <a href="#souls">PUBLIC SOULS</a>
             <a href="#pricing">PRICING</a>
           </nav>
-          <LoginButton className="btn btn-outline site-header-cta">
-            START FREE
-          </LoginButton>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Link href={CONTROL_ROOM_PATH} className="btn btn-outline site-header-cta">
+              OPEN APP
+            </Link>
+            <LoginButton className="btn btn-outline site-header-cta">
+              START FREE
+            </LoginButton>
+          </div>
         </div>
       </header>
 
@@ -88,6 +76,7 @@ export default async function HomePage() {
                       GET STARTED FREE
                     </>
                   </LoginButton>
+                  <Link href={CONTROL_ROOM_PATH} className="btn btn-outline landing-cta-secondary">OPEN APP</Link>
                   <a href="#souls" className="btn btn-outline landing-cta-secondary">BROWSE SOULS</a>
                   <a href="#pricing" className="btn btn-outline landing-cta-secondary">SEE PRICING</a>
                 </div>

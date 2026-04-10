@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AgentCard } from './agent-card';
 import { Logo } from './logo';
@@ -27,34 +27,45 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
 
-  const loadCurrentUser = useCallback(async () => {
+  const loadControlRoom = useCallback(async (options?: { silent?: boolean }) => {
     try {
-      const res = await fetch('/api/auth/me', { cache: 'no-store' });
+      if (!options?.silent) setLoading(true);
+      const res = await fetch('/api/control-room', { cache: 'no-store' });
+      if (res.status === 401) {
+        router.push('/');
+        return;
+      }
       if (!res.ok) return;
-      setUser(await res.json());
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const loadAgents = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/agents', { cache: 'no-store' });
-      if (!res.ok) return;
-      setAgents(await res.json());
+      const data = await res.json();
+      if (data.user) setUser(data.user);
+      if (Array.isArray(data.agents)) setAgents(data.agents);
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
-    const interval = window.setInterval(loadAgents, 30000);
-    return () => window.clearInterval(interval);
-  }, [loadAgents]);
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadControlRoom({ silent: true });
+    };
+
+    refreshTimerRef.current = window.setInterval(refreshIfVisible, 60000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+
+    return () => {
+      if (refreshTimerRef.current !== null) {
+        window.clearInterval(refreshTimerRef.current);
+      }
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [loadControlRoom]);
 
   const handleCheckout = async (plan: 'pro' | 'scale' = 'pro') => {
     setBillingLoading('checkout');
@@ -325,7 +336,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={async () => {
-          await Promise.all([loadAgents(), loadCurrentUser()]);
+          await loadControlRoom();
         }}
       />
     </div>

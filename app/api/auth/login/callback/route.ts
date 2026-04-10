@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
+import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { COOKIE_NAME } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { getPresetSoulProfile } from '@/lib/open-source-souls';
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
     // If first login (no agents), auto-create an agent connected to their X account
     const existingAgents = await getUserAgentIds(userId);
     await Promise.all(existingAgents.map((agentId) => addAgentToUser(userId, agentId)));
-    let redirectPath = '/';
+    let redirectPath = CONTROL_ROOM_PATH;
 
     if (existingAgents.length === 0) {
       // Check if another agent already uses this X account

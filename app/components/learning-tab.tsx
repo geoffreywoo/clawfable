@@ -222,11 +222,20 @@ export function LearningTab({ agentId }: LearningTabProps) {
       }
     };
 
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void load();
+    };
+
     void load();
-    const interval = window.setInterval(load, 30000);
+    const interval = window.setInterval(refreshIfVisible, 30000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
     };
   }, [agentId]);
 

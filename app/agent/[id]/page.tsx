@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { AgentDashboardClient } from '@/app/components/agent-dashboard-client';
+import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { requireAgentAccess } from '@/lib/auth';
 import {
   getAgentSummariesForUser,
@@ -42,6 +43,6 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
       />
     );
   } catch {
-    redirect('/');
+    redirect(CONTROL_ROOM_PATH);
   }
 }
