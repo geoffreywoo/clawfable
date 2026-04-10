@@ -82,4 +82,54 @@ describe('generateViralBatch', () => {
     expect(batch).toHaveLength(1);
     expect(batch[0].content).toBe('founders are still pitching 2024 businesses into a 2026 model curve');
   });
+
+  it('falls back to deterministic templates when Anthropic credits are exhausted', async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')
+    );
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'contrarian',
+        topics: ['AI agents', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'sharp and direct. no fluff.',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take', 'analysis'],
+          topTopics: ['AI agents', 'startups'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      3,
+      null,
+      null,
+      null,
+      undefined,
+      [],
+      [],
+      null,
+    );
+
+    expect(batch).toHaveLength(3);
+    expect(batch.every((tweet) => tweet.content.length > 0)).toBe(true);
+    expect(batch.some((tweet) => tweet.rationale.toLowerCase().includes('template fallback'))).toBe(true);
+  });
 });

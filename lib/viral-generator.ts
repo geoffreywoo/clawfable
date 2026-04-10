@@ -64,6 +64,157 @@ export interface ProtocolTweet {
   rationale: string;
 }
 
+function normalizeTopicLabel(topic: string): string {
+  return topic.trim().replace(/[_-]+/g, ' ');
+}
+
+function buildFallbackClaim(topic: string, tone: string): string {
+  const normalizedTone = tone.toLowerCase();
+
+  if (normalizedTone.includes('contrarian')) {
+    return `${topic} is still being framed around the wrong bottleneck.`;
+  }
+  if (normalizedTone.includes('optimist')) {
+    return `The upside in ${topic} is bigger than most people realize.`;
+  }
+  if (normalizedTone.includes('analyst')) {
+    return `The market is misreading what actually compounds in ${topic}.`;
+  }
+  if (normalizedTone.includes('provocateur')) {
+    return `Most of the ${topic} conversation is theater, not edge.`;
+  }
+  if (normalizedTone.includes('educator')) {
+    return `If you want to understand ${topic}, start with the incentives.`;
+  }
+
+  return `${topic} is changing faster than the default playbook assumes.`;
+}
+
+function buildFallbackTemplates(
+  voiceProfile: VoiceProfile,
+  analysis: AccountAnalysis,
+  count: number,
+  style: ContentStyleConfig,
+  recentPosts: string[],
+): ProtocolTweet[] {
+  const topics = Array.from(new Set([
+    ...(style.bias.momentumTopic ? [style.bias.momentumTopic] : []),
+    ...(style.bias.scheduledTopic ? [style.bias.scheduledTopic] : []),
+    ...analysis.engagementPatterns.topTopics,
+    ...voiceProfile.topics,
+    'AI',
+  ]))
+    .filter(Boolean)
+    .map(normalizeTopicLabel)
+    .slice(0, 6);
+
+  const enabledFormats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
+  const formats = enabledFormats.length > 0 ? enabledFormats : ['hot_take', 'analysis', 'observation', 'question'];
+  const maxTemplates = Math.max(count * 2, count + 3);
+  const templates: ProtocolTweet[] = [];
+  const contentSeen = new Set<string>();
+  const recentCorpus = recentPosts.map((post) => post.toLowerCase());
+
+  const addTemplate = (tweet: ProtocolTweet) => {
+    const normalized = tweet.content.trim();
+    if (!normalized || contentSeen.has(normalized)) return;
+    if (recentCorpus.some((post) => post.includes(normalized.toLowerCase()))) return;
+    contentSeen.add(normalized);
+    templates.push(tweet);
+  };
+
+  for (const topic of topics) {
+    const claim = buildFallbackClaim(topic, voiceProfile.tone);
+    const angle = `${voiceProfile.communicationStyle.split('.')[0] || 'Stay specific and sharp'}`.trim();
+
+    for (const format of formats) {
+      if (templates.length >= maxTemplates) break;
+
+      switch (format) {
+        case 'hot_take':
+          addTemplate({
+            content: `${claim}\n\nThe winners will be the people who optimize for signal, not optics.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: contrarian claim with a clean operator takeaway.',
+          });
+          break;
+        case 'analysis':
+          addTemplate({
+            content: `The mistake people keep making with ${topic} is assuming distribution is the moat.\n\nThe real edge is tighter feedback loops, faster iteration, and clearer taste.\n\n${angle}.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: structured analysis aligned to the account voice.',
+          });
+          break;
+        case 'observation':
+          addTemplate({
+            content: `Observation:\n\nmost people talking about ${topic} are optimizing for narrative.\n\nthe operators are optimizing for compounding advantages.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: short observational frame built for reply and bookmark energy.',
+          });
+          break;
+        case 'question':
+          addTemplate({
+            content: `Serious question:\n\nwhat does ${topic} look like when you remove the legacy assumption everyone is still building around?`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: question-led prompt designed to trigger thoughtful replies.',
+          });
+          break;
+        case 'data_point':
+          addTemplate({
+            content: `Data point:\n\nwhen a market shifts from rewarding hype to rewarding iteration speed, almost every incumbent reads the change too late.\n\n${topic} looks a lot like that right now.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: pseudo-data framing without inventing fake numbers.',
+          });
+          break;
+        case 'short_punch':
+          addTemplate({
+            content: `${topic} rewards builders.\n\nnot narrators.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: short punchy contrast for fast engagement.',
+          });
+          break;
+        case 'long_form':
+          addTemplate({
+            content: `The common mistake in ${topic} discourse is confusing visibility with leverage.\n\nVisibility gets attention.\nLeverage compounds outcomes.\n\nThe people winning this cycle are the ones building systems that learn faster than their competitors.\n\nThat is the real moat.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: longer structured argument for depth-oriented readers.',
+          });
+          break;
+        default:
+          addTemplate({
+            content: `${claim}\n\nThat is the shift most people are still underestimating.`,
+            format,
+            targetTopic: topic,
+            rationale: 'Template fallback: generic resilient format when richer generation is unavailable.',
+          });
+          break;
+      }
+    }
+  }
+
+  return templates.slice(0, maxTemplates);
+}
+
+function shouldUseFallbackGeneration(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes('credit balance is too low')
+    || message.includes('plans & billing')
+    || message.includes('overloaded')
+    || message.includes('temporarily unavailable')
+    || message.includes('rate limit')
+    || message.includes('api connection')
+    || message.includes('request failed')
+  );
+}
+
 /**
  * Collect quotable tweets from trending topics — high-engagement posts
  * from the agent's network that are worth QTing.
@@ -469,7 +620,33 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     return tweets;
   } catch (err) {
     console.error('Claude generation error:', err);
-    throw err; // Don't swallow — let the caller handle it
+    if (!shouldUseFallbackGeneration(err)) {
+      throw err; // Real code bug or malformed request — surface it.
+    }
+
+    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, style, recentPosts)
+      .filter((tweet) => !getTweetCompletenessIssue(tweet.content));
+    const ranked = rankGeneratedTweets(
+      fallbackTweets,
+      {
+        voiceProfile,
+        learnings,
+        style,
+        recentPosts,
+        allTweets,
+        memory: memory || {
+          alwaysDoMoreOfThis: [],
+          neverDoThisAgain: [],
+          topicsWithMomentum: [],
+          formatsUnderTested: [],
+          operatorHiddenPreferences: [],
+          identityConstraints: [],
+          weeklyChanges: [],
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    );
+    return selectTopRankedTweets(ranked, count);
   }
 }
 
