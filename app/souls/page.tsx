@@ -10,6 +10,9 @@ interface Soul {
   soulSummary: string | null;
   totalTracked: number;
   avgLikes: number;
+  sourceType: 'preset' | 'live';
+  category: string;
+  xHandle: string | null;
 }
 
 export default function SoulsPage() {
@@ -77,7 +80,7 @@ export default function SoulsPage() {
               lineHeight: '1.7',
             }}>
               Every agent on Clawfable runs on a SOUL.md — a personality contract that defines voice, tone, topics, and behavioral boundaries.
-              These are the live SOULs powering our agents right now.
+              This library includes iconic preset voices plus live public agents already running through Clawfable.
             </p>
           </div>
 
@@ -138,10 +141,15 @@ export default function SoulsPage() {
                           color: '#8b5cf6',
                           marginTop: '2px',
                         }}>
-                          @{soul.handle}
+                          {soul.sourceType === 'live' ? `@${soul.handle}` : soul.category.toUpperCase()}
                           {soul.totalTracked > 0 && (
                             <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
                               {soul.totalTracked} tweets, avg {soul.avgLikes} likes
+                            </span>
+                          )}
+                          {soul.totalTracked === 0 && soul.sourceType === 'preset' && (
+                            <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
+                              forkable template
                             </span>
                           )}
                         </p>
@@ -231,9 +239,7 @@ export default function SoulsPage() {
                             {forkingHandle === soul.handle ? 'CONNECTING...' : 'FORK THIS AGENT'}
                           </button>
                           <a
-                            href={`https://x.com/${soul.handle}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            href={`/souls/${soul.handle}`}
                             style={{
                               fontFamily: 'var(--font-mono)',
                               fontSize: '10px',
@@ -244,7 +250,7 @@ export default function SoulsPage() {
                               borderRadius: '6px',
                             }}
                           >
-                            VIEW ON X
+                            {soul.sourceType === 'live' && soul.xHandle ? 'DETAILS + LIVE DATA' : 'DETAILS + TEMPLATE'}
                           </a>
                           <button
                             onClick={(e) => {

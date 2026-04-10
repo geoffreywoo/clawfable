@@ -3,6 +3,7 @@ import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
+import { getPresetSoulSummaries, type PublicSoulSummary } from './open-source-souls';
 import { normalizeSetupStep } from './setup-state';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import { decodeKeys } from './twitter-client';
@@ -33,15 +34,6 @@ import type {
   Tweet,
   User,
 } from './types';
-
-export interface PublicSoulSummary {
-  handle: string;
-  name: string;
-  soulMd: string;
-  soulSummary: string | null;
-  totalTracked: number;
-  avgLikes: number;
-}
 
 export interface ProtocolSnapshot {
   settings: ProtocolSettings;
@@ -190,6 +182,9 @@ const getCachedPublicSouls = unstable_cache(
           soulSummary: agent.soulSummary,
           totalTracked: learnings?.totalTracked ?? 0,
           avgLikes: learnings?.avgLikes ?? 0,
+          sourceType: 'live',
+          category: 'live agent',
+          xHandle: agent.handle,
         };
       })
     );
@@ -199,5 +194,6 @@ const getCachedPublicSouls = unstable_cache(
 );
 
 export async function getPublicSoulSummaries(): Promise<PublicSoulSummary[]> {
-  return getCachedPublicSouls();
+  const liveSouls = await getCachedPublicSouls();
+  return [...getPresetSoulSummaries(), ...liveSouls];
 }

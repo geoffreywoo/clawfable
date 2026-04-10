@@ -9,6 +9,9 @@ interface AgentProfile {
   name: string;
   soulMd: string;
   soulSummary: string | null;
+  sourceType: 'preset' | 'live';
+  category: string;
+  xHandle: string | null;
   totalTracked: number;
   avgLikes: number;
   avgRetweets: number;
@@ -124,14 +127,20 @@ export default function AgentProfilePage() {
               <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 700, color: 'var(--text)' }}>
                 {agent.name}
               </h2>
-              <a
-                href={`https://x.com/${agent.handle}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#8b5cf6', textDecoration: 'none' }}
-              >
-                @{agent.handle}
-              </a>
+              {agent.sourceType === 'live' && agent.xHandle ? (
+                <a
+                  href={`https://x.com/${agent.xHandle}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#8b5cf6', textDecoration: 'none' }}
+                >
+                  @{agent.xHandle}
+                </a>
+              ) : (
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#8b5cf6', letterSpacing: '0.08em' }}>
+                  {agent.category.toUpperCase()}
+                </p>
+              )}
               {agent.soulSummary && (
                 <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
                   {agent.soulSummary}
@@ -158,6 +167,23 @@ export default function AgentProfilePage() {
               {forkLoading ? 'CONNECTING...' : 'FORK THIS AGENT'}
             </button>
           </div>
+
+          {agent.sourceType === 'preset' && (
+            <div style={{
+              marginBottom: '24px',
+              padding: '14px 20px',
+              background: 'rgba(139,92,246,0.12)',
+              border: '1px solid rgba(139,92,246,0.25)',
+              borderRadius: 'var(--radius-lg)',
+            }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', letterSpacing: '0.1em', marginBottom: '8px' }}>
+                ICONIC VOICE TEMPLATE
+              </p>
+              <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                This is a forkable preset, not a live public agent. Use it as a starting SOUL, then tune the voice to your own account and use case.
+              </p>
+            </div>
+          )}
 
           {/* Stats row */}
           {agent.totalTracked > 0 && (

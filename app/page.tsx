@@ -24,7 +24,9 @@ export default async function HomePage() {
     );
   }
 
-  const liveAgents = await getPublicSoulSummaries();
+  const publicSouls = await getPublicSoulSummaries();
+  const presetSouls = publicSouls.filter((soul) => soul.sourceType === 'preset');
+  const liveAgents = publicSouls.filter((soul) => soul.sourceType === 'live');
 
   return (
     <div className="page-shell">
@@ -73,6 +75,9 @@ export default async function HomePage() {
                 </LoginButton>
                 <Link href="/pricing" className="btn btn-outline landing-cta-secondary">
                   SEE PRICING
+                </Link>
+                <Link href="/souls" className="btn btn-outline landing-cta-secondary">
+                  BROWSE OPEN SOULS
                 </Link>
                 <p className="landing-cta-note">
                   Connect your X account, draft the voice contract, and review the first tweet batch.
@@ -163,29 +168,38 @@ export default async function HomePage() {
 
             <div className="landing-panel">
               <div className="landing-panel-header">
-                <span className="landing-panel-label">PUBLIC AGENTS</span>
-                <p className="landing-panel-caption">Peek at real voice contracts already running through Clawfable.</p>
+                <span className="landing-panel-label">OPEN SOURCE SOULS</span>
+                <p className="landing-panel-caption">
+                  Fork iconic presets like Yoda or Morgan Freeman, then tune them into your own live agent.
+                </p>
               </div>
-              {liveAgents.length > 0 ? (
+              {presetSouls.length > 0 ? (
                 <div className="landing-feature-list">
-                  {liveAgents.slice(0, 5).map((agent) => (
+                  {presetSouls.slice(0, 5).map((agent) => (
                     <a
                       key={agent.handle}
                       href={`/souls/${agent.handle}`}
                       className="landing-feature-row"
                       style={{ textDecoration: 'none', display: 'block' }}
                     >
-                      <p className="landing-feature-title" style={{ color: 'var(--text)' }}>@{agent.handle}</p>
+                      <p className="landing-feature-title" style={{ color: 'var(--text)' }}>{agent.name}</p>
                       <p className="landing-feature-desc">
-                        {agent.soulSummary || 'Public SOUL available'}
-                        {agent.totalTracked > 0 ? ` · ${agent.totalTracked} tracked tweets` : ''}
+                        {agent.soulSummary || 'Open source SOUL preset'}
+                        {agent.category ? ` · ${agent.category}` : ''}
                       </p>
                     </a>
                   ))}
                 </div>
               ) : (
                 <div className="landing-trust-list">
-                  <div className="landing-trust-item">Public SOULs appear here once agents are live.</div>
+                  <div className="landing-trust-item">Open source SOUL presets appear here once the library is loaded.</div>
+                </div>
+              )}
+              {liveAgents.length > 0 && (
+                <div className="landing-trust-list" style={{ marginTop: '12px' }}>
+                  <div className="landing-trust-item">
+                    Plus {liveAgents.length} live public agents whose real SOULs and performance can also be forked.
+                  </div>
                 </div>
               )}
             </div>

@@ -4,6 +4,7 @@ import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { COOKIE_NAME } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
+import { getPresetSoulProfile } from '@/lib/open-source-souls';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
@@ -69,12 +70,21 @@ export async function GET(request: NextRequest) {
 
       // If forking from an existing agent, pre-fill the SOUL.md
       let soulMd = '# Pending SOUL.md setup';
+      let soulSummary: string | null = null;
       let setupStep: 'soul' | 'analyze' = 'soul';
       if (temp.forkHandle) {
         const sourceAgent = await getAgentByHandle(temp.forkHandle);
         if (sourceAgent && sourceAgent.soulMd && sourceAgent.soulMd.length > 50) {
           soulMd = sourceAgent.soulMd;
+          soulSummary = sourceAgent.soulSummary;
           setupStep = 'analyze'; // skip voice definition, go straight to analysis
+        } else {
+          const presetSoul = getPresetSoulProfile(temp.forkHandle);
+          if (presetSoul) {
+            soulMd = presetSoul.soulMd;
+            soulSummary = presetSoul.soulSummary;
+            setupStep = 'analyze';
+          }
         }
       }
 
@@ -82,7 +92,7 @@ export async function GET(request: NextRequest) {
         handle: screenName,
         name: screenName,
         soulMd,
-        soulSummary: null,
+        soulSummary,
         apiKey: Buffer.from(consumerKey).toString('base64'),
         apiSecret: Buffer.from(consumerSecret).toString('base64'),
         accessToken: Buffer.from(accessToken).toString('base64'),
