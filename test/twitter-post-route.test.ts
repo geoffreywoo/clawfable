@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAgent, createTweet, getLearningSignals, getTweet } from '@/lib/kv-storage';
+import { createAgent, createTweet, getTweet, updateTweet } from '@/lib/kv-storage';
 
 const mocks = vi.hoisted(() => ({
   requireAgentAccess: vi.fn(),
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     accessToken: 'access-token',
     accessSecret: 'access-secret',
   })),
+  resolveQueuedTweetFailure: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -27,14 +28,28 @@ vi.mock('@/lib/twitter-client', () => ({
   decodeKeys: mocks.decodeKeys,
 }));
 
+vi.mock('@/lib/queue-healing', () => ({
+  resolveQueuedTweetFailure: mocks.resolveQueuedTweetFailure,
+}));
+
 import { POST } from '@/app/api/agents/[id]/twitter/post/route';
 
 describe('twitter post route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveQueuedTweetFailure.mockImplementation(async (_agent: unknown, tweet: any) => {
+      const updated = await updateTweet(tweet.id, {
+        content: 'your thesis is obsolete before the partner meeting ends',
+      });
+      return {
+        action: 'repaired',
+        tweet: updated,
+        detail: 'Auto-repaired the draft and kept it queued.',
+      };
+    });
   });
 
-  it('blocks and quarantines incomplete manual posts before they reach X', async () => {
+  it('auto-fixes incomplete queued drafts instead of quarantining them', async () => {
     const agent = await createAgent({
       handle: 'manual-post-guard',
       name: 'Manual Post Guard',
@@ -77,17 +92,13 @@ describe('twitter post route', () => {
 
     const data = await response.json();
     const updatedTweet = await getTweet(tweet.id);
-    const signals = await getLearningSignals(agent.id, 10);
 
     expect(response.status).toBe(422);
     expect(String(data.error)).toContain('mid-word or mid-thought');
+    expect(data.autoFixed).toBe(true);
     expect(mocks.postTweet).not.toHaveBeenCalled();
-    expect(updatedTweet?.quarantinedAt).toBeTruthy();
-    expect(updatedTweet?.quarantineReason).toContain('mid-word or mid-thought');
-    expect(signals.some((signal) =>
-      signal.tweetId === tweet.id
-      && signal.signalType === 'x_post_rejected'
-      && signal.surface === 'manual_post'
-    )).toBe(true);
+    expect(updatedTweet?.quarantinedAt).toBeNull();
+    expect(updatedTweet?.quarantineReason).toBeNull();
+    expect(updatedTweet?.content).toBe('your thesis is obsolete before the partner meeting ends');
   });
 });

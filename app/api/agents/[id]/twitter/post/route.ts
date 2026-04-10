@@ -3,6 +3,7 @@ import { addLearningSignal, getTweet, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
+import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -13,8 +14,10 @@ export async function POST(
   let dbTweetId: string | null = null;
   let existingTweet = null as Awaited<ReturnType<typeof getTweet>> | null;
   let isReply = false;
+  let currentAgent: Awaited<ReturnType<typeof requireAgentAccess>>['agent'] | null = null;
   try {
     const { agent } = await requireAgentAccess(id);
+    currentAgent = agent;
 
     if (!agent.isConnected || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) {
       return NextResponse.json({ error: 'Twitter API not configured for this agent' }, { status: 503 });
@@ -29,19 +32,15 @@ export async function POST(
 
     const completenessIssue = getTweetCompletenessIssue(String(content));
     if (completenessIssue) {
-      const quarantineReason = `${completenessIssue} Draft quarantined until reviewed.`;
-      if (dbTweetId) {
-        await updateTweet(dbTweetId, {
-          quarantinedAt: new Date().toISOString(),
-          quarantineReason,
-        });
-        await addLearningSignal(id, {
-          tweetId: dbTweetId,
-          signalType: isReply ? 'reply_rejected' : 'x_post_rejected',
-          surface: isReply ? 'mentions' : 'manual_post',
-          rewardDelta: -0.75,
-          reason: quarantineReason,
-        });
+      if (dbTweetId && existingTweet?.status === 'queued') {
+        const resolved = await resolveQueuedTweetFailure(agent, existingTweet, completenessIssue);
+        return NextResponse.json({
+          error: completenessIssue,
+          autoFixed: resolved.action === 'repaired',
+          queueResolved: true,
+          repairedContent: resolved.tweet?.content ?? null,
+          queueAction: resolved.action,
+        }, { status: 422 });
       }
       return NextResponse.json({ error: completenessIssue }, { status: 422 });
     }
@@ -79,12 +78,12 @@ export async function POST(
 
     return NextResponse.json({ success: true, tweetUrl: result.tweetUrl, tweetId: result.tweetId });
   } catch (err) {
+    try { return handleAuthError(err); } catch {}
+    const message = err instanceof Error ? err.message : 'Failed to post tweet';
+    let queueAction: string | null = null;
+    let repairedContent: string | null = null;
+
     if (dbTweetId) {
-      const message = err instanceof Error ? err.message : 'Failed to post tweet';
-      await updateTweet(dbTweetId, {
-        quarantinedAt: new Date().toISOString(),
-        quarantineReason: message,
-      }).catch(() => null);
       await addLearningSignal(id, {
         tweetId: dbTweetId,
         signalType: isReply ? 'reply_rejected' : 'x_post_rejected',
@@ -93,8 +92,18 @@ export async function POST(
         reason: message,
       }).catch(() => null);
     }
-    try { return handleAuthError(err); } catch {}
-    const message = err instanceof Error ? err.message : 'Failed to post tweet';
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    if (dbTweetId && existingTweet?.status === 'queued' && currentAgent) {
+      const resolved = await resolveQueuedTweetFailure(currentAgent, existingTweet, message).catch(() => null);
+      queueAction = resolved?.action ?? null;
+      repairedContent = resolved?.tweet?.content ?? null;
+    }
+    return NextResponse.json({
+      error: message,
+      queueResolved: Boolean(queueAction),
+      autoFixed: queueAction === 'repaired',
+      repairedContent,
+      queueAction,
+    }, { status: 500 });
   }
 }

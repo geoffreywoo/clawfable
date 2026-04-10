@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   getMe: vi.fn(),
   getMentionsFromTwitter: vi.fn(),
   getTweetCompletenessIssue: vi.fn((_: string) => null),
+  resolveQueuedTweetFailure: vi.fn(),
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -83,6 +84,10 @@ vi.mock('@/lib/survivability', () => ({
   pickDiverseTweet: vi.fn((queue: Array<unknown>) => queue[0] ?? null),
   clampPostsPerDay: vi.fn((value: number) => value),
   getTweetCompletenessIssue: mocks.getTweetCompletenessIssue,
+}));
+
+vi.mock('@/lib/queue-healing', () => ({
+  resolveQueuedTweetFailure: mocks.resolveQueuedTweetFailure,
 }));
 
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -199,6 +204,16 @@ beforeEach(() => {
   });
   mocks.getMentionsFromTwitter.mockResolvedValue([]);
   mocks.getTweetCompletenessIssue.mockImplementation(() => null);
+  mocks.resolveQueuedTweetFailure.mockImplementation(async (_agent: unknown, tweet: any, _reason: string) => ({
+    action: 'repaired',
+    tweet: {
+      ...tweet,
+      content: 'rebuilt queue draft',
+      quarantinedAt: null,
+      quarantineReason: null,
+    },
+    detail: 'Auto-repaired the draft and kept it queued.',
+  }));
 });
 
 describe('autopilot remote debug logging', () => {
@@ -215,7 +230,7 @@ describe('autopilot remote debug logging', () => {
     expect(result).toMatchObject({
       action: 'error',
       tweetId: '522',
-      content: queuedTweet.content,
+      content: 'rebuilt queue draft',
       format: 'long_form',
       topic: 'masculinity',
     });
@@ -269,7 +284,7 @@ describe('autopilot remote debug logging', () => {
     expect(failureEntry.reason).toContain('author=@alice');
   });
 
-  it('quarantines incomplete queued drafts before they can post', async () => {
+  it('repairs incomplete queued drafts before they can post', async () => {
     mocks.getQueuedTweets.mockResolvedValue([
       {
         ...queuedTweet,
@@ -291,17 +306,18 @@ describe('autopilot remote debug logging', () => {
     const result = await runAutopilot(baseAgent);
 
     expect(result.action).toBe('posted');
-    expect(result.tweetId).toBe('523');
-    expect(mocks.updateTweet).toHaveBeenCalledWith('522', expect.objectContaining({
-      quarantineReason: expect.stringContaining('incomplete trailing fragment'),
-    }));
-    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), validQueuedTweet.content);
+    expect(result.tweetId).toBe('522');
+    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
+      baseAgent,
+      expect.objectContaining({ id: '522' }),
+      expect.stringContaining('incomplete trailing fragment')
+    );
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), 'rebuilt queue draft');
 
-    const quarantineEntry = mocks.addPostLogEntry.mock.calls
+    const repairEntry = mocks.addPostLogEntry.mock.calls
       .map(([, entry]) => entry)
-      .find((entry) => entry.tweetId === '522' && entry.action === 'error');
+      .find((entry) => entry.tweetId === '522' && entry.reason.includes('Auto-repaired the draft'));
 
-    expect(quarantineEntry).toBeDefined();
-    expect(quarantineEntry.reason).toContain('Draft quarantined until reviewed');
+    expect(repairEntry).toBeDefined();
   });
 });

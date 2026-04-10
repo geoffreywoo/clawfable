@@ -42,6 +42,7 @@ import {
   getTweetCompletenessIssue,
 } from './survivability';
 import { getAutonomyConfidenceThreshold } from './candidate-ranking';
+import { resolveQueuedTweetFailure } from './queue-healing';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
@@ -122,45 +123,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
-  // Clamp postsPerDay to safe maximum
-  const safePostsPerDay = clampPostsPerDay(settings.postsPerDay);
-  const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
-
-  // Peak hour clustering: during peak hours, use 40% of normal cooldown (post more often).
-  // During off-peak, use 3x cooldown (post less often). This clusters posts into high-engagement windows.
-  const currentHour = new Date().getUTCHours();
-  const hasPeakHours = settings.peakHours && settings.peakHours.length > 0;
-  const isPeakHour = hasPeakHours && settings.peakHours.includes(currentHour);
-  const cooldownMultiplier = hasPeakHours ? (isPeakHour ? 0.4 : 3.0) : 1.0;
-
-  const minIntervalMs = jitterInterval(Math.round(baseIntervalMs * cooldownMultiplier));
-  if (settings.lastPostedAt) {
-    const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
-    if (elapsed < minIntervalMs) {
-      const minsLeft = Math.round((minIntervalMs - elapsed) / 60000);
-      return {
-        agentId,
-        action: repliesSent > 0 ? 'replied' : 'skipped',
-        reason: repliesSent > 0
-          ? `Sent ${repliesSent} replies. Post cooldown: ${minsLeft}m left${isPeakHour ? ' (peak hour)' : ''}`
-          : `Cooldown: ${minsLeft}m until next post${isPeakHour ? ' (peak hour, faster)' : ''}`,
-        repliesSent,
-      };
-    }
-  }
-
-  // Daily hard cap — stop posting if we've hit the absolute limit
   const postLog = await getPostLog(agentId, 50);
-  if (isDailyCapReached(postLog)) {
-    return {
-      agentId,
-      action: repliesSent > 0 ? 'replied' : 'skipped',
-      reason: repliesSent > 0
-        ? `Sent ${repliesSent} replies. Daily post cap reached.`
-        : 'Daily post cap reached — pausing until tomorrow',
-      repliesSent,
-    };
-  }
 
   // Content calendar: if today has a topic focus, pass it to generation
   const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()];
@@ -190,9 +153,42 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     }
   }
 
-  // Ensure queue has content
+  // Heal broken queued drafts before cooldown so the queue stays healthy even
+  // during long off-peak pauses.
   let queue = await getQueuedTweets(agentId);
+  const healedQueue: typeof queue = [];
+  for (const queuedTweet of queue) {
+    const queueIssue = queuedTweet.quarantinedAt
+      ? (queuedTweet.quarantineReason || 'Draft was previously quarantined after a posting failure.')
+      : getTweetCompletenessIssue(queuedTweet.content);
+
+    if (!queueIssue) {
+      healedQueue.push(queuedTweet);
+      continue;
+    }
+
+    const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, queueIssue);
+    if (resolved.tweet) {
+      healedQueue.push(resolved.tweet);
+    }
+
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: queuedTweet.id,
+      xTweetId: queuedTweet.xTweetId || '',
+      content: queuedTweet.content,
+      format: queuedTweet.format || 'unknown',
+      topic: queuedTweet.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: resolved.action === 'deleted' ? 'error' : 'skipped',
+      reason: `${queueIssue} ${resolved.detail}`,
+    });
+  }
+  queue = healedQueue;
   let activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+
+  // Ensure queue has content
   if (activeQueue.length < settings.minQueueSize) {
     const generated = await refillQueue(agent, settings.minQueueSize - activeQueue.length + 3, {
       scheduledTopic: todaysTopic,
@@ -204,15 +200,52 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     }
   }
 
+  // Clamp postsPerDay to safe maximum
+  const safePostsPerDay = clampPostsPerDay(settings.postsPerDay);
+  const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
+
+  // Peak hour clustering: during peak hours, use 40% of normal cooldown (post more often).
+  // During off-peak, use 3x cooldown (post less often). This clusters posts into high-engagement windows.
+  const currentHour = new Date().getUTCHours();
+  const hasPeakHours = settings.peakHours && settings.peakHours.length > 0;
+  const isPeakHour = hasPeakHours && settings.peakHours.includes(currentHour);
+  const cooldownMultiplier = hasPeakHours ? (isPeakHour ? 0.4 : 3.0) : 1.0;
+
+  const minIntervalMs = jitterInterval(Math.round(baseIntervalMs * cooldownMultiplier));
+  if (settings.lastPostedAt) {
+    const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
+    if (elapsed < minIntervalMs) {
+      const minsLeft = Math.round((minIntervalMs - elapsed) / 60000);
+      return {
+        agentId,
+        action: repliesSent > 0 ? 'replied' : 'skipped',
+        reason: repliesSent > 0
+          ? `Sent ${repliesSent} replies. Post cooldown: ${minsLeft}m left${isPeakHour ? ' (peak hour)' : ''}`
+          : `Cooldown: ${minsLeft}m until next post${isPeakHour ? ' (peak hour, faster)' : ''}`,
+        repliesSent,
+      };
+    }
+  }
+
+  // Daily hard cap — stop posting if we've hit the absolute limit
+  if (isDailyCapReached(postLog)) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. Daily post cap reached.`
+        : 'Daily post cap reached — pausing until tomorrow',
+      repliesSent,
+    };
+  }
+
   if (activeQueue.length === 0) {
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0
         ? `Sent ${repliesSent} replies. No active queued tweet cleared posting filters.`
-        : queue.length > 0
-          ? 'All queued tweets are quarantined. Review the queue before posting again.'
-          : 'Queue empty and generation failed',
+        : 'Queue empty after auto-repair and generation attempts',
       repliesSent,
     };
   }
@@ -230,11 +263,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       continue;
     }
 
-    const quarantineReason = `${completenessIssue} Draft quarantined until reviewed.`;
-    await updateTweet(queuedTweet.id, {
-      quarantinedAt: new Date().toISOString(),
-      quarantineReason,
-    });
+    const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, completenessIssue);
     await addPostLogEntry(agentId, {
       agentId,
       tweetId: queuedTweet.id,
@@ -244,9 +273,13 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       topic: queuedTweet.topic || 'general',
       postedAt: new Date().toISOString(),
       source: 'autopilot',
-      action: 'error',
-      reason: quarantineReason,
+      action: resolved.action === 'deleted' ? 'error' : 'skipped',
+      reason: `${completenessIssue} ${resolved.detail}`,
     });
+
+    if (resolved.tweet && !getTweetCompletenessIssue(resolved.tweet.content)) {
+      validationPassedQueue.push(resolved.tweet);
+    }
   }
 
   if (validationPassedQueue.length === 0) {
@@ -254,8 +287,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0
-        ? 'Sent replies, but all queued tweets failed completeness checks and were quarantined for review.'
-        : 'All queued tweets failed completeness checks and were quarantined for review.',
+        ? 'Sent replies, but no queued tweets were salvageable after auto-repair.'
+        : 'No queued tweets were salvageable after auto-repair.',
       repliesSent,
     };
   }
@@ -364,10 +397,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       };
     }
 
-    await updateTweet(tweet.id, {
-      quarantinedAt: new Date().toISOString(),
-      quarantineReason: message,
-    });
+    const resolved = await resolveQueuedTweetFailure(agent, tweet, message);
     await addLearningSignal(agentId, {
       tweetId: tweet.id,
       signalType: 'x_post_rejected',
@@ -384,11 +414,11 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     return {
       agentId,
       action: 'error',
-      reason: `${message} Draft quarantined until reviewed.`,
+      reason: `${message} ${resolved.detail}`,
       tweetId: tweet.id,
-      content: tweet.content,
-      format: tweet.format || 'unknown',
-      topic: tweet.topic || 'general',
+      content: resolved.tweet?.content ?? tweet.content,
+      format: (resolved.tweet?.format ?? tweet.format) || 'unknown',
+      topic: (resolved.tweet?.topic ?? tweet.topic) || 'general',
       repliesSent,
     };
   }
