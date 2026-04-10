@@ -6,6 +6,14 @@ import { getCurrentUser } from '@/lib/auth';
 import { getBillingSummary } from '@/lib/billing';
 import { getAgentSummariesForUser, getPublicSoulSummaries } from '@/lib/dashboard-data';
 
+function XMark() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+      <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default async function HomePage() {
   const user = await getCurrentUser();
 
@@ -27,6 +35,7 @@ export default async function HomePage() {
   const publicSouls = await getPublicSoulSummaries();
   const presetSouls = publicSouls.filter((soul) => soul.sourceType === 'preset');
   const liveAgents = publicSouls.filter((soul) => soul.sourceType === 'live');
+  const featuredPresets = presetSouls.slice(0, 6);
 
   return (
     <div className="page-shell">
@@ -43,6 +52,9 @@ export default async function HomePage() {
             <Link href="/pricing">PRICING</Link>
             <Link href="/souls">PUBLIC SOULS</Link>
           </nav>
+          <LoginButton className="btn btn-outline site-header-cta">
+            START FREE
+          </LoginButton>
         </div>
       </header>
 
@@ -52,95 +64,150 @@ export default async function HomePage() {
             <div className="landing-hero-copy">
               <span className="landing-kicker">SELF-IMPROVING X AGENTS</span>
               <h2 className="landing-title">
-                Train an X agent on your voice.
-                Approve the first batch.
-                Then let it compound.
+                Turn an X account into a self-improving agent.
               </h2>
               <p className="landing-subtitle">
-                Clawfable analyzes what already works on your account, drafts in your style,
-                shows why each tweet was chosen, and keeps learning from approvals, edits,
-                deletes, and live performance.
+                Clawfable turns post history, approvals, edits, deletes, and live performance
+                into an operating system for one voice. Start with review, see why each draft
+                was chosen, then arm autopilot when the system has earned it.
               </p>
+              <div className="landing-chip-row">
+                <span className="landing-chip">START MANUAL</span>
+                <span className="landing-chip">SEE THE MODEL THINK</span>
+                <span className="landing-chip">PAY FOR AUTONOMY</span>
+              </div>
               <div className="landing-cta-row">
-                <LoginButton
-                  className="landing-cta-btn"
-                  style={{ fontSize: '14px', padding: '12px 32px' }}
-                >
-                  <>
-                    <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                      <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-                    </svg>
-                    GET STARTED FREE
-                  </>
-                </LoginButton>
-                <Link href="/pricing" className="btn btn-outline landing-cta-secondary">
-                  SEE PRICING
-                </Link>
-                <Link href="/souls" className="btn btn-outline landing-cta-secondary">
-                  BROWSE OPEN SOULS
-                </Link>
+                <div className="landing-cta-actions">
+                  <LoginButton
+                    className="landing-cta-btn"
+                    style={{ fontSize: '14px', padding: '12px 28px' }}
+                  >
+                    <>
+                      <XMark />
+                      GET STARTED FREE
+                    </>
+                  </LoginButton>
+                  <Link href="/souls" className="btn btn-outline landing-cta-secondary">
+                    BROWSE SOULS
+                  </Link>
+                </div>
                 <p className="landing-cta-note">
-                  Connect your X account, draft the voice contract, and review the first tweet batch.
-                  Nothing goes live during setup.
+                  Nothing posts during setup. You connect X, generate the voice contract,
+                  and approve the first batch before queue or autopilot can run.
                 </p>
+                <div className="landing-inline-links">
+                  <Link href="/pricing">SEE PRICING</Link>
+                  <span>•</span>
+                  <Link href="/souls">OPEN SOURCE SOUL LIBRARY</Link>
+                </div>
               </div>
             </div>
 
-            <div className="landing-panel-stack">
-              <div className="landing-panel">
-                <div className="landing-panel-header">
-                  <span className="landing-panel-label">SYSTEM MODEL</span>
-                  <p className="landing-panel-caption">A feedback loop, not a one-shot generator.</p>
+            <div className="landing-command">
+              <div className="landing-command-head">
+                <span className="landing-panel-label">CONTROL ROOM PREVIEW</span>
+                <h3 className="landing-command-title">One voice, one loop, visible the whole way down.</h3>
+                <p className="landing-panel-caption">
+                  The product is strongest when it feels like operating a system, not prompting a chatbot.
+                </p>
+              </div>
+              <div className="landing-command-grid">
+                <div className="landing-command-section">
+                  <span className="landing-command-label">INPUTS</span>
+                  <div className="landing-command-row">
+                    <span className="landing-command-key">POST HISTORY</span>
+                    <span className="landing-command-value">what already sounds true</span>
+                  </div>
+                  <div className="landing-command-row">
+                    <span className="landing-command-key">OPERATOR ACTIONS</span>
+                    <span className="landing-command-value">approvals, edits, deletes, skips</span>
+                  </div>
+                  <div className="landing-command-row">
+                    <span className="landing-command-key">LIVE PERFORMANCE</span>
+                    <span className="landing-command-value">account-relative engagement, not raw vanity</span>
+                  </div>
                 </div>
-                <div className="landing-feature-list">
+
+                <div className="landing-command-section">
+                  <span className="landing-command-label">BELIEF STATE</span>
+                  <div className="landing-feature-list">
+                    {[
+                      ['DO MORE', 'Direct hooks, concrete specifics, sharper first lines.'],
+                      ['AVOID', 'Generic abstractions, weak endings, patterns the operator rejects.'],
+                      ['UNDER TEST', 'Formats and topics the system is still probing for edge.'],
+                    ].map(([title, description]) => (
+                      <div key={title} className="landing-feature-row">
+                        <p className="landing-feature-title">{title}</p>
+                        <p className="landing-feature-desc">{description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="landing-command-section">
+                  <span className="landing-command-label">WHAT YOU SEE</span>
                   {[
-                    ['VOICE CONTRACT', 'Extracted from your posts or coached manually.'],
-                    ['LEARNING LOOP', 'Approvals, edits, deletes, and performance become future priors.'],
-                    ['DECISION VISIBILITY', 'Every candidate can explain why it was chosen.'],
-                    ['AUTOPILOT MODES', 'Safe, balanced, and explore let you choose the risk profile.'],
-                  ].map(([title, description]) => (
-                    <div key={title} className="landing-feature-row">
-                      <p className="landing-feature-title">{title}</p>
-                      <p className="landing-feature-desc">{description}</p>
+                    ['RANKED QUEUE', 'Each candidate can explain why it belongs there.'],
+                    ['LEARNING TAB', 'Beliefs, active experiments, and weekly changes stay legible.'],
+                    ['AUTOPILOT MODES', 'Safe, balanced, and explore make risk an explicit choice.'],
+                  ].map(([title, value]) => (
+                    <div key={title} className="landing-command-row">
+                      <span className="landing-command-key">{title}</span>
+                      <span className="landing-command-value">{value}</span>
                     </div>
                   ))}
                 </div>
               </div>
-
-              <div className="landing-panel landing-panel-stack landing-panel-wide">
-                <div className="landing-panel-header">
-                  <span className="landing-panel-label">WHY IT FEELS DIFFERENT</span>
-                  <p className="landing-panel-caption">
-                    Clawfable is not just a tweet generator. It is an operating system for a voice that gets sharper with use.
-                  </p>
-                </div>
+              <div className="landing-command-metrics">
                 {[
-                  ['YOU APPROVE THE FIRST BATCH', 'The product starts with review, not blind automation.'],
-                  ['EVERY SIGNAL TEACHES THE SYSTEM', 'Approvals, edits, deletes, and live performance all update future drafts.'],
-                  ['EVERY TWEET IS EXPLAINABLE', 'See why a candidate was chosen before it enters queue or goes live.'],
-                  ['ONE PLACE TO SEE THE LEARNING', 'The learning control room shows what changed, what is under test, and what to avoid.'],
-                ].map(([key, value]) => (
-                  <div key={key} className="landing-system-row">
-                    <span className="landing-system-key">{key}</span>
-                    <span className="landing-system-value">{value}</span>
+                  ['PRESETS', String(presetSouls.length)],
+                  ['LIVE SOULS', String(liveAgents.length)],
+                  ['FIRST SESSION', '5 MIN'],
+                  ['AUTOPILOT', '3 MODES'],
+                ].map(([label, value]) => (
+                  <div key={label} className="landing-metric-cell">
+                    <span className="landing-metric-label">{label}</span>
+                    <span className="landing-metric-value">{value}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="landing-sections">
+          <div className="landing-proof-grid">
+            {[
+              [
+                'START WITH REVIEW',
+                'The first promise is not autonomy. It is taste. You approve the first batch before the machine earns the right to run.',
+              ],
+              [
+                'SEE THE MACHINE THINK',
+                'Queue, compose, and learning surfaces show why a tweet was drafted, what the system believes, and which hypotheses are under test.',
+              ],
+              [
+                'PAY FOR COMPOUNDING',
+                'Free gets you setup and manual control. Paid unlocks the automation loop once the voice actually feels real.',
+              ],
+            ].map(([title, text]) => (
+              <div key={title} className="landing-proof-card">
+                <span className="landing-panel-label">{title}</span>
+                <p className="landing-proof-text">{text}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="landing-story-grid">
             <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
                 <span className="landing-panel-label">FIRST SESSION</span>
-                <p className="landing-panel-caption">Most users can get to a reviewable first batch in about five minutes.</p>
+                <p className="landing-panel-caption">The setup should feel controlled, fast, and reversible.</p>
               </div>
               <div className="landing-step-list">
                 {[
-                  ['1', 'Name the agent and connect X.'],
-                  ['2', 'Generate the voice contract from real posts or define it manually.'],
-                  ['3', 'Analyze what already performs on the account.'],
-                  ['4', 'Approve the tweets that feel true and arm the queue.'],
+                  ['1', 'Connect X and name the account you want to train.'],
+                  ['2', 'Generate the voice contract from real posts or coach it directly.'],
+                  ['3', 'Review the first ranked batch and keep only the drafts that actually feel true.'],
+                  ['4', 'Arm the queue and decide whether this account should stay manual, balanced, or exploratory.'],
                 ].map(([num, text]) => (
                   <div key={num} className="landing-step">
                     <div className="landing-step-num">{num}</div>
@@ -150,42 +217,49 @@ export default async function HomePage() {
               </div>
             </div>
 
-            <div className="landing-panel">
+            <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
-                <span className="landing-panel-label">WHAT YOU CONTROL</span>
-                <p className="landing-panel-caption">The system automates execution, not judgment.</p>
+                <span className="landing-panel-label">WHAT COMPOUNDS</span>
+                <p className="landing-panel-caption">The point is not more drafts. The point is a sharper system every week.</p>
               </div>
-              <div className="landing-trust-list">
+              <div className="landing-feature-list">
                 {[
-                  'You decide the voice contract and can coach it directly.',
-                  'You review the first batch before anything is queued to post.',
-                  'Safe, balanced, and explore modes let you choose how aggressive learning should be.',
-                ].map((item) => (
-                  <div key={item} className="landing-trust-item">{item}</div>
+                  ['VOICE RULES HARDEN', 'Coaching turns into structured rules instead of disappearing into one chat session.'],
+                  ['BAD PATTERNS GET PENALIZED', 'Deletes, skips, and weak performance become negative pressure in future ranking.'],
+                  ['NEW BETS STAY EXPLICIT', 'The system explores under-tested formats and topics without hiding the hypothesis from you.'],
+                  ['AUTONOMY GETS SAFER', 'Confidence thresholds, visible rationale, and mode controls keep automation legible.'],
+                ].map(([title, description]) => (
+                  <div key={title} className="landing-feature-row">
+                    <p className="landing-feature-title">{title}</p>
+                    <p className="landing-feature-desc">{description}</p>
+                  </div>
                 ))}
               </div>
             </div>
+          </div>
 
-            <div className="landing-panel">
+          <div className="landing-library-grid">
+            <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
                 <span className="landing-panel-label">OPEN SOURCE SOULS</span>
                 <p className="landing-panel-caption">
-                  Fork iconic presets like Yoda or Morgan Freeman, then tune them into your own live agent.
+                  Start from a live public voice or a preset with unmistakable character, then fork it into your own control room.
                 </p>
               </div>
-              {presetSouls.length > 0 ? (
-                <div className="landing-feature-list">
-                  {presetSouls.slice(0, 5).map((agent) => (
+              {featuredPresets.length > 0 ? (
+                <div className="landing-soul-grid">
+                  {featuredPresets.map((agent) => (
                     <a
                       key={agent.handle}
                       href={`/souls/${agent.handle}`}
-                      className="landing-feature-row"
-                      style={{ textDecoration: 'none', display: 'block' }}
+                      className="landing-soul-card"
                     >
-                      <p className="landing-feature-title" style={{ color: 'var(--text)' }}>{agent.name}</p>
-                      <p className="landing-feature-desc">
+                      <div className="landing-soul-head">
+                        <p className="landing-soul-name">{agent.name}</p>
+                        <span className="landing-soul-type">{agent.category}</span>
+                      </div>
+                      <p className="landing-soul-summary">
                         {agent.soulSummary || 'Open source SOUL preset'}
-                        {agent.category ? ` · ${agent.category}` : ''}
                       </p>
                     </a>
                   ))}
@@ -195,28 +269,44 @@ export default async function HomePage() {
                   <div className="landing-trust-item">Open source SOUL presets appear here once the library is loaded.</div>
                 </div>
               )}
-              {liveAgents.length > 0 && (
-                <div className="landing-trust-list" style={{ marginTop: '12px' }}>
-                  <div className="landing-trust-item">
-                    Plus {liveAgents.length} live public agents whose real SOULs and performance can also be forked.
+            </div>
+
+            <div className="landing-side-stack">
+              <div className="landing-panel">
+                <div className="landing-panel-header">
+                  <span className="landing-panel-label">PUBLIC SIGNAL</span>
+                  <p className="landing-panel-caption">The library is not just fictional templates. Live public agents can be forked too.</p>
+                </div>
+                <div className="landing-feature-list">
+                  <div className="landing-feature-row">
+                    <p className="landing-feature-title">{liveAgents.length} live public souls</p>
+                    <p className="landing-feature-desc">Real SOULs with real performance history, available to inspect and fork.</p>
+                  </div>
+                  <div className="landing-feature-row">
+                    <p className="landing-feature-title">{presetSouls.length} presets</p>
+                    <p className="landing-feature-desc">Distinctive voices like Yoda, Morgan Freeman, and other strong starting points.</p>
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          <div style={{ textAlign: 'center', marginTop: '32px' }}>
-            <LoginButton className="landing-cta-btn">
-              <>
-                <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                  <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-                </svg>
-                OPEN MISSION CONTROL
-              </>
-            </LoginButton>
-            <p className="landing-footer">
-              built by <a href="https://x.com/geoffreywoo" target="_blank" rel="noopener noreferrer">@geoffreywoo</a>
-            </p>
+              <div className="landing-panel">
+                <div className="landing-panel-header">
+                  <span className="landing-panel-label">START HERE</span>
+                  <p className="landing-panel-caption">You do not need to believe in autopilot on day one. You just need a voice worth training.</p>
+                </div>
+                <div className="landing-footer-cta">
+                  <LoginButton className="landing-cta-btn">
+                    <>
+                      <XMark />
+                      OPEN MISSION CONTROL
+                    </>
+                  </LoginButton>
+                  <p className="landing-footer">
+                    built by <a href="https://x.com/geoffreywoo" target="_blank" rel="noopener noreferrer">@geoffreywoo</a>
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </main>
