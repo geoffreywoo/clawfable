@@ -6,6 +6,7 @@ import {
   isRepetitiveContent,
   isNearDuplicate,
   getTweetCompletenessIssue,
+  getGeneratedTweetIssue,
   isCompleteTweetDraft,
   pickDiverseTweet,
   clampPostsPerDay,
@@ -214,6 +215,15 @@ describe('getTweetCompletenessIssue', () => {
     expect(issue).toContain('unfinished clause');
   });
 
+  it('flags long drafts that die mid-word after a connector', () => {
+    const issue = getTweetCompletenessIssue(
+      'psa to every vc partner still doing "pattern matching":\n\n' +
+      'your entire investment thesis just became obsolete\n\n' +
+      "while you're scheduling 47 coffee meetings to evaluate one deal, mythos agents are processing 10k startups per day with better accuracy than y"
+    );
+    expect(issue).toContain('mid-word or mid-thought');
+  });
+
   it('accepts complete tweets even without ending punctuation', () => {
     const issue = getTweetCompletenessIssue(
       'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
@@ -222,6 +232,11 @@ describe('getTweetCompletenessIssue', () => {
     expect(isCompleteTweetDraft(
       'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
     )).toBe(true);
+  });
+
+  it('flags model outputs that hit the token limit before finishing', () => {
+    const issue = getGeneratedTweetIssue('complete enough looking text', 'max_tokens');
+    expect(issue).toContain('token limit');
   });
 });
 

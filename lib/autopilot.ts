@@ -874,6 +874,8 @@ async function refillQueue(
 
     let added = 0;
     for (const item of allBatch) {
+      const completenessIssue = getTweetCompletenessIssue(item.content);
+      if (completenessIssue) continue;
       if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) continue;
       recentContent.unshift(item.content);
 

@@ -161,6 +161,9 @@ export function isNearDuplicate(
 const TERMINAL_PUNCTUATION_RE = /[.!?…'")\]]$/;
 const TRAILING_DELIMITER_RE = /(?:[,:;\/\\([{]|[-–—])$/;
 const INCOMPLETE_FRAGMENT_RE = /^(?:the|a|an)\s+(?:only|best|worst|first|last|next|real|whole|same|main|biggest|smallest|hardest|easiest|most|least|key|problem|point|reason|question|answer|difference)\b|^(?:because|while|if|when|unless|until|although|though|where|which|who|whose|that|than|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across)\b/i;
+const SHORT_TRAILING_TOKEN_RE = /^[a-z]{1,3}$/;
+const PRECEDING_CONNECTOR_RE = /^(?:than|because|while|if|when|unless|until|although|though|where|which|who|whose|that|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across|against|inside|outside|toward|towards|via|like)$/i;
+const ALLOWED_SHORT_TRAILING_TOKENS = new Set(['ai', 'vc', 'lp', 'gp', 'pm', 'am', 'gm', 'gn', 'us', 'uk', 'eu']);
 
 function hasUnbalancedOpeningDelimiters(text: string): boolean {
   const delimiterPairs: Array<[string, string]> = [
@@ -192,7 +195,10 @@ export function getTweetCompletenessIssue(text: string): string | null {
     .map((line) => line.trim())
     .filter(Boolean);
   const lastLine = lines[lines.length - 1] || trimmed;
-  const lastLineWordCount = lastLine.split(/\s+/).filter(Boolean).length;
+  const lastLineWords = lastLine.split(/\s+/).filter(Boolean);
+  const lastLineWordCount = lastLineWords.length;
+  const lastWord = lastLineWords[lastLineWords.length - 1] || '';
+  const previousWord = lastLineWords[lastLineWords.length - 2] || '';
 
   if (TRAILING_DELIMITER_RE.test(lastLine)) {
     return `Draft ends with an unfinished clause (“${lastLine}”).`;
@@ -206,11 +212,31 @@ export function getTweetCompletenessIssue(text: string): string | null {
     return `Draft ends with an incomplete trailing fragment (“${lastLine}”).`;
   }
 
+  if (
+    !TERMINAL_PUNCTUATION_RE.test(lastLine)
+    && trimmed.length >= 80
+    && SHORT_TRAILING_TOKEN_RE.test(lastWord)
+    && !ALLOWED_SHORT_TRAILING_TOKENS.has(lastWord.toLowerCase())
+    && PRECEDING_CONNECTOR_RE.test(previousWord)
+  ) {
+    return `Draft appears to end mid-word or mid-thought (“${lastLine}”).`;
+  }
+
   return null;
 }
 
 export function isCompleteTweetDraft(text: string): boolean {
   return getTweetCompletenessIssue(text) === null;
+}
+
+export function getGeneratedTweetIssue(
+  text: string,
+  stopReason?: string | null,
+): string | null {
+  if (stopReason === 'max_tokens') {
+    return 'Model output hit the token limit before the draft finished.';
+  }
+  return getTweetCompletenessIssue(text);
 }
 
 // ─── Queue selection with diversity ─────────────────────────────────────────

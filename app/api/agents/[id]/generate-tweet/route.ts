@@ -9,6 +9,7 @@ import {
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
+import { getGeneratedTweetIssue } from '@/lib/survivability';
 
 // POST /api/agents/[id]/generate-tweet
 export async function POST(
@@ -64,6 +65,7 @@ export async function POST(
       const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
       const tweets = [];
       for (const item of batch) {
+        if (getGeneratedTweetIssue(item.content)) continue;
         const tweet = await createTweet({
           agentId: id,
           content: item.content,
@@ -87,6 +89,10 @@ export async function POST(
           scheduledAt: null,
         });
         tweets.push(tweet);
+      }
+
+      if (tweets.length === 0) {
+        return NextResponse.json({ error: 'Generation failed — all preview drafts were incomplete' }, { status: 502 });
       }
 
       const stalePreviewIds = replaceTweetId
@@ -121,6 +127,10 @@ export async function POST(
       const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
       if (batch.length > 0) {
         const item = batch[0];
+        const generationIssue = getGeneratedTweetIssue(item.content);
+        if (generationIssue) {
+          return NextResponse.json({ error: generationIssue }, { status: 502 });
+        }
         const tweet = await createTweet({
           agentId: id,
           content: item.content,
@@ -165,6 +175,11 @@ export async function POST(
       .join('')
       .trim()
       .replace(/^["']|["']$/g, ''); // strip wrapping quotes
+
+    const generationIssue = getGeneratedTweetIssue(content, response.stop_reason);
+    if (generationIssue) {
+      return NextResponse.json({ error: generationIssue }, { status: 502 });
+    }
 
     const tweet = await createTweet({
       agentId: id,

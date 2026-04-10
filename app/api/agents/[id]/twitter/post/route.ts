@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, getTweet, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { getTweetCompletenessIssue } from '@/lib/survivability';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -10,6 +11,8 @@ export async function POST(
 ) {
   const { id } = await params;
   let dbTweetId: string | null = null;
+  let existingTweet = null as Awaited<ReturnType<typeof getTweet>> | null;
+  let isReply = false;
   try {
     const { agent } = await requireAgentAccess(id);
 
@@ -21,6 +24,27 @@ export async function POST(
     const { content, replyToId, tweetId } = body;
     dbTweetId = tweetId ? String(tweetId) : null;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
+    existingTweet = dbTweetId ? await getTweet(String(dbTweetId)) : null;
+    isReply = existingTweet?.type === 'reply' || Boolean(replyToId);
+
+    const completenessIssue = getTweetCompletenessIssue(String(content));
+    if (completenessIssue) {
+      const quarantineReason = `${completenessIssue} Draft quarantined until reviewed.`;
+      if (dbTweetId) {
+        await updateTweet(dbTweetId, {
+          quarantinedAt: new Date().toISOString(),
+          quarantineReason,
+        });
+        await addLearningSignal(id, {
+          tweetId: dbTweetId,
+          signalType: isReply ? 'reply_rejected' : 'x_post_rejected',
+          surface: isReply ? 'mentions' : 'manual_post',
+          rewardDelta: -0.75,
+          reason: quarantineReason,
+        });
+      }
+      return NextResponse.json({ error: completenessIssue }, { status: 422 });
+    }
 
     const keys = decodeKeys({
       apiKey: agent.apiKey,
@@ -37,7 +61,6 @@ export async function POST(
     }
 
     if (dbTweetId) {
-      const existingTweet = await getTweet(String(dbTweetId));
       const updated = await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId, postedAt: new Date().toISOString() });
       await addLearningSignal(id, {
         tweetId: String(dbTweetId),
@@ -64,8 +87,8 @@ export async function POST(
       }).catch(() => null);
       await addLearningSignal(id, {
         tweetId: dbTweetId,
-        signalType: 'x_post_rejected',
-        surface: 'manual_post',
+        signalType: isReply ? 'reply_rejected' : 'x_post_rejected',
+        surface: isReply ? 'mentions' : 'manual_post',
         rewardDelta: -0.75,
         reason: message,
       }).catch(() => null);

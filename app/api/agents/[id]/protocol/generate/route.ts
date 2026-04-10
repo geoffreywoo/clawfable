@@ -6,6 +6,7 @@ import {
 import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
+import { getGeneratedTweetIssue } from '@/lib/survivability';
 
 // POST /api/agents/[id]/protocol/generate — generate viral content via Claude
 export async function POST(
@@ -30,14 +31,15 @@ export async function POST(
     });
 
     const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
+    const completeBatch = batch.filter((item) => !getGeneratedTweetIssue(item.content));
 
-    if (batch.length === 0) {
+    if (completeBatch.length === 0) {
       return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
     }
 
     // Store as draft tweets
     const tweets = await Promise.all(
-      batch.map((item) =>
+      completeBatch.map((item) =>
         createTweet({
           agentId: id,
           content: item.content,
