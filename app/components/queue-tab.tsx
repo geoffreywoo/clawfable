@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { TweetDecisionPanel } from '@/app/components/tweet-decision-panel';
+import { getAutopilotScheduleStatus } from '@/lib/autopilot-status';
 import type { LearningSnapshot } from '@/lib/learning-snapshot';
 import type { Tweet, ProtocolSettings } from '@/lib/types';
 
@@ -297,6 +298,12 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const activeQueuedTweets = queuedTweets.filter((tweet) => !tweet.quarantinedAt);
   const quarantinedTweets = queuedTweets.filter((tweet) => tweet.quarantinedAt);
   const feedbackTweets = queue.filter((tweet) => tweet.status === 'deleted_from_x');
+  const scheduleStatus = autopilotSettings
+    ? getAutopilotScheduleStatus(autopilotSettings, {
+        activeQueueCount: activeQueuedTweets.length,
+        quarantinedCount: quarantinedTweets.length,
+      })
+    : null;
 
   if (loading) {
     return (
@@ -331,7 +338,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       )}
 
       {/* Autopilot status banner */}
-      {autopilotSettings && (
+      {autopilotSettings && scheduleStatus && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '10px 14px', borderRadius: 'var(--radius)',
@@ -346,20 +353,14 @@ export function QueueTab({ agentId }: QueueTabProps) {
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: autopilotSettings.enabled ? '#22c55e' : 'var(--text-muted)' }}>
             {autopilotSettings.enabled ? (
               <>
-                <span style={{ fontWeight: 700 }}>SCHEDULE LIVE</span>
-                {' — pulling approved tweets from this queue about '}{autopilotSettings.postsPerDay}{'x/day.'}
-                {autopilotSettings.lastPostedAt && (
-                  <> Next post in ~{Math.max(0, Math.round(
-                    ((24 / autopilotSettings.postsPerDay) * 60) -
-                    ((Date.now() - new Date(autopilotSettings.lastPostedAt).getTime()) / 60000)
-                  ))} min.</>
-                )}
-                {' Queue refills when it drops below '}{autopilotSettings.minQueueSize}{' items.'}
+                <span style={{ fontWeight: 700 }}>{scheduleStatus.title}</span>
+                {' — pulling approved tweets from this queue about '}{autopilotSettings.postsPerDay}{'x/day. '}
+                {scheduleStatus.summary}{' '}{scheduleStatus.queueDetail}
               </>
             ) : (
               <>
-                <span style={{ fontWeight: 700 }}>SCHEDULE PAUSED</span>
-                {' — use this as a manual review lane, or enable automation once the voice feels right.'}
+                <span style={{ fontWeight: 700 }}>{scheduleStatus.title}</span>
+                {' — '}{scheduleStatus.summary}{' '}{scheduleStatus.queueDetail}
               </>
             )}
           </p>

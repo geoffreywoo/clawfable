@@ -12,14 +12,15 @@ import type { Tweet, PostLogEntry } from './types';
 
 // ─── Timing jitter ──────────────────────────────────────────────────────────
 
+export const POST_INTERVAL_JITTER_FRACTION = 0.15;
+
 /**
  * Given a base interval in ms, returns a jittered interval ±15%.
  * Posts at perfectly regular intervals are the #1 bot detection signal.
  */
 export function jitterInterval(baseMs: number): number {
-  const jitterFraction = 0.15;
-  const min = baseMs * (1 - jitterFraction);
-  const max = baseMs * (1 + jitterFraction);
+  const min = baseMs * (1 - POST_INTERVAL_JITTER_FRACTION);
+  const max = baseMs * (1 + POST_INTERVAL_JITTER_FRACTION);
   return Math.round(min + Math.random() * (max - min));
 }
 
