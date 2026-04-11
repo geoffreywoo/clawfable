@@ -33,17 +33,17 @@ export function AgentCard({ agent }: AgentCardProps) {
     <div
       className="agent-card"
       style={{
-        borderColor: `hsla(${hue}, 60%, 40%, 0.2)`,
+        borderColor: `hsla(${hue}, 45%, 48%, 0.22)`,
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLElement;
-        el.style.boxShadow = `0 0 18px hsla(${hue}, 60%, 40%, 0.12)`;
-        el.style.borderColor = `hsla(${hue}, 60%, 40%, 0.45)`;
+        el.style.boxShadow = `0 18px 40px hsla(${hue}, 30%, 42%, 0.16)`;
+        el.style.borderColor = `hsla(${hue}, 45%, 48%, 0.42)`;
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLElement;
         el.style.boxShadow = '';
-        el.style.borderColor = `hsla(${hue}, 60%, 40%, 0.2)`;
+        el.style.borderColor = `hsla(${hue}, 45%, 48%, 0.22)`;
       }}
       onClick={handleOpen}
       data-testid={`card-agent-${agent.id}`}
@@ -54,9 +54,9 @@ export function AgentCard({ agent }: AgentCardProps) {
           <div
             className="agent-avatar"
             style={{
-              background: `hsla(${hue}, 60%, 22%, 0.5)`,
-              border: `1px solid hsla(${hue}, 60%, 40%, 0.3)`,
-              color: `hsl(${hue}, 60%, 65%)`,
+              background: `hsla(${hue}, 60%, 92%, 1)`,
+              border: `1px solid hsla(${hue}, 45%, 48%, 0.22)`,
+              color: `hsl(${hue}, 45%, 34%)`,
             }}
           >
             {agent.name.charAt(0).toUpperCase()}
@@ -106,9 +106,9 @@ export function AgentCard({ agent }: AgentCardProps) {
         style={{
           width: '100%',
           justifyContent: 'center',
-          background: `hsla(${hue}, 60%, 22%, 0.3)`,
-          border: `1px solid hsla(${hue}, 60%, 40%, 0.3)`,
-          color: `hsl(${hue}, 60%, 65%)`,
+          background: `hsla(${hue}, 60%, 95%, 1)`,
+          border: `1px solid hsla(${hue}, 45%, 48%, 0.22)`,
+          color: `hsl(${hue}, 45%, 34%)`,
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -116,7 +116,7 @@ export function AgentCard({ agent }: AgentCardProps) {
         }}
         data-testid={`button-open-agent-${agent.id}`}
       >
-        {inSetup ? 'CONTINUE SETUP' : 'OPEN CONTROL ROOM'}
+        {inSetup ? 'Continue setup' : 'Open control room'}
       </button>
     </div>
   );

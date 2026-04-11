@@ -1,19 +1,20 @@
-import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { IBM_Plex_Mono, Manrope, Outfit } from 'next/font/google';
 
-export const fontHeading = Space_Grotesk({
+export const fontHeading = Outfit({
   subsets: ['latin'],
   variable: '--font-space',
   display: 'swap',
 });
 
-export const fontBody = Inter({
+export const fontBody = Manrope({
   subsets: ['latin'],
   variable: '--font-body',
   display: 'swap',
 });
 
-export const fontMono = JetBrains_Mono({
+export const fontMono = IBM_Plex_Mono({
   subsets: ['latin'],
   variable: '--font-mono',
+  weight: ['400', '500', '600'],
   display: 'swap',
 });

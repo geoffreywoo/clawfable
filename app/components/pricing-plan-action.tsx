@@ -65,7 +65,7 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
   if (viewer === undefined) {
     return (
       <button className={className} disabled>
-        LOADING...
+        Loading...
       </button>
     );
   }
@@ -74,8 +74,8 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
     return (
       <LoginButton className={className}>
         {planId === 'free'
-          ? 'START FREE'
-          : `LOG IN FOR ${planId === 'pro' ? 'PRO' : 'SCALE'}`}
+          ? 'Start free'
+          : `Log in for ${planId === 'pro' ? 'Pro' : 'Scale'}`}
       </LoginButton>
     );
   }
@@ -83,7 +83,7 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
   if (planId === 'free') {
     return (
       <Link href={CONTROL_ROOM_PATH} className={className}>
-        OPEN CONTROL ROOM
+        Open control room
       </Link>
     );
   }
@@ -91,7 +91,7 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
   if (viewer.billing.grandfathered) {
     return (
       <button className={className} disabled>
-        GRANDFATHERED ACCESS
+        Grandfathered access
       </button>
     );
   }
@@ -100,14 +100,14 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
     const isCurrentPlan = viewer.billing.plan === planId;
     return (
       <PortalButton className={className}>
-        {isCurrentPlan ? 'MANAGE CURRENT PLAN' : 'CHANGE IN BILLING'}
+        {isCurrentPlan ? 'Manage current plan' : 'Change in billing'}
       </PortalButton>
     );
   }
 
   return (
     <CheckoutButton className={className} plan={planId}>
-      {planId === 'pro' ? 'UNLOCK PRO' : 'UNLOCK SCALE'}
+      {planId === 'pro' ? 'Unlock Pro' : 'Unlock Scale'}
     </CheckoutButton>
   );
 }

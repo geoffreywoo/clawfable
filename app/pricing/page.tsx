@@ -15,16 +15,16 @@ export default function PricingPage() {
           <Logo size={32} />
           <div className="site-header-text">
             <h1>CLAWFABLE</h1>
-            <p>Mission Control For X Agents</p>
+            <p>AI publishing teammate for X</p>
           </div>
         </div>
         <div className="site-header-right">
           <nav className="site-header-nav">
-            <Link href="/">HOME</Link>
-            <Link href="/souls">PUBLIC SOULS</Link>
+            <Link href="/">Home</Link>
+            <Link href="/souls">Soul library</Link>
           </nav>
           <Link href={CONTROL_ROOM_PATH} className="btn btn-outline btn-sm">
-            OPEN APP
+            Open app
           </Link>
         </div>
       </header>
@@ -33,13 +33,13 @@ export default function PricingPage() {
         <div className="content-wrap pricing-shell">
           <section className="pricing-hero">
             <p className="pricing-kicker">PRICING</p>
-            <h1 className="pricing-title">Start free. Pay when you want the automation layer.</h1>
+            <h1 className="pricing-title">Start free. Upgrade when you want Clawfable to do the repetitive work.</h1>
             <p className="pricing-subtitle">
               Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
               hands-off posting, auto-replies, proactive engagement, and multi-agent control.
             </p>
             <div className="pricing-hero-actions">
-              <LoginButton className="landing-cta-btn">GET STARTED FREE</LoginButton>
+              <LoginButton className="landing-cta-btn">Start free</LoginButton>
               <p className="pricing-hero-note">
                 Setup is review-first. Nothing posts during calibration.
               </p>
@@ -58,7 +58,7 @@ export default function PricingPage() {
                       <p className="pricing-card-label">{plan.label}</p>
                       <h2 className="pricing-card-name">{plan.name}</h2>
                     </div>
-                    {plan.recommended && <span className="pricing-card-badge">MOST POPULAR</span>}
+                    {plan.recommended && <span className="pricing-card-badge">Most popular</span>}
                   </div>
                   <div className="pricing-card-price-row">
                     <span className="pricing-card-price">{plan.price}</span>
@@ -88,7 +88,7 @@ export default function PricingPage() {
           <section className="pricing-story-grid">
             <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
-                <span className="landing-panel-label">WHAT CHANGES WHEN YOU PAY</span>
+                  <span className="landing-panel-label">What changes when you pay</span>
                 <p className="landing-panel-caption">The free tier proves the voice. Paid plans take over the repetitive operating work.</p>
               </div>
               {[
@@ -105,13 +105,13 @@ export default function PricingPage() {
 
             <div className="landing-panel">
               <div className="landing-panel-header">
-                <span className="landing-panel-label">WHO EACH PLAN IS FOR</span>
+                  <span className="landing-panel-label">Who each plan is for</span>
               </div>
               <div className="landing-trust-list">
                 {[
-                  'Free: one operator proving whether an AI-managed voice can actually feel true.',
+                  'Free: a creator proving whether an AI-managed voice actually feels true.',
                   'Pro: a serious personal brand, founder account, or small fleet that wants daily hands-off execution.',
-                  'Scale: a multi-brand or multi-persona operation that needs room to experiment across many agents.',
+                  'Scale: a multi-brand or multi-persona operation that needs room to experiment across many voices.',
                 ].map((item) => (
                   <div key={item} className="landing-trust-item">{item}</div>
                 ))}
@@ -122,7 +122,7 @@ export default function PricingPage() {
           <section className="pricing-compare">
             <div className="section-header">
               <div className="section-title">
-                <h2>PLAN COMPARISON</h2>
+                  <h2>Plan comparison</h2>
               </div>
             </div>
             <div className="pricing-compare-table">

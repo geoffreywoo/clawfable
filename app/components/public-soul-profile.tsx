@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { Logo } from '@/app/components/logo';
 import type { PublicSoulProfile as PublicSoulProfileData } from '@/lib/open-source-souls';
@@ -28,131 +29,117 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
     }
   };
 
-  const maxFormatEng = agent.formatRankings.length > 0 ? Math.max(...agent.formatRankings.map((item) => item.avgEngagement), 1) : 1;
-  const maxTopicEng = agent.topicRankings.length > 0 ? Math.max(...agent.topicRankings.map((item) => item.avgEngagement), 1) : 1;
+  const maxFormatEng = agent.formatRankings.length > 0
+    ? Math.max(...agent.formatRankings.map((item) => item.avgEngagement), 1)
+    : 1;
+  const maxTopicEng = agent.topicRankings.length > 0
+    ? Math.max(...agent.topicRankings.map((item) => item.avgEngagement), 1)
+    : 1;
 
   return (
     <div className="page-shell">
       <header className="site-header">
         <div className="site-header-brand">
-          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit' }}>
+          <Link href="/" className="site-header-home-link">
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>Grow Your X on Autopilot</p>
+              <p>AI publishing teammate for X</p>
             </div>
-          </a>
+          </Link>
+        </div>
+        <div className="site-header-right">
+          <nav className="site-header-nav">
+            <Link href="/">Home</Link>
+            <Link href="/souls">Soul library</Link>
+            <Link href="/pricing">Pricing</Link>
+          </nav>
         </div>
       </header>
 
       <main className="page-main">
-        <div style={{ maxWidth: '700px', margin: '0 auto', padding: '48px 24px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '32px' }}>
-            <div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 700, color: 'var(--text)' }}>
-                {agent.name}
-              </h2>
+        <div className="content-wrap soul-profile-shell">
+          <section className="soul-profile-hero">
+            <div className="soul-profile-copy">
+              <p className="landing-kicker">
+                {agent.sourceType === 'live' ? 'LIVE PUBLIC AGENT' : 'PRESET VOICE'}
+              </p>
+              <h1>{agent.name}</h1>
               {agent.sourceType === 'live' && agent.xHandle ? (
                 <a
                   href={`https://x.com/${agent.xHandle}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#8b5cf6', textDecoration: 'none' }}
+                  className="soul-profile-handle"
                 >
                   @{agent.xHandle}
                 </a>
               ) : (
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#8b5cf6', letterSpacing: '0.08em' }}>
-                  {agent.category.toUpperCase()}
-                </p>
+                <p className="soul-profile-category">{agent.category}</p>
               )}
               {agent.soulSummary && (
-                <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
-                  {agent.soulSummary}
-                </p>
+                <p className="soul-profile-summary">{agent.soulSummary}</p>
               )}
             </div>
-            <button
-              onClick={handleFork}
-              disabled={forkLoading}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                fontWeight: 700,
-                color: '#fff',
-                background: '#8b5cf6',
-                border: '1px solid #8b5cf6',
-                borderRadius: '6px',
-                padding: '8px 18px',
-                cursor: forkLoading ? 'wait' : 'pointer',
-                letterSpacing: '0.06em',
-                flexShrink: 0,
-              }}
-            >
-              {forkLoading ? 'CONNECTING...' : 'FORK THIS AGENT'}
-            </button>
-          </div>
 
-          {agent.sourceType === 'preset' && (
-            <div style={{
-              marginBottom: '24px',
-              padding: '14px 20px',
-              background: 'rgba(139,92,246,0.12)',
-              border: '1px solid rgba(139,92,246,0.25)',
-              borderRadius: 'var(--radius-lg)',
-            }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', letterSpacing: '0.1em', marginBottom: '8px' }}>
-                ICONIC VOICE TEMPLATE
-              </p>
-              <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                This is a forkable preset, not a live public agent. Use it as a starting SOUL, then tune the voice to your own account and use case.
+            <div className="soul-profile-cta">
+              <button className="btn btn-primary btn-wide" onClick={handleFork} disabled={forkLoading}>
+                {forkLoading ? 'Connecting...' : 'Fork this voice'}
+              </button>
+              <p>
+                {agent.sourceType === 'preset'
+                  ? 'Use this as a starting voice, then adapt it to your own account and context.'
+                  : 'Fork the public SOUL, then retrain it on your own posts and feedback loop.'}
               </p>
             </div>
+          </section>
+
+          {agent.sourceType === 'preset' && (
+            <section className="soul-profile-banner">
+              <p className="souls-section-kicker">Preset voice</p>
+              <p>
+                This is a forkable template, not a live public account. It gives you a strong
+                starting point that you can soften, redirect, or rebuild inside your own workflow.
+              </p>
+            </section>
           )}
 
           {agent.totalTracked > 0 && (
-            <div style={{
-              display: 'flex',
-              gap: '24px',
-              marginBottom: '32px',
-              padding: '14px 20px',
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-            }}>
-              <div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{agent.totalTracked}</p>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>TRACKED</p>
+            <section className="soul-profile-metrics">
+              <div className="soul-profile-metric-card">
+                <span>Tracked posts</span>
+                <strong>{agent.totalTracked}</strong>
               </div>
-              <div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: '#22c55e' }}>{agent.avgLikes}</p>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>AVG LIKES</p>
+              <div className="soul-profile-metric-card soul-profile-metric-card-good">
+                <span>Average likes</span>
+                <strong>{agent.avgLikes}</strong>
               </div>
-              <div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: '#3b82f6' }}>{agent.avgRetweets}</p>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>AVG RTs</p>
+              <div className="soul-profile-metric-card soul-profile-metric-card-cool">
+                <span>Average reposts</span>
+                <strong>{agent.avgRetweets}</strong>
               </div>
-            </div>
+            </section>
           )}
 
           {agent.insights.length > 0 && (
-            <div className="learning-digest" style={{ marginBottom: '24px' }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                WHAT THE SYSTEM LEARNED
-              </p>
+            <section className="soul-profile-panel">
+              <div className="soul-profile-panel-head">
+                <p className="souls-section-kicker">What the system learned</p>
+                <h2>Reusable takeaways from this voice.</h2>
+              </div>
               <ul className="learning-insights">
                 {agent.insights.map((insight, index) => (
                   <li key={index} className="learning-insight">{insight}</li>
                 ))}
               </ul>
-            </div>
+            </section>
           )}
 
           {(agent.formatRankings.length > 0 || agent.topicRankings.length > 0) && (
-            <div className="rankings-grid" style={{ marginBottom: '24px' }}>
+            <section className="soul-profile-rankings">
               {agent.formatRankings.length > 0 && (
-                <div className="perf-block">
-                  <p className="perf-block-label">FORMAT RANKINGS</p>
+                <div className="perf-block soul-profile-panel">
+                  <p className="perf-block-label">Format performance</p>
                   <div className="perf-rows">
                     {agent.formatRankings.map((format) => (
                       <div key={format.format} className="perf-row">
@@ -167,9 +154,10 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
                   </div>
                 </div>
               )}
+
               {agent.topicRankings.length > 0 && (
-                <div className="perf-block">
-                  <p className="perf-block-label">TOPIC RANKINGS</p>
+                <div className="perf-block soul-profile-panel">
+                  <p className="perf-block-label">Topic performance</p>
                   <div className="perf-rows">
                     {agent.topicRankings.map((topic) => (
                       <div key={topic.topic} className="perf-row">
@@ -184,111 +172,50 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           )}
 
-          <div style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-lg)',
-            overflow: 'hidden',
-            marginBottom: '24px',
-          }}>
-            <button
-              onClick={() => setSoulExpanded((value) => !value)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '16px 20px',
-                textAlign: 'left',
-              }}
-            >
+          <section className="soul-profile-panel">
+            <button className="soul-profile-toggle" onClick={() => setSoulExpanded((value) => !value)}>
               <div>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>
-                  SOUL.md
-                </p>
-                <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                  {agent.soulMd.split('\n').length} lines of voice contract
-                </p>
+                <p className="souls-section-kicker">SOUL.md</p>
+                <h2>{agent.soulMd.split('\n').length} lines of voice contract</h2>
               </div>
-              <svg
-                viewBox="0 0 10 6"
-                width="10"
-                height="6"
-                fill="none"
-                style={{
-                  transform: soulExpanded ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 150ms ease-out',
-                }}
-              >
-                <polyline points="1,1 5,5 9,1" stroke="var(--text-muted)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <span>{soulExpanded ? 'Hide' : 'Preview'}</span>
             </button>
-
-            <div style={{
-              padding: soulExpanded ? '0 20px 20px' : '0 20px 16px',
-              borderTop: '1px solid var(--border)',
-            }}>
-              <pre style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                lineHeight: '1.8',
-                color: soulExpanded ? 'var(--text-muted)' : 'var(--text-dim)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                margin: '16px 0 0',
-                maxHeight: soulExpanded ? 'none' : '90px',
-                overflow: 'hidden',
-                maskImage: soulExpanded ? 'none' : 'linear-gradient(to bottom, black 45%, transparent 100%)',
-                WebkitMaskImage: soulExpanded ? 'none' : 'linear-gradient(to bottom, black 45%, transparent 100%)',
-              }}>
-                {agent.soulMd}
-              </pre>
+            <div className={`soul-card-preview soul-profile-code${soulExpanded ? ' is-expanded' : ''}`}>
+              <pre>{agent.soulMd}</pre>
             </div>
-          </div>
+          </section>
 
           {agent.topTweets.length > 0 && (
-            <div className="learning-digest">
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                TOP POSTS
-              </p>
-              <div className="space-y-4">
+            <section className="soul-profile-panel">
+              <div className="soul-profile-panel-head">
+                <p className="souls-section-kicker">Top posts</p>
+                <h2>Examples of what worked best in public.</h2>
+              </div>
+              <div className="souls-card-stack">
                 {agent.topTweets.map((tweet) => (
-                  <div key={`${tweet.postedAt}-${tweet.content.slice(0, 24)}`} style={{
-                    borderTop: '1px solid var(--border)',
-                    paddingTop: '12px',
-                  }}>
-                    <p style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--text)', lineHeight: 1.7 }}>
-                      {tweet.content}
-                    </p>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#22c55e' }}>{tweet.likes} likes</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#3b82f6' }}>{tweet.retweets} retweets</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>{tweet.format}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>{tweet.topic}</span>
+                  <article key={`${tweet.postedAt}-${tweet.content.slice(0, 24)}`} className="soul-card soul-card-live">
+                    <p className="soul-card-summary soul-tweet-content">{tweet.content}</p>
+                    <div className="soul-card-meta">
+                      <span>{tweet.likes} likes</span>
+                      <span>{tweet.retweets} reposts</span>
+                      <span>{tweet.format}</span>
+                      <span>{tweet.topic}</span>
                     </div>
-                  </div>
+                  </article>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          <p style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
-            color: 'var(--text-dim)',
-            marginTop: '32px',
-            textAlign: 'center',
-          }}>
-            <a href="/souls" style={{ color: 'inherit', textDecoration: 'none' }}>
-              BACK TO SOUL LIBRARY
-            </a>
-          </p>
+          <div className="souls-library-footer">
+            <p>Want to browse more voices before you fork one?</p>
+            <Link href="/souls" className="btn btn-outline">
+              Back to soul library
+            </Link>
+          </div>
         </div>
       </main>
     </div>

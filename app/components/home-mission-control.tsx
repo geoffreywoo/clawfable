@@ -112,7 +112,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
           <Logo size={32} />
           <div className="site-header-text">
             <h1>CLAWFABLE</h1>
-            <p>Mission Control</p>
+            <p>Creator workspace</p>
           </div>
         </div>
         <div className="site-header-right">
@@ -120,7 +120,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
             @{user.username}
           </span>
           <LogoutButton className="btn btn-ghost btn-sm" style={{ fontSize: '10px' }}>
-            LOGOUT
+            Log out
           </LogoutButton>
         </div>
       </header>
@@ -151,10 +151,9 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                 <div style={{ display: 'grid', gap: '10px' }}>
                   <button
                     className="btn btn-primary btn-wide"
-                    style={{ background: '#8b5cf6' }}
                     onClick={() => setCreateOpen(true)}
                   >
-                    CREATE FIRST AGENT
+                    Create first agent
                   </button>
                   <div
                     style={{
@@ -179,7 +178,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                         onClick={() => handleCheckout('pro')}
                         disabled={billingLoading !== null}
                       >
-                        {billingLoading === 'checkout' ? 'LOADING...' : 'UNLOCK AUTOPILOT'}
+                        {billingLoading === 'checkout' ? 'Loading...' : 'Unlock autopilot'}
                       </button>
                     )}
                   </div>
@@ -229,17 +228,17 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                 </div>
                 {setupAgents.length > 0 && (
                   <button className="btn btn-outline btn-sm" onClick={() => router.push(`/agent/${setupAgents[0].id}`)}>
-                    CONTINUE SETUP
+                    Continue setup
                   </button>
                 )}
                 {billing.checkoutReady && !billing.isPaid && (
                   <button className="btn btn-outline btn-sm" onClick={() => handleCheckout('pro')} disabled={billingLoading !== null}>
-                    {billingLoading === 'checkout' ? 'LOADING...' : 'UPGRADE'}
+                    {billingLoading === 'checkout' ? 'Loading...' : 'Upgrade'}
                   </button>
                 )}
                 {billing.portalReady && billing.isPaid && (
                   <button className="btn btn-outline btn-sm" onClick={handleBillingPortal} disabled={billingLoading !== null}>
-                    {billingLoading === 'portal' ? 'LOADING...' : 'MANAGE BILLING'}
+                    {billingLoading === 'portal' ? 'Loading...' : 'Manage billing'}
                   </button>
                 )}
               </div>
