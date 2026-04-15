@@ -4,11 +4,9 @@
  * from how the person actually tweets.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from './ai';
 import type { TwitterKeys } from './twitter-client';
 import { getDeepTimeline, getMe, getFollowing } from './twitter-client';
-
-const anthropic = new Anthropic();
 
 export interface SoulFromTweetsResult {
   soulMd: string;
@@ -74,16 +72,14 @@ export async function generateSoulFromTweets(
   const shortCount = timeline.filter(t => t.text.length < 200).length;
   const longCount = timeline.filter(t => t.text.length > 500).length;
 
-  // Ask Claude to reverse-engineer the voice
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+  // Ask the model to reverse-engineer the voice
+  const response = await generateText({
+    tier: 'quality',
+    maxTokens: 2048,
     system: `You are an expert at analyzing Twitter accounts and reverse-engineering their voice, personality, and posting strategy. You produce SOUL.md files — structured personality profiles that capture exactly how someone tweets.
 
 Be specific and detailed. Don't be generic. The SOUL.md should be so accurate that someone reading it could write tweets indistinguishable from the original account.`,
-    messages: [{
-      role: 'user',
-      content: `Analyze @${me.username} (${me.name}) based on their tweet history and generate a SOUL.md.
+    prompt: `Analyze @${me.username} (${me.name}) based on their tweet history and generate a SOUL.md.
 
 ## ACCOUNT STATS
 - ${timeline.length} tweets analyzed
@@ -135,24 +131,16 @@ What they clearly avoid based on their content. Patterns you DON'T see. Be speci
 Who they're writing for based on following/engagement patterns.
 
 Output ONLY the SOUL.md markdown. No commentary.`,
-    }],
   });
 
-  const soulMd = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
+  const soulMd = response.text;
 
   // Extract a quick voice summary
-  const summaryResponse = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 256,
+  const summaryResponse = await generateText({
+    tier: 'quality',
+    maxTokens: 256,
     system: 'Output a single JSON object with: tone (string), topics (array of strings, max 5), voiceSummary (one sentence).',
-    messages: [{
-      role: 'user',
-      content: `Based on these top tweets, classify the voice:\n${topTweets.slice(0, 10).map(t => `"${t.text}"`).join('\n')}\n\nJSON only, no markdown.`,
-    }],
+    prompt: `Based on these top tweets, classify the voice:\n${topTweets.slice(0, 10).map(t => `"${t.text}"`).join('\n')}\n\nJSON only, no markdown.`,
   });
 
   let detectedTone = 'contrarian';
@@ -160,11 +148,7 @@ Output ONLY the SOUL.md markdown. No commentary.`,
   let voiceSummary = '';
 
   try {
-    const raw = summaryResponse.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
+    const raw = summaryResponse.text
       .replace(/^```(?:json)?\s*\n?/i, '')
       .replace(/\n?```\s*$/i, '');
     const parsed = JSON.parse(raw);

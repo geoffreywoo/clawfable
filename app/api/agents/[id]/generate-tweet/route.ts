@@ -10,6 +10,7 @@ import { generateViralBatch } from '@/lib/viral-generator';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
+import { generateText } from '@/lib/ai';
 
 // POST /api/agents/[id]/generate-tweet
 export async function POST(
@@ -109,10 +110,10 @@ export async function POST(
       directiveLimit: 10,
     });
 
-    // Use Claude if analysis exists, with the topic as trending context
+    // Use the shared generator if analysis exists, with the topic as trending context
     if (analysis) {
       const topicContext = headline || topic || 'general';
-      // Create a minimal trending topic so Claude generates about this specific topic
+      // Create a minimal trending topic so the generator targets this specific topic
       const fakeTrending = [{
         id: 0,
         headline: topicContext,
@@ -157,26 +158,21 @@ export async function POST(
       }
     }
 
-    // Fallback: simple Claude call without analysis
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const anthropic = new Anthropic();
+    // Fallback: simple one-shot generation without analysis
     const topicText = headline || topic || 'AI and technology';
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 1024,
       system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle}. Write a single tweet about the given topic. Vary the length naturally — short punchy takes or longer structured posts. No hashtags. Be specific and opinionated.`,
-      messages: [{ role: 'user', content: `Write one tweet about: ${topicText}` }],
+      prompt: `Write one tweet about: ${topicText}`,
     });
 
-    const content = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const content = response.text
       .trim()
       .replace(/^["']|["']$/g, ''); // strip wrapping quotes
 
-    const generationIssue = getGeneratedTweetIssue(content, response.stop_reason);
+    const generationIssue = getGeneratedTweetIssue(content, response.stopReason);
     if (generationIssue) {
       return NextResponse.json({ error: generationIssue }, { status: 502 });
     }

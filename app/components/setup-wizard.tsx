@@ -326,7 +326,7 @@ export function SetupWizard({
       setRegenerationsLeft(2);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError('Preview timed out. Claude is slow right now. Click Retry.');
+        setError('Preview timed out. The model is slow right now. Click Retry.');
       } else {
         setError(err instanceof Error ? err.message : 'Preview generation failed');
       }

@@ -1,17 +1,15 @@
 /**
- * Viral content generator powered by Claude.
+ * Viral content generator powered by the configured AI provider.
  * Optimized for Quote Tweets — piggybacks on viral posts from the agent's network.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from './ai';
 import type { AccountAnalysis, AgentLearnings, PersonalizationMemory, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
-
-const anthropic = new Anthropic();
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -207,9 +205,14 @@ function shouldUseFallbackGeneration(error: unknown): boolean {
   return (
     message.includes('credit balance is too low')
     || message.includes('plans & billing')
+    || message.includes('insufficient_quota')
+    || message.includes('exceeded your current quota')
+    || message.includes('billing hard limit')
+    || message.includes('api key quota')
     || message.includes('overloaded')
     || message.includes('temporarily unavailable')
     || message.includes('rate limit')
+    || message.includes('tokens per min')
     || message.includes('api connection')
     || message.includes('request failed')
   );
@@ -246,7 +249,7 @@ function collectQuotableTweets(trending: TrendingTopic[]): Array<{
 }
 
 /**
- * Build the system prompt for Claude.
+ * Build the system prompt for the configured AI provider.
  */
 function buildSystemPrompt(
   voiceProfile: VoiceProfile,
@@ -501,7 +504,7 @@ ${formats.join(', ')}
 }
 
 /**
- * Generate a batch of tweets using Claude, optimized for QTs.
+ * Generate a batch of tweets using the configured AI provider, optimized for QTs.
  */
 export async function generateViralBatch(
   voiceProfile: VoiceProfile,
@@ -539,17 +542,14 @@ ${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 4096,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
+      prompt: userPrompt,
     });
 
-    const text = response.content
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
+    const text = response.text;
 
     const tweets: RankedProtocolTweet[] = [];
     const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];
@@ -619,7 +619,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
 
     return tweets;
   } catch (err) {
-    console.error('Claude generation error:', err);
+    console.error('AI generation error:', err);
     if (!shouldUseFallbackGeneration(err)) {
       throw err; // Real code bug or malformed request — surface it.
     }
@@ -674,14 +674,11 @@ export async function extractStyleSignals(exampleTweets: string[]): Promise<Styl
   if (exampleTweets.length === 0) return DEFAULT_STYLE_SIGNALS;
 
   try {
-    const response = await anthropic.messages.create({
-      // Structured style extraction — Haiku is plenty.
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    const response = await generateText({
+      tier: 'fast',
+      maxTokens: 1024,
       system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
-      messages: [{
-        role: 'user',
-        content: `Analyze these tweets and extract the writing style:
+      prompt: `Analyze these tweets and extract the writing style:
 
 ${exampleTweets.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
 
@@ -691,16 +688,11 @@ Output a JSON object with:
 - "toneMarkers": array of tone descriptors (e.g. ["sarcastic", "data-driven", "provocative"])
 - "topicPreferences": array of main topics discussed
 - "rawExtraction": one paragraph describing the overall voice and style`,
-      }],
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const text = response.text;
 
-    // Strip markdown code fences if Claude wraps the JSON
+    // Strip markdown code fences if the model wraps the JSON
     const cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
     const parsed = JSON.parse(cleaned);
 
@@ -730,13 +722,11 @@ export async function generateSoulMd(
       ? `\n\nExample tweets this agent admires or has written:\n${exampleTweets.map(t => `- "${t}"`).join('\n')}`
       : '';
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 1024,
       system: 'You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.',
-      messages: [{
-        role: 'user',
-        content: `Generate a SOUL.md for a Twitter agent named "${agentName}".
+      prompt: `Generate a SOUL.md for a Twitter agent named "${agentName}".
 
 Voice archetype: ${archetype}
 Topics: ${topics.join(', ')}${examplesSection}
@@ -758,14 +748,9 @@ Do not optimize for: [what to avoid — be specific]
 
 ## 4) Focus Areas
 Topics: ${topics.join(', ')}`,
-      }],
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const text = response.text;
 
     return text;
   } catch (err) {

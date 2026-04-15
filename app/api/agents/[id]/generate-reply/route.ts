@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createTweet, getAnalysis } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { generateText } from '@/lib/ai';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -76,17 +74,14 @@ ${agent.soulMd}`);
 - Be specific to what they actually said — don't give generic responses.
 - Replies can be any length. Short and punchy (under 100 chars) often hits hardest. But go longer if the clapback or explanation needs room. X supports up to 4000 chars.`);
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 300,
       system: systemParts.join('\n'),
-      messages: [{ role: 'user', content: `${authorHandle} tweeted this at you:\n\n"${content}"\n\nWrite your reply.` }],
+      prompt: `${authorHandle} tweeted this at you:\n\n"${content}"\n\nWrite your reply.`,
     });
 
-    const replyContent = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const replyContent = response.text
       .trim()
       .replace(/^["']|["']$/g, '');
 

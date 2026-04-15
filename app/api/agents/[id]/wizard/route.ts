@@ -54,7 +54,7 @@ export async function POST(
       await saveSoulBackup(id, agent.soulMd);
     }
 
-    // Parallel Claude calls: SOUL.md generation + style extraction
+    // Parallel model calls: SOUL.md generation + style extraction
     const [soulMd, styleSignals] = await Promise.all([
       generateSoulMd(archetype, topics, examples, agent.name),
       examples.length > 0

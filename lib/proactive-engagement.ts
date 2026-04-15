@@ -13,9 +13,7 @@ import { replyToTweet, likeTweet, followUser, getFollowing } from './twitter-cli
 import { formatActionError } from './twitter-debug';
 import { parseSoulMd } from './soul-parser';
 import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { generateText } from './ai';
 
 /**
  * Reply to viral tweets in the agent's network.
@@ -159,20 +157,14 @@ async function generateViralReply(
 - NEVER include links to clawfable.com or self-promote. Just be good.
 - Output ONLY the reply text. No quotes, no prefix.`);
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 200,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 200,
       system: systemParts.join('\n'),
-      messages: [{
-        role: 'user',
-        content: `@${tweetAuthor} posted this viral tweet (topic: ${category}):\n\n"${tweetText.slice(0, 500)}"\n\nWrite your reply. Be sharp, be you, add value.`,
-      }],
+      prompt: `@${tweetAuthor} posted this viral tweet (topic: ${category}):\n\n"${tweetText.slice(0, 500)}"\n\nWrite your reply. Be sharp, be you, add value.`,
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const text = response.text
       .trim()
       .replace(/^["']|["']$/g, '');
 
@@ -246,20 +238,14 @@ export async function generateAgentShoutout(
     // Pick a random agent to shout out
     const target = otherAgents[Math.floor(Math.random() * otherAgents.length)];
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 200,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 200,
       system: `You are @${agent.handle}. Write a brief, natural shoutout tweet mentioning @${target.handle} (${target.name}). The shoutout should feel organic, not forced. Reference their work or perspective. Stay in your voice. Keep it under 200 chars. No hashtags. Output ONLY the tweet text.`,
-      messages: [{
-        role: 'user',
-        content: `Write a shoutout for @${target.handle}. Their soul summary: "${target.soulSummary || target.name}". Make it feel natural.`,
-      }],
+      prompt: `Write a shoutout for @${target.handle}. Their soul summary: "${target.soulSummary || target.name}". Make it feel natural.`,
     });
 
-    const content = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const content = response.text
       .trim()
       .replace(/^["']|["']$/g, '');
 
@@ -301,21 +287,14 @@ export async function studyPeerStyles(
       .map((t) => `@${t.author} (${t.likes} likes): "${t.text.slice(0, 200)}"`)
       .join('\n');
 
-    const response = await anthropic.messages.create({
-      // Pattern extraction from a small list — Haiku is sufficient and ~10x cheaper.
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
+    const response = await generateText({
+      tier: 'fast',
+      maxTokens: 512,
       system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
-      messages: [{
-        role: 'user',
-        content: `These are the top-performing tweets from accounts in this agent's network right now:\n\n${tweetList}\n\nWhat style patterns are working? Be specific and actionable.`,
-      }],
+      prompt: `These are the top-performing tweets from accounts in this agent's network right now:\n\n${tweetList}\n\nWhat style patterns are working? Be specific and actionable.`,
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     return text.split('\n')
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())

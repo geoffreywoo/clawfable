@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
 import type { VoiceDirective, VoiceDirectiveRule } from '@/lib/types';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from '@/lib/ai';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
-
-const anthropic = new Anthropic();
 
 // GET /api/agents/[id]/voice-chat — get chat history + active directives
 export async function GET(
@@ -61,10 +59,10 @@ export async function POST(
     ]);
     const activeDirectiveRules = getActiveVoiceDirectiveRules(existingDirectiveRules);
 
-    // Claude responds AS the agent, acknowledges the feedback, and extracts a directive
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 512,
+    // The model responds AS the agent, acknowledges the feedback, and extracts a directive
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 512,
       system: `You are @${agent.handle} (${agent.name}), an AI agent having a voice coaching session with your operator.
 
 YOUR SOUL.md:
@@ -91,11 +89,7 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
       })).concat([{ role: 'user' as const, content: message.trim() }]),
     });
 
-    const responseText = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const responseText = response.text;
 
     // Extract directive
     const directiveMatch = responseText.match(/DIRECTIVE:\s*(.+)/i);
@@ -162,12 +156,12 @@ async function auditQueueAgainstDirective(
   const queue = await getQueuedTweets(agentId);
   if (queue.length === 0) return { purged: 0, rewritten: 0 };
 
-  // Send all queued tweets to Claude for audit
+  // Send all queued tweets to the model for audit
   const tweetList = queue.map((t, i) => `[${i}] "${t.content.slice(0, 250)}"`).join('\n');
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+  const response = await generateText({
+    tier: 'quality',
+    maxTokens: 2048,
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:
 - PASS: tweet already complies with the directive
 - REWRITE: tweet violates the directive but can be fixed. Output the rewritten version.
@@ -177,21 +171,15 @@ Output one JSON line per tweet: {"idx": N, "action": "pass|rewrite|purge", "rewr
 Only output JSON lines, no other text.
 
 Voice: @${agent.handle} (${agent.name})`,
-    messages: [{
-      role: 'user',
-      content: `NEW DIRECTIVE: ${directive}
+    prompt: `NEW DIRECTIVE: ${directive}
 
 QUEUED TWEETS TO AUDIT:
 ${tweetList}
 
 Audit each tweet against the directive. Be strict — if it violates the spirit of the directive, rewrite or purge it.`,
-    }],
   });
 
-  const text = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('');
+  const text = response.text;
 
   let purged = 0;
   let rewritten = 0;

@@ -17,10 +17,8 @@ import {
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from './ai';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
-
-const anthropic = new Anthropic();
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_TRACKED_FOR_EVOLUTION = 50;
@@ -98,9 +96,9 @@ async function evolveSoul(
       .map((t) => `[${t.likes} likes] "${t.content.slice(0, 200)}"`)
       .join('\n');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 4096,
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.
 
 RULES:
@@ -113,9 +111,7 @@ RULES:
 - Output the COMPLETE updated SOUL.md — not a diff, not instructions
 
 After the SOUL.md, output one line starting with "CHANGES:" summarizing what you changed in under 50 words.`,
-      messages: [{
-        role: 'user',
-        content: `CURRENT SOUL.md:
+      prompt: `CURRENT SOUL.md:
 ${currentSoul}
 
 PERFORMANCE DATA (${learnings.totalTracked} tweets tracked):
@@ -151,13 +147,9 @@ ${negFeedback.length > 0 ? `CONTENT THE OPERATOR REJECTED (the soul should steer
 ${negFeedback.map((f) => `- ${f}`).join('\n')}` : ''}
 
 Evolve this SOUL.md to incorporate what actually works. Respect operator directives. Output the complete updated SOUL.md, then a CHANGES: line.`,
-      }],
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     // Split the response into new soul + change summary
     const changesIdx = text.lastIndexOf('CHANGES:');

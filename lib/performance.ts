@@ -24,9 +24,7 @@ import {
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { generateText } from './ai';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -85,7 +83,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const newTweets = timeline.filter((t) => !checkedXIds.has(String(t.id)));
   if (newTweets.length === 0) return 0;
 
-  // Batch classify manually written tweets via Claude (up to 20 at a time)
+  // Batch classify manually written tweets via the fast AI tier (up to 20 at a time)
   const manualTweets = newTweets.filter((t) => !ourXIds.has(String(t.id)));
   const classifications = await batchClassifyTweets(manualTweets.slice(0, 20));
 
@@ -188,7 +186,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
 }
 
 /**
- * Batch classify tweets using Claude. Extracts format, topic, hook type,
+ * Batch classify tweets using the fast AI tier. Extracts format, topic, hook type,
  * tone, and specificity for each tweet. This is the key to learning from
  * manually written tweets — we can't learn from them without knowing what
  * dimensions they express.
@@ -202,10 +200,9 @@ async function batchClassifyTweets(
   try {
     const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
 
-    const response = await anthropic.messages.create({
-      // Haiku is plenty for structured classification — cuts cost ~10x and latency ~3x.
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
+    const response = await generateText({
+      tier: 'fast',
+      maxTokens: 2048,
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
 - "idx": the tweet index number
 - "format": one of: hot_take, question, data_point, short_punch, long_form, analysis, observation, thread_hook, story, announcement
@@ -215,13 +212,10 @@ async function batchClassifyTweets(
 - "specificity": abstract, concrete, data_driven
 
 Output ONLY JSON objects, one per line, no other text.`,
-      messages: [{ role: 'user', content: `Classify these tweets:\n${tweetList}` }],
+      prompt: `Classify these tweets:\n${tweetList}`,
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
@@ -485,9 +479,9 @@ async function generateInsights(
   const autopilotTweets = history.filter((t) => t.source === 'autopilot');
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: 1024,
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")
 2. Grounded in the data (reference actual numbers)
@@ -496,9 +490,7 @@ async function generateInsights(
 Include at least one rule about what to STOP doing.
 Include at least one rule comparing autopilot vs manual tweet performance (if both exist).
 Output bullet points, one per line, no numbering.`,
-      messages: [{
-        role: 'user',
-        content: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
+      prompt: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
 TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${sourceBreakdown.trainingSource === 'autopilot' ? 'autopilot only' : 'mixed because autopilot history is still sparse'})
 
 STYLE FINGERPRINT (computed from top 30 tweets):
@@ -522,13 +514,9 @@ BOTTOM 10 TWEETS:
 ${worst.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
 
 Generate prescriptive rules for improving content quality. Focus on style patterns, not just topics.`,
-      }],
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     return text.split('\n')
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())

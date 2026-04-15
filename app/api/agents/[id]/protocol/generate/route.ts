@@ -8,7 +8,7 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 
-// POST /api/agents/[id]/protocol/generate — generate viral content via Claude
+// POST /api/agents/[id]/protocol/generate — generate viral content via the shared AI layer
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

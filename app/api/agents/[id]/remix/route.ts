@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateTweet, addRemixEntry } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { generateText } from '@/lib/ai';
 
 const REMIX_DIRECTIONS: Record<string, string> = {
   shorter: 'Make it shorter and punchier. Cut the fat. Under 200 chars if possible.',
@@ -43,21 +41,18 @@ export async function POST(
     let remixed = '';
     let lastIssue: string | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: attempt === 0 ? 1024 : 1536,
+      const response = await generateText({
+        tier: 'quality',
+        maxTokens: attempt === 0 ? 1024 : 1536,
         system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction. Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${agent.soulMd ? `\n\nVoice reference:\n${agent.soulMd.slice(0, 1000)}` : ''}`,
-        messages: [{ role: 'user', content: `Original tweet:\n"${content}"\n\nInstruction: ${instruction}` }],
+        prompt: `Original tweet:\n"${content}"\n\nInstruction: ${instruction}`,
       });
 
-      remixed = response.content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
+      remixed = response.text
         .trim()
         .replace(/^["']|["']$/g, '');
 
-      lastIssue = getGeneratedTweetIssue(remixed, response.stop_reason);
+      lastIssue = getGeneratedTweetIssue(remixed, response.stopReason);
       if (!lastIssue) break;
     }
 

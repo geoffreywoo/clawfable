@@ -430,7 +430,7 @@ export interface StyleSignals {
   vocabulary: string;          // casual | technical | mixed
   toneMarkers: string[];       // e.g. ['sarcastic', 'data-driven']
   topicPreferences: string[];
-  rawExtraction: string;       // Claude's full style analysis text
+  rawExtraction: string;       // Model's full style analysis text
 }
 
 export interface FeedbackEntry {

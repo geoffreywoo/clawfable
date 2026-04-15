@@ -1,9 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from './ai';
 import type { Agent, Tweet } from './types';
 import { deleteTweet, updateTweet } from './kv-storage';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
-
-const anthropic = new Anthropic();
 
 export type QueueIssueDisposition = 'keep' | 'repair';
 
@@ -88,9 +86,9 @@ async function generateRepairCandidate(agent: Agent, tweet: Tweet, reason: strin
   let lastIssue: string | null = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: attempt === 0 ? 1024 : 1536,
+    const response = await generateText({
+      tier: 'quality',
+      maxTokens: attempt === 0 ? 1024 : 1536,
       system: `You repair queued X drafts. Output ONLY the repaired tweet text.
 
 Requirements:
@@ -102,9 +100,7 @@ Requirements:
 
 Voice reference:
 ${agent.soulMd.slice(0, 1800)}`,
-      messages: [{
-        role: 'user',
-        content: `Agent: @${agent.handle} (${agent.name})
+      prompt: `Agent: @${agent.handle} (${agent.name})
 Format: ${tweet.format || 'unknown'}
 Topic: ${tweet.topic || 'general'}
 Failure reason: ${reason}
@@ -113,17 +109,11 @@ Original draft:
 ${tweet.content}
 
 Repair this queued draft so it is complete and ready to post.${attempt === 1 ? ' The first repair was not good enough. Rewrite more boldly and make the ending unmistakably complete.' : ''}`,
-      }],
     });
 
-    const candidate = cleanRepairedDraft(
-      response.content
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text)
-        .join('')
-    );
+    const candidate = cleanRepairedDraft(response.text);
 
-    lastIssue = getGeneratedTweetIssue(candidate, response.stop_reason);
+    lastIssue = getGeneratedTweetIssue(candidate, response.stopReason);
     if (lastIssue) continue;
 
     if (mustRewriteMore && isNearDuplicate(candidate, [tweet.content], 0.82).isDuplicate) {
