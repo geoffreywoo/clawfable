@@ -499,6 +499,16 @@ function normalizeUser(user: User): User {
 }
 
 function normalizeTweetRecord(tweet: Tweet): Tweet {
+  const coerceNullableNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
   return {
     ...tweet,
     id: String(tweet.id),
@@ -509,14 +519,14 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     postedAt: tweet.postedAt ?? null,
     rationale: tweet.rationale ?? null,
     generationMode: tweet.generationMode ?? null,
-    candidateScore: tweet.candidateScore ?? null,
-    confidenceScore: tweet.confidenceScore ?? null,
-    voiceScore: tweet.voiceScore ?? null,
-    noveltyScore: tweet.noveltyScore ?? null,
-    predictedEngagementScore: tweet.predictedEngagementScore ?? null,
-    freshnessScore: tweet.freshnessScore ?? null,
-    repetitionRiskScore: tweet.repetitionRiskScore ?? null,
-    policyRiskScore: tweet.policyRiskScore ?? null,
+    candidateScore: coerceNullableNumber(tweet.candidateScore),
+    confidenceScore: coerceNullableNumber(tweet.confidenceScore),
+    voiceScore: coerceNullableNumber(tweet.voiceScore),
+    noveltyScore: coerceNullableNumber(tweet.noveltyScore),
+    predictedEngagementScore: coerceNullableNumber(tweet.predictedEngagementScore),
+    freshnessScore: coerceNullableNumber(tweet.freshnessScore),
+    repetitionRiskScore: coerceNullableNumber(tweet.repetitionRiskScore),
+    policyRiskScore: coerceNullableNumber(tweet.policyRiskScore),
     quarantineReason: tweet.quarantineReason ?? null,
     quarantinedAt: tweet.quarantinedAt ?? null,
   };

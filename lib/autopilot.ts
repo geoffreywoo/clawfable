@@ -16,6 +16,7 @@ import {
   getAnalysis,
   createTweet,
   updateTweet,
+  deleteTweet,
   createMention,
   getMentions,
   addPostLogEntry,
@@ -43,7 +44,7 @@ import {
 } from './survivability';
 import { getAutonomyConfidenceThreshold } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { generateText } from './ai';
+import { generateText, getPrimaryAiProvider } from './ai';
 
 export interface AutopilotResult {
   agentId: string;
@@ -55,6 +56,19 @@ export interface AutopilotResult {
   format?: string;
   topic?: string;
   repliesSent?: number;
+}
+
+function isTemplateFallbackTweet(tweet: { rationale?: string | null }): boolean {
+  return typeof tweet.rationale === 'string' && tweet.rationale.toLowerCase().includes('template fallback');
+}
+
+function coerceConfidenceValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 /**
@@ -186,6 +200,26 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   queue = healedQueue;
   let activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
 
+  const primaryProvider = getPrimaryAiProvider();
+  const templateFallbackQueue = activeQueue.filter(isTemplateFallbackTweet);
+  if (primaryProvider === 'openai' && templateFallbackQueue.length > 0) {
+    await Promise.all(templateFallbackQueue.map((tweet) => deleteTweet(tweet.id)));
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'queue_refresh',
+      topic: 'generation',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: `Discarded ${templateFallbackQueue.length} template fallback draft${templateFallbackQueue.length === 1 ? '' : 's'} so the queue can refill with richer ${primaryProvider} generations.`,
+    });
+    queue = await getQueuedTweets(agentId);
+    activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+  }
+
   // Ensure queue has content
   if (activeQueue.length < settings.minQueueSize) {
     const generated = await refillQueue(agent, settings.minQueueSize - activeQueue.length + 3, {
@@ -292,8 +326,12 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   const confidenceThreshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
-  const effectiveConfidence = (tweet: { confidenceScore?: number | null; candidateScore?: number | null }) =>
-    tweet.confidenceScore ?? (typeof tweet.candidateScore === 'number' ? tweet.candidateScore / 100 : 0.67);
+  const effectiveConfidence = (tweet: { confidenceScore?: number | null; candidateScore?: number | null }) => {
+    const confidenceScore = coerceConfidenceValue(tweet.confidenceScore);
+    if (confidenceScore !== null) return confidenceScore;
+    const candidateScore = coerceConfidenceValue(tweet.candidateScore);
+    return candidateScore !== null ? candidateScore / 100 : 0.67;
+  };
   const confidenceFiltered = settings.autonomyMode === 'explore'
     ? validationPassedQueue
     : validationPassedQueue.filter((tweet) => effectiveConfidence(tweet) >= confidenceThreshold);

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getAnalysis: vi.fn(),
   createTweet: vi.fn(),
   updateTweet: vi.fn(),
+  deleteTweet: vi.fn(),
   createMention: vi.fn(),
   getMentions: vi.fn(),
   addPostLogEntry: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getAnalysis: mocks.getAnalysis,
   createTweet: mocks.createTweet,
   updateTweet: mocks.updateTweet,
+  deleteTweet: mocks.deleteTweet,
   createMention: mocks.createMention,
   getMentions: mocks.getMentions,
   addPostLogEntry: mocks.addPostLogEntry,
@@ -90,14 +92,14 @@ vi.mock('@/lib/queue-healing', () => ({
   resolveQueuedTweetFailure: mocks.resolveQueuedTweetFailure,
 }));
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class AnthropicMock {
-    messages = {
-      create: vi.fn(async () => ({
-        content: [{ type: 'text', text: 'reply draft' }],
-      })),
-    };
-  },
+vi.mock('@/lib/ai', () => ({
+  generateText: vi.fn(async () => ({
+    text: 'reply draft',
+    stopReason: 'end_turn',
+    provider: 'openai',
+    model: 'gpt-5.4',
+  })),
+  getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
 import { runAutopilot } from '@/lib/autopilot';
@@ -186,6 +188,7 @@ beforeEach(() => {
   mocks.addPostLogEntry.mockResolvedValue(undefined);
   mocks.createMention.mockResolvedValue(undefined);
   mocks.updateTweet.mockResolvedValue(undefined);
+  mocks.deleteTweet.mockResolvedValue(undefined);
   mocks.logFunnelEvent.mockResolvedValue(undefined);
   mocks.decodeKeys.mockReturnValue({
     appKey: 'a',
@@ -238,6 +241,53 @@ describe('autopilot remote debug logging', () => {
     expect(result.reason).toContain('draftId=522');
     expect(result.reason).toContain('format=long_form');
     expect(result.reason).toContain('topic=masculinity');
+  });
+
+  it('clears stale template fallback drafts when richer generation is available again', async () => {
+    mocks.getQueuedTweets
+      .mockResolvedValueOnce([
+        {
+          ...queuedTweet,
+          id: 'fallback-1',
+          rationale: 'Template fallback: generic resilient format when richer generation is unavailable.',
+        },
+      ])
+      .mockResolvedValueOnce([validQueuedTweet]);
+
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-123', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(mocks.deleteTweet).toHaveBeenCalledWith('fallback-1');
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        format: 'queue_refresh',
+      }),
+    );
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe(validQueuedTweet.id);
+  });
+
+  it('coerces stringified score fields before logging confidence', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([
+      {
+        ...validQueuedTweet,
+        confidenceScore: '0.83',
+        candidateScore: '83',
+      },
+    ]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-999', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        reason: expect.stringContaining('0.83'),
+      }),
+    );
   });
 
   it('writes detailed auto-reply failures into the activity log', async () => {
