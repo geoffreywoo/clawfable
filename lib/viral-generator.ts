@@ -9,6 +9,7 @@ import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
+import { judgeCandidates, mutateTopCandidates } from './generation-judging';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
@@ -465,7 +466,7 @@ ${soulMd}`);
     parts.push(`\n## BANDIT SLOT PLAN (follow this exactly)
 This batch is allocated by a multi-armed bandit controller. Each slot is an actual traffic bet, not a suggestion.`);
     for (const plan of slotPlan) {
-      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | ${plan.rationale}`);
+      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure} | ${plan.rationale}`);
     }
   }
 
@@ -518,7 +519,7 @@ export async function generateViralBatch(
   allTweets: Tweet[] = [],
   memory: PersonalizationMemory | null = null,
 ): Promise<RankedProtocolTweet[]> {
-  const candidateCount = count <= 1 ? 5 : count <= 3 ? 6 : count <= 5 ? 8 : Math.min(12, count + 4);
+  const candidateCount = count <= 1 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
   const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, style, recentPosts, memory);
 
   const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
@@ -537,7 +538,7 @@ export async function generateViralBatch(
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
-${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned format, targetTopic, length, and mode for each slot.` : ''}
+${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -551,7 +552,6 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
 
     const text = response.text;
 
-    const tweets: RankedProtocolTweet[] = [];
     const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];
     const acceptedContents: string[] = [];
     const usedFormatTopicCombos = new Set<string>();
@@ -595,29 +595,51 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       if (b.slot > 0) return 1;
       return 0;
     });
+    const rankingContext = {
+      voiceProfile,
+      learnings,
+      style,
+      recentPosts,
+      allTweets,
+      memory: memory || {
+        alwaysDoMoreOfThis: [],
+        neverDoThisAgain: [],
+        topicsWithMomentum: [],
+        formatsUnderTested: [],
+        operatorHiddenPreferences: [],
+        identityConstraints: [],
+        weeklyChanges: [],
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    const baseCandidates = stagedTweets.map(({ slot: _slot, ...tweet }) => tweet);
+    const judged = await judgeCandidates(baseCandidates, {
+      voiceProfile,
+      analysis,
+      learnings,
+      memory,
+    });
+    const mutatedCandidates = await mutateTopCandidates(judged, {
+      voiceProfile,
+      memory,
+    });
+    const judgedMutations = mutatedCandidates.length > 0
+      ? await judgeCandidates(
+          mutatedCandidates.filter((candidate) => !isNearDuplicate(candidate.content, baseCandidates.map((item) => item.content), 0.58).isDuplicate),
+          {
+            voiceProfile,
+            analysis,
+            learnings,
+            memory,
+          },
+        )
+      : [];
     const ranked = rankGeneratedTweets(
-      stagedTweets.map(({ slot: _slot, ...tweet }) => tweet),
-      {
-        voiceProfile,
-        learnings,
-        style,
-        recentPosts,
-        allTweets,
-        memory: memory || {
-          alwaysDoMoreOfThis: [],
-          neverDoThisAgain: [],
-          topicsWithMomentum: [],
-          formatsUnderTested: [],
-          operatorHiddenPreferences: [],
-          identityConstraints: [],
-          weeklyChanges: [],
-          updatedAt: new Date().toISOString(),
-        },
-      }
+      [...judged, ...judgedMutations],
+      rankingContext,
     );
-    tweets.push(...selectTopRankedTweets(ranked, count));
 
-    return tweets;
+    return selectTopRankedTweets(ranked, count);
   } catch (err) {
     console.error('AI generation error:', err);
     if (!shouldUseFallbackGeneration(err)) {
@@ -626,26 +648,24 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
 
     const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, style, recentPosts)
       .filter((tweet) => !getTweetCompletenessIssue(tweet.content));
-    const ranked = rankGeneratedTweets(
-      fallbackTweets,
-      {
-        voiceProfile,
-        learnings,
-        style,
-        recentPosts,
-        allTweets,
-        memory: memory || {
-          alwaysDoMoreOfThis: [],
-          neverDoThisAgain: [],
-          topicsWithMomentum: [],
-          formatsUnderTested: [],
-          operatorHiddenPreferences: [],
-          identityConstraints: [],
-          weeklyChanges: [],
-          updatedAt: new Date().toISOString(),
-        },
-      }
-    );
+    const rankingContext = {
+      voiceProfile,
+      learnings,
+      style,
+      recentPosts,
+      allTweets,
+      memory: memory || {
+        alwaysDoMoreOfThis: [],
+        neverDoThisAgain: [],
+        topicsWithMomentum: [],
+        formatsUnderTested: [],
+        operatorHiddenPreferences: [],
+        identityConstraints: [],
+        weeklyChanges: [],
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
     return selectTopRankedTweets(ranked, count);
   }
 }

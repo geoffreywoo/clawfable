@@ -19,6 +19,18 @@ interface TweetDecisionPanelProps {
     | 'topic'
     | 'rationale'
     | 'content'
+    | 'hookType'
+    | 'toneType'
+    | 'specificityType'
+    | 'structureType'
+    | 'coverageCluster'
+    | 'judgeScore'
+    | 'judgeNotes'
+    | 'mutationRound'
+    | 'rewardPrediction'
+    | 'globalPriorWeight'
+    | 'localPriorWeight'
+    | 'scoreProvenance'
   >;
   snapshot: LearningSnapshot | null;
 }
@@ -119,6 +131,15 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         </div>
       )}
 
+      <div className="decision-explainer">
+        <p className="decision-explainer-label">WINNING PATH</p>
+        <p className="decision-explainer-copy">
+          {tweet.scoreProvenance
+            ? `Local prior ${Math.round(tweet.scoreProvenance.localPrior * 100)} · shared prior ${Math.round(tweet.scoreProvenance.globalPrior * 100)} · judge ${Math.round(tweet.scoreProvenance.judge * 100)} · predicted reward ${Math.round(tweet.scoreProvenance.predictedReward * 100)}.`
+            : 'This draft won on the current ensemble ranking and learning memory.'}
+        </p>
+      </div>
+
       <div className="decision-score-grid">
         <ScoreRow label="Voice match" value={tweet.voiceScore} />
         <ScoreRow label="Novelty" value={tweet.noveltyScore} />
@@ -128,9 +149,28 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         <ScoreRow label="Policy safety" value={tweet.policyRiskScore} invert />
       </div>
 
+      {(typeof tweet.judgeScore === 'number' || tweet.judgeNotes) && (
+        <div className="decision-explainer">
+          <p className="decision-explainer-label">CRITIC PASS</p>
+          <p className="decision-explainer-copy">
+            {typeof tweet.judgeScore === 'number' ? `Judge ${Math.round(tweet.judgeScore * 100)}%. ` : ''}
+            {tweet.judgeNotes || 'A critique pass reviewed voice fit, clarity, novelty, audience fit, and policy safety.'}
+          </p>
+        </div>
+      )}
+
       <div className="decision-footer-meta">
         {tweet.format && <span className="learning-source-chip">FORMAT {tweet.format.replace(/_/g, ' ').toUpperCase()}</span>}
         {tweet.topic && <span className="learning-source-chip">TOPIC {tweet.topic.toUpperCase()}</span>}
+        {tweet.hookType && <span className="learning-source-chip">HOOK {tweet.hookType.replace(/_/g, ' ').toUpperCase()}</span>}
+        {tweet.toneType && <span className="learning-source-chip">TONE {tweet.toneType.replace(/_/g, ' ').toUpperCase()}</span>}
+        {tweet.specificityType && <span className="learning-source-chip">SPECIFICITY {tweet.specificityType.replace(/_/g, ' ').toUpperCase()}</span>}
+        {tweet.structureType && <span className="learning-source-chip">STRUCTURE {tweet.structureType.replace(/_/g, ' ').toUpperCase()}</span>}
+        {typeof tweet.rewardPrediction === 'number' && <span className="learning-source-chip">REWARD {Math.round(tweet.rewardPrediction * 100)}%</span>}
+        {typeof tweet.localPriorWeight === 'number' && <span className="learning-source-chip">LOCAL {Math.round(tweet.localPriorWeight * 100)}%</span>}
+        {typeof tweet.globalPriorWeight === 'number' && <span className="learning-source-chip">GLOBAL {Math.round(tweet.globalPriorWeight * 100)}%</span>}
+        {typeof tweet.mutationRound === 'number' && tweet.mutationRound > 0 && <span className="learning-source-chip">MUTATION {tweet.mutationRound}</span>}
+        {tweet.coverageCluster && <span className="learning-source-chip">CLUSTER {tweet.coverageCluster.toUpperCase()}</span>}
         <span className="learning-source-chip">{tweet.content.length} CHARS</span>
       </div>
     </div>

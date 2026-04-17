@@ -109,6 +109,89 @@ export interface AgentDetail {
 
 export type AutonomyMode = 'safe' | 'balanced' | 'explore';
 export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted' | 'deleted_from_x';
+export type TweetHookType =
+  | 'question'
+  | 'bold_claim'
+  | 'data_point'
+  | 'story'
+  | 'observation'
+  | 'contrarian'
+  | 'listicle'
+  | 'callout'
+  | 'prediction'
+  | 'confession'
+  | 'how_to'
+  | 'unknown';
+export type TweetToneType =
+  | 'sarcastic'
+  | 'earnest'
+  | 'analytical'
+  | 'provocative'
+  | 'educational'
+  | 'casual'
+  | 'urgent'
+  | 'playful'
+  | 'unknown';
+export type TweetSpecificityType =
+  | 'abstract'
+  | 'concrete'
+  | 'data_driven'
+  | 'tactical'
+  | 'story_led'
+  | 'unknown';
+export type TweetStructureType =
+  | 'single_punch'
+  | 'stacked_lines'
+  | 'argument'
+  | 'story_arc'
+  | 'list'
+  | 'question_led'
+  | 'comparison'
+  | 'manifesto'
+  | 'unknown';
+
+export interface CandidateFeatureTags {
+  hook: TweetHookType;
+  tone: TweetToneType;
+  specificity: TweetSpecificityType;
+  structure: TweetStructureType;
+  thesis: string;
+  riskFlags: string[];
+}
+
+export interface CandidateJudgeBreakdown {
+  overall: number;
+  voiceFit: number;
+  clarity: number;
+  novelty: number;
+  audienceFit: number;
+  policySafety: number;
+}
+
+export interface CandidateScoreProvenance {
+  localPrior: number;
+  globalPrior: number;
+  judge: number;
+  predictedReward: number;
+  noveltyCoverage: number;
+  riskPenalty: number;
+}
+
+export interface RewardBreakdown {
+  approval: number;
+  editBurden: number;
+  deletionPenalty: number;
+  postingOutcome: number;
+  copySignal: number;
+  replyOutcome: number;
+  timeToApproval: number;
+  engagementLift: number;
+  immediateTotal: number;
+  delayedTotal: number;
+  total: number;
+  computedAt: string;
+  notes: string[];
+}
 
 export interface Tweet {
   id: string;
@@ -138,6 +221,22 @@ export interface Tweet {
   freshnessScore?: number | null;
   repetitionRiskScore?: number | null;
   policyRiskScore?: number | null;
+  hookType?: TweetHookType | null;
+  toneType?: TweetToneType | null;
+  specificityType?: TweetSpecificityType | null;
+  structureType?: TweetStructureType | null;
+  thesis?: string | null;
+  coverageCluster?: string | null;
+  featureTags?: CandidateFeatureTags | null;
+  judgeScore?: number | null;
+  judgeBreakdown?: CandidateJudgeBreakdown | null;
+  judgeNotes?: string | null;
+  mutationRound?: number | null;
+  rewardPrediction?: number | null;
+  globalPriorWeight?: number | null;
+  localPriorWeight?: number | null;
+  scoreProvenance?: CandidateScoreProvenance | null;
+  rewardBreakdown?: RewardBreakdown | null;
   quarantineReason?: string | null;
   quarantinedAt?: string | null;
   createdAt: string;
@@ -324,9 +423,11 @@ export interface TweetPerformance {
   content: string;
   format: string;
   topic: string;
-  hook?: string;           // opening hook type: question, bold_claim, data_point, story, observation
-  tone?: string;           // sarcastic, earnest, analytical, provocative, educational
-  specificity?: string;    // abstract, concrete, data_driven
+  hook?: TweetHookType;
+  tone?: TweetToneType;
+  specificity?: TweetSpecificityType;
+  structure?: TweetStructureType;
+  thesis?: string;
   postedAt: string;
   checkedAt: string;
   likes: number;
@@ -470,6 +571,19 @@ export interface LearningSignal {
   reason?: string;
   inferred?: boolean;
   metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface OutcomeEpisode {
+  agentId: string;
+  tweetId: string;
+  xTweetId?: string;
+  format: string | null;
+  topic: string | null;
+  featureTags: CandidateFeatureTags;
+  reward: RewardBreakdown;
+  signals: LearningSignalType[];
+  stage: 'immediate' | 'final';
+  observedAt: string;
 }
 
 export interface PersonalizationMemory {

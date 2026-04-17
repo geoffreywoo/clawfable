@@ -9,6 +9,10 @@ import type {
 import type { RemixEntry } from './kv-storage';
 import type { BanditPolicy } from './bandit';
 import type { VoiceProfile } from './soul-parser';
+import { summarizeEditDelta, type EditDeltaSummary } from './outcome-rewards';
+
+export { summarizeEditDelta };
+export type { EditDeltaSummary };
 
 function unique(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
@@ -22,54 +26,6 @@ function sortCounts(entries: Record<string, number>): string[] {
   return Object.entries(entries)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([value]) => value);
-}
-
-export interface EditDeltaSummary {
-  summary: string;
-  preferenceHints: string[];
-  metadata: Record<string, string | number | boolean | null>;
-  rewardDelta: number;
-}
-
-export function summarizeEditDelta(original: string, edited: string): EditDeltaSummary {
-  const preferenceHints: string[] = [];
-  const metadata: Record<string, string | number | boolean | null> = {
-    originalLength: original.length,
-    editedLength: edited.length,
-  };
-
-  if (edited.length < original.length * 0.85) {
-    preferenceHints.push('Operator keeps tightening drafts before approval.');
-    metadata.lengthDirection = 'shorter';
-  } else if (edited.length > original.length * 1.15) {
-    preferenceHints.push('Operator often wants more depth before a tweet feels ready.');
-    metadata.lengthDirection = 'longer';
-  }
-
-  if (!original.includes('?') && edited.includes('?')) {
-    preferenceHints.push('Question hooks are often added during edits.');
-    metadata.addedQuestionHook = true;
-  }
-
-  if (!/\d/.test(original) && /\d/.test(edited)) {
-    preferenceHints.push('Operators add numbers or specifics before approving.');
-    metadata.addedSpecificity = true;
-  }
-
-  if (!original.includes('\n') && edited.includes('\n')) {
-    preferenceHints.push('Structured line breaks improve operator confidence.');
-    metadata.addedStructure = true;
-  }
-
-  const summary = preferenceHints[0] || 'Operator edited this draft before approving it.';
-  const rewardDelta = preferenceHints.length === 0 ? 0.3 : 0.2;
-
-  return {
-    summary,
-    preferenceHints,
-    metadata,
-    rewardDelta,
-  };
 }
 
 function buildMomentumTopics(

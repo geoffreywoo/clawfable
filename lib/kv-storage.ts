@@ -509,6 +509,19 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     return null;
   };
 
+  const coerceNullableJson = <T>(value: unknown): T | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'object') return value as T;
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
   return {
     ...tweet,
     id: String(tweet.id),
@@ -527,8 +540,34 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     freshnessScore: coerceNullableNumber(tweet.freshnessScore),
     repetitionRiskScore: coerceNullableNumber(tweet.repetitionRiskScore),
     policyRiskScore: coerceNullableNumber(tweet.policyRiskScore),
+    hookType: tweet.hookType ?? null,
+    toneType: tweet.toneType ?? null,
+    specificityType: tweet.specificityType ?? null,
+    structureType: tweet.structureType ?? null,
+    thesis: tweet.thesis ?? null,
+    coverageCluster: tweet.coverageCluster ?? null,
+    featureTags: coerceNullableJson(tweet.featureTags),
+    judgeScore: coerceNullableNumber(tweet.judgeScore),
+    judgeBreakdown: coerceNullableJson(tweet.judgeBreakdown),
+    judgeNotes: tweet.judgeNotes ?? null,
+    mutationRound: coerceNullableNumber(tweet.mutationRound),
+    rewardPrediction: coerceNullableNumber(tweet.rewardPrediction),
+    globalPriorWeight: coerceNullableNumber(tweet.globalPriorWeight),
+    localPriorWeight: coerceNullableNumber(tweet.localPriorWeight),
+    scoreProvenance: coerceNullableJson(tweet.scoreProvenance),
+    rewardBreakdown: coerceNullableJson(tweet.rewardBreakdown),
     quarantineReason: tweet.quarantineReason ?? null,
     quarantinedAt: tweet.quarantinedAt ?? null,
+  };
+}
+
+function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
+  return {
+    ...tweet,
+    featureTags: tweet.featureTags ? JSON.stringify(tweet.featureTags) : null,
+    judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
+    scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
+    rewardBreakdown: tweet.rewardBreakdown ? JSON.stringify(tweet.rewardBreakdown) : null,
   };
 }
 
@@ -597,11 +636,27 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     freshnessScore: data.freshnessScore ?? null,
     repetitionRiskScore: data.repetitionRiskScore ?? null,
     policyRiskScore: data.policyRiskScore ?? null,
+    hookType: data.hookType ?? null,
+    toneType: data.toneType ?? null,
+    specificityType: data.specificityType ?? null,
+    structureType: data.structureType ?? null,
+    thesis: data.thesis ?? null,
+    coverageCluster: data.coverageCluster ?? null,
+    featureTags: data.featureTags ?? null,
+    judgeScore: data.judgeScore ?? null,
+    judgeBreakdown: data.judgeBreakdown ?? null,
+    judgeNotes: data.judgeNotes ?? null,
+    mutationRound: data.mutationRound ?? null,
+    rewardPrediction: data.rewardPrediction ?? null,
+    globalPriorWeight: data.globalPriorWeight ?? null,
+    localPriorWeight: data.localPriorWeight ?? null,
+    scoreProvenance: data.scoreProvenance ?? null,
+    rewardBreakdown: data.rewardBreakdown ?? null,
     quarantineReason: data.quarantineReason ?? null,
     quarantinedAt: data.quarantinedAt ?? null,
     createdAt: new Date().toISOString(),
   };
-  await kvHset(KEYS.tweet(id), tweet as unknown as Record<string, unknown>);
+  await kvHset(KEYS.tweet(id), serializeTweetRecord(tweet));
   await kvLpush(KEYS.agentTweets(data.agentId), id);
   if (tweet.status === 'queued') {
     await kvLpush(KEYS.agentQueue(data.agentId), id);
@@ -638,7 +693,7 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
   }
 
   const updated = normalizeTweetRecord({ ...existing, ...nextData });
-  await kvHset(KEYS.tweet(id), updated as unknown as Record<string, unknown>);
+  await kvHset(KEYS.tweet(id), serializeTweetRecord(updated));
 
   // Sync queue list
   if (data.status !== undefined && data.status !== prevStatus) {

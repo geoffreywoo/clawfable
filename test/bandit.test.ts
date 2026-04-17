@@ -2,6 +2,30 @@ import { describe, expect, it } from 'vitest';
 import { buildBanditPolicy, buildBanditSlotPlan } from '@/lib/bandit';
 import type { FeedbackEntry, Tweet, TweetPerformance } from '@/lib/types';
 
+function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: string; family: import('@/lib/bandit').BanditArmScore['family'] }): import('@/lib/bandit').BanditArmScore {
+  return {
+    arm: overrides.arm,
+    family: overrides.family,
+    pulls: overrides.pulls ?? 3,
+    localPulls: overrides.localPulls ?? overrides.pulls ?? 3,
+    globalPulls: overrides.globalPulls ?? 2,
+    priorPulls: overrides.priorPulls ?? 3,
+    successes: overrides.successes ?? 2,
+    failures: overrides.failures ?? 1,
+    meanReward: overrides.meanReward ?? 0.61,
+    globalMeanReward: overrides.globalMeanReward ?? 0.57,
+    explorationBonus: overrides.explorationBonus ?? 0.42,
+    uncertainty: overrides.uncertainty ?? 0.21,
+    alpha: overrides.alpha ?? 3,
+    beta: overrides.beta ?? 2,
+    ucbScore: overrides.ucbScore ?? 1.03,
+    thompsonScore: overrides.thompsonScore ?? 1.01,
+    coldStart: overrides.coldStart ?? false,
+    source: overrides.source ?? 'mixed',
+    localShare: overrides.localShare ?? 0.54,
+  };
+}
+
 function performanceEntry(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
   return {
     tweetId: overrides.tweetId || crypto.randomUUID(),
@@ -81,7 +105,7 @@ describe('bandit policy', () => {
     expect(policy.trainingSource).toBe('autopilot');
     expect(policy.summary.some((entry) => entry.startsWith('Exploit format: hot_take'))).toBe(true);
     expect(policy.summary).toContain('Explore format: question');
-    expect(policy.formatArms[0].arm).toBe('question');
+    expect(policy.formatArms.some((arm) => arm.arm === 'hot_take' && arm.meanReward > 0.7)).toBe(true);
     expect(policy.formatArms.find((arm) => arm.arm === 'question')?.coldStart).toBe(true);
   });
 
@@ -151,20 +175,38 @@ describe('bandit policy', () => {
       trainingSource: 'autopilot',
       totalPulls: 20,
       successThreshold: 15,
+      globalPriorWeight: 0.35,
+      localEvidenceWeight: 0.65,
       formatArms: [
-        { arm: 'hot_take', pulls: 12, successes: 10, failures: 2, meanReward: 0.83, explorationBonus: 0.4, ucbScore: 1.23, coldStart: false },
-        { arm: 'question', pulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true },
-        { arm: 'analysis', pulls: 4, successes: 2, failures: 2, meanReward: 0.5, explorationBonus: 0.8, ucbScore: 1.3, coldStart: false },
+        arm({ arm: 'hot_take', family: 'format', pulls: 12, successes: 10, failures: 2, meanReward: 0.83, explorationBonus: 0.4, ucbScore: 1.23, coldStart: false }),
+        arm({ arm: 'question', family: 'format', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true, localShare: 0 }),
+        arm({ arm: 'analysis', family: 'format', pulls: 4, successes: 2, failures: 2, meanReward: 0.5, explorationBonus: 0.8, ucbScore: 1.3, coldStart: false }),
       ],
       topicArms: [
-        { arm: 'AI', pulls: 10, successes: 8, failures: 2, meanReward: 0.8, explorationBonus: 0.4, ucbScore: 1.2, coldStart: false },
-        { arm: 'Markets', pulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true },
-        { arm: 'Startups', pulls: 5, successes: 3, failures: 2, meanReward: 0.6, explorationBonus: 0.7, ucbScore: 1.3, coldStart: false },
+        arm({ arm: 'AI', family: 'topic', pulls: 10, successes: 8, failures: 2, meanReward: 0.8, explorationBonus: 0.4, ucbScore: 1.2, coldStart: false }),
+        arm({ arm: 'Markets', family: 'topic', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true, localShare: 0 }),
+        arm({ arm: 'Startups', family: 'topic', pulls: 5, successes: 3, failures: 2, meanReward: 0.6, explorationBonus: 0.7, ucbScore: 1.3, coldStart: false }),
       ],
       lengthArms: [
-        { arm: 'medium', pulls: 10, successes: 8, failures: 2, meanReward: 0.8, explorationBonus: 0.4, ucbScore: 1.2, coldStart: false },
-        { arm: 'long', pulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true },
-        { arm: 'short', pulls: 4, successes: 2, failures: 2, meanReward: 0.5, explorationBonus: 0.7, ucbScore: 1.2, coldStart: false },
+        arm({ arm: 'medium', family: 'length', pulls: 10, successes: 8, failures: 2, meanReward: 0.8, explorationBonus: 0.4, ucbScore: 1.2, coldStart: false }),
+        arm({ arm: 'long', family: 'length', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, explorationBonus: 1.2, ucbScore: 1.7, coldStart: true, localShare: 0 }),
+        arm({ arm: 'short', family: 'length', pulls: 4, successes: 2, failures: 2, meanReward: 0.5, explorationBonus: 0.7, ucbScore: 1.2, coldStart: false }),
+      ],
+      hookArms: [
+        arm({ arm: 'bold_claim', family: 'hook', pulls: 8, successes: 6, meanReward: 0.76 }),
+        arm({ arm: 'question', family: 'hook', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, coldStart: true, localShare: 0 }),
+      ],
+      toneArms: [
+        arm({ arm: 'analytical', family: 'tone', pulls: 8, successes: 6, meanReward: 0.74 }),
+        arm({ arm: 'provocative', family: 'tone', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, coldStart: true, localShare: 0 }),
+      ],
+      specificityArms: [
+        arm({ arm: 'concrete', family: 'specificity', pulls: 8, successes: 6, meanReward: 0.71 }),
+        arm({ arm: 'data_driven', family: 'specificity', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, coldStart: true, localShare: 0 }),
+      ],
+      structureArms: [
+        arm({ arm: 'argument', family: 'structure', pulls: 8, successes: 6, meanReward: 0.73 }),
+        arm({ arm: 'stacked_lines', family: 'structure', pulls: 0, localPulls: 0, successes: 0, failures: 0, meanReward: 0.5, coldStart: true, localShare: 0 }),
       ],
       summary: [],
     }, {

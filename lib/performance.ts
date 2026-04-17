@@ -25,6 +25,7 @@ import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './t
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
 import { generateText } from './ai';
+import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -93,6 +94,9 @@ export async function checkPerformance(agent: Agent): Promise<number> {
     const isOurs = ourXIds.has(String(timelineTweet.id));
     const ourTweet = isOurs ? ourTweetMap.get(String(timelineTweet.id)) : null;
     const classification = classifications.get(String(timelineTweet.id));
+    const inferredFeatures = extractCandidateFeatureTags(timelineTweet.text, {
+      topic: ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general',
+    });
 
     const totalEngagement = timelineTweet.likes + timelineTweet.retweets + (timelineTweet.replies ?? 0);
     const engagementRate = timelineTweet.impressions > 0
@@ -105,9 +109,11 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       content: timelineTweet.text,
       format: ourTweet?.format || replyLogEntry(postLog, String(timelineTweet.id))?.format || classification?.format || 'unknown',
       topic: ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general',
-      hook: classification?.hook,
-      tone: classification?.tone,
-      specificity: classification?.specificity,
+      hook: classification?.hook || inferredFeatures.hook,
+      tone: classification?.tone || inferredFeatures.tone,
+      specificity: classification?.specificity || inferredFeatures.specificity,
+      structure: inferredFeatures.structure || extractStructureType(timelineTweet.text),
+      thesis: inferredFeatures.thesis,
       postedAt: timelineTweet.createdAt,
       checkedAt: new Date().toISOString(),
       likes: timelineTweet.likes,
@@ -193,8 +199,8 @@ export async function checkPerformance(agent: Agent): Promise<number> {
  */
 async function batchClassifyTweets(
   tweets: Array<{ id: string; text: string }>
-): Promise<Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>> {
-  const result = new Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>();
+): Promise<Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>> {
+  const result = new Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>();
   if (tweets.length === 0) return result;
 
   try {
@@ -227,9 +233,9 @@ Output ONLY JSON objects, one per line, no other text.`,
           result.set(String(tweets[idx].id), {
             format: parsed.format || 'unknown',
             topic: parsed.topic || 'general',
-            hook: parsed.hook || 'observation',
-            tone: parsed.tone || 'casual',
-            specificity: parsed.specificity || 'concrete',
+            hook: (parsed.hook || 'observation') as TweetPerformance['hook'],
+            tone: (parsed.tone || 'casual') as TweetPerformance['tone'],
+            specificity: (parsed.specificity || 'concrete') as TweetPerformance['specificity'],
           });
         }
       } catch { /* skip malformed lines */ }

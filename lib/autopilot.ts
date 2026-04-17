@@ -959,6 +959,21 @@ async function refillQueue(
         freshnessScore: item.freshnessScore,
         repetitionRiskScore: item.repetitionRiskScore,
         policyRiskScore: item.policyRiskScore,
+        hookType: item.featureTags?.hook ?? null,
+        toneType: item.featureTags?.tone ?? null,
+        specificityType: item.featureTags?.specificity ?? null,
+        structureType: item.featureTags?.structure ?? null,
+        thesis: item.featureTags?.thesis ?? null,
+        coverageCluster: item.coverageCluster ?? null,
+        featureTags: item.featureTags ?? null,
+        judgeScore: item.judgeScore ?? null,
+        judgeBreakdown: item.judgeBreakdown ?? null,
+        judgeNotes: item.judgeNotes ?? null,
+        mutationRound: item.mutationRound ?? null,
+        rewardPrediction: item.rewardPrediction ?? null,
+        globalPriorWeight: item.globalPriorWeight ?? null,
+        localPriorWeight: item.localPriorWeight ?? null,
+        scoreProvenance: item.scoreProvenance ?? null,
         xTweetId: null,
         quoteTweetId: null,
         quoteTweetAuthor: null,
@@ -999,6 +1014,21 @@ interface MarketingTweet {
   freshnessScore?: number;
   repetitionRiskScore?: number;
   policyRiskScore?: number;
+  hookType?: string | null;
+  toneType?: string | null;
+  specificityType?: string | null;
+  structureType?: string | null;
+  thesis?: string | null;
+  coverageCluster?: string | null;
+  featureTags?: import('./types').CandidateFeatureTags | null;
+  judgeScore?: number | null;
+  judgeBreakdown?: import('./types').CandidateJudgeBreakdown | null;
+  judgeNotes?: string | null;
+  mutationRound?: number | null;
+  rewardPrediction?: number | null;
+  globalPriorWeight?: number | null;
+  localPriorWeight?: number | null;
+  scoreProvenance?: import('./types').CandidateScoreProvenance | null;
 }
 
 async function generateMarketingTweets(

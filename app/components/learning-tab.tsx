@@ -121,6 +121,9 @@ function ExperimentLane({ lane }: { lane: LearningExperimentLane }) {
         <p className="experiment-lane-title">{lane.title}</p>
         <p className="experiment-lane-copy">{lane.belief}</p>
       </div>
+      <div className="learning-state-note">
+        <p>{lane.provenance}</p>
+      </div>
       <div className="experiment-hypothesis-card">
         <p className="experiment-hypothesis-label">HYPOTHESIS</p>
         <p className="experiment-hypothesis-copy">{lane.hypothesis}</p>
@@ -326,6 +329,12 @@ export function LearningTab({ agentId }: LearningTabProps) {
             value={String(overview.recentSignals)}
             sublabel={`${overview.trainingPulls} training pulls in policy`}
             tone="neutral"
+          />
+          <OverviewCard
+            label="LOCAL EVIDENCE"
+            value={`${Math.round(overview.localEvidenceWeight * 100)}%`}
+            sublabel={`${Math.round(overview.globalPriorWeight * 100)}% still shared prior`}
+            tone={overview.localEvidenceWeight >= 0.55 ? 'positive' : 'warning'}
           />
         </div>
       </div>

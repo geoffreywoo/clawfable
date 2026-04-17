@@ -18,6 +18,7 @@ import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
 import { buildBanditPolicy } from './bandit';
 import { buildPersonalizationMemory } from './learning-loop';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
+import { getGlobalBanditPrior } from './global-bandit-prior';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -117,6 +118,7 @@ export async function buildGenerationContext(
     feedback,
     signals,
     baseline,
+    globalPrior,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -130,6 +132,7 @@ export async function buildGenerationContext(
     getFeedback(agent.id),
     getLearningSignals(agent.id, 200),
     getBaseline(agent.id),
+    getGlobalBanditPrior(),
   ]);
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
@@ -172,6 +175,7 @@ export async function buildGenerationContext(
     allowedFormats,
     candidateTopics,
     baseline,
+    globalPrior,
   });
   const memory = buildPersonalizationMemory({
     feedback,

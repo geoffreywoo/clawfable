@@ -3,11 +3,13 @@ import type {
   AgentLearnings,
   FeedbackEntry,
   LearningSignal,
+  OutcomeEpisode,
   PersonalizationMemory,
   ProtocolSettings,
   Tweet,
   TweetPerformance,
 } from './types';
+import { buildOutcomeEpisodes } from './outcome-rewards';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
 type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
@@ -47,15 +49,18 @@ export interface LearningOverview {
   };
   trainingSource: BanditPolicy['trainingSource'] | null;
   trainingPulls: number;
+  localEvidenceWeight: number;
+  globalPriorWeight: number;
   recentSignals: number;
 }
 
 export interface LearningExperimentLane {
-  id: 'formats' | 'topics' | 'lengths';
+  id: 'formats' | 'topics' | 'lengths' | 'hooks' | 'tones' | 'specificity' | 'structure';
   title: string;
   belief: string;
   hypothesis: string;
   nextCheck: string;
+  provenance: string;
   exploit: BanditArmScore | null;
   explore: BanditArmScore | null;
   caution: BanditArmScore | null;
@@ -428,6 +433,10 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
     { id: 'formats', title: 'FORMATS', arms: policy.formatArms },
     { id: 'topics', title: 'TOPICS', arms: policy.topicArms },
     { id: 'lengths', title: 'LENGTH', arms: policy.lengthArms },
+    { id: 'hooks', title: 'HOOKS', arms: policy.hookArms },
+    { id: 'tones', title: 'TONES', arms: policy.toneArms },
+    { id: 'specificity', title: 'SPECIFICITY', arms: policy.specificityArms },
+    { id: 'structure', title: 'STRUCTURE', arms: policy.structureArms },
   ];
 
   return groups.map(({ id, title, arms }) => {
@@ -446,6 +455,13 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
       : caution
         ? `Next check: keep exposure low on ${sentenceCaseArm(caution.arm)} unless newer evidence changes the picture.`
         : `Next check: keep sampling until a cleaner winner emerges.`;
+    const provenance = exploit
+      ? exploit.source === 'local_evidence'
+        ? `Leader is mostly driven by local account evidence (${Math.round(exploit.localShare * 100)}% local share).`
+        : exploit.source === 'global_prior'
+          ? 'Leader is still mostly coming from the shared cold-start prior.'
+          : `Leader is mixed: ${Math.round(exploit.localShare * 100)}% local evidence, ${Math.round((1 - exploit.localShare) * 100)}% shared prior.`
+      : 'No leading arm yet.';
 
     return {
       id,
@@ -453,6 +469,7 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
       belief,
       hypothesis,
       nextCheck,
+      provenance,
       exploit,
       explore,
       caution,
@@ -614,6 +631,29 @@ export interface BuildLearningSnapshotOptions {
   baseline?: { avgLikes: number; avgRetweets: number } | null;
 }
 
+function buildOutcomeEventEntries(episodes: OutcomeEpisode[], allTweets: Tweet[]): LearningEventEntry[] {
+  const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  return episodes
+    .slice()
+    .sort((a, b) => new Date(b.observedAt).getTime() - new Date(a.observedAt).getTime())
+    .slice(0, 10)
+    .map((episode) => {
+      const tweet = tweetById.get(String(episode.tweetId));
+      return {
+        id: `episode:${episode.tweetId}`,
+        createdAt: episode.observedAt,
+        title: episode.reward.total >= 0 ? 'Composite Reward Updated' : 'Composite Penalty Updated',
+        summary: `Unified reward settled at ${episode.reward.total >= 0 ? '+' : ''}${episode.reward.total.toFixed(2)} across ${episode.signals.join(', ') || 'performance'}.`,
+        learned: episode.reward.notes[0] || 'This reward episode now affects feature-level ranking and experimentation.',
+        source: 'performance',
+        tone: episode.reward.total >= 0 ? 'positive' : 'warning',
+        rewardDelta: episode.reward.total,
+        surface: 'cron',
+        tweetPreview: tweet?.content,
+      };
+    });
+}
+
 export function buildLearningSnapshot({
   settings,
   learnings,
@@ -632,6 +672,13 @@ export function buildLearningSnapshot({
   const previousWeek = windowRates(signals, nowMs - (sevenDays * 2), tweetById, nowMs - sevenDays);
   const liveTweets = allTweets.filter((tweet) => ['preview', 'draft', 'queued'].includes(tweet.status));
   const averageConfidencePercent = averageConfidence(liveTweets);
+  const outcomeEpisodes = buildOutcomeEpisodes({
+    agentId: allTweets[0]?.agentId || 'agent',
+    tweets: allTweets,
+    signals,
+    performanceHistory,
+    baseline,
+  });
 
   return {
     overview: {
@@ -650,6 +697,8 @@ export function buildLearningSnapshot({
       activeMix: activeMix(allTweets),
       trainingSource: banditPolicy?.trainingSource || null,
       trainingPulls: banditPolicy?.totalPulls || 0,
+      localEvidenceWeight: banditPolicy?.localEvidenceWeight || 0,
+      globalPriorWeight: banditPolicy?.globalPriorWeight || 0,
       recentSignals: recentWindowSignals(signals, nowMs - sevenDays).length,
     },
     topRules: [
@@ -667,7 +716,9 @@ export function buildLearningSnapshot({
       summary: banditPolicy?.summary || [],
       lanes: buildExperimentLanes(banditPolicy),
     },
-    recentEvents: buildRecentEvents(signals, allTweets),
+    recentEvents: [...buildRecentEvents(signals, allTweets), ...buildOutcomeEventEntries(outcomeEpisodes, allTweets)]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 16),
     memory,
   };
 }
