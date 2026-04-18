@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOAuthTemp, deleteOAuthTemp, getAgent, updateAgent } from '@/lib/kv-storage';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
+import { resolveRequestOrigin } from '@/lib/request-origin';
 
 // GET /api/auth/twitter/callback — Twitter redirects here after user authorizes agent connection
 export async function GET(request: NextRequest) {
   const oauthToken = request.nextUrl.searchParams.get('oauth_token');
   const oauthVerifier = request.nextUrl.searchParams.get('oauth_verifier');
   const denied = request.nextUrl.searchParams.get('denied');
-  const origin = process.env.APP_URL || request.nextUrl.origin;
+  const origin = resolveRequestOrigin(request);
 
   if (denied) {
     return NextResponse.redirect(new URL('/?oauth=denied', origin));

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveOAuthTemp } from '@/lib/kv-storage';
 import { formatOAuthStartError } from '@/lib/oauth-start-error';
+import { resolveRequestOrigin } from '@/lib/request-origin';
 import { generateOAuthLink } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
     // Verify login + ownership
     await requireAgentAccess(agentId);
 
-    const origin = process.env.APP_URL || request.headers.get('origin') || request.nextUrl.origin;
+    const origin = resolveRequestOrigin(request);
     const callbackUrl = `${origin}/api/auth/twitter/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);

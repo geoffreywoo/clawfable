@@ -6,6 +6,7 @@ import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { COOKIE_NAME } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { getPresetSoulProfile } from '@/lib/open-source-souls';
+import { resolveRequestOrigin } from '@/lib/request-origin';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
   const oauthToken = request.nextUrl.searchParams.get('oauth_token');
   const oauthVerifier = request.nextUrl.searchParams.get('oauth_verifier');
   const denied = request.nextUrl.searchParams.get('denied');
-  const origin = process.env.APP_URL || request.nextUrl.origin;
+  const origin = resolveRequestOrigin(request);
 
   if (denied) {
     return NextResponse.redirect(new URL('/?auth=denied', origin));
