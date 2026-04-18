@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveOAuthTemp } from '@/lib/kv-storage';
+import { formatOAuthStartError } from '@/lib/oauth-start-error';
 import { generateOAuthLink } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -26,7 +27,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
-    const message = err instanceof Error ? err.message : 'Failed to start OAuth';
+    console.error('Agent connect OAuth start error:', err instanceof Error ? err.message : err);
+    const message = formatOAuthStartError(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

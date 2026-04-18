@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveOAuthTemp } from '@/lib/kv-storage';
+import { formatOAuthStartError } from '@/lib/oauth-start-error';
 import { generateOAuthLink } from '@/lib/twitter-client';
 
 // POST /api/auth/login — start login OAuth flow
@@ -17,7 +18,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to start login';
+    console.error('Login start error:', err instanceof Error ? err.message : err);
+    const message = formatOAuthStartError(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

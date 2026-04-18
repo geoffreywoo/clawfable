@@ -441,8 +441,8 @@ export function decodeKeys(encoded: {
 // ─── OAuth 1.0a 3-legged flow ───────────────────────────────────────────────
 
 function getConsumerKeys(): { appKey: string; appSecret: string } {
-  const appKey = process.env.TWITTER_CONSUMER_KEY;
-  const appSecret = process.env.TWITTER_CONSUMER_SECRET;
+  const appKey = process.env.TWITTER_CONSUMER_KEY?.trim();
+  const appSecret = process.env.TWITTER_CONSUMER_SECRET?.trim();
   if (!appKey || !appSecret) {
     throw new Error('TWITTER_CONSUMER_KEY and TWITTER_CONSUMER_SECRET env vars are required');
   }

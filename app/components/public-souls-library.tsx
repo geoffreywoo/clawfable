@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { Logo } from '@/app/components/logo';
+import { reportActionError, requestLoginUrl } from '@/app/components/site-actions';
 import type { PublicSoulSummary } from '@/lib/open-source-souls';
 
 interface PublicSoulsLibraryProps {
@@ -19,15 +20,10 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
   const handleFork = async (handle: string) => {
     setForkingHandle(handle);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forkHandle: handle }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      window.location.href = data.url;
-    } catch {
+      const url = await requestLoginUrl({ forkHandle: handle });
+      window.location.href = url;
+    } catch (error) {
+      reportActionError(error, 'Failed to start login');
       setForkingHandle(null);
     }
   };

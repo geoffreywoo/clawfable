@@ -12,6 +12,45 @@ interface ActionButtonProps {
   onSuccess?: () => void;
 }
 
+interface LoginRequestPayload {
+  forkHandle?: string;
+}
+
+async function readActionError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json() as { error?: string };
+    return typeof data.error === 'string' && data.error.trim() ? data.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function requestLoginUrl(payload?: LoginRequestPayload): Promise<string> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  });
+
+  if (!res.ok) {
+    throw new Error(await readActionError(res, 'Failed to start login'));
+  }
+
+  const data = await res.json() as { url?: string };
+  if (!data.url) {
+    throw new Error('Failed to start login');
+  }
+
+  return data.url;
+}
+
+export function reportActionError(error: unknown, fallback: string): void {
+  const message = error instanceof Error ? error.message : fallback;
+  if (typeof window !== 'undefined') {
+    window.alert(message);
+  }
+}
+
 export function LoginButton({
   className,
   style,
@@ -23,11 +62,10 @@ export function LoginButton({
   const handleLogin = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to start login');
-      window.location.href = data.url;
-    } catch {
+      const url = await requestLoginUrl();
+      window.location.href = url;
+    } catch (error) {
+      reportActionError(error, 'Failed to start login');
       setLoading(false);
     }
   };
@@ -93,7 +131,8 @@ export function CheckoutButton({
       if (!res.ok) throw new Error(data.error || 'Failed to start checkout');
       onSuccess?.();
       window.location.href = data.url;
-    } catch {
+    } catch (error) {
+      reportActionError(error, 'Failed to start checkout');
       setLoading(false);
     }
   };
@@ -122,7 +161,8 @@ export function PortalButton({
       if (!res.ok) throw new Error(data.error || 'Failed to open billing portal');
       onSuccess?.();
       window.location.href = data.url;
-    } catch {
+    } catch (error) {
+      reportActionError(error, 'Failed to open billing portal');
       setLoading(false);
     }
   };
