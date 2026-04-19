@@ -8,6 +8,7 @@ import {
   getProtocolSnapshot,
 } from '@/lib/dashboard-data';
 import { getMetricsArray } from '@/lib/kv-storage';
+import { isSetupIncomplete } from '@/lib/setup-state';
 
 interface AgentDashboardPageProps {
   params: Promise<{ id: string }>;
@@ -40,7 +41,9 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
           postLog: protocol.postLog,
           metrics,
         }}
-        shouldOpenSetupContinuation={resolvedSearchParams.oauth === 'success'}
+        shouldOpenSetupContinuation={
+          resolvedSearchParams.oauth === 'success' && isSetupIncomplete(agent.setupStep)
+        }
       />
     );
   } catch (err) {
