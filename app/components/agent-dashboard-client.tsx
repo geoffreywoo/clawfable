@@ -4,7 +4,6 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HealthAlerts } from '@/app/components/health-alerts';
-import { SetupContinuation } from '@/app/components/setup-continuation';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/lib/setup-state';
 import type { BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
@@ -29,6 +28,9 @@ const MetricsTab = dynamic(() => import('@/app/components/metrics-tab').then((mo
 });
 const SettingsTab = dynamic(() => import('@/app/components/settings-tab').then((mod) => mod.SettingsTab), {
   loading: () => <TabSkeleton />,
+});
+const SetupContinuation = dynamic(() => import('@/app/components/setup-continuation').then((mod) => mod.SetupContinuation), {
+  ssr: false,
 });
 
 const TABS = [

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { HomeMissionControl } from '@/app/components/home-mission-control';
+import { ControlRoomShell } from '@/app/components/control-room-shell';
 import { getCurrentUser } from '@/lib/auth';
 import { getControlRoomSnapshot } from '@/lib/dashboard-data';
 
@@ -12,7 +12,7 @@ export default async function ControlRoomPage() {
   const snapshot = await getControlRoomSnapshot(user);
 
   return (
-    <HomeMissionControl
+    <ControlRoomShell
       initialUser={snapshot.user}
       initialAgents={snapshot.agents}
     />

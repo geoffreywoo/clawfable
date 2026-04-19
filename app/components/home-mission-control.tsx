@@ -1,12 +1,16 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AgentCard } from './agent-card';
 import { Logo } from './logo';
-import { SetupWizard } from './setup-wizard';
 import { LogoutButton } from './site-actions';
 import type { AgentSummary, BillingSummary } from '@/lib/types';
+
+const SetupWizard = dynamic(() => import('./setup-wizard').then((mod) => mod.SetupWizard), {
+  ssr: false,
+});
 
 interface AuthUser {
   id: string;

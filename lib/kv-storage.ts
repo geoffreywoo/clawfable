@@ -1,4 +1,5 @@
 import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule } from './types';
+import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
@@ -349,6 +350,7 @@ const KEYS = {
   stripeCustomerUser: (customerId: string) => `stripe:customer:${customerId}:user`,
   stripeSubscriptionUser: (subscriptionId: string) => `stripe:subscription:${subscriptionId}:user`,
   session: (token: string) => `session:${token}`,
+  userUsername: (username: string) => `user:username:${username}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
   agentJobs: (id: string) => `agent:${id}:jobs`,
@@ -509,6 +511,12 @@ function normalizeUser(user: User): User {
     plan: user.plan ?? 'free',
     currentPeriodEnd: user.currentPeriodEnd ?? null,
   };
+}
+
+async function setUserUsernameIndex(user: Pick<User, 'id' | 'username'>): Promise<void> {
+  const normalized = normalizeUsername(user.username);
+  if (!normalized) return;
+  await kvSet(KEYS.userUsername(normalized), String(user.id));
 }
 
 function normalizeTweetRecord(tweet: Tweet): Tweet {
@@ -940,6 +948,28 @@ export async function getUser(xUserId: string): Promise<User | null> {
   return user ? normalizeUser(user) : null;
 }
 
+export async function getUserByUsername(username: string): Promise<User | null> {
+  const normalized = normalizeUsername(username);
+  if (!normalized) return null;
+
+  const indexedId = await kvGet<string>(KEYS.userUsername(normalized));
+  if (indexedId) {
+    const indexedUser = await getUser(String(indexedId));
+    if (indexedUser) return indexedUser;
+    await kvDel(KEYS.userUsername(normalized));
+  }
+
+  // Legacy rows predate the username index. Recover once and persist the index.
+  const ids = await kvSmembers(KEYS.userSet());
+  if (ids.length === 0) return null;
+
+  const users = await Promise.all(ids.map((id) => getUser(String(id))));
+  const normalizedUsers = users.filter((user): user is User => user !== null);
+  await Promise.all(normalizedUsers.map((user) => setUserUsernameIndex(user)));
+
+  return normalizedUsers.find((user) => normalizeUsername(user.username) === normalized) ?? null;
+}
+
 export async function getUsers(): Promise<User[]> {
   let ids = await kvSmembers(KEYS.userSet());
   if (ids.length === 0) {
@@ -980,6 +1010,7 @@ export async function getOrCreateUser(xUserId: string, username: string, name: s
   };
   await kvHset(KEYS.user(xUserId), user as unknown as Record<string, unknown>);
   await kvSadd(KEYS.userSet(), xUserId);
+  await setUserUsernameIndex(user);
   return user;
 }
 
@@ -989,8 +1020,14 @@ export async function updateUser(xUserId: string, updates: Partial<User>): Promi
     throw new Error(`User ${xUserId} not found`);
   }
   const merged = normalizeUser({ ...current, ...updates });
+  const previousUsername = normalizeUsername(current.username);
   await kvHset(KEYS.user(xUserId), merged as unknown as Record<string, unknown>);
   await kvSadd(KEYS.userSet(), xUserId);
+  const nextUsername = normalizeUsername(merged.username);
+  if (previousUsername && previousUsername !== nextUsername) {
+    await kvDel(KEYS.userUsername(previousUsername));
+  }
+  await setUserUsernameIndex(merged);
   return merged;
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { TweetPreview, TweetPreviewSkeleton } from './tweet-preview';
 
 type Step = 'identity' | 'soul' | 'analyze' | 'preview';
@@ -72,7 +72,6 @@ export function SetupWizard({
   initialStep = null,
 }: SetupWizardProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const autoRunRef = useRef<{ analyze: string; preview: string }>({ analyze: '', preview: '' });
 
   // Identity
@@ -104,8 +103,11 @@ export function SetupWizard({
   useEffect(() => {
     if (!open) return;
 
-    const searchResumeId = searchParams.get('setup');
-    const searchResumeStep = searchParams.get('step');
+    const searchParams = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : null;
+    const searchResumeId = searchParams?.get('setup');
+    const searchResumeStep = searchParams?.get('step');
     const resolvedResumeId = resumeAgentId || searchResumeId;
     const resolvedResumeStep = initialStep || searchResumeStep;
     const nextStep: ResumeStep | null =
@@ -139,7 +141,7 @@ export function SetupWizard({
     setStep('identity');
     setHandle('');
     setName('');
-  }, [open, resumeAgentId, initialStep, searchParams]);
+  }, [open, resumeAgentId, initialStep]);
 
   useEffect(() => {
     if (!previewTweets.length) {

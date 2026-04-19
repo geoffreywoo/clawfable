@@ -1,4 +1,4 @@
-import { getAgent, getAgentOwnerId, getAgents, getUserAgentIds, getUsers } from './kv-storage';
+import { getAgent, getAgentOwnerId, getAgents, getUserAgentIds, getUserByUsername } from './kv-storage';
 import { getInternalSharedUsernames, isInternalSharedAccount, normalizeUsername } from './internal-accounts';
 import type { Agent, User } from './types';
 
@@ -8,8 +8,9 @@ export async function getAccessibleUsers(user: User): Promise<User[]> {
   }
 
   const sharedUsernames = getInternalSharedUsernames();
-  const users = await getUsers();
-  const sharedUsers = users.filter((candidate) => sharedUsernames.has(normalizeUsername(candidate.username)));
+  const sharedUsers = (
+    await Promise.all(Array.from(sharedUsernames).map((username) => getUserByUsername(username)))
+  ).filter((candidate): candidate is User => candidate !== null);
   const deduped = new Map<string, User>([[user.id, user]]);
 
   for (const candidate of sharedUsers) {
@@ -24,12 +25,11 @@ export async function getAccessibleUserIds(user: User): Promise<string[]> {
   return users.map((candidate) => String(candidate.id));
 }
 
-async function getFallbackAgentIds(user: User, ownerIds: string[]): Promise<string[]> {
+async function getFallbackAgentIds(user: User, ownerIds: string[], accessibleUsers: User[]): Promise<string[]> {
   const agents = await getAgents();
   if (agents.length === 0) return [];
 
   const recoverableHandles = new Set<string>();
-  const accessibleUsers = await getAccessibleUsers(user);
   for (const candidate of accessibleUsers) {
     const normalized = normalizeUsername(candidate.username);
     if (normalized) recoverableHandles.add(normalized);
@@ -80,10 +80,11 @@ async function getFallbackAgentIds(user: User, ownerIds: string[]): Promise<stri
 }
 
 export async function getAccessibleAgentIds(user: User): Promise<string[]> {
-  const ownerIds = await getAccessibleUserIds(user);
+  const accessibleUsers = await getAccessibleUsers(user);
+  const ownerIds = accessibleUsers.map((candidate) => String(candidate.id));
   const agentIdGroups = await Promise.all(ownerIds.map((ownerId) => getUserAgentIds(ownerId)));
   const directIds = new Set(agentIdGroups.flat().map(String));
-  const fallbackIds = await getFallbackAgentIds(user, ownerIds);
+  const fallbackIds = await getFallbackAgentIds(user, ownerIds, accessibleUsers);
 
   return Array.from(new Set([...directIds, ...fallbackIds]));
 }

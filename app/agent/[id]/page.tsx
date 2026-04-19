@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { AgentDashboardClient } from '@/app/components/agent-dashboard-client';
+import { AgentDashboardShell } from '@/app/components/agent-dashboard-shell';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { AuthError, NotFoundError, requireAgentAccess } from '@/lib/auth';
 import {
@@ -27,7 +27,7 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
     ]);
 
     return (
-      <AgentDashboardClient
+      <AgentDashboardShell
         agentId={agent.id}
         initialAgent={serializeAgentDetail(agent)}
         initialOtherAgents={otherAgents}
