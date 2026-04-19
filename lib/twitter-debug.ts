@@ -86,12 +86,13 @@ export function isRateLimitTwitterError(error: unknown): boolean {
   }
 
   const actionError = isTwitterActionError(error) ? error : null;
-  const summary = [
-    actionError?.title,
-    actionError?.detail,
-    actionError?.rawMessage,
-    error instanceof Error ? error.message : String(error),
-  ]
+  const summary = (actionError
+    ? [
+        actionError.title,
+        actionError.detail,
+        actionError.rawMessage,
+      ]
+    : [error instanceof Error ? error.message : String(error)])
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -106,12 +107,13 @@ export function isInvalidTwitterCredentialError(error: unknown): boolean {
   }
 
   const actionError = isTwitterActionError(error) ? error : null;
-  const summary = [
-    actionError?.title,
-    actionError?.detail,
-    actionError?.rawMessage,
-    error instanceof Error ? error.message : String(error),
-  ]
+  const summary = (actionError
+    ? [
+        actionError.title,
+        actionError.detail,
+        actionError.rawMessage,
+      ]
+    : [error instanceof Error ? error.message : String(error)])
     .filter(Boolean)
     .join(' ')
     .toLowerCase();

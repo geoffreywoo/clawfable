@@ -12,7 +12,7 @@ import type { TwitterKeys } from './twitter-client';
 import { replyToTweet, likeTweet, followUser, getFollowing } from './twitter-client';
 import { formatActionError, isInvalidTwitterCredentialError } from './twitter-debug';
 import { parseSoulMd } from './soul-parser';
-import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory, invalidateAgentConnection } from './kv-storage';
+import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
 import { generateText } from './ai';
 
 /**
@@ -104,9 +104,6 @@ export async function replyToViralTweets(
         targetTweetId: topic.topTweet.id,
         likes: topic.topTweet.likes,
       });
-      if (isInvalidTwitterCredentialError(err)) {
-        await invalidateAgentConnection(agent.id);
-      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: topic.topTweet.id,
@@ -118,7 +115,7 @@ export async function replyToViralTweets(
         source: 'autopilot',
         action: 'error',
         reason: isInvalidTwitterCredentialError(err)
-          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          ? `X rejected a proactive reply request. Connection preserved so manual posting is not interrupted. ${formatted}`
           : formatted,
       });
     }
@@ -207,9 +204,6 @@ export async function likeNetworkTweets(
         targetTweetId: topic.topTweet.id,
         likes: topic.topTweet.likes,
       });
-      if (isInvalidTwitterCredentialError(err)) {
-        await invalidateAgentConnection(agent.id);
-      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: topic.topTweet.id,
@@ -221,7 +215,7 @@ export async function likeNetworkTweets(
         source: 'autopilot',
         action: 'error',
         reason: isInvalidTwitterCredentialError(err)
-          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          ? `X rejected a proactive like request. Connection preserved so manual posting is not interrupted. ${formatted}`
           : formatted,
       });
     }
@@ -350,9 +344,6 @@ export async function discoverAndFollow(
       handle: `@${agent.handle}`,
       xUserId: agent.xUserId,
     });
-    if (isInvalidTwitterCredentialError(err)) {
-      await invalidateAgentConnection(agent.id);
-    }
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -364,7 +355,7 @@ export async function discoverAndFollow(
       source: 'autopilot',
       action: 'error',
       reason: isInvalidTwitterCredentialError(err)
-        ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+        ? `X rejected the background following lookup. Connection preserved so queue posting is not interrupted. ${formatted}`
         : formatted,
     });
     return 0;
@@ -459,9 +450,6 @@ export async function discoverAndFollow(
         username: candidate.username,
         why: candidate.reason,
       });
-      if (isInvalidTwitterCredentialError(err)) {
-        await invalidateAgentConnection(agent.id);
-      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: '',
@@ -473,7 +461,7 @@ export async function discoverAndFollow(
         source: 'autopilot',
         action: 'error',
         reason: isInvalidTwitterCredentialError(err)
-          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          ? `X rejected an auto-follow request. Connection preserved so manual posting is not interrupted. ${formatted}`
           : formatted,
       });
     }

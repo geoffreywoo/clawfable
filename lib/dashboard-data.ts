@@ -87,7 +87,7 @@ function isConnectionStatusLog(entry: PostLogEntry): boolean {
     'x_auth_denied',
     'x_auth_duplicate',
     'x_auth_callback_error',
-  ].includes(entry.format);
+  ].includes(entry.format) || /agent disconnected|connection preserved/i.test(entry.reason || '');
 }
 
 export async function buildAgentDetail(agent: Agent): Promise<AgentDetail> {
