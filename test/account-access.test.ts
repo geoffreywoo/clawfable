@@ -77,5 +77,6 @@ describe('internal shared account access', () => {
 
     expect(accessibleIds).toContain(newerAgent.id);
     expect(accessibleIds).not.toContain(olderAgent.id);
+    expect(await canAccessAgent(geoffrey, newerAgent.id)).toBe(true);
   });
 });

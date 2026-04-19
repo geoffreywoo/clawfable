@@ -25,6 +25,31 @@ export async function getAccessibleUserIds(user: User): Promise<string[]> {
   return users.map((candidate) => String(candidate.id));
 }
 
+async function buildAccessScope(user: User): Promise<{
+  accessibleUsers: User[];
+  ownerIds: string[];
+  ownerIdSet: Set<string>;
+  recoverableHandles: Set<string>;
+}> {
+  const accessibleUsers = await getAccessibleUsers(user);
+  const ownerIds = accessibleUsers.map((candidate) => String(candidate.id));
+  const ownerIdSet = new Set(ownerIds);
+  const recoverableHandles = new Set<string>();
+
+  for (const candidate of accessibleUsers) {
+    const normalized = normalizeUsername(candidate.username);
+    if (normalized) recoverableHandles.add(normalized);
+  }
+
+  if (isInternalSharedAccount(user)) {
+    for (const handle of getInternalSharedUsernames()) {
+      recoverableHandles.add(handle);
+    }
+  }
+
+  return { accessibleUsers, ownerIds, ownerIdSet, recoverableHandles };
+}
+
 async function getFallbackAgentIds(user: User, ownerIds: string[], accessibleUsers: User[]): Promise<string[]> {
   const agents = await getAgents();
   if (agents.length === 0) return [];
@@ -80,8 +105,7 @@ async function getFallbackAgentIds(user: User, ownerIds: string[], accessibleUse
 }
 
 export async function getAccessibleAgentIds(user: User): Promise<string[]> {
-  const accessibleUsers = await getAccessibleUsers(user);
-  const ownerIds = accessibleUsers.map((candidate) => String(candidate.id));
+  const { accessibleUsers, ownerIds } = await buildAccessScope(user);
   const agentIdGroups = await Promise.all(ownerIds.map((ownerId) => getUserAgentIds(ownerId)));
   const directIds = new Set(agentIdGroups.flat().map(String));
   const fallbackIds = await getFallbackAgentIds(user, ownerIds, accessibleUsers);
@@ -107,7 +131,56 @@ export async function getAccessibleAgents(user: User): Promise<Agent[]> {
     });
 }
 
-export async function canAccessAgent(user: User, agentId: string): Promise<boolean> {
-  const agentIds = await getAccessibleAgentIds(user);
-  return agentIds.includes(String(agentId));
+export async function canAccessAgent(user: User, agentId: string, preloadedAgent?: Agent | null): Promise<boolean> {
+  const normalizedAgentId = String(agentId);
+  const agent = preloadedAgent ?? await getAgent(normalizedAgentId);
+  if (!agent) return false;
+
+  const userId = String(user.id);
+  const normalizedHandle = normalizeUsername(agent.handle);
+  const directIds = await getUserAgentIds(userId);
+  if (directIds.map(String).includes(normalizedAgentId)) {
+    return true;
+  }
+
+  if (normalizedHandle && normalizedHandle === normalizeUsername(user.username)) {
+    return true;
+  }
+
+  if (agent.xUserId && String(agent.xUserId) === userId) {
+    return true;
+  }
+
+  const ownerId = await getAgentOwnerId(normalizedAgentId);
+  if (ownerId && String(ownerId) === userId) {
+    return true;
+  }
+
+  if (!isInternalSharedAccount(user)) return false;
+
+  const sharedHandles = getInternalSharedUsernames();
+  if (normalizedHandle && sharedHandles.has(normalizedHandle)) {
+    return true;
+  }
+
+  const accessibleUsers = await getAccessibleUsers(user);
+  const accessibleUserIds = new Set(accessibleUsers.map((candidate) => String(candidate.id)));
+  if (ownerId && accessibleUserIds.has(String(ownerId))) {
+    return true;
+  }
+
+  if (agent.xUserId && accessibleUserIds.has(String(agent.xUserId))) {
+    return true;
+  }
+
+  const sharedDirectGroups = await Promise.all(
+    Array.from(accessibleUserIds)
+      .filter((candidateId) => candidateId !== userId)
+      .map((candidateId) => getUserAgentIds(candidateId))
+  );
+  if (sharedDirectGroups.some((ids) => ids.map(String).includes(normalizedAgentId))) {
+    return true;
+  }
+
+  return false;
 }
