@@ -22,11 +22,13 @@ import {
   getLearningSignals,
   getMentions,
   getMetricsArray,
+  getMentionCount,
   getPerformanceHistory,
   getPostLog,
   getProtocolSettings,
   getQueuedTweets,
   getTweets,
+  getTweetCount,
 } from './kv-storage';
 import type {
   AccountAnalysis,
@@ -76,7 +78,10 @@ export function serializeAgentDetail(agent: Agent): AgentDetail {
 }
 
 export async function buildAgentSummary(agent: Agent): Promise<AgentSummary> {
-  const [tweets, mentions] = await Promise.all([getTweets(agent.id), getMentions(agent.id)]);
+  const [tweetCount, mentionCount] = await Promise.all([
+    getTweetCount(agent.id),
+    getMentionCount(agent.id),
+  ]);
 
   return {
     id: agent.id,
@@ -88,8 +93,8 @@ export async function buildAgentSummary(agent: Agent): Promise<AgentSummary> {
     xUserId: agent.xUserId,
     setupStep: normalizeSetupStep(agent.setupStep),
     createdAt: agent.createdAt,
-    tweetCount: tweets.filter((tweet) => tweet.status !== 'preview').length,
-    mentionCount: mentions.length,
+    tweetCount,
+    mentionCount,
   };
 }
 

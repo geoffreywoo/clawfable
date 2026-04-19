@@ -1,4 +1,4 @@
-import { getAgent, getAgentOwnerId, getAgents, getUserAgentIds, getUserByUsername } from './kv-storage';
+import { getAgent, getAgentByHandle, getAgentOwnerId, getAgents, getUserAgentIds, getUserByUsername } from './kv-storage';
 import { getInternalSharedUsernames, isInternalSharedAccount, normalizeUsername } from './internal-accounts';
 import type { Agent, User } from './types';
 
@@ -26,20 +26,13 @@ export async function getAccessibleUserIds(user: User): Promise<string[]> {
 }
 
 async function buildAccessScope(user: User): Promise<{
-  accessibleUsers: User[];
   ownerIds: string[];
-  ownerIdSet: Set<string>;
   recoverableHandles: Set<string>;
 }> {
-  const accessibleUsers = await getAccessibleUsers(user);
-  const ownerIds = accessibleUsers.map((candidate) => String(candidate.id));
-  const ownerIdSet = new Set(ownerIds);
+  const ownerIds = [String(user.id)];
   const recoverableHandles = new Set<string>();
-
-  for (const candidate of accessibleUsers) {
-    const normalized = normalizeUsername(candidate.username);
-    if (normalized) recoverableHandles.add(normalized);
-  }
+  const normalizedUsername = normalizeUsername(user.username);
+  if (normalizedUsername) recoverableHandles.add(normalizedUsername);
 
   if (isInternalSharedAccount(user)) {
     for (const handle of getInternalSharedUsernames()) {
@@ -47,10 +40,20 @@ async function buildAccessScope(user: User): Promise<{
     }
   }
 
-  return { accessibleUsers, ownerIds, ownerIdSet, recoverableHandles };
+  return { ownerIds, recoverableHandles };
 }
 
-async function getFallbackAgentIds(user: User, ownerIds: string[], accessibleUsers: User[]): Promise<string[]> {
+async function getRecoveredAgentIdsByHandle(recoverableHandles: Iterable<string>): Promise<string[]> {
+  const recoveredAgents = await Promise.all(
+    Array.from(recoverableHandles).map((handle) => getAgentByHandle(handle))
+  );
+
+  return recoveredAgents
+    .filter((agent): agent is Agent => agent !== null)
+    .map((agent) => String(agent.id));
+}
+
+async function getFallbackAgentIdsFromScan(user: User, ownerIds: string[], accessibleUsers: User[]): Promise<string[]> {
   const agents = await getAgents();
   if (agents.length === 0) return [];
 
@@ -105,12 +108,25 @@ async function getFallbackAgentIds(user: User, ownerIds: string[], accessibleUse
 }
 
 export async function getAccessibleAgentIds(user: User): Promise<string[]> {
-  const { accessibleUsers, ownerIds } = await buildAccessScope(user);
+  const { ownerIds, recoverableHandles } = await buildAccessScope(user);
   const agentIdGroups = await Promise.all(ownerIds.map((ownerId) => getUserAgentIds(ownerId)));
   const directIds = new Set(agentIdGroups.flat().map(String));
-  const fallbackIds = await getFallbackAgentIds(user, ownerIds, accessibleUsers);
+  const recoveredIds = new Set(await getRecoveredAgentIdsByHandle(recoverableHandles));
+  const resolvedIds = new Set([...directIds, ...recoveredIds]);
 
-  return Array.from(new Set([...directIds, ...fallbackIds]));
+  const hasConfidentFastPath = !isInternalSharedAccount(user)
+    || directIds.size > 1
+    || recoveredIds.size > 1
+    || (directIds.size > 0 && recoveredIds.size > 0);
+
+  if (hasConfidentFastPath && resolvedIds.size > 0) {
+    return Array.from(resolvedIds);
+  }
+
+  const accessibleUsers = await getAccessibleUsers(user);
+  const fallbackOwnerIds = accessibleUsers.map((candidate) => String(candidate.id));
+  const fallbackIds = await getFallbackAgentIdsFromScan(user, fallbackOwnerIds, accessibleUsers);
+  return Array.from(new Set(fallbackIds));
 }
 
 export async function getAccessibleAgentCount(user: User): Promise<number> {

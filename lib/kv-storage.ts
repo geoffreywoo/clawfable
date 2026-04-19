@@ -261,6 +261,32 @@ async function kvLrange(key: string, start: number, stop: number): Promise<strin
   }
 }
 
+async function kvLlen(key: string): Promise<number> {
+  const cacheKey = `list:${key}`;
+  const cached = getCached<string[]>(cacheKey);
+  if (cached.hit && cached.value) {
+    return cached.value.length;
+  }
+  try {
+    const client = await getKvClient();
+    if (!client) {
+      const list = (memStore.get(key) as string[]) ?? [];
+      setCached(cacheKey, list);
+      return list.length;
+    }
+    if (typeof client.llen === 'function') {
+      return Number(await client.llen(key));
+    }
+    const full = (await client.lrange(key, 0, -1)) as string[];
+    setCached(cacheKey, full);
+    return full.length;
+  } catch {
+    const list = (memStore.get(key) as string[]) ?? [];
+    setCached(cacheKey, list);
+    return list.length;
+  }
+}
+
 async function kvLrem(key: string, count: number, value: string): Promise<void> {
   invalidateCached(`list:${key}`);
   try {
@@ -633,6 +659,10 @@ export async function getTweets(agentId: string): Promise<Tweet[]> {
   return tweets.filter((t): t is Tweet => t !== null).map(normalizeTweetRecord);
 }
 
+export async function getTweetCount(agentId: string): Promise<number> {
+  return kvLlen(KEYS.agentTweets(agentId));
+}
+
 export async function getTweet(id: string): Promise<Tweet | null> {
   const tweet = await kvHgetall<Tweet>(KEYS.tweet(String(id)));
   return tweet ? normalizeTweetRecord(tweet) : null;
@@ -768,6 +798,10 @@ export async function getMentions(agentId: string): Promise<Mention[]> {
     .filter((m): m is Mention => m !== null)
     .map((m) => normalizeId({ ...m, id: String(m.id), tweetId: m.tweetId != null ? String(m.tweetId) : null, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getMentionCount(agentId: string): Promise<number> {
+  return kvLlen(KEYS.agentMentions(agentId));
 }
 
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
