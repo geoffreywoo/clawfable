@@ -31,6 +31,9 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
   const connectionStatusNote = agent.connectionStatusNote ?? null;
+  const connectionActionLabel = connecting
+    ? isConnected ? 'REDIRECTING TO RE-AUTH...' : 'REDIRECTING...'
+    : isConnected ? 'RE-AUTH X FOR THIS AGENT' : 'ATTACH X TO THIS AGENT';
 
   const handleGenerateSoul = async () => {
     if (!isConnected) {
@@ -267,16 +270,27 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                 {isConnected ? 'X API CONNECTED' : 'X API DISCONNECTED'}
               </span>
             </div>
-            {isConnected && (
+            <div className="flex items-center gap-2">
               <button
-                className="btn btn-danger btn-sm"
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                data-testid="button-disconnect"
+                className={`btn ${isConnected ? 'btn-outline' : 'btn-primary'} btn-sm`}
+                onClick={handleOAuthConnect}
+                disabled={connecting || disconnecting}
+                data-testid={isConnected ? 'button-reauth' : 'button-connect'}
+                style={isConnected ? undefined : { background: '#8b5cf6' }}
               >
-                {disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+                {connectionActionLabel}
               </button>
-            )}
+              {isConnected && (
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={handleDisconnect}
+                  disabled={disconnecting || connecting}
+                  data-testid="button-disconnect"
+                >
+                  {disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+                </button>
+              )}
+            </div>
           </div>
           <p
             style={{
@@ -286,7 +300,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             }}
           >
             {isConnected
-              ? 'Connected — live posting and mentions sync enabled.'
+              ? 'Connected — live posting and mentions sync enabled. Use re-auth to refresh this agent without disconnecting first.'
               : 'This specific agent does not currently have an attached X user token. Logging into Clawfable is separate from attaching X to this agent.'}
           </p>
           {!isConnected && connectionStatusNote && (
@@ -335,26 +349,13 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           )}
         </div>
 
-        {/* OAuth connect button */}
-        {!isConnected && (
-          <div style={{ marginTop: '12px' }}>
-            <button
-              className="btn btn-primary btn-wide"
-              disabled={connecting}
-              onClick={handleOAuthConnect}
-              data-testid="button-connect"
-              style={{ background: '#8b5cf6' }}
-            >
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
-                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-              </svg>
-              {connecting ? 'REDIRECTING...' : 'ATTACH X TO THIS AGENT'}
-            </button>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
-              You&apos;ll be redirected to X to authorize this specific agent. A successful callback should flip the status card above from disconnected to connected.
-            </p>
-          </div>
-        )}
+        <div style={{ marginTop: '12px' }}>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
+            {isConnected
+              ? 'Re-auth refreshes this agent’s X token and permissions in place. Disconnect only removes the current token from this agent.'
+              : 'You’ll be redirected to X to authorize this specific agent. A successful callback should flip the status card above from disconnected to connected.'}
+          </p>
+        </div>
       </div>
 
       {/* ─── Soul Evolution ────────────────────────────────────────────────── */}
