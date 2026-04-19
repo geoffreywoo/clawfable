@@ -15,15 +15,19 @@ export interface TwitterKeys {
   accessSecret: string;
 }
 
+function normalizeKeyPart(value: string): string {
+  return value.trim();
+}
+
 /**
  * Create a TwitterApi client from raw key strings.
  */
 export function createClient(keys: TwitterKeys): TwitterApi {
   return new TwitterApi({
-    appKey: keys.appKey,
-    appSecret: keys.appSecret,
-    accessToken: keys.accessToken,
-    accessSecret: keys.accessSecret,
+    appKey: normalizeKeyPart(keys.appKey),
+    appSecret: normalizeKeyPart(keys.appSecret),
+    accessToken: normalizeKeyPart(keys.accessToken),
+    accessSecret: normalizeKeyPart(keys.accessSecret),
   });
 }
 
@@ -431,10 +435,10 @@ export function decodeKeys(encoded: {
   accessSecret: string;
 }): TwitterKeys {
   return {
-    appKey: Buffer.from(encoded.apiKey, 'base64').toString('utf-8'),
-    appSecret: Buffer.from(encoded.apiSecret, 'base64').toString('utf-8'),
-    accessToken: Buffer.from(encoded.accessToken, 'base64').toString('utf-8'),
-    accessSecret: Buffer.from(encoded.accessSecret, 'base64').toString('utf-8'),
+    appKey: normalizeKeyPart(Buffer.from(encoded.apiKey, 'base64').toString('utf-8')),
+    appSecret: normalizeKeyPart(Buffer.from(encoded.apiSecret, 'base64').toString('utf-8')),
+    accessToken: normalizeKeyPart(Buffer.from(encoded.accessToken, 'base64').toString('utf-8')),
+    accessSecret: normalizeKeyPart(Buffer.from(encoded.accessSecret, 'base64').toString('utf-8')),
   };
 }
 

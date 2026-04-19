@@ -19,8 +19,18 @@ export async function POST(
       return NextResponse.json({ error: 'All four API keys are required' }, { status: 400 });
     }
 
+    const normalizedApiKey = String(apiKey).trim();
+    const normalizedApiSecret = String(apiSecret).trim();
+    const normalizedAccessToken = String(accessToken).trim();
+    const normalizedAccessSecret = String(accessSecret).trim();
+
     // Validate keys by calling getMe
-    const keys = { appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret };
+    const keys = {
+      appKey: normalizedApiKey,
+      appSecret: normalizedApiSecret,
+      accessToken: normalizedAccessToken,
+      accessSecret: normalizedAccessSecret,
+    };
     const user = await getMe(keys);
 
     const duplicateAgent = await findExistingConnectedAgentByXUserId(user.id, id);
@@ -33,10 +43,10 @@ export async function POST(
 
     // Store encoded and advance setup step
     const updates: Record<string, unknown> = {
-      apiKey: Buffer.from(apiKey).toString('base64'),
-      apiSecret: Buffer.from(apiSecret).toString('base64'),
-      accessToken: Buffer.from(accessToken).toString('base64'),
-      accessSecret: Buffer.from(accessSecret).toString('base64'),
+      apiKey: Buffer.from(normalizedApiKey).toString('base64'),
+      apiSecret: Buffer.from(normalizedApiSecret).toString('base64'),
+      accessToken: Buffer.from(normalizedAccessToken).toString('base64'),
+      accessSecret: Buffer.from(normalizedAccessSecret).toString('base64'),
       isConnected: 1,
       xUserId: user.id,
     };

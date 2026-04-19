@@ -62,8 +62,8 @@ export async function GET(request: NextRequest) {
         return response;
       }
 
-      const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
-      const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
+      const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
+      const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
 
       // If forking from an existing agent, pre-fill the SOUL.md
       let soulMd = '# Pending SOUL.md setup';
@@ -92,8 +92,8 @@ export async function GET(request: NextRequest) {
         soulSummary,
         apiKey: Buffer.from(consumerKey).toString('base64'),
         apiSecret: Buffer.from(consumerSecret).toString('base64'),
-        accessToken: Buffer.from(accessToken).toString('base64'),
-        accessSecret: Buffer.from(accessSecret).toString('base64'),
+        accessToken: Buffer.from(accessToken.trim()).toString('base64'),
+        accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
         isConnected: 1,
         xUserId: userId,
         setupStep,
