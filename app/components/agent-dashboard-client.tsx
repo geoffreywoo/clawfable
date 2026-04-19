@@ -228,12 +228,12 @@ export function AgentDashboardClient({
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
                   left: 0,
-                  background: '#1a1a1a',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  minWidth: '180px',
+                  background: 'var(--surface)',
+                  border: '1px solid rgba(70, 54, 38, 0.14)',
+                  borderRadius: '16px',
+                  minWidth: '220px',
                   zIndex: 50,
-                  boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
+                  boxShadow: '0 18px 36px rgba(70, 54, 38, 0.14)',
                   overflow: 'hidden',
                 }}
               >
@@ -252,25 +252,26 @@ export function AgentDashboardClient({
                         padding: '10px 12px',
                         background: 'none',
                         border: 'none',
-                        borderBottom: '1px solid var(--border)',
+                        borderBottom: '1px solid rgba(70, 54, 38, 0.08)',
                         cursor: 'pointer',
                         textAlign: 'left',
+                        color: 'var(--text)',
                       }}
-                      onMouseEnter={(event) => (event.currentTarget.style.background = '#222')}
+                      onMouseEnter={(event) => (event.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
                     >
                       <div style={{
                         width: '22px', height: '22px', borderRadius: '5px', flexShrink: 0,
-                        background: `hsla(${otherHue}, 60%, 22%, 0.5)`,
-                        border: `1px solid hsla(${otherHue}, 60%, 40%, 0.3)`,
+                        background: `hsla(${otherHue}, 60%, 92%, 1)`,
+                        border: `1px solid hsla(${otherHue}, 45%, 48%, 0.22)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700,
-                        color: `hsl(${otherHue}, 60%, 65%)`,
+                        color: `hsl(${otherHue}, 45%, 34%)`,
                       }}>
                         {otherAgent.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>
                           {otherAgent.name}
                         </div>
                         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-muted)' }}>
