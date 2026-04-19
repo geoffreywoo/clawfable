@@ -243,6 +243,37 @@ describe('autopilot remote debug logging', () => {
     expect(result.reason).toContain('topic=masculinity');
   });
 
+  it('does not misclassify unauthorized post failures as rate limits when the draft mentions rate limits', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([
+      {
+        ...queuedTweet,
+        id: 'rate-limit-false-positive',
+        content: 'every founder talking about rate limits is missing the real problem',
+        topic: 'software',
+      },
+    ]);
+    mocks.postTweet.mockRejectedValue(new TwitterActionError({
+      action: 'post_tweet',
+      statusCode: 401,
+      title: 'Unauthorized',
+      detail: 'Unauthorized',
+      context: {
+        preview: 'every founder talking about rate limits is missing the real problem',
+      },
+    }));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('error');
+    expect(result.reason).toContain('post_tweet [401 Unauthorized]');
+    expect(result.reason).not.toContain('Rate limited');
+    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
+      baseAgent,
+      expect.objectContaining({ id: 'rate-limit-false-positive' }),
+      expect.stringContaining('401 Unauthorized')
+    );
+  });
+
   it('clears stale template fallback drafts when richer generation is available again', async () => {
     mocks.getQueuedTweets
       .mockResolvedValueOnce([

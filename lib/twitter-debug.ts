@@ -79,6 +79,26 @@ export function getActionErrorStatusCode(error: unknown): number | undefined {
   return isTwitterActionError(error) ? error.statusCode : undefined;
 }
 
+export function isRateLimitTwitterError(error: unknown): boolean {
+  const statusCode = getActionErrorStatusCode(error);
+  if (statusCode !== undefined) {
+    return statusCode === 429;
+  }
+
+  const actionError = isTwitterActionError(error) ? error : null;
+  const summary = [
+    actionError?.title,
+    actionError?.detail,
+    actionError?.rawMessage,
+    error instanceof Error ? error.message : String(error),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return summary.includes('rate limit') || summary.includes('429');
+}
+
 export function isTransientTwitterError(error: unknown): boolean {
   const statusCode = getActionErrorStatusCode(error);
   if (statusCode !== undefined) {

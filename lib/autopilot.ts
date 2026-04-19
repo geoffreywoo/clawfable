@@ -32,7 +32,7 @@ import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
-import { formatActionError, getActionErrorStatusCode, isTransientTwitterError } from './twitter-debug';
+import { formatActionError, getActionErrorStatusCode, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
   jitterInterval,
@@ -415,7 +415,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
     // Detect rate limit (429) or server error (5xx) and back off
     const statusCode = getActionErrorStatusCode(err);
-    const isRateLimit = statusCode === 429 || message.toLowerCase().includes('rate limit');
+    const isRateLimit = isRateLimitTwitterError(err);
     const isServerError = isTransientTwitterError(err) && statusCode !== 429;
     if (isRateLimit || isServerError) {
       const backoffMins = isRateLimit ? 60 : 15;
