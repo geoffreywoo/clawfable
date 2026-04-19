@@ -112,11 +112,15 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Delete failed');
+      }
       showToast('Agent deleted');
       onAgentDeleted();
-    } catch {
-      showToast('Delete failed');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed');
       setDeleting(false);
     }
   };

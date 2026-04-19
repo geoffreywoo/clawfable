@@ -367,7 +367,9 @@ export function AgentDashboardClient({
           <SettingsTab
             agentId={agentId}
             agent={agent}
-            onAgentDeleted={() => router.push(CONTROL_ROOM_PATH)}
+            onAgentDeleted={() => {
+              window.location.href = CONTROL_ROOM_PATH;
+            }}
             onAgentUpdated={loadDashboardShell}
           />
         )}

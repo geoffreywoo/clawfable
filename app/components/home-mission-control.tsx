@@ -53,6 +53,10 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
   }, [router]);
 
   useEffect(() => {
+    void loadControlRoom({ silent: true });
+  }, [loadControlRoom]);
+
+  useEffect(() => {
     const refreshIfVisible = () => {
       if (document.visibilityState !== 'visible') return;
       void loadControlRoom({ silent: true });

@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getSession, getUser, getAgent } from './kv-storage';
+import { getSession, getUser, getAgent, resetReadCache } from './kv-storage';
 import { canAccessAgent } from './account-access';
 import type { User, Agent } from './types';
 
@@ -19,6 +19,7 @@ export class NotFoundError extends Error {
  * Throws AuthError if not logged in.
  */
 export async function requireUser(): Promise<User> {
+  resetReadCache();
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) throw new AuthError();

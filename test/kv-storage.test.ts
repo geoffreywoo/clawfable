@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  addAgentToUser,
   createAgent,
+  getOrCreateUser,
   getAgent,
   getAgents,
+  getUserAgentIds,
   updateAgent,
   deleteAgent,
   createTweet,
@@ -67,6 +70,28 @@ describe('kv-storage', () => {
       await deleteAgent(agent.id);
       const retrieved = await getAgent(agent.id);
       expect(retrieved).toBeNull();
+    });
+
+    it('removes a deleted agent from every user-agent index', async () => {
+      const owner = await getOrCreateUser('delete-user-1', 'deleteowner', 'Delete Owner');
+      const secondary = await getOrCreateUser('delete-user-2', 'deleteviewer', 'Delete Viewer');
+
+      const agent = await createAgent({
+        handle: 'delete-index-test',
+        name: 'Delete Index Test',
+        soulMd: '# Delete index test',
+      } as any);
+
+      await addAgentToUser(owner.id, agent.id);
+      await addAgentToUser(secondary.id, agent.id);
+
+      expect(await getUserAgentIds(owner.id)).toContain(agent.id);
+      expect(await getUserAgentIds(secondary.id)).toContain(agent.id);
+
+      await deleteAgent(agent.id);
+
+      expect(await getUserAgentIds(owner.id)).not.toContain(agent.id);
+      expect(await getUserAgentIds(secondary.id)).not.toContain(agent.id);
     });
   });
 

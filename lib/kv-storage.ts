@@ -525,7 +525,7 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agent(id));
   await kvSrem(KEYS.agentSet(), id);
   await kvDel(KEYS.agentHandle(agent.handle));
-  await kvDel(KEYS.agentOwner(id));
+  await removeAgentFromAllUsers(id);
 }
 
 // ─── Tweet storage ────────────────────────────────────────────────────────────
@@ -1149,6 +1149,14 @@ export async function addAgentToUser(userId: string, agentId: string): Promise<v
 
 export async function removeAgentFromUser(userId: string, agentId: string): Promise<void> {
   await kvSrem(KEYS.userAgents(userId), agentId);
+  await kvDel(KEYS.agentOwner(agentId));
+}
+
+export async function removeAgentFromAllUsers(agentId: string): Promise<void> {
+  const users = await getUsers();
+  if (users.length > 0) {
+    await Promise.all(users.map((user) => kvSrem(KEYS.userAgents(String(user.id)), String(agentId))));
+  }
   await kvDel(KEYS.agentOwner(agentId));
 }
 
