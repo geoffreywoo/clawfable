@@ -2032,7 +2032,7 @@ h1, h2, h3, h4 {
 .learning-digest {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid #8b5cf6;
+  border-left: 3px solid var(--primary);
   border-radius: var(--radius-lg);
   padding: 20px 24px;
 }
@@ -2121,32 +2121,32 @@ h1, h2, h3, h4 {
 .experiment-card,
 .decision-signal-chip {
   --tone-color: var(--text-muted);
-  --tone-bg: rgba(255, 255, 255, 0.04);
+  --tone-bg: rgba(94, 109, 99, 0.08);
   --tone-border: var(--border);
 }
 
 .learning-tone-positive {
-  --tone-color: #22c55e;
-  --tone-bg: rgba(34, 197, 94, 0.08);
-  --tone-border: rgba(34, 197, 94, 0.24);
+  --tone-color: var(--green);
+  --tone-bg: rgba(47, 154, 95, 0.12);
+  --tone-border: rgba(47, 154, 95, 0.24);
 }
 
 .learning-tone-neutral {
-  --tone-color: #8b5cf6;
-  --tone-bg: rgba(139, 92, 246, 0.08);
-  --tone-border: rgba(139, 92, 246, 0.24);
+  --tone-color: #4f84c4;
+  --tone-bg: rgba(79, 132, 196, 0.12);
+  --tone-border: rgba(79, 132, 196, 0.22);
 }
 
 .learning-tone-warning {
-  --tone-color: #f59e0b;
-  --tone-bg: rgba(245, 158, 11, 0.08);
-  --tone-border: rgba(245, 158, 11, 0.24);
+  --tone-color: var(--warning);
+  --tone-bg: rgba(199, 133, 40, 0.12);
+  --tone-border: rgba(199, 133, 40, 0.22);
 }
 
 .learning-tone-danger {
-  --tone-color: #ef4444;
-  --tone-bg: rgba(239, 68, 68, 0.08);
-  --tone-border: rgba(239, 68, 68, 0.24);
+  --tone-color: var(--red);
+  --tone-bg: rgba(214, 92, 92, 0.12);
+  --tone-border: rgba(214, 92, 92, 0.22);
 }
 
 .learning-hero {
@@ -2700,6 +2700,462 @@ h1, h2, h3, h4 {
   border-radius: 999px;
 }
 
+.learning-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.learning-scoreboard-shell {
+  position: sticky;
+  top: 12px;
+  z-index: 2;
+}
+
+.learning-scoreboard {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(251, 246, 238, 0.96));
+  border: 1px solid rgba(70, 54, 38, 0.14);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: 0 14px 34px rgba(70, 54, 38, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.learning-scoreboard-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.learning-scoreboard-title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 1.08;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.learning-scoreboard-copy,
+.learning-section-copy,
+.learning-story-empty,
+.learning-performance-sub,
+.experiment-summary-cell strong,
+.experiment-confidence {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.learning-scoreboard-copy,
+.learning-section-copy,
+.learning-story-empty {
+  color: var(--text-muted);
+}
+
+.learning-scoreboard-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 360px;
+}
+
+.learning-status-banner {
+  border: 1px solid var(--tone-border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--tone-bg), rgba(255, 255, 255, 0.6));
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.learning-status-banner-label {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.learning-status-banner-copy {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.learning-scoreboard-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.learning-score-card,
+.learning-performance-card,
+.learning-story-panel,
+.learning-event-group,
+.learning-funnel-card {
+  background: var(--surface);
+  border: 1px solid rgba(70, 54, 38, 0.12);
+  border-radius: 18px;
+}
+
+.learning-score-card {
+  border-color: var(--tone-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), var(--tone-bg));
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learning-score-card-head,
+.learning-story-item-head,
+.learning-funnel-headline,
+.experiment-lane-headline,
+.experiment-summary-grid-modern,
+.learning-event-group-head,
+.decision-explainer-meta,
+.decision-outcome-grid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.learning-score-card-label,
+.learning-story-kicker,
+.learning-performance-label,
+.experiment-summary-label,
+.decision-outcome-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.learning-score-card-value,
+.learning-performance-value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+
+.learning-score-card-delta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--tone-color);
+}
+
+.learning-score-card-copy {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  min-height: 58px;
+}
+
+.learning-sparkline {
+  width: 100%;
+  height: 28px;
+  display: block;
+}
+
+.learning-sparkline-line {
+  fill: none;
+  stroke: var(--tone-color);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.learning-story-grid,
+.learning-events-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.learning-story-panel,
+.learning-event-group,
+.learning-funnel-card,
+.learning-performance-panel {
+  padding: 18px;
+}
+
+.learning-story-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.18;
+  color: var(--text);
+  margin-top: 6px;
+}
+
+.learning-story-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.learning-story-item {
+  border: 1px solid var(--tone-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), var(--tone-bg));
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.learning-story-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.learning-story-item-summary {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  margin-top: 8px;
+}
+
+.learning-story-item-meta {
+  margin-top: 10px;
+}
+
+.learning-impact-chip,
+.learning-state-chip,
+.learning-confidence-pill,
+.decision-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--tone-border);
+  background: var(--tone-bg);
+  padding: 5px 9px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tone-color);
+  white-space: nowrap;
+}
+
+.learning-evidence-drawer {
+  margin-top: 10px;
+  border-top: 1px solid rgba(70, 54, 38, 0.1);
+  padding-top: 10px;
+}
+
+.learning-evidence-drawer summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.learning-evidence-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+.learning-evidence-drawer summary::after {
+  content: '+';
+  margin-left: 8px;
+}
+
+.learning-evidence-drawer[open] summary::after {
+  content: '−';
+}
+
+.learning-evidence-list,
+.decision-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.learning-evidence-list li,
+.decision-list li {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.learning-buckets-grid-modern,
+.experiment-grid-modern,
+.learning-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.learning-bucket-modern {
+  padding: 18px;
+}
+
+.learning-confidence-pill {
+  font-size: 10px;
+}
+
+.experiment-lane-modern {
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(243, 235, 223, 0.78));
+}
+
+.experiment-lane-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.experiment-confidence {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.experiment-summary-grid-modern {
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.experiment-summary-cell {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid rgba(70, 54, 38, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.experiment-summary-cell strong {
+  display: block;
+  color: var(--text);
+  margin-top: 6px;
+}
+
+.experiment-evidence-drawer {
+  margin-top: 12px;
+}
+
+.learning-performance-grid {
+  margin-top: 16px;
+}
+
+.learning-performance-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learning-performance-sub {
+  color: var(--text-muted);
+  min-height: 44px;
+}
+
+.learning-funnel-card {
+  margin-top: 16px;
+}
+
+.learning-funnel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.learning-funnel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.learning-funnel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.learning-funnel-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.learning-funnel-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), #8bbf9f);
+}
+
+.learning-event-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.learning-event-compact {
+  padding: 12px 14px;
+}
+
+.decision-summary-grid-modern {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.decision-summary-badge {
+  width: 100%;
+}
+
+.decision-explainer-meta {
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.decision-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.decision-outcome-grid {
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.decision-outcome-card {
+  flex: 1;
+  border: 1px solid rgba(70, 54, 38, 0.08);
+  border-radius: 12px;
+  background: var(--surface-3);
+  padding: 10px;
+}
+
+.decision-outcome-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
 /* ─── Rankings grid ────────────────────────────────────────────────────────── */
 .rankings-grid {
   display: grid;
@@ -2736,15 +3192,28 @@ h1, h2, h3, h4 {
   .comparison-grid,
   .learning-primer-grid,
   .learning-buckets-grid,
+  .learning-buckets-grid-modern,
   .experiment-grid,
+  .experiment-grid-modern,
   .learning-kpi-grid,
+  .learning-scoreboard-grid,
+  .learning-story-grid,
+  .learning-events-grid,
+  .learning-performance-grid,
+  .learning-funnel-grid,
   .decision-panel-top,
+  .decision-insight-grid,
   .decision-score-grid {
     grid-template-columns: 1fr;
   }
 
   .learning-hero-head,
-  .learning-event-head {
+  .learning-event-head,
+  .learning-scoreboard-top,
+  .learning-funnel-headline,
+  .experiment-lane-headline,
+  .learning-score-card-head,
+  .learning-story-item-head {
     flex-direction: column;
   }
 
@@ -2752,8 +3221,18 @@ h1, h2, h3, h4 {
     align-items: flex-start;
   }
 
-  .decision-summary-grid {
+  .decision-summary-grid,
+  .decision-summary-grid-modern,
+  .experiment-summary-grid-modern {
     grid-template-columns: 1fr;
+  }
+
+  .learning-scoreboard-shell {
+    position: static;
+  }
+
+  .learning-scoreboard {
+    padding: 18px;
   }
 }
 
