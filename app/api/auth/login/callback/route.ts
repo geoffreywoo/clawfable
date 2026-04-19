@@ -7,6 +7,7 @@ import { COOKIE_NAME } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { getPresetSoulProfile } from '@/lib/open-source-souls';
 import { resolveRequestOrigin } from '@/lib/request-origin';
+import { getSessionCookieOptions } from '@/lib/session-cookie';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
@@ -57,13 +58,7 @@ export async function GET(request: NextRequest) {
         // X account already has an active agent — redirect to it instead of creating duplicate
         redirectPath = `/agent/${duplicateAgent.id}`;
         const response = NextResponse.redirect(new URL(redirectPath, origin));
-        response.cookies.set(COOKIE_NAME, sessionToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          path: '/',
-          maxAge: THIRTY_DAYS,
-        });
+        response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
         return response;
       }
 
@@ -138,13 +133,7 @@ export async function GET(request: NextRequest) {
     }
 
     const response = NextResponse.redirect(new URL(redirectPath, origin));
-    response.cookies.set(COOKIE_NAME, sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: THIRTY_DAYS,
-    });
+    response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
 
     return response;
   } catch (err) {

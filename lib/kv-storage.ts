@@ -375,7 +375,7 @@ export async function getAgents(): Promise<Agent[]> {
   return agents
     .filter((a): a is Agent => a !== null)
     .map(normalizeId)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort(compareNewestRecordFirst);
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {
@@ -483,6 +483,19 @@ export async function deleteAgent(id: string): Promise<void> {
 // IDs are always strings internally, so coerce on read.
 function normalizeId<T extends { id: unknown }>(obj: T): T & { id: string } {
   return { ...obj, id: String(obj.id) };
+}
+
+function compareNewestRecordFirst<T extends { createdAt: string; id?: unknown }>(a: T, b: T): number {
+  const createdAtDelta = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  if (createdAtDelta !== 0) return createdAtDelta;
+
+  const aId = Number(a.id);
+  const bId = Number(b.id);
+  if (Number.isFinite(aId) && Number.isFinite(bId)) {
+    return bId - aId;
+  }
+
+  return String(b.id ?? '').localeCompare(String(a.id ?? ''));
 }
 
 function normalizeUser(user: User): User {
@@ -1030,7 +1043,8 @@ export async function getUserAgents(userId: string): Promise<Agent[]> {
   const agents = await Promise.all(ids.map((id) => kvHgetall<Agent>(KEYS.agent(id))));
   return agents
     .filter((a): a is Agent => a !== null)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .map(normalizeId)
+    .sort(compareNewestRecordFirst);
 }
 
 export async function addAgentToUser(userId: string, agentId: string): Promise<void> {

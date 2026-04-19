@@ -36,4 +36,46 @@ describe('internal shared account access', () => {
     expect(await canAccessAgent(geoffrey, antifundAgent.id)).toBe(true);
     expect(await canAccessAgent(outsider, geoffreyAgent.id)).toBe(false);
   });
+
+  it('recovers access when the user-agent index is missing but the agent xUserId matches the user', async () => {
+    const user = await getOrCreateUser('fallback-user-1', 'fallbackuser', 'Fallback User');
+
+    const agent = await createAgent({
+      handle: 'fallbackuser',
+      name: 'Fallback User Agent',
+      soulMd: '# soul',
+      xUserId: user.id,
+      isConnected: 1,
+      setupStep: 'ready',
+    } as any);
+
+    expect(await getAccessibleAgentIds(user)).toContain(agent.id);
+    expect(await canAccessAgent(user, agent.id)).toBe(true);
+  });
+
+  it('uses only the newest matching internal handle when recovering shared access from stale indices', async () => {
+    const geoffrey = await getOrCreateUser('fallback-user-2', 'geoffreywoo', 'Geoffrey Woo');
+    await getOrCreateUser('fallback-user-3', 'clawfable', 'Clawfable');
+
+    const olderAgent = await createAgent({
+      handle: 'clawfable',
+      name: 'Clawfable Old',
+      soulMd: '# soul',
+      isConnected: 0,
+      setupStep: 'soul',
+    } as any);
+
+    const newerAgent = await createAgent({
+      handle: 'clawfable',
+      name: 'Clawfable New',
+      soulMd: '# soul',
+      isConnected: 1,
+      setupStep: 'ready',
+    } as any);
+
+    const accessibleIds = await getAccessibleAgentIds(geoffrey);
+
+    expect(accessibleIds).toContain(newerAgent.id);
+    expect(accessibleIds).not.toContain(olderAgent.id);
+  });
 });

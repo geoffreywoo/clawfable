@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { AgentDashboardClient } from '@/app/components/agent-dashboard-client';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
-import { requireAgentAccess } from '@/lib/auth';
+import { AuthError, NotFoundError, requireAgentAccess } from '@/lib/auth';
 import {
   getAgentSummariesForUser,
   getProtocolSnapshot,
@@ -42,7 +42,15 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
         shouldOpenSetupContinuation={resolvedSearchParams.oauth === 'success'}
       />
     );
-  } catch {
-    redirect(CONTROL_ROOM_PATH);
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof NotFoundError) {
+      redirect(CONTROL_ROOM_PATH);
+    }
+
+    console.error('Agent dashboard load failed', {
+      agentId: id,
+      error: err instanceof Error ? err.message : err,
+    });
+    throw err;
   }
 }

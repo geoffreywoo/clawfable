@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { SETUP_BANNER_CONTENT, normalizeSetupStep } from '@/lib/setup-state';
 import type { AgentSummary } from '@/lib/types';
 
@@ -13,7 +13,6 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
-  const router = useRouter();
   const hue = getAgentHue(agent.name);
   const isConnected = agent.isConnected === 1;
   const setupStep = normalizeSetupStep(agent.setupStep);
@@ -25,15 +24,14 @@ export function AgentCard({ agent }: AgentCardProps) {
       ? 'Setup is still in progress. Open the control room to finish the voice contract and approve the first batch.'
       : 'Open the control room to inspect the queue, tune the voice, and watch what the system is learning.';
 
-  const handleOpen = () => {
-    router.push(`/agent/${agent.id}`);
-  };
-
   return (
-    <div
+    <Link
+      href={`/agent/${agent.id}`}
       className="agent-card"
       style={{
         borderColor: `hsla(${hue}, 45%, 48%, 0.22)`,
+        color: 'inherit',
+        textDecoration: 'none',
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLElement;
@@ -45,7 +43,6 @@ export function AgentCard({ agent }: AgentCardProps) {
         el.style.boxShadow = '';
         el.style.borderColor = `hsla(${hue}, 45%, 48%, 0.22)`;
       }}
-      onClick={handleOpen}
       data-testid={`card-agent-${agent.id}`}
     >
       {/* Header */}
@@ -101,7 +98,7 @@ export function AgentCard({ agent }: AgentCardProps) {
       </div>
 
       {/* Open button */}
-      <button
+      <span
         className="btn"
         style={{
           width: '100%',
@@ -110,14 +107,10 @@ export function AgentCard({ agent }: AgentCardProps) {
           border: `1px solid hsla(${hue}, 45%, 48%, 0.22)`,
           color: `hsl(${hue}, 45%, 34%)`,
         }}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleOpen();
-        }}
         data-testid={`button-open-agent-${agent.id}`}
       >
         {inSetup ? 'Continue setup' : 'Open control room'}
-      </button>
-    </div>
+      </span>
+    </Link>
   );
 }
