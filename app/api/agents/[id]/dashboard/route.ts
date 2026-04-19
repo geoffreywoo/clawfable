@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import {
+  buildAgentDetail,
   getAgentLearningSnapshot,
   getAgentQueueFeed,
   getAgentSummariesForUser,
   getAgentTopics,
   getProtocolSnapshot,
-  serializeAgentDetail,
 } from '@/lib/dashboard-data';
 import { getAnalysis, getMetricsArray } from '@/lib/kv-storage';
 
@@ -55,7 +55,7 @@ export async function GET(
     const tasks = sections.map(async (section) => {
       switch (section) {
         case 'agent':
-          response.agent = serializeAgentDetail(agent);
+          response.agent = await buildAgentDetail(agent);
           return;
         case 'otherAgents':
           response.otherAgents = (await getAgentSummariesForUser(user)).filter((candidate) => candidate.id !== agent.id);

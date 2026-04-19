@@ -105,6 +105,10 @@ export interface AgentDetail {
   setupStep: SetupStep;
   createdAt: string;
   hasKeys: boolean;
+  connectionStatusNote?: {
+    reason: string;
+    occurredAt: string;
+  } | null;
 }
 
 export type AutonomyMode = 'safe' | 'balanced' | 'explore';

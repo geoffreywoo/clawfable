@@ -30,6 +30,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
+  const connectionStatusNote = agent.connectionStatusNote ?? null;
 
   const handleGenerateSoul = async () => {
     if (!isConnected) {
@@ -286,8 +287,52 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           >
             {isConnected
               ? 'Connected — live posting and mentions sync enabled.'
-              : 'Configure your X API keys below to enable live posting and mentions sync.'}
+              : 'This specific agent does not currently have an attached X user token. Logging into Clawfable is separate from attaching X to this agent.'}
           </p>
+          {!isConnected && connectionStatusNote && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(139,92,246,0.18)',
+                background: 'rgba(139,92,246,0.06)',
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#c4b5fd',
+                  marginBottom: '6px',
+                }}
+              >
+                LAST X AUTH EVENT
+              </p>
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  lineHeight: '1.7',
+                  color: 'var(--text)',
+                }}
+              >
+                {connectionStatusNote.reason}
+              </p>
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '9px',
+                  color: 'var(--text-muted)',
+                  marginTop: '6px',
+                }}
+              >
+                {new Date(connectionStatusNote.occurredAt).toLocaleString()}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* OAuth connect button */}
@@ -303,10 +348,10 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                 <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
               </svg>
-              {connecting ? 'REDIRECTING...' : 'CONNECT X'}
+              {connecting ? 'REDIRECTING...' : 'ATTACH X TO THIS AGENT'}
             </button>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
-              You&apos;ll be redirected to X to authorize this agent. Requires Read + Write permissions and still does not post anything by itself.
+              You&apos;ll be redirected to X to authorize this specific agent. A successful callback should flip the status card above from disconnected to connected.
             </p>
           </div>
         )}

@@ -3,7 +3,7 @@ import { updateAgent, deleteAgent, removeAgentFromUser, saveFeedback, logFunnelE
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { isSetupStep } from '@/lib/setup-state';
-import { serializeAgentDetail } from '@/lib/dashboard-data';
+import { buildAgentDetail } from '@/lib/dashboard-data';
 
 // GET /api/agents/[id]
 export async function GET(
@@ -13,7 +13,7 @@ export async function GET(
   const { id } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-    return NextResponse.json(serializeAgentDetail(agent));
+    return NextResponse.json(await buildAgentDetail(agent));
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch agent' }, { status: 500 });

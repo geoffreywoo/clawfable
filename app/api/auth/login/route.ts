@@ -15,7 +15,13 @@ export async function POST(request: NextRequest) {
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
 
-    await saveOAuthTemp(oauthToken, { oauthTokenSecret, agentId: null, purpose: 'login', forkHandle });
+    await saveOAuthTemp(oauthToken, {
+      oauthTokenSecret,
+      agentId: null,
+      purpose: 'login',
+      forkHandle,
+      createdAt: new Date().toISOString(),
+    });
 
     return NextResponse.json({ url });
   } catch (err) {

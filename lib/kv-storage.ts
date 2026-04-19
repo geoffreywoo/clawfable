@@ -866,6 +866,7 @@ export interface OAuthTempData {
   agentId: string | null;
   purpose: 'login' | 'connect';
   forkHandle?: string; // handle of agent whose SOUL to fork on signup
+  createdAt?: string;
 }
 
 export async function saveOAuthTemp(oauthToken: string, data: OAuthTempData): Promise<void> {

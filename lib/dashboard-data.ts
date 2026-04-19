@@ -74,6 +74,36 @@ export function serializeAgentDetail(agent: Agent): AgentDetail {
     setupStep: normalizeSetupStep(agent.setupStep),
     createdAt: agent.createdAt,
     hasKeys: !!(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret),
+    connectionStatusNote: null,
+  };
+}
+
+function isConnectionStatusLog(entry: PostLogEntry): boolean {
+  return [
+    'x_auth_invalid',
+    'x_auth_connected',
+    'x_auth_connect_start',
+    'x_auth_connect_start_error',
+    'x_auth_denied',
+    'x_auth_duplicate',
+    'x_auth_callback_error',
+  ].includes(entry.format);
+}
+
+export async function buildAgentDetail(agent: Agent): Promise<AgentDetail> {
+  const detail = serializeAgentDetail(agent);
+  const entries = await getPostLog(agent.id, 20);
+  const connectionEntry = entries.find(isConnectionStatusLog);
+  if (!connectionEntry?.reason) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    connectionStatusNote: {
+      reason: connectionEntry.reason,
+      occurredAt: connectionEntry.postedAt,
+    },
   };
 }
 

@@ -3,9 +3,9 @@ import { AgentDashboardShell } from '@/app/components/agent-dashboard-shell';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { AuthError, NotFoundError, requireAgentAccess } from '@/lib/auth';
 import {
+  buildAgentDetail,
   getAgentSummariesForUser,
   getProtocolSnapshot,
-  serializeAgentDetail,
 } from '@/lib/dashboard-data';
 import { getMetricsArray } from '@/lib/kv-storage';
 
@@ -25,11 +25,12 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
       getProtocolSnapshot(user, agent.id),
       getMetricsArray(agent.id),
     ]);
+    const agentDetail = await buildAgentDetail(agent);
 
     return (
       <AgentDashboardShell
         agentId={agent.id}
-        initialAgent={serializeAgentDetail(agent)}
+        initialAgent={agentDetail}
         initialOtherAgents={otherAgents}
         initialAutopilotData={{
           agentConnected: agent.isConnected === 1,
