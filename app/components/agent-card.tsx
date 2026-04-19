@@ -21,8 +21,8 @@ export function AgentCard({ agent }: AgentCardProps) {
   const soulPreview = agent.soulMdPreview && !agent.soulMdPreview.startsWith('# Pending')
     ? agent.soulMdPreview
     : inSetup
-      ? 'Setup is still in progress. Open the control room to finish the voice contract and approve the first batch.'
-      : 'Open the control room to inspect the queue, tune the voice, and watch what the system is learning.';
+      ? 'Setup is still in progress. Open the workspace to finish the voice contract and approve the first batch.'
+      : 'Open the workspace to inspect drafts, queue health, automation, and what the system is learning.';
 
   return (
     <Link
@@ -69,7 +69,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             title={inSetup ? 'Setup in progress' : isConnected ? 'X API Connected' : 'Not connected'}
           />
           <span className={`status-label ${inSetup ? 'setup' : isConnected ? 'live' : 'offline'}`}>
-            {inSetup ? 'SETUP' : isConnected ? 'LIVE' : 'OFFLINE'}
+            {inSetup ? 'Setup' : isConnected ? 'Live' : 'Offline'}
           </span>
         </div>
       </div>
@@ -109,7 +109,7 @@ export function AgentCard({ agent }: AgentCardProps) {
         }}
         data-testid={`button-open-agent-${agent.id}`}
       >
-        {inSetup ? 'Continue setup' : 'Open control room'}
+        {inSetup ? 'Continue setup' : 'Open workspace'}
       </span>
     </Link>
   );

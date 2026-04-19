@@ -474,7 +474,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
     return (
       <div className="learning-empty">
         <div className="learning-digest-header">
-          <h2>LEARNING</h2>
+          <h2>Learning</h2>
         </div>
         <p className="learning-progress-label">
           No learning snapshot yet. Approve, edit, copy, or delete a few drafts and this room will start showing what changed.
@@ -504,7 +504,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
         <div className="learning-scoreboard">
           <div className="learning-scoreboard-top">
             <div>
-              <p className="learning-hero-label">LEARNING SCOREBOARD</p>
+              <p className="learning-hero-label">Learning scoreboard</p>
               <h2 className="learning-scoreboard-title">Is this agent getting better?</h2>
               <p className="learning-scoreboard-copy">
                 This view defaults to this week vs last week, then lets you drill into what changed, what is under test, and which lessons are actively shaping drafts.
@@ -538,7 +538,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
       <section>
         <div className="section-header">
           <div className="section-title">
-            <h2>WHAT CHANGED</h2>
+            <h2>What changed</h2>
             <span className="section-count">plain-language explanations backed by real weekly movement</span>
           </div>
         </div>
@@ -567,7 +567,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
       <section>
         <div className="section-header">
           <div className="section-title">
-            <h2>CURRENT LESSONS</h2>
+            <h2>Current lessons</h2>
             <span className="section-count">what the system believes right now, in operator language</span>
           </div>
         </div>
@@ -584,7 +584,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
       <section>
         <div className="section-header">
           <div className="section-title">
-            <h2>ACTIVE EXPERIMENTS</h2>
+            <h2>Active experiments</h2>
             <span className="section-count">which feature bets are still competing for policy weight</span>
           </div>
         </div>
@@ -608,7 +608,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
       <section className="learning-performance-panel">
         <div className="section-header">
           <div className="section-title">
-            <h2>PERFORMANCE OF LEARNING</h2>
+            <h2>Performance of learning</h2>
             <span className="section-count">is the learning loop actually producing better behavior</span>
           </div>
         </div>
@@ -682,7 +682,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
       <section>
         <div className="section-header">
           <div className="section-title">
-            <h2>RECENT LEARNING EVENTS</h2>
+            <h2>Recent learning events</h2>
             <span className="section-count">grouped by the kind of evidence the system just received</span>
           </div>
         </div>

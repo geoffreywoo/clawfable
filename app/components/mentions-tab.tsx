@@ -236,7 +236,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       <div className="section-header">
         <div className="section-title">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="#8b5cf6" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="#8b5cf6" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
-          <h2>MENTIONS</h2>
+          <h2>Inbox</h2>
           <span className="section-count">{mentions.length} items</span>
         </div>
         <button
@@ -256,7 +256,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
           >
             <path d="M12 7A5 5 0 1 1 7 2M12 2v5l-5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {isRefreshing ? 'REFRESHING...' : 'REFRESH'}
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
@@ -332,7 +332,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                   onClick={() => handleGenerate(mention)}
                   data-testid={`button-reply-${mention.id}`}
                 >
-                  {generatingId === mention.id ? 'GENERATING...' : 'GENERATE REPLY'}
+                  {generatingId === mention.id ? 'Generating...' : 'Draft reply'}
                 </button>
               </div>
             </div>
@@ -340,7 +340,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
             {/* Reply draft */}
             {replyDrafts[mention.id] && (
               <div className="reply-draft" data-testid={`card-reply-${mention.id}`}>
-                <div className="reply-draft-label">REPLY DRAFT</div>
+                <div className="reply-draft-label">Reply draft</div>
                 <p style={{ fontSize: '13px', color: 'var(--text)', lineHeight: '1.65', marginBottom: '10px' }}>
                   {replyDrafts[mention.id].content}
                 </p>

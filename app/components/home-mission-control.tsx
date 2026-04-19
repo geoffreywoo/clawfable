@@ -186,7 +186,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                         onClick={() => handleCheckout('pro')}
                         disabled={billingLoading !== null}
                       >
-                        {billingLoading === 'checkout' ? 'Loading...' : 'Unlock autopilot'}
+                        {billingLoading === 'checkout' ? 'Loading...' : 'Unlock automation'}
                       </button>
                     )}
                   </div>
@@ -202,13 +202,13 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                 <h2 className="home-brief-title">
                   {setupAgents.length > 0
                     ? 'You are still in calibration.'
-                    : 'Your control room is live.'}
+                    : 'Your workspace is live.'}
                 </h2>
                 <p className="home-brief-body">
                   {setupAgents.length > 0
                     ? `${setupAgents.length} agent${setupAgents.length === 1 ? '' : 's'} still need setup review before they can run with confidence.`
                     : billing.canUseAutopilot
-                      ? 'Open any agent to inspect queue, learnings, and automation settings from one place.'
+                      ? 'Open any agent to inspect drafts, queue health, insights, and automation from one place.'
                       : 'Manual compose, queue review, and learning remain open. Upgrade when you want hands-off posting and reply automation.'}
                 </p>
                 {billing.grandfathered && (

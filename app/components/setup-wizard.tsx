@@ -707,7 +707,7 @@ export function SetupWizard({
                 <div className="wizard-launch-success">
                   <div className="wizard-launch-check">&#10003;</div>
                   <h3>Your agent is ready</h3>
-                  <p>Approved tweets are in queue and automation can now work from them. You can tune anything from the control room.</p>
+                  <p>Approved tweets are in queue and automation can now work from them. You can tune anything from the workspace.</p>
                 </div>
               ) : (
                 <>

@@ -228,7 +228,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
                 <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
               </svg>
-              <h2>DRAFT ON DEMAND</h2>
+              <h2>Create drafts</h2>
               <span className="section-count">voice, learning, and live topic signals</span>
             </div>
           </div>
@@ -259,7 +259,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           <button className="btn btn-primary" onClick={handleReanalyze} disabled={analyzing}
             style={{ marginTop: '12px', background: '#8b5cf6' }}
           >
-            {analyzing ? 'LEARNING...' : 'LEARN THIS ACCOUNT'}
+            {analyzing ? 'Learning...' : 'Learn this account'}
           </button>
         </div>
       )}
@@ -270,7 +270,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#8b5cf6" /></svg>
-              <h2>DRAFTS</h2>
+              <h2>Fresh drafts</h2>
               <span className="section-count">{generatedTweets.length} ready to review</span>
             </div>
           </div>
@@ -346,7 +346,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
         <div className="section-header">
           <div className="section-title">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polyline points="1,12 5,7 9,9 15,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            <h2>TRENDING IN YOUR NETWORK</h2>
+            <h2>Topics from your network</h2>
             <span className="section-count">{topics.length} topics</span>
           </div>
         </div>
@@ -412,11 +412,11 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                 <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.5" />
                 <path d="M8 4v4l3 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
-              <h2>ACCOUNT BASELINE</h2>
+              <h2>Account baseline</h2>
               <span className="section-count">analyzed {getTimeAgo(analysis.analyzedAt)}</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleReanalyze} disabled={analyzing}>
-              {analyzing ? 'LEARNING...' : 'REFRESH ANALYSIS'}
+              {analyzing ? 'Learning...' : 'Refresh analysis'}
             </button>
           </div>
 

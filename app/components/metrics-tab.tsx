@@ -222,7 +222,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
               <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
-            <h2>WHAT THE SYSTEM IS LEARNING</h2>
+            <h2>What the system is learning</h2>
             <span className="section-count">updated {getTimeAgo(learnings.updatedAt)}</span>
           </div>
           <ul className="learning-insights">
@@ -241,7 +241,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--text-dim)" strokeWidth="1.3" />
               <line x1="6" y1="14" x2="10" y2="14" stroke="var(--text-dim)" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
-            <h2>LEARNING</h2>
+            <h2>Learning</h2>
           </div>
           <div className="learning-progress">
             <p className="learning-progress-label">
@@ -268,7 +268,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <polyline points="2,11 6,7 9,8.5 14,3" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               <polyline points="10,3 14,3 14,7" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <h2>COMPOUNDING</h2>
+            <h2>Compounding</h2>
             <span className="section-count">how the system is improving from operator feedback</span>
           </div>
 
@@ -311,7 +311,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
           {timeseries.compounding.topLearnedRules.length > 0 && (
             <div className="learning-digest">
               <div className="learning-digest-header">
-                <h2>TOP LEARNED RULES</h2>
+                <h2>Top learned rules</h2>
               </div>
               <ul className="learning-insights">
                 {timeseries.compounding.topLearnedRules.map((rule, index) => (
@@ -323,7 +323,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
 
           {timeseries.compounding.weeklyChanges.length > 0 && (
             <div className="perf-block">
-              <p className="perf-block-label">WHAT CHANGED THIS WEEK</p>
+              <p className="perf-block-label">What changed this week</p>
               <div className="perf-tweets">
                 {timeseries.compounding.weeklyChanges.map((change, index) => (
                   <div key={index} className="perf-tweet">
@@ -375,7 +375,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" />
               <rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" />
             </svg>
-            <h2>WHAT PERFORMS</h2>
+            <h2>What performs</h2>
             <span className="section-count">ranked by avg engagement</span>
           </div>
 
@@ -460,8 +460,8 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               <polyline points="10,3 14,3 14,7" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <h2>AUTOPILOT LIFT</h2>
-            <span className="section-count">vs. pre-autopilot baseline</span>
+            <h2>Automation lift</h2>
+            <span className="section-count">vs. pre-automation baseline</span>
           </div>
           {timeseries.lift.likesPercent >= 0 ? (
             <div className="lift-hero lift-positive">
@@ -503,7 +503,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       {timeseries && timeseries.daily.some((d) => d.tweetsPosted > 0) && (
         <div className="trend-section">
           <div className="section-title mb-4">
-            <h2>POSTING ACTIVITY</h2>
+            <h2>Posting activity</h2>
             <span className="section-count">last 14 days</span>
           </div>
           <div className="trend-bars">
@@ -528,7 +528,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       {timeseries && timeseries.daily.some((d) => d.avgLikes > 0) && (
         <div className="trend-section">
           <div className="section-title mb-4">
-            <h2>ENGAGEMENT TREND</h2>
+            <h2>Engagement trend</h2>
             <span className="section-count">avg likes per day</span>
           </div>
           <div className="trend-bars">
@@ -556,13 +556,13 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
           <rect x="6" y="5" width="3" height="10" rx="1" fill="var(--text-dim)" />
           <rect x="11" y="2" width="3" height="13" rx="1" fill="var(--text-dim)" />
         </svg>
-        <h2>COUNTERS</h2>
+        <h2>Counters</h2>
       </div>
 
       {metrics.length === 0 ? (
         <div style={{ padding: '40px 20px', textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-            No data yet. Generate tweets, run analysis, or enable autopilot to see metrics.
+            No data yet. Generate tweets, run analysis, or enable automation to see metrics.
           </p>
         </div>
       ) : (

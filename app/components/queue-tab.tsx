@@ -371,7 +371,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       <div className="section-header">
         <div className="section-title">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          <h2>APPROVED QUEUE</h2>
+          <h2>Ready to post</h2>
           <span className="section-count">{activeQueuedTweets.length} ready{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
         </div>
         {activeQueuedTweets.length > 0 && (
@@ -408,7 +408,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                 <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
                 <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
               </svg>
-              <h2>DELETED FROM X</h2>
+              <h2>Removed from X</h2>
               <span className="section-count">Explain the miss so future drafts improve</span>
             </div>
           </div>
@@ -476,7 +476,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                 <line x1="5" y1="5" x2="11" y2="11" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" />
                 <line x1="11" y1="5" x2="5" y2="11" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
-              <h2>QUARANTINED</h2>
+              <h2>Needs rescue</h2>
               <span className="section-count">Blocked or rejected drafts waiting for review</span>
             </div>
           </div>
@@ -513,7 +513,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
         <div className="empty-state">
           <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><line x1="5" y1="8" x2="27" y2="8" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="16" x2="27" y2="16" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="24" x2="18" y2="24" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /></svg>
           <p>No approved tweets are waiting here yet.</p>
-          <p>Draft in Compose, finish the first setup review, or let automation refill once the queue minimum is set.</p>
+          <p>Create drafts, finish the first setup review, or let automation refill once the queue minimum is set.</p>
         </div>
       )}
 
