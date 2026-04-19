@@ -26,13 +26,20 @@ import {
   setTrendingCache,
   getConversationHistory,
   getPerformanceHistory,
+  invalidateAgentConnection,
   type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, type TwitterKeys } from './twitter-client';
-import { formatActionError, getActionErrorStatusCode, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
+import {
+  formatActionError,
+  getActionErrorStatusCode,
+  isInvalidTwitterCredentialError,
+  isRateLimitTwitterError,
+  isTransientTwitterError,
+} from './twitter-debug';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import {
   jitterInterval,
@@ -415,8 +422,22 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
     // Detect rate limit (429) or server error (5xx) and back off
     const statusCode = getActionErrorStatusCode(err);
+    const isInvalidCredentials = isInvalidTwitterCredentialError(err);
     const isRateLimit = isRateLimitTwitterError(err);
     const isServerError = isTransientTwitterError(err) && statusCode !== 429;
+    if (isInvalidCredentials) {
+      await invalidateAgentConnection(agentId);
+      return {
+        agentId,
+        action: 'error',
+        reason: `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${message}`,
+        tweetId: tweet.id,
+        content: tweet.content,
+        format: tweet.format || 'unknown',
+        topic: tweet.topic || 'general',
+        repliesSent,
+      };
+    }
     if (isRateLimit || isServerError) {
       const backoffMins = isRateLimit ? 60 : 15;
       const pauseUntil = new Date(Date.now() + backoffMins * 60 * 1000).toISOString();

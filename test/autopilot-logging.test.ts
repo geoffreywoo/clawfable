@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
   getPerformanceHistory: vi.fn(),
   addLearningSignal: vi.fn(),
+  invalidateAgentConnection: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
   postTweet: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getConversationHistory: mocks.getConversationHistory,
   getPerformanceHistory: mocks.getPerformanceHistory,
   addLearningSignal: mocks.addLearningSignal,
+  invalidateAgentConnection: mocks.invalidateAgentConnection,
 }));
 
 vi.mock('@/lib/generation-context', () => ({
@@ -186,6 +188,7 @@ beforeEach(() => {
   mocks.getTrendingCache.mockResolvedValue([]);
   mocks.setTrendingCache.mockResolvedValue(undefined);
   mocks.addPostLogEntry.mockResolvedValue(undefined);
+  mocks.invalidateAgentConnection.mockResolvedValue(undefined);
   mocks.createMention.mockResolvedValue(undefined);
   mocks.updateTweet.mockResolvedValue(undefined);
   mocks.deleteTweet.mockResolvedValue(undefined);
@@ -267,11 +270,9 @@ describe('autopilot remote debug logging', () => {
     expect(result.action).toBe('error');
     expect(result.reason).toContain('post_tweet [401 Unauthorized]');
     expect(result.reason).not.toContain('Rate limited');
-    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
-      baseAgent,
-      expect.objectContaining({ id: 'rate-limit-false-positive' }),
-      expect.stringContaining('401 Unauthorized')
-    );
+    expect(result.reason).toContain('Agent disconnected, reconnect in Settings');
+    expect(mocks.invalidateAgentConnection).toHaveBeenCalledWith(baseAgent.id);
+    expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
   });
 
   it('clears stale template fallback drafts when richer generation is available again', async () => {

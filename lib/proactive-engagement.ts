@@ -10,9 +10,9 @@ import type { Agent, ProtocolSettings } from './types';
 import type { TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { replyToTweet, likeTweet, followUser, getFollowing } from './twitter-client';
-import { formatActionError } from './twitter-debug';
+import { formatActionError, isInvalidTwitterCredentialError } from './twitter-debug';
 import { parseSoulMd } from './soul-parser';
-import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
+import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory, invalidateAgentConnection } from './kv-storage';
 import { generateText } from './ai';
 
 /**
@@ -99,6 +99,14 @@ export async function replyToViralTweets(
 
       repliesSent++;
     } catch (err) {
+      const formatted = formatActionError(err, 'proactive_reply', {
+        target: `@${topic.topTweet.author}`,
+        targetTweetId: topic.topTweet.id,
+        likes: topic.topTweet.likes,
+      });
+      if (isInvalidTwitterCredentialError(err)) {
+        await invalidateAgentConnection(agent.id);
+      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: topic.topTweet.id,
@@ -109,11 +117,9 @@ export async function replyToViralTweets(
         postedAt: new Date().toISOString(),
         source: 'autopilot',
         action: 'error',
-        reason: formatActionError(err, 'proactive_reply', {
-          target: `@${topic.topTweet.author}`,
-          targetTweetId: topic.topTweet.id,
-          likes: topic.topTweet.likes,
-        }),
+        reason: isInvalidTwitterCredentialError(err)
+          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          : formatted,
       });
     }
   }
@@ -196,6 +202,14 @@ export async function likeNetworkTweets(
       await likeTweet(keys, String(agent.xUserId), topic.topTweet.id);
       liked++;
     } catch (err) {
+      const formatted = formatActionError(err, 'like_network_tweet', {
+        target: `@${topic.topTweet.author}`,
+        targetTweetId: topic.topTweet.id,
+        likes: topic.topTweet.likes,
+      });
+      if (isInvalidTwitterCredentialError(err)) {
+        await invalidateAgentConnection(agent.id);
+      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: topic.topTweet.id,
@@ -206,11 +220,9 @@ export async function likeNetworkTweets(
         postedAt: new Date().toISOString(),
         source: 'autopilot',
         action: 'error',
-        reason: formatActionError(err, 'like_network_tweet', {
-          target: `@${topic.topTweet.author}`,
-          targetTweetId: topic.topTweet.id,
-          likes: topic.topTweet.likes,
-        }),
+        reason: isInvalidTwitterCredentialError(err)
+          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          : formatted,
       });
     }
   }
@@ -334,6 +346,13 @@ export async function discoverAndFollow(
     const following = await getFollowing(keys, String(agent.xUserId), 200);
     currentFollowing = new Set(following.map((f) => f.id));
   } catch (err) {
+    const formatted = formatActionError(err, 'get_following', {
+      handle: `@${agent.handle}`,
+      xUserId: agent.xUserId,
+    });
+    if (isInvalidTwitterCredentialError(err)) {
+      await invalidateAgentConnection(agent.id);
+    }
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -344,10 +363,9 @@ export async function discoverAndFollow(
       postedAt: new Date().toISOString(),
       source: 'autopilot',
       action: 'error',
-      reason: formatActionError(err, 'get_following', {
-        handle: `@${agent.handle}`,
-        xUserId: agent.xUserId,
-      }),
+      reason: isInvalidTwitterCredentialError(err)
+        ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+        : formatted,
     });
     return 0;
   }
@@ -437,6 +455,13 @@ export async function discoverAndFollow(
       currentFollowing.add(user.id);
       followed++;
     } catch (err) {
+      const formatted = formatActionError(err, 'auto_follow', {
+        username: candidate.username,
+        why: candidate.reason,
+      });
+      if (isInvalidTwitterCredentialError(err)) {
+        await invalidateAgentConnection(agent.id);
+      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: '',
@@ -447,10 +472,9 @@ export async function discoverAndFollow(
         postedAt: new Date().toISOString(),
         source: 'autopilot',
         action: 'error',
-        reason: formatActionError(err, 'auto_follow', {
-          username: candidate.username,
-          why: candidate.reason,
-        }),
+        reason: isInvalidTwitterCredentialError(err)
+          ? `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatted}`
+          : formatted,
       });
     }
   }

@@ -99,6 +99,30 @@ export function isRateLimitTwitterError(error: unknown): boolean {
   return summary.includes('rate limit') || summary.includes('429');
 }
 
+export function isInvalidTwitterCredentialError(error: unknown): boolean {
+  const statusCode = getActionErrorStatusCode(error);
+  if (statusCode !== undefined) {
+    return statusCode === 401;
+  }
+
+  const actionError = isTwitterActionError(error) ? error : null;
+  const summary = [
+    actionError?.title,
+    actionError?.detail,
+    actionError?.rawMessage,
+    error instanceof Error ? error.message : String(error),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    summary.includes('unauthorized')
+    || summary.includes('could not authenticate')
+    || summary.includes('invalid or expired token')
+  );
+}
+
 export function isTransientTwitterError(error: unknown): boolean {
   const statusCode = getActionErrorStatusCode(error);
   if (statusCode !== undefined) {

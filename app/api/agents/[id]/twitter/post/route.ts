@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addLearningSignal, getTweet, updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, getTweet, invalidateAgentConnection, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
+import { isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -82,6 +83,17 @@ export async function POST(
     const message = err instanceof Error ? err.message : 'Failed to post tweet';
     let queueAction: string | null = null;
     let repairedContent: string | null = null;
+
+    if (currentAgent && isInvalidTwitterCredentialError(err)) {
+      await invalidateAgentConnection(currentAgent.id);
+      return NextResponse.json({
+        error: `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${message}`,
+        queueResolved: false,
+        autoFixed: false,
+        repairedContent: null,
+        queueAction: null,
+      }, { status: 401 });
+    }
 
     if (dbTweetId) {
       await addLearningSignal(id, {

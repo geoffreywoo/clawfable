@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
-import { formatActionError } from '@/lib/twitter-debug';
+import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
 import { getBillingSummary } from '@/lib/billing';
 
 // GET /api/cron/post — called by Vercel Cron every 10 minutes
@@ -276,7 +276,25 @@ async function refreshMentions(agentId: string): Promise<number> {
   let rawMentions;
   try {
     rawMentions = await getMentionsFromTwitter(keys, String(agent.xUserId), latestStoredTweetId);
-  } catch {
+  } catch (err) {
+    if (isInvalidTwitterCredentialError(err)) {
+      await invalidateAgentConnection(agentId);
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'cron_mentions_error',
+        topic: 'mentions',
+        postedAt: new Date().toISOString(),
+        source: 'cron',
+        action: 'error',
+        reason: `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatActionError(err, 'fetch_mentions', {
+          handle: `@${agent.handle}`,
+          xUserId: agent.xUserId,
+        })}`,
+      });
+    }
     return 0;
   }
 

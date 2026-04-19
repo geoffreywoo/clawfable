@@ -431,6 +431,29 @@ export async function updateAgent(id: string, data: UpdateAgentInput): Promise<A
   return updated;
 }
 
+export async function invalidateAgentConnection(id: string): Promise<Agent | null> {
+  const existing = await getAgent(id);
+  if (!existing) return null;
+
+  const alreadyDisconnected = existing.isConnected !== 1
+    && !existing.apiKey
+    && !existing.apiSecret
+    && !existing.accessToken
+    && !existing.accessSecret;
+
+  if (alreadyDisconnected) {
+    return existing;
+  }
+
+  return updateAgent(id, {
+    apiKey: null,
+    apiSecret: null,
+    accessToken: null,
+    accessSecret: null,
+    isConnected: 0,
+  });
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   const agent = await getAgent(id);
   if (!agent) return;
