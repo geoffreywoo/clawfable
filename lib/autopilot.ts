@@ -995,6 +995,9 @@ async function refillQueue(
         globalPriorWeight: item.globalPriorWeight ?? null,
         localPriorWeight: item.localPriorWeight ?? null,
         scoreProvenance: item.scoreProvenance ?? null,
+        sourceLane: item.sourceLane ?? null,
+        trendTopicId: item.trendTopicId ?? null,
+        trendHeadline: item.trendHeadline ?? null,
         xTweetId: null,
         quoteTweetId: null,
         quoteTweetAuthor: null,
@@ -1026,6 +1029,9 @@ interface MarketingTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  sourceLane?: import('./types').ContentSourceLane | null;
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
   generationMode?: 'safe' | 'balanced' | 'explore';
   candidateScore?: number;
   confidenceScore?: number;

@@ -1,8 +1,10 @@
 import type { BanditArmScore, BanditPolicy } from './bandit';
 import type {
   AgentLearnings,
+  ContentSourceLane,
   FeedbackEntry,
   LearningSignal,
+  ManualExampleCuration,
   OutcomeEpisode,
   PersonalizationMemory,
   ProtocolSettings,
@@ -10,6 +12,7 @@ import type {
   TweetPerformance,
 } from './types';
 import { buildOutcomeEpisodes } from './outcome-rewards';
+import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
 type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
@@ -173,6 +176,45 @@ export interface LearningDecisionInsight {
   evidence: string[];
 }
 
+export interface LearningPlannerLaneCard {
+  lane: ContentSourceLane;
+  plannedSlots: number;
+  posts: number;
+  avgEngagement: number;
+  wins: number;
+}
+
+export interface LearningTrendPlannerItem {
+  id: string;
+  category: string;
+  headline: string;
+  lane: string;
+  fit: number;
+  reason: string;
+}
+
+export interface LearningManualExampleItem {
+  xTweetId: string;
+  content: string;
+  likes: number;
+  pinned: boolean;
+  blocked: boolean;
+}
+
+export interface LearningPlannerPreview {
+  trendMixTarget: number;
+  trendTolerance: string;
+  nextBatchMix: LearningPlannerLaneCard[];
+  acceptedTrends: LearningTrendPlannerItem[];
+  rejectedTrends: LearningTrendPlannerItem[];
+  manualExamples: {
+    pinnedCount: number;
+    blockedCount: number;
+    topicClusters: Array<{ topic: string; angle: string; sampleCount: number; avgEngagement: number }>;
+    examples: LearningManualExampleItem[];
+  };
+}
+
 export interface LearningSnapshot {
   overview: LearningOverview;
   scoreboard: LearningScoreboard;
@@ -194,6 +236,7 @@ export interface LearningSnapshot {
   topRegressions: LearningNarrativeItem[];
   policyChanges: LearningNarrativeItem[];
   decisionInsights: Record<string, LearningDecisionInsight>;
+  planner: LearningPlannerPreview;
 }
 
 interface WindowMetrics {
@@ -673,6 +716,30 @@ function summarizeSignalEvent(signal: LearningSignal, tweet: Tweet | undefined):
         rewardDelta: signal.rewardDelta,
         surface: signal.surface,
         group: 'performance',
+        tweetPreview,
+      };
+    case 'tweet_liked':
+      return {
+        title: 'Tweet liked',
+        summary: 'A supervised Engage like completed successfully.',
+        learned: 'This target class is currently a safe engagement lane.',
+        source: 'performance',
+        tone: 'positive',
+        rewardDelta: signal.rewardDelta,
+        surface: signal.surface,
+        group: 'performance',
+        tweetPreview,
+      };
+    case 'tweet_like_failed':
+      return {
+        title: 'Like failed',
+        summary: 'A supervised Engage like hit a browser or platform failure.',
+        learned: learnedFromReason || 'The operator may need to retry once the browser state is healthy again.',
+        source: 'performance',
+        tone: 'warning',
+        rewardDelta: signal.rewardDelta,
+        surface: signal.surface,
+        group: 'policy',
         tweetPreview,
       };
     case 'x_post_rejected':
@@ -1494,6 +1561,96 @@ export interface BuildLearningSnapshotOptions {
   allTweets: Tweet[];
   performanceHistory: TweetPerformance[];
   baseline?: { avgLikes: number; avgRetweets: number } | null;
+  sourcePlan?: SourcePlannerPlan | null;
+  manualExampleCuration?: ManualExampleCuration | null;
+  trending?: EnrichedTrendingTopic[];
+}
+
+function buildPlannerPreview(
+  settings: ProtocolSettings,
+  learnings: AgentLearnings | null,
+  sourcePlan: SourcePlannerPlan | null | undefined,
+  manualExampleCuration: ManualExampleCuration | null | undefined,
+  trending: EnrichedTrendingTopic[] | undefined,
+): LearningPlannerPreview {
+  const sourcePerf = new Map((learnings?.sourceLanePerformance || []).map((item) => [item.lane, item]));
+  const laneOrder: ContentSourceLane[] = [
+    'manual_core_exploit',
+    'trend_aligned_exploit',
+    'trend_adjacent_explore',
+    'core_explore_fallback',
+  ];
+
+  const nextBatchMix = laneOrder.map((lane) => {
+    const perf = sourcePerf.get(lane);
+    return {
+      lane,
+      plannedSlots: sourcePlan?.laneCounts[lane] || 0,
+      posts: perf?.posts || 0,
+      avgEngagement: perf?.avgEngagement || 0,
+      wins: perf?.wins || 0,
+    };
+  });
+
+  const pinnedIds = new Set((manualExampleCuration?.pinnedXTweetIds || []).map((id) => String(id)));
+  const blockedIds = new Set((manualExampleCuration?.blockedXTweetIds || []).map((id) => String(id)));
+  const examples = [
+    ...(learnings?.operatorVoiceReference?.bestPerformers || []),
+    ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+  ]
+    .reduce<LearningManualExampleItem[]>((items, tweet) => {
+      if (items.some((item) => item.xTweetId === String(tweet.xTweetId))) return items;
+      items.push({
+        xTweetId: String(tweet.xTweetId),
+        content: tweet.content.slice(0, 180),
+        likes: tweet.likes,
+        pinned: pinnedIds.has(String(tweet.xTweetId)),
+        blocked: blockedIds.has(String(tweet.xTweetId)),
+      });
+      return items;
+    }, [])
+    .slice(0, 8);
+
+  const acceptedTrends = (sourcePlan?.acceptedTrends || trending?.filter((item) => item.sourceLane !== 'reject') || [])
+    .slice(0, 6)
+    .map((trend) => ({
+      id: String(trend.id),
+      category: trend.category,
+      headline: trend.headline,
+      lane: trend.sourceLane,
+      fit: Math.round((trend.fitScores?.total || 0) * 100),
+      reason: trend.plannerReason,
+    }));
+
+  const rejectedTrends = (sourcePlan?.rejectedTrends || trending?.filter((item) => item.sourceLane === 'reject') || [])
+    .slice(0, 6)
+    .map((trend) => ({
+      id: String(trend.id),
+      category: trend.category,
+      headline: trend.headline,
+      lane: trend.sourceLane,
+      fit: Math.round((trend.fitScores?.total || 0) * 100),
+      reason: trend.plannerReason,
+    }));
+
+  return {
+    trendMixTarget: settings.trendMixTarget ?? 35,
+    trendTolerance: settings.trendTolerance || 'moderate',
+    nextBatchMix,
+    acceptedTrends,
+    rejectedTrends,
+    manualExamples: {
+      pinnedCount: pinnedIds.size,
+      blockedCount: blockedIds.size,
+      topicClusters: (learnings?.manualTopicProfile || []).slice(0, 6).map((cluster) => ({
+        topic: cluster.topic,
+        angle: cluster.angle,
+        sampleCount: cluster.sampleCount,
+        avgEngagement: cluster.avgEngagement,
+      })),
+      examples,
+    },
+  };
 }
 
 export function buildLearningSnapshot({
@@ -1506,6 +1663,9 @@ export function buildLearningSnapshot({
   allTweets,
   performanceHistory,
   baseline,
+  sourcePlan,
+  manualExampleCuration,
+  trending,
 }: BuildLearningSnapshotOptions): LearningSnapshot {
   const nowMs = Date.now();
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -1535,6 +1695,7 @@ export function buildLearningSnapshot({
   const narratives = buildNarratives(weeklyMetrics, banditPolicy, memory);
   const experimentLanes = buildExperimentLanes(banditPolicy);
   const decisionInsights = buildDecisionInsights(allTweets, memory, experimentLanes, outcomeEpisodes);
+  const planner = buildPlannerPreview(settings, learnings, sourcePlan, manualExampleCuration, trending);
   const policyChangeEvents = buildPolicyChangeEvents(
     narratives.policyChanges,
     learnings?.updatedAt || memory.updatedAt || new Date().toISOString(),
@@ -1619,5 +1780,6 @@ export function buildLearningSnapshot({
     topRegressions: narratives.topRegressions,
     policyChanges: narratives.policyChanges,
     decisionInsights,
+    planner,
   };
 }

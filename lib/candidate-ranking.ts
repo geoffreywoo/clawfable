@@ -3,6 +3,7 @@ import type {
   CandidateFeatureTags,
   CandidateJudgeBreakdown,
   CandidateScoreProvenance,
+  ContentSourceLane,
   PersonalizationMemory,
   Tweet,
   AutonomyMode,
@@ -18,6 +19,9 @@ export interface RankableProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  sourceLane?: ContentSourceLane | null;
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
   featureTags?: CandidateFeatureTags | null;
   coverageCluster?: string | null;
   judgeScore?: number | null;
@@ -46,6 +50,9 @@ export interface RankedProtocolTweet extends RankableProtocolTweet {
   globalPriorWeight: number;
   localPriorWeight: number;
   scoreProvenance: CandidateScoreProvenance;
+  sourceLane?: ContentSourceLane | null;
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
 }
 
 export interface CandidateRankingContext {
@@ -168,6 +175,14 @@ function scoreVoiceMatch(
     score += 0.07;
   }
 
+  if (learnings?.operatorVoiceReference?.styleFingerprint.topHooks.some((hook) => hook.toLowerCase() === featureTags.hook.toLowerCase())) {
+    score += 0.06;
+  }
+
+  if (learnings?.operatorVoiceReference?.styleFingerprint.topTones.some((tone) => tone.toLowerCase() === featureTags.tone.toLowerCase())) {
+    score += 0.06;
+  }
+
   if (voiceProfile.antiGoals.some((goal) => goal.length > 6 && candidate.content.toLowerCase().includes(goal.toLowerCase()))) {
     score -= 0.35;
   }
@@ -258,6 +273,50 @@ function scoreFreshness(
 
   const topicMatches = countRecentMatches(context.allTweets, 'topic', candidate.targetTopic);
   score -= Math.min(topicMatches, 3) * 0.07;
+  return clamp(score);
+}
+
+function scoreSourceLane(
+  candidate: RankableProtocolTweet,
+  context: CandidateRankingContext,
+  featureTags: CandidateFeatureTags,
+): number {
+  const lane = candidate.sourceLane || 'manual_core_exploit';
+  const normalizedTopic = normalizeTopic(candidate.targetTopic);
+  const manualTopics = context.learnings?.manualTopicProfile?.map((cluster) => normalizeTopic(cluster.topic)) || [];
+  const acceptedTrends = context.style.sourcePlan?.acceptedTrends || [];
+
+  if (lane === 'manual_core_exploit') {
+    let score = 0.45;
+    if (manualTopics.includes(normalizedTopic)) score += 0.22;
+    if (context.learnings?.operatorVoiceReference?.styleFingerprint.topHooks.some((hook) => hook.toLowerCase() === featureTags.hook.toLowerCase())) {
+      score += 0.12;
+    }
+    if (context.learnings?.operatorVoiceReference?.styleFingerprint.topTones.some((tone) => tone.toLowerCase() === featureTags.tone.toLowerCase())) {
+      score += 0.1;
+    }
+    return clamp(score);
+  }
+
+  if (lane === 'trend_aligned_exploit' || lane === 'trend_adjacent_explore') {
+    const match = acceptedTrends.find((trend) =>
+      String(trend.id) === String(candidate.trendTopicId || '')
+      || normalizeTopic(trend.category) === normalizedTopic
+    );
+    let score = match ? 0.56 : 0.22;
+    if (match?.sourceLane === lane) score += 0.2;
+    if (match?.fitScores.manual && match.fitScores.manual > 0.4) score += 0.08;
+    if (lane === 'trend_adjacent_explore' && context.style.autonomyMode === 'explore') score += 0.06;
+    return clamp(score);
+  }
+
+  let score = 0.34;
+  if (context.style.exploration.underusedTopics.some((topic) => normalizeTopic(topic) === normalizedTopic)) {
+    score += 0.18;
+  }
+  if (context.style.exploration.underusedFormats.some((format) => normalizeFormat(format) === normalizeFormat(candidate.format))) {
+    score += 0.12;
+  }
   return clamp(score);
 }
 
@@ -353,6 +412,7 @@ export function rankGeneratedTweets(
     const noveltyScore = scoreNovelty(candidate, featureTags, context.recentPosts, context.allTweets);
     const rewardPrediction = scorePredictedReward(candidate, context, featureTags);
     const freshnessScore = scoreFreshness(candidate, featureTags, context);
+    const sourceLaneScore = scoreSourceLane(candidate, context, featureTags);
     const judgeScore = scoreJudge(candidate);
     const repetitionRiskScore = scoreRepetitionRisk(candidate, featureTags, context);
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
@@ -363,7 +423,7 @@ export function rankGeneratedTweets(
       globalPrior: Number((rewardPrediction.global * 0.1).toFixed(3)),
       judge: Number((judgeScore * 0.18).toFixed(3)),
       predictedReward: Number((rewardPrediction.reward * 0.18).toFixed(3)),
-      noveltyCoverage: Number((((noveltyScore + freshnessScore) / 2) * 0.16).toFixed(3)),
+      noveltyCoverage: Number((((noveltyScore + freshnessScore + sourceLaneScore) / 3) * 0.16).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -372,6 +432,7 @@ export function rankGeneratedTweets(
       noveltyScore * 0.16 +
       rewardPrediction.reward * 0.2 +
       freshnessScore * 0.08 +
+      sourceLaneScore * 0.08 +
       judgeScore * 0.2 +
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08
@@ -414,6 +475,9 @@ export function rankGeneratedTweets(
       globalPriorWeight: Number(context.style.banditPolicy?.globalPriorWeight.toFixed(3) || 0),
       localPriorWeight: Number(context.style.banditPolicy?.localEvidenceWeight.toFixed(3) || 0),
       scoreProvenance,
+      sourceLane: candidate.sourceLane ?? null,
+      trendTopicId: candidate.trendTopicId ?? null,
+      trendHeadline: candidate.trendHeadline ?? null,
     };
   });
 

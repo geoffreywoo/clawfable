@@ -4,7 +4,7 @@
  * and feeds insights back into generation.
  */
 
-import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint } from './types';
+import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, Tweet } from './types';
 import {
   getTweets,
   getPerformanceHistory,
@@ -20,15 +20,133 @@ import {
   updateTweet,
   saveFeedback,
   addLearningSignal,
+  getManualExampleCuration,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
 import { generateText } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
+import { buildManualTopicProfile } from './source-planner';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
+}
+
+function weightedEngagementScore(tweet: TweetPerformance): number {
+  return tweet.likes + tweet.retweets + (tweet.replies * 2);
+}
+
+function parsePerformanceTimestamp(value: string | undefined): number {
+  const timestamp = value ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function performanceEntryKey(tweet: TweetPerformance): string {
+  return String(tweet.xTweetId || `${tweet.tweetId}:${tweet.postedAt}:${tweet.content}`);
+}
+
+function sourcePriority(source: TweetPerformance['source']): number {
+  switch (source) {
+    case 'autopilot':
+      return 3;
+    case 'manual':
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function mergePerformanceEntries(primary: TweetPerformance, secondary: TweetPerformance): TweetPerformance {
+  const likes = Math.max(primary.likes, secondary.likes);
+  const retweets = Math.max(primary.retweets, secondary.retweets);
+  const replies = Math.max(primary.replies, secondary.replies);
+  const impressions = Math.max(primary.impressions, secondary.impressions);
+  const totalEngagement = likes + retweets + replies;
+
+  const earlierPostedAt = parsePerformanceTimestamp(primary.postedAt) <= parsePerformanceTimestamp(secondary.postedAt)
+    ? (primary.postedAt || secondary.postedAt)
+    : secondary.postedAt;
+
+  return {
+    ...secondary,
+    ...primary,
+    tweetId: primary.tweetId || secondary.tweetId,
+    xTweetId: primary.xTweetId || secondary.xTweetId,
+    content: primary.content || secondary.content,
+    format: primary.format !== 'unknown' ? primary.format : secondary.format,
+    topic: (primary.topic && primary.topic !== 'general' && primary.topic !== 'unknown') ? primary.topic : secondary.topic,
+    hook: primary.hook || secondary.hook,
+    tone: primary.tone || secondary.tone,
+    specificity: primary.specificity || secondary.specificity,
+    structure: primary.structure || secondary.structure,
+    thesis: primary.thesis || secondary.thesis,
+    postedAt: earlierPostedAt,
+    checkedAt: parsePerformanceTimestamp(primary.checkedAt) >= parsePerformanceTimestamp(secondary.checkedAt)
+      ? primary.checkedAt
+      : secondary.checkedAt,
+    likes,
+    retweets,
+    replies,
+    impressions,
+    engagementRate: impressions > 0
+      ? Math.round((totalEngagement / impressions) * 10000) / 100
+      : Math.max(primary.engagementRate, secondary.engagementRate),
+    wasViral: primary.wasViral || secondary.wasViral,
+    source: sourcePriority(primary.source) >= sourcePriority(secondary.source) ? primary.source : secondary.source,
+  };
+}
+
+function dedupePerformanceHistory(history: TweetPerformance[]): TweetPerformance[] {
+  const sorted = [...history].sort((a, b) => (
+    parsePerformanceTimestamp(b.checkedAt) - parsePerformanceTimestamp(a.checkedAt)
+    || weightedEngagementScore(b) - weightedEngagementScore(a)
+  ));
+
+  const deduped = new Map<string, TweetPerformance>();
+
+  for (const entry of sorted) {
+    const key = performanceEntryKey(entry);
+    const existing = deduped.get(key);
+    deduped.set(key, existing ? mergePerformanceEntries(existing, entry) : entry);
+  }
+
+  return Array.from(deduped.values()).sort((a, b) => (
+    parsePerformanceTimestamp(b.checkedAt) - parsePerformanceTimestamp(a.checkedAt)
+  ));
+}
+
+function buildSourceLanePerformance(
+  history: TweetPerformance[],
+  allTweets: Tweet[],
+): SourceLanePerformance[] {
+  const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  const tweetByXId = new Map(
+    allTweets
+      .filter((tweet) => tweet.xTweetId)
+      .map((tweet) => [String(tweet.xTweetId), tweet]),
+  );
+  const buckets = new Map<SourceLanePerformance['lane'], { total: number; count: number; wins: number }>();
+
+  for (const entry of history) {
+    const tweet = (entry.tweetId && tweetById.get(String(entry.tweetId))) || tweetByXId.get(String(entry.xTweetId));
+    const lane = tweet?.sourceLane;
+    if (!lane) continue;
+    const current = buckets.get(lane) || { total: 0, count: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.count += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(lane, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([lane, stats]) => ({
+      lane,
+      posts: stats.count,
+      avgEngagement: Math.round(stats.total / Math.max(stats.count, 1)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
 }
 
 /**
@@ -254,7 +372,12 @@ Output ONLY JSON objects, one per line, no other text.`,
  * and generates prescriptive rules for generation.
  */
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
-  const history = await getPerformanceHistory(agent.id, 500);
+  const rawHistory = await getPerformanceHistory(agent.id, 500);
+  const history = dedupePerformanceHistory(rawHistory);
+  const [allTweets, manualExampleCuration] = await Promise.all([
+    getTweets(agent.id),
+    getManualExampleCuration(agent.id),
+  ]);
 
   if (history.length === 0) {
     return {
@@ -268,16 +391,14 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       formatRankings: [],
       topicRankings: [],
       insights: [],
+      manualExampleCuration,
     };
   }
-
-  // Weighted engagement score: replies count 2x because they signal deeper engagement
-  // and the X algorithm amplifies reply-generating content more than passive likes
-  const weightedScore = (t: TweetPerformance) => t.likes + t.retweets + (t.replies * 2);
 
   const autopilotHistory = history.filter((t) => t.source === 'autopilot');
   const manualHistory = history.filter((t) => t.source === 'manual');
   const timelineHistory = history.filter((t) => t.source === 'timeline');
+  const operatorReferenceHistory = history.filter((t) => t.source !== 'autopilot');
   const trainingHistory = autopilotHistory.length >= 10 ? autopilotHistory : history;
   const sourceBreakdown = {
     autopilot: autopilotHistory.length,
@@ -288,7 +409,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   };
 
   // Sort by weighted engagement
-  const sorted = [...trainingHistory].sort((a, b) => weightedScore(b) - weightedScore(a));
+  const sorted = [...trainingHistory].sort((a, b) => weightedEngagementScore(b) - weightedEngagementScore(a));
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
@@ -299,7 +420,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     const f = h.format || 'unknown';
     if (f === 'unknown') continue; // skip unclassified
     if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
-    formatMap[f].total += weightedScore(h);
+    formatMap[f].total += weightedEngagementScore(h);
     formatMap[f].count++;
   }
   const formatRankings = Object.entries(formatMap)
@@ -312,7 +433,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     const t = h.topic || 'general';
     if (t === 'general' || t === 'unknown') continue;
     if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
-    topicMap[t].total += weightedScore(h);
+    topicMap[t].total += weightedEngagementScore(h);
     topicMap[t].count++;
   }
   const topicRankings = Object.entries(topicMap)
@@ -321,6 +442,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
 
   // Compute style fingerprint from top 30 tweets
   const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
+  const operatorVoiceReference = buildOperatorVoiceReference(operatorReferenceHistory, manualExampleCuration);
+  const manualTopicProfile = buildManualTopicProfile(operatorReferenceHistory, manualExampleCuration);
+  const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
 
   // Generate prescriptive insights
   const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
@@ -337,6 +461,10 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     topicRankings,
     insights,
     styleFingerprint,
+    operatorVoiceReference,
+    manualTopicProfile,
+    manualExampleCuration,
+    sourceLanePerformance,
     sourceBreakdown,
   };
 
@@ -357,6 +485,32 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   });
 
   return learnings;
+}
+
+function buildOperatorVoiceReference(
+  history: TweetPerformance[],
+  curation: ManualExampleCuration,
+): OperatorVoiceReference | undefined {
+  const usableHistory = history.filter((tweet) => tweet.content && tweet.content.trim().length > 0);
+  if (usableHistory.length < 3) return undefined;
+
+  const pinnedExamples = usableHistory.filter((tweet) => curation.pinnedXTweetIds.includes(String(tweet.xTweetId)));
+  const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
+  const sorted = [...usableHistory].sort((a, b) => weightedEngagementScore(b) - weightedEngagementScore(a));
+  const topPerformers = [
+    ...pinnedExamples,
+    ...sorted.filter((tweet) => !blocked.has(String(tweet.xTweetId)) && !curation.pinnedXTweetIds.includes(String(tweet.xTweetId))),
+  ].slice(0, 12);
+  const worstPerformers = sorted.slice(-6);
+  if (topPerformers.length === 0) return undefined;
+
+  return {
+    sampleCount: usableHistory.length,
+    bestPerformers: topPerformers.slice(0, 5),
+    styleFingerprint: computeStyleFingerprint(topPerformers, worstPerformers),
+    pinnedExamples: pinnedExamples.slice(0, 3),
+    blockedXTweetIds: [...blocked],
+  };
 }
 
 /**
@@ -392,7 +546,9 @@ function computeStyleFingerprint(
   // Count hook types from classified tweets
   const hookCounts: Record<string, number> = {};
   for (const t of top) {
-    if (t.hook) { hookCounts[t.hook] = (hookCounts[t.hook] || 0) + 1; }
+    const inferred = extractCandidateFeatureTags(t.content, { topic: t.topic });
+    const hook = t.hook || inferred.hook;
+    if (hook) { hookCounts[hook] = (hookCounts[hook] || 0) + 1; }
   }
   const topHooks = Object.entries(hookCounts)
     .sort((a, b) => b[1] - a[1])
@@ -401,7 +557,9 @@ function computeStyleFingerprint(
 
   const toneCounts: Record<string, number> = {};
   for (const t of top) {
-    if (t.tone) { toneCounts[t.tone] = (toneCounts[t.tone] || 0) + 1; }
+    const inferred = extractCandidateFeatureTags(t.content, { topic: t.topic });
+    const tone = t.tone || inferred.tone;
+    if (tone) { toneCounts[tone] = (toneCounts[tone] || 0) + 1; }
   }
   const topTones = Object.entries(toneCounts)
     .sort((a, b) => b[1] - a[1])

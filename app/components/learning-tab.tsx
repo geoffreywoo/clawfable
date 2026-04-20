@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   LearningBucket,
   LearningEventEntry,
@@ -104,6 +104,10 @@ function bucketLabel(bucketId: LearningBucket['id']): string {
     default:
       return 'Current lessons';
   }
+}
+
+function formatPlannerLane(lane: string): string {
+  return lane.replace(/_/g, ' ');
 }
 
 function buildSparklinePoints(values: number[]): string {
@@ -409,28 +413,32 @@ function FunnelStage({
 export function LearningTab({ agentId }: LearningTabProps) {
   const [snapshot, setSnapshot] = useState<LearningSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingExampleId, setPendingExampleId] = useState<string | null>(null);
+
+  const loadSnapshot = useCallback(async () => {
+    const res = await fetch(`/api/agents/${agentId}/dashboard?sections=learning`, { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error('Failed to load learning snapshot');
+    setSnapshot(data.learning ?? null);
+  }, [agentId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/agents/${agentId}/dashboard?sections=learning`, { cache: 'no-store' });
-        const data = await res.json();
-        if (!cancelled && res.ok) setSnapshot(data.learning ?? null);
-      } catch {
-        if (!cancelled) setSnapshot(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
     const refreshIfVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      void load();
+      void loadSnapshot().catch(() => {
+        if (!cancelled) setSnapshot(null);
+      });
     };
 
-    void load();
+    void loadSnapshot()
+      .catch(() => {
+        if (!cancelled) setSnapshot(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     const interval = window.setInterval(refreshIfVisible, 30000);
     window.addEventListener('focus', refreshIfVisible);
     document.addEventListener('visibilitychange', refreshIfVisible);
@@ -441,7 +449,35 @@ export function LearningTab({ agentId }: LearningTabProps) {
       window.removeEventListener('focus', refreshIfVisible);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
-  }, [agentId]);
+  }, [loadSnapshot]);
+
+  const updateManualExample = useCallback(async (
+    xTweetId: string,
+    action: 'pin' | 'unpin' | 'block' | 'unblock',
+  ) => {
+    setPendingExampleId(xTweetId);
+    try {
+      const body = action === 'pin'
+        ? { pin: [xTweetId] }
+        : action === 'unpin'
+          ? { unpin: [xTweetId] }
+          : action === 'block'
+            ? { block: [xTweetId] }
+            : { unblock: [xTweetId] };
+
+      const res = await fetch(`/api/agents/${agentId}/learning/manual-examples`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Failed to update manual example curation');
+      await loadSnapshot();
+    } catch {
+      // Keep the existing snapshot if the update fails.
+    } finally {
+      setPendingExampleId(null);
+    }
+  }, [agentId, loadSnapshot]);
 
   const groupedEvents = useMemo(() => {
     const groups = {
@@ -578,6 +614,186 @@ export function LearningTab({ agentId }: LearningTabProps) {
           {snapshot.beliefState.map((bucket) => (
             <LessonBucket key={bucket.id} bucket={bucket} />
           ))}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-header">
+          <div className="section-title">
+            <h2>Source planner</h2>
+            <span className="section-count">how the next batch balances manual voice against network trends</span>
+          </div>
+        </div>
+        <div className="learning-section-copy">
+          This planner sets the next batch mix before candidate generation. It decides how many slots should exploit proven manual voice, how many should ride aligned trends, and how many should be controlled exploration bets.
+        </div>
+
+        <div className="learning-story-grid">
+          <section className="learning-story-panel">
+            <div className="learning-story-head">
+              <div>
+                <p className="learning-story-kicker">Next batch mix</p>
+                <h3 className="learning-story-title">
+                  Trend target {snapshot.planner.trendMixTarget}% · tolerance {snapshot.planner.trendTolerance}
+                </h3>
+              </div>
+            </div>
+            <div className="learning-story-list">
+              {snapshot.planner.nextBatchMix.map((lane) => (
+                <article key={lane.lane} className="learning-story-item">
+                  <div className="learning-story-item-head">
+                    <p className="learning-story-item-title">{formatPlannerLane(lane.lane)}</p>
+                    <span className="learning-source-chip">{lane.plannedSlots} planned</span>
+                  </div>
+                  <p className="learning-story-item-summary">
+                    {lane.posts > 0
+                      ? `${lane.posts} shipped posts, avg ${lane.avgEngagement} engagement, ${lane.wins} wins.`
+                      : 'No shipped evidence yet for this lane.'}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="learning-story-panel">
+            <div className="learning-story-head">
+              <div>
+                <p className="learning-story-kicker">Accepted trends</p>
+                <h3 className="learning-story-title">Hot topics the planner will allow into the queue</h3>
+              </div>
+            </div>
+            {snapshot.planner.acceptedTrends.length === 0 ? (
+              <p className="learning-story-empty">No current trend candidate passed the planner filters.</p>
+            ) : (
+              <div className="learning-story-list">
+                {snapshot.planner.acceptedTrends.map((trend) => (
+                  <article key={trend.id} className="learning-story-item">
+                    <div className="learning-story-item-head">
+                      <p className="learning-story-item-title">{trend.category}</p>
+                      <span className="learning-source-chip">{trend.lane} · {trend.fit}%</span>
+                    </div>
+                    <p className="learning-story-item-summary">{trend.headline}</p>
+                    <div className="learning-story-item-meta">
+                      <span className="learning-impact-chip learning-tone-positive">{trend.reason}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="learning-story-panel">
+            <div className="learning-story-head">
+              <div>
+                <p className="learning-story-kicker">Rejected trends</p>
+                <h3 className="learning-story-title">Topics the planner explicitly kept out</h3>
+              </div>
+            </div>
+            {snapshot.planner.rejectedTrends.length === 0 ? (
+              <p className="learning-story-empty">No obvious off-brand trends were rejected in the current window.</p>
+            ) : (
+              <div className="learning-story-list">
+                {snapshot.planner.rejectedTrends.map((trend) => (
+                  <article key={trend.id} className="learning-story-item">
+                    <div className="learning-story-item-head">
+                      <p className="learning-story-item-title">{trend.category}</p>
+                      <span className="learning-source-chip">{trend.fit}% fit</span>
+                    </div>
+                    <p className="learning-story-item-summary">{trend.headline}</p>
+                    <div className="learning-story-item-meta">
+                      <span className="learning-impact-chip learning-tone-warning">{trend.reason}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
+
+      <section>
+        <div className="section-header">
+          <div className="section-title">
+            <h2>Manual exemplar curation</h2>
+            <span className="section-count">pin the human-written winners you want the planner to trust most</span>
+          </div>
+        </div>
+        <div className="learning-section-copy">
+          Auto-pick works by default. Use pin when a tweet is a canonical example of your voice or topic judgment. Use block when a tweet performed well but should not steer future generations.
+        </div>
+
+        <div className="learning-story-grid">
+          <section className="learning-story-panel">
+            <div className="learning-story-head">
+              <div>
+                <p className="learning-story-kicker">Manual topic priors</p>
+                <h3 className="learning-story-title">What the planner learned from human-written winners</h3>
+              </div>
+            </div>
+            {snapshot.planner.manualExamples.topicClusters.length === 0 ? (
+              <p className="learning-story-empty">No stable manual topic clusters yet.</p>
+            ) : (
+              <div className="learning-story-list">
+                {snapshot.planner.manualExamples.topicClusters.map((cluster) => (
+                  <article key={`${cluster.topic}-${cluster.angle}`} className="learning-story-item">
+                    <div className="learning-story-item-head">
+                      <p className="learning-story-item-title">{cluster.topic}</p>
+                      <span className="learning-source-chip">{cluster.sampleCount} examples</span>
+                    </div>
+                    <p className="learning-story-item-summary">{cluster.angle}</p>
+                    <div className="learning-story-item-meta">
+                      <span className="learning-impact-chip learning-tone-neutral">avg {cluster.avgEngagement} engagement</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="learning-story-panel">
+            <div className="learning-story-head">
+              <div>
+                <p className="learning-story-kicker">Curate examples</p>
+                <h3 className="learning-story-title">
+                  {snapshot.planner.manualExamples.pinnedCount} pinned · {snapshot.planner.manualExamples.blockedCount} blocked
+                </h3>
+              </div>
+            </div>
+            {snapshot.planner.manualExamples.examples.length === 0 ? (
+              <p className="learning-story-empty">No manual examples available to curate yet.</p>
+            ) : (
+              <div className="learning-story-list">
+                {snapshot.planner.manualExamples.examples.map((example) => (
+                  <article key={example.xTweetId} className="learning-story-item">
+                    <div className="learning-story-item-head">
+                      <p className="learning-story-item-title">{example.likes} likes</p>
+                      <div className="learning-story-item-meta">
+                        {example.pinned && <span className="learning-source-chip">PINNED</span>}
+                        {example.blocked && <span className="learning-source-chip">BLOCKED</span>}
+                      </div>
+                    </div>
+                    <p className="learning-story-item-summary">{example.content}</p>
+                    <div className="learning-story-item-meta" style={{ gap: '8px' }}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        disabled={pendingExampleId === example.xTweetId}
+                        onClick={() => updateManualExample(example.xTweetId, example.pinned ? 'unpin' : 'pin')}
+                      >
+                        {example.pinned ? 'Unpin' : 'Pin'}
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        disabled={pendingExampleId === example.xTweetId}
+                        onClick={() => updateManualExample(example.xTweetId, example.blocked ? 'unblock' : 'block')}
+                      >
+                        {example.blocked ? 'Unblock' : 'Block'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </section>
 

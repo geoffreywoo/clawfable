@@ -1,4 +1,5 @@
 import type {
+  ContentSourceLane,
   FeedbackEntry,
   LearningSignal,
   OutcomeEpisode,
@@ -9,6 +10,7 @@ import type {
   TweetStructureType,
   TweetToneType,
 } from './types';
+import type { SourcePlannerPlan } from './source-planner';
 import { buildOutcomeEpisodes, computePerformanceLiftReward } from './outcome-rewards';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 
@@ -72,6 +74,7 @@ export interface BanditPolicy {
 export interface BanditSlotPlan {
   slot: number;
   mode: 'exploit' | 'explore';
+  sourceLane: ContentSourceLane;
   format: string;
   topic: string;
   length: BanditLengthBucket;
@@ -80,6 +83,8 @@ export interface BanditSlotPlan {
   specificity: TweetSpecificityType | string;
   structure: TweetStructureType | string;
   coverageCluster: string;
+  trendTopicId: string | null;
+  trendHeadline: string | null;
   rationale: string;
 }
 
@@ -105,6 +110,7 @@ interface BuildBanditSlotPlanOptions {
   count: number;
   explorationRate: number;
   biasTopics?: string[];
+  sourcePlan?: SourcePlannerPlan | null;
 }
 
 const DEFAULT_MEAN_REWARD = 0.52;
@@ -527,6 +533,33 @@ function pickUnusedArm(
   };
 }
 
+function createSyntheticArm(
+  family: BanditArmFamily,
+  arm: string,
+): BanditArmScore {
+  return {
+    arm,
+    family,
+    pulls: 0,
+    localPulls: 0,
+    globalPulls: 0,
+    priorPulls: DEFAULT_PRIOR_PULLS,
+    successes: 0,
+    failures: 0,
+    meanReward: DEFAULT_MEAN_REWARD,
+    globalMeanReward: DEFAULT_MEAN_REWARD,
+    explorationBonus: 0.25,
+    uncertainty: 0.25,
+    alpha: 1,
+    beta: 1,
+    ucbScore: DEFAULT_MEAN_REWARD,
+    thompsonScore: DEFAULT_MEAN_REWARD,
+    coldStart: true,
+    source: 'global_prior',
+    localShare: 0,
+  };
+}
+
 function prioritizeArms(
   ranking: BanditArmScore[],
   used: Set<string>,
@@ -618,6 +651,7 @@ export function buildBanditSlotPlan(
     count,
     explorationRate,
     biasTopics = [],
+    sourcePlan = null,
   }: BuildBanditSlotPlanOptions,
 ): BanditSlotPlan[] {
   if (!policy || count <= 0) return [];
@@ -659,9 +693,10 @@ export function buildBanditSlotPlan(
   const plans: BanditSlotPlan[] = [];
 
   for (let slot = 0; slot < count; slot++) {
-    const mode = modes[slot];
+    const sourceSlot = sourcePlan?.slots[slot] || null;
+    const mode = sourceSlot?.mode || modes[slot];
     const familyRankings = mode === 'explore' ? explore : exploit;
-    const preferredTopic = biasIndex < normalizedBiasTopics.length ? normalizedBiasTopics[biasIndex] : null;
+    const preferredTopic = sourceSlot?.targetTopic || (biasIndex < normalizedBiasTopics.length ? normalizedBiasTopics[biasIndex] : null);
     const envelope = selectPrimaryEnvelope(
       {
         format: familyRankings.format,
@@ -678,6 +713,10 @@ export function buildBanditSlotPlan(
     );
     let format = envelope.format;
     let topic = envelope.topic;
+    if (sourceSlot?.targetTopic) {
+      topic = familyRankings.topic.find((arm) => arm.arm.toLowerCase() === sourceSlot.targetTopic.toLowerCase())
+        || createSyntheticArm('topic', sourceSlot.targetTopic);
+    }
     if (preferredTopic) {
       biasIndex++;
     }
@@ -720,13 +759,18 @@ export function buildBanditSlotPlan(
     usedFamilies.specificity.add(specificity.arm);
     usedFamilies.structure.add(structure.arm);
 
-    const rationale = mode === 'explore'
+    const sourceLane = sourceSlot?.sourceLane || (mode === 'explore' ? 'core_explore_fallback' : 'manual_core_exploit');
+    const baseRationale = mode === 'explore'
       ? `Explore ${format.arm}/${topic.arm}/${hook.arm}. Uncertainty is still high, so this slot buys information while staying on-brand.`
       : `Exploit ${format.arm}/${topic.arm}/${hook.arm}. Local reward and posterior mean both support this combination.`;
+    const rationale = sourceSlot
+      ? `${sourceSlot.plannerReason} ${baseRationale}`
+      : baseRationale;
 
     plans.push({
       slot: slot + 1,
       mode,
+      sourceLane,
       format: format.arm,
       topic: topic.arm,
       length: (length.arm as BanditLengthBucket) || 'medium',
@@ -735,6 +779,8 @@ export function buildBanditSlotPlan(
       specificity: specificity.arm,
       structure: structure.arm,
       coverageCluster: `${topic.arm.toLowerCase()}:${hook.arm.toLowerCase()}:${structure.arm.toLowerCase()}`,
+      trendTopicId: sourceSlot?.trendTopicId || null,
+      trendHeadline: sourceSlot?.trendHeadline || null,
       rationale,
     });
   }

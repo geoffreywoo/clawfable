@@ -197,6 +197,14 @@ export interface RewardBreakdown {
   notes: string[];
 }
 
+export type ContentSourceLane =
+  | 'manual_core_exploit'
+  | 'trend_aligned_exploit'
+  | 'trend_adjacent_explore'
+  | 'core_explore_fallback';
+
+export type TrendTolerance = 'adjacent' | 'moderate' | 'aggressive';
+
 export interface Tweet {
   id: string;
   agentId: string;
@@ -241,6 +249,9 @@ export interface Tweet {
   localPriorWeight?: number | null;
   scoreProvenance?: CandidateScoreProvenance | null;
   rewardBreakdown?: RewardBreakdown | null;
+  sourceLane?: ContentSourceLane | null;
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
   quarantineReason?: string | null;
   quarantinedAt?: string | null;
   createdAt: string;
@@ -338,6 +349,8 @@ export interface ProtocolSettings {
   };
   autonomyMode: AutonomyMode; // safe = higher confidence, explore = learn faster
   explorationRate: number;    // 0-100, percentage of batch reserved for exploratory ideas
+  trendMixTarget?: number;    // 0-100, target share of trend-led slots
+  trendTolerance?: TrendTolerance; // how far from core voice trend exploration may go
   enabledFormats: string[];  // which formats to use, empty = all
   qtRatio: number;           // 0-100, percentage of QTs vs originals
   // Marketing track
@@ -443,6 +456,21 @@ export interface TweetPerformance {
   source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline
 }
 
+export interface ManualExampleCuration {
+  pinnedXTweetIds: string[];
+  blockedXTweetIds: string[];
+  updatedAt: string;
+}
+
+export interface ManualTopicCluster {
+  topic: string;
+  angle: string;
+  weight: number;
+  sampleCount: number;
+  avgEngagement: number;
+  topTweets: TweetPerformance[];
+}
+
 export interface StyleFingerprint {
   avgLength: number;
   shortPct: number;        // % tweets under 200 chars
@@ -458,6 +486,21 @@ export interface StyleFingerprint {
   updatedAt: string;
 }
 
+export interface OperatorVoiceReference {
+  sampleCount: number;                 // human-written reference pool size
+  bestPerformers: TweetPerformance[];  // strongest operator-written tweets
+  styleFingerprint: StyleFingerprint;  // how the best human-written tweets sound
+  pinnedExamples?: TweetPerformance[];
+  blockedXTweetIds?: string[];
+}
+
+export interface SourceLanePerformance {
+  lane: ContentSourceLane;
+  posts: number;
+  avgEngagement: number;
+  wins: number;
+}
+
 export interface AgentLearnings {
   agentId: string;
   updatedAt: string;
@@ -470,6 +513,10 @@ export interface AgentLearnings {
   topicRankings: Array<{ topic: string; avgEngagement: number; count: number }>;
   insights: string[];                     // AI-generated prescriptive rules
   styleFingerprint?: StyleFingerprint;    // computed from top performers
+  operatorVoiceReference?: OperatorVoiceReference; // high-performing human-written voice anchors
+  manualTopicProfile?: ManualTopicCluster[];
+  manualExampleCuration?: ManualExampleCuration;
+  sourceLanePerformance?: SourceLanePerformance[];
   sourceBreakdown?: {
     autopilot: number;
     manual: number;
@@ -487,6 +534,98 @@ export interface AccountAnalysis {
   engagementPatterns: EngagementPattern;
   followingProfile: FollowingProfile;
   contentFingerprint: string;  // summary of what makes this account's content perform
+}
+
+// ─── Engagement types ────────────────────────────────────────────────────────
+
+export type EngagementCandidateSource = 'feed' | 'pasted';
+export type EngagementActionType = 'like' | 'reply';
+export type EngagementActionStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'aborted';
+export type EngagementSessionState = 'draft' | 'approved' | 'running' | 'succeeded' | 'failed' | 'aborted';
+
+export interface EngagementCandidate {
+  id: string;
+  agentId: string;
+  source: EngagementCandidateSource;
+  tweetId: string;
+  tweetUrl: string;
+  authorId: string | null;
+  authorHandle: string;
+  authorName: string | null;
+  text: string;
+  likes: number;
+  createdAt: string;
+  topic: string | null;
+  score: number;
+  scoreReason: string;
+}
+
+export interface EngagementDraft {
+  tweetId: string;
+  content: string;
+  originalContent: string;
+  edited: boolean;
+  updatedAt: string;
+}
+
+export interface EngagementProof {
+  type: 'screenshot' | 'dom';
+  localPath?: string | null;
+  note?: string | null;
+  capturedAt: string;
+}
+
+export interface EngagementAction {
+  id: string;
+  type: EngagementActionType;
+  status: EngagementActionStatus;
+  candidate: EngagementCandidate;
+  draft: EngagementDraft | null;
+  resultTweetId: string | null;
+  resultTweetUrl: string | null;
+  proof: EngagementProof | null;
+  failureReason: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface EngagementSession {
+  id: string;
+  agentId: string;
+  state: EngagementSessionState;
+  actions: EngagementAction[];
+  machineLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  abortedAt: string | null;
+  lastError: string | null;
+}
+
+export interface BrowserCompanionPairing {
+  id: string;
+  ownerUserId: string;
+  machineLabel: string;
+  token: string;
+  status: 'pending' | 'active' | 'revoked';
+  currentAgentId: string | null;
+  currentAgentHandle: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastHeartbeatAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface EngageSnapshot {
+  companion: {
+    latestPairing: BrowserCompanionPairing | null;
+    localUrl: string;
+  };
+  candidateFeed: EngagementCandidate[];
+  currentSession: EngagementSession | null;
+  recentSessions: EngagementSession[];
 }
 
 // ─── Tweet job types ────────────────────────────────────────────────────────
@@ -560,6 +699,8 @@ export type LearningSignalType =
   | 'reply_generated'
   | 'reply_rejected'
   | 'reply_posted'
+  | 'tweet_liked'
+  | 'tweet_like_failed'
   | 'x_post_rejected'
   | 'x_post_succeeded';
 
@@ -569,7 +710,7 @@ export interface LearningSignal {
   tweetId?: string;
   xTweetId?: string;
   signalType: LearningSignalType;
-  surface: 'compose' | 'queue' | 'mentions' | 'setup' | 'autopilot' | 'manual_post' | 'cron';
+  surface: 'compose' | 'queue' | 'mentions' | 'setup' | 'autopilot' | 'manual_post' | 'cron' | 'engage';
   rewardDelta: number; // -1 to 1
   createdAt: string;
   reason?: string;

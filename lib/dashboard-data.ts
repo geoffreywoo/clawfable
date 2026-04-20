@@ -1,6 +1,7 @@
 import { unstable_cache } from 'next/cache';
 import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
+import { BROWSER_COMPANION_LOCAL_URL, buildEngagementFeed } from './engagement';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
 import {
@@ -12,14 +13,19 @@ import {
 import { normalizeSetupStep } from './setup-state';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import { decodeKeys } from './twitter-client';
+import { buildSourcePlannerPlan, enrichTrendingTopics } from './source-planner';
 import {
   getAgentByHandle,
+  getActiveEngagementSession,
   getAgents,
   getAnalysis,
   getBaseline,
   getFeedback,
   getLearnings,
+  getLatestBrowserCompanionPairingForUser,
   getLearningSignals,
+  getManualExampleCuration,
+  listEngagementSessions,
   getMentions,
   getMetricsArray,
   getMentionCount,
@@ -36,6 +42,7 @@ import type {
   AgentDetail,
   AgentSummary,
   BillingSummary,
+  EngageSnapshot,
   Metric,
   PostLogEntry,
   ProtocolSettings,
@@ -174,13 +181,31 @@ export async function getProtocolSnapshot(user: User, agentId: string): Promise<
 }
 
 export async function getAgentLearningSnapshot(agent: Agent): Promise<LearningSnapshot> {
-  const [context, signals, feedback, performanceHistory, baseline] = await Promise.all([
+  const [context, signals, feedback, performanceHistory, baseline, trending, manualExampleCuration] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getLearningSignals(agent.id, 250),
     getFeedback(agent.id),
     getPerformanceHistory(agent.id, 200),
     getBaseline(agent.id),
+    getAgentTopics(agent),
+    getManualExampleCuration(agent.id),
   ]);
+  const enrichedTrending = enrichTrendingTopics(
+    trending,
+    context.voiceProfile,
+    context.learnings,
+    context.settings.trendTolerance ?? context.style.trendTolerance,
+  );
+  const sourcePlan = buildSourcePlannerPlan({
+    count: 4,
+    autonomyMode: context.settings.autonomyMode,
+    trendMixTarget: context.settings.trendMixTarget ?? context.style.trendMixTarget,
+    trendTolerance: context.settings.trendTolerance ?? context.style.trendTolerance,
+    voiceProfile: context.voiceProfile,
+    learnings: context.learnings,
+    trending,
+    fallbackTopics: context.style.exploration.underusedTopics,
+  });
 
   return buildLearningSnapshot({
     settings: context.settings,
@@ -192,6 +217,9 @@ export async function getAgentLearningSnapshot(agent: Agent): Promise<LearningSn
     allTweets: context.allTweets,
     performanceHistory,
     baseline,
+    sourcePlan,
+    manualExampleCuration,
+    trending: enrichedTrending,
   });
 }
 
@@ -230,6 +258,26 @@ export interface DashboardSections {
   learning?: LearningSnapshot;
   analysis?: AccountAnalysis | null;
   topics?: TrendingTopic[];
+  engage?: EngageSnapshot;
+}
+
+export async function getAgentEngageSnapshot(user: User, agent: Agent): Promise<EngageSnapshot> {
+  const [candidateFeed, currentSession, recentSessions, latestPairing] = await Promise.all([
+    buildEngagementFeed(agent).catch(() => []),
+    getActiveEngagementSession(agent.id),
+    listEngagementSessions(agent.id, 6),
+    getLatestBrowserCompanionPairingForUser(user.id),
+  ]);
+
+  return {
+    companion: {
+      latestPairing,
+      localUrl: BROWSER_COMPANION_LOCAL_URL,
+    },
+    candidateFeed,
+    currentSession,
+    recentSessions,
+  };
 }
 
 const getCachedPublicSouls = unstable_cache(

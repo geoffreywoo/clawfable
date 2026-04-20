@@ -37,7 +37,7 @@ export async function PATCH(
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
-      'lengthMix', 'autonomyMode', 'explorationRate', 'enabledFormats',
+      'lengthMix', 'autonomyMode', 'explorationRate', 'trendMixTarget', 'trendTolerance', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
       'soulEvolutionMode',
       'proactiveReplies', 'proactiveLikes', 'autoFollow', 'agentShoutouts',
@@ -51,6 +51,15 @@ export async function PATCH(
     // Enforce safe posting limits
     if (typeof updates.postsPerDay === 'number') {
       updates.postsPerDay = clampPostsPerDay(updates.postsPerDay);
+    }
+    if (typeof updates.trendMixTarget === 'number') {
+      updates.trendMixTarget = Math.max(0, Math.min(100, Math.round(updates.trendMixTarget)));
+    }
+    if (
+      typeof updates.trendTolerance === 'string'
+      && !['adjacent', 'moderate', 'aggressive'].includes(updates.trendTolerance)
+    ) {
+      delete updates.trendTolerance;
     }
 
     const isTryingToEnableAutomation = (

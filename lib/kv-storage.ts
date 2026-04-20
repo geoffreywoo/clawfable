@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration } from './types';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 
@@ -63,6 +63,10 @@ function invalidateAllNamespaces(key: string): void {
   readCache.delete(`hash:${key}`);
   readCache.delete(`list:${key}`);
   readCache.delete(`set:${key}`);
+}
+
+function normalizeAgentHandle(handle: string | null | undefined): string {
+  return normalizeUsername(handle);
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
@@ -349,7 +353,7 @@ async function kvHgetall<T>(key: string): Promise<T | null> {
 const KEYS = {
   agentSet: () => 'agents',
   agent: (id: string) => `agent:${id}`,
-  agentHandle: (handle: string) => `agent:handle:${handle}`,
+  agentHandle: (handle: string) => `agent:handle:${normalizeAgentHandle(handle)}`,
   agentOwner: (id: string) => `agent:${id}:owner`,
   agentTweets: (id: string) => `agent:${id}:tweets`,
   agentQueue: (id: string) => `agent:${id}:queue`,
@@ -362,13 +366,20 @@ const KEYS = {
   agentPerformance: (id: string) => `agent:${id}:performance`,
   agentLearnings: (id: string) => `agent:${id}:learnings`,
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
+  agentEngagementSessions: (id: string) => `agent:${id}:engage_sessions`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
   agentFollowerHistory: (id: string) => `agent:${id}:followers`,
   agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
   agentVoiceChat: (id: string) => `agent:${id}:voice_chat`,
   agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
   agentVoiceDirectiveRules: (id: string) => `agent:${id}:voice_directive_rules`,
+  agentManualExamples: (id: string) => `agent:${id}:manual_examples`,
   agentSignals: (id: string) => `agent:${id}:signals`,
+  browserPairing: (id: string) => `browser:pairing:${id}`,
+  browserPairingByToken: (token: string) => `browser:pairing:token:${token}`,
+  browserPairingChallenge: (challenge: string) => `browser:pairing:challenge:${challenge}`,
+  userBrowserPairings: (userId: string) => `user:${userId}:browser_pairings`,
+  engagementSession: (id: string) => `engage:session:${id}`,
   cronLog: () => 'cron:log',
   userSet: () => 'users',
   user: (xUserId: string) => `user:${xUserId}`,
@@ -385,6 +396,8 @@ const KEYS = {
   counterTweet: () => 'counter:tweet',
   counterMention: () => 'counter:mention',
   counterJob: () => 'counter:job',
+  counterEngagementSession: () => 'counter:engagement_session',
+  counterBrowserPairing: () => 'counter:browser_pairing',
   agentWizard: (id: string) => `agent:${id}:wizard`,
   agentStyle: (id: string) => `agent:${id}:style`,
   agentFeedback: (id: string) => `agent:${id}:feedback`,
@@ -393,6 +406,82 @@ const KEYS = {
   agentRateLimit: (id: string, action: string) => `ratelimit:${id}:${action}`,
   agentBaseline: (id: string) => `agent:${id}:baseline`,
 };
+
+export class AgentHandleConflictError extends Error {
+  readonly handle: string;
+  readonly existingAgentId: string | null;
+
+  constructor(handle: string, existingAgentId?: string | null) {
+    const normalizedHandle = normalizeAgentHandle(handle);
+    super(`An agent for @${normalizedHandle} already exists.`);
+    this.name = 'AgentHandleConflictError';
+    this.handle = normalizedHandle;
+    this.existingAgentId = existingAgentId ? String(existingAgentId) : null;
+  }
+}
+
+function hasLiveAgentCredentials(agent: Pick<Agent, 'apiKey' | 'apiSecret' | 'accessToken' | 'accessSecret'>): boolean {
+  return Boolean(agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret);
+}
+
+function compareCanonicalHandleAgents(a: Agent, b: Agent): number {
+  const connectedDelta = Number(b.isConnected === 1) - Number(a.isConnected === 1);
+  if (connectedDelta !== 0) return connectedDelta;
+
+  const liveKeysDelta = Number(hasLiveAgentCredentials(b)) - Number(hasLiveAgentCredentials(a));
+  if (liveKeysDelta !== 0) return liveKeysDelta;
+
+  const xUserDelta = Number(Boolean(b.xUserId)) - Number(Boolean(a.xUserId));
+  if (xUserDelta !== 0) return xUserDelta;
+
+  const readyDelta = Number(b.setupStep === 'ready') - Number(a.setupStep === 'ready');
+  if (readyDelta !== 0) return readyDelta;
+
+  const createdAtDelta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  if (createdAtDelta !== 0) return createdAtDelta;
+
+  const aId = Number(a.id);
+  const bId = Number(b.id);
+  if (Number.isFinite(aId) && Number.isFinite(bId)) {
+    return aId - bId;
+  }
+
+  return String(a.id).localeCompare(String(b.id));
+}
+
+async function getAgentsByHandleValue(handle: string): Promise<Agent[]> {
+  const normalizedHandle = normalizeAgentHandle(handle);
+  if (!normalizedHandle) return [];
+
+  const agents = await getAgents();
+  return agents
+    .filter((agent) => normalizeAgentHandle(agent.handle) === normalizedHandle)
+    .sort(compareCanonicalHandleAgents);
+}
+
+async function getHandleConflict(handle: string, excludeAgentId?: string | null): Promise<Agent | null> {
+  const excludedId = excludeAgentId ? String(excludeAgentId) : null;
+  const matches = await getAgentsByHandleValue(handle);
+  return matches.find((agent) => !excludedId || String(agent.id) !== excludedId) ?? null;
+}
+
+async function syncCanonicalHandleIndex(handle: string): Promise<Agent | null> {
+  const normalizedHandle = normalizeAgentHandle(handle);
+  if (!normalizedHandle) return null;
+
+  const canonical = (await getAgentsByHandleValue(normalizedHandle))[0] ?? null;
+  if (!canonical) {
+    await kvDel(KEYS.agentHandle(normalizedHandle));
+    return null;
+  }
+
+  const currentId = await kvGet<string>(KEYS.agentHandle(normalizedHandle));
+  if (String(currentId || '') !== String(canonical.id)) {
+    await kvSet(KEYS.agentHandle(normalizedHandle), String(canonical.id));
+  }
+
+  return canonical;
+}
 
 // ─── Agent storage ────────────────────────────────────────────────────────────
 
@@ -412,17 +501,25 @@ export async function getAgent(id: string): Promise<Agent | null> {
 }
 
 export async function getAgentByHandle(handle: string): Promise<Agent | null> {
-  const id = await kvGet<string>(KEYS.agentHandle(handle));
-  if (!id) return null;
-  return getAgent(id);
+  return syncCanonicalHandleIndex(handle);
 }
 
 export async function createAgent(data: Omit<CreateAgentInput, 'id'>): Promise<Agent> {
+  const normalizedHandle = normalizeAgentHandle(data.handle);
+  if (!normalizedHandle) {
+    throw new Error('Agent handle is required');
+  }
+
+  const existing = await getHandleConflict(normalizedHandle);
+  if (existing) {
+    throw new AgentHandleConflictError(normalizedHandle, existing.id);
+  }
+
   const counter = await kvIncr(KEYS.counterAgent());
   const id = String(counter);
   const agent: Agent = {
     id,
-    handle: data.handle,
+    handle: normalizedHandle,
     name: data.name,
     soulMd: data.soulMd,
     soulSummary: data.soulSummary ?? null,
@@ -438,7 +535,7 @@ export async function createAgent(data: Omit<CreateAgentInput, 'id'>): Promise<A
   };
   await kvHset(KEYS.agent(id), agent as unknown as Record<string, unknown>);
   await kvSadd(KEYS.agentSet(), id);
-  await kvSet(KEYS.agentHandle(agent.handle), id);
+  await syncCanonicalHandleIndex(agent.handle);
   return agent;
 }
 
@@ -446,14 +543,25 @@ export async function updateAgent(id: string, data: UpdateAgentInput): Promise<A
   const existing = await getAgent(id);
   if (!existing) throw new Error(`Agent ${id} not found`);
 
-  // If handle changed, update handle index
-  if (data.handle && data.handle !== existing.handle) {
-    await kvDel(KEYS.agentHandle(existing.handle));
-    await kvSet(KEYS.agentHandle(data.handle), id);
+  const previousHandle = normalizeAgentHandle(existing.handle);
+  const nextHandle = data.handle !== undefined
+    ? normalizeAgentHandle(data.handle)
+    : previousHandle;
+  if (!nextHandle) throw new Error('Agent handle is required');
+
+  const conflictingAgent = await getHandleConflict(nextHandle, id);
+  if (conflictingAgent) {
+    throw new AgentHandleConflictError(nextHandle, conflictingAgent.id);
   }
 
-  const updated = { ...existing, ...data };
+  const updated = { ...existing, ...data, handle: nextHandle };
   await kvHset(KEYS.agent(id), updated as unknown as Record<string, unknown>);
+
+  if (previousHandle !== nextHandle) {
+    await syncCanonicalHandleIndex(previousHandle);
+  }
+  await syncCanonicalHandleIndex(nextHandle);
+
   return updated;
 }
 
@@ -509,6 +617,7 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentFeedback(id));
   await kvDel(KEYS.agentEvents(id));
   await kvDel(KEYS.agentSoulBackup(id));
+  await kvDel(KEYS.agentManualExamples(id));
 
   // Cascade: delete protocol, post log, learnings, performance, baseline, jobs
   await kvDel(KEYS.agentProtocol(id));
@@ -516,6 +625,9 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentLearnings(id));
   await kvDel(KEYS.agentPerformance(id));
   await kvDel(KEYS.agentBaseline(id));
+  const engagementSessionIds = await kvLrange(KEYS.agentEngagementSessions(id), 0, -1);
+  await Promise.all(engagementSessionIds.map((sessionId) => kvDel(KEYS.engagementSession(String(sessionId)))));
+  await kvDel(KEYS.agentEngagementSessions(id));
   // Delete jobs
   const jobIds = await kvLrange(KEYS.agentJobs(id), 0, -1);
   await Promise.all(jobIds.map((jid) => kvDel(`job:${jid}`)));
@@ -524,7 +636,7 @@ export async function deleteAgent(id: string): Promise<void> {
   // Remove agent
   await kvDel(KEYS.agent(id));
   await kvSrem(KEYS.agentSet(), id);
-  await kvDel(KEYS.agentHandle(agent.handle));
+  await syncCanonicalHandleIndex(agent.handle);
   await removeAgentFromAllUsers(id);
 }
 
@@ -626,6 +738,9 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     localPriorWeight: coerceNullableNumber(tweet.localPriorWeight),
     scoreProvenance: coerceNullableJson(tweet.scoreProvenance),
     rewardBreakdown: coerceNullableJson(tweet.rewardBreakdown),
+    sourceLane: tweet.sourceLane ?? null,
+    trendTopicId: tweet.trendTopicId ?? null,
+    trendHeadline: tweet.trendHeadline ?? null,
     quarantineReason: tweet.quarantineReason ?? null,
     quarantinedAt: tweet.quarantinedAt ?? null,
   };
@@ -726,6 +841,9 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     localPriorWeight: data.localPriorWeight ?? null,
     scoreProvenance: data.scoreProvenance ?? null,
     rewardBreakdown: data.rewardBreakdown ?? null,
+    sourceLane: data.sourceLane ?? null,
+    trendTopicId: data.trendTopicId ?? null,
+    trendHeadline: data.trendHeadline ?? null,
     quarantineReason: data.quarantineReason ?? null,
     quarantinedAt: data.quarantinedAt ?? null,
     createdAt: new Date().toISOString(),
@@ -899,6 +1017,8 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   autonomyMode: 'balanced',
   explorationRate: 35,
+  trendMixTarget: 35,
+  trendTolerance: 'moderate',
   enabledFormats: [],  // empty = all formats
   qtRatio: 60,
   marketingEnabled: false,
@@ -924,6 +1044,39 @@ export async function updateProtocolSettings(agentId: string, updates: Partial<P
   const merged = { ...current, ...updates };
   await kvSet(KEYS.agentProtocol(agentId), merged);
   return merged;
+}
+
+const DEFAULT_MANUAL_EXAMPLE_CURATION: ManualExampleCuration = {
+  pinnedXTweetIds: [],
+  blockedXTweetIds: [],
+  updatedAt: new Date(0).toISOString(),
+};
+
+function normalizeManualExampleCuration(value: ManualExampleCuration | null | undefined): ManualExampleCuration {
+  return {
+    pinnedXTweetIds: [...new Set((value?.pinnedXTweetIds || []).map((id) => String(id)))],
+    blockedXTweetIds: [...new Set((value?.blockedXTweetIds || []).map((id) => String(id)))],
+    updatedAt: value?.updatedAt || DEFAULT_MANUAL_EXAMPLE_CURATION.updatedAt,
+  };
+}
+
+export async function getManualExampleCuration(agentId: string): Promise<ManualExampleCuration> {
+  const stored = await kvGet<ManualExampleCuration>(KEYS.agentManualExamples(agentId));
+  return normalizeManualExampleCuration(stored);
+}
+
+export async function updateManualExampleCuration(
+  agentId: string,
+  updates: Partial<ManualExampleCuration>,
+): Promise<ManualExampleCuration> {
+  const current = await getManualExampleCuration(agentId);
+  const next = normalizeManualExampleCuration({
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+  await kvSet(KEYS.agentManualExamples(agentId), next);
+  return next;
 }
 
 // ─── Post log storage ────────────────────────────────────────────────────────
@@ -1278,6 +1431,8 @@ const UNIQUE_SIGNAL_TYPES = new Set<LearningSignal['signalType']>([
   'reply_generated',
   'reply_rejected',
   'reply_posted',
+  'tweet_liked',
+  'tweet_like_failed',
   'deleted_from_x',
   'deleted_from_queue',
   'x_post_rejected',
@@ -1626,6 +1781,13 @@ interface TrendingCacheEntry {
   cachedAt: string;
 }
 
+interface BrowserPairingChallenge {
+  challenge: string;
+  ownerUserId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 const TRENDING_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 export async function getTrendingCache(agentId: string): Promise<unknown | null> {
@@ -1638,6 +1800,225 @@ export async function getTrendingCache(agentId: string): Promise<unknown | null>
 
 export async function setTrendingCache(agentId: string, data: unknown): Promise<void> {
   await kvSet(KEYS.agentTrendingCache(agentId), { data, cachedAt: new Date().toISOString() });
+}
+
+// ─── Engagement sessions ────────────────────────────────────────────────────
+
+function normalizeEngagementSession(session: EngagementSession): EngagementSession {
+  return {
+    ...session,
+    id: String(session.id),
+    machineLabel: session.machineLabel ?? null,
+    approvedAt: session.approvedAt ?? null,
+    startedAt: session.startedAt ?? null,
+    completedAt: session.completedAt ?? null,
+    abortedAt: session.abortedAt ?? null,
+    lastError: session.lastError ?? null,
+    actions: Array.isArray(session.actions)
+      ? session.actions.map((action) => ({
+          ...action,
+          id: String(action.id),
+          draft: action.draft ? {
+            ...action.draft,
+            tweetId: String(action.draft.tweetId),
+            updatedAt: action.draft.updatedAt,
+          } : null,
+          resultTweetId: action.resultTweetId ? String(action.resultTweetId) : null,
+          resultTweetUrl: action.resultTweetUrl ?? null,
+          proof: action.proof ? {
+            ...action.proof,
+            localPath: action.proof.localPath ?? null,
+            note: action.proof.note ?? null,
+          } : null,
+          failureReason: action.failureReason ?? null,
+          startedAt: action.startedAt ?? null,
+          completedAt: action.completedAt ?? null,
+          candidate: {
+            ...action.candidate,
+            id: String(action.candidate.id),
+            agentId: String(action.candidate.agentId),
+            tweetId: String(action.candidate.tweetId),
+            tweetUrl: action.candidate.tweetUrl,
+            authorId: action.candidate.authorId ? String(action.candidate.authorId) : null,
+            authorName: action.candidate.authorName ?? null,
+            topic: action.candidate.topic ?? null,
+          },
+        }))
+      : [],
+  };
+}
+
+export async function getEngagementSession(id: string): Promise<EngagementSession | null> {
+  const session = await kvGet<EngagementSession>(KEYS.engagementSession(id));
+  return session ? normalizeEngagementSession(session) : null;
+}
+
+export async function listEngagementSessions(agentId: string, limit = 10): Promise<EngagementSession[]> {
+  const ids = await kvLrange(KEYS.agentEngagementSessions(agentId), 0, limit - 1);
+  const sessions = await Promise.all(ids.map((id) => getEngagementSession(String(id))));
+  return sessions
+    .filter((session): session is EngagementSession => session !== null)
+    .sort(compareNewestRecordFirst);
+}
+
+export async function getActiveEngagementSession(agentId: string): Promise<EngagementSession | null> {
+  const sessions = await listEngagementSessions(agentId, 20);
+  return sessions.find((session) => ['draft', 'approved', 'running'].includes(session.state)) ?? null;
+}
+
+export async function getDraftEngagementSession(agentId: string): Promise<EngagementSession | null> {
+  const sessions = await listEngagementSessions(agentId, 20);
+  return sessions.find((session) => session.state === 'draft') ?? null;
+}
+
+export async function saveEngagementSession(session: EngagementSession): Promise<EngagementSession> {
+  const normalized = normalizeEngagementSession({
+    ...session,
+    updatedAt: new Date().toISOString(),
+  });
+  await kvSet(KEYS.engagementSession(normalized.id), normalized);
+  return normalized;
+}
+
+export async function createEngagementSession(session: Omit<EngagementSession, 'id' | 'createdAt' | 'updatedAt'>): Promise<EngagementSession> {
+  const counter = await kvIncr(KEYS.counterEngagementSession());
+  const now = new Date().toISOString();
+  const created = normalizeEngagementSession({
+    ...session,
+    id: `engage-${counter}`,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await kvSet(KEYS.engagementSession(created.id), created);
+  await kvLpush(KEYS.agentEngagementSessions(created.agentId), created.id);
+  return created;
+}
+
+export async function updateEngagementSession(
+  id: string,
+  updates: Partial<Omit<EngagementSession, 'id' | 'agentId' | 'createdAt'>>
+): Promise<EngagementSession> {
+  const existing = await getEngagementSession(id);
+  if (!existing) throw new Error(`Engagement session ${id} not found`);
+  const updated = normalizeEngagementSession({
+    ...existing,
+    ...updates,
+    id: existing.id,
+    agentId: existing.agentId,
+    createdAt: existing.createdAt,
+    updatedAt: new Date().toISOString(),
+  });
+  await kvSet(KEYS.engagementSession(id), updated);
+  return updated;
+}
+
+// ─── Browser companion pairings ─────────────────────────────────────────────
+
+function normalizeBrowserCompanionPairing(pairing: BrowserCompanionPairing): BrowserCompanionPairing {
+  return {
+    ...pairing,
+    id: String(pairing.id),
+    ownerUserId: String(pairing.ownerUserId),
+    token: String(pairing.token),
+    machineLabel: pairing.machineLabel,
+    currentAgentId: pairing.currentAgentId ? String(pairing.currentAgentId) : null,
+    currentAgentHandle: pairing.currentAgentHandle ?? null,
+    lastHeartbeatAt: pairing.lastHeartbeatAt ?? null,
+    expiresAt: pairing.expiresAt ?? null,
+  };
+}
+
+export async function createBrowserCompanionPairingChallenge(ownerUserId: string, ttlMinutes = 10): Promise<BrowserPairingChallenge> {
+  const challenge = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
+  const record: BrowserPairingChallenge = {
+    challenge,
+    ownerUserId: String(ownerUserId),
+    createdAt,
+    expiresAt,
+  };
+  await kvSet(KEYS.browserPairingChallenge(challenge), record);
+  return record;
+}
+
+export async function consumeBrowserCompanionPairingChallenge(challenge: string): Promise<BrowserPairingChallenge | null> {
+  const record = await kvGet<BrowserPairingChallenge>(KEYS.browserPairingChallenge(challenge));
+  if (!record) return null;
+  await kvDel(KEYS.browserPairingChallenge(challenge));
+  if (new Date(record.expiresAt).getTime() < Date.now()) return null;
+  return record;
+}
+
+export async function getBrowserCompanionPairing(id: string): Promise<BrowserCompanionPairing | null> {
+  const pairing = await kvGet<BrowserCompanionPairing>(KEYS.browserPairing(id));
+  return pairing ? normalizeBrowserCompanionPairing(pairing) : null;
+}
+
+export async function getBrowserCompanionPairingByToken(token: string): Promise<BrowserCompanionPairing | null> {
+  const pairingId = await kvGet<string>(KEYS.browserPairingByToken(token));
+  if (!pairingId) return null;
+  return getBrowserCompanionPairing(String(pairingId));
+}
+
+export async function listBrowserCompanionPairingsForUser(ownerUserId: string): Promise<BrowserCompanionPairing[]> {
+  const ids = await kvSmembers(KEYS.userBrowserPairings(ownerUserId));
+  const pairings = await Promise.all(ids.map((id) => getBrowserCompanionPairing(String(id))));
+  return pairings
+    .filter((pairing): pairing is BrowserCompanionPairing => pairing !== null)
+    .sort(compareNewestRecordFirst);
+}
+
+export async function getLatestBrowserCompanionPairingForUser(ownerUserId: string): Promise<BrowserCompanionPairing | null> {
+  const pairings = await listBrowserCompanionPairingsForUser(ownerUserId);
+  return pairings[0] ?? null;
+}
+
+export async function createBrowserCompanionPairing(
+  ownerUserId: string,
+  machineLabel: string,
+  ttlHours = 24 * 7
+): Promise<BrowserCompanionPairing> {
+  const counter = await kvIncr(KEYS.counterBrowserPairing());
+  const id = `pair-${counter}`;
+  const token = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const pairing = normalizeBrowserCompanionPairing({
+    id,
+    ownerUserId: String(ownerUserId),
+    machineLabel,
+    token,
+    status: 'active',
+    currentAgentId: null,
+    currentAgentHandle: null,
+    createdAt: now,
+    updatedAt: now,
+    lastHeartbeatAt: now,
+    expiresAt: new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString(),
+  });
+  await kvSet(KEYS.browserPairing(id), pairing);
+  await kvSet(KEYS.browserPairingByToken(token), id);
+  await kvSadd(KEYS.userBrowserPairings(ownerUserId), id);
+  return pairing;
+}
+
+export async function updateBrowserCompanionPairing(
+  id: string,
+  updates: Partial<Omit<BrowserCompanionPairing, 'id' | 'ownerUserId' | 'createdAt' | 'token'>>
+): Promise<BrowserCompanionPairing> {
+  const existing = await getBrowserCompanionPairing(id);
+  if (!existing) throw new Error(`Browser companion pairing ${id} not found`);
+  const updated = normalizeBrowserCompanionPairing({
+    ...existing,
+    ...updates,
+    id: existing.id,
+    ownerUserId: existing.ownerUserId,
+    createdAt: existing.createdAt,
+    token: existing.token,
+    updatedAt: new Date().toISOString(),
+  });
+  await kvSet(KEYS.browserPairing(id), updated);
+  return updated;
 }
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────

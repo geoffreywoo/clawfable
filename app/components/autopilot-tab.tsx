@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
+import type { LearningSnapshot } from '@/lib/learning-snapshot';
 
 interface AutopilotTabProps {
   agentId: string;
@@ -25,6 +26,10 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatLaneLabel(lane: string): string {
+  return lane.replace(/_/g, ' ');
+}
+
 export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
   const [billing, setBilling] = useState<BillingSummary | null>(null);
@@ -46,6 +51,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [learnedInsights, setLearnedInsights] = useState<string[]>([]);
   const [antiPatterns, setAntiPatterns] = useState<string[]>([]);
   const [remixPatterns, setRemixPatterns] = useState<string[]>([]);
+  const [learningSnapshot, setLearningSnapshot] = useState<LearningSnapshot | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,9 +88,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
     const loadSecondaryData = async () => {
       try {
-        const [voiceChatData, learningsData] = await Promise.all([
+        const [voiceChatData, learningsData, learningSnapshotData] = await Promise.all([
           fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).catch(() => null),
           fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/agents/${agentId}/learning`).then((r) => r.ok ? r.json() : null).catch(() => null),
         ]);
         if (cancelled) return;
         if (voiceChatData?.chat) setVoiceChat(voiceChatData.chat);
@@ -92,6 +99,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         if (learningsData?.insights) setLearnedInsights(learningsData.insights);
         if (learningsData?.styleFingerprint?.antiPatterns) setAntiPatterns(learningsData.styleFingerprint.antiPatterns);
         if (learningsData?.styleFingerprint?.remixPatterns) setRemixPatterns(learningsData.styleFingerprint.remixPatterns);
+        if (learningSnapshotData?.planner) setLearningSnapshot(learningSnapshotData);
       } catch {
         // ignore
       }
@@ -1022,6 +1030,111 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                    Source-aware planner
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Balance proven manual voice against timely follow-graph trends.
+                  </p>
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                  tuned in Insights
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div className="field">
+                  <label>TREND MIX TARGET</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="70"
+                      step="5"
+                      value={settings.trendMixTarget ?? 35}
+                      onChange={(e) => handleUpdateSettings({ trendMixTarget: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
+                    />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '36px', textAlign: 'right' }}>
+                      {settings.trendMixTarget ?? 35}%
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    TREND TOLERANCE
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'adjacent', label: 'ADJACENT', hint: 'stay close to core topics' },
+                      { id: 'moderate', label: 'MODERATE', hint: 'allow measured adjacent bets' },
+                      { id: 'aggressive', label: 'AGGRESSIVE', hint: 'push further when network momentum is strong' },
+                    ].map((option) => {
+                      const active = (settings.trendTolerance || 'moderate') === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          className="protocol-tag"
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '10px',
+                            padding: '8px 10px',
+                            background: active ? 'var(--primary-soft)' : 'var(--surface)',
+                            borderColor: active ? 'var(--primary-border)' : 'var(--border)',
+                            color: active ? 'var(--primary)' : 'var(--text-dim)',
+                            opacity: active ? 1 : 0.75,
+                          }}
+                          title={option.hint}
+                          onClick={() => handleUpdateSettings({ trendTolerance: option.id as ProtocolSettings['trendTolerance'] })}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {learningSnapshot?.planner && (
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                      {learningSnapshot.planner.nextBatchMix.map((lane) => (
+                        <div key={lane.lane} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: 'var(--surface-3)' }}>
+                          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>{formatLaneLabel(lane.lane)}</p>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>{lane.plannedSlots}</div>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                            avg {lane.avgEngagement || 0} engagement across {lane.posts} posts
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {learningSnapshot.planner.acceptedTrends.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                          Accepted trend candidates
+                        </p>
+                        {learningSnapshot.planner.acceptedTrends.slice(0, 3).map((trend) => (
+                          <div key={trend.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: 'var(--surface)' }}>
+                            <div className="flex items-center justify-between" style={{ gap: '8px', marginBottom: '4px' }}>
+                              <p style={{ fontWeight: 600, color: 'var(--text)' }}>{trend.category}</p>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--primary)' }}>
+                                {trend.lane} · {trend.fit}%
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{trend.headline}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

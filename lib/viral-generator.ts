@@ -4,13 +4,14 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, PersonalizationMemory, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, ContentSourceLane, PersonalizationMemory, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
 import { judgeCandidates, mutateTopCandidates } from './generation-judging';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
+import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -24,6 +25,8 @@ export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
   enabledFormats: string[];
   autonomyMode: 'safe' | 'balanced' | 'explore';
+  trendMixTarget: number;
+  trendTolerance: 'adjacent' | 'moderate' | 'aggressive';
   exploration: {
     rate: number;
     underusedFormats: string[];
@@ -34,12 +37,15 @@ export interface ContentStyleConfig {
     momentumTopic: string | null;
   };
   banditPolicy?: BanditPolicy | null;
+  sourcePlan?: SourcePlannerPlan | null;
 }
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
   enabledFormats: [],
   autonomyMode: 'balanced',
+  trendMixTarget: 35,
+  trendTolerance: 'moderate',
   exploration: {
     rate: 35,
     underusedFormats: [],
@@ -61,6 +67,9 @@ export interface ProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  sourceLane?: ContentSourceLane | null;
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
 }
 
 function normalizeTopicLabel(topic: string): string {
@@ -406,6 +415,28 @@ ${soulMd}`);
         parts.push(`These are not suggestions. They are patterns that have been PROVEN to fail for this account. Do not use them under any circumstances.`);
       }
     }
+
+    if (learnings.operatorVoiceReference && learnings.operatorVoiceReference.bestPerformers.length > 0) {
+      const humanRef = learnings.operatorVoiceReference;
+      const fp = humanRef.styleFingerprint;
+      parts.push(`\n## HUMAN VOICE ANCHORS (high-performing operator-written tweets — copy the voice and cadence, not the exact take)`);
+      parts.push(`Derived from ${humanRef.sampleCount} operator-written timeline tweets.`);
+      parts.push(`- Human sweet spot length: ${fp.avgLength} chars (${fp.shortPct}% short, ${fp.mediumPct}% medium, ${fp.longPct}% long)`);
+      if (fp.usesLineBreaks) parts.push(`- Strong human-written posts use line breaks for pacing`);
+      if (!fp.usesEmojis) parts.push(`- Strong human-written posts avoid emojis`);
+      if (fp.topHooks.length > 0) parts.push(`- Human-preferred hooks: ${fp.topHooks.join(', ')}`);
+      if (fp.topTones.length > 0) parts.push(`- Human-preferred tones: ${fp.topTones.join(', ')}`);
+      for (const t of humanRef.bestPerformers.slice(0, 3)) {
+        parts.push(`- HUMAN VOICE EXAMPLE [${t.likes} likes]: "${t.content.slice(0, 180)}"`);
+      }
+    }
+
+    if (learnings.manualTopicProfile && learnings.manualTopicProfile.length > 0) {
+      parts.push(`\n## MANUAL TOPIC PRIORS (topics and angles proven in human-written tweets)`);
+      for (const cluster of learnings.manualTopicProfile.slice(0, 6)) {
+        parts.push(`- ${cluster.topic}: "${cluster.angle}" (${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement)`);
+      }
+    }
   }
 
   // Recent posts — avoid repeating
@@ -421,10 +452,21 @@ ${soulMd}`);
   const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = finalCount >= 4 ? Math.max(1, Math.round((finalCount * explorationRate) / 100)) : 0;
   const formats = enabledFormats.length > 0 ? enabledFormats : ALL_FORMATS;
+  const sourcePlan = style.sourcePlan || buildSourcePlannerPlan({
+    count: finalCount,
+    autonomyMode: style.autonomyMode,
+    trendMixTarget: style.trendMixTarget,
+    trendTolerance: style.trendTolerance,
+    voiceProfile,
+    learnings,
+    trending,
+    fallbackTopics: style.exploration.underusedTopics,
+  });
   const slotPlan = buildBanditSlotPlan(style.banditPolicy, {
     count: finalCount,
     explorationRate,
     biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
+    sourcePlan,
   });
 
   if (memory) {
@@ -462,11 +504,19 @@ ${soulMd}`);
 - Never spend the whole batch exploring. The rest should exploit proven winners.`);
   }
 
+  if (sourcePlan.acceptedTrends.length > 0 || sourcePlan.rejectedTrends.length > 0) {
+    parts.push(`\n## SOURCE-AWARE PLANNER
+- Target trend mix: ${style.trendMixTarget}% of the batch
+- Trend tolerance: ${style.trendTolerance}
+- Accepted trend lanes: ${sourcePlan.acceptedTrends.slice(0, 5).map((trend) => `${trend.category} (${trend.sourceLane})`).join(', ') || 'none'}
+- Rejected trend classes: ${sourcePlan.rejectedTrends.slice(0, 4).map((trend) => trend.category).join(', ') || 'none'}`);
+  }
+
   if (style.banditPolicy && slotPlan.length > 0) {
     parts.push(`\n## BANDIT SLOT PLAN (follow this exactly)
 This batch is allocated by a multi-armed bandit controller. Each slot is an actual traffic bet, not a suggestion.`);
     for (const plan of slotPlan) {
-      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure} | ${plan.rationale}`);
+      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''} | ${plan.rationale}`);
     }
   }
 
@@ -520,15 +570,30 @@ export async function generateViralBatch(
   memory: PersonalizationMemory | null = null,
 ): Promise<RankedProtocolTweet[]> {
   const candidateCount = count <= 1 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, style, recentPosts, memory);
+  const sourcePlan = style.sourcePlan || buildSourcePlannerPlan({
+    count,
+    autonomyMode: style.autonomyMode,
+    trendMixTarget: style.trendMixTarget,
+    trendTolerance: style.trendTolerance,
+    voiceProfile,
+    learnings,
+    trending,
+    fallbackTopics: style.exploration.underusedTopics,
+  });
+  const effectiveStyle = {
+    ...style,
+    sourcePlan,
+  };
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, effectiveStyle, recentPosts, memory);
 
-  const formats = style.enabledFormats.length > 0 ? style.enabledFormats : ALL_FORMATS;
-  const explorationRate = Math.max(0, Math.min(100, style.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
+  const formats = effectiveStyle.enabledFormats.length > 0 ? effectiveStyle.enabledFormats : ALL_FORMATS;
+  const explorationRate = Math.max(0, Math.min(100, effectiveStyle.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
-  const slotPlan = buildBanditSlotPlan(style.banditPolicy, {
+  const slotPlan = buildBanditSlotPlan(effectiveStyle.banditPolicy, {
     count,
     explorationRate,
-    biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
+    biasTopics: [effectiveStyle.bias.momentumTopic, effectiveStyle.bias.scheduledTopic].filter(Boolean) as string[],
+    sourcePlan,
   });
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
@@ -538,7 +603,7 @@ export async function generateViralBatch(
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
-${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
+${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -571,6 +636,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           const slot = Number(parsed.slot || 0);
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
+          const slotAssignment = slotPlan.find((plan) => plan.slot === slot) || null;
           if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) continue;
           const combo = `${String(format).toLowerCase()}::${String(targetTopic).toLowerCase()}`;
           if (usedFormatTopicCombos.has(combo)) continue;
@@ -581,7 +647,10 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             content: cleanContent,
             format,
             targetTopic,
-            rationale: parsed.rationale || '',
+            rationale: parsed.rationale || slotAssignment?.rationale || '',
+            sourceLane: slotAssignment?.sourceLane || null,
+            trendTopicId: slotAssignment?.trendTopicId || null,
+            trendHeadline: slotAssignment?.trendHeadline || null,
           });
         }
       } catch {
@@ -598,7 +667,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     const rankingContext = {
       voiceProfile,
       learnings,
-      style,
+      style: effectiveStyle,
       recentPosts,
       allTweets,
       memory: memory || {
@@ -646,12 +715,18 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       throw err; // Real code bug or malformed request — surface it.
     }
 
-    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, style, recentPosts)
+    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts)
+      .map((tweet, index) => ({
+        ...tweet,
+        sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+        trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
+        trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
+      }))
       .filter((tweet) => !getTweetCompletenessIssue(tweet.content));
     const rankingContext = {
       voiceProfile,
       learnings,
-      style,
+      style: effectiveStyle,
       recentPosts,
       allTweets,
       memory: memory || {
