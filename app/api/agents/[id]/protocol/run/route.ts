@@ -22,7 +22,7 @@ export async function POST(
     }
     const result = await runAutopilot(agent);
     if (settings.enabled) {
-      await refreshAutopilotHealth(agent);
+      await refreshAutopilotHealth(agent, undefined, { clearExternalBlockers: result.action === 'posted' });
     }
 
     // Log to cron log so it shows in the dashboard

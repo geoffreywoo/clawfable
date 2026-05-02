@@ -41,7 +41,7 @@ vi.mock('@/lib/twitter-debug', () => ({
   formatActionError: mocks.formatActionError,
 }));
 
-import { evaluateAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
+import { evaluateAutopilotHealth, refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
 
 const baseAgent = {
   id: 'agent-health-1',
@@ -200,7 +200,9 @@ describe('autopilot health watchdog', () => {
     expect(health.status).toBe('blocked');
     expect(health.externalBlocker).toBe('x_auth');
     expect(mocks.invalidateAgentConnection).toHaveBeenCalledWith(baseAgent.id);
-    expect(mocks.selfHealAutopilotQueue).not.toHaveBeenCalled();
+    expect(mocks.selfHealAutopilotQueue).toHaveBeenCalledWith(baseAgent, baseSettings, {
+      forceArchiveLowConfidence: true,
+    });
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
@@ -208,5 +210,32 @@ describe('autopilot health watchdog', () => {
         action: 'error',
       }),
     );
+  });
+
+  it('preserves a recent external blocker during a non-posting refresh', async () => {
+    mocks.getAutopilotHealth.mockResolvedValue({
+      agentId: baseAgent.id,
+      status: 'blocked',
+      checkedAt: '2026-04-03T00:00:00.000Z',
+      reason: 'X API check failed. Autopilot needs operator attention before it can safely recover.',
+      details: ['x api failed'],
+      lastPostedAt: '2026-04-01T00:00:00.000Z',
+      expectedPostBy: '2026-04-01T06:00:00.000Z',
+      minutesOverdue: 0,
+      cadenceHours: 4,
+      queueDepth: 10,
+      postableQueueDepth: 0,
+      staleLowConfidenceDepth: 10,
+      maxConfidence: 0.52,
+      externalBlocker: 'x_api',
+      selfHealAttemptedAt: '2026-04-03T00:00:00.000Z',
+      selfHealAction: 'archived 10, generated 0; validated X credentials',
+    });
+
+    const health = await refreshAutopilotHealth(baseAgent, baseSettings);
+
+    expect(health.status).toBe('blocked');
+    expect(health.externalBlocker).toBe('x_api');
+    expect(health.selfHealAction).toContain('validated X credentials');
   });
 });

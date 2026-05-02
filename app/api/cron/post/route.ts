@@ -242,7 +242,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (settings.enabled) {
-          await refreshAutopilotHealth(agent);
+          await refreshAutopilotHealth(agent, undefined, { clearExternalBlockers: result.action === 'posted' });
         }
       } catch (err) {
         const reason = formatActionError(err, 'run_autopilot', {

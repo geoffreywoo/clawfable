@@ -17,6 +17,7 @@ const WATCHDOG_GRACE_MULTIPLIER = 2.25;
 const WATCHDOG_MIN_WINDOW_MS = 6 * 60 * 60 * 1000;
 const WATCHDOG_MAX_WINDOW_MS = 48 * 60 * 60 * 1000;
 const FUTURE_COOLDOWN_SKEW_MS = 5 * 60 * 1000;
+const RECENT_EXTERNAL_BLOCKER_MS = 30 * 60 * 1000;
 
 function isSuccessfulPost(entry: PostLogEntry): boolean {
   return Boolean(
@@ -142,8 +143,31 @@ export async function evaluateAutopilotHealth(
 export async function refreshAutopilotHealth(
   agent: Agent,
   settingsArg?: ProtocolSettings,
+  options: { clearExternalBlockers?: boolean } = {},
 ): Promise<AutopilotHealthSnapshot> {
   const health = await evaluateAutopilotHealth(agent, settingsArg);
+  const previous = await getAutopilotHealth(agent.id);
+  const previousCheckedAt = previous?.checkedAt ? new Date(previous.checkedAt).getTime() : 0;
+  const shouldPreserveExternalBlocker = Boolean(
+    !options.clearExternalBlockers
+    && previous?.status === 'blocked'
+    && (previous.externalBlocker === 'x_auth' || previous.externalBlocker === 'x_api' || previous.externalBlocker === 'billing')
+    && Number.isFinite(previousCheckedAt)
+    && Date.now() - previousCheckedAt < RECENT_EXTERNAL_BLOCKER_MS
+  );
+
+  if (shouldPreserveExternalBlocker && previous) {
+    return setAutopilotHealth({
+      ...health,
+      status: 'blocked',
+      reason: previous.reason,
+      details: [...new Set([...previous.details, ...health.details])],
+      externalBlocker: previous.externalBlocker,
+      selfHealAttemptedAt: previous.selfHealAttemptedAt,
+      selfHealAction: previous.selfHealAction,
+    });
+  }
+
   return setAutopilotHealth(health);
 }
 
@@ -196,6 +220,14 @@ export async function runAutopilotWatchdog(
     details.push('Reset the impossible cooldown timestamp before the posting pass.');
   }
 
+  if (health.externalBlocker === 'queue' || health.minutesOverdue > 0 || health.externalBlocker === 'cooldown') {
+    const healed = await selfHealAutopilotQueue(agent, settings, {
+      forceArchiveLowConfidence: true,
+    });
+    selfHealAction = healed.action;
+    details.push(`Queue self-heal: ${healed.action}.`);
+  }
+
   const xValidation = await validateXCredentials(agent);
   if (xValidation.ok === false) {
     if (xValidation.authInvalid) {
@@ -212,7 +244,7 @@ export async function runAutopilotWatchdog(
       details: [...details, xValidation.reason],
       externalBlocker: xValidation.authInvalid ? 'x_auth' : 'x_api',
       selfHealAttemptedAt: new Date().toISOString(),
-      selfHealAction: 'validated X credentials',
+      selfHealAction: selfHealAction ? `${selfHealAction}; validated X credentials` : 'validated X credentials',
     };
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
@@ -227,14 +259,6 @@ export async function runAutopilotWatchdog(
       reason: blocked.reason,
     });
     return setAutopilotHealth(blocked);
-  }
-
-  if (health.externalBlocker === 'queue' || health.minutesOverdue > 0 || health.externalBlocker === 'cooldown') {
-    const healed = await selfHealAutopilotQueue(agent, settings, {
-      forceArchiveLowConfidence: true,
-    });
-    selfHealAction = healed.action;
-    details.push(`Queue self-heal: ${healed.action}.`);
   }
 
   health = await evaluateAutopilotHealth(agent, await getProtocolSettings(agent.id));
