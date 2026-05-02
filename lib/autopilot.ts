@@ -7,7 +7,7 @@
  * 2. Auto-reply: fetch new mentions, generate replies, post them
  */
 
-import type { Agent, AgentLearnings, ProtocolSettings } from './types';
+import type { Agent, AgentLearnings, ProtocolSettings, Tweet } from './types';
 import {
   addLearningSignal,
   getProtocolSettings,
@@ -76,6 +76,88 @@ function coerceConfidenceValue(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+const CONFIDENCE_THRESHOLD_EPSILON = 0.005;
+const STALE_LOW_CONFIDENCE_QUEUE_MS = 24 * 60 * 60 * 1000;
+
+function effectiveConfidence(tweet: { confidenceScore?: number | string | null; candidateScore?: number | string | null }): number {
+  const confidenceScore = coerceConfidenceValue(tweet.confidenceScore);
+  if (confidenceScore !== null) return confidenceScore;
+  const candidateScore = coerceConfidenceValue(tweet.candidateScore);
+  return candidateScore !== null ? candidateScore / 100 : 0.67;
+}
+
+function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
+  if (mode === 'explore') return true;
+  return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= threshold;
+}
+
+async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[]): Promise<Tweet[]> {
+  const validationPassedQueue: Tweet[] = [];
+  for (const queuedTweet of queuedTweets) {
+    const completenessIssue = getTweetCompletenessIssue(queuedTweet.content);
+    if (!completenessIssue) {
+      validationPassedQueue.push(queuedTweet);
+      continue;
+    }
+
+    const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, completenessIssue);
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: queuedTweet.id,
+      xTweetId: queuedTweet.xTweetId || '',
+      content: queuedTweet.content,
+      format: queuedTweet.format || 'unknown',
+      topic: queuedTweet.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: resolved.action === 'deleted' ? 'error' : 'skipped',
+      reason: `${completenessIssue} ${resolved.detail}`,
+    });
+
+    if (resolved.tweet && !getTweetCompletenessIssue(resolved.tweet.content)) {
+      validationPassedQueue.push(resolved.tweet);
+    }
+  }
+  return validationPassedQueue;
+}
+
+async function archiveStaleLowConfidenceQueue(
+  agentId: string,
+  tweets: Tweet[],
+  threshold: number,
+  now = Date.now(),
+): Promise<number> {
+  const staleLowConfidenceTweets = tweets.filter((tweet) => {
+    const createdAt = new Date(tweet.createdAt).getTime();
+    return Number.isFinite(createdAt)
+      && now - createdAt >= STALE_LOW_CONFIDENCE_QUEUE_MS
+      && effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON < threshold;
+  });
+
+  if (staleLowConfidenceTweets.length === 0) return 0;
+
+  await Promise.all(staleLowConfidenceTweets.map((tweet) => updateTweet(tweet.id, {
+    status: 'draft',
+    quarantinedAt: new Date(now).toISOString(),
+    quarantineReason: `Auto-archived from autopost queue: confidence ${effectiveConfidence(tweet).toFixed(3)} stayed below the active threshold ${threshold.toFixed(2)}.`,
+  })));
+
+  await addPostLogEntry(agentId, {
+    agentId,
+    tweetId: '',
+    xTweetId: '',
+    content: '',
+    format: 'queue_refresh',
+    topic: 'generation',
+    postedAt: new Date().toISOString(),
+    source: 'autopilot',
+    action: 'skipped',
+    reason: `Moved ${staleLowConfidenceTweets.length} stale low-confidence draft${staleLowConfidenceTweets.length === 1 ? '' : 's'} out of the autopost queue so fresh candidates can be generated.`,
+  });
+
+  return staleLowConfidenceTweets.length;
 }
 
 /**
@@ -294,32 +376,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     .filter((e) => (!e.action || e.action === 'posted') && e.content)
     .slice(0, 10)
     .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
-  const validationPassedQueue = [];
-  for (const queuedTweet of activeQueue) {
-    const completenessIssue = getTweetCompletenessIssue(queuedTweet.content);
-    if (!completenessIssue) {
-      validationPassedQueue.push(queuedTweet);
-      continue;
-    }
-
-    const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, completenessIssue);
-    await addPostLogEntry(agentId, {
-      agentId,
-      tweetId: queuedTweet.id,
-      xTweetId: queuedTweet.xTweetId || '',
-      content: queuedTweet.content,
-      format: queuedTweet.format || 'unknown',
-      topic: queuedTweet.topic || 'general',
-      postedAt: new Date().toISOString(),
-      source: 'autopilot',
-      action: resolved.action === 'deleted' ? 'error' : 'skipped',
-      reason: `${completenessIssue} ${resolved.detail}`,
-    });
-
-    if (resolved.tweet && !getTweetCompletenessIssue(resolved.tweet.content)) {
-      validationPassedQueue.push(resolved.tweet);
-    }
-  }
+  let validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue);
 
   if (validationPassedQueue.length === 0) {
     return {
@@ -333,15 +390,28 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   const confidenceThreshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
-  const effectiveConfidence = (tweet: { confidenceScore?: number | null; candidateScore?: number | null }) => {
-    const confidenceScore = coerceConfidenceValue(tweet.confidenceScore);
-    if (confidenceScore !== null) return confidenceScore;
-    const candidateScore = coerceConfidenceValue(tweet.candidateScore);
-    return candidateScore !== null ? candidateScore / 100 : 0.67;
-  };
-  const confidenceFiltered = settings.autonomyMode === 'explore'
-    ? validationPassedQueue
-    : validationPassedQueue.filter((tweet) => effectiveConfidence(tweet) >= confidenceThreshold);
+  let confidenceFiltered = validationPassedQueue.filter((tweet) =>
+    clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
+  );
+
+  if (confidenceFiltered.length === 0) {
+    const archived = await archiveStaleLowConfidenceQueue(agentId, validationPassedQueue, confidenceThreshold);
+    if (archived > 0) {
+      const generated = await refillQueue(agent, Math.max(settings.minQueueSize + 3, archived), {
+        scheduledTopic: todaysTopic,
+        momentumTopic,
+      });
+
+      if (generated > 0) {
+        queue = await getQueuedTweets(agentId);
+        activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+        validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue);
+        confidenceFiltered = validationPassedQueue.filter((tweet) =>
+          clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
+        );
+      }
+    }
+  }
 
   if (confidenceFiltered.length === 0) {
     return {

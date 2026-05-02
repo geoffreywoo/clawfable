@@ -322,6 +322,119 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
+  it('allows near-threshold scores that round to the displayed threshold', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([
+      {
+        ...validQueuedTweet,
+        confidenceScore: '0.578',
+        candidateScore: '100',
+      },
+    ]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-near-threshold', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe(validQueuedTweet.id);
+    expect(mocks.postTweet).toHaveBeenCalledWith(
+      expect.anything(),
+      validQueuedTweet.content,
+    );
+  });
+
+  it('archives stale below-threshold drafts and refills instead of wedging autopost', async () => {
+    const staleLowConfidenceTweets = [
+      {
+        ...queuedTweet,
+        id: 'low-1',
+        createdAt: '2026-04-01T00:00:00.000Z',
+        confidenceScore: 0.51,
+        candidateScore: 55,
+      },
+      {
+        ...validQueuedTweet,
+        id: 'low-2',
+        createdAt: '2026-04-01T00:00:00.000Z',
+        confidenceScore: 0.54,
+        candidateScore: 57,
+      },
+    ];
+    const freshQueuedTweet = {
+      ...validQueuedTweet,
+      id: 'fresh-1',
+      content: 'fresh high confidence draft',
+      createdAt: new Date().toISOString(),
+      confidenceScore: 0.82,
+      candidateScore: 88,
+    };
+
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      minQueueSize: 2,
+    });
+    mocks.getQueuedTweets
+      .mockResolvedValueOnce(staleLowConfidenceTweets)
+      .mockResolvedValueOnce([freshQueuedTweet]);
+    mocks.getAnalysis.mockResolvedValue({ summary: 'analysis' });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'contrarian',
+        topics: ['AI'],
+        antiGoals: [],
+        communicationStyle: 'sharp and direct',
+        summary: 'summary',
+      },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 2 },
+      style: { bias: {} },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+    });
+    mocks.generateViralBatch.mockResolvedValue([
+      {
+        content: freshQueuedTweet.content,
+        format: freshQueuedTweet.format,
+        targetTopic: freshQueuedTweet.topic,
+        rationale: 'fresh replacement',
+        candidateScore: freshQueuedTweet.candidateScore,
+        confidenceScore: freshQueuedTweet.confidenceScore,
+      },
+    ]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-fresh-1', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe('fresh-1');
+    expect(mocks.updateTweet).toHaveBeenCalledWith(
+      'low-1',
+      expect.objectContaining({
+        status: 'draft',
+        quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
+      }),
+    );
+    expect(mocks.updateTweet).toHaveBeenCalledWith(
+      'low-2',
+      expect.objectContaining({
+        status: 'draft',
+        quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
+      }),
+    );
+    expect(mocks.createTweet).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'queued',
+      content: freshQueuedTweet.content,
+      confidenceScore: freshQueuedTweet.confidenceScore,
+    }));
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        format: 'queue_refresh',
+        reason: expect.stringContaining('stale low-confidence'),
+      }),
+    );
+  });
+
   it('writes detailed auto-reply failures into the activity log', async () => {
     mocks.getProtocolSettings.mockResolvedValue({
       ...baseSettings,
