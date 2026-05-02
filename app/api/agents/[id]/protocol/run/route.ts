@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { runAutopilot } from '@/lib/autopilot';
-import { addCronLogEntry, addPostLogEntry } from '@/lib/kv-storage';
+import { addCronLogEntry, addPostLogEntry, getProtocolSettings } from '@/lib/kv-storage';
+import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
 import { assertCanUseAutopilot, BillingError } from '@/lib/billing';
 
 // POST /api/agents/[id]/protocol/run — manually trigger autopilot for one agent
@@ -15,7 +16,14 @@ export async function POST(
     const { user, agent } = await requireAgentAccess(id);
     const agentCount = await getAccessibleAgentCount(user);
     assertCanUseAutopilot(user, agentCount);
+    const settings = await getProtocolSettings(id);
+    if (settings.enabled) {
+      await runAutopilotWatchdog(agent, settings);
+    }
     const result = await runAutopilot(agent);
+    if (settings.enabled) {
+      await refreshAutopilotHealth(agent);
+    }
 
     // Log to cron log so it shows in the dashboard
     await addCronLogEntry({

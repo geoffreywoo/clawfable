@@ -4,6 +4,7 @@ import { getBillingSummary } from './billing';
 import { BROWSER_COMPANION_LOCAL_URL, buildEngagementFeed } from './engagement';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
+import { evaluateAutopilotHealth } from './autopilot-health';
 import {
   getPresetSoulProfile,
   getPresetSoulSummaries,
@@ -17,6 +18,7 @@ import { buildSourcePlannerPlan, enrichTrendingTopics } from './source-planner';
 import {
   getAgentByHandle,
   getActiveEngagementSession,
+  getAutopilotHealth,
   getAgents,
   getAnalysis,
   getBaseline,
@@ -40,6 +42,7 @@ import type {
   AccountAnalysis,
   Agent,
   AgentDetail,
+  AutopilotHealthSnapshot,
   AgentSummary,
   BillingSummary,
   EngageSnapshot,
@@ -66,6 +69,7 @@ export interface ProtocolSnapshot {
   settings: ProtocolSettings;
   postLog: PostLogEntry[];
   billing: BillingSummary;
+  autopilotHealth: AutopilotHealthSnapshot | null;
 }
 
 export function serializeAgentDetail(agent: Agent): AgentDetail {
@@ -166,17 +170,31 @@ export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
   return [...deletedFromX, ...queued];
 }
 
-export async function getProtocolSnapshot(user: User, agentId: string): Promise<ProtocolSnapshot> {
-  const [settings, postLog, agentCount] = await Promise.all([
+export async function getProtocolSnapshot(user: User, agentOrId: Agent | string): Promise<ProtocolSnapshot> {
+  const agentId = typeof agentOrId === 'string' ? agentOrId : agentOrId.id;
+  const [settings, postLog, agentCount, autopilotHealth] = await Promise.all([
     getProtocolSettings(agentId),
     getPostLog(agentId, 10),
     getAccessibleAgentCount(user),
+    getAutopilotHealth(agentId),
   ]);
+  const liveAutopilotHealth = typeof agentOrId === 'string'
+    ? autopilotHealth
+    : await evaluateAutopilotHealth(agentOrId, settings, postLog);
+  const mergedAutopilotHealth = autopilotHealth && liveAutopilotHealth
+    ? {
+        ...liveAutopilotHealth,
+        details: [...new Set([...autopilotHealth.details, ...liveAutopilotHealth.details])],
+        selfHealAttemptedAt: autopilotHealth.selfHealAttemptedAt,
+        selfHealAction: autopilotHealth.selfHealAction,
+      }
+    : liveAutopilotHealth;
 
   return {
     settings,
     postLog,
     billing: getBillingSummary(user, agentCount),
+    autopilotHealth: mergedAutopilotHealth,
   };
 }
 

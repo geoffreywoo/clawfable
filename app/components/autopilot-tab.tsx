@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
+import type { AutopilotHealthSnapshot, BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
 import type { LearningSnapshot } from '@/lib/learning-snapshot';
 
 interface AutopilotTabProps {
@@ -13,6 +13,7 @@ interface AutopilotTabProps {
     billing: BillingSummary;
     postLog: PostLogEntry[];
     metrics: Metric[];
+    autopilotHealth?: AutopilotHealthSnapshot | null;
   };
 }
 
@@ -30,11 +31,19 @@ function formatLaneLabel(lane: string): string {
   return lane.replace(/_/g, ' ');
 }
 
+function getHealthTone(status: AutopilotHealthSnapshot['status'] | undefined): { label: string; color: string; bg: string } {
+  if (status === 'blocked') return { label: 'Blocked', color: '#d65c5c', bg: 'rgba(214, 92, 92, 0.12)' };
+  if (status === 'degraded') return { label: 'Self-healing', color: '#c78528', bg: 'rgba(199, 133, 40, 0.14)' };
+  if (status === 'watch') return { label: 'Watching', color: '#4f84c4', bg: 'rgba(79, 132, 196, 0.12)' };
+  return { label: 'Healthy', color: '#2f9a5f', bg: 'rgba(47, 154, 95, 0.12)' };
+}
+
 export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
   const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [autopilotHealth, setAutopilotHealth] = useState<AutopilotHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
   const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
@@ -64,6 +73,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
       setBilling(initialData.billing);
       setPostLog(initialData.postLog);
       setMetrics(initialData.metrics);
+      setAutopilotHealth(initialData.autopilotHealth || null);
       setLoading(false);
       return true;
     };
@@ -79,6 +89,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           setSettings(data.protocol.settings);
           setBilling(data.protocol.billing || null);
           setPostLog(data.protocol.postLog || []);
+          setAutopilotHealth(data.protocol.autopilotHealth || null);
         }
         if (Array.isArray(data.metrics)) setMetrics(data.metrics);
       } finally {
@@ -201,6 +212,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           setSettings(snapshot.protocol.settings);
           setBilling(snapshot.protocol.billing || null);
           setPostLog(snapshot.protocol.postLog || []);
+          setAutopilotHealth(snapshot.protocol.autopilotHealth || null);
         }
         if (Array.isArray(snapshot.metrics)) setMetrics(snapshot.metrics);
       }
@@ -363,6 +375,55 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               <p className="control-room-intro-card-copy">Ask for fresh drafts whenever you want a new angle, topic, or experiment lane.</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {settings && agentConnected && autopilotHealth && (
+        <div className="protocol-card" style={{
+          padding: '14px 16px',
+          borderColor: autopilotHealth.status === 'healthy' ? 'var(--border)' : getHealthTone(autopilotHealth.status).color,
+          background: autopilotHealth.status === 'healthy' ? 'var(--surface)' : getHealthTone(autopilotHealth.status).bg,
+          marginBottom: '16px',
+        }}>
+          <div className="flex items-center justify-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
+            <div>
+              <div className="flex items-center gap-2" style={{ marginBottom: '4px' }}>
+                <span style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: getHealthTone(autopilotHealth.status).color,
+                  textTransform: 'uppercase',
+                }}>
+                  AUTOPILOT WATCHDOG · {getHealthTone(autopilotHealth.status).label}
+                </span>
+              </div>
+              <p style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}>
+                {autopilotHealth.reason}
+              </p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                {autopilotHealth.postableQueueDepth}/{autopilotHealth.queueDepth} postable · cadence {autopilotHealth.cadenceHours}h
+                {autopilotHealth.minutesOverdue > 0 ? ` · ${autopilotHealth.minutesOverdue}m overdue` : ''}
+                {autopilotHealth.selfHealAction ? ` · last heal: ${autopilotHealth.selfHealAction}` : ''}
+              </p>
+            </div>
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '9px',
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+            }}>
+              checked {getTimeAgo(autopilotHealth.checkedAt)}
+            </span>
+          </div>
+          {autopilotHealth.details.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+              {autopilotHealth.details.slice(0, 3).map((detail) => (
+                <span key={detail} className="chip" style={{ fontSize: '10px' }}>{detail}</span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

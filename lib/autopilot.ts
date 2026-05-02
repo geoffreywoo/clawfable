@@ -65,6 +65,25 @@ export interface AutopilotResult {
   repliesSent?: number;
 }
 
+export interface AutopilotQueueHealth {
+  queueDepth: number;
+  activeQueueDepth: number;
+  postableQueueDepth: number;
+  lowConfidenceDepth: number;
+  staleLowConfidenceDepth: number;
+  threshold: number;
+  mode: ProtocolSettings['autonomyMode'];
+  maxConfidence: number | null;
+}
+
+export interface AutopilotQueueSelfHealResult {
+  archived: number;
+  generated: number;
+  before: AutopilotQueueHealth;
+  after: AutopilotQueueHealth;
+  action: string;
+}
+
 function isTemplateFallbackTweet(tweet: { rationale?: string | null }): boolean {
   return typeof tweet.rationale === 'string' && tweet.rationale.toLowerCase().includes('template fallback');
 }
@@ -128,11 +147,11 @@ async function archiveStaleLowConfidenceQueue(
   tweets: Tweet[],
   threshold: number,
   now = Date.now(),
+  force = false,
 ): Promise<number> {
   const staleLowConfidenceTweets = tweets.filter((tweet) => {
     const createdAt = new Date(tweet.createdAt).getTime();
-    return Number.isFinite(createdAt)
-      && now - createdAt >= STALE_LOW_CONFIDENCE_QUEUE_MS
+    return (force || (Number.isFinite(createdAt) && now - createdAt >= STALE_LOW_CONFIDENCE_QUEUE_MS))
       && effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON < threshold;
   });
 
@@ -158,6 +177,77 @@ async function archiveStaleLowConfidenceQueue(
   });
 
   return staleLowConfidenceTweets.length;
+}
+
+export async function inspectAutopilotQueue(
+  agentId: string,
+  settingsArg?: ProtocolSettings,
+): Promise<AutopilotQueueHealth> {
+  const settings = settingsArg || await getProtocolSettings(agentId);
+  const threshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
+  const queue = await getQueuedTweets(agentId);
+  const activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+  const completeQueue = activeQueue.filter((tweet) => !getTweetCompletenessIssue(tweet.content));
+  const confidenceValues = completeQueue.map(effectiveConfidence);
+  const staleCutoff = Date.now() - STALE_LOW_CONFIDENCE_QUEUE_MS;
+
+  return {
+    queueDepth: queue.length,
+    activeQueueDepth: activeQueue.length,
+    postableQueueDepth: completeQueue.filter((tweet) =>
+      clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+    ).length,
+    lowConfidenceDepth: completeQueue.filter((tweet) =>
+      !clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+    ).length,
+    staleLowConfidenceDepth: completeQueue.filter((tweet) =>
+      !clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+      && new Date(tweet.createdAt).getTime() < staleCutoff
+    ).length,
+    threshold,
+    mode: settings.autonomyMode || 'balanced',
+    maxConfidence: confidenceValues.length > 0 ? Math.max(...confidenceValues) : null,
+  };
+}
+
+export async function selfHealAutopilotQueue(
+  agent: Agent,
+  settingsArg?: ProtocolSettings,
+  options: { forceArchiveLowConfidence?: boolean } = {},
+): Promise<AutopilotQueueSelfHealResult> {
+  const settings = settingsArg || await getProtocolSettings(agent.id);
+  const before = await inspectAutopilotQueue(agent.id, settings);
+
+  if (before.postableQueueDepth > 0) {
+    return {
+      archived: 0,
+      generated: 0,
+      before,
+      after: before,
+      action: 'queue already has postable drafts',
+    };
+  }
+
+  const queuedTweets = await getQueuedTweets(agent.id);
+  const completeActiveQueue = queuedTweets
+    .filter((tweet) => !tweet.quarantinedAt && !getTweetCompletenessIssue(tweet.content));
+  const archived = await archiveStaleLowConfidenceQueue(
+    agent.id,
+    completeActiveQueue,
+    before.threshold,
+    Date.now(),
+    options.forceArchiveLowConfidence,
+  );
+  const generated = await refillQueue(agent, Math.max(settings.minQueueSize + 3, archived, 3));
+  const after = await inspectAutopilotQueue(agent.id, settings);
+
+  return {
+    archived,
+    generated,
+    before,
+    after,
+    action: `archived ${archived}, generated ${generated}`,
+  };
 }
 
 /**

@@ -61,7 +61,7 @@ export async function GET(
           response.otherAgents = (await getAgentSummariesForUser(user)).filter((candidate) => candidate.id !== agent.id);
           return;
         case 'protocol':
-          response.protocol = await getProtocolSnapshot(user, agent.id);
+          response.protocol = await getProtocolSnapshot(user, agent);
           return;
         case 'metrics':
           response.metrics = await getMetricsArray(agent.id);

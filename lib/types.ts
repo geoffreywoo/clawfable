@@ -370,6 +370,27 @@ export interface ProtocolSettings {
   contentCalendar: Record<string, string>; // day-of-week -> topic focus (e.g. "monday": "analysis")
 }
 
+export type AutopilotHealthStatus = 'healthy' | 'watch' | 'degraded' | 'blocked';
+
+export interface AutopilotHealthSnapshot {
+  agentId: string;
+  status: AutopilotHealthStatus;
+  checkedAt: string;
+  reason: string;
+  details: string[];
+  lastPostedAt: string | null;
+  expectedPostBy: string | null;
+  minutesOverdue: number;
+  cadenceHours: number;
+  queueDepth: number;
+  postableQueueDepth: number;
+  staleLowConfidenceDepth: number;
+  maxConfidence: number | null;
+  externalBlocker: 'x_auth' | 'x_api' | 'billing' | 'queue' | 'cooldown' | null;
+  selfHealAttemptedAt: string | null;
+  selfHealAction: string | null;
+}
+
 export interface VoiceDirective {
   id: string;
   role: 'operator' | 'agent';

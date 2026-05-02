@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Metric, AgentLearnings } from '@/lib/types';
+import type { AutopilotHealthSnapshot, Metric, AgentLearnings } from '@/lib/types';
 
 interface MetricsTabProps {
   agentId: string;
@@ -69,6 +69,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
   const [learnings, setLearnings] = useState<AgentLearnings | null>(null);
   const [timeseries, setTimeseries] = useState<TimeseriesData | null>(null);
   const [healthScore, setHealthScore] = useState<number>(0);
+  const [autopilotHealth, setAutopilotHealth] = useState<AutopilotHealthSnapshot | null>(null);
   const [funnel, setFunnel] = useState<{ milestones: Array<{ event: string; reached: boolean; ts: string | null }>; currentStage: string; completionPct: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -82,6 +83,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         if (Array.isArray(metricsData)) setMetrics(metricsData);
         else if (metricsData?.metrics && Array.isArray(metricsData.metrics)) setMetrics(metricsData.metrics);
         if (metricsData?.healthScore !== undefined) setHealthScore(metricsData.healthScore);
+        if (metricsData?.autopilotHealth) setAutopilotHealth(metricsData.autopilotHealth);
         if (metricsData?.funnel) setFunnel(metricsData.funnel);
         if (learningsData && typeof learningsData === 'object' && learningsData.totalTracked > 0) {
           setLearnings(learningsData);
@@ -174,6 +176,29 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
                 {thisWeek.filter((d) => d.tweetsPosted > 0).length} active days
               </p>
             </div>
+          </div>
+        )}
+
+        {autopilotHealth && (
+          <div style={{
+            flex: 1,
+            background: 'var(--surface)',
+            border: `1px solid ${autopilotHealth.status === 'healthy' ? 'var(--border)' : autopilotHealth.status === 'blocked' ? '#d65c5c' : '#c78528'}`,
+            borderRadius: 'var(--radius-lg)',
+            padding: '14px 20px',
+            minWidth: '260px',
+          }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '6px' }}>AUTOPILOT HEALTH</p>
+            <p style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: autopilotHealth.status === 'healthy' ? '#2f9a5f' : autopilotHealth.status === 'blocked' ? '#d65c5c' : '#c78528' }}>
+              {autopilotHealth.status.toUpperCase()}
+            </p>
+            <p style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              {autopilotHealth.reason}
+            </p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '8px' }}>
+              {autopilotHealth.postableQueueDepth}/{autopilotHealth.queueDepth} postable
+              {autopilotHealth.selfHealAction ? ` · ${autopilotHealth.selfHealAction}` : ''}
+            </p>
           </div>
         )}
       </div>

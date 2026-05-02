@@ -1,7 +1,7 @@
 'use client';
 
 import { AgentDashboardClient } from './agent-dashboard-client';
-import type { BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
+import type { AutopilotHealthSnapshot, BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
 
 interface AutopilotInitialData {
   agentConnected: boolean;
@@ -10,6 +10,7 @@ interface AutopilotInitialData {
   billing: BillingSummary;
   postLog: PostLogEntry[];
   metrics: Metric[];
+  autopilotHealth?: AutopilotHealthSnapshot | null;
 }
 
 interface AgentDashboardShellProps {

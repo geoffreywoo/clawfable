@@ -1,4 +1,4 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot } from './types';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 
@@ -375,6 +375,7 @@ const KEYS = {
   agentVoiceDirectiveRules: (id: string) => `agent:${id}:voice_directive_rules`,
   agentManualExamples: (id: string) => `agent:${id}:manual_examples`,
   agentSignals: (id: string) => `agent:${id}:signals`,
+  agentAutopilotHealth: (id: string) => `agent:${id}:autopilot_health`,
   browserPairing: (id: string) => `browser:pairing:${id}`,
   browserPairingByToken: (token: string) => `browser:pairing:token:${token}`,
   browserPairingChallenge: (challenge: string) => `browser:pairing:challenge:${challenge}`,
@@ -1077,6 +1078,17 @@ export async function updateManualExampleCuration(
   });
   await kvSet(KEYS.agentManualExamples(agentId), next);
   return next;
+}
+
+// ─── Autopilot health storage ────────────────────────────────────────────────
+
+export async function getAutopilotHealth(agentId: string): Promise<AutopilotHealthSnapshot | null> {
+  return kvGet<AutopilotHealthSnapshot>(KEYS.agentAutopilotHealth(agentId));
+}
+
+export async function setAutopilotHealth(snapshot: AutopilotHealthSnapshot): Promise<AutopilotHealthSnapshot> {
+  await kvSet(KEYS.agentAutopilotHealth(snapshot.agentId), snapshot);
+  return snapshot;
 }
 
 // ─── Post log storage ────────────────────────────────────────────────────────

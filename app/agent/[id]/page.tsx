@@ -23,7 +23,7 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
     const { user, agent } = await requireAgentAccess(id);
     const [otherAgents, protocol, metrics] = await Promise.all([
       getAgentSummariesForUser(user).then((agents) => agents.filter((candidate) => candidate.id !== agent.id)),
-      getProtocolSnapshot(user, agent.id),
+      getProtocolSnapshot(user, agent),
       getMetricsArray(agent.id),
     ]);
     const agentDetail = await buildAgentDetail(agent);
@@ -40,6 +40,7 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
           billing: protocol.billing,
           postLog: protocol.postLog,
           metrics,
+          autopilotHealth: protocol.autopilotHealth,
         }}
         shouldOpenSetupContinuation={
           resolvedSearchParams.oauth === 'success' && isSetupIncomplete(agent.setupStep)

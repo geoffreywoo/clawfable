@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets, getFunnelEvents, computeFunnelSummary, getLearnings, getBaseline } from '@/lib/kv-storage';
+import { getTweets, getMentions, getPostLog, getProtocolSettings, getAnalysis, getQueuedTweets, getFunnelEvents, computeFunnelSummary, getLearnings, getBaseline, getAutopilotHealth } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { evaluateAutopilotHealth } from '@/lib/autopilot-health';
 
 // GET /api/agents/[id]/metrics — compute live metrics from actual data
 export async function GET(
@@ -9,16 +10,26 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent } = await requireAgentAccess(id);
 
-    const [tweets, mentions, postLog, settings, analysis, funnelEvents] = await Promise.all([
+    const [tweets, mentions, postLog, settings, analysis, funnelEvents, storedAutopilotHealth] = await Promise.all([
       getTweets(id),
       getMentions(id),
       getPostLog(id, 100),
       getProtocolSettings(id),
       getAnalysis(id),
       getFunnelEvents(id),
+      getAutopilotHealth(id),
     ]);
+    const liveAutopilotHealth = await evaluateAutopilotHealth(agent, settings, postLog);
+    const autopilotHealth = storedAutopilotHealth
+      ? {
+          ...liveAutopilotHealth,
+          details: [...new Set([...storedAutopilotHealth.details, ...liveAutopilotHealth.details])],
+          selfHealAttemptedAt: storedAutopilotHealth.selfHealAttemptedAt,
+          selfHealAction: storedAutopilotHealth.selfHealAction,
+        }
+      : liveAutopilotHealth;
 
     const liveTweets = tweets.filter((t) => t.status !== 'preview');
     const posted = liveTweets.filter((t) => t.status === 'posted');
@@ -42,11 +53,18 @@ export async function GET(
 
     // Health alerts
     const health: Array<{ level: string; message: string; cta?: { label: string; tab: string } }> = [];
-    const { agent } = await requireAgentAccess(id);
     const queuedTweets = await getQueuedTweets(id);
 
     if (settings.enabled && !agent.isConnected) {
       health.push({ level: 'error', message: 'X API disconnected. Autopilot cannot post.', cta: { label: 'Reconnect', tab: 'settings' } });
+    }
+
+    if (settings.enabled && autopilotHealth.status !== 'healthy') {
+      health.push({
+        level: autopilotHealth.status === 'blocked' ? 'error' : 'warning',
+        message: autopilotHealth.reason,
+        cta: { label: autopilotHealth.externalBlocker === 'x_auth' ? 'Reconnect' : 'Check automation', tab: autopilotHealth.externalBlocker === 'x_auth' ? 'settings' : 'automation' },
+      });
     }
 
     const postedEntries = postLog.filter((e) => e.action === 'posted' || (!e.action && e.tweetId));
@@ -78,7 +96,7 @@ export async function GET(
     if (agent.soulPublic !== 0) healthScore += 5;
     if (settings.marketingEnabled) healthScore += 5;
 
-    return NextResponse.json({ metrics, health, funnel, healthScore });
+    return NextResponse.json({ metrics, health, funnel, healthScore, autopilotHealth });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch metrics' }, { status: 500 });

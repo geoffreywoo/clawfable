@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { HealthAlerts } from '@/app/components/health-alerts';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/lib/setup-state';
-import type { BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
+import type { AutopilotHealthSnapshot, BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
 
 const ComposeTab = dynamic(() => import('@/app/components/compose-tab').then((mod) => mod.ComposeTab), {
   loading: () => <TabSkeleton />,
@@ -79,6 +79,7 @@ interface AutopilotInitialData {
   billing: BillingSummary;
   postLog: PostLogEntry[];
   metrics: Metric[];
+  autopilotHealth?: AutopilotHealthSnapshot | null;
 }
 
 interface AgentDashboardClientProps {

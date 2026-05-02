@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
+import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
@@ -71,6 +72,24 @@ export async function GET(request: NextRequest) {
           source: 'cron',
           action: 'skipped',
           reason: `Automation disabled on ${billing?.label || 'free'} plan.`,
+        });
+        await setAutopilotHealth({
+          agentId: agent.id,
+          status: 'blocked',
+          checkedAt: new Date().toISOString(),
+          reason: `Automation disabled on ${billing?.label || 'free'} plan.`,
+          details: ['Upgrade or change billing before autopilot can run again.'],
+          lastPostedAt: settings.lastPostedAt,
+          expectedPostBy: null,
+          minutesOverdue: 0,
+          cadenceHours: 0,
+          queueDepth: 0,
+          postableQueueDepth: 0,
+          staleLowConfidenceDepth: 0,
+          maxConfidence: null,
+          externalBlocker: 'billing',
+          selfHealAttemptedAt: null,
+          selfHealAction: null,
         });
         continue;
       }
@@ -198,6 +217,10 @@ export async function GET(request: NextRequest) {
       if (!settings.enabled && !settings.autoReply) continue;
 
       try {
+        if (settings.enabled) {
+          await runAutopilotWatchdog(agent, settings);
+        }
+
         const result = await runAutopilot(agent);
         autopilotResults.push(result);
 
@@ -216,6 +239,10 @@ export async function GET(request: NextRequest) {
             action: result.action,
             reason: result.reason,
           });
+        }
+
+        if (settings.enabled) {
+          await refreshAutopilotHealth(agent);
         }
       } catch (err) {
         const reason = formatActionError(err, 'run_autopilot', {
@@ -238,6 +265,7 @@ export async function GET(request: NextRequest) {
           action: 'error',
           reason,
         });
+        await refreshAutopilotHealth(agent).catch(() => null);
       }
     }
 
