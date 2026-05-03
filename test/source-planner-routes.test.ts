@@ -123,6 +123,34 @@ describe('source planner routes', () => {
     }));
   });
 
+  it('persists the shitpoast toggle when the value is boolean', async () => {
+    const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shitpoastEnabled: true,
+      }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateProtocolSettings).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      shitpoastEnabled: true,
+    }));
+  });
+
+  it('drops non-boolean shitpoast toggle updates', async () => {
+    const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shitpoastEnabled: 'yes',
+      }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateProtocolSettings.mock.calls[0]?.[1]).not.toHaveProperty('shitpoastEnabled');
+  });
+
   it('drops invalid trend tolerance values from protocol settings updates', async () => {
     const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
       method: 'PATCH',

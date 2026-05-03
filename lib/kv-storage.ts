@@ -740,6 +740,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     scoreProvenance: coerceNullableJson(tweet.scoreProvenance),
     rewardBreakdown: coerceNullableJson(tweet.rewardBreakdown),
     sourceLane: tweet.sourceLane ?? null,
+    styleMode: tweet.styleMode === 'shitpoast' ? 'shitpoast' : 'standard',
     trendTopicId: tweet.trendTopicId ?? null,
     trendHeadline: tweet.trendHeadline ?? null,
     quarantineReason: tweet.quarantineReason ?? null,
@@ -843,6 +844,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     scoreProvenance: data.scoreProvenance ?? null,
     rewardBreakdown: data.rewardBreakdown ?? null,
     sourceLane: data.sourceLane ?? null,
+    styleMode: data.styleMode ?? 'standard',
     trendTopicId: data.trendTopicId ?? null,
     trendHeadline: data.trendHeadline ?? null,
     quarantineReason: data.quarantineReason ?? null,
@@ -1020,6 +1022,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   explorationRate: 35,
   trendMixTarget: 35,
   trendTolerance: 'moderate',
+  shitpoastEnabled: false,
   enabledFormats: [],  // empty = all formats
   qtRatio: 60,
   marketingEnabled: false,

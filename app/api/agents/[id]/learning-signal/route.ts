@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, getTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import type { LearningSignal } from '@/lib/types';
+import { metadataWithStyleMode } from '@/lib/style-mode';
 
 // POST /api/agents/[id]/learning-signal
 export async function POST(
@@ -27,8 +28,9 @@ export async function POST(
       return NextResponse.json({ error: 'signalType, surface, and rewardDelta are required' }, { status: 400 });
     }
 
+    let tweet: Awaited<ReturnType<typeof getTweet>> | null = null;
     if (tweetId) {
-      const tweet = await getTweet(String(tweetId));
+      tweet = await getTweet(String(tweetId));
       if (!tweet || String(tweet.agentId) !== String(id)) {
         return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
       }
@@ -42,7 +44,7 @@ export async function POST(
       rewardDelta,
       reason,
       inferred,
-      metadata: metadata || undefined,
+      metadata: tweet ? metadataWithStyleMode(tweet, metadata || {}) : metadata || undefined,
     });
 
     return NextResponse.json(signal);

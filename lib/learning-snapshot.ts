@@ -13,6 +13,7 @@ import type {
 } from './types';
 import { buildOutcomeEpisodes } from './outcome-rewards';
 import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
+import { getShitpoastSlotCount, SHITPOAST_STYLE_MODE } from './style-mode';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
 type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
@@ -201,9 +202,25 @@ export interface LearningManualExampleItem {
   blocked: boolean;
 }
 
+export interface LearningShitpoastPreview {
+  enabled: boolean;
+  capPercent: number;
+  plannedSlots: number;
+  posts: number;
+  avgEngagement: number;
+  wins: number;
+  approvals: number;
+  rejections: number;
+  deletes: number;
+  avgConfidence: number;
+  confidencePassRate: number;
+  status: 'off' | 'waiting' | 'learning' | 'working' | 'suppressed';
+}
+
 export interface LearningPlannerPreview {
   trendMixTarget: number;
   trendTolerance: string;
+  shitpoast: LearningShitpoastPreview;
   nextBatchMix: LearningPlannerLaneCard[];
   acceptedTrends: LearningTrendPlannerItem[];
   rejectedTrends: LearningTrendPlannerItem[];
@@ -1591,6 +1608,18 @@ function buildPlannerPreview(
       wins: perf?.wins || 0,
     };
   });
+  const shitpoastPerf = learnings?.styleModePerformance?.find((item) => item.mode === SHITPOAST_STYLE_MODE);
+  const plannedShitpoastSlots = getShitpoastSlotCount(sourcePlan?.slots.length || 0, settings.shitpoastEnabled);
+  const shitpoastRejectLoad = ((shitpoastPerf?.rejections || 0) + (shitpoastPerf?.deletes || 0)) / Math.max((shitpoastPerf?.approvals || 0) + (shitpoastPerf?.posts || 0) + (shitpoastPerf?.rejections || 0) + (shitpoastPerf?.deletes || 0), 1);
+  const shitpoastStatus: LearningShitpoastPreview['status'] = !settings.shitpoastEnabled
+    ? 'off'
+    : plannedShitpoastSlots === 0
+      ? 'waiting'
+      : shitpoastRejectLoad >= 0.35
+        ? 'suppressed'
+        : (shitpoastPerf?.posts || 0) >= 3 && (shitpoastPerf?.wins || 0) > 0
+          ? 'working'
+          : 'learning';
 
   const pinnedIds = new Set((manualExampleCuration?.pinnedXTweetIds || []).map((id) => String(id)));
   const blockedIds = new Set((manualExampleCuration?.blockedXTweetIds || []).map((id) => String(id)));
@@ -1636,6 +1665,20 @@ function buildPlannerPreview(
   return {
     trendMixTarget: settings.trendMixTarget ?? 35,
     trendTolerance: settings.trendTolerance || 'moderate',
+    shitpoast: {
+      enabled: Boolean(settings.shitpoastEnabled),
+      capPercent: 20,
+      plannedSlots: plannedShitpoastSlots,
+      posts: shitpoastPerf?.posts || 0,
+      avgEngagement: shitpoastPerf?.avgEngagement || 0,
+      wins: shitpoastPerf?.wins || 0,
+      approvals: shitpoastPerf?.approvals || 0,
+      rejections: shitpoastPerf?.rejections || 0,
+      deletes: shitpoastPerf?.deletes || 0,
+      avgConfidence: shitpoastPerf?.avgConfidence || 0,
+      confidencePassRate: shitpoastPerf?.confidencePassRate || 0,
+      status: shitpoastStatus,
+    },
     nextBatchMix,
     acceptedTrends,
     rejectedTrends,

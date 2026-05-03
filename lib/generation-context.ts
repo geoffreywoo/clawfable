@@ -26,6 +26,7 @@ const DEFAULT_STYLE: ContentStyleConfig = {
   autonomyMode: 'balanced',
   trendMixTarget: 35,
   trendTolerance: 'moderate',
+  shitpoastEnabled: false,
   exploration: {
     rate: 35,
     underusedFormats: [],
@@ -231,12 +232,17 @@ export async function buildGenerationContext(
     voiceProfile.communicationStyle += `\n\n## IDENTITY CONSTRAINTS\n${memory.identityConstraints.map((item) => `- ${item}`).join('\n')}`;
   }
 
+  if (settings.shitpoastEnabled) {
+    voiceProfile.communicationStyle += `\n\n## SHITPOAST STYLE MODE\nWhen a slot is tagged shitpoast, keep the same core beliefs and topics but raise the chaos: sharper, stranger, funnier, more memetic, and less corporate. Do not use slurs, targeted harassment, fabricated facts, or defamatory claims.`;
+  }
+
   const style = {
     lengthMix: settings.lengthMix || DEFAULT_STYLE.lengthMix,
     enabledFormats: settings.enabledFormats || DEFAULT_STYLE.enabledFormats,
     autonomyMode: settings.autonomyMode || DEFAULT_STYLE.autonomyMode,
     trendMixTarget: settings.trendMixTarget ?? DEFAULT_STYLE.trendMixTarget,
     trendTolerance: settings.trendTolerance ?? DEFAULT_STYLE.trendTolerance,
+    shitpoastEnabled: settings.shitpoastEnabled ?? DEFAULT_STYLE.shitpoastEnabled,
     exploration: {
       rate: Math.max(0, Math.min(100,
         settings.autonomyMode === 'safe'

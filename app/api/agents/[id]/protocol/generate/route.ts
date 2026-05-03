@@ -73,6 +73,7 @@ export async function POST(
           localPriorWeight: item.localPriorWeight ?? null,
           scoreProvenance: item.scoreProvenance ?? null,
           sourceLane: item.sourceLane ?? null,
+          styleMode: item.styleMode ?? 'standard',
           trendTopicId: item.trendTopicId ?? null,
           trendHeadline: item.trendHeadline ?? null,
           xTweetId: null,

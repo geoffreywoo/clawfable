@@ -1,4 +1,5 @@
 import type {
+  ContentStyleMode,
   ContentSourceLane,
   FeedbackEntry,
   LearningSignal,
@@ -13,6 +14,7 @@ import type {
 import type { SourcePlannerPlan } from './source-planner';
 import { buildOutcomeEpisodes, computePerformanceLiftReward } from './outcome-rewards';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
+import { buildShitpoastSlotSet, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 
 export type BanditLengthBucket = 'short' | 'medium' | 'long';
 export type BanditTrainingSource = 'autopilot' | 'mixed';
@@ -75,6 +77,7 @@ export interface BanditSlotPlan {
   slot: number;
   mode: 'exploit' | 'explore';
   sourceLane: ContentSourceLane;
+  styleMode: ContentStyleMode;
   format: string;
   topic: string;
   length: BanditLengthBucket;
@@ -111,6 +114,7 @@ interface BuildBanditSlotPlanOptions {
   explorationRate: number;
   biasTopics?: string[];
   sourcePlan?: SourcePlannerPlan | null;
+  shitpoastEnabled?: boolean;
 }
 
 const DEFAULT_MEAN_REWARD = 0.52;
@@ -533,6 +537,18 @@ function pickUnusedArm(
   };
 }
 
+function pickPreferredArm(
+  ranking: BanditArmScore[],
+  preferredArms: string[],
+  fallback: BanditArmScore,
+): BanditArmScore {
+  for (const preferred of preferredArms) {
+    const arm = ranking.find((entry) => entry.arm.toLowerCase() === preferred.toLowerCase());
+    if (arm) return arm;
+  }
+  return fallback;
+}
+
 function createSyntheticArm(
   family: BanditArmFamily,
   arm: string,
@@ -652,6 +668,7 @@ export function buildBanditSlotPlan(
     explorationRate,
     biasTopics = [],
     sourcePlan = null,
+    shitpoastEnabled = false,
   }: BuildBanditSlotPlanOptions,
 ): BanditSlotPlan[] {
   if (!policy || count <= 0) return [];
@@ -691,10 +708,12 @@ export function buildBanditSlotPlan(
   let biasIndex = 0;
   const normalizedBiasTopics = unique(biasTopics);
   const plans: BanditSlotPlan[] = [];
+  const shitpoastSlots = buildShitpoastSlotSet(count, shitpoastEnabled);
 
   for (let slot = 0; slot < count; slot++) {
     const sourceSlot = sourcePlan?.slots[slot] || null;
     const mode = sourceSlot?.mode || modes[slot];
+    const styleMode = shitpoastSlots.has(slot + 1) ? SHITPOAST_STYLE_MODE : STANDARD_STYLE_MODE;
     const familyRankings = mode === 'explore' ? explore : exploit;
     const preferredTopic = sourceSlot?.targetTopic || (biasIndex < normalizedBiasTopics.length ? normalizedBiasTopics[biasIndex] : null);
     const envelope = selectPrimaryEnvelope(
@@ -744,8 +763,21 @@ export function buildBanditSlotPlan(
     const tone = pickUnusedArm(familyRankings.tone, usedFamilies.tone, 'analytical');
     const specificity = pickUnusedArm(familyRankings.specificity, usedFamilies.specificity, 'concrete');
     const structure = pickUnusedArm(familyRankings.structure, usedFamilies.structure, 'single_punch');
+    if (styleMode === SHITPOAST_STYLE_MODE) {
+      format = pickPreferredArm(familyRankings.format, ['hot_take', 'short_punch', 'observation'], format);
+      length = pickPreferredArm(familyRankings.length, ['short', 'medium'], length);
+    }
+    const selectedHook = styleMode === SHITPOAST_STYLE_MODE
+      ? pickPreferredArm(familyRankings.hook, ['contrarian', 'bold_claim', 'confession', 'callout', 'prediction', 'observation'], hook)
+      : hook;
+    const selectedTone = styleMode === SHITPOAST_STYLE_MODE
+      ? pickPreferredArm(familyRankings.tone, ['provocative', 'playful', 'sarcastic', 'casual'], tone)
+      : tone;
+    const selectedStructure = styleMode === SHITPOAST_STYLE_MODE
+      ? pickPreferredArm(familyRankings.structure, ['single_punch', 'stacked_lines', 'comparison', 'manifesto'], structure)
+      : structure;
 
-    let combo = `${format.arm}::${topic.arm}::${length.arm}::${hook.arm}::${structure.arm}`;
+    let combo = `${format.arm}::${topic.arm}::${length.arm}::${selectedHook.arm}::${selectedStructure.arm}`;
     usedPrimaryCombos.add(`${format.arm}::${topic.arm}::${length.arm}`);
     if (usedCombos.has(combo)) {
       combo = `${combo}::${slot + 1}`;
@@ -754,34 +786,38 @@ export function buildBanditSlotPlan(
     usedFamilies.format.add(format.arm);
     usedFamilies.topic.add(topic.arm);
     usedFamilies.length.add(length.arm);
-    usedFamilies.hook.add(hook.arm);
-    usedFamilies.tone.add(tone.arm);
+    usedFamilies.hook.add(selectedHook.arm);
+    usedFamilies.tone.add(selectedTone.arm);
     usedFamilies.specificity.add(specificity.arm);
-    usedFamilies.structure.add(structure.arm);
+    usedFamilies.structure.add(selectedStructure.arm);
 
     const sourceLane = sourceSlot?.sourceLane || (mode === 'explore' ? 'core_explore_fallback' : 'manual_core_exploit');
     const baseRationale = mode === 'explore'
-      ? `Explore ${format.arm}/${topic.arm}/${hook.arm}. Uncertainty is still high, so this slot buys information while staying on-brand.`
-      : `Exploit ${format.arm}/${topic.arm}/${hook.arm}. Local reward and posterior mean both support this combination.`;
+      ? `Explore ${format.arm}/${topic.arm}/${selectedHook.arm}. Uncertainty is still high, so this slot buys information while staying on-brand.`
+      : `Exploit ${format.arm}/${topic.arm}/${selectedHook.arm}. Local reward and posterior mean both support this combination.`;
     const rationale = sourceSlot
       ? `${sourceSlot.plannerReason} ${baseRationale}`
       : baseRationale;
+    const styleRationale = styleMode === SHITPOAST_STYLE_MODE
+      ? `${rationale} Style mode: shitpoast. Raise the punch and weirdness without increasing policy risk.`
+      : rationale;
 
     plans.push({
       slot: slot + 1,
       mode,
       sourceLane,
+      styleMode,
       format: format.arm,
       topic: topic.arm,
       length: (length.arm as BanditLengthBucket) || 'medium',
-      hook: hook.arm,
-      tone: tone.arm,
+      hook: selectedHook.arm,
+      tone: selectedTone.arm,
       specificity: specificity.arm,
-      structure: structure.arm,
-      coverageCluster: `${topic.arm.toLowerCase()}:${hook.arm.toLowerCase()}:${structure.arm.toLowerCase()}`,
+      structure: selectedStructure.arm,
+      coverageCluster: `${topic.arm.toLowerCase()}:${selectedHook.arm.toLowerCase()}:${selectedStructure.arm.toLowerCase()}`,
       trendTopicId: sourceSlot?.trendTopicId || null,
       trendHeadline: sourceSlot?.trendHeadline || null,
-      rationale,
+      rationale: styleRationale,
     });
   }
 

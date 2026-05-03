@@ -132,4 +132,75 @@ describe('generateViralBatch', () => {
     expect(batch.every((tweet) => tweet.content.length > 0)).toBe(true);
     expect(batch.some((tweet) => tweet.rationale.toLowerCase().includes('template fallback'))).toBe(true);
   });
+
+  it('includes shitpoast instructions and tags capped candidates when enabled', async () => {
+    anthropicCreateMock.mockResolvedValue({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          slot: 2,
+          content: 'ai agents are just interns with root access and better posture',
+          format: 'hot_take',
+          targetTopic: 'AI',
+          styleMode: 'shitpoast',
+          rationale: 'Sharp and memetic.',
+        }),
+      }],
+    });
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'contrarian',
+        topics: ['AI'],
+        antiGoals: [],
+        communicationStyle: 'sharp and direct',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take'],
+          topTopics: ['AI'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      4,
+      null,
+      null,
+      null,
+      {
+        lengthMix: { short: 50, medium: 50, long: 0 },
+        enabledFormats: [],
+        autonomyMode: 'balanced',
+        trendMixTarget: 35,
+        trendTolerance: 'moderate',
+        shitpoastEnabled: true,
+        exploration: { rate: 35, underusedFormats: [], underusedTopics: [] },
+        bias: { scheduledTopic: null, momentumTopic: null },
+        banditPolicy: null,
+      },
+      [],
+      [],
+      null,
+    );
+
+    const createCall = anthropicCreateMock.mock.calls[0]?.[0];
+    expect(createCall.system).toContain('## SHITPOAST MODE');
+    expect(createCall.messages[0].content).toContain('"styleMode": "standard" or "shitpoast"');
+    expect(batch[0]?.styleMode).toBe('shitpoast');
+  });
 });

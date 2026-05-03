@@ -4,6 +4,7 @@ import type {
   CandidateJudgeBreakdown,
   CandidateScoreProvenance,
   ContentSourceLane,
+  ContentStyleMode,
   PersonalizationMemory,
   Tweet,
   AutonomyMode,
@@ -13,6 +14,7 @@ import type { ContentStyleConfig } from './viral-generator';
 import { getLengthBucketFromText } from './bandit';
 import { isNearDuplicate } from './survivability';
 import { buildCoverageCluster, extractCandidateFeatureTags, ideaSimilarity } from './tweet-features';
+import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE } from './style-mode';
 
 export interface RankableProtocolTweet {
   content: string;
@@ -20,6 +22,7 @@ export interface RankableProtocolTweet {
   targetTopic: string;
   rationale: string;
   sourceLane?: ContentSourceLane | null;
+  styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
   featureTags?: CandidateFeatureTags | null;
@@ -51,6 +54,7 @@ export interface RankedProtocolTweet extends RankableProtocolTweet {
   localPriorWeight: number;
   scoreProvenance: CandidateScoreProvenance;
   sourceLane?: ContentSourceLane | null;
+  styleMode: ContentStyleMode;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
 }
@@ -320,6 +324,41 @@ function scoreSourceLane(
   return clamp(score);
 }
 
+function getStyleModePerformanceAdjustment(
+  mode: ContentStyleMode,
+  context: CandidateRankingContext,
+): number {
+  if (mode !== SHITPOAST_STYLE_MODE) return 0;
+  const perf = context.learnings?.styleModePerformance?.find((entry) => entry.mode === SHITPOAST_STYLE_MODE);
+  if (!perf || perf.posts < 3) return 0;
+
+  const rejectionLoad = (perf.rejections + perf.deletes) / Math.max(perf.approvals + perf.posts + perf.rejections + perf.deletes, 1);
+  const winRate = perf.wins / Math.max(perf.posts, 1);
+  return clamp((winRate * 0.08) - (rejectionLoad * 0.16), -0.12, 0.08);
+}
+
+function scoreStyleMode(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  policyRiskScore: number,
+): number {
+  const mode = normalizeContentStyleMode(candidate.styleMode);
+  if (mode !== SHITPOAST_STYLE_MODE) return 0.5;
+
+  let score = 0.38;
+  const normalizedFormat = normalizeFormat(candidate.format);
+  if (['hot_take', 'short_punch', 'observation'].includes(normalizedFormat)) score += 0.16;
+  if (['contrarian', 'bold_claim', 'confession', 'callout', 'prediction', 'observation'].includes(featureTags.hook)) score += 0.18;
+  if (['provocative', 'playful', 'sarcastic', 'casual'].includes(featureTags.tone)) score += 0.14;
+  if (['single_punch', 'stacked_lines', 'comparison', 'manifesto'].includes(featureTags.structure)) score += 0.1;
+  if (featureTags.specificity !== 'abstract') score += 0.08;
+  if (candidate.content.length <= 280) score += 0.06;
+  if (policyRiskScore > 0.28) score -= 0.18;
+  if (featureTags.riskFlags.includes('absolute_claim') || featureTags.riskFlags.includes('shouty_caps')) score -= 0.08;
+
+  return clamp(score);
+}
+
 function scoreJudge(candidate: RankableProtocolTweet): number {
   if (typeof candidate.judgeScore === 'number') return clamp(candidate.judgeScore);
   if (candidate.judgeBreakdown) {
@@ -416,6 +455,9 @@ export function rankGeneratedTweets(
     const judgeScore = scoreJudge(candidate);
     const repetitionRiskScore = scoreRepetitionRisk(candidate, featureTags, context);
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
+    const styleMode = normalizeContentStyleMode(candidate.styleMode);
+    const styleModeScore = scoreStyleMode(candidate, featureTags, policyRiskScore);
+    const styleModeAdjustment = getStyleModePerformanceAdjustment(styleMode, context);
     const riskPenalty = clamp((policyRiskScore * 0.6) + (repetitionRiskScore * 0.4));
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -435,7 +477,9 @@ export function rankGeneratedTweets(
       sourceLaneScore * 0.08 +
       judgeScore * 0.2 +
       (1 - repetitionRiskScore) * 0.08 +
-      (1 - policyRiskScore) * 0.08
+      (1 - policyRiskScore) * 0.08 +
+      (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
+      styleModeAdjustment
     );
 
     if (context.style.autonomyMode === 'safe') {
@@ -448,6 +492,7 @@ export function rankGeneratedTweets(
       scoreProvenance.localPrior +
       scoreProvenance.globalPrior +
       voiceScore * 0.16 +
+      (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.08 : 0) +
       scoreProvenance.predictedReward +
       scoreProvenance.judge +
       scoreProvenance.noveltyCoverage +
@@ -476,6 +521,7 @@ export function rankGeneratedTweets(
       localPriorWeight: Number(context.style.banditPolicy?.localEvidenceWeight.toFixed(3) || 0),
       scoreProvenance,
       sourceLane: candidate.sourceLane ?? null,
+      styleMode,
       trendTopicId: candidate.trendTopicId ?? null,
       trendHeadline: candidate.trendHeadline ?? null,
     };
@@ -492,11 +538,15 @@ export function rankGeneratedTweets(
 export function selectTopRankedTweets(
   ranked: RankedProtocolTweet[],
   count: number,
+  options: { maxShitpoast?: number } = {},
 ): RankedProtocolTweet[] {
   const selected: RankedProtocolTweet[] = [];
   const usedClusters = new Set<string>();
+  const maxShitpoast = options.maxShitpoast ?? Number.POSITIVE_INFINITY;
+  let shitpoastSelected = 0;
 
   for (const candidate of ranked) {
+    if (candidate.styleMode === SHITPOAST_STYLE_MODE && shitpoastSelected >= maxShitpoast) continue;
     const cluster = candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, candidate.featureTags?.thesis);
     const nearDuplicate = selected.some((item) =>
       isNearDuplicate(item.content, [candidate.content]).isDuplicate
@@ -513,6 +563,7 @@ export function selectTopRankedTweets(
 
     selected.push(candidate);
     usedClusters.add(cluster);
+    if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
     if (selected.length === count) break;
   }
 

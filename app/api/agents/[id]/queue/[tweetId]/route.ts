@@ -3,6 +3,7 @@ import { addLearningSignal, deleteTweet, getTweet, saveFeedback, updateTweet } f
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
 import { summarizeEditDelta } from '@/lib/learning-loop';
+import { metadataWithStyleMode } from '@/lib/style-mode';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -40,11 +41,11 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
-          metadata: {
+          metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
-          },
+          }),
         });
       } else {
         await addLearningSignal(id, {
@@ -52,9 +53,9 @@ export async function PATCH(
           signalType: 'approved_without_edit',
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: 0.85,
-          metadata: {
+          metadata: metadataWithStyleMode(tweet, {
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
-          },
+          }),
         });
       }
     }
@@ -69,11 +70,11 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : 'manual_post',
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
-          metadata: {
+          metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
-          },
+          }),
         });
       }
       await addLearningSignal(id, {
@@ -82,11 +83,11 @@ export async function PATCH(
         signalType: tweet.type === 'reply' ? 'reply_posted' : 'x_post_succeeded',
         surface: tweet.type === 'reply' ? 'mentions' : 'manual_post',
         rewardDelta: 0.7,
-        metadata: {
+        metadata: metadataWithStyleMode(updated, {
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
-        },
+        }),
       });
     }
 
@@ -110,9 +111,9 @@ export async function PATCH(
           surface: 'queue',
           rewardDelta: -0.95,
           reason: trimmedReason,
-          metadata: {
+          metadata: metadataWithStyleMode(tweet, {
             userProvidedReason: true,
-          },
+          }),
         });
       } else if (trimmedReason === 'skipped') {
         const inferredReason = await inferDeleteIntent({
@@ -137,9 +138,9 @@ export async function PATCH(
           rewardDelta: -0.8,
           reason: inferredReason,
           inferred: true,
-          metadata: {
+          metadata: metadataWithStyleMode(tweet, {
             userProvidedReason: false,
-          },
+          }),
         });
       }
     }
@@ -190,9 +191,9 @@ export async function DELETE(
       rewardDelta: -0.75,
       reason: intentSummary,
       inferred: !userReason,
-      metadata: {
+      metadata: metadataWithStyleMode(tweet, {
         userProvidedReason: !!userReason,
-      },
+      }),
     });
 
     await deleteTweet(tweetId);

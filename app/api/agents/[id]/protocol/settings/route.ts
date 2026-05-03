@@ -37,7 +37,7 @@ export async function PATCH(
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
       'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
-      'lengthMix', 'autonomyMode', 'explorationRate', 'trendMixTarget', 'trendTolerance', 'enabledFormats',
+      'lengthMix', 'autonomyMode', 'explorationRate', 'trendMixTarget', 'trendTolerance', 'shitpoastEnabled', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
       'soulEvolutionMode',
       'proactiveReplies', 'proactiveLikes', 'autoFollow', 'agentShoutouts',
@@ -60,6 +60,9 @@ export async function PATCH(
       && !['adjacent', 'moderate', 'aggressive'].includes(updates.trendTolerance)
     ) {
       delete updates.trendTolerance;
+    }
+    if (updates.shitpoastEnabled !== undefined && typeof updates.shitpoastEnabled !== 'boolean') {
+      delete updates.shitpoastEnabled;
     }
 
     const isTryingToEnableAutomation = (

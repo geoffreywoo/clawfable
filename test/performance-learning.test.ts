@@ -6,6 +6,7 @@ import {
   getProtocolSettings,
   updateProtocolSettings,
   updateManualExampleCuration,
+  addLearningSignal,
 } from '@/lib/kv-storage';
 
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -36,6 +37,7 @@ function performanceEntry(overrides: Record<string, unknown>) {
     engagementRate: Number(overrides.engagementRate ?? 13),
     wasViral: Boolean(overrides.wasViral ?? false),
     source: (overrides.source || 'autopilot') as 'autopilot' | 'manual' | 'timeline',
+    styleMode: (overrides.styleMode || 'standard') as 'standard' | 'shitpoast',
     hook: String(overrides.hook || 'bold_claim'),
     tone: String(overrides.tone || 'analytical'),
     specificity: String(overrides.specificity || 'concrete'),
@@ -267,6 +269,7 @@ describe('performance learning smoke', () => {
       quoteTweetAuthor: null,
       scheduledAt: null,
       sourceLane: 'trend_aligned_exploit',
+      styleMode: 'shitpoast',
       trendTopicId: 'trend-42',
       trendHeadline: 'Model infra momentum',
     });
@@ -280,7 +283,16 @@ describe('performance learning smoke', () => {
       retweets: 4,
       replies: 3,
       source: 'autopilot',
+      styleMode: 'shitpoast',
     }) as any);
+
+    await addLearningSignal(agent.id, {
+      tweetId: trendTweet.id,
+      signalType: 'approved_without_edit',
+      surface: 'queue',
+      rewardDelta: 0.8,
+      metadata: { styleMode: 'shitpoast' },
+    });
 
     await addPerformanceEntry(agent.id, performanceEntry({
       tweetId: trendTweet.id,
@@ -336,5 +348,7 @@ describe('performance learning smoke', () => {
     expect(learnings.operatorVoiceReference?.bestPerformers.some((tweet) => tweet.xTweetId === 'x-block')).toBe(false);
     expect(learnings.sourceLanePerformance?.find((lane) => lane.lane === 'manual_core_exploit')?.posts).toBe(1);
     expect(learnings.sourceLanePerformance?.find((lane) => lane.lane === 'trend_aligned_exploit')?.posts).toBe(1);
+    expect(learnings.styleModePerformance?.find((mode) => mode.mode === 'shitpoast')?.posts).toBe(1);
+    expect(learnings.styleModePerformance?.find((mode) => mode.mode === 'shitpoast')?.approvals).toBe(1);
   });
 });

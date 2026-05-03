@@ -110,6 +110,22 @@ function formatPlannerLane(lane: string): string {
   return lane.replace(/_/g, ' ');
 }
 
+function formatShitpoastStatus(status: LearningSnapshot['planner']['shitpoast']['status']): string {
+  switch (status) {
+    case 'off':
+      return 'Off';
+    case 'waiting':
+      return 'Waiting for a large enough batch';
+    case 'working':
+      return 'Working';
+    case 'suppressed':
+      return 'Being held back by quality signals';
+    case 'learning':
+    default:
+      return 'Learning';
+  }
+}
+
 function buildSparklinePoints(values: number[]): string {
   if (values.length === 0) return '';
 
@@ -652,6 +668,32 @@ export function LearningTab({ agentId }: LearningTabProps) {
                   </p>
                 </article>
               ))}
+              <article className="learning-story-item">
+                <div className="learning-story-item-head">
+                  <p className="learning-story-item-title">Shitpoast style experiment</p>
+                  <span className="learning-source-chip">
+                    {snapshot.planner.shitpoast.enabled ? `${snapshot.planner.shitpoast.plannedSlots} planned` : 'OFF'}
+                  </span>
+                </div>
+                <p className="learning-story-item-summary">
+                  {snapshot.planner.shitpoast.enabled
+                    ? `Capped at ${snapshot.planner.shitpoast.capPercent}% of slots. Status: ${formatShitpoastStatus(snapshot.planner.shitpoast.status)}.`
+                    : 'Disabled. Standard source planning is running without high-chaos style slots.'}
+                </p>
+                <div className="learning-story-item-meta">
+                  <span className="learning-impact-chip learning-tone-neutral">
+                    {snapshot.planner.shitpoast.posts} posts · avg {snapshot.planner.shitpoast.avgEngagement} engagement
+                  </span>
+                  <span className="learning-impact-chip learning-tone-neutral">
+                    {snapshot.planner.shitpoast.confidencePassRate}% confidence pass rate
+                  </span>
+                  {(snapshot.planner.shitpoast.rejections > 0 || snapshot.planner.shitpoast.deletes > 0) && (
+                    <span className="learning-impact-chip learning-tone-warning">
+                      {snapshot.planner.shitpoast.rejections + snapshot.planner.shitpoast.deletes} negative signals
+                    </span>
+                  )}
+                </div>
+              </article>
             </div>
           </section>
 

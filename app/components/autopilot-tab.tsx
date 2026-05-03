@@ -967,6 +967,29 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               </div>
             </div>
 
+            <div className="protocol-card" style={{ padding: '14px', borderColor: settings.shitpoastEnabled ? 'var(--primary-border)' : 'var(--border)', background: settings.shitpoastEnabled ? 'var(--primary-soft)' : 'var(--surface)' }}>
+              <div className="flex items-center justify-between" style={{ gap: '12px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: settings.shitpoastEnabled ? 'var(--primary)' : 'var(--text-muted)' }}>
+                    Shitpoast
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.5 }}>
+                    Sharper, weirder, higher-chaos takes. Capped and still filtered before posting.
+                  </p>
+                </div>
+                <button
+                  className={settings.shitpoastEnabled ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                  onClick={() => handleUpdateSettings({ shitpoastEnabled: !settings.shitpoastEnabled })}
+                  aria-pressed={Boolean(settings.shitpoastEnabled)}
+                >
+                  {settings.shitpoastEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
+                Max 20% of generated slots. If no wild draft passes quality gates, that slot falls back to standard posting.
+              </p>
+            </div>
+
             {/* Length mix */}
             <div className="protocol-card" style={{ padding: '14px' }}>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
@@ -1165,6 +1188,17 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 {learningSnapshot?.planner && (
                   <div style={{ display: 'grid', gap: '10px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: learningSnapshot.planner.shitpoast.enabled ? 'var(--primary-soft)' : 'var(--surface-3)' }}>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>Shitpoast</p>
+                        <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>
+                          {learningSnapshot.planner.shitpoast.enabled ? `${learningSnapshot.planner.shitpoast.plannedSlots}` : 'Off'}
+                        </div>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          {learningSnapshot.planner.shitpoast.posts > 0
+                            ? `avg ${learningSnapshot.planner.shitpoast.avgEngagement} across ${learningSnapshot.planner.shitpoast.posts} posts`
+                            : `cap ${learningSnapshot.planner.shitpoast.capPercent}% of slots`}
+                        </p>
+                      </div>
                       {learningSnapshot.planner.nextBatchMix.map((lane) => (
                         <div key={lane.lane} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: 'var(--surface-3)' }}>
                           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>{formatLaneLabel(lane.lane)}</p>

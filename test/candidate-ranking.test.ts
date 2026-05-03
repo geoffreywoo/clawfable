@@ -47,6 +47,7 @@ function ranked(overrides: Partial<RankedProtocolTweet> = {}): RankedProtocolTwe
       noveltyCoverage: 0.11,
       riskPenalty: 0.05,
     },
+    styleMode: overrides.styleMode || 'standard',
   };
 }
 

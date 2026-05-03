@@ -4,7 +4,7 @@
  * and feeds insights back into generation.
  */
 
-import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, Tweet } from './types';
+import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, StyleModePerformance, Tweet, LearningSignal } from './types';
 import {
   getTweets,
   getPerformanceHistory,
@@ -21,6 +21,7 @@ import {
   saveFeedback,
   addLearningSignal,
   getManualExampleCuration,
+  getLearningSignals,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
@@ -28,6 +29,7 @@ import { inferDeleteIntent } from './delete-intent';
 import { generateText } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
+import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -81,6 +83,7 @@ function mergePerformanceEntries(primary: TweetPerformance, secondary: TweetPerf
     specificity: primary.specificity || secondary.specificity,
     structure: primary.structure || secondary.structure,
     thesis: primary.thesis || secondary.thesis,
+    styleMode: primary.styleMode || secondary.styleMode || STANDARD_STYLE_MODE,
     postedAt: earlierPostedAt,
     checkedAt: parsePerformanceTimestamp(primary.checkedAt) >= parsePerformanceTimestamp(secondary.checkedAt)
       ? primary.checkedAt
@@ -147,6 +150,106 @@ function buildSourceLanePerformance(
       wins: stats.wins,
     }))
     .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildStyleModePerformance(
+  history: TweetPerformance[],
+  allTweets: Tweet[],
+  signals: LearningSignal[],
+): StyleModePerformance[] {
+  const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  const tweetByXId = new Map(
+    allTweets
+      .filter((tweet) => tweet.xTweetId)
+      .map((tweet) => [String(tweet.xTweetId), tweet]),
+  );
+  const buckets = new Map<StyleModePerformance['mode'], {
+    total: number;
+    posts: number;
+    wins: number;
+    approvals: number;
+    rejections: number;
+    deletes: number;
+    confidenceTotal: number;
+    confidenceCount: number;
+    confidencePasses: number;
+  }>();
+  const ensure = (mode: StyleModePerformance['mode']) => {
+    const existing = buckets.get(mode);
+    if (existing) return existing;
+    const next = {
+      total: 0,
+      posts: 0,
+      wins: 0,
+      approvals: 0,
+      rejections: 0,
+      deletes: 0,
+      confidenceTotal: 0,
+      confidenceCount: 0,
+      confidencePasses: 0,
+    };
+    buckets.set(mode, next);
+    return next;
+  };
+
+  ensure(STANDARD_STYLE_MODE);
+  ensure(SHITPOAST_STYLE_MODE);
+
+  const resolveMode = (tweetId?: string, xTweetId?: string, metadataMode?: unknown): StyleModePerformance['mode'] => {
+    const tweet = (tweetId && tweetById.get(String(tweetId))) || (xTweetId && tweetByXId.get(String(xTweetId))) || null;
+    return normalizeContentStyleMode(metadataMode || tweet?.styleMode);
+  };
+
+  for (const entry of history) {
+    const mode = normalizeContentStyleMode(
+      entry.styleMode ||
+      ((entry.tweetId && tweetById.get(String(entry.tweetId))?.styleMode) || null) ||
+      ((entry.xTweetId && tweetByXId.get(String(entry.xTweetId))?.styleMode) || null),
+    );
+    const current = ensure(mode);
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+  }
+
+  for (const tweet of allTweets) {
+    const mode = tweetStyleMode(tweet);
+    const confidence = tweet.confidenceScore;
+    if (typeof confidence !== 'number') continue;
+    const current = ensure(mode);
+    current.confidenceTotal += confidence;
+    current.confidenceCount += 1;
+    if (confidence >= 0.58) current.confidencePasses += 1;
+  }
+
+  for (const signal of signals) {
+    const mode = resolveMode(signal.tweetId, signal.xTweetId, signal.metadata?.styleMode);
+    const current = ensure(mode);
+    if (signal.signalType === 'approved_without_edit' || signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
+      current.approvals += 1;
+    }
+    if (signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected') {
+      current.rejections += 1;
+    }
+    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x') {
+      current.deletes += 1;
+    }
+  }
+
+  return [SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE].map((mode) => {
+    const stats = ensure(mode);
+    return {
+      mode,
+      posts: stats.posts,
+      avgEngagement: stats.posts > 0 ? Math.round(stats.total / stats.posts) : 0,
+      wins: stats.wins,
+      approvals: stats.approvals,
+      rejections: stats.rejections,
+      deletes: stats.deletes,
+      avgConfidence: stats.confidenceCount > 0 ? Number((stats.confidenceTotal / stats.confidenceCount).toFixed(3)) : 0,
+      confidencePassRate: stats.confidenceCount > 0 ? Math.round((stats.confidencePasses / stats.confidenceCount) * 100) : 0,
+    };
+  });
 }
 
 /**
@@ -241,6 +344,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,
       source: isOurs ? 'autopilot' : 'timeline',
+      styleMode: ourTweet?.styleMode ?? STANDARD_STYLE_MODE,
     };
 
     await addPerformanceEntry(agent.id, entry);
@@ -374,9 +478,10 @@ Output ONLY JSON objects, one per line, no other text.`,
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const rawHistory = await getPerformanceHistory(agent.id, 500);
   const history = dedupePerformanceHistory(rawHistory);
-  const [allTweets, manualExampleCuration] = await Promise.all([
+  const [allTweets, manualExampleCuration, signals] = await Promise.all([
     getTweets(agent.id),
     getManualExampleCuration(agent.id),
+    getLearningSignals(agent.id, 500),
   ]);
 
   if (history.length === 0) {
@@ -392,6 +497,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       topicRankings: [],
       insights: [],
       manualExampleCuration,
+      styleModePerformance: buildStyleModePerformance([], allTweets, signals),
     };
   }
 
@@ -445,6 +551,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const operatorVoiceReference = buildOperatorVoiceReference(operatorReferenceHistory, manualExampleCuration);
   const manualTopicProfile = buildManualTopicProfile(operatorReferenceHistory, manualExampleCuration);
   const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
+  const styleModePerformance = buildStyleModePerformance(history, allTweets, signals);
 
   // Generate prescriptive insights
   const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
@@ -465,6 +572,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     manualTopicProfile,
     manualExampleCuration,
     sourceLanePerformance,
+    styleModePerformance,
     sourceBreakdown,
   };
 

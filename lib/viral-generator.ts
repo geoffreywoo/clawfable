@@ -4,7 +4,7 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, ContentSourceLane, PersonalizationMemory, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, ContentSourceLane, ContentStyleMode, PersonalizationMemory, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
@@ -12,6 +12,7 @@ import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } 
 import { judgeCandidates, mutateTopCandidates } from './generation-judging';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
 import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
+import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -27,6 +28,7 @@ export interface ContentStyleConfig {
   autonomyMode: 'safe' | 'balanced' | 'explore';
   trendMixTarget: number;
   trendTolerance: 'adjacent' | 'moderate' | 'aggressive';
+  shitpoastEnabled: boolean;
   exploration: {
     rate: number;
     underusedFormats: string[];
@@ -46,6 +48,7 @@ const DEFAULT_STYLE: ContentStyleConfig = {
   autonomyMode: 'balanced',
   trendMixTarget: 35,
   trendTolerance: 'moderate',
+  shitpoastEnabled: false,
   exploration: {
     rate: 35,
     underusedFormats: [],
@@ -68,6 +71,7 @@ export interface ProtocolTweet {
   targetTopic: string;
   rationale: string;
   sourceLane?: ContentSourceLane | null;
+  styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
 }
@@ -467,7 +471,9 @@ ${soulMd}`);
     explorationRate,
     biasTopics: [style.bias.momentumTopic, style.bias.scheduledTopic].filter(Boolean) as string[],
     sourcePlan,
+    shitpoastEnabled: style.shitpoastEnabled,
   });
+  const shitpoastSlots = slotPlan.filter((plan) => plan.styleMode === SHITPOAST_STYLE_MODE).length;
 
   if (memory) {
     if (memory.alwaysDoMoreOfThis.length > 0) {
@@ -516,8 +522,18 @@ ${soulMd}`);
     parts.push(`\n## BANDIT SLOT PLAN (follow this exactly)
 This batch is allocated by a multi-armed bandit controller. Each slot is an actual traffic bet, not a suggestion.`);
     for (const plan of slotPlan) {
-      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''} | ${plan.rationale}`);
+      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | style=${plan.styleMode} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''} | ${plan.rationale}`);
     }
+  }
+
+  if (style.shitpoastEnabled) {
+    parts.push(`\n## SHITPOAST MODE
+- Status: ON, capped at ${Math.round(0.2 * 100)}% of final slots${shitpoastSlots > 0 ? ` (${shitpoastSlots} planned slot${shitpoastSlots === 1 ? '' : 's'} in this batch)` : ''}.
+- Only slots explicitly marked style=shitpoast should use this mode. All other slots stay standard.
+- Shitpoast means sharper, weirder, more memetic, more surprising, and more unhinged in cadence.
+- Keep it grounded in the account's real beliefs and approved topics. Do not become random.
+- Hard guardrails still apply: no slurs, no targeted harassment, no defamatory claims, no fabricated facts, no calls for harm, no policy-unsafe bait.
+- Prefer punchy hooks, odd-but-true observations, clean absurdity, and high-specificity contrarian angles.`);
   }
 
   parts.push(`\n## AUTONOMY MODE
@@ -594,16 +610,20 @@ export async function generateViralBatch(
     explorationRate,
     biasTopics: [effectiveStyle.bias.momentumTopic, effectiveStyle.bias.scheduledTopic].filter(Boolean) as string[],
     sourcePlan,
+    shitpoastEnabled: effectiveStyle.shitpoastEnabled,
   });
+  const maxShitpoast = getShitpoastSlotCount(count, effectiveStyle.shitpoastEnabled);
+  const inferredShitpoastSlots = buildShitpoastSlotSet(count, effectiveStyle.shitpoastEnabled);
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
+- "styleMode": "standard" or "shitpoast" (must match the slot's style)
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
-${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
+${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -637,6 +657,16 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
           const slotAssignment = slotPlan.find((plan) => plan.slot === slot) || null;
+          const styleMode = slotAssignment
+            ? normalizeContentStyleMode(slotAssignment.styleMode)
+            : (
+                effectiveStyle.shitpoastEnabled &&
+                maxShitpoast > 0 &&
+                inferredShitpoastSlots.has(slot) &&
+                normalizeContentStyleMode(parsed.styleMode) === SHITPOAST_STYLE_MODE
+                  ? SHITPOAST_STYLE_MODE
+                  : STANDARD_STYLE_MODE
+              );
           if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) continue;
           const combo = `${String(format).toLowerCase()}::${String(targetTopic).toLowerCase()}`;
           if (usedFormatTopicCombos.has(combo)) continue;
@@ -649,6 +679,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             targetTopic,
             rationale: parsed.rationale || slotAssignment?.rationale || '',
             sourceLane: slotAssignment?.sourceLane || null,
+            styleMode,
             trendTopicId: slotAssignment?.trendTopicId || null,
             trendHeadline: slotAssignment?.trendHeadline || null,
           });
@@ -708,7 +739,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       rankingContext,
     );
 
-    return selectTopRankedTweets(ranked, count);
+    return selectTopRankedTweets(ranked, count, { maxShitpoast });
   } catch (err) {
     console.error('AI generation error:', err);
     if (!shouldUseFallbackGeneration(err)) {
@@ -719,6 +750,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       .map((tweet, index) => ({
         ...tweet,
         sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+        styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
         trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
         trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
       }))
@@ -741,7 +773,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       },
     };
     const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
-    return selectTopRankedTweets(ranked, count);
+    return selectTopRankedTweets(ranked, count, { maxShitpoast });
   }
 }
 

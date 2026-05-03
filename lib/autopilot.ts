@@ -541,6 +541,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
           confidenceScore: effectiveConfidence(tweet),
           candidateScore: tweet.candidateScore ?? null,
           generationMode: tweet.generationMode ?? null,
+          styleMode: tweet.styleMode ?? 'standard',
         },
       });
 
@@ -625,6 +626,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
         confidenceScore: effectiveConfidence(tweet),
         candidateScore: tweet.candidateScore ?? null,
         generationMode: tweet.generationMode ?? null,
+        styleMode: tweet.styleMode ?? 'standard',
       },
     });
 
@@ -1156,6 +1158,7 @@ async function refillQueue(
         localPriorWeight: item.localPriorWeight ?? null,
         scoreProvenance: item.scoreProvenance ?? null,
         sourceLane: item.sourceLane ?? null,
+        styleMode: item.styleMode ?? 'standard',
         trendTopicId: item.trendTopicId ?? null,
         trendHeadline: item.trendHeadline ?? null,
         xTweetId: null,
@@ -1190,6 +1193,7 @@ interface MarketingTweet {
   targetTopic: string;
   rationale: string;
   sourceLane?: import('./types').ContentSourceLane | null;
+  styleMode?: import('./types').ContentStyleMode | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
   generationMode?: 'safe' | 'balanced' | 'explore';

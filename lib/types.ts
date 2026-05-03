@@ -203,6 +203,8 @@ export type ContentSourceLane =
   | 'trend_adjacent_explore'
   | 'core_explore_fallback';
 
+export type ContentStyleMode = 'standard' | 'shitpoast';
+
 export type TrendTolerance = 'adjacent' | 'moderate' | 'aggressive';
 
 export interface Tweet {
@@ -250,6 +252,7 @@ export interface Tweet {
   scoreProvenance?: CandidateScoreProvenance | null;
   rewardBreakdown?: RewardBreakdown | null;
   sourceLane?: ContentSourceLane | null;
+  styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
   quarantineReason?: string | null;
@@ -351,6 +354,7 @@ export interface ProtocolSettings {
   explorationRate: number;    // 0-100, percentage of batch reserved for exploratory ideas
   trendMixTarget?: number;    // 0-100, target share of trend-led slots
   trendTolerance?: TrendTolerance; // how far from core voice trend exploration may go
+  shitpoastEnabled?: boolean;  // capped high-chaos style experiments
   enabledFormats: string[];  // which formats to use, empty = all
   qtRatio: number;           // 0-100, percentage of QTs vs originals
   // Marketing track
@@ -475,6 +479,7 @@ export interface TweetPerformance {
   engagementRate: number;  // (likes+RTs+replies) / impressions
   wasViral: boolean;       // exceeded the viral threshold
   source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline
+  styleMode?: ContentStyleMode;
 }
 
 export interface ManualExampleCuration {
@@ -522,6 +527,18 @@ export interface SourceLanePerformance {
   wins: number;
 }
 
+export interface StyleModePerformance {
+  mode: ContentStyleMode;
+  posts: number;
+  avgEngagement: number;
+  wins: number;
+  approvals: number;
+  rejections: number;
+  deletes: number;
+  avgConfidence: number;
+  confidencePassRate: number;
+}
+
 export interface AgentLearnings {
   agentId: string;
   updatedAt: string;
@@ -538,6 +555,7 @@ export interface AgentLearnings {
   manualTopicProfile?: ManualTopicCluster[];
   manualExampleCuration?: ManualExampleCuration;
   sourceLanePerformance?: SourceLanePerformance[];
+  styleModePerformance?: StyleModePerformance[];
   sourceBreakdown?: {
     autopilot: number;
     manual: number;

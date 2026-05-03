@@ -5,6 +5,7 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
 import { isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
+import { metadataWithStyleMode } from '@/lib/style-mode';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -68,12 +69,12 @@ export async function POST(
         signalType: updated.type === 'reply' ? 'reply_posted' : 'x_post_succeeded',
         surface: updated.type === 'reply' ? 'mentions' : 'manual_post',
         rewardDelta: 0.72,
-        metadata: {
+        metadata: metadataWithStyleMode(updated, {
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
           wasEdited: (existingTweet?.editCount ?? 0) > 0,
-        },
+        }),
       });
     }
 
@@ -102,6 +103,7 @@ export async function POST(
         surface: isReply ? 'mentions' : 'manual_post',
         rewardDelta: -0.75,
         reason: message,
+        metadata: metadataWithStyleMode(existingTweet),
       }).catch(() => null);
     }
 
