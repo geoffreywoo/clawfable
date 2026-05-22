@@ -358,10 +358,12 @@ ${soulMd}`);
     parts.push(`\n## LEARNINGS FROM ACCOUNT PERFORMANCE (THIS IS CRITICAL — adapt based on what actually works)`);
     parts.push(`Tracked ${learnings.totalTracked} tweets total. Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
     if (breakdown) {
-      if (breakdown.trainingSource === 'autopilot') {
+      if (breakdown.manual > 0) {
+        parts.push(`Manually posted tweets are HIGH-SIGNAL operator approvals. Prioritize those ${breakdown.manual} manual posts when matching voice, sentiment, tone, cadence, topic boundaries, and structure. Autopilot data should tune performance only when it agrees with the manual signal.`);
+      } else if (breakdown.trainingSource === 'autopilot') {
         parts.push(`Autonomous policy should trust the ${breakdown.trainingCount} autopilot tweets below first. Human reference pool: ${breakdown.manual + breakdown.timeline} timeline/manual tweets for comparison only.`);
       } else {
-        parts.push(`Autopilot history is still sparse, so the current training set mixes autopilot and human-written tweets. Treat strong manual examples as reference voice, not guaranteed autonomous policy.`);
+        parts.push(`Autopilot history is still sparse, so the current training set mixes autopilot and operator-written tweets. Treat strong operator examples as high-signal voice, sentiment, tone, and topic references.`);
       }
     }
 
@@ -423,15 +425,15 @@ ${soulMd}`);
     if (learnings.operatorVoiceReference && learnings.operatorVoiceReference.bestPerformers.length > 0) {
       const humanRef = learnings.operatorVoiceReference;
       const fp = humanRef.styleFingerprint;
-      parts.push(`\n## HUMAN VOICE ANCHORS (high-performing operator-written tweets — copy the voice and cadence, not the exact take)`);
-      parts.push(`Derived from ${humanRef.sampleCount} operator-written timeline tweets.`);
+      parts.push(`\n## MANUAL / OPERATOR VOICE ANCHORS (high-signal examples — copy the voice, sentiment, tone, and cadence, not the exact take)`);
+      parts.push(`Derived from ${humanRef.sampleCount} manually posted or operator-written tweets.`);
       parts.push(`- Human sweet spot length: ${fp.avgLength} chars (${fp.shortPct}% short, ${fp.mediumPct}% medium, ${fp.longPct}% long)`);
       if (fp.usesLineBreaks) parts.push(`- Strong human-written posts use line breaks for pacing`);
       if (!fp.usesEmojis) parts.push(`- Strong human-written posts avoid emojis`);
       if (fp.topHooks.length > 0) parts.push(`- Human-preferred hooks: ${fp.topHooks.join(', ')}`);
       if (fp.topTones.length > 0) parts.push(`- Human-preferred tones: ${fp.topTones.join(', ')}`);
       for (const t of humanRef.bestPerformers.slice(0, 3)) {
-        parts.push(`- HUMAN VOICE EXAMPLE [${t.likes} likes]: "${t.content.slice(0, 180)}"`);
+        parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, 180)}"`);
       }
     }
 

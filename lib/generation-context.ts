@@ -1,4 +1,4 @@
-import type { Agent, AgentLearnings, PersonalizationMemory, ProtocolSettings, Tweet } from './types';
+import type { Agent, AgentLearnings, LearningSignal, PersonalizationMemory, ProtocolSettings, Tweet, TweetPerformance } from './types';
 import {
   getBaseline,
   getFeedback,
@@ -117,6 +117,33 @@ function rankUnderusedTopics(tweets: Tweet[], voiceTopics: string[]): string[] {
     .slice(0, 4);
 }
 
+function normalizeManualPerformanceSources(
+  history: TweetPerformance[],
+  signals: LearningSignal[],
+): TweetPerformance[] {
+  const manualTweetIds = new Set<string>();
+  const manualXTweetIds = new Set<string>();
+
+  for (const signal of signals) {
+    if (signal.signalType !== 'x_post_succeeded' || signal.surface !== 'manual_post') continue;
+    if (signal.tweetId) manualTweetIds.add(String(signal.tweetId));
+    if (signal.xTweetId) manualXTweetIds.add(String(signal.xTweetId));
+  }
+
+  if (manualTweetIds.size === 0 && manualXTweetIds.size === 0) return history;
+
+  return history.map((entry) => {
+    if (entry.source !== 'autopilot') return entry;
+    if (
+      (entry.tweetId && manualTweetIds.has(String(entry.tweetId))) ||
+      (entry.xTweetId && manualXTweetIds.has(String(entry.xTweetId)))
+    ) {
+      return { ...entry, source: 'manual' };
+    }
+    return entry;
+  });
+}
+
 export async function buildGenerationContext(
   agent: Agent,
   options: BuildGenerationContextOptions = {},
@@ -171,7 +198,7 @@ export async function buildGenerationContext(
 
   if (learnings?.operatorVoiceReference && learnings.operatorVoiceReference.bestPerformers.length > 0) {
     const reference = learnings.operatorVoiceReference;
-    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE REFERENCE (high-performing human-written tweets — match the voice, tone, and rhythm)\nDerived from ${reference.sampleCount} operator-written timeline tweets.\n${describeStyleFingerprint(reference.styleFingerprint).join('\n')}\nVoice anchors:\n${reference.bestPerformers.map((entry) => `- "${entry.content.slice(0, 180)}"`).join('\n')}\nUse these as VOICE calibration examples. Reuse the energy and phrasing discipline, not the exact claim or topic.`;
+    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)\nDerived from ${reference.sampleCount} manually posted or operator-written tweets.\n${describeStyleFingerprint(reference.styleFingerprint).join('\n')}\nVoice anchors:\n${reference.bestPerformers.map((entry) => `- "${entry.content.slice(0, 180)}"`).join('\n')}\nUse these as VOICE calibration examples. Reuse the energy, sentiment, and phrasing discipline, not the exact claim.`;
   }
 
   if (learnings?.manualTopicProfile && learnings.manualTopicProfile.length > 0) {
@@ -194,8 +221,9 @@ export async function buildGenerationContext(
     ...(learnings?.topicRankings.map((entry) => entry.topic) || []),
     ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic)),
   ])];
+  const normalizedPerformanceHistory = normalizeManualPerformanceSources(performanceHistory, signals);
   const banditPolicy = buildBanditPolicy({
-    performanceHistory,
+    performanceHistory: normalizedPerformanceHistory,
     feedback,
     signals,
     allTweets,
@@ -210,7 +238,7 @@ export async function buildGenerationContext(
     remixPatterns: remixMemory,
     directiveRules: activeDirectiveRules,
     learnings,
-    performanceHistory,
+    performanceHistory: normalizedPerformanceHistory,
     banditPolicy,
     voiceProfile,
     baselineLikes: baseline?.avgLikes || 0,

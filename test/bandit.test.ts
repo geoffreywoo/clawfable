@@ -105,8 +105,56 @@ describe('bandit policy', () => {
     expect(policy.trainingSource).toBe('autopilot');
     expect(policy.summary.some((entry) => entry.startsWith('Exploit format: hot_take'))).toBe(true);
     expect(policy.summary).toContain('Explore format: question');
-    expect(policy.formatArms.some((arm) => arm.arm === 'hot_take' && arm.meanReward > 0.7)).toBe(true);
+    const hotTake = policy.formatArms.find((arm) => arm.arm === 'hot_take');
+    const analysis = policy.formatArms.find((arm) => arm.arm === 'analysis');
+    expect(hotTake?.meanReward).toBeGreaterThan(analysis?.meanReward || 0);
+    expect(hotTake?.localPulls).toBeGreaterThan(analysis?.localPulls || 0);
+    expect(hotTake?.source).toBe('local_evidence');
     expect(policy.formatArms.find((arm) => arm.arm === 'question')?.coldStart).toBe(true);
+  });
+
+  it('keeps manually posted winners in the local policy even with enough autopilot history', () => {
+    const performanceHistory = Array.from({ length: 10 }, (_, index) =>
+      performanceEntry({
+        tweetId: `auto-${index}`,
+        xTweetId: `x-auto-${index}`,
+        content: `autopilot infra miss ${index}`,
+        format: 'analysis',
+        topic: 'Infra',
+        likes: 4,
+        retweets: 0,
+        replies: 0,
+        source: 'autopilot',
+      })
+    ).concat([
+      performanceEntry({
+        tweetId: 'manual-1',
+        xTweetId: 'x-manual-1',
+        content: 'Biohacking got interesting when it became instrumentation, not supplement theater.',
+        format: 'hot_take',
+        topic: 'Biohacking',
+        likes: 70,
+        retweets: 8,
+        replies: 4,
+        source: 'manual',
+        tone: 'provocative',
+      }),
+    ]);
+
+    const policy = buildBanditPolicy({
+      performanceHistory,
+      feedback: [],
+      signals: [],
+      allTweets: [],
+      allowedFormats: ['analysis', 'hot_take'],
+      candidateTopics: ['Infra', 'Biohacking'],
+      baseline: null,
+    });
+
+    expect(policy.trainingSource).toBe('mixed');
+    expect(policy.formatArms[0]?.arm).toBe('hot_take');
+    expect(policy.topicArms[0]?.arm).toBe('Biohacking');
+    expect(policy.toneArms.find((arm) => arm.arm === 'provocative')?.localPulls).toBeGreaterThan(0);
   });
 
   it('penalizes strategies that operators delete', () => {

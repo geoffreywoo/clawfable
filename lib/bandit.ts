@@ -136,6 +136,12 @@ function recencyWeight(ts: string): number {
   return Math.pow(0.5, ageDays / BANDIT_HALF_LIFE_DAYS);
 }
 
+function sourceSignalWeight(source: TweetPerformance['source']): number {
+  if (source === 'manual') return 2;
+  if (source === 'timeline') return 1.25;
+  return 1;
+}
+
 function unique(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value) && value !== 'unknown'))];
 }
@@ -231,7 +237,7 @@ function collectFallbackPerformanceObservations(
   for (const entry of performanceHistory) {
     if (entry.tweetId && coveredTweetIds.has(String(entry.tweetId))) continue;
     const reward = performanceReward(entry, baseline);
-    const weight = recencyWeight(entry.checkedAt);
+    const weight = recencyWeight(entry.checkedAt) * sourceSignalWeight(entry.source);
     const featureTags = extractCandidateFeatureTags(entry.content, {
       topic: entry.topic,
       thesisHint: entry.thesis,
@@ -430,8 +436,13 @@ export function buildBanditPolicy({
   globalPrior,
 }: BuildBanditPolicyOptions): BanditPolicy {
   const autopilotHistory = performanceHistory.filter((entry) => entry.source === 'autopilot');
-  const trainingHistory = autopilotHistory.length >= 10 ? autopilotHistory : performanceHistory;
-  const trainingSource: BanditTrainingSource = autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
+  const manualHistory = performanceHistory.filter((entry) => entry.source === 'manual');
+  const trainingHistory = manualHistory.length > 0
+    ? performanceHistory
+    : autopilotHistory.length >= 10
+      ? autopilotHistory
+      : performanceHistory;
+  const trainingSource: BanditTrainingSource = manualHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
 
   const scoreThreshold = median(trainingHistory.map((entry) => entry.likes + (entry.retweets * 2) + (entry.replies * 1.5)));
   const baselineScore = baseline ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2)) : 0;
@@ -444,7 +455,16 @@ export function buildBanditPolicy({
     performanceHistory,
     baseline,
   });
-  const coveredTweetIds = new Set(episodes.map((episode) => String(episode.tweetId)));
+  const manualPerformanceTweetIds = new Set(
+    performanceHistory
+      .filter((entry) => entry.source === 'manual' && entry.tweetId)
+      .map((entry) => String(entry.tweetId)),
+  );
+  const coveredTweetIds = new Set(
+    episodes
+      .map((episode) => String(episode.tweetId))
+      .filter((tweetId) => !manualPerformanceTweetIds.has(tweetId)),
+  );
   const observations = [
     ...collectEpisodeObservations(episodes, allTweets),
     ...collectFallbackPerformanceObservations(performanceHistory, coveredTweetIds, baseline),

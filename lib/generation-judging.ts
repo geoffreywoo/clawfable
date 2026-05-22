@@ -143,6 +143,7 @@ Ground rules:
 - Top formats: ${analysis.engagementPatterns.topFormats.join(', ') || 'unknown'}
 - Top topics: ${analysis.engagementPatterns.topTopics.join(', ') || 'unknown'}
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}
+${learnings?.operatorVoiceReference?.bestPerformers?.length ? `- Manual/operator anchors are high-signal for voice, sentiment, tone, and topics: ${learnings.operatorVoiceReference.bestPerformers.slice(0, 3).map((entry) => `"${entry.content.slice(0, 120)}"`).join(' | ')}` : ''}
 ${memory?.neverDoThisAgain?.length ? `- Avoid: ${memory.neverDoThisAgain.slice(0, 3).join(' | ')}` : ''}
 
 Output one JSON object per line, no markdown.`,

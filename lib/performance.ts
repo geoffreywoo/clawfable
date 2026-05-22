@@ -50,13 +50,61 @@ function performanceEntryKey(tweet: TweetPerformance): string {
 
 function sourcePriority(source: TweetPerformance['source']): number {
   switch (source) {
-    case 'autopilot':
-      return 3;
     case 'manual':
+      return 3;
+    case 'autopilot':
       return 2;
     default:
       return 1;
   }
+}
+
+function manualPostSuccessSignals(signals: LearningSignal[]): { tweetIds: Set<string>; xTweetIds: Set<string> } {
+  const tweetIds = new Set<string>();
+  const xTweetIds = new Set<string>();
+
+  for (const signal of signals) {
+    if (signal.signalType !== 'x_post_succeeded' || signal.surface !== 'manual_post') continue;
+    if (signal.tweetId) tweetIds.add(String(signal.tweetId));
+    if (signal.xTweetId) xTweetIds.add(String(signal.xTweetId));
+  }
+
+  return { tweetIds, xTweetIds };
+}
+
+function wasManuallyPosted(
+  tweetId: string | null | undefined,
+  xTweetId: string | null | undefined,
+  manualSignals: { tweetIds: Set<string>; xTweetIds: Set<string> },
+): boolean {
+  return Boolean(
+    (tweetId && manualSignals.tweetIds.has(String(tweetId))) ||
+    (xTweetId && manualSignals.xTweetIds.has(String(xTweetId)))
+  );
+}
+
+function normalizeManualPerformanceSources(
+  history: TweetPerformance[],
+  signals: LearningSignal[],
+): TweetPerformance[] {
+  const manualSignals = manualPostSuccessSignals(signals);
+  if (manualSignals.tweetIds.size === 0 && manualSignals.xTweetIds.size === 0) return history;
+
+  return history.map((entry) => {
+    if (entry.source !== 'autopilot') return entry;
+    if (!wasManuallyPosted(entry.tweetId, entry.xTweetId, manualSignals)) return entry;
+    return { ...entry, source: 'manual' };
+  });
+}
+
+function sourceSignalWeight(source: TweetPerformance['source']): number {
+  if (source === 'manual') return 2;
+  if (source === 'timeline') return 1.25;
+  return 1;
+}
+
+function weightedLearningScore(tweet: TweetPerformance): number {
+  return weightedEngagementScore(tweet) * sourceSignalWeight(tweet.source);
 }
 
 function mergePerformanceEntries(primary: TweetPerformance, secondary: TweetPerformance): TweetPerformance {
@@ -273,6 +321,8 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // Get existing performance entries to avoid re-checking
   const existing = await getPerformanceHistory(agent.id, 500);
   const checkedXIds = new Set(existing.map((e) => String(e.xTweetId)));
+  const signals = await getLearningSignals(agent.id, 500);
+  const manualSignals = manualPostSuccessSignals(signals);
 
   // Fetch full recent timeline (all tweets, not just ours)
   let timeline;
@@ -343,7 +393,9 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       impressions: timelineTweet.impressions ?? 0,
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,
-      source: isOurs ? 'autopilot' : 'timeline',
+      source: isOurs
+        ? (wasManuallyPosted(ourTweet?.id, String(timelineTweet.id), manualSignals) ? 'manual' : 'autopilot')
+        : 'timeline',
       styleMode: ourTweet?.styleMode ?? STANDARD_STYLE_MODE,
     };
 
@@ -477,12 +529,12 @@ Output ONLY JSON objects, one per line, no other text.`,
  */
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const rawHistory = await getPerformanceHistory(agent.id, 500);
-  const history = dedupePerformanceHistory(rawHistory);
   const [allTweets, manualExampleCuration, signals] = await Promise.all([
     getTweets(agent.id),
     getManualExampleCuration(agent.id),
     getLearningSignals(agent.id, 500),
   ]);
+  const history = normalizeManualPerformanceSources(dedupePerformanceHistory(rawHistory), signals);
 
   if (history.length === 0) {
     return {
@@ -505,46 +557,63 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const manualHistory = history.filter((t) => t.source === 'manual');
   const timelineHistory = history.filter((t) => t.source === 'timeline');
   const operatorReferenceHistory = history.filter((t) => t.source !== 'autopilot');
-  const trainingHistory = autopilotHistory.length >= 10 ? autopilotHistory : history;
+  const trainingHistory = manualHistory.length > 0
+    ? history
+    : autopilotHistory.length >= 10
+      ? autopilotHistory
+      : history;
   const sourceBreakdown = {
     autopilot: autopilotHistory.length,
     manual: manualHistory.length,
     timeline: timelineHistory.length,
     trainingCount: trainingHistory.length,
-    trainingSource: autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
+    trainingSource: manualHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
   };
 
   // Sort by weighted engagement
-  const sorted = [...trainingHistory].sort((a, b) => weightedEngagementScore(b) - weightedEngagementScore(a));
+  const sorted = [...trainingHistory].sort((a, b) =>
+    weightedLearningScore(b) - weightedLearningScore(a) ||
+    weightedEngagementScore(b) - weightedEngagementScore(a)
+  );
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
 
   // Format rankings
-  const formatMap: Record<string, { total: number; count: number }> = {};
+  const formatMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
   for (const h of trainingHistory) {
     const f = h.format || 'unknown';
     if (f === 'unknown') continue; // skip unclassified
-    if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
+    if (!formatMap[f]) formatMap[f] = { total: 0, count: 0, signalTotal: 0 };
     formatMap[f].total += weightedEngagementScore(h);
+    formatMap[f].signalTotal += weightedLearningScore(h);
     formatMap[f].count++;
   }
   const formatRankings = Object.entries(formatMap)
     .map(([format, d]) => ({ format, avgEngagement: Math.round(d.total / d.count), count: d.count }))
-    .sort((a, b) => b.avgEngagement - a.avgEngagement);
+    .sort((a, b) => {
+      const left = formatMap[a.format].signalTotal / Math.max(formatMap[a.format].count, 1);
+      const right = formatMap[b.format].signalTotal / Math.max(formatMap[b.format].count, 1);
+      return right - left || b.avgEngagement - a.avgEngagement;
+    });
 
   // Topic rankings
-  const topicMap: Record<string, { total: number; count: number }> = {};
+  const topicMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
   for (const h of trainingHistory) {
     const t = h.topic || 'general';
     if (t === 'general' || t === 'unknown') continue;
-    if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
+    if (!topicMap[t]) topicMap[t] = { total: 0, count: 0, signalTotal: 0 };
     topicMap[t].total += weightedEngagementScore(h);
+    topicMap[t].signalTotal += weightedLearningScore(h);
     topicMap[t].count++;
   }
   const topicRankings = Object.entries(topicMap)
     .map(([topic, d]) => ({ topic, avgEngagement: Math.round(d.total / d.count), count: d.count }))
-    .sort((a, b) => b.avgEngagement - a.avgEngagement);
+    .sort((a, b) => {
+      const left = topicMap[a.topic].signalTotal / Math.max(topicMap[a.topic].count, 1);
+      const right = topicMap[b.topic].signalTotal / Math.max(topicMap[b.topic].count, 1);
+      return right - left || b.avgEngagement - a.avgEngagement;
+    });
 
   // Compute style fingerprint from top 30 tweets
   const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
@@ -600,7 +669,7 @@ function buildOperatorVoiceReference(
   curation: ManualExampleCuration,
 ): OperatorVoiceReference | undefined {
   const usableHistory = history.filter((tweet) => tweet.content && tweet.content.trim().length > 0);
-  if (usableHistory.length < 3) return undefined;
+  if (usableHistory.length === 0) return undefined;
 
   const pinnedExamples = usableHistory.filter((tweet) => curation.pinnedXTweetIds.includes(String(tweet.xTweetId)));
   const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
@@ -749,6 +818,11 @@ async function generateInsights(
   const worst = sorted.slice(-10);
   const operatorTweets = history.filter((t) => t.source !== 'autopilot');
   const autopilotTweets = history.filter((t) => t.source === 'autopilot');
+  const trainingSetLabel = sourceBreakdown.trainingSource === 'autopilot'
+    ? 'autopilot only'
+    : sourceBreakdown.manual > 0
+      ? 'mixed with manually posted high-signal approvals'
+      : 'mixed because autopilot history is still sparse';
 
   try {
     const response = await generateText({
@@ -763,7 +837,8 @@ Include at least one rule about what to STOP doing.
 Include at least one rule comparing autopilot vs manual tweet performance (if both exist).
 Output bullet points, one per line, no numbering.`,
       prompt: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
-TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${sourceBreakdown.trainingSource === 'autopilot' ? 'autopilot only' : 'mixed because autopilot history is still sparse'})
+TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${trainingSetLabel})
+MANUAL POSTING RULE: Tweets manually posted by the operator are high-signal approvals. Treat their voice, sentiment, tone, topics, and structure as stronger guidance than autonomous posts unless direct deletion feedback contradicts them.
 
 STYLE FINGERPRINT (computed from top 30 tweets):
 - Avg length: ${styleFingerprint.avgLength} chars (${styleFingerprint.shortPct}% short, ${styleFingerprint.mediumPct}% medium, ${styleFingerprint.longPct}% long)

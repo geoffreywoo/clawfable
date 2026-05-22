@@ -248,7 +248,7 @@ describe('generation context', () => {
 
     const context = await buildGenerationContext(agent);
     expect(context.voiceProfile.communicationStyle).toContain('## OPERATOR VOICE REFERENCE');
-    expect(context.voiceProfile.communicationStyle).toContain('Derived from 8 operator-written timeline tweets.');
+    expect(context.voiceProfile.communicationStyle).toContain('Derived from 8 manually posted or operator-written tweets.');
     expect(context.voiceProfile.communicationStyle).toContain('Best human tones: analytical, provocative');
     expect(context.voiceProfile.communicationStyle).toContain('manual killer opener');
     expect(context.voiceProfile.communicationStyle).toContain('## MANUAL TOPIC PRIORS');

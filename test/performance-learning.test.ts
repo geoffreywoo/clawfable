@@ -89,6 +89,75 @@ describe('performance learning smoke', () => {
     expect(learnings.operatorVoiceReference?.styleFingerprint.topTones).toContain('analytical');
   });
 
+  it('treats manually posted Clawfable tweets as high-signal voice and topic training', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-manual-signal',
+      name: 'Perf Agent Manual Signal',
+      soulMd: '# soul',
+    } as any);
+
+    for (let i = 0; i < 10; i++) {
+      await addPerformanceEntry(agent.id, performanceEntry({
+        tweetId: `auto-${i}`,
+        xTweetId: `x-auto-${i}`,
+        content: `autopilot infrastructure tweet ${i}`,
+        format: 'analysis',
+        topic: 'Infra',
+        likes: 32,
+        retweets: 2,
+        replies: 1,
+        source: 'autopilot',
+      }) as any);
+    }
+
+    const manualTweet = await createTweet({
+      agentId: agent.id,
+      content: 'Biohacking got interesting when it stopped being supplement theater and became instrumentation.',
+      type: 'original',
+      status: 'posted',
+      format: 'hot_take',
+      topic: 'Biohacking',
+      xTweetId: 'x-manual-posted',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    await addLearningSignal(agent.id, {
+      tweetId: manualTweet.id,
+      xTweetId: 'x-manual-posted',
+      signalType: 'x_post_succeeded',
+      surface: 'manual_post',
+      rewardDelta: 0.72,
+    });
+
+    await addPerformanceEntry(agent.id, performanceEntry({
+      tweetId: manualTweet.id,
+      xTweetId: 'x-manual-posted',
+      content: manualTweet.content,
+      format: 'hot_take',
+      topic: 'Biohacking',
+      likes: 44,
+      retweets: 4,
+      replies: 3,
+      source: 'autopilot',
+      hook: 'bold_claim',
+      tone: 'provocative',
+      specificity: 'concrete',
+    }) as any);
+
+    const learnings = await buildLearnings(agent);
+
+    expect(learnings.sourceBreakdown?.manual).toBe(1);
+    expect(learnings.sourceBreakdown?.trainingSource).toBe('mixed');
+    expect(learnings.formatRankings[0]?.format).toBe('hot_take');
+    expect(learnings.topicRankings[0]?.topic).toBe('Biohacking');
+    expect(learnings.bestPerformers[0]?.source).toBe('manual');
+    expect(learnings.operatorVoiceReference?.sampleCount).toBe(1);
+    expect(learnings.operatorVoiceReference?.bestPerformers[0]?.xTweetId).toBe('x-manual-posted');
+    expect(learnings.operatorVoiceReference?.styleFingerprint.topTones).toContain('provocative');
+  });
+
   it('only auto-tunes settings when the training set is truly autopilot-backed', async () => {
     const mixedAgent = await createAgent({
       handle: 'perf-agent-2',
