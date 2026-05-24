@@ -143,10 +143,16 @@ function summarizeWeeklyChanges(
   const approvals = recentSignals.filter((signal) => signal.signalType === 'approved_without_edit').length;
   const edits = recentSignals.filter((signal) => signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post').length;
   const deletes = recentSignals.filter((signal) => signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x').length;
+  const tasteSignals = recentSignals.filter((signal) =>
+    signal.signalType === 'taste_more_like_this'
+    || signal.signalType === 'taste_less_like_this'
+    || signal.signalType === 'taste_calibration_edit'
+  ).length;
 
   if (approvals > 0) changes.push(`${approvals} drafts were approved cleanly this week — the baseline voice fit is improving.`);
   if (edits > 0) changes.push(`${edits} drafts needed operator reshaping this week, so those edits are feeding hidden preference memory.`);
   if (deletes > 0) changes.push(`${deletes} rejected tweets sharpened the blocklist this week.`);
+  if (tasteSignals > 0) changes.push(`${tasteSignals} taste calibration signal${tasteSignals === 1 ? '' : 's'} tightened the owner preference model this week.`);
   if (momentumTopics.length > 0) changes.push(`Momentum is building around ${momentumTopics.slice(0, 2).join(' and ')} right now.`);
 
   const recentReasons = unique(recentFeedback.map((entry) => entry.intentSummary || entry.reason)).slice(0, 2);

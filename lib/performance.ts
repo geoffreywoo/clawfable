@@ -126,7 +126,11 @@ function sourceSignalWeight(source: TweetPerformance['source']): number {
 }
 
 function weightedLearningScore(tweet: TweetPerformance): number {
-  return weightedEngagementScore(tweet) * sourceSignalWeight(tweet.source);
+  const qualityScore = tweet.qualityAdjustedGrowthScore
+    ?? tweet.actionRewards?.qualityAdjustedGrowthScore
+    ?? computeActionRewards(tweet).qualityAdjustedGrowthScore
+    ?? 50;
+  return ((qualityScore * 1.15) + (weightedEngagementScore(tweet) * 0.28)) * sourceSignalWeight(tweet.source);
 }
 
 function mergePerformanceEntries(primary: TweetPerformance, secondary: TweetPerformance): TweetPerformance {
@@ -466,6 +470,13 @@ function analysisLikeBaseline(history: TweetPerformance[]): number {
     : likes[middle];
 }
 
+function qualityGrowthScore(entry: TweetPerformance): number {
+  return entry.qualityAdjustedGrowthScore
+    ?? entry.actionRewards?.qualityAdjustedGrowthScore
+    ?? computeActionRewards(entry).qualityAdjustedGrowthScore
+    ?? 50;
+}
+
 async function createVelocityFollowupDraft(
   agent: Agent,
   entry: TweetPerformance,
@@ -696,7 +707,8 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       slopScore: ourTweet?.slopScore ?? scoreSlopRisk(timelineTweet.text, inferredFeatures),
       replyBaitScore: ourTweet?.replyBaitScore ?? scoreReplyPotential(timelineTweet.text, inferredFeatures),
     };
-    entry.actionRewards = computeActionRewards(entry);
+    entry.actionRewards = computeActionRewards(entry, analysis?.engagementPatterns || null);
+    entry.qualityAdjustedGrowthScore = entry.actionRewards.qualityAdjustedGrowthScore;
     entry.earlyVelocityScore = computeEarlyVelocityScore(entry);
 
     await addPerformanceEntry(agent.id, entry);
@@ -947,9 +959,24 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     performanceHistory: history,
   });
   const topRelationshipHandles = buildTopRelationshipHandles(mentions);
+  const baselineLikes = analysisLikeBaseline(history);
   const viralityPostmortems = sorted
-    .filter((entry) => entry.wasViral || weightedEngagementScore(entry) >= Math.max(20, (analysisLikeBaseline(history) * 2)))
-    .slice(0, 8)
+    .filter((entry) => {
+      const engagement = weightedEngagementScore(entry);
+      const quality = qualityGrowthScore(entry);
+      const bigWin = entry.wasViral || engagement >= Math.max(20, baselineLikes * 2) || quality >= 72;
+      const meaningfulMiss = (
+        (entry.source === 'autopilot' || entry.source === 'manual') &&
+        (engagement <= Math.max(2, baselineLikes * 0.35) || quality <= 34)
+      );
+      return bigWin || meaningfulMiss;
+    })
+    .sort((a, b) => {
+      const aDistance = Math.abs(qualityGrowthScore(a) - 50) + (a.wasViral ? 20 : 0);
+      const bDistance = Math.abs(qualityGrowthScore(b) - 50) + (b.wasViral ? 20 : 0);
+      return bDistance - aDistance || weightedLearningScore(b) - weightedLearningScore(a);
+    })
+    .slice(0, 12)
     .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights

@@ -200,6 +200,12 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
       return { postingOutcome: -0.72 };
     case 'x_post_succeeded':
       return { postingOutcome: 0.32 };
+    case 'taste_more_like_this':
+      return { approval: 0.46 };
+    case 'taste_less_like_this':
+      return { deletionPenalty: -0.52 };
+    case 'taste_calibration_edit':
+      return { approval: 0.22, editBurden: -0.08 };
     default:
       return {};
   }
@@ -327,7 +333,7 @@ export function buildOutcomeEpisode({
   }
   if (performance) {
     breakdown.actionRewards = performance.actionRewards || computeActionRewards(performance, baseline);
-    breakdown.notes.push(`Action reward ${breakdown.actionRewards.total >= 0 ? '+' : ''}${Math.round(breakdown.actionRewards.total * 100)} from likes, replies, reposts, impressions, and rate.`);
+    breakdown.notes.push(`Quality growth ${breakdown.actionRewards.qualityAdjustedGrowthScore ?? 'n/a'}/100; action reward ${breakdown.actionRewards.total >= 0 ? '+' : ''}${Math.round(breakdown.actionRewards.total * 100)} from useful replies, target attention, reposts, impressions, and rate.`);
   }
 
   breakdown.immediateTotal = round(clamp(

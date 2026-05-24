@@ -3560,6 +3560,12 @@ h1, h2, h3, h4 {
   margin-top: 10px;
 }
 
+.learning-calibration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .learning-impact-chip,
 .learning-state-chip,
 .learning-confidence-pill,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeActionRewards, scoreHighValueReply } from '@/lib/virality-signals';
+import { assessTasteRisk, computeActionRewards, scoreHighValueReply } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -49,6 +49,36 @@ describe('virality signals', () => {
     expect(rewards.likeReward).toBeGreaterThan(0);
     expect(rewards.replyReward).toBeGreaterThan(0);
     expect(rewards.repostReward).toBeGreaterThan(0);
-    expect(rewards.total).toBeLessThanOrEqual(0.8);
+    expect(rewards.highQualityReplyReward).toBeGreaterThan(0);
+    expect(rewards.qualityAdjustedGrowthScore).toBeGreaterThan(50);
+    expect(rewards.total).toBeLessThanOrEqual(0.9);
+  });
+
+  it('boosts known relationship targets in reply scoring', () => {
+    const unknown = scoreHighValueReply({
+      text: 'Can you give a concrete example of this?',
+      authorUsername: 'newperson',
+    }, { topics: ['AI'] });
+    const known = scoreHighValueReply({
+      text: 'Can you give a concrete example of this?',
+      authorUsername: 'knownbuilder',
+    }, {
+      topics: ['AI'],
+      relationshipHandles: [{ handle: 'knownbuilder', interactions: 5, avgEngagement: 20 }],
+    });
+
+    expect(known.score).toBeGreaterThan(unknown.score);
+    expect(known.reason).toContain('known relationship target');
+  });
+
+  it('holds embarrassing replies while allowing sharp substantive posts', () => {
+    const bad = assessTasteRisk('you are a stupid clown lol', { surface: 'reply', highValueScore: 0.6 });
+    const sharp = assessTasteRisk(
+      'Most AI agent demos optimize for applause. Production agents optimize for boring recovery paths.',
+      { surface: 'post', policyRiskScore: 0.08, creativeRiskScore: 0.22, slopScore: 0.12, voiceScore: 0.78 },
+    );
+
+    expect(bad.action).toBe('block');
+    expect(sharp.action).toBe('allow');
   });
 });
