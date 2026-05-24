@@ -9,7 +9,8 @@ import {
   getAgentTopics,
   getProtocolSnapshot,
 } from '@/lib/dashboard-data';
-import { getAnalysis, getMetricsArray } from '@/lib/kv-storage';
+import { getAnalysis } from '@/lib/kv-storage';
+import { getAgentMetricsSnapshot } from '@/lib/metrics-snapshot';
 
 const VALID_SECTIONS = new Set([
   'agent',
@@ -67,7 +68,7 @@ export async function GET(
           response.protocol = await getProtocolSnapshot(user, agent);
           return;
         case 'metrics':
-          response.metrics = await getMetricsArray(agent.id);
+          response.metrics = await getAgentMetricsSnapshot(agent.id);
           return;
         case 'queue':
           response.queue = await getAgentQueueFeed(agent.id);

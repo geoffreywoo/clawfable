@@ -29,7 +29,6 @@ import {
   getManualExampleCuration,
   listEngagementSessions,
   getMentions,
-  getMetricsArray,
   getMentionCount,
   getPerformanceHistory,
   getPostLog,

@@ -7,7 +7,7 @@ import {
   getAgentSummariesForUser,
   getProtocolSnapshot,
 } from '@/lib/dashboard-data';
-import { getMetricsArray } from '@/lib/kv-storage';
+import { getAgentMetricsSnapshot } from '@/lib/metrics-snapshot';
 import { isSetupIncomplete } from '@/lib/setup-state';
 
 interface AgentDashboardPageProps {
@@ -24,7 +24,7 @@ export default async function AgentDashboardPage({ params, searchParams }: Agent
     const [otherAgents, protocol, metrics] = await Promise.all([
       getAgentSummariesForUser(user).then((agents) => agents.filter((candidate) => candidate.id !== agent.id)),
       getProtocolSnapshot(user, agent),
-      getMetricsArray(agent.id),
+      getAgentMetricsSnapshot(agent.id),
     ]);
     const agentDetail = await buildAgentDetail(agent);
 
