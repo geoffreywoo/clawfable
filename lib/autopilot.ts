@@ -283,13 +283,16 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   if (settings.autoReply) {
     // Check reply cooldown
     const replyInterval = (settings.replyIntervalMins || 30) * 60 * 1000;
-    const replyElapsed = settings.lastRepliedAt
-      ? Date.now() - new Date(settings.lastRepliedAt).getTime()
+    const lastReplyAttemptAt = settings.lastReplyCheckedAt || settings.lastRepliedAt;
+    const replyElapsed = lastReplyAttemptAt
+      ? Date.now() - new Date(lastReplyAttemptAt).getTime()
       : Infinity;
 
     if (replyElapsed >= replyInterval) {
+      const checkedAt = new Date().toISOString();
       try {
         repliesSent = await runAutoReply(agent, keys, settings);
+        await updateProtocolSettings(agent.id, { lastReplyCheckedAt: checkedAt });
       } catch (err) {
         await addPostLogEntry(agent.id, {
           agentId: agent.id,
@@ -305,6 +308,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
             handle: `@${agent.handle}`,
           }),
         });
+        await updateProtocolSettings(agent.id, { lastReplyCheckedAt: checkedAt });
         // Don't fail the whole run if replies fail
       }
     }

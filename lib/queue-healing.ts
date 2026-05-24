@@ -24,6 +24,7 @@ const ACCOUNT_LEVEL_PATTERNS = [
   'account is locked',
   'account is suspended',
   'rate limit',
+  'request failed',
   'temporarily unavailable',
   'service unavailable',
   'internal server error',
@@ -43,7 +44,6 @@ const CONTENT_REPAIR_PATTERNS = [
   'duplicate content',
   'text is too long',
   'content is invalid',
-  'request failed',
 ];
 
 function cleanRepairedDraft(text: string): string {
@@ -58,7 +58,6 @@ function requiresMaterialRewrite(reason: string): boolean {
   return (
     lower.includes('post_tweet')
     || lower.includes('duplicate')
-    || lower.includes('request failed')
     || lower.includes('content is invalid')
   );
 }

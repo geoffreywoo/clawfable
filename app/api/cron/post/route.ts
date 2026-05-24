@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
@@ -323,13 +323,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const responsePayload = {
       timestamp: new Date().toISOString(),
       mentionsRefreshed,
       performanceTracked,
       autopilotProcessed: autopilotResults.length,
       results: autopilotResults,
-    });
+    };
+    await addCronLogEntry(responsePayload);
+
+    return NextResponse.json(responsePayload);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Cron failed';
     return NextResponse.json({ error: message }, { status: 500 });

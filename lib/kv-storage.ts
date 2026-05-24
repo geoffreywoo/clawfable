@@ -1132,6 +1132,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   replyIntervalMins: 30,
   lastPostedAt: null,
   lastRepliedAt: null,
+  lastReplyCheckedAt: null,
   totalAutoPosted: 0,
   totalAutoReplied: 0,
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -1236,6 +1237,7 @@ export interface CronLogEntry {
   id: string;
   timestamp: string;
   mentionsRefreshed: number;
+  performanceTracked?: number;
   autopilotProcessed: number;
   results: Array<{ agentId: string; action: string; reason: string; content?: string; repliesSent?: number }>;
 }

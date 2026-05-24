@@ -14,15 +14,15 @@ describe('queue-healing classification', () => {
         'post_tweet [403 Forbidden]: You are not permitted to perform this action.'
       )
     ).toBe('keep');
+
+    expect(
+      classifyQueuedTweetIssue('post_tweet: Request failed')
+    ).toBe('keep');
   });
 
   it('repairs broken or rejected content drafts', () => {
     expect(
       classifyQueuedTweetIssue('Draft appears to end mid-word or mid-thought (“better accuracy than y”).')
-    ).toBe('repair');
-
-    expect(
-      classifyQueuedTweetIssue('post_tweet: Request failed')
     ).toBe('repair');
 
     expect(

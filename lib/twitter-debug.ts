@@ -136,6 +136,11 @@ export function isTransientTwitterError(error: unknown): boolean {
     return (
       message.includes('rate limit')
       || message.includes('429')
+      || message.includes('request failed')
+      || message.includes('network')
+      || message.includes('timeout')
+      || message.includes('econn')
+      || message.includes('socket hang up')
       || message.includes('500')
       || message.includes('502')
       || message.includes('503')

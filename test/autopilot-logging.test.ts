@@ -275,6 +275,25 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
   });
 
+  it('backs off transient request failures without deleting or rewriting the queued draft', async () => {
+    mocks.postTweet.mockRejectedValue(new TwitterActionError({
+      action: 'post_tweet',
+      rawMessage: 'Request failed',
+    }));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('error');
+    expect(result.reason).toContain('API error');
+    expect(result.reason).toContain('pausing 15m');
+    expect(mocks.updateProtocolSettings).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ lastPostedAt: expect.any(String) }),
+    );
+    expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
+    expect(mocks.deleteTweet).not.toHaveBeenCalled();
+  });
+
   it('clears stale template fallback drafts when richer generation is available again', async () => {
     mocks.getQueuedTweets
       .mockResolvedValueOnce([
@@ -534,6 +553,55 @@ describe('autopilot remote debug logging', () => {
           targetMentionId: 'mention-high',
         }),
       }),
+    );
+  });
+
+  it('records reply scan cooldowns when high-value mode skips every mention', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+      highValueReplyMode: true,
+      minReplyValueScore: 0.78,
+      lastRepliedAt: '2026-04-01T00:00:00.000Z',
+      lastReplyCheckedAt: null,
+    });
+    mocks.getMentionsFromTwitter.mockResolvedValue([
+      {
+        id: 'mention-low',
+        text: 'nice',
+        authorId: 'user-low',
+        authorName: 'Low Signal',
+        authorUsername: 'low',
+        createdAt: '2026-04-07T12:00:00.000Z',
+        conversationId: 'conv-low',
+        inReplyToTweetId: null,
+      },
+    ]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result).toMatchObject({
+      action: 'skipped',
+      reason: 'Auto-post disabled',
+      repliesSent: 0,
+    });
+    expect(mocks.replyToTweet).not.toHaveBeenCalled();
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        format: 'auto_reply_high_value',
+        action: 'skipped',
+        reason: expect.stringContaining('below 0.78'),
+      }),
+    );
+    expect(mocks.updateProtocolSettings).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ lastReplyCheckedAt: expect.any(String) }),
+    );
+    expect(mocks.updateProtocolSettings).not.toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ lastRepliedAt: expect.any(String) }),
     );
   });
 

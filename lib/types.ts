@@ -460,6 +460,7 @@ export interface ProtocolSettings {
   replyIntervalMins: number;  // minimum minutes between reply runs
   lastPostedAt: string | null;
   lastRepliedAt: string | null;
+  lastReplyCheckedAt?: string | null;
   totalAutoPosted: number;
   totalAutoReplied: number;
   // Content style controls

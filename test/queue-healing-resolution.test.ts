@@ -76,13 +76,29 @@ describe('resolveQueuedTweetFailure', () => {
     expect(mocks.deleteTweet).not.toHaveBeenCalled();
   });
 
-  it('deletes the broken draft instead of throwing when repair generation fails', async () => {
+  it('keeps drafts for generic post request failures', async () => {
+    const result = await resolveQueuedTweetFailure(
+      baseAgent,
+      { ...baseTweet, quarantinedAt: '2026-04-10T01:00:00.000Z' },
+      'post_tweet: Request failed',
+    );
+
+    expect(result.action).toBe('kept');
+    expect(mocks.updateTweet).toHaveBeenCalledWith(baseTweet.id, {
+      quarantinedAt: null,
+      quarantineReason: null,
+    });
+    expect(mocks.deleteTweet).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it('deletes the broken draft instead of throwing when content repair generation fails', async () => {
     mocks.anthropicCreate.mockRejectedValue(new Error('Anthropic overloaded'));
 
     const result = await resolveQueuedTweetFailure(
       baseAgent,
       { ...baseTweet, quarantinedAt: '2026-04-10T01:00:00.000Z' },
-      'post_tweet: Request failed',
+      'post_tweet: duplicate content',
     );
 
     expect(result.action).toBe('deleted');

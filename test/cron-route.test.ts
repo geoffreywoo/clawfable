@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createMention: vi.fn(),
   getMentions: vi.fn(),
   addPostLogEntry: vi.fn(),
+  addCronLogEntry: vi.fn(),
   getLearnings: vi.fn(),
   getPerformanceHistory: vi.fn(),
   resetReadCache: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/lib/kv-storage', () => ({
   createMention: mocks.createMention,
   getMentions: mocks.getMentions,
   addPostLogEntry: mocks.addPostLogEntry,
+  addCronLogEntry: mocks.addCronLogEntry,
   getLearnings: mocks.getLearnings,
   getPerformanceHistory: mocks.getPerformanceHistory,
   resetReadCache: mocks.resetReadCache,
@@ -119,6 +121,7 @@ describe('cron autopilot isolation', () => {
     mocks.getAgentOwnerId.mockResolvedValue(null);
     mocks.getUser.mockResolvedValue(null);
     mocks.runAutopilot.mockRejectedValue(new Error('repair pipeline blew up'));
+    mocks.addCronLogEntry.mockResolvedValue(undefined);
     mocks.getLearnings.mockResolvedValue(null);
     mocks.getPerformanceHistory.mockResolvedValue([]);
     mocks.checkPerformance.mockResolvedValue(0);
@@ -144,6 +147,12 @@ describe('cron autopilot isolation', () => {
         source: 'cron',
       }),
     );
+    expect(mocks.addCronLogEntry).toHaveBeenCalledWith(expect.objectContaining({
+      mentionsRefreshed: 0,
+      performanceTracked: 0,
+      autopilotProcessed: 1,
+      results: [expect.objectContaining({ agentId: 'agent-1', action: 'error' })],
+    }));
   });
 
   it('logs performance tracking failures instead of swallowing them', async () => {
