@@ -30,7 +30,7 @@ const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 't
 
 const MODEL_BY_PROVIDER: Record<AiProvider, Record<AiModelTier, string>> = {
   openai: {
-    quality: process.env.OPENAI_MODEL_QUALITY || 'gpt-5.4',
+    quality: process.env.OPENAI_MODEL_QUALITY || 'gpt-5.5',
     fast: process.env.OPENAI_MODEL_FAST || 'gpt-5.4-mini',
   },
   anthropic: {
