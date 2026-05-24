@@ -3,19 +3,19 @@ import './globals.css';
 import { fontBody, fontHeading, fontMono } from './fonts';
 
 export const metadata: Metadata = {
-  title: 'Clawfable — Train an X voice that gets better every week',
-  description: 'Train an AI publishing teammate on your real X voice. Review the first batch, see what it learns, and turn on autopilot when it feels right.',
+  title: 'Clawfable — Autopilot an authentic X voice toward attention',
+  description: 'Pilot an X account as an authentic extension of its owner’s voice, tuned toward maximum niche attention and virality.',
   metadataBase: new URL('https://www.clawfable.com'),
   openGraph: {
-    title: 'Clawfable — Train an X voice that gets better every week',
-    description: 'Train an AI publishing teammate on your real X voice.',
+    title: 'Clawfable — Autopilot an authentic X voice toward attention',
+    description: 'Pilot an X account as an authentic extension of its owner’s voice.',
     siteName: 'Clawfable',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Clawfable — Train an X voice that gets better every week',
-    description: 'Train an AI publishing teammate on your real X voice.',
+    title: 'Clawfable — Autopilot an authentic X voice toward attention',
+    description: 'Pilot an X account as an authentic extension of its owner’s voice.',
     creator: '@geoffreywoo',
   },
 };

@@ -5,7 +5,7 @@
  * 1. Jittering post timing (±15% of interval)
  * 2. Enforcing content diversity (no consecutive same-format/topic)
  * 3. Detecting near-duplicate content before posting
- * 4. Enforcing daily hard caps regardless of settings
+ * 4. Enforcing daily original-post caps regardless of settings
  */
 
 import type { Tweet, PostLogEntry } from './types';
@@ -26,14 +26,32 @@ export function jitterInterval(baseMs: number): number {
 
 // ─── Daily hard cap ─────────────────────────────────────────────────────────
 
-/** Absolute max posts per day, regardless of user settings. */
-export const DAILY_HARD_CAP = 60;
+/** Absolute max original posts per day, regardless of user settings. */
+export const DAILY_HARD_CAP = 12;
 
 /** Absolute max postsPerDay the user can configure. */
-export const MAX_POSTS_PER_DAY_SETTING = 48;
+export const MAX_POSTS_PER_DAY_SETTING = 12;
+
+const NON_ORIGINAL_POST_FORMATS = new Set([
+  'auto_reply',
+  'proactive_reply',
+  'proactive_like',
+  'auto_follow',
+  'cron',
+  'learning',
+  'queue_refresh',
+  'system',
+]);
+
+function isOriginalPostEntry(entry: PostLogEntry): boolean {
+  const format = (entry.format || '').toLowerCase();
+  if (NON_ORIGINAL_POST_FORMATS.has(format)) return false;
+  if (format.endsWith('_error')) return false;
+  return true;
+}
 
 /**
- * Count how many autopilot posts happened in the last 24 hours.
+ * Count how many autopilot original posts happened in the last 24 hours.
  * Only counts entries with source='autopilot' and action='posted' (or no action, for legacy entries).
  */
 export function countPostsInLast24h(postLog: PostLogEntry[]): number {
@@ -43,6 +61,7 @@ export function countPostsInLast24h(postLog: PostLogEntry[]): number {
     // Only count actual posts, not skips/errors/mention-refreshes
     const isPost = !entry.action || entry.action === 'posted';
     if (!isPost) return false;
+    if (!isOriginalPostEntry(entry)) return false;
     const ts = new Date(entry.postedAt).getTime();
     return ts >= cutoff;
   }).length;

@@ -69,13 +69,6 @@ async function getFallbackAgentIdsFromScan(user: User, ownerIds: string[], acces
     }
   }
 
-  const newestAgentIdByHandle = new Map<string, string>();
-  for (const agent of agents) {
-    const normalizedHandle = normalizeUsername(agent.handle);
-    if (!normalizedHandle || newestAgentIdByHandle.has(normalizedHandle)) continue;
-    newestAgentIdByHandle.set(normalizedHandle, String(agent.id));
-  }
-
   const ownerEntries = await Promise.all(
     agents.map(async (agent) => [String(agent.id), await getAgentOwnerId(String(agent.id))] as const)
   );
@@ -97,11 +90,12 @@ async function getFallbackAgentIdsFromScan(user: User, ownerIds: string[], acces
     }
   }
 
-  for (const handle of recoverableHandles) {
-    const agentId = newestAgentIdByHandle.get(handle);
-    if (agentId) {
-      fallbackIds.add(agentId);
-    }
+  const recoveredByHandle = await Promise.all(
+    Array.from(recoverableHandles).map((handle) => getAgentByHandle(handle))
+  );
+
+  for (const agent of recoveredByHandle) {
+    if (agent) fallbackIds.add(String(agent.id));
   }
 
   return Array.from(fallbackIds);

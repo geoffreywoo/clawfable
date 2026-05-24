@@ -356,7 +356,7 @@ export interface ProtocolSettings {
   trendTolerance?: TrendTolerance; // how far from core voice trend exploration may go
   shitpoastEnabled?: boolean;  // capped high-chaos style experiments
   enabledFormats: string[];  // which formats to use, empty = all
-  qtRatio: number;           // 0-100, percentage of QTs vs originals
+  qtRatio: number;           // legacy, currently ignored; standalone originals are the default
   // Marketing track
   marketingEnabled: boolean;   // generate promotional tweets for clawfable.com
   marketingMix: number;        // 0-100, percentage of tweets that are promotional
@@ -365,8 +365,8 @@ export interface ProtocolSettings {
   soulEvolutionMode: 'auto' | 'approval' | 'off';
   lastEvolvedAt: string | null;
   // Proactive engagement
-  proactiveReplies: boolean;     // reply to viral tweets in network
-  proactiveLikes: boolean;       // like relevant tweets in network
+  proactiveReplies: boolean;     // disabled: X blocks arbitrary API replies; use supervised Engage flow
+  proactiveLikes: boolean;       // legacy disabled; X API like endpoint is blocked
   autoFollow: boolean;           // follow relevant accounts to expand network
   agentShoutouts: boolean;       // cross-promote other Clawfable agents
   // Posting schedule

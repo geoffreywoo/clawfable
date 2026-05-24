@@ -226,7 +226,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <polygon points="2,2 14,8 2,14" fill="#8b5cf6" />
+                <polygon points="2,2 14,8 2,14" fill="var(--primary)" />
               </svg>
               <h2>Create drafts</h2>
               <span className="section-count">voice, learning, and live topic signals</span>
@@ -236,10 +236,10 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
             Ask for fresh drafts whenever you want. Clawfable uses the voice contract, recent learning signals, proven patterns, and live topics to build a batch you can review.
           </p>
           <div className="flex gap-3">
-            <button className="btn btn-primary" onClick={() => handleBatchGenerate(3)} disabled={generating} style={{ background: '#8b5cf6' }}>
+            <button className="btn btn-primary" onClick={() => handleBatchGenerate(3)} disabled={generating} style={{ background: 'var(--primary)' }}>
               {generating ? 'DRAFTING...' : 'DRAFT 3'}
             </button>
-            <button className="btn btn-primary" onClick={() => handleBatchGenerate(5)} disabled={generating} style={{ background: '#8b5cf6' }}>
+            <button className="btn btn-primary" onClick={() => handleBatchGenerate(5)} disabled={generating} style={{ background: 'var(--primary)' }}>
               DRAFT 5
             </button>
             <button className="btn btn-outline" onClick={() => handleBatchGenerate(10)} disabled={generating}>
@@ -250,14 +250,14 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
       ) : (
         <div className="protocol-empty">
           <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
-            <circle cx="24" cy="24" r="20" stroke="#8b5cf6" strokeWidth="1.5" strokeDasharray="4 3" />
-            <path d="M24 14v10l7 4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="20" stroke="var(--primary)" strokeWidth="1.5" strokeDasharray="4 3" />
+            <path d="M24 14v10l7 4" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>
             This agent needs one account-learning pass before Clawfable can draft against real voice and engagement data.
           </p>
           <button className="btn btn-primary" onClick={handleReanalyze} disabled={analyzing}
-            style={{ marginTop: '12px', background: '#8b5cf6' }}
+            style={{ marginTop: '12px', background: 'var(--primary)' }}
           >
             {analyzing ? 'Learning...' : 'Learn this account'}
           </button>
@@ -269,7 +269,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
         <div>
           <div className="section-header">
             <div className="section-title">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="#8b5cf6" /></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polygon points="2,2 14,8 2,14" fill="var(--primary)" /></svg>
               <h2>Fresh drafts</h2>
               <span className="section-count">{generatedTweets.length} ready to review</span>
             </div>
@@ -288,9 +288,9 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                     {tweet.generationMode && (
                       <span className="protocol-tag" style={{
                         fontSize: '9px',
-                        color: tweet.generationMode === 'safe' ? '#22c55e' : tweet.generationMode === 'explore' ? '#f59e0b' : '#8b5cf6',
-                        borderColor: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.35)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.35)' : 'rgba(139,92,246,0.35)',
-                        background: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.08)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.08)' : 'rgba(139,92,246,0.08)',
+                        color: tweet.generationMode === 'safe' ? '#22c55e' : tweet.generationMode === 'explore' ? '#f59e0b' : 'var(--primary)',
+                        borderColor: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.35)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.35)' : 'rgba(74,139,103,0.35)',
+                        background: tweet.generationMode === 'safe' ? 'rgba(34,197,94,0.08)' : tweet.generationMode === 'explore' ? 'rgba(245,158,11,0.08)' : 'rgba(74,139,103,0.08)',
                       }}>
                         {tweet.generationMode}
                       </span>
@@ -310,7 +310,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                 <div className="decision-inline-actions">
                   <button
                     className="btn btn-ghost btn-sm"
-                    style={{ paddingInline: 0, color: openDecisionId === tweet.id ? '#8b5cf6' : 'var(--text-muted)' }}
+                    style={{ paddingInline: 0, color: openDecisionId === tweet.id ? 'var(--primary)' : 'var(--text-muted)' }}
                     onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
                   >
                     {openDecisionId === tweet.id ? 'HIDE WHY' : 'WHY THIS TWEET'}
@@ -323,7 +323,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                   <span className="char-count">{tweet.content.length} chars</span>
                   <div className="tweet-actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>COPY</button>
-                    <button className="btn btn-ghost btn-sm" style={{ color: '#8b5cf6' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
                     <button
                       className="btn btn-ghost btn-sm"
                       style={{ color: agentConnected ? '#ef4444' : 'var(--text-dim)', cursor: agentConnected ? 'pointer' : 'not-allowed' }}
@@ -345,7 +345,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
       <div>
         <div className="section-header">
           <div className="section-title">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polyline points="1,12 5,7 9,9 15,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><polyline points="1,12 5,7 9,9 15,3" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
             <h2>Topics from your network</h2>
             <span className="section-count">{topics.length} topics</span>
           </div>
@@ -382,8 +382,8 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                   </div>
                   <div className="flex flex-col items-end gap-2" style={{ flexShrink: 0 }}>
                     <span className="topic-score" style={{
-                      background: `rgba(139,92,246,${topic.relevanceScore / 200})`,
-                      color: topic.relevanceScore > 85 ? '#8b5cf6' : '#888',
+                      background: `rgba(74,139,103,${topic.relevanceScore / 200})`,
+                      color: topic.relevanceScore > 85 ? 'var(--primary)' : '#888',
                     }}>
                       {topic.relevanceScore}
                     </span>
@@ -409,8 +409,8 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.5" />
-                <path d="M8 4v4l3 2" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx="8" cy="8" r="6" stroke="var(--primary)" strokeWidth="1.5" />
+                <path d="M8 4v4l3 2" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <h2>Account baseline</h2>
               <span className="section-count">analyzed {getTimeAgo(analysis.analyzedAt)}</span>

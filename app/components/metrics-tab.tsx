@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { AutopilotHealthSnapshot, Metric, AgentLearnings } from '@/lib/types';
+import type { VoiceTuningAnalytics, VoiceSentiment } from '@/lib/voice-tuning-analytics';
 
 interface MetricsTabProps {
   agentId: string;
@@ -14,6 +15,7 @@ interface TimeseriesData {
   daily: Array<{ date: string; tweetsPosted: number; avgLikes: number }>;
   formatBreakdown: Array<{ format: string; count: number; avgEngagement: number }>;
   topicBreakdown: Array<{ topic: string; count: number; avgEngagement: number }>;
+  voiceTuning?: VoiceTuningAnalytics;
   compounding?: {
     approvalRate: { currentWeek: number; previousWeek: number };
     deleteRate: { currentWeek: number; previousWeek: number };
@@ -39,7 +41,7 @@ const METRIC_CONFIG: Record<string, {
 }> = {
   tweets_generated: { label: 'Total Generated', format: (v) => String(v) },
   tweets_posted: { label: 'Posted to X', format: (v) => String(v), color: '#22c55e' },
-  tweets_queued: { label: 'In Queue', format: (v) => String(v), color: '#8b5cf6' },
+  tweets_queued: { label: 'In Queue', format: (v) => String(v), color: 'var(--primary)' },
   tweets_draft: { label: 'Drafts', format: (v) => String(v) },
   mentions: { label: 'Mentions', format: (v) => String(v), color: '#3b82f6' },
   auto_posted: { label: 'Auto-Posted', format: (v) => String(v), color: '#22c55e' },
@@ -63,6 +65,22 @@ function getTimeAgo(ts: string): string {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+function formatLabel(value: string | null | undefined): string {
+  if (!value) return 'Not enough data';
+  return value.replace(/_/g, ' ');
+}
+
+function formatNullablePercent(value: number | null): string {
+  return value === null ? 'n/a' : `${value}%`;
+}
+
+const SENTIMENT_COPY: Record<VoiceSentiment, string> = {
+  positive: 'Positive',
+  neutral: 'Neutral',
+  spicy: 'Spicy',
+  negative: 'Critical',
+};
 
 export function MetricsTab({ agentId }: MetricsTabProps) {
   const [metrics, setMetrics] = useState<Metric[]>([]);
@@ -110,6 +128,10 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
   const maxDailyLikes = timeseries ? Math.max(...timeseries.daily.map((d) => d.avgLikes), 1) : 1;
   const maxFormatEng = learnings?.formatRankings.length ? Math.max(...learnings.formatRankings.map((f) => f.avgEngagement), 1) : 1;
   const maxTopicEng = learnings?.topicRankings.length ? Math.max(...learnings.topicRankings.map((t) => t.avgEngagement), 1) : 1;
+  const voiceTuning = timeseries?.voiceTuning || null;
+  const maxToneEng = Math.max(...(voiceTuning?.toneBreakdown.map((row) => row.avgEngagement) || [1]), 1);
+  const maxShapeEng = Math.max(...(voiceTuning?.voiceShapeBreakdown.map((row) => row.avgEngagement) || [1]), 1);
+  const maxTuningTopicEng = Math.max(...(voiceTuning?.topicMatrix.map((row) => row.avgEngagement) || [1]), 1);
 
   // Compute weekly comparison from timeseries
   const thisWeek = timeseries?.daily.slice(0, 7) || [];
@@ -222,12 +244,12 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
                   width: '100%',
                   height: '6px',
                   borderRadius: '3px',
-                  background: m.reached ? '#8b5cf6' : 'var(--surface-2)',
+                  background: m.reached ? 'var(--primary)' : 'var(--surface-2)',
                 }} />
                 <span style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '8px',
-                  color: m.reached ? '#8b5cf6' : 'var(--text-dim)',
+                  color: m.reached ? 'var(--primary)' : 'var(--text-dim)',
                   letterSpacing: '0.05em',
                   textAlign: 'center',
                 }}>
@@ -239,13 +261,184 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         </div>
       )}
 
+      {/* ─── 1. Tuning Cockpit ──────────────────────────────────────────── */}
+      {voiceTuning && (
+        <section className="tuning-cockpit">
+          <div className="tuning-cockpit-head">
+            <div>
+              <p className="tuning-kicker">Writing mix control</p>
+              <h2>Tune the voice, topics, and sentiment</h2>
+              <p>
+                Use this panel to decide what to push next: sharper tone, better topic allocation,
+                or a different sentiment mix.
+              </p>
+            </div>
+            <div className="tuning-sample-badge">
+              <span>{voiceTuning.summary.totalSamples}</span>
+              <small>tracked samples</small>
+            </div>
+          </div>
+
+          {voiceTuning.summary.totalSamples > 0 ? (
+            <>
+              <div className="tuning-summary-grid">
+                <article className="tuning-summary-card">
+                  <span>Best tone</span>
+                  <strong>{formatLabel(voiceTuning.summary.bestTone)}</strong>
+                  <p>Lead with this voice when the next batch needs reliability.</p>
+                </article>
+                <article className="tuning-summary-card">
+                  <span>Topic to push</span>
+                  <strong>{formatLabel(voiceTuning.summary.topicOpportunity)}</strong>
+                  <p>Highest current opportunity by weighted engagement.</p>
+                </article>
+                <article className="tuning-summary-card">
+                  <span>Spice mix</span>
+                  <strong>{voiceTuning.summary.sentimentBalance.spicy}%</strong>
+                  <p>Share of recent posts classified as spicy or contrarian.</p>
+                </article>
+                <article className="tuning-summary-card muted">
+                  <span>Watchlist</span>
+                  <strong>{formatLabel(voiceTuning.summary.riskiestTone)}</strong>
+                  <p>Reduce or reshape this tone if deletion risk keeps rising.</p>
+                </article>
+              </div>
+
+              <div className="tuning-sentiment-panel">
+                <div className="tuning-panel-head">
+                  <div>
+                    <h3>Sentiment balance</h3>
+                    <p>Keep the account spicy without letting one emotional register flatten the voice.</p>
+                  </div>
+                </div>
+                <div className="tuning-sentiment-bar" aria-label="Sentiment mix">
+                  {voiceTuning.sentimentBreakdown.filter((row) => row.share > 0).map((row) => (
+                    <span
+                      key={row.sentiment}
+                      className={`tuning-sentiment-fill sentiment-${row.sentiment}`}
+                      style={{ width: `${Math.max(row.share, 4)}%` }}
+                      title={`${SENTIMENT_COPY[row.sentiment]} ${row.share}%`}
+                    />
+                  ))}
+                </div>
+                <div className="tuning-sentiment-legend">
+                  {voiceTuning.sentimentBreakdown.map((row) => (
+                    <span key={row.sentiment}>
+                      <i className={`sentiment-dot sentiment-${row.sentiment}`} />
+                      {SENTIMENT_COPY[row.sentiment]} {row.share}%
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="tuning-analytics-grid">
+                <section className="tuning-panel">
+                  <div className="tuning-panel-head">
+                    <div>
+                      <h3>Tone performance</h3>
+                      <p>Engagement plus operator acceptance signals.</p>
+                    </div>
+                  </div>
+                  <div className="tuning-rows">
+                    {voiceTuning.toneBreakdown.map((row) => (
+                      <div key={row.tone} className="tuning-row">
+                        <div className="tuning-row-main">
+                          <span className="tuning-row-label">{formatLabel(row.tone)}</span>
+                          <span className="tuning-row-meta">{row.count} posts</span>
+                        </div>
+                        <div className="tuning-row-bar-track">
+                          <div className="tuning-row-bar" style={{ width: `${(row.avgEngagement / maxToneEng) * 100}%` }} />
+                        </div>
+                        <div className="tuning-row-stats">
+                          <strong>{row.avgEngagement}</strong>
+                          <span>{formatNullablePercent(row.approvalRate)} approved</span>
+                          <span>{formatNullablePercent(row.deleteRate)} deleted</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="tuning-panel">
+                  <div className="tuning-panel-head">
+                    <div>
+                      <h3>Voice shapes</h3>
+                      <p>Which rhetorical containers are carrying the voice.</p>
+                    </div>
+                  </div>
+                  <div className="tuning-shape-list">
+                    {voiceTuning.voiceShapeBreakdown.map((row) => (
+                      <article key={row.shape} className="tuning-shape-card">
+                        <div>
+                          <strong>{formatLabel(row.shape)}</strong>
+                          <span>{row.share}% of mix</span>
+                        </div>
+                        <div className="tuning-shape-meter">
+                          <span style={{ width: `${(row.avgEngagement / maxShapeEng) * 100}%` }} />
+                        </div>
+                        <small>{row.avgEngagement} avg engagement</small>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <section className="tuning-panel">
+                <div className="tuning-panel-head">
+                  <div>
+                    <h3>Topic tuning matrix</h3>
+                    <p>For each topic, the UI shows the tone and sentiment that should guide the next batch.</p>
+                  </div>
+                </div>
+                <div className="tuning-topic-grid">
+                  {voiceTuning.topicMatrix.map((row) => (
+                    <article key={row.topic} className="tuning-topic-card">
+                      <div className="tuning-topic-topline">
+                        <strong>{formatLabel(row.topic)}</strong>
+                        <span>{row.count} posts</span>
+                      </div>
+                      <div className="tuning-topic-meter">
+                        <span style={{ width: `${(row.avgEngagement / maxTuningTopicEng) * 100}%` }} />
+                      </div>
+                      <div className="tuning-topic-tags">
+                        {row.topTone && <span>{formatLabel(row.topTone)}</span>}
+                        {row.sentiment && <span>{SENTIMENT_COPY[row.sentiment]}</span>}
+                        <span>{row.avgEngagement} avg eng</span>
+                      </div>
+                      <p>{row.recommendation}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="tuning-recommendation-panel">
+                <div>
+                  <p className="tuning-kicker">Recommended moves</p>
+                  <h3>What to change next</h3>
+                </div>
+                <ul>
+                  {voiceTuning.recommendations.map((recommendation, index) => (
+                    <li key={`${recommendation}-${index}`}>{recommendation}</li>
+                  ))}
+                </ul>
+              </section>
+            </>
+          ) : (
+            <div className="tuning-empty-state">
+              <strong>No tuning sample yet</strong>
+              <p>Post a few tweets or refresh timeline learning, then this panel will show tone, topic, and sentiment recommendations.</p>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ─── 1. Learning Digest Hero ──────────────────────────────────────── */}
       {learnings && learnings.insights.length > 0 ? (
         <div className="learning-digest">
           <div className="learning-digest-header">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
-              <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--primary)" strokeWidth="1.3" />
+              <line x1="6" y1="14" x2="10" y2="14" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
             <h2>What the system is learning</h2>
             <span className="section-count">updated {getTimeAgo(learnings.updatedAt)}</span>
@@ -396,9 +589,9 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         <div>
           <div className="section-title mb-4">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <rect x="1" y="8" width="3" height="7" rx="1" fill="#8b5cf6" />
-              <rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" />
-              <rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" />
+              <rect x="1" y="8" width="3" height="7" rx="1" fill="var(--primary)" />
+              <rect x="6" y="5" width="3" height="10" rx="1" fill="var(--primary)" />
+              <rect x="11" y="2" width="3" height="13" rx="1" fill="var(--primary)" />
             </svg>
             <h2>What performs</h2>
             <span className="section-count">ranked by avg engagement</span>
@@ -482,8 +675,8 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         <div className="lift-section">
           <div className="section-title mb-4">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline points="10,3 14,3 14,7" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="2,12 6,7 9,9 14,3" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="10,3 14,3 14,7" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <h2>Automation lift</h2>
             <span className="section-count">vs. pre-automation baseline</span>

@@ -27,7 +27,7 @@ export default async function HomePage() {
           <Logo size={32} />
           <div className="site-header-text">
             <h1>CLAWFABLE</h1>
-            <p>AI publishing teammate for X</p>
+            <p>Authentic X autopilot</p>
           </div>
         </div>
         <div className="site-header-right">
@@ -36,7 +36,7 @@ export default async function HomePage() {
             <a href="#souls">Soul library</a>
             <a href="#pricing">Pricing</a>
           </nav>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="site-header-actions">
             <Link href={CONTROL_ROOM_PATH} className="btn btn-outline site-header-cta">
               Open app
             </Link>
@@ -51,19 +51,19 @@ export default async function HomePage() {
         <div className="content-wrap landing-shell">
           <div className="landing-hero-grid">
             <div className="landing-hero-copy">
-              <span className="landing-kicker">TRAIN YOUR VOICE, THEN LET IT HELP</span>
+              <span className="landing-kicker">AUTHENTIC X AUTOPILOT</span>
               <h2 className="landing-title">
-                Train an X voice that gets better every week.
+                Train your X voice. Let it publish when it earns trust.
               </h2>
               <p className="landing-subtitle">
                 Clawfable learns from your real posts, approvals, edits, deletes, and live
-                performance. Start with guided review, see why each draft was chosen, and only
-                turn on automation when the voice actually feels like you.
+                performance, then turns that evidence into a ranked queue and optional autopilot.
+                More consistency, without sounding like a prompt.
               </p>
               <div className="landing-chip-row">
-                <span className="landing-chip">Train on real posts</span>
-                <span className="landing-chip">Approve the first batch</span>
-                <span className="landing-chip">Turn on autopilot later</span>
+                <span className="landing-chip">Review-first setup</span>
+                <span className="landing-chip">Learns from manual posts</span>
+                <span className="landing-chip">Autopilot only when ready</span>
               </div>
               <div className="landing-cta-row">
                 <div className="landing-cta-actions">
@@ -76,85 +76,57 @@ export default async function HomePage() {
                       Start free with X
                     </>
                   </LoginButton>
-                  <Link href={CONTROL_ROOM_PATH} className="btn btn-outline landing-cta-secondary">Open app</Link>
-                  <a href="#souls" className="btn btn-outline landing-cta-secondary">Browse voices</a>
-                  <a href="#pricing" className="btn btn-outline landing-cta-secondary">See pricing</a>
+                  <a href="#system" className="btn btn-outline landing-cta-secondary">See how it works</a>
                 </div>
                 <p className="landing-cta-note">
-                  Nothing posts during setup. You connect X, train the voice, and approve the first
-                  batch before the queue or autopilot can run.
+                  Nothing posts during setup. Connect X, train the voice, review the first batch,
+                  then decide whether autopilot is allowed to run.
                 </p>
-                <div className="landing-inline-links">
-                  <a href="#system">How it works</a>
-                  <span>•</span>
-                  <a href="#souls">Public soul library</a>
-                  <span>•</span>
-                  <a href="#pricing">Plans</a>
-                </div>
               </div>
             </div>
 
             <div className="landing-command" id="system">
               <div className="landing-command-head">
-                <span className="landing-panel-label">HOW CLAWFABLE WORKS</span>
-                <h3 className="landing-command-title">A calm workflow for turning one account into a reliable publishing teammate.</h3>
+                <span className="landing-panel-label">HOW IT WORKS</span>
+                <h3 className="landing-command-title">A weekly loop that keeps the account sounding like you.</h3>
                 <p className="landing-panel-caption">
-                  You can inspect the learning loop before you ever hand over posting.
+                  The system only gets more autonomy as it collects proof from your decisions and actual post outcomes.
                 </p>
               </div>
-              <div className="landing-command-grid">
-                <div className="landing-command-section">
-                  <span className="landing-command-label">LEARNS FROM</span>
-                  <div className="landing-command-row">
-                    <span className="landing-command-key">POST HISTORY</span>
-                    <span className="landing-command-value">what already sounds true</span>
-                  </div>
-                  <div className="landing-command-row">
-                    <span className="landing-command-key">OPERATOR ACTIONS</span>
-                    <span className="landing-command-value">approvals, edits, deletes, skips</span>
-                  </div>
-                  <div className="landing-command-row">
-                    <span className="landing-command-key">LIVE PERFORMANCE</span>
-                    <span className="landing-command-value">account-relative engagement, not raw vanity</span>
-                  </div>
-                </div>
-
-                <div className="landing-command-section">
-                  <span className="landing-command-label">REMEMBERS</span>
-                  <div className="landing-feature-list">
-                    {[
-                      ['DO MORE', 'Specific hooks, concrete details, and first lines that sound true.'],
-                      ['AVOID', 'Patterns you reject, weak endings, and generic abstractions.'],
-                      ['UNDER TEST', 'Fresh formats and topics the system is still exploring.'],
-                    ].map(([title, description]) => (
-                      <div key={title} className="landing-feature-row">
-                        <p className="landing-feature-title">{title}</p>
-                        <p className="landing-feature-desc">{description}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="landing-command-section">
-                  <span className="landing-command-label">SHOWS YOU</span>
-                  {[
-                    ['RANKED QUEUE', 'Each draft can explain why it belongs there.'],
-                    ['LEARNING TAB', 'Beliefs, experiments, and weekly changes stay legible.'],
-                    ['AUTOPILOT MODES', 'Safe, balanced, and explore make risk an explicit choice.'],
-                  ].map(([title, value]) => (
-                    <div key={title} className="landing-command-row">
-                      <span className="landing-command-key">{title}</span>
-                      <span className="landing-command-value">{value}</span>
+              <div className="landing-loop-steps">
+                {[
+                  ['01', 'Learn the voice', 'Import posting history and turn manual winners into a voice contract.'],
+                  ['02', 'Rank the queue', 'Generate drafts with reasons, confidence, source lane, and topic fit.'],
+                  ['03', 'Post and adapt', 'Use approvals, edits, deletes, and engagement to tune the next batch.'],
+                ].map(([num, title, text]) => (
+                  <div key={num} className="landing-loop-step">
+                    <span className="landing-loop-num">{num}</span>
+                    <div>
+                      <p className="landing-feature-title">{title}</p>
+                      <p className="landing-feature-desc">{text}</p>
                     </div>
-                  ))}
+                  </div>
+                ))}
+              </div>
+              <div className="landing-voice-card">
+                <div>
+                  <span className="landing-command-label">NEXT BATCH PREVIEW</span>
+                  <p>3 manual-core posts, 2 aligned trends, 1 spicy explore slot.</p>
+                </div>
+                <div className="landing-voice-meter">
+                  <span style={{ width: '86%' }} />
+                </div>
+                <div className="landing-voice-meta">
+                  <span>Voice fit 86%</span>
+                  <span>Autopilot gated</span>
                 </div>
               </div>
               <div className="landing-command-metrics">
                 {[
-                  ['PRESETS', String(presetSouls.length)],
-                  ['LIVE SOULS', String(liveAgents.length)],
-                  ['FIRST SESSION', '5 MIN'],
-                  ['AUTOPILOT', '3 MODES'],
+                  ['Setup', '5 min'],
+                  ['Presets', String(presetSouls.length)],
+                  ['Modes', '3'],
+                  ['Posting', 'gated'],
                 ].map(([label, value]) => (
                   <div key={label} className="landing-metric-cell">
                     <span className="landing-metric-label">{label}</span>
@@ -168,16 +140,16 @@ export default async function HomePage() {
           <section className="landing-proof-grid">
             {[
               [
-                'Train on what is already true',
-                'Clawfable starts from the posts, edits, and patterns that already sound like you, not a blank prompt box.',
+                'Voice before volume',
+                'Start from what already sounds like you, then let the system explore without sanding off the edge.',
               ],
               [
-                'Keep your judgment in the loop',
-                'Queue, compose, and learning surfaces show why a draft was chosen and what the system is still trying to learn.',
+                'Clear reasons for every draft',
+                'See why a post belongs in the queue, which topic it targets, and what the system is testing.',
               ],
               [
-                'Pay for automation, not curiosity',
-                'Free is for proving the voice. Paid plans unlock the repetitive publishing work once the system has earned your trust.',
+                'Autopilot after calibration',
+                'Free proves the voice. Paid plans unlock repetitive publishing once the queue is earning trust.',
               ],
             ].map(([title, text]) => (
               <div key={title} className="landing-proof-card">
@@ -191,14 +163,14 @@ export default async function HomePage() {
             <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
                 <span className="landing-panel-label">FIRST SESSION</span>
-                <p className="landing-panel-caption">The setup should feel guided, fast, and safe to try.</p>
+                <p className="landing-panel-caption">A guided setup that keeps posting disabled until you approve the first batch.</p>
               </div>
               <div className="landing-step-list">
                 {[
                   ['1', 'Connect X and choose the account you want to train.'],
-                  ['2', 'Generate the voice contract from real posts or coach it directly.'],
-                  ['3', 'Review the first ranked batch and keep only the drafts that actually feel true.'],
-                  ['4', 'Choose whether this voice should stay manual, balanced, or exploratory.'],
+                  ['2', 'Build a voice contract from real posts or direct coaching.'],
+                  ['3', 'Review ranked drafts and keep only what feels true.'],
+                  ['4', 'Choose manual mode, balanced autopilot, or explore mode.'],
                 ].map(([num, text]) => (
                   <div key={num} className="landing-step">
                     <div className="landing-step-num">{num}</div>
@@ -210,15 +182,15 @@ export default async function HomePage() {
 
             <div className="landing-panel landing-panel-wide">
               <div className="landing-panel-header">
-                <span className="landing-panel-label">WHAT COMPOUNDS</span>
+                <span className="landing-panel-label">WHAT IMPROVES</span>
                 <p className="landing-panel-caption">The point is not more drafts. It is a sharper voice every week.</p>
               </div>
               <div className="landing-feature-list">
                 {[
-                  ['VOICE RULES HARDEN', 'Coaching turns into reusable rules instead of disappearing into one chat session.'],
-                  ['BAD PATTERNS GET PENALIZED', 'Deletes, skips, and weak performance push similar drafts down in future ranking.'],
-                  ['NEW BETS STAY EXPLICIT', 'The system explores fresh formats and topics without hiding the hypothesis from you.'],
-                  ['AUTONOMY GETS SAFER', 'Confidence thresholds, visible rationale, and mode controls keep automation legible.'],
+                  ['Voice rules get sharper', 'Coaching turns into reusable rules instead of disappearing into one chat session.'],
+                  ['Bad patterns get penalized', 'Deletes, skips, and weak performance push similar drafts down in future ranking.'],
+                  ['Trend bets stay visible', 'The planner shows which trends fit the voice and which ones got rejected.'],
+                  ['Autonomy stays legible', 'Confidence thresholds, rationale, and mode controls keep automation easy to inspect.'],
                 ].map(([title, description]) => (
                   <div key={title} className="landing-feature-row">
                     <p className="landing-feature-title">{title}</p>
@@ -233,11 +205,11 @@ export default async function HomePage() {
             <div className="landing-section-head">
               <div>
                 <p className="landing-panel-label">PUBLIC SOUL LIBRARY</p>
-                <h3 className="landing-section-title">Start from a preset or fork a public voice.</h3>
+                <h3 className="landing-section-title">Start with a preset, then make the voice yours.</h3>
               </div>
               <p className="landing-section-copy">
-                Presets give you a strong creative starting point. Live public agents show what a trained
-                voice looks like when it is already operating in the wild.
+                Presets give you a strong creative starting point. Public agents show what a trained
+                voice looks like once it has real decisions and performance behind it.
               </p>
             </div>
 
@@ -245,9 +217,7 @@ export default async function HomePage() {
               <div className="landing-panel landing-panel-wide">
                 <div className="landing-panel-header">
                   <span className="landing-panel-label">PRESET SOULS</span>
-                  <p className="landing-panel-caption">
-                    Forkable templates with unmistakable character, useful when you want a dramatic starting point before making it your own.
-                  </p>
+                  <p className="landing-panel-caption">Forkable templates with unmistakable style, useful when you want a fast starting point.</p>
                 </div>
                 {presetSouls.length > 0 ? (
                   <div className="landing-soul-grid">
@@ -277,9 +247,7 @@ export default async function HomePage() {
               <div className="landing-panel landing-panel-wide">
                 <div className="landing-panel-header">
                   <span className="landing-panel-label">LIVE PUBLIC AGENTS</span>
-                  <p className="landing-panel-caption">
-                    Real public voices with live SOULs and performance histories, useful when you want to learn from something already proven.
-                  </p>
+                  <p className="landing-panel-caption">Real public voices with SOULs and performance histories when available.</p>
                 </div>
                 {liveAgents.length > 0 ? (
                   <div className="landing-live-grid">
@@ -315,7 +283,7 @@ export default async function HomePage() {
 
             <div className="landing-section-footer">
               <p className="landing-panel-caption">
-                Want the full library view? The dedicated souls index is still there for browsing and detail pages.
+                Want the full library view? Browse presets, public voices, and detail pages.
               </p>
               <Link href="/souls" className="btn btn-outline">Open full soul library</Link>
             </div>
@@ -324,10 +292,10 @@ export default async function HomePage() {
           <section id="pricing" className="landing-section-shell">
             <div className="pricing-hero">
               <p className="pricing-kicker">PRICING</p>
-              <h3 className="pricing-title">Start free. Upgrade when you want Clawfable to do the repetitive work.</h3>
+              <h3 className="pricing-title">Start free. Upgrade when publishing gets repetitive.</h3>
               <p className="pricing-subtitle">
-                Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
-                hands-off posting, auto-replies, proactive engagement, and multi-agent control.
+                Pro unlocks the labor-saving parts: queue execution, auto-replies, supervised engagement,
+                and multi-agent control.
               </p>
               <div className="pricing-hero-actions">
                 <LoginButton className="landing-cta-btn">Start free</LoginButton>
@@ -382,7 +350,7 @@ export default async function HomePage() {
                 <div className="landing-feature-list">
                   {[
                     ['FREE IS FOR CALIBRATION', 'Train one agent, inspect the learning loop, and decide whether the system actually sounds like you.'],
-                    ['PRO UNLOCKS EXECUTION', 'Queue execution, auto-replies, and proactive engagement move from manual control to automation.'],
+                    ['PRO UNLOCKS EXECUTION', 'Queue execution, auto-replies, and supervised engagement workflows move from manual control to guided operation.'],
                     ['SCALE UNLOCKS FLEET MANAGEMENT', 'Run more voices at once without collapsing into generic prompts or fragmented workflows.'],
                   ].map(([title, description]) => (
                     <div key={title} className="landing-feature-row">
@@ -455,7 +423,7 @@ export default async function HomePage() {
               <div className="landing-panel-header">
                 <span className="landing-panel-label">Start here</span>
                 <p className="landing-panel-caption">
-                  You do not need to believe in autopilot on day one. You just need a voice worth training.
+                  You do not need to trust autopilot on day one. Start by training a voice worth protecting.
                 </p>
               </div>
               <div className="landing-final-cta-row">

@@ -235,7 +235,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="#8b5cf6" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="#8b5cf6" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="var(--primary)" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="var(--primary)" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
           <h2>Inbox</h2>
           <span className="section-count">{mentions.length} items</span>
         </div>
@@ -278,7 +278,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
           return (
           <div key={mention.id} className="space-y-2">
             {/* Mention card */}
-            <div className="mention-card" data-testid={`card-mention-${mention.id}`} style={isThread ? { borderLeft: '3px solid #8b5cf6' } : undefined}>
+            <div className="mention-card" data-testid={`card-mention-${mention.id}`} style={isThread ? { borderLeft: '3px solid var(--primary)' } : undefined}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
@@ -286,9 +286,9 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                       <span style={{
                         fontFamily: 'var(--font-mono)',
                         fontSize: '9px',
-                        color: '#8b5cf6',
-                        background: 'rgba(139,92,246,0.1)',
-                        border: '1px solid rgba(139,92,246,0.3)',
+                        color: 'var(--primary)',
+                        background: 'rgba(74,139,103,0.1)',
+                        border: '1px solid rgba(74,139,103,0.3)',
                         borderRadius: '4px',
                         padding: '1px 6px',
                         flexShrink: 0,

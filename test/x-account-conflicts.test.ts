@@ -22,6 +22,9 @@ describe('x account conflict detection', () => {
       setupStep: 'ready',
     } as any);
 
+    const canonicalDefault = await findExistingConnectedAgentByXUserId('x-antifund-1');
+    expect(canonicalDefault?.id).toBe(canonical.id);
+
     const found = await findExistingConnectedAgentByXUserId('x-antifund-1', duplicate.id);
     expect(found?.id).toBe(canonical.id);
 

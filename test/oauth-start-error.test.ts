@@ -14,6 +14,15 @@ describe('formatOAuthStartError', () => {
     ).toContain('Rotate TWITTER_CONSUMER_KEY and TWITTER_CONSUMER_SECRET');
   });
 
+  it('explains localhost callback failures clearly', () => {
+    expect(
+      formatOAuthStartError(
+        new Error('Request failed with code 403'),
+        { callbackUrl: 'http://localhost:3000/api/auth/login/callback' },
+      )
+    ).toContain('rejects localhost callback URLs');
+  });
+
   it('passes through unrelated errors', () => {
     expect(formatOAuthStartError(new Error('Something else failed'))).toBe('Something else failed');
   });

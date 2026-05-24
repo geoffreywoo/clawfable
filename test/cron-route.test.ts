@@ -18,8 +18,6 @@ const mocks = vi.hoisted(() => ({
   getMentionsFromTwitter: vi.fn(),
   decodeKeys: vi.fn(),
   maybeEvolveSoul: vi.fn(),
-  replyToViralTweets: vi.fn(),
-  likeNetworkTweets: vi.fn(),
   discoverAndFollow: vi.fn(),
   checkPerformance: vi.fn(),
   buildLearnings: vi.fn(),
@@ -60,8 +58,6 @@ vi.mock('@/lib/soul-evolution', () => ({
 }));
 
 vi.mock('@/lib/proactive-engagement', () => ({
-  replyToViralTweets: mocks.replyToViralTweets,
-  likeNetworkTweets: mocks.likeNetworkTweets,
   discoverAndFollow: mocks.discoverAndFollow,
 }));
 
@@ -144,6 +140,73 @@ describe('cron autopilot isolation', () => {
       'agent-1',
       expect.objectContaining({
         format: 'cron_autopilot_error',
+        action: 'error',
+        source: 'cron',
+      }),
+    );
+  });
+
+  it('logs performance tracking failures instead of swallowing them', async () => {
+    const connectedAgent = {
+      id: 'agent-1',
+      handle: 'geoffreywoo',
+      name: 'Geoffrey Woo',
+      isConnected: 1,
+      apiKey: Buffer.from('key').toString('base64'),
+      apiSecret: Buffer.from('secret').toString('base64'),
+      accessToken: Buffer.from('token').toString('base64'),
+      accessSecret: Buffer.from('access-secret').toString('base64'),
+      xUserId: 'user-1',
+    };
+    mocks.getAgents.mockResolvedValue([connectedAgent]);
+    mocks.getAgent.mockResolvedValue(connectedAgent);
+    mocks.getProtocolSettings.mockResolvedValue({
+      enabled: false,
+      postsPerDay: 6,
+      activeHoursStart: 0,
+      activeHoursEnd: 24,
+      minQueueSize: 10,
+      autoReply: false,
+      maxRepliesPerRun: 3,
+      replyIntervalMins: 30,
+      lastPostedAt: null,
+      lastRepliedAt: null,
+      totalAutoPosted: 0,
+      totalAutoReplied: 0,
+      lengthMix: { short: 30, medium: 30, long: 40 },
+      autonomyMode: 'balanced',
+      explorationRate: 35,
+      enabledFormats: [],
+      qtRatio: 0,
+      marketingEnabled: false,
+      marketingMix: 0,
+      marketingRole: '',
+      soulEvolutionMode: 'off',
+      lastEvolvedAt: null,
+      proactiveReplies: false,
+      proactiveLikes: false,
+      autoFollow: false,
+      agentShoutouts: false,
+      peakHours: [],
+      contentCalendar: {},
+    });
+    mocks.getMentions.mockResolvedValue([]);
+    mocks.getMentionsFromTwitter.mockResolvedValue([]);
+    mocks.decodeKeys.mockReturnValue({
+      appKey: 'key',
+      appSecret: 'secret',
+      accessToken: 'token',
+      accessSecret: 'access-secret',
+    });
+    mocks.checkPerformance.mockRejectedValue(new Error('timeline lookup blocked'));
+
+    const response = await GET(new Request('http://localhost/api/cron/post') as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({
+        format: 'cron_performance_error',
         action: 'error',
         source: 'cron',
       }),

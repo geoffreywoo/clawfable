@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  AgentHandleConflictError,
   addAgentToUser,
   createAgent,
   getOrCreateUser,
   getAgent,
+  getAgentByHandle,
   getAgents,
   getUserAgentIds,
   updateAgent,
@@ -14,6 +16,8 @@ import {
   getAnalysis,
   saveAnalysis,
   updateTweet,
+  getProtocolSettings,
+  updateProtocolSettings,
 } from '@/lib/kv-storage';
 
 // Tests run against the in-memory fallback (no KV env vars set)
@@ -47,6 +51,41 @@ describe('kv-storage', () => {
       });
       expect(updated.soulMd).toBe('# Updated');
       expect(updated.setupStep).toBe('ready');
+    });
+
+    it('rejects creating a second agent for the same handle regardless of casing', async () => {
+      const agent = await createAgent({
+        handle: 'CanonicalHandle',
+        name: 'Canonical Handle',
+        soulMd: '# Primary',
+      } as any);
+
+      await expect(createAgent({
+        handle: '@canonicalhandle',
+        name: 'Duplicate Handle',
+        soulMd: '# Duplicate',
+      } as any)).rejects.toBeInstanceOf(AgentHandleConflictError);
+
+      const canonical = await getAgentByHandle('canonicalhandle');
+      expect(canonical?.id).toBe(agent.id);
+      expect(canonical?.handle).toBe('canonicalhandle');
+    });
+
+    it('rejects updating an agent to a handle that is already in use', async () => {
+      await createAgent({
+        handle: 'rename-target',
+        name: 'Rename Target',
+        soulMd: '# target',
+      } as any);
+      const agent = await createAgent({
+        handle: 'rename-source',
+        name: 'Rename Source',
+        soulMd: '# source',
+      } as any);
+
+      await expect(updateAgent(agent.id, {
+        handle: 'rename-target',
+      })).rejects.toBeInstanceOf(AgentHandleConflictError);
     });
 
     it('deletes an agent and cascades', async () => {
@@ -124,6 +163,30 @@ describe('kv-storage', () => {
       const retrieved = await getAnalysis('99');
       expect(retrieved).not.toBeNull();
       expect(retrieved!.tweetCount).toBe(100);
+    });
+  });
+
+  describe('Protocol settings', () => {
+    it('forces blocked X API engagement settings off on read and write', async () => {
+      const agent = await createAgent({
+        handle: 'protocol-api-blocks',
+        name: 'Protocol API Blocks',
+        soulMd: '# Protocol API Blocks',
+      } as any);
+
+      const updated = await updateProtocolSettings(agent.id, {
+        proactiveReplies: true,
+        proactiveLikes: true,
+        autoFollow: true,
+      });
+      const read = await getProtocolSettings(agent.id);
+
+      expect(updated.proactiveReplies).toBe(false);
+      expect(updated.proactiveLikes).toBe(false);
+      expect(updated.autoFollow).toBe(true);
+      expect(read.proactiveReplies).toBe(false);
+      expect(read.proactiveLikes).toBe(false);
+      expect(read.autoFollow).toBe(true);
     });
   });
 

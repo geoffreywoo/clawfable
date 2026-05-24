@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addPostLogEntry, getOAuthTemp, deleteOAuthTemp, getAgent, updateAgent } from '@/lib/kv-storage';
+import { addPostLogEntry, getOAuthTemp, deleteOAuthTemp, getAgent, getAgentByHandle, updateAgent } from '@/lib/kv-storage';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { resolveRequestOrigin } from '@/lib/request-origin';
@@ -66,11 +66,31 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const handleAgent = await getAgentByHandle(screenName);
+    if (handleAgent && String(handleAgent.id) !== String(agentId)) {
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_duplicate',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: `This X handle is already mapped to agent ${handleAgent.id} (@${handleAgent.handle}).`,
+      }).catch(() => null);
+      await deleteOAuthTemp(oauthToken);
+      return NextResponse.redirect(
+        new URL(`/agent/${handleAgent.id}?oauth=duplicate&username=${screenName}`, origin)
+      );
+    }
+
     const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
     const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
 
     const agent = await getAgent(agentId);
     const updates: Record<string, unknown> = {
+      handle: screenName,
       apiKey: Buffer.from(consumerKey).toString('base64'),
       apiSecret: Buffer.from(consumerSecret).toString('base64'),
       accessToken: Buffer.from(accessToken.trim()).toString('base64'),

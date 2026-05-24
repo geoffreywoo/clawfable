@@ -25,7 +25,7 @@ export const MARKETING_PLANS = [
     features: [
       'Up to 5 agents',
       'Autopilot queue execution',
-      'Auto-replies and proactive engagement',
+      'Auto-replies and supervised engagement',
       'Full self-learning loop from operator and live signals',
       'Experimentation and confidence controls',
       'Best for a serious creator or small operator fleet',
@@ -55,7 +55,7 @@ export const MARKETING_COMPARE_ROWS = [
   ['Manual compose and queue review', 'Included', 'Included', 'Included'],
   ['Learning control room and decision visibility', 'Included', 'Included', 'Included'],
   ['Autopilot posting and queue execution', 'No', 'Yes', 'Yes'],
-  ['Auto-replies and proactive engagement', 'No', 'Yes', 'Yes'],
+  ['Auto-replies and supervised engagement', 'No', 'Yes', 'Yes'],
   ['Advanced experimentation controls', 'No', 'Yes', 'Yes'],
   ['Priority support', 'No', 'No', 'Yes'],
 ] as const;

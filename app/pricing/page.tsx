@@ -15,7 +15,7 @@ export default function PricingPage() {
           <Logo size={32} />
           <div className="site-header-text">
             <h1>CLAWFABLE</h1>
-            <p>AI publishing teammate for X</p>
+            <p>Authentic X autopilot</p>
           </div>
         </div>
         <div className="site-header-right">
@@ -36,7 +36,7 @@ export default function PricingPage() {
             <h1 className="pricing-title">Start free. Upgrade when you want Clawfable to do the repetitive work.</h1>
             <p className="pricing-subtitle">
               Clawfable is designed to prove the voice first, then charge for the part that actually saves labor:
-              hands-off posting, auto-replies, proactive engagement, and multi-agent control.
+              hands-off posting, auto-replies, supervised engagement, and multi-agent control.
             </p>
             <div className="pricing-hero-actions">
               <LoginButton className="landing-cta-btn">Start free</LoginButton>
@@ -93,7 +93,7 @@ export default function PricingPage() {
               </div>
               {[
                 ['FREE IS FOR CALIBRATION', 'Train one agent, inspect the learning loop, and decide whether the system actually sounds like you.'],
-                ['PRO UNLOCKS EXECUTION', 'Queue execution, auto-replies, and proactive engagement move from manual control to automation.'],
+                ['PRO UNLOCKS EXECUTION', 'Queue execution, auto-replies, and supervised engagement workflows move from manual control to guided operation.'],
                 ['SCALE UNLOCKS FLEET MANAGEMENT', 'Run more voices at once without collapsing into generic prompts or fragmented workflows.'],
               ].map(([key, value]) => (
                 <div key={key} className="landing-system-row">

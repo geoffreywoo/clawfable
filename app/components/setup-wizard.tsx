@@ -208,6 +208,15 @@ export function SetupWizard({
       const createData = await createRes.json();
       if (!createRes.ok) throw new Error(createData.error || 'Failed to create agent');
       const newAgentId = createData.id;
+      const reusedExistingAgent = createData.created === false || createData.reused === true;
+      const needsOAuth = createData.isConnected !== 1 && createData.setupStep === 'oauth';
+
+      if (!needsOAuth) {
+        onCreated?.();
+        onClose();
+        router.push(`/agent/${newAgentId}`);
+        return;
+      }
 
       const authRes = await fetch('/api/auth/twitter', {
         method: 'POST',
@@ -216,7 +225,9 @@ export function SetupWizard({
       });
       const authData = await authRes.json();
       if (!authRes.ok) {
-        await fetch(`/api/agents/${newAgentId}`, { method: 'DELETE' }).catch(() => {});
+        if (!reusedExistingAgent) {
+          await fetch(`/api/agents/${newAgentId}`, { method: 'DELETE' }).catch(() => {});
+        }
         throw new Error(authData.error || 'Failed to start OAuth');
       }
 
@@ -486,7 +497,7 @@ export function SetupWizard({
                   className="btn btn-primary"
                   disabled={!handle.trim() || !name.trim() || loading}
                   onClick={handleCreateAndAuth}
-                  style={{ background: handle.trim() && name.trim() ? '#8b5cf6' : undefined }}
+                  style={{ background: handle.trim() && name.trim() ? 'var(--primary)' : undefined }}
                 >
                   <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
                     <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
@@ -515,7 +526,7 @@ export function SetupWizard({
                     </div>
                     <button
                       className="btn btn-primary btn-sm"
-                      style={{ background: '#8b5cf6', flexShrink: 0 }}
+                      style={{ background: 'var(--primary)', flexShrink: 0 }}
                       disabled={loading}
                       onClick={handleGenerateSoulFromTweets}
                     >
@@ -600,7 +611,7 @@ export function SetupWizard({
                   className="btn btn-primary"
                   disabled={!canGenerateVoice || loading}
                   onClick={handleGenerateVoice}
-                  style={{ background: canGenerateVoice ? '#8b5cf6' : undefined }}
+                  style={{ background: canGenerateVoice ? 'var(--primary)' : undefined }}
                 >
                   {loading ? 'DRAFTING VOICE CONTRACT...' : 'DRAFT VOICE CONTRACT'}
                 </button>
@@ -693,7 +704,7 @@ export function SetupWizard({
                   className="btn btn-primary"
                   disabled={!analysis || loading}
                   onClick={handleGoToPreview}
-                  style={{ background: analysis ? '#8b5cf6' : undefined }}
+                  style={{ background: analysis ? 'var(--primary)' : undefined }}
                 >
                   SHOW FIRST BATCH
                 </button>
@@ -753,7 +764,7 @@ export function SetupWizard({
                       className="btn btn-primary"
                       disabled={!canLaunch}
                       onClick={handleLaunch}
-                      style={{ background: canLaunch ? '#8b5cf6' : undefined }}
+                      style={{ background: canLaunch ? 'var(--primary)' : undefined }}
                     >
                       {launching ? 'GOING LIVE...' : 'APPROVE SELECTED + GO LIVE'}
                     </button>

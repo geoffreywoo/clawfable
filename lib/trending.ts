@@ -61,6 +61,7 @@ export async function fetchTrendingFromFollowing(
   // Fetch recent tweets from each (in parallel, batched to avoid rate limits)
   const allTweets: RawTweet[] = [];
   const batchSize = 5;
+  let failedTimelineFetches = 0;
 
   for (let i = 0; i < topAccounts.length; i += batchSize) {
     const batch = topAccounts.slice(i, i + batchSize);
@@ -81,11 +82,18 @@ export async function fetchTrendingFromFollowing(
     for (const result of results) {
       if (result.status === 'fulfilled') {
         allTweets.push(...result.value);
+      } else {
+        failedTimelineFetches++;
       }
     }
   }
 
-  if (allTweets.length === 0) return [];
+  if (allTweets.length === 0) {
+    if (topAccounts.length > 0 && failedTimelineFetches > 0) {
+      throw new Error(`Unable to fetch followed-account timelines from X (${failedTimelineFetches}/${topAccounts.length} failed).`);
+    }
+    return [];
+  }
 
   // Cluster tweets into topics
   const topicBuckets: Record<string, RawTweet[]> = {};

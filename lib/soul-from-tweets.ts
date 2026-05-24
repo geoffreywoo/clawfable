@@ -7,6 +7,7 @@
 import { generateText } from './ai';
 import type { TwitterKeys } from './twitter-client';
 import { getDeepTimeline, getMe, getFollowing } from './twitter-client';
+import { CLAWFABLE_PLATFORM_GOAL, getPlatformGoalForHandle } from './platform-goal';
 
 export interface SoulFromTweetsResult {
   soulMd: string;
@@ -78,7 +79,9 @@ export async function generateSoulFromTweets(
     maxTokens: 2048,
     system: `You are an expert at analyzing Twitter accounts and reverse-engineering their voice, personality, and posting strategy. You produce SOUL.md files — structured personality profiles that capture exactly how someone tweets.
 
-Be specific and detailed. Don't be generic. The SOUL.md should be so accurate that someone reading it could write tweets indistinguishable from the original account.`,
+Be specific and detailed. Don't be generic. The SOUL.md should be so accurate that someone reading it could write tweets indistinguishable from the original account.
+
+Every SOUL.md must inherit this non-editable Clawfable platform goal: ${CLAWFABLE_PLATFORM_GOAL}`,
     prompt: `Analyze @${me.username} (${me.name}) based on their tweet history and generate a SOUL.md.
 
 ## ACCOUNT STATS
@@ -113,7 +116,8 @@ Who is this person? What's their role/position? How do they see themselves?
 Exactly how they write. Sentence structure, vocabulary level, use of humor/sarcasm/data, signature phrases or patterns. Be VERY specific — quote actual patterns you see.
 
 ## 3) Objective Function
-What they're optimizing for based on their best tweets. What drives their content.
+Primary objective: ${getPlatformGoalForHandle(me.username)}
+Then explain what this account specifically optimizes for based on its best tweets.
 
 ## 4) Topics & Expertise
 What they tweet about, ranked by frequency and performance. Be specific about their angle on each topic.

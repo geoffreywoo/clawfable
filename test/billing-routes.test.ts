@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireAgentAccess: vi.fn(),
   handleAuthError: vi.fn((err: unknown) => { throw err; }),
   getAccessibleAgentCount: vi.fn(),
+  canAccessAgent: vi.fn(),
   getAgentByHandle: vi.fn(),
   createAgent: vi.fn(),
   addAgentToUser: vi.fn(),
@@ -26,6 +27,16 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
+  AgentHandleConflictError: class AgentHandleConflictError extends Error {
+    handle: string;
+    existingAgentId: string | null;
+
+    constructor(handle: string, existingAgentId?: string | null) {
+      super(`An agent for @${handle} already exists.`);
+      this.handle = handle;
+      this.existingAgentId = existingAgentId ?? null;
+    }
+  },
   getAgentByHandle: mocks.getAgentByHandle,
   createAgent: mocks.createAgent,
   addAgentToUser: mocks.addAgentToUser,
@@ -44,6 +55,7 @@ vi.mock('@/lib/kv-storage', () => ({
 
 vi.mock('@/lib/account-access', () => ({
   getAccessibleAgentCount: mocks.getAccessibleAgentCount,
+  canAccessAgent: mocks.canAccessAgent,
 }));
 
 vi.mock('@/lib/soul-parser', () => ({
@@ -94,6 +106,7 @@ describe('billing route guards', () => {
       agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
     });
     mocks.getAccessibleAgentCount.mockResolvedValue(1);
+    mocks.canAccessAgent.mockResolvedValue(false);
     mocks.getAgentByHandle.mockResolvedValue(null);
     mocks.getProtocolSettings.mockResolvedValue({
       enabled: false,

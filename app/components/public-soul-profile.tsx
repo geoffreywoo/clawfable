@@ -40,7 +40,7 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
-              <p>AI publishing teammate for X</p>
+              <p>Authentic X autopilot</p>
             </div>
           </Link>
         </div>

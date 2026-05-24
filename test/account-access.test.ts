@@ -53,21 +53,13 @@ describe('internal shared account access', () => {
     expect(await canAccessAgent(user, agent.id)).toBe(true);
   });
 
-  it('uses only the newest matching internal handle when recovering shared access from stale indices', async () => {
+  it('recovers shared access through the canonical internal handle record', async () => {
     const geoffrey = await getOrCreateUser('fallback-user-2', 'geoffreywoo', 'Geoffrey Woo');
     await getOrCreateUser('fallback-user-3', 'clawfable', 'Clawfable');
 
-    const olderAgent = await createAgent({
+    const canonicalAgent = await createAgent({
       handle: 'clawfable',
-      name: 'Clawfable Old',
-      soulMd: '# soul',
-      isConnected: 0,
-      setupStep: 'soul',
-    } as any);
-
-    const newerAgent = await createAgent({
-      handle: 'clawfable',
-      name: 'Clawfable New',
+      name: 'Clawfable Canonical',
       soulMd: '# soul',
       isConnected: 1,
       setupStep: 'ready',
@@ -75,8 +67,7 @@ describe('internal shared account access', () => {
 
     const accessibleIds = await getAccessibleAgentIds(geoffrey);
 
-    expect(accessibleIds).toContain(newerAgent.id);
-    expect(accessibleIds).not.toContain(olderAgent.id);
-    expect(await canAccessAgent(geoffrey, newerAgent.id)).toBe(true);
+    expect(accessibleIds).toContain(canonicalAgent.id);
+    expect(await canAccessAgent(geoffrey, canonicalAgent.id)).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import { updateTweet, addRemixEntry } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { generateText } from '@/lib/ai';
+import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 
 const REMIX_DIRECTIONS: Record<string, string> = {
   shorter: 'Make it shorter and punchier. Cut the fat. Under 200 chars if possible.',
@@ -44,7 +45,11 @@ export async function POST(
       const response = await generateText({
         tier: 'quality',
         maxTokens: attempt === 0 ? 1024 : 1536,
-        system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction. Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${agent.soulMd ? `\n\nVoice reference:\n${agent.soulMd.slice(0, 1000)}` : ''}`,
+        system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction.
+
+Clawfable platform goal, non-negotiable: ${getPlatformGoalForHandle(agent.handle)}
+
+Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${agent.soulMd ? `\n\nVoice reference:\n${agent.soulMd.slice(0, 1000)}` : ''}`,
         prompt: `Original tweet:\n"${content}"\n\nInstruction: ${instruction}`,
       });
 

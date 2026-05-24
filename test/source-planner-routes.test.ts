@@ -168,6 +168,38 @@ describe('source planner routes', () => {
     expect(mocks.updateProtocolSettings.mock.calls[0]?.[1]).not.toHaveProperty('trendTolerance');
   });
 
+  it('forces legacy proactive likes off even if a client tries to enable them', async () => {
+    const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proactiveLikes: true,
+      }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertCanUseAutopilot).not.toHaveBeenCalled();
+    expect(mocks.updateProtocolSettings).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      proactiveLikes: false,
+    }));
+  });
+
+  it('forces API proactive replies off even if a client tries to enable them', async () => {
+    const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proactiveReplies: true,
+      }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertCanUseAutopilot).not.toHaveBeenCalled();
+    expect(mocks.updateProtocolSettings).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      proactiveReplies: false,
+    }));
+  });
+
   it('returns manual example curation for the authenticated agent', async () => {
     const response = await manualExamplesGET(
       new Request('http://localhost/api/manual-examples') as any,

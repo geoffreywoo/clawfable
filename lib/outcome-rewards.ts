@@ -167,6 +167,10 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
       return { replyOutcome: -0.55 };
     case 'reply_posted':
       return { replyOutcome: 0.34 };
+    case 'tweet_liked':
+      return {};
+    case 'tweet_like_failed':
+      return {};
     case 'x_post_rejected':
       return { postingOutcome: -0.72 };
     case 'x_post_succeeded':

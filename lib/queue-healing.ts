@@ -2,6 +2,7 @@ import { generateText } from './ai';
 import type { Agent, Tweet } from './types';
 import { deleteTweet, updateTweet } from './kv-storage';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
+import { getPlatformGoalForHandle } from './platform-goal';
 
 export type QueueIssueDisposition = 'keep' | 'repair';
 
@@ -93,6 +94,7 @@ async function generateRepairCandidate(agent: Agent, tweet: Tweet, reason: strin
 
 Requirements:
 - Preserve the core thesis and voice.
+- Follow the non-negotiable Clawfable platform goal: ${getPlatformGoalForHandle(agent.handle)}
 - Return one complete, postable draft with no commentary or quotation marks.
 - Never leave a dangling clause, half sentence, or unfinished ending.
 - Keep the repaired draft at or below the original length when possible.

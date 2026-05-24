@@ -15,6 +15,11 @@ function normalizeHost(value: string | null | undefined): string | null {
   }
 }
 
+function isLocalHost(hostOrOrigin: string | null | undefined): boolean {
+  const host = normalizeHost(hostOrOrigin);
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
 export function getSessionCookieDomain(hostOrOrigin: string | null | undefined): string | undefined {
   const host = normalizeHost(hostOrOrigin);
   if (!host) return undefined;
@@ -29,10 +34,11 @@ export function getSessionCookieOptions(
   overrides: SessionCookieOptionsInput = {}
 ) {
   const domain = getSessionCookieDomain(hostOrOrigin);
+  const secure = process.env.NODE_ENV === 'production' && !isLocalHost(hostOrOrigin);
 
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure,
     sameSite: 'lax' as const,
     path: '/',
     ...(domain ? { domain } : {}),

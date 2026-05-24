@@ -17,6 +17,9 @@ const QueueTab = dynamic(() => import('@/app/components/queue-tab').then((mod) =
 const MentionsTab = dynamic(() => import('@/app/components/mentions-tab').then((mod) => mod.MentionsTab), {
   loading: () => <TabSkeleton />,
 });
+const EngageTab = dynamic(() => import('@/app/components/engage-tab').then((mod) => mod.EngageTab), {
+  loading: () => <TabSkeleton />,
+});
 const AutomationTab = dynamic(() => import('@/app/components/autopilot-tab').then((mod) => mod.AutopilotTab), {
   loading: () => <TabSkeleton />,
 });
@@ -54,6 +57,12 @@ const TABS = [
     label: 'Inbox',
     title: 'Handle replies without losing the thread.',
     description: 'Refresh mentions, draft responses, and decide which replies belong in the queue or on X right now.',
+  },
+  {
+    id: 'engage',
+    label: 'Engage',
+    title: 'Run supervised browser sessions for likes and arbitrary-target replies.',
+    description: 'Pair the local companion, rank targets, stage a mixed like/reply queue, approve once, and keep an emergency stop visible.',
   },
   {
     id: 'insights',
@@ -128,6 +137,8 @@ function resolveDashboardLocation(rawTab: string | null, rawView: string | null)
     case 'inbox':
     case 'mentions':
       return { tab: 'mentions', insightsView };
+    case 'engage':
+      return { tab: 'engage', insightsView };
     case 'metrics':
     case 'results':
       return { tab: 'insights', insightsView: 'results' };
@@ -485,6 +496,7 @@ export function AgentDashboardClient({
         {activeTab === 'compose' && <ComposeTab agentId={agentId} />}
         {activeTab === 'queue' && <QueueTab agentId={agentId} />}
         {activeTab === 'mentions' && <MentionsTab agentId={agentId} />}
+        {activeTab === 'engage' && <EngageTab agentId={agentId} />}
         {activeTab === 'insights' && (
           <InsightsTab
             agentId={agentId}

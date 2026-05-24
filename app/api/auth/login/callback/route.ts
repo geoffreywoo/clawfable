@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getMentions, getAgentByHandle } from '@/lib/kv-storage';
-import { getMentionsFromTwitter, getMe } from '@/lib/twitter-client';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getAgentByHandle, getAgent, updateAgent } from '@/lib/kv-storage';
+import { getMentionsFromTwitter } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { COOKIE_NAME } from '@/lib/auth';
@@ -10,6 +10,56 @@ import { resolveRequestOrigin } from '@/lib/request-origin';
 import { getSessionCookieOptions } from '@/lib/session-cookie';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
+
+async function seedMentions(agentId: string, consumerKey: string, consumerSecret: string, accessToken: string, accessSecret: string, userId: string): Promise<void> {
+  try {
+    const agentKeys = {
+      appKey: consumerKey,
+      appSecret: consumerSecret,
+      accessToken,
+      accessSecret,
+    };
+    const rawMentions = await getMentionsFromTwitter(agentKeys, userId);
+    for (const m of rawMentions) {
+      await createMention({
+        agentId,
+        author: String(m.authorName || m.authorId),
+        authorHandle: `@${String(m.authorUsername || m.authorId)}`,
+        content: m.text,
+        tweetId: m.id,
+        conversationId: m.conversationId || null,
+        inReplyToTweetId: m.inReplyToTweetId || null,
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: m.createdAt,
+      });
+    }
+  } catch {
+    // Non-critical — mentions will be fetched by cron later
+  }
+}
+
+async function connectLoginAgent(agentId: string, screenName: string, userId: string, accessToken: string, accessSecret: string): Promise<void> {
+  const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
+  const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
+  const agent = await getAgent(agentId);
+  const updates: Record<string, unknown> = {
+    handle: screenName,
+    apiKey: Buffer.from(consumerKey).toString('base64'),
+    apiSecret: Buffer.from(consumerSecret).toString('base64'),
+    accessToken: Buffer.from(accessToken.trim()).toString('base64'),
+    accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
+    isConnected: 1,
+    xUserId: userId,
+  };
+
+  if (agent && (agent.setupStep === 'oauth' || !agent.setupStep)) {
+    updates.setupStep = 'soul';
+  }
+
+  await updateAgent(agentId, updates as Parameters<typeof updateAgent>[1]);
+  await seedMentions(agentId, consumerKey, consumerSecret, accessToken, accessSecret, userId);
+}
 
 // GET /api/auth/login/callback — Twitter redirects here after user authorizes
 export async function GET(request: NextRequest) {
@@ -46,22 +96,31 @@ export async function GET(request: NextRequest) {
     // Clean up temp
     await deleteOAuthTemp(oauthToken);
 
-    // If first login (no agents), auto-create an agent connected to their X account
     const existingAgents = await getUserAgentIds(userId);
     await Promise.all(existingAgents.map((agentId) => addAgentToUser(userId, agentId)));
     let redirectPath = CONTROL_ROOM_PATH;
 
-    if (existingAgents.length === 0) {
-      // Check if another agent already uses this X account
-      const duplicateAgent = await findExistingConnectedAgentByXUserId(userId);
-      if (duplicateAgent) {
-        // X account already has an active agent — redirect to it instead of creating duplicate
-        redirectPath = `/agent/${duplicateAgent.id}`;
-        const response = NextResponse.redirect(new URL(redirectPath, origin));
-        response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
-        return response;
-      }
+    const duplicateAgent = await findExistingConnectedAgentByXUserId(userId);
+    if (duplicateAgent) {
+      await addAgentToUser(userId, duplicateAgent.id);
+      await connectLoginAgent(duplicateAgent.id, screenName, userId, accessToken, accessSecret);
+      redirectPath = `/agent/${duplicateAgent.id}?oauth=success&username=${screenName}`;
+      const response = NextResponse.redirect(new URL(redirectPath, origin));
+      response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
+      return response;
+    }
 
+    const handleAgent = await getAgentByHandle(screenName);
+    if (handleAgent) {
+      await addAgentToUser(userId, handleAgent.id);
+      await connectLoginAgent(handleAgent.id, screenName, userId, accessToken, accessSecret);
+      redirectPath = `/agent/${handleAgent.id}?oauth=success&username=${screenName}`;
+      const response = NextResponse.redirect(new URL(redirectPath, origin));
+      response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
+      return response;
+    }
+
+    if (existingAgents.length === 0) {
       const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
       const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
 
@@ -101,32 +160,7 @@ export async function GET(request: NextRequest) {
 
       await addAgentToUser(userId, agent.id);
 
-      // Pre-fetch mentions so they're available immediately
-      try {
-        const agentKeys = {
-          appKey: consumerKey,
-          appSecret: consumerSecret,
-          accessToken,
-          accessSecret,
-        };
-        const rawMentions = await getMentionsFromTwitter(agentKeys, userId);
-        for (const m of rawMentions) {
-          await createMention({
-            agentId: agent.id,
-            author: String(m.authorName || m.authorId),
-            authorHandle: `@${String(m.authorUsername || m.authorId)}`,
-            content: m.text,
-            tweetId: m.id,
-            conversationId: m.conversationId || null,
-            inReplyToTweetId: m.inReplyToTweetId || null,
-            engagementLikes: 0,
-            engagementRetweets: 0,
-            createdAt: m.createdAt,
-          });
-        }
-      } catch {
-        // Non-critical — mentions will be fetched by cron later
-      }
+      await seedMentions(agent.id, consumerKey, consumerSecret, accessToken, accessSecret, userId);
 
       // Redirect to agent dashboard with setup continuation
       redirectPath = `/agent/${agent.id}?oauth=success&username=${screenName}`;

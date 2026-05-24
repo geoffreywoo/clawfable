@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  AgentHandleConflictError,
   createAgent,
   addAgentToUser,
   logFunnelEvent,
   getAgentByHandle,
 } from '@/lib/kv-storage';
-import { getAccessibleAgentCount } from '@/lib/account-access';
+import { canAccessAgent, getAccessibleAgentCount } from '@/lib/account-access';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
 import { assertCanCreateAgent, BillingError } from '@/lib/billing';
@@ -24,8 +25,9 @@ export async function GET() {
 
 // POST /api/agents — create a new agent for the current user
 export async function POST(request: NextRequest) {
+  let user: Awaited<ReturnType<typeof requireUser>> | null = null;
   try {
-    const user = await requireUser();
+    user = await requireUser();
     const agentCount = await getAccessibleAgentCount(user);
     assertCanCreateAgent(user, agentCount);
 
@@ -36,10 +38,16 @@ export async function POST(request: NextRequest) {
     }
     const cleanHandle = handle.replace(/^@/, '').trim();
 
-    // Prevent duplicate agents for the same X handle
     const existingAgent = await getAgentByHandle(cleanHandle);
-    if (existingAgent && existingAgent.setupStep === 'ready' && existingAgent.isConnected) {
-      return NextResponse.json({ error: `An agent for @${cleanHandle} already exists and is active.` }, { status: 409 });
+    if (existingAgent) {
+      if (await canAccessAgent(user, existingAgent.id, existingAgent)) {
+        await addAgentToUser(user.id, existingAgent.id);
+        return NextResponse.json({ ...existingAgent, created: false, reused: true });
+      }
+
+      return NextResponse.json({
+        error: `An agent for @${existingAgent.handle} already exists. Log in as the original primary account or choose a different handle.`,
+      }, { status: 409 });
     }
 
     const voiceProfile = parseSoulMd(name, soulMd);
@@ -63,8 +71,19 @@ export async function POST(request: NextRequest) {
     // Funnel: wizard started
     await logFunnelEvent(agent.id, 'wizard_start', { handle: cleanHandle });
 
-    return NextResponse.json(agent);
+    return NextResponse.json({ ...agent, created: true, reused: false });
   } catch (err) {
+    if (err instanceof AgentHandleConflictError) {
+      const existingAgent = await getAgentByHandle(err.handle);
+      if (user && existingAgent && await canAccessAgent(user, existingAgent.id, existingAgent)) {
+        await addAgentToUser(user.id, existingAgent.id);
+        return NextResponse.json({ ...existingAgent, created: false, reused: true });
+      }
+
+      return NextResponse.json({
+        error: err.message || `An agent for @${err.handle} already exists.`,
+      }, { status: 409 });
+    }
     if (err instanceof BillingError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     }

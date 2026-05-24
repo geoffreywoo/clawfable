@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getSessionCookieDomain, getSessionCookieOptions } from '@/lib/session-cookie';
 
 describe('session cookie domain handling', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('shares cookies across clawfable apex and www hosts', () => {
     expect(getSessionCookieDomain('https://www.clawfable.com')).toBe('.clawfable.com');
     expect(getSessionCookieDomain('https://clawfable.com')).toBe('.clawfable.com');
@@ -19,6 +23,13 @@ describe('session cookie domain handling', () => {
       path: '/',
       domain: '.clawfable.com',
       maxAge: 123,
+    });
+  });
+
+  it('keeps localhost cookies non-secure even under a production build', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(getSessionCookieOptions('http://localhost:3002')).toMatchObject({
+      secure: false,
     });
   });
 });

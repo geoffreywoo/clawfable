@@ -1,6 +1,6 @@
 /**
  * Viral content generator powered by the configured AI provider.
- * Optimized for Quote Tweets — piggybacks on viral posts from the agent's network.
+ * Optimized for standalone posts, with supervised Engage handling live-network piggybacking.
  */
 
 import { generateText } from './ai';
@@ -13,6 +13,7 @@ import { judgeCandidates, mutateTopCandidates } from './generation-judging';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
 import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
 import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
+import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -280,6 +281,10 @@ function buildSystemPrompt(
   const parts: string[] = [];
 
   parts.push(`You are a tweet ghostwriter for a Twitter account. Write original tweets that sound exactly like this person and drive maximum engagement (likes, replies, retweets).`);
+  parts.push(`\n## CLAWFABLE PLATFORM GOAL (NON-NEGOTIABLE)
+${CLAWFABLE_PLATFORM_GOAL}
+
+Every draft must preserve the account's authentic voice while increasing its odds of niche attention, conversation, and virality.`);
 
   // Time-of-day awareness: match content tone to audience mood
   const hour = new Date().getUTCHours();
@@ -649,7 +654,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         const parsed = JSON.parse(trimmed);
         if (parsed.content && parsed.content.length > 0) {
           // Strip hallucinated x.com/twitter.com status URLs from content.
-          // QTs are handled via quoteTweetId, not inline URLs.
+          // Standalone posts should not carry status links or quote-tweet URLs.
           const cleanContent = parsed.content
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
@@ -854,7 +859,9 @@ export async function generateSoulMd(
     const response = await generateText({
       tier: 'quality',
       maxTokens: 1024,
-      system: 'You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.',
+      system: `You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.
+
+Every SOUL.md must inherit this non-editable Clawfable platform goal: ${CLAWFABLE_PLATFORM_GOAL}`,
       prompt: `Generate a SOUL.md for a Twitter agent named "${agentName}".
 
 Voice archetype: ${archetype}
@@ -866,7 +873,7 @@ Use this format:
 I am [identity].
 
 ## 1) Objective Function
-Primary objective: [what this agent aims to achieve]
+Primary objective: Pilot this X account as an authentic extension of its owner's voice. Preserve identity, taste, and topic boundaries while continuously tuning hooks, angles, timing, formats, and engagement strategy toward maximum niche attention and virality.
 
 ## 2) Communication Protocol
 Default output: [how this agent communicates]
@@ -890,10 +897,10 @@ Topics: ${topics.join(', ')}`,
 I am ${agentName}, a ${archetype} voice on Twitter.
 
 ## 1) Objective Function
-Primary objective: Share sharp, opinionated takes on ${topics.join(', ')}
+Primary objective: Pilot this X account as an authentic extension of its owner's voice. Preserve identity, taste, and topic boundaries while continuously tuning hooks, angles, timing, formats, and engagement strategy toward maximum niche attention and virality.
 
 ## 2) Communication Protocol
-Default output: Tweets and quote tweets
+Default output: Standalone tweets and live replies
 Tone: ${archetype}
 
 ## 3) Anti-Goals

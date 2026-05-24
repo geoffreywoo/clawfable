@@ -64,12 +64,17 @@ export async function PATCH(
     if (updates.shitpoastEnabled !== undefined && typeof updates.shitpoastEnabled !== 'boolean') {
       delete updates.shitpoastEnabled;
     }
+    if (updates.proactiveLikes !== undefined) {
+      updates.proactiveLikes = false;
+    }
+    if (updates.proactiveReplies !== undefined) {
+      updates.proactiveReplies = false;
+    }
 
     const isTryingToEnableAutomation = (
       updates.enabled === true
       || updates.autoReply === true
       || updates.proactiveReplies === true
-      || updates.proactiveLikes === true
       || updates.autoFollow === true
       || updates.agentShoutouts === true
     );

@@ -359,6 +359,32 @@ function scoreStyleMode(
   return clamp(score);
 }
 
+function scoreViralTakePotential(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  policyRiskScore: number,
+): number {
+  const text = candidate.content;
+  const lower = text.toLowerCase();
+  const normalizedFormat = normalizeFormat(candidate.format);
+  let score = 0.38;
+
+  if (['hot_take', 'short_punch', 'observation'].includes(normalizedFormat)) score += 0.13;
+  if (['contrarian', 'bold_claim', 'callout', 'prediction', 'confession'].includes(featureTags.hook)) score += 0.16;
+  if (['provocative', 'sarcastic', 'playful', 'analytical'].includes(featureTags.tone)) score += 0.08;
+  if (['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)) score += 0.12;
+  if (/\b(most people|everyone|nobody|founders|operators|investors)\b.+\b(wrong|misread|underestimate|overrate|miss)\b/i.test(text)) score += 0.1;
+  if (/\b(not|isn't|aren't)\b.{0,80}\b(but|it's|it is|because)\b/i.test(text) || /\bvs\b| versus | compared to /i.test(text)) score += 0.06;
+  if (/\b\d+[%x]?\b|\$\d/.test(text)) score += 0.05;
+  if (text.length >= 60 && text.length <= 360) score += 0.06;
+  if (text.length > 1200) score -= 0.05;
+  if (featureTags.riskFlags.includes('thin')) score -= 0.08;
+  if (featureTags.riskFlags.includes('salesy')) score -= 0.12;
+  if (policyRiskScore >= 0.35) score -= 0.2;
+
+  return clamp(score);
+}
+
 function scoreJudge(candidate: RankableProtocolTweet): number {
   if (typeof candidate.judgeScore === 'number') return clamp(candidate.judgeScore);
   if (candidate.judgeBreakdown) {
@@ -458,6 +484,7 @@ export function rankGeneratedTweets(
     const styleMode = normalizeContentStyleMode(candidate.styleMode);
     const styleModeScore = scoreStyleMode(candidate, featureTags, policyRiskScore);
     const styleModeAdjustment = getStyleModePerformanceAdjustment(styleMode, context);
+    const viralTakeScore = scoreViralTakePotential(candidate, featureTags, policyRiskScore);
     const riskPenalty = clamp((policyRiskScore * 0.6) + (repetitionRiskScore * 0.4));
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -476,6 +503,7 @@ export function rankGeneratedTweets(
       freshnessScore * 0.08 +
       sourceLaneScore * 0.08 +
       judgeScore * 0.2 +
+      viralTakeScore * 0.1 +
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
@@ -493,6 +521,7 @@ export function rankGeneratedTweets(
       scoreProvenance.globalPrior +
       voiceScore * 0.16 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.08 : 0) +
+      viralTakeScore * 0.06 +
       scoreProvenance.predictedReward +
       scoreProvenance.judge +
       scoreProvenance.noveltyCoverage +
@@ -506,7 +535,7 @@ export function rankGeneratedTweets(
       confidenceScore: Number(confidenceScore.toFixed(3)),
       voiceScore: Number(voiceScore.toFixed(3)),
       noveltyScore: Number(noveltyScore.toFixed(3)),
-      predictedEngagementScore: Number(rewardPrediction.reward.toFixed(3)),
+      predictedEngagementScore: Number(clamp((rewardPrediction.reward * 0.72) + (viralTakeScore * 0.28)).toFixed(3)),
       freshnessScore: Number(freshnessScore.toFixed(3)),
       repetitionRiskScore: Number(repetitionRiskScore.toFixed(3)),
       policyRiskScore: Number(policyRiskScore.toFixed(3)),

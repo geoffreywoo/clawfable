@@ -256,9 +256,9 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
           <div className="section-header mb-6">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" style={{ flexShrink: 0 }}>
-                <rect x="1" y="4" width="14" height="8" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <circle cx="5" cy="8" r="1.5" fill="#8b5cf6" />
-                <line x1="9" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+                <rect x="1" y="4" width="14" height="8" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+                <circle cx="5" cy="8" r="1.5" fill="var(--primary)" />
+                <line x1="9" y1="8" x2="13" y2="8" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <h2>AGENTS</h2>
               {!loading && (
@@ -295,8 +295,8 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
               >
                 <div className="plus-ring">
                   <svg viewBox="0 0 16 16" width="18" height="18" fill="none">
-                    <line x1="8" y1="3" x2="8" y2="13" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
-                    <line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" />
+                    <line x1="8" y1="3" x2="8" y2="13" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" />
+                    <line x1="3" y1="8" x2="13" y2="8" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" />
                   </svg>
                 </div>
                 <div style={{ textAlign: 'center' }}>

@@ -1024,7 +1024,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   trendTolerance: 'moderate',
   shitpoastEnabled: false,
   enabledFormats: [],  // empty = all formats
-  qtRatio: 60,
+  qtRatio: 0,
   marketingEnabled: false,
   marketingMix: 0,
   marketingRole: '',
@@ -1040,12 +1040,17 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
 
 export async function getProtocolSettings(agentId: string): Promise<ProtocolSettings> {
   const stored = await kvGet<ProtocolSettings>(KEYS.agentProtocol(agentId));
-  return stored ? { ...DEFAULT_PROTOCOL, ...stored } : { ...DEFAULT_PROTOCOL };
+  const settings = stored ? { ...DEFAULT_PROTOCOL, ...stored } : { ...DEFAULT_PROTOCOL };
+  return {
+    ...settings,
+    proactiveReplies: false,
+    proactiveLikes: false,
+  };
 }
 
 export async function updateProtocolSettings(agentId: string, updates: Partial<ProtocolSettings>): Promise<ProtocolSettings> {
   const current = await getProtocolSettings(agentId);
-  const merged = { ...current, ...updates };
+  const merged = { ...current, ...updates, proactiveReplies: false, proactiveLikes: false };
   await kvSet(KEYS.agentProtocol(agentId), merged);
   return merged;
 }

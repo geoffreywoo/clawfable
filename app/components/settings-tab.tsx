@@ -149,7 +149,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
       {/* Header */}
       <div className="section-title">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="#8b5cf6" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="var(--primary)" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
         <h2>Agent settings</h2>
       </div>
 
@@ -244,7 +244,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             disabled={!soulChanged || savingSoul}
             onClick={handleSaveSoul}
             data-testid="button-save-soul"
-            style={{ background: soulChanged ? '#8b5cf6' : undefined }}
+            style={{ background: soulChanged ? 'var(--primary)' : undefined }}
           >
             {savingSoul ? 'SAVING...' : 'SAVE CHANGES'}
           </button>
@@ -260,7 +260,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               {isConnected ? (
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#22c55e" strokeWidth="1.5" /><polyline points="4,8 7,11 12,5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               ) : (
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#8b5cf6" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--primary)" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
               )}
               <span
                 style={{
@@ -268,7 +268,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontSize: '11px',
                   fontWeight: 700,
                   letterSpacing: '0.08em',
-                  color: isConnected ? '#22c55e' : '#8b5cf6',
+                  color: isConnected ? '#22c55e' : 'var(--primary)',
                 }}
               >
                 {isConnected ? 'X API CONNECTED' : 'X API DISCONNECTED'}
@@ -280,7 +280,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                 onClick={handleOAuthConnect}
                 disabled={connecting || disconnecting}
                 data-testid={isConnected ? 'button-reauth' : 'button-connect'}
-                style={isConnected ? undefined : { background: '#8b5cf6' }}
+                style={isConnected ? undefined : { background: 'var(--primary)' }}
               >
                 {connectionActionLabel}
               </button>
@@ -313,8 +313,8 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                 marginTop: '12px',
                 padding: '10px 12px',
                 borderRadius: '6px',
-                border: '1px solid rgba(139,92,246,0.18)',
-                background: 'rgba(139,92,246,0.06)',
+                border: '1px solid rgba(74,139,103,0.18)',
+                background: 'rgba(74,139,103,0.06)',
               }}
             >
               <p
@@ -366,7 +366,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       <div style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderLeft: '3px solid #8b5cf6',
+        borderLeft: '3px solid var(--primary)',
         borderRadius: 'var(--radius-lg)',
         padding: '16px 20px',
         marginBottom: '16px',
@@ -424,7 +424,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             </p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
               List this agent&apos;s SOUL.md on{' '}
-              <a href="/souls" target="_blank" style={{ color: '#8b5cf6', textDecoration: 'none' }}>clawfable.com/souls</a>
+              <a href="/souls" target="_blank" style={{ color: 'var(--primary)', textDecoration: 'none' }}>clawfable.com/souls</a>
             </p>
           </div>
           <button
@@ -480,7 +480,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#ef4444' }}>Are you sure?</p>
             <button
               className="btn btn-sm"
-              style={{ background: '#8b5cf6', color: '#fff', border: '1px solid #8b5cf6' }}
+              style={{ background: 'var(--primary)', color: '#fff', border: '1px solid var(--primary)' }}
               disabled={deleting}
               onClick={handleDelete}
               data-testid="button-delete-agent-final"

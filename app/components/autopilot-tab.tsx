@@ -288,7 +288,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         {[
           { label: 'GENERATED', value: getMetricValue('tweets_generated'), color: undefined },
           { label: 'POSTED', value: getMetricValue('tweets_posted'), color: '#22c55e' },
-          { label: 'QUEUED', value: getMetricValue('tweets_queued'), color: '#8b5cf6' },
+          { label: 'QUEUED', value: getMetricValue('tweets_queued'), color: 'var(--primary)' },
           { label: 'AUTO-POSTED', value: getMetricValue('auto_posted'), color: '#22c55e' },
           { label: 'AUTO-REPLIED', value: getMetricValue('auto_replied'), color: '#3b82f6' },
           { label: 'MENTIONS', value: getMetricValue('mentions'), color: '#3b82f6' },
@@ -325,7 +325,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           }}>
             {billing.grandfathered
               ? 'This account has grandfathered full access. Automation stays unlocked without an active paid subscription.'
-              : 'Free keeps manual compose, queue review, and the learning surfaces open. Paid plans unlock auto-posting, auto-replies, proactive engagement, and hands-off queue execution.'}
+              : 'Free keeps manual compose, queue review, and the learning surfaces open. Paid plans unlock auto-posting, auto-replies, supervised engagement workflows, and hands-off queue execution.'}
           </p>
           <p style={{
             fontFamily: 'var(--font-mono)',
@@ -376,6 +376,57 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {settings && (
+        <section className="growth-loop-panel">
+          <div className="growth-loop-head">
+            <div>
+              <p className="growth-loop-kicker">Growth loop</p>
+              <h2>Catch live attention, publish a sharper take, then double down on what moves.</h2>
+            </div>
+            <span className="growth-loop-mode">Engagement manual</span>
+          </div>
+          <div className="growth-loop-grid">
+            {[
+              {
+                step: '1',
+                label: 'Find waves',
+                value: `${settings.trendMixTarget ?? 35}% trend mix`,
+                copy: learningSnapshot?.planner.acceptedTrends.length
+                  ? `${learningSnapshot.planner.acceptedTrends.length} accepted trend candidate${learningSnapshot.planner.acceptedTrends.length === 1 ? '' : 's'} in the next planner pass.`
+                  : 'The follow graph is scanned for fresh, relevant conversations before the next batch.',
+              },
+              {
+                step: '2',
+                label: 'Draft takes',
+                value: settings.shitpoastEnabled ? 'Sharp mode capped' : 'Standard mode',
+                copy: `Hot takes, short punches, and observations compete with ${settings.explorationRate}% exploration reserved for learning.`,
+              },
+              {
+                step: '3',
+                label: 'Engage early',
+                value: 'Browser supervised',
+                copy: 'Use Engage for supervised visibility in live threads. Direct API replies into arbitrary conversations are blocked by X.',
+              },
+              {
+                step: '4',
+                label: 'Learn fast',
+                value: learningSnapshot?.overview.trainingSource === 'autopilot' ? 'Autopilot data' : 'Mixed data',
+                copy: learningSnapshot
+                  ? `${Math.round(learningSnapshot.overview.localEvidenceWeight * 100)}% local evidence weight. Outcomes feed the next ranking pass.`
+                  : 'Approvals, edits, deletes, and performance will update the next ranking pass.',
+              },
+            ].map((item) => (
+              <article key={item.step} className="growth-loop-card">
+                <div className="growth-loop-step">{item.step}</div>
+                <p className="growth-loop-label">{item.label}</p>
+                <strong>{item.value}</strong>
+                <p>{item.copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
       {settings && agentConnected && autopilotHealth && (
@@ -433,7 +484,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <circle cx="8" cy="8" r="6" stroke={settings.enabled || settings.autoReply ? '#22c55e' : '#8b5cf6'} strokeWidth="1.5" />
+                <circle cx="8" cy="8" r="6" stroke={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--primary)'} strokeWidth="1.5" />
                 <circle cx="8" cy="8" r="2" fill={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--text-dim)'} />
               </svg>
               <h2>Publishing automation</h2>
@@ -474,7 +525,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
                       disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
-                      {[1, 2, 3, 4, 6, 8, 12, 24, 48].map((n) => <option key={n} value={n}>{n}{n === 48 ? ' (every 30m)' : ''}</option>)}
+                      {[1, 2, 3, 4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}{n === 12 ? ' (max)' : ''}</option>)}
                     </select>
                   </div>
                   <div className="field"><label>MIN QUEUE</label>
@@ -602,8 +653,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
-                <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
+                <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--primary)" strokeWidth="1.3" />
+                <line x1="6" y1="14" x2="10" y2="14" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round" />
               </svg>
               <h2>Coach the voice</h2>
               <span className="section-count">{voiceDirectives.length} active directive{voiceDirectives.length !== 1 ? 's' : ''}</span>
@@ -618,8 +669,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {voiceDirectives.slice(0, 5).map((d, i) => (
                 <span key={i} style={{
-                  fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#8b5cf6',
-                  background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)',
+                  fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--primary)',
+                  background: 'rgba(74,139,103,0.1)', border: '1px solid rgba(74,139,103,0.3)',
                   borderRadius: '4px', padding: '3px 8px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {d.slice(0, 60)}{d.length > 60 ? '...' : ''}
@@ -660,8 +711,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                       maxWidth: '80%',
                       padding: '8px 12px',
                       borderRadius: '10px',
-                      background: msg.role === 'operator' ? 'rgba(139,92,246,0.15)' : 'var(--surface-2)',
-                      border: `1px solid ${msg.role === 'operator' ? 'rgba(139,92,246,0.3)' : 'var(--border)'}`,
+                      background: msg.role === 'operator' ? 'rgba(74,139,103,0.15)' : 'var(--surface-2)',
+                      border: `1px solid ${msg.role === 'operator' ? 'rgba(74,139,103,0.3)' : 'var(--border)'}`,
                     }}>
                       <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text)', lineHeight: 1.5 }}>
                         {msg.content}
@@ -706,7 +757,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 />
                 <button
                   className="btn btn-primary btn-sm"
-                  style={{ background: '#8b5cf6', flexShrink: 0 }}
+                  style={{ background: 'var(--primary)', flexShrink: 0 }}
                   disabled={!voiceInput.trim() || voiceSending}
                   onClick={handleVoiceSend}
                 >
@@ -716,12 +767,12 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
               {/* Active directives list */}
               {voiceDirectives.length > 0 && (
-                <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'rgba(139,92,246,0.03)' }}>
+                <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'rgba(74,139,103,0.03)' }}>
                   <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em', marginBottom: '6px' }}>
                     Active directives ({voiceDirectives.length})
                   </p>
                   {voiceDirectives.map((d, i) => (
-                    <p key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#8b5cf6', marginBottom: '3px' }}>
+                    <p key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--primary)', marginBottom: '3px' }}>
                       {i + 1}. {d}
                     </p>
                   ))}
@@ -738,8 +789,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <polyline points="5,8 7,10 11,6" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+                <polyline points="5,8 7,10 11,6" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <h2>Current rules</h2>
               <span className="section-count">{voiceDirectives.length + learnedInsights.length + antiPatterns.length} total</span>
@@ -751,15 +802,15 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               <div style={{
                 background: 'var(--surface)',
                 border: '1px solid var(--border)',
-                borderLeft: '3px solid #8b5cf6',
+                borderLeft: '3px solid var(--primary)',
                 borderRadius: 'var(--radius-lg)',
                 padding: '12px 16px',
               }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#8b5cf6', marginBottom: '8px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--primary)', marginBottom: '8px' }}>
                   From voice coaching ({voiceDirectives.length})
                 </p>
                 {voiceDirectives.map((d, i) => (
-                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(139,92,246,0.3)' }}>
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(74,139,103,0.3)' }}>
                     {d}
                   </p>
                 ))}
@@ -815,7 +866,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path d="M8 1l2.5 5H15l-4 3.5L12.5 15 8 11.5 3.5 15 5 9.5 1 6h4.5L8 1z" stroke="#8b5cf6" strokeWidth="1.3" fill="none" />
+                <path d="M8 1l2.5 5H15l-4 3.5L12.5 15 8 11.5 3.5 15 5 9.5 1 6h4.5L8 1z" stroke="var(--primary)" strokeWidth="1.3" fill="none" />
               </svg>
               <h2>Audience growth</h2>
             </div>
@@ -826,20 +877,21 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button className="btn btn-sm" style={{
-                    background: settings.proactiveReplies ? '#22c55e' : 'var(--surface-2)',
-                    color: settings.proactiveReplies ? '#fff' : 'var(--text-muted)',
-                    border: `1px solid ${settings.proactiveReplies ? '#22c55e' : 'var(--border)'}`,
+                    background: 'var(--surface-2)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
                     minWidth: '40px',
-                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ proactiveReplies: !settings.proactiveReplies })}>
-                    {settings.proactiveReplies ? 'ON' : 'OFF'}
+                  }} disabled>
+                    OFF
                   </button>
                   <div>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>REPLY TO VIRAL</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Jump into viral threads in your network for visibility
+                      API replies are disabled because X blocks arbitrary conversation replies. Use Engage for supervised replies.
                     </p>
                   </div>
                 </div>
+                <span className="learning-source-chip">API DISABLED</span>
               </div>
             </div>
 
@@ -848,17 +900,17 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button className="btn btn-sm" style={{
-                    background: settings.proactiveLikes ? '#22c55e' : 'var(--surface-2)',
-                    color: settings.proactiveLikes ? '#fff' : 'var(--text-muted)',
-                    border: `1px solid ${settings.proactiveLikes ? '#22c55e' : 'var(--border)'}`,
+                    background: 'var(--surface-2)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
                     minWidth: '40px',
-                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ proactiveLikes: !settings.proactiveLikes })}>
-                    {settings.proactiveLikes ? 'ON' : 'OFF'}
+                  }} disabled>
+                    OFF
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-LIKE</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-LIKE DISABLED</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Like relevant tweets from your network
+                      X blocks the API like endpoint for this app. Use supervised Engage likes through the browser companion.
                     </p>
                   </div>
                 </div>
@@ -918,9 +970,9 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-                <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+                <line x1="5" y1="6" x2="11" y2="6" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="5" y1="10" x2="9" y2="10" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
               <h2>Generation controls</h2>
               <span className="section-count">controls generation output</span>
@@ -952,9 +1004,9 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                         cursor: 'pointer',
                         fontSize: '10px',
                         padding: '8px 10px',
-                        background: active ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
-                        borderColor: active ? 'rgba(139,92,246,0.4)' : 'var(--border)',
-                        color: active ? '#8b5cf6' : 'var(--text-dim)',
+                        background: active ? 'rgba(74,139,103,0.15)' : 'var(--surface)',
+                        borderColor: active ? 'rgba(74,139,103,0.4)' : 'var(--border)',
+                        color: active ? 'var(--primary)' : 'var(--text-dim)',
                         opacity: active ? 1 : 0.7,
                       }}
                       onClick={() => handleUpdateSettings({ autonomyMode: mode.id as ProtocolSettings['autonomyMode'] })}
@@ -1009,7 +1061,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                         const ratio = current.medium + current.long > 0 ? current.medium / (current.medium + current.long) : 0.5;
                         handleUpdateSettings({ lengthMix: { short, medium: Math.round(remaining * ratio), long: Math.round(remaining * (1 - ratio)) } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.short ?? 30}%
@@ -1029,7 +1081,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                         const ratio = current.short + current.long > 0 ? current.short / (current.short + current.long) : 0.5;
                         handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium, long: Math.round(remaining * (1 - ratio)) } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.medium ?? 30}%
@@ -1049,7 +1101,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                         const ratio = current.short + current.medium > 0 ? current.short / (current.short + current.medium) : 0.5;
                         handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium: Math.round(remaining * (1 - ratio)), long } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.long ?? 40}%
@@ -1091,9 +1143,9 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                       style={{
                         cursor: 'pointer',
                         fontSize: '10px',
-                        background: enabled ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
-                        borderColor: enabled ? 'rgba(139,92,246,0.4)' : 'var(--border)',
-                        color: enabled ? '#8b5cf6' : 'var(--text-dim)',
+                        background: enabled ? 'rgba(74,139,103,0.15)' : 'var(--surface)',
+                        borderColor: enabled ? 'rgba(74,139,103,0.4)' : 'var(--border)',
+                        color: enabled ? 'var(--primary)' : 'var(--text-dim)',
                         opacity: enabled ? 1 : 0.5,
                       }}
                       onClick={() => {
@@ -1241,9 +1293,9 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         <div className="section-header">
           <div className="section-title">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-              <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-              <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+              <line x1="5" y1="6" x2="11" y2="6" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
+              <line x1="5" y1="10" x2="9" y2="10" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
               <h2>Recent activity</h2>
             <span className="section-count">{postLog.length} events</span>

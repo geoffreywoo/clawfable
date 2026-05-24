@@ -104,6 +104,16 @@ describe('countPostsInLast24h', () => {
     delete (entry as unknown as Record<string, unknown>).action;
     expect(countPostsInLast24h([entry])).toBe(1);
   });
+
+  it('does not count proactive engagement actions as original posts', () => {
+    const entries = [
+      makePostLogEntry({ format: 'hot_take', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'proactive_reply', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'proactive_like', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'auto_follow', source: 'autopilot', action: 'posted' }),
+    ];
+    expect(countPostsInLast24h(entries)).toBe(1);
+  });
 });
 
 describe('isDailyCapReached', () => {
@@ -288,7 +298,7 @@ describe('pickDiverseTweet', () => {
 describe('clampPostsPerDay', () => {
   it('clamps to MAX_POSTS_PER_DAY_SETTING', () => {
     expect(clampPostsPerDay(100)).toBe(MAX_POSTS_PER_DAY_SETTING);
-    expect(clampPostsPerDay(48)).toBe(48); // 48 is within range
+    expect(clampPostsPerDay(12)).toBe(12);
   });
 
   it('clamps minimum to 1', () => {

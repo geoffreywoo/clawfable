@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPostLog, getPerformanceHistory, getBaseline, getLearningSignals } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
+import { buildVoiceTuningAnalytics } from '@/lib/voice-tuning-analytics';
 
 function pct(value: number): number {
   return Math.round(value * 100);
@@ -47,6 +48,11 @@ function windowRates(
   };
 }
 
+function parseTs(value: string | null | undefined): number {
+  const ms = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 // GET /api/agents/[id]/metrics/timeseries
 export async function GET(
   _request: NextRequest,
@@ -88,7 +94,8 @@ export async function GET(
     }
 
     // Bucket performance data by day
-    const recentPerf = perfHistory.filter((p) => new Date(p.postedAt) >= cutoff);
+    const sortedPerf = [...perfHistory].sort((a, b) => parseTs(b.postedAt) - parseTs(a.postedAt));
+    const recentPerf = sortedPerf.filter((p) => new Date(p.postedAt) >= cutoff);
     for (const perf of recentPerf) {
       const key = new Date(perf.postedAt).toISOString().slice(0, 10);
       const day = dailyMap.get(key);
@@ -171,6 +178,12 @@ export async function GET(
       weeklyChanges: context?.memory.weeklyChanges || [],
       memory: context?.memory || null,
     };
+    const tuningPerf = recentPerf.length >= 6 ? recentPerf : sortedPerf.slice(0, 80);
+    const voiceTuning = buildVoiceTuningAnalytics({
+      performance: tuningPerf,
+      signals,
+      tweets: context?.allTweets || [],
+    });
 
     return NextResponse.json({
       baseline: baseline ? {
@@ -191,6 +204,7 @@ export async function GET(
       period: '14d',
       dataReady: recentPerf.length >= 5 && baseline !== null,
       compounding,
+      voiceTuning,
     });
   } catch (err) {
     try { return handleAuthError(err); } catch {}

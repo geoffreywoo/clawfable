@@ -30,6 +30,8 @@ import { generateText } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
+import { formatActionError } from './twitter-debug';
+import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -321,14 +323,36 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // Get existing performance entries to avoid re-checking
   const existing = await getPerformanceHistory(agent.id, 500);
   const checkedXIds = new Set(existing.map((e) => String(e.xTweetId)));
-  const signals = await getLearningSignals(agent.id, 500);
+  const [postLog, signals] = await Promise.all([
+    getPostLog(agent.id, 200),
+    getLearningSignals(agent.id, 500),
+  ]);
   const manualSignals = manualPostSuccessSignals(signals);
+
+  if (hasRecentReadEndpointFailure(postLog, 'performance_timeline_error')) {
+    return 0;
+  }
 
   // Fetch full recent timeline (all tweets, not just ours)
   let timeline;
   try {
     timeline = await getUserTimeline(keys, String(agent.xUserId), 100);
-  } catch {
+  } catch (err) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'performance_timeline_error',
+      topic: 'learning',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'error',
+      reason: formatActionError(err, 'fetch_timeline_for_performance', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      }),
+    });
     return 0;
   }
 
@@ -340,7 +364,6 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const ourTweetMap = new Map(allTweets.filter((t) => t.xTweetId).map((t) => [String(t.xTweetId), t]));
 
   // Also include reply xTweetIds from the post log (replies aren't in getTweets)
-  const postLog = await getPostLog(agent.id, 200);
   const replyXIds = new Set(
     postLog
       .filter((e) => (e.format === 'auto_reply' || e.format === 'proactive_reply') && e.xTweetId)

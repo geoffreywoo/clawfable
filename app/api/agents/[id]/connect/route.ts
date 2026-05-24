@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateAgent } from '@/lib/kv-storage';
+import { getAgentByHandle, updateAgent } from '@/lib/kv-storage';
 import { getMe } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
@@ -41,8 +41,17 @@ export async function POST(
       }, { status: 409 });
     }
 
+    const handleAgent = await getAgentByHandle(user.username);
+    if (handleAgent && String(handleAgent.id) !== String(id)) {
+      return NextResponse.json({
+        error: `This X handle is already mapped to agent ${handleAgent.handle || handleAgent.id}.`,
+        duplicateAgentId: handleAgent.id,
+      }, { status: 409 });
+    }
+
     // Store encoded and advance setup step
     const updates: Record<string, unknown> = {
+      handle: user.username,
       apiKey: Buffer.from(normalizedApiKey).toString('base64'),
       apiSecret: Buffer.from(normalizedApiSecret).toString('base64'),
       accessToken: Buffer.from(normalizedAccessToken).toString('base64'),

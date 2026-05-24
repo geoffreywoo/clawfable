@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import {
   buildAgentDetail,
+  getAgentEngageSnapshot,
   getAgentLearningSnapshot,
   getAgentQueueFeed,
   getAgentSummariesForUser,
@@ -19,6 +20,7 @@ const VALID_SECTIONS = new Set([
   'learning',
   'analysis',
   'topics',
+  'engage',
 ] as const);
 
 type DashboardSection =
@@ -29,7 +31,8 @@ type DashboardSection =
   | 'queue'
   | 'learning'
   | 'analysis'
-  | 'topics';
+  | 'topics'
+  | 'engage';
 
 function parseSections(searchParams: URLSearchParams): DashboardSection[] {
   const raw = searchParams.get('sections');
@@ -77,6 +80,9 @@ export async function GET(
           return;
         case 'topics':
           response.topics = await getAgentTopics(agent);
+          return;
+        case 'engage':
+          response.engage = await getAgentEngageSnapshot(user, agent);
           return;
       }
     });

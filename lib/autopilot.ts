@@ -52,6 +52,7 @@ import {
 import { getAutonomyConfidenceThreshold } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { generateText, getPrimaryAiProvider } from './ai';
+import { getPlatformGoalForHandle } from './platform-goal';
 
 export interface AutopilotResult {
   agentId: string;
@@ -863,6 +864,10 @@ async function generateReply(
   const systemParts: string[] = [];
 
   systemParts.push(`You are @${agent.handle} (${agent.name}). You are writing a reply tweet AS THIS ACCOUNT. This is YOUR identity — own it completely.`);
+  systemParts.push(`\n## CLAWFABLE PLATFORM GOAL (NON-NEGOTIABLE)
+${getPlatformGoalForHandle(agent.handle)}
+
+Preserve the account's authentic voice while increasing the odds of niche attention, conversation, and virality.`);
 
   // Include full SOUL.md for maximum voice fidelity
   if (agent.soulMd) {

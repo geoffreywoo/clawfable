@@ -370,7 +370,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
           <h2>Ready to post</h2>
           <span className="section-count">{activeQueuedTweets.length} ready{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
         </div>
@@ -496,7 +496,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>COPY</button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    style={{ color: '#8b5cf6' }}
+                    style={{ color: 'var(--primary)' }}
                     onClick={() => { setEditingId(tweet.id); setEditContent(tweet.content); }}
                   >
                     EDIT TO RESCUE
@@ -563,7 +563,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     <div className="decision-inline-actions">
                       <button
                         className="btn btn-ghost btn-sm"
-                        style={{ paddingInline: 0, color: openDecisionId === tweet.id ? '#8b5cf6' : 'var(--text-muted)' }}
+                        style={{ paddingInline: 0, color: openDecisionId === tweet.id ? 'var(--primary)' : 'var(--text-muted)' }}
                         onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
                       >
                         {openDecisionId === tweet.id ? 'HIDE WHY' : 'WHY THIS TWEET'}
@@ -624,7 +624,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     />
                     <button
                       className="btn btn-primary btn-sm"
-                      style={{ background: '#8b5cf6', fontSize: '10px', height: '28px' }}
+                      style={{ background: 'var(--primary)', fontSize: '10px', height: '28px' }}
                       disabled={!customPrompt.trim() || remixingId === tweet.id}
                       onClick={() => handleRemix(tweet, 'custom', customPrompt.trim())}
                     >
@@ -663,7 +663,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     className="btn btn-ghost btn-sm"
                     onClick={() => { setRemixOpenId(remixOpenId === tweet.id ? null : tweet.id); setCustomPrompt(''); }}
                     title="Remix"
-                    style={{ padding: '4px 8px', color: remixOpenId === tweet.id ? '#8b5cf6' : undefined }}
+                    style={{ padding: '4px 8px', color: remixOpenId === tweet.id ? 'var(--primary)' : undefined }}
                   >
                     <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M2 10l3-3 2 2 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 4h4v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
@@ -747,7 +747,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   className="btn btn-primary"
                   disabled={deleteSubmitting || !deleteReason.trim()}
                   onClick={() => handleDelete(false)}
-                  style={{ background: deleteReason.trim() ? '#8b5cf6' : undefined }}
+                  style={{ background: deleteReason.trim() ? 'var(--primary)' : undefined }}
                 >
                   {deleteSubmitting ? 'REMOVING...' : 'SAVE REASON + REMOVE'}
                 </button>

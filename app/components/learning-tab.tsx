@@ -110,6 +110,32 @@ function formatPlannerLane(lane: string): string {
   return lane.replace(/_/g, ' ');
 }
 
+function formatArmLabel(value: string | null | undefined): string {
+  return value ? value.replace(/_/g, ' ') : 'No signal yet';
+}
+
+function clampPercent(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function ratioToPercent(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return clampPercent(value <= 1 ? value * 100 : value);
+}
+
+function confidenceTone(value: number): LearningTone {
+  if (value >= 70) return 'positive';
+  if (value >= 45) return 'warning';
+  return 'danger';
+}
+
+function compareTone(current: number, previous: number, higherIsBetter = true): LearningTone {
+  if (current === previous) return 'neutral';
+  const improving = higherIsBetter ? current > previous : current < previous;
+  return improving ? 'positive' : 'warning';
+}
+
 function formatShitpoastStatus(status: LearningSnapshot['planner']['shitpoast']['status']): string {
   switch (status) {
     case 'off':
@@ -357,6 +383,229 @@ function ExperimentLaneCard({ lane }: { lane: LearningExperimentLane }) {
   );
 }
 
+function PersonaMetricCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: LearningTone;
+}) {
+  return (
+    <article className={`persona-model-card ${toneClass(tone)}`}>
+      <span className="persona-model-label">{label}</span>
+      <strong className="persona-model-value">{value}</strong>
+      <span className="persona-model-detail">{detail}</span>
+    </article>
+  );
+}
+
+function PersonaModelMap({ snapshot }: { snapshot: LearningSnapshot }) {
+  const currentWeek = snapshot.weeklySeries[snapshot.weeklySeries.length - 1];
+  const previousWeek = snapshot.weeklySeries[snapshot.weeklySeries.length - 2] || currentWeek;
+  const localWeight = ratioToPercent(snapshot.overview.localEvidenceWeight);
+  const globalWeight = ratioToPercent(snapshot.overview.globalPriorWeight);
+  const confidence = snapshot.overview.averageConfidencePercent ?? snapshot.calibration.currentWeek;
+  const doMore = [
+    ...snapshot.memory.alwaysDoMoreOfThis,
+    ...snapshot.memory.operatorHiddenPreferences,
+  ].slice(0, 4);
+  const momentumTopics = snapshot.memory.topicsWithMomentum.length > 0
+    ? snapshot.memory.topicsWithMomentum
+    : snapshot.planner.manualExamples.topicClusters.map((cluster) => `${cluster.topic}: ${cluster.angle}`);
+  const issueNotes = [
+    localWeight < 25 ? 'Local evidence is still thin, so the persona is leaning heavily on shared priors.' : null,
+    snapshot.overview.trainingPulls < 20 ? 'The bandit has not seen enough pulls to trust lane winners aggressively.' : null,
+    confidence < 55 ? 'Draft confidence is low; expect more queue items to sit below the active gate.' : null,
+    currentWeek.deleteRate > previousWeek.deleteRate ? 'Deletes rose this week, so the avoid list deserves attention.' : null,
+  ].filter((item): item is string => Boolean(item));
+  const performanceCells = [
+    {
+      label: 'Approval',
+      value: `${currentWeek.approvalRate}%`,
+      width: clampPercent(currentWeek.approvalRate),
+      tone: compareTone(currentWeek.approvalRate, previousWeek.approvalRate),
+    },
+    {
+      label: 'Engagement lift',
+      value: `${currentWeek.engagementLift >= 0 ? '+' : ''}${currentWeek.engagementLift}%`,
+      width: clampPercent(50 + currentWeek.engagementLift),
+      tone: compareTone(currentWeek.engagementLift, previousWeek.engagementLift),
+    },
+    {
+      label: 'Calibration',
+      value: `${snapshot.calibration.currentWeek}%`,
+      width: clampPercent(snapshot.calibration.currentWeek),
+      tone: confidenceTone(snapshot.calibration.currentWeek),
+    },
+    {
+      label: 'Delete rate',
+      value: `${currentWeek.deleteRate}%`,
+      width: clampPercent(100 - currentWeek.deleteRate),
+      tone: compareTone(currentWeek.deleteRate, previousWeek.deleteRate, false),
+    },
+  ];
+
+  return (
+    <section className="persona-model-map">
+      <div className="persona-model-head">
+        <div>
+          <p className="learning-hero-label">Persona model map</p>
+          <h2 className="persona-model-title">What the underlying voice model trusts right now</h2>
+        </div>
+        <div className="persona-model-head-meta">
+          <span className="learning-source-chip">MODE {snapshot.overview.autonomyMode.toUpperCase()}</span>
+          <span className="learning-source-chip">
+            SOURCE {snapshot.overview.trainingSource ? sourceLabel(snapshot.overview.trainingSource) : 'COLD START'}
+          </span>
+        </div>
+      </div>
+
+      <div className="persona-model-summary-grid">
+        <PersonaMetricCard
+          label="Evidence weight"
+          value={`${localWeight}% local`}
+          detail={`${globalWeight}% shared prior still active`}
+          tone={localWeight >= 50 ? 'positive' : localWeight >= 25 ? 'warning' : 'neutral'}
+        />
+        <PersonaMetricCard
+          label="Training pulls"
+          value={String(snapshot.overview.trainingPulls)}
+          detail={`${snapshot.overview.recentSignals} recent learning signals`}
+          tone={snapshot.overview.trainingPulls >= 50 ? 'positive' : snapshot.overview.trainingPulls >= 20 ? 'warning' : 'neutral'}
+        />
+        <PersonaMetricCard
+          label="Draft confidence"
+          value={confidence > 0 ? `${confidence}%` : 'N/A'}
+          detail={`${snapshot.overview.activeMix.total} active drafts in the current mix`}
+          tone={confidence > 0 ? confidenceTone(confidence) : 'neutral'}
+        />
+        <PersonaMetricCard
+          label="Exploration"
+          value={`${snapshot.overview.explorationRate}%`}
+          detail={`${snapshot.overview.activeMix.explore} explore · ${snapshot.overview.activeMix.balanced} balanced`}
+          tone={snapshot.overview.explorationRate <= 45 ? 'positive' : 'warning'}
+        />
+      </div>
+
+      <div className="persona-evidence-bar" aria-label={`Local evidence ${localWeight} percent, shared prior ${globalWeight} percent`}>
+        <div className="persona-evidence-local" style={{ width: `${localWeight}%` }} />
+        <div className="persona-evidence-global" style={{ width: `${Math.max(0, 100 - localWeight)}%` }} />
+      </div>
+
+      <div className="persona-model-main-grid">
+        <section className="persona-model-panel persona-model-panel-wide">
+          <div className="persona-panel-head">
+            <p className="learning-story-kicker">Voice fingerprint</p>
+            <span className="learning-source-chip">{snapshot.experiments.lanes.length} lanes</span>
+          </div>
+          {snapshot.experiments.lanes.length === 0 ? (
+            <p className="learning-story-empty">No feature lanes have enough evidence yet.</p>
+          ) : (
+            <div className="persona-rail-list">
+              {snapshot.experiments.lanes.map((lane) => {
+                const reward = lane.exploit ? clampPercent(lane.exploit.meanReward * 100) : 0;
+                const laneTone = confidenceTone(lane.confidence);
+                return (
+                  <article key={lane.id} className="persona-rail-row">
+                    <div className="persona-rail-copy">
+                      <span className="persona-rail-label">{lane.title}</span>
+                      <strong>{formatArmLabel(lane.exploit?.arm)}</strong>
+                      <span>
+                        {lane.explore ? `Testing ${formatArmLabel(lane.explore.arm)}` : 'No challenger active'}
+                      </span>
+                    </div>
+                    <div className="persona-rail-metrics">
+                      <span className={`learning-state-chip ${toneClass(laneTone)}`}>{lane.confidence}% confidence</span>
+                      <span className="persona-model-detail">
+                        {lane.exploit ? `${reward}% reward · ${Math.round(lane.exploit.localShare * 100)}% local` : 'waiting'}
+                      </span>
+                      <div className="persona-rail-meter">
+                        <div className={`persona-rail-fill ${toneClass(laneTone)}`} style={{ width: `${Math.max(6, reward)}%` }} />
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="persona-model-panel">
+          <div className="persona-panel-head">
+            <p className="learning-story-kicker">Model boundaries</p>
+            <span className="learning-source-chip">memory</span>
+          </div>
+          <div className="persona-memory-grid">
+            {[
+              { label: 'Lean into', tone: 'positive' as LearningTone, items: doMore },
+              { label: 'Avoid', tone: 'danger' as LearningTone, items: snapshot.memory.neverDoThisAgain.slice(0, 4) },
+              { label: 'Momentum', tone: 'neutral' as LearningTone, items: momentumTopics.slice(0, 4) },
+              { label: 'Identity', tone: 'warning' as LearningTone, items: snapshot.memory.identityConstraints.slice(0, 4) },
+            ].map((group) => (
+              <div key={group.label} className={`persona-memory-card ${toneClass(group.tone)}`}>
+                <span className="persona-model-label">{group.label}</span>
+                {group.items.length === 0 ? (
+                  <p className="persona-memory-empty">No stable signal yet.</p>
+                ) : (
+                  <ul className="persona-memory-list">
+                    {group.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="persona-model-bottom-grid">
+        <section className="persona-model-panel">
+          <div className="persona-panel-head">
+            <p className="learning-story-kicker">Weekly performance wiring</p>
+            <span className="learning-source-chip">{currentWeek.label}</span>
+          </div>
+          <div className="persona-performance-list">
+            {performanceCells.map((cell) => (
+              <div key={cell.label} className="persona-performance-row">
+                <div className="persona-performance-head">
+                  <span>{cell.label}</span>
+                  <strong>{cell.value}</strong>
+                </div>
+                <div className="persona-performance-track">
+                  <div className={`persona-performance-fill ${toneClass(cell.tone)}`} style={{ width: `${Math.max(6, cell.width)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className={`persona-model-panel persona-model-alert ${toneClass(issueNotes.length > 0 ? 'warning' : 'positive')}`}>
+          <div className="persona-panel-head">
+            <p className="learning-story-kicker">Model watchlist</p>
+            <span className={`learning-state-chip ${toneClass(issueNotes.length > 0 ? 'warning' : 'positive')}`}>
+              {issueNotes.length > 0 ? `${issueNotes.length} watch` : 'clear'}
+            </span>
+          </div>
+          {issueNotes.length === 0 ? (
+            <p className="persona-watch-copy">No model-level weakness stands out in the current weekly snapshot.</p>
+          ) : (
+            <ul className="persona-watch-list">
+              {issueNotes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function EventRow({ event }: { event: LearningEventEntry }) {
   return (
     <article className={`learning-event learning-event-compact ${toneClass(event.tone)}`}>
@@ -586,6 +835,8 @@ export function LearningTab({ agentId }: LearningTabProps) {
           </div>
         </div>
       </section>
+
+      <PersonaModelMap snapshot={snapshot} />
 
       <section>
         <div className="section-header">

@@ -166,7 +166,7 @@ export function assertCanUseAutopilot(user: User, agentCount = 0): BillingSummar
   const summary = getBillingSummary(user, agentCount);
   if (!summary.canUseAutopilot) {
     throw new BillingError(
-      'Paid plans unlock the automation layer: auto-posting, auto-replies, proactive engagement, and hands-off queue execution.',
+      'Paid plans unlock the automation layer: auto-posting, auto-replies, supervised engagement workflows, and hands-off queue execution.',
       'autopilot_locked',
       403,
     );

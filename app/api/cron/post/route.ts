@@ -6,7 +6,7 @@ import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
 import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
-import { replyToViralTweets, likeNetworkTweets, discoverAndFollow } from '@/lib/proactive-engagement';
+import { discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
 import { getBillingSummary } from '@/lib/billing';
@@ -141,6 +141,20 @@ export async function GET(request: NextRequest) {
           performanceTracked += tracked;
         } catch (err) {
           console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_performance_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'check_performance', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Rebuild learnings once per day (or on first run when null)
@@ -158,6 +172,20 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] learnings build failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_learning_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'build_learnings', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Auto re-analyze if analysis is older than 7 days
@@ -165,6 +193,20 @@ export async function GET(request: NextRequest) {
           await maybeReanalyze(agent);
         } catch (err) {
           console.error(`[cron] re-analysis failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_reanalysis_error',
+            topic: 'analysis',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'reanalyze_account', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Evolve soul if conditions are met (weekly, 50+ tweets tracked)
@@ -175,11 +217,25 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] soul evolution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_soul_evolution_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'evolve_soul', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
-        // Proactive engagement (reply to viral tweets + like network content)
+        // Follow graph expansion. API replies into arbitrary conversations are disabled by X.
         // Reuse `settings` from the early-exit check above instead of refetching.
-        if (settings.proactiveReplies || settings.proactiveLikes || settings.autoFollow) {
+        if (settings.autoFollow) {
           try {
             const agentKeys = decodeKeys({
               apiKey: agent.apiKey!,
@@ -187,25 +243,23 @@ export async function GET(request: NextRequest) {
               accessToken: agent.accessToken!,
               accessSecret: agent.accessSecret!,
             });
-            const viralReplies = await replyToViralTweets(agent, agentKeys, settings);
-            const likes = await likeNetworkTweets(agent, agentKeys, settings);
             const follows = await discoverAndFollow(agent, agentKeys, settings);
-            if (viralReplies > 0 || likes > 0 || follows > 0) {
-              console.log(`[cron] proactive engagement for agent ${agent.id}: ${viralReplies} viral replies, ${likes} likes, ${follows} follows`);
+            if (follows > 0) {
+              console.log(`[cron] follow discovery for agent ${agent.id}: ${follows} follows`);
             }
           } catch (err) {
-            console.error(`[cron] proactive engagement failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+            console.error(`[cron] follow discovery failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
             await addPostLogEntry(agent.id, {
               agentId: agent.id,
               tweetId: '',
               xTweetId: '',
               content: '',
-              format: 'proactive_engagement_error',
+              format: 'auto_follow_error',
               topic: 'network_growth',
               postedAt: new Date().toISOString(),
               source: 'cron',
               action: 'error',
-              reason: formatActionError(err, 'proactive_engagement', {
+              reason: formatActionError(err, 'auto_follow', {
                 handle: `@${agent.handle}`,
               }),
             });

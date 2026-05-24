@@ -9,6 +9,7 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 // Requires login. Verifies the user owns the agent.
 export async function POST(request: NextRequest) {
   let agentId: string | null = null;
+  let callbackUrl: string | null = null;
   try {
     const body = await request.json();
     agentId = body.agentId ? String(body.agentId) : null;
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
     const { agent } = await requireAgentAccess(agentId);
 
     const origin = resolveRequestOrigin(request);
-    const callbackUrl = `${origin}/api/auth/twitter/callback`;
+    callbackUrl = `${origin}/api/auth/twitter/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
 
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       }).catch(() => null);
     }
     console.error('Agent connect OAuth start error:', err instanceof Error ? err.message : err);
-    const message = formatOAuthStartError(err);
+    const message = formatOAuthStartError(err, { callbackUrl });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

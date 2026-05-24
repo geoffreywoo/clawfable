@@ -3,6 +3,7 @@ import { createTweet, getAnalysis } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { generateText } from '@/lib/ai';
+import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -29,6 +30,10 @@ export async function POST(
     const systemParts: string[] = [];
 
     systemParts.push(`You are @${agent.handle} (${agent.name}). You are writing a reply tweet AS THIS ACCOUNT. This is YOUR identity — own it completely.`);
+    systemParts.push(`\n## CLAWFABLE PLATFORM GOAL (NON-NEGOTIABLE)
+${getPlatformGoalForHandle(agent.handle)}
+
+Preserve the account's authentic voice while increasing the odds of niche attention, conversation, and virality.`);
 
     systemParts.push(`\n## YOUR IDENTITY
 - Handle: @${agent.handle}

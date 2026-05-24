@@ -1,227 +1,78 @@
 /**
- * Proactive engagement engine.
- * Instead of waiting for mentions, the agent actively:
- * 1. Replies to viral tweets in its network (highest growth lever on X)
- * 2. Likes relevant tweets to build relationships
- * 3. Shouts out other Clawfable agents (cross-promotion)
+ * Network engagement support.
+ * API replies and likes are disabled no-ops; the active paths:
+ * 1. Follow relevant accounts to improve the trend graph
+ * 2. Study peer styles from high-performing network posts
+ * 3. Shout out other Clawfable agents for cross-promotion
  */
 
 import type { Agent, ProtocolSettings } from './types';
-import type { TrendingTopic } from './trending';
+import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
-import { replyToTweet, likeTweet, followUser, getFollowing } from './twitter-client';
+import { followUser, getFollowing } from './twitter-client';
 import { formatActionError, isInvalidTwitterCredentialError } from './twitter-debug';
-import { parseSoulMd } from './soul-parser';
-import { getAnalysis, getProtocolSettings, addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
+import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, setTrendingCache, getPerformanceHistory } from './kv-storage';
 import { generateText } from './ai';
+import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
+
+async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promise<TrendingTopic[]> {
+  const cached = await getTrendingCache(agent.id) as TrendingTopic[] | null;
+  if (Array.isArray(cached) && cached.length > 0) return cached;
+
+  if (!agent.xUserId) return [];
+
+  const recentPostLog = await getPostLog(agent.id, 30);
+  if (hasRecentReadEndpointFailure(recentPostLog, ['trend_refresh_error', 'auto_follow_error', 'performance_timeline_error'])) {
+    return [];
+  }
+
+  try {
+    const fresh = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
+    if (fresh.length > 0) {
+      await setTrendingCache(agent.id, fresh);
+    }
+    return fresh;
+  } catch (err) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'trend_refresh_error',
+      topic: 'network_growth',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'error',
+      reason: formatActionError(err, 'refresh_trending_for_engagement', {
+        handle: `@${agent.handle}`,
+      }),
+    });
+    return [];
+  }
+}
 
 /**
- * Reply to viral tweets in the agent's network.
- * This is the #1 growth strategy on X: show up in viral threads
- * where thousands of people are already looking.
+ * Disabled: X blocks API replies into arbitrary conversations unless the account
+ * has already been mentioned or engaged. Use the supervised Engage/browser flow.
  */
 export async function replyToViralTweets(
-  agent: Agent,
-  keys: TwitterKeys,
-  settings: ProtocolSettings,
+  _agent: Agent,
+  _keys: TwitterKeys,
+  _settings: ProtocolSettings,
 ): Promise<number> {
-  if (!settings.proactiveReplies) return 0;
-
-  // Get cached trending data (already fetched by refillQueue, 4h TTL)
-  const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
-  if (!trending || trending.length === 0) return 0;
-
-  // Find RISING tweets — posted recently with high engagement velocity.
-  // A tweet at 100 likes in 2 hours is about to blow up.
-  // A tweet at 500 likes from 3 days ago is a dead thread.
-  const now = Date.now();
-  const viralTweets = trending
-    .filter((t) => {
-      if (!t.topTweet || t.topTweet.likes < 50) return false;
-      const tweetAge = now - new Date(t.timestamp).getTime();
-      const hoursOld = tweetAge / (1000 * 60 * 60);
-      // Rising = posted within last 6 hours with 50+ likes, OR within 12 hours with 200+ likes
-      return (hoursOld < 6 && t.topTweet.likes >= 50) || (hoursOld < 12 && t.topTweet.likes >= 200);
-    })
-    // Sort by engagement velocity (likes per hour)
-    .sort((a, b) => {
-      const ageA = Math.max(1, (now - new Date(a.timestamp).getTime()) / (1000 * 60 * 60));
-      const ageB = Math.max(1, (now - new Date(b.timestamp).getTime()) / (1000 * 60 * 60));
-      return (b.topTweet!.likes / ageB) - (a.topTweet!.likes / ageA);
-    })
-    .slice(0, 5);
-
-  if (viralTweets.length === 0) return 0;
-
-  // Check which tweets we've already replied to
-  const postLog = await getPostLog(agent.id, 100);
-  const repliedToIds = new Set(
-    postLog
-      .filter((e) => e.format === 'proactive_reply')
-      .map((e) => e.tweetId)
-  );
-
-  const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-  const analysis = await getAnalysis(agent.id);
-  let repliesSent = 0;
-
-  for (const topic of viralTweets) {
-    if (repliesSent >= 2) break; // Max 2 proactive replies per run
-    if (!topic.topTweet || repliedToIds.has(topic.topTweet.id)) continue;
-
-    let replyContent = '';
-    try {
-      replyContent = await generateViralReply(
-        agent,
-        voiceProfile,
-        analysis,
-        topic.topTweet.text,
-        topic.topTweet.author,
-        topic.category,
-      );
-
-      if (!replyContent) continue;
-
-      const result = await replyToTweet(keys, replyContent, topic.topTweet.id);
-
-      await addPostLogEntry(agent.id, {
-        agentId: agent.id,
-        tweetId: topic.topTweet.id,
-        xTweetId: result.tweetId,
-        content: replyContent,
-        format: 'proactive_reply',
-        topic: topic.category,
-        postedAt: new Date().toISOString(),
-        source: 'autopilot',
-        action: 'posted',
-        reason: `Proactive reply to @${topic.topTweet.author} (${topic.topTweet.likes} likes)`,
-      });
-
-      repliesSent++;
-    } catch (err) {
-      const formatted = formatActionError(err, 'proactive_reply', {
-        target: `@${topic.topTweet.author}`,
-        targetTweetId: topic.topTweet.id,
-        likes: topic.topTweet.likes,
-      });
-      await addPostLogEntry(agent.id, {
-        agentId: agent.id,
-        tweetId: topic.topTweet.id,
-        xTweetId: '',
-        content: replyContent || topic.topTweet.text,
-        format: 'proactive_reply_error',
-        topic: topic.category,
-        postedAt: new Date().toISOString(),
-        source: 'autopilot',
-        action: 'error',
-        reason: isInvalidTwitterCredentialError(err)
-          ? `X rejected a proactive reply request. Connection preserved so manual posting is not interrupted. ${formatted}`
-          : formatted,
-      });
-    }
-  }
-
-  return repliesSent;
-}
-
-async function generateViralReply(
-  agent: Agent,
-  voiceProfile: ReturnType<typeof parseSoulMd>,
-  analysis: Awaited<ReturnType<typeof getAnalysis>>,
-  tweetText: string,
-  tweetAuthor: string,
-  category: string,
-): Promise<string | null> {
-  try {
-    const systemParts = [
-      `You are @${agent.handle} (${agent.name}). You are writing a reply to a VIRAL tweet to get maximum visibility.`,
-      `\nYour voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle.slice(0, 300)}`,
-    ];
-
-    if (agent.soulMd) {
-      systemParts.push(`\n## YOUR SOUL.md\n${agent.soulMd.slice(0, 1500)}`);
-    }
-
-    if (analysis?.viralTweets?.length) {
-      systemParts.push(`\nYour best tweets for reference:`);
-      for (const vt of analysis.viralTweets.slice(0, 3)) {
-        systemParts.push(`- [${vt.likes} likes] "${vt.text.slice(0, 100)}"`);
-      }
-    }
-
-    systemParts.push(`\n## STRATEGY FOR VIRAL REPLIES
-- This tweet already has high engagement. Your reply will be seen by THOUSANDS.
-- Add genuine value: a unique angle, insider knowledge, a contrarian take, or a sharp observation.
-- Be CONCISE. Under 200 chars hits hardest in reply threads.
-- Don't suck up. Don't say "great point". Add something NEW.
-- Be opinionated. Bland agreement gets scrolled past.
-- If you disagree, disagree smartly with evidence.
-- Match the energy of the original but bring YOUR voice.
-- NEVER include links to clawfable.com or self-promote. Just be good.
-- Output ONLY the reply text. No quotes, no prefix.`);
-
-    const response = await generateText({
-      tier: 'quality',
-      maxTokens: 200,
-      system: systemParts.join('\n'),
-      prompt: `@${tweetAuthor} posted this viral tweet (topic: ${category}):\n\n"${tweetText.slice(0, 500)}"\n\nWrite your reply. Be sharp, be you, add value.`,
-    });
-
-    const text = response.text
-      .trim()
-      .replace(/^["']|["']$/g, '');
-
-    return text.length > 0 ? text : null;
-  } catch {
-    return null;
-  }
+  return 0;
 }
 
 /**
- * Like relevant tweets in the agent's network.
- * Free engagement that builds relationships without posting.
+ * Disabled: X API access for likes is blocked/unreliable on the available app tier.
+ * Keep this export as a no-op for legacy imports and stored settings.
  */
 export async function likeNetworkTweets(
-  agent: Agent,
-  keys: TwitterKeys,
-  settings: ProtocolSettings,
+  _agent: Agent,
+  _keys: TwitterKeys,
+  _settings: ProtocolSettings,
 ): Promise<number> {
-  if (!settings.proactiveLikes || !agent.xUserId) return 0;
-
-  const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
-  if (!trending || trending.length === 0) return 0;
-
-  // Like the top tweet from each trending topic (max 5 likes per run)
-  let liked = 0;
-  for (const topic of trending.slice(0, 5)) {
-    if (!topic.topTweet || liked >= 5) break;
-    try {
-      await likeTweet(keys, String(agent.xUserId), topic.topTweet.id);
-      liked++;
-    } catch (err) {
-      const formatted = formatActionError(err, 'like_network_tweet', {
-        target: `@${topic.topTweet.author}`,
-        targetTweetId: topic.topTweet.id,
-        likes: topic.topTweet.likes,
-      });
-      await addPostLogEntry(agent.id, {
-        agentId: agent.id,
-        tweetId: topic.topTweet.id,
-        xTweetId: '',
-        content: topic.topTweet.text,
-        format: 'proactive_like_error',
-        topic: topic.category,
-        postedAt: new Date().toISOString(),
-        source: 'autopilot',
-        action: 'error',
-        reason: isInvalidTwitterCredentialError(err)
-          ? `X rejected a proactive like request. Connection preserved so manual posting is not interrupted. ${formatted}`
-          : formatted,
-      });
-    }
-  }
-
-  return liked;
+  return 0;
 }
 
 /**
@@ -334,6 +185,11 @@ export async function discoverAndFollow(
 ): Promise<number> {
   if (!settings.autoFollow || !agent.xUserId) return 0;
 
+  const recentPostLog = await getPostLog(agent.id, 30);
+  if (hasRecentReadEndpointFailure(recentPostLog, ['auto_follow_error', 'trend_refresh_error'])) {
+    return 0;
+  }
+
   // Get who we already follow
   let currentFollowing: Set<string>;
   try {
@@ -365,8 +221,8 @@ export async function discoverAndFollow(
   const candidates = new Map<string, { id: string; username: string; reason: string; score: number }>();
 
   // Source 1: Authors of viral tweets in trending data
-  const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
-  if (trending) {
+  const trending = await getTrendingForEngagement(agent, keys);
+  if (trending.length > 0) {
     for (const topic of trending) {
       if (!topic.topTweet || topic.topTweet.likes < 100) continue;
       // We don't have the author's user ID from trending (only username)
