@@ -18,6 +18,14 @@ export interface HighValueReplyScore {
   lowSignal: boolean;
 }
 
+export interface TasteRiskAssessment {
+  score: number;
+  provocationScore: number;
+  action: 'allow' | 'review' | 'block';
+  embarrassing: boolean;
+  reasons: string[];
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -109,10 +117,15 @@ export function scoreHighValueReply(mention: {
 }, context: {
   topics?: string[];
   recentConversationTurns?: number;
+  relationshipHandles?: Array<{ handle: string; interactions?: number; avgEngagement?: number }>;
 } = {}): HighValueReplyScore {
   const text = mention.text.trim();
   const lower = text.toLowerCase();
   const topics = context.topics || [];
+  const normalizedAuthor = (mention.authorUsername || mention.authorName || '').replace(/^@/, '').trim().toLowerCase();
+  const relationship = normalizedAuthor
+    ? context.relationshipHandles?.find((entry) => entry.handle.replace(/^@/, '').toLowerCase() === normalizedAuthor)
+    : null;
   let score = 0.22;
   const reasons: string[] = [];
   let responseStrategy: HighValueReplyScore['responseStrategy'] = 'extend_context';
@@ -158,6 +171,10 @@ export function scoreHighValueReply(mention: {
     score += 0.06;
     reasons.push('continues an existing thread');
   }
+  if (relationship) {
+    score += Math.min(0.18, 0.08 + (relationship.interactions || 0) * 0.015 + (relationship.avgEngagement || 0) / 600);
+    reasons.push('known relationship target');
+  }
   if (/\b(interesting|curious|nuance|tradeoff|edge case|example)\b/i.test(text)) {
     score += 0.08;
     reasons.push('invites nuance');
@@ -187,6 +204,112 @@ export function scoreHighValueReply(mention: {
     reason: reasons.length > 0 ? reasons.join(', ') : 'general mention',
     responseStrategy: lowSignal ? 'ignore_low_signal' : responseStrategy,
     lowSignal,
+  };
+}
+
+export function assessTasteRisk(content: string, options: {
+  surface: 'post' | 'reply';
+  mentionText?: string | null;
+  autonomyMode?: 'safe' | 'balanced' | 'explore' | null;
+  policyRiskScore?: number | null;
+  creativeRiskScore?: number | null;
+  slopScore?: number | null;
+  voiceScore?: number | null;
+  highValueScore?: number | null;
+}): TasteRiskAssessment {
+  const text = content.trim();
+  const lower = text.toLowerCase();
+  const reasons: string[] = [];
+  let risk = 0.08;
+  let provocation = 0.08;
+
+  if (!text) {
+    return { score: 1, provocationScore: 0, action: 'block', embarrassing: true, reasons: ['empty output'] };
+  }
+
+  const genericPhrases = [
+    'game changer',
+    'unlock',
+    'at the end of the day',
+    'the future is',
+    'here\'s the thing',
+    'the real question',
+    'paradigm shift',
+    '10x your',
+  ];
+  const genericHits = genericPhrases.filter((phrase) => lower.includes(phrase)).length;
+  if (genericHits > 0) {
+    risk += Math.min(0.24, genericHits * 0.08);
+    reasons.push('generic phrasing');
+  }
+
+  if (/(idiot|moron|retard|kill yourself|kys|loser|clown|stupid)\b/i.test(text)) {
+    risk += 0.5;
+    provocation += 0.22;
+    reasons.push('needlessly personal or abusive');
+  }
+  if (/\b(guaranteed|always|never|everyone knows|nobody understands)\b/i.test(text)) {
+    risk += 0.12;
+    provocation += 0.1;
+    reasons.push('over-certain claim');
+  }
+  if (/\b(wrong|overrated|underrated|delusional|cope|fraud|scam)\b/i.test(text)) {
+    provocation += 0.18;
+  }
+  if (/\b(most people|everyone|nobody|the market|founders|investors)\b.{0,90}\b(wrong|miss|misread|underestimate|overrate)\b/i.test(text)) {
+    provocation += 0.18;
+  }
+  if (/[A-Z]{8,}/.test(text) || /!!{2,}/.test(text)) {
+    risk += 0.12;
+    provocation += 0.08;
+    reasons.push('shouty formatting');
+  }
+  if (options.surface === 'reply') {
+    if (/^(thanks|agree|true|facts|nice|lol)[.!?\s]*$/i.test(text)) {
+      risk += 0.28;
+      reasons.push('low-value reply');
+    }
+    if ((options.highValueScore ?? 1) < 0.55) {
+      risk += 0.12;
+      reasons.push('weak mention value');
+    }
+    if (text.length > 900) {
+      risk += 0.12;
+      reasons.push('reply too long');
+    }
+  }
+  if (/(send|transfer|buy|sell|mint|deploy|claim|airdrop)\s+(@|\$|0x|\d)/i.test(text)) {
+    risk += 0.45;
+    reasons.push('action-command shaped text');
+  }
+
+  risk += Math.max(0, (options.policyRiskScore ?? 0) - 0.22) * 0.65;
+  risk += Math.max(0, (options.creativeRiskScore ?? 0) - 0.5) * 0.35;
+  risk += Math.max(0, (options.slopScore ?? 0) - 0.42) * 0.45;
+  risk += Math.max(0, 0.48 - (options.voiceScore ?? 0.72)) * 0.4;
+
+  if (/\b(for example|because|data|specific|here is|when you|the tradeoff)\b/i.test(text)) {
+    risk -= 0.08;
+  }
+  if (options.autonomyMode === 'safe') risk += 0.04;
+  if (options.autonomyMode === 'explore' && options.surface === 'post') risk -= 0.03;
+
+  const score = Number(clamp(risk).toFixed(3));
+  const provocationScore = Number(clamp(provocation).toFixed(3));
+  const blockThreshold = options.surface === 'reply' ? 0.58 : 0.68;
+  const reviewThreshold = options.surface === 'reply' ? 0.42 : 0.5;
+  const action = score >= blockThreshold ? 'block' : score >= reviewThreshold ? 'review' : 'allow';
+
+  if (action !== 'allow' && reasons.length === 0) {
+    reasons.push('taste risk exceeded autopilot threshold');
+  }
+
+  return {
+    score,
+    provocationScore,
+    action,
+    embarrassing: action === 'block',
+    reasons,
   };
 }
 
@@ -257,11 +380,54 @@ export function computeActionRewards(
   const engagementRateReward = clamp((entry.engagementRate - 2) / 20, -0.1, 0.25);
   const profileClickReward = 0;
   const followReward = 0;
+  const replyShare = entry.replies / Math.max(1, entry.likes + entry.retweets + entry.replies);
+  const highQualityReplyReward = clamp((entry.replies / Math.max(2, baselineLikes * 0.25)) * 0.16 + replyShare * 0.16, 0, 0.34);
+  const relationshipReward = clamp(
+    (entry.relationshipTargetHandle ? 0.12 : 0)
+    + (entry.portfolioRole === 'relationship' ? 0.08 : 0)
+    + (entry.networkCluster && entry.networkCluster !== 'generalists' ? 0.04 : 0),
+    0,
+    0.26,
+  );
+  const targetAudienceReward = clamp(
+    (entry.targetAudienceSegment && entry.targetAudienceSegment !== 'generalists' ? 0.08 : 0)
+    + Math.min(0.16, (entry.retweets + entry.replies) / Math.max(4, baselineLikes)),
+    0,
+    0.26,
+  );
+  const bookmarkProxyReward = clamp(
+    (entry.impressions > 0 ? Math.log10(entry.impressions + 1) / 18 : 0)
+    + Math.max(0, entry.engagementRate - 2) / 60,
+    0,
+    0.24,
+  );
+  const cringeRiskPenalty = clamp(
+    (entry.slopScore || 0) * 0.14
+    + (entry.creativeRiskScore || 0) * 0.12
+    + (!entry.wasViral && entry.likes <= Math.max(1, baselineLikes * 0.35) ? 0.08 : 0),
+    0,
+    0.32,
+  );
   const negativeFeedbackRisk = entry.wasViral ? 0 : clamp((entry.creativeRiskScore || 0) * 0.12 + (entry.slopScore || 0) * 0.08, 0, 0.18);
-  const total = clamp(
-    likeReward + replyReward + repostReward + impressionReward + engagementRateReward + profileClickReward + followReward - negativeFeedbackRisk,
+  const qualityAdjustedGrowthReward = clamp(
+    (likeReward * 0.62)
+    + (repostReward * 0.9)
+    + highQualityReplyReward
+    + relationshipReward
+    + targetAudienceReward
+    + bookmarkProxyReward
+    + (engagementRateReward * 0.72)
+    - cringeRiskPenalty
+    - (negativeFeedbackRisk * 0.6),
     -0.6,
-    0.8,
+    0.9,
+  );
+  const qualityAdjustedGrowthScore = Math.round(clamp((qualityAdjustedGrowthReward + 0.6) / 1.5) * 100);
+  const total = clamp(
+    (likeReward + replyReward + repostReward + impressionReward + engagementRateReward + profileClickReward + followReward - negativeFeedbackRisk) * 0.45
+    + qualityAdjustedGrowthReward * 0.55,
+    -0.6,
+    0.9,
   );
 
   return {
@@ -272,6 +438,13 @@ export function computeActionRewards(
     engagementRateReward: Number(engagementRateReward.toFixed(3)),
     profileClickReward,
     followReward,
+    highQualityReplyReward: Number(highQualityReplyReward.toFixed(3)),
+    relationshipReward: Number(relationshipReward.toFixed(3)),
+    targetAudienceReward: Number(targetAudienceReward.toFixed(3)),
+    bookmarkProxyReward: Number(bookmarkProxyReward.toFixed(3)),
+    cringeRiskPenalty: Number(cringeRiskPenalty.toFixed(3)),
+    qualityAdjustedGrowthScore,
+    qualityAdjustedGrowthReward: Number(qualityAdjustedGrowthReward.toFixed(3)),
     negativeFeedbackRisk: Number(negativeFeedbackRisk.toFixed(3)),
     total: Number(total.toFixed(3)),
   };

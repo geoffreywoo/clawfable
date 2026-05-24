@@ -15,7 +15,7 @@ import type {
   ViralityPostmortem,
 } from './types';
 import type { EnrichedTrendingTopic } from './source-planner';
-import { inferAudienceSegment } from './virality-signals';
+import { computeActionRewards, inferAudienceSegment } from './virality-signals';
 
 export const PORTFOLIO_SEQUENCE: PostPortfolioRole[] = [
   'proof',
@@ -341,7 +341,9 @@ export function buildViralityPostmortem(
   entry: TweetPerformance,
 ): ViralityPostmortem {
   const engagement = weightedEngagement(entry);
-  const win = entry.wasViral || engagement >= 40;
+  const actionRewards = entry.actionRewards || computeActionRewards(entry);
+  const qualityScore = entry.qualityAdjustedGrowthScore ?? actionRewards.qualityAdjustedGrowthScore ?? null;
+  const win = entry.wasViral || engagement >= 40 || (qualityScore !== null && qualityScore >= 72);
   const replyDense = entry.replies >= Math.max(2, Math.round(entry.likes * 0.15));
   const media = entry.mediaExperimentType || 'text_only';
   const factors = [
@@ -356,6 +358,7 @@ export function buildViralityPostmortem(
     entry.slopScore && entry.slopScore >= 0.45 ? 'Reduce generic phrasing/slop risk.' : '',
     entry.creativeRiskScore && entry.creativeRiskScore >= 0.55 ? 'Keep the creative edge but tighten voice fit.' : '',
     entry.replies === 0 && entry.replyBaitScore && entry.replyBaitScore >= 0.55 ? 'The reply forecast was too optimistic; test a clearer question.' : '',
+    qualityScore !== null && qualityScore <= 34 ? 'Quality-adjusted growth was weak; this likely attracted too little useful attention.' : '',
     !win && engagement < 8 ? 'The angle did not create enough visible action reward.' : '',
   ].filter(Boolean);
 
@@ -367,8 +370,9 @@ export function buildViralityPostmortem(
     content: entry.content,
     postedAt: entry.postedAt,
     analyzedAt: new Date().toISOString(),
-    score: engagement,
-    performanceSummary: `${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies, ${entry.impressions} impressions.`,
+    score: qualityScore ?? engagement,
+    qualityAdjustedGrowthScore: qualityScore,
+    performanceSummary: `${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies, ${entry.impressions} impressions${qualityScore !== null ? `, quality growth ${qualityScore}/100` : ''}.`,
     winningFactors: factors.length > 0 ? factors.slice(0, 5) : ['No dominant winning factor detected yet.'],
     misses: misses.length > 0 ? misses.slice(0, 4) : ['No major miss detected from available metrics.'],
     nextExperiments: [

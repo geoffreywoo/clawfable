@@ -12,6 +12,7 @@ import type {
   TweetPerformance,
 } from './types';
 import { buildOutcomeEpisodes } from './outcome-rewards';
+import { buildTasteCalibrationQueue, type TasteCalibrationSnapshot } from './taste-calibration';
 import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
 import { getShitpoastSlotCount, SHITPOAST_STYLE_MODE } from './style-mode';
 
@@ -20,9 +21,9 @@ type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
 export type LearningStatusState = 'improving' | 'stable' | 'regressing' | 'under_test' | 'low_confidence' | 'waiting';
 export type LearningEventGroup = 'approvals' | 'misses' | 'performance' | 'policy';
 
-const APPROVAL_SIGNAL_TYPES = new Set(['approved_without_edit', 'edited_before_queue', 'edited_before_post', 'reply_posted']);
+const APPROVAL_SIGNAL_TYPES = new Set(['approved_without_edit', 'edited_before_queue', 'edited_before_post', 'reply_posted', 'taste_more_like_this', 'taste_calibration_edit']);
 const EDIT_SIGNAL_TYPES = new Set(['edited_before_queue', 'edited_before_post']);
-const REJECTION_SIGNAL_TYPES = new Set(['deleted_from_queue', 'deleted_from_x', 'reply_rejected', 'x_post_rejected']);
+const REJECTION_SIGNAL_TYPES = new Set(['deleted_from_queue', 'deleted_from_x', 'reply_rejected', 'x_post_rejected', 'taste_less_like_this']);
 const DELETE_SIGNAL_TYPES = new Set(['deleted_from_queue', 'deleted_from_x']);
 const POST_SIGNAL_TYPES = new Set(['reply_posted', 'x_post_succeeded']);
 const LIVE_TWEET_STATUSES = new Set(['preview', 'draft', 'queued']);
@@ -254,6 +255,7 @@ export interface LearningSnapshot {
   policyChanges: LearningNarrativeItem[];
   decisionInsights: Record<string, LearningDecisionInsight>;
   planner: LearningPlannerPreview;
+  tasteCalibration: TasteCalibrationSnapshot;
 }
 
 interface WindowMetrics {
@@ -781,6 +783,42 @@ function summarizeSignalEvent(signal: LearningSignal, tweet: Tweet | undefined):
         rewardDelta: signal.rewardDelta,
         surface: signal.surface,
         group: 'performance',
+        tweetPreview,
+      };
+    case 'taste_more_like_this':
+      return {
+        title: 'Taste approved',
+        summary: preview ? `Owner asked for more like ${preview}.` : 'Owner asked for more drafts like this.',
+        learned: learnedFromReason || 'This draft shape is now a positive taste signal.',
+        source: 'operator',
+        tone: 'positive',
+        rewardDelta: signal.rewardDelta,
+        surface: signal.surface,
+        group: 'approvals',
+        tweetPreview,
+      };
+    case 'taste_less_like_this':
+      return {
+        title: 'Taste rejected',
+        summary: preview ? `Owner asked for less like ${preview}.` : 'Owner asked for fewer drafts like this.',
+        learned: learnedFromReason || 'This draft shape is now a negative taste signal.',
+        source: 'operator',
+        tone: 'danger',
+        rewardDelta: signal.rewardDelta,
+        surface: signal.surface,
+        group: 'misses',
+        tweetPreview,
+      };
+    case 'taste_calibration_edit':
+      return {
+        title: 'Taste edit captured',
+        summary: preview ? `Owner calibrated ${preview}.` : 'Owner calibrated a draft before approval.',
+        learned: learnedFromReason || 'The edit is being mined into hidden-preference memory.',
+        source: 'operator',
+        tone: 'warning',
+        rewardDelta: signal.rewardDelta,
+        surface: signal.surface,
+        group: 'approvals',
         tweetPreview,
       };
     default:
@@ -1824,5 +1862,6 @@ export function buildLearningSnapshot({
     policyChanges: narratives.policyChanges,
     decisionInsights,
     planner,
+    tasteCalibration: buildTasteCalibrationQueue(allTweets),
   };
 }

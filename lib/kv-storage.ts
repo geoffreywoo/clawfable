@@ -1425,9 +1425,10 @@ async function updateDraftExperimentFromSignal(agentId: string, signal: Learning
 
   const status =
     signal.signalType === 'approved_without_edit' ? 'approved' :
-    signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post' ? 'edited' :
+    signal.signalType === 'taste_more_like_this' ? 'approved' :
+    signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post' || signal.signalType === 'taste_calibration_edit' ? 'edited' :
     signal.signalType === 'x_post_succeeded' || signal.signalType === 'reply_posted' ? 'posted' :
-    signal.signalType === 'deleted_from_queue' || signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected' ? 'rejected' :
+    signal.signalType === 'deleted_from_queue' || signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected' || signal.signalType === 'taste_less_like_this' ? 'rejected' :
     signal.signalType === 'deleted_from_x' ? 'deleted' :
     undefined;
 
@@ -1457,24 +1458,24 @@ async function updateDraftExperimentFromPerformance(agentId: string, entry: Twee
   if (!experimentId) return;
   const experiment = await getDraftExperiment(experimentId);
   const engagement = entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
-  const lightweightLift = Math.max(-0.6, Math.min(0.8, ((engagement - 12) / 12) * 0.35));
   const actionRewards = entry.actionRewards || computeActionRewards(entry);
+  const qualityLift = actionRewards.qualityAdjustedGrowthReward ?? actionRewards.total;
   const earlyVelocityScore = entry.earlyVelocityScore ?? computeEarlyVelocityScore(entry);
   const notes = [
     ...(experiment?.outcomeNotes || []),
-    `Live performance: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies. Action reward ${actionRewards.total >= 0 ? '+' : ''}${actionRewards.total}.`,
+    `Live performance: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies. Quality growth ${actionRewards.qualityAdjustedGrowthScore ?? 'n/a'}/100; reward ${qualityLift >= 0 ? '+' : ''}${qualityLift}.`,
   ].slice(-8);
 
   await updateDraftExperiment(experimentId, {
     xTweetId: entry.xTweetId || experiment?.xTweetId || null,
     status: 'measured',
-    finalReward: Number(lightweightLift.toFixed(3)),
+    finalReward: Number(qualityLift.toFixed(3)),
     actionRewards,
     earlyVelocityScore,
     actualEngagement: Number(engagement.toFixed(3)),
     engagementRate: entry.engagementRate,
-    performanceLift: Number(lightweightLift.toFixed(3)),
-    totalReward: Number(((experiment?.immediateReward || 0) + lightweightLift).toFixed(3)),
+    performanceLift: Number(qualityLift.toFixed(3)),
+    totalReward: Number(((experiment?.immediateReward || 0) + qualityLift).toFixed(3)),
     lastSignalType: 'x_post_succeeded',
     outcomeNotes: notes,
     completedAt: new Date().toISOString(),

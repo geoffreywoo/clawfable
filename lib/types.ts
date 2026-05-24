@@ -223,6 +223,13 @@ export interface ActionRewardBreakdown {
   engagementRateReward: number;
   profileClickReward: number;
   followReward: number;
+  highQualityReplyReward?: number;
+  relationshipReward?: number;
+  targetAudienceReward?: number;
+  bookmarkProxyReward?: number;
+  cringeRiskPenalty?: number;
+  qualityAdjustedGrowthScore?: number;
+  qualityAdjustedGrowthReward?: number;
   negativeFeedbackRisk: number;
   total: number;
 }
@@ -612,6 +619,7 @@ export interface TweetPerformance {
   networkCluster?: AudienceSegment;
   performanceCheckpoint?: PerformanceCheckpoint;
   actionRewards?: ActionRewardBreakdown;
+  qualityAdjustedGrowthScore?: number;
   draftExperimentId?: string;
   experimentBatchId?: string;
   experimentHoldout?: boolean;
@@ -833,6 +841,7 @@ export interface ViralityPostmortem {
   postedAt: string;
   analyzedAt: string;
   score: number;
+  qualityAdjustedGrowthScore?: number | null;
   performanceSummary: string;
   winningFactors: string[];
   misses: string[];
@@ -994,7 +1003,7 @@ export interface FeedbackEntry {
   generatedAt: string; // when the feedback signal was recorded
   reason?: string;
   intentSummary?: string;
-  source?: 'preview_feedback' | 'queue_delete';
+  source?: 'preview_feedback' | 'queue_delete' | 'taste_calibration';
   userProvidedReason?: boolean;
 }
 
@@ -1012,7 +1021,10 @@ export type LearningSignalType =
   | 'tweet_liked'
   | 'tweet_like_failed'
   | 'x_post_rejected'
-  | 'x_post_succeeded';
+  | 'x_post_succeeded'
+  | 'taste_more_like_this'
+  | 'taste_less_like_this'
+  | 'taste_calibration_edit';
 
 export interface LearningSignal {
   id: string;

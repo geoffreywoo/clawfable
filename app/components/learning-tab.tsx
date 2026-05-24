@@ -675,10 +675,69 @@ function FunnelStage({
   );
 }
 
+function TasteCalibrationPanel({
+  snapshot,
+  pendingId,
+  onSignal,
+}: {
+  snapshot: LearningSnapshot;
+  pendingId: string | null;
+  onSignal: (tweetId: string, action: 'more_like_this' | 'less_like_this') => void;
+}) {
+  const items = snapshot.tasteCalibration.items;
+  return (
+    <section className="learning-story-panel">
+      <div className="learning-story-head">
+        <div>
+          <p className="learning-story-kicker">Daily taste check</p>
+          <h3 className="learning-story-title">Teach the account what feels right before the market votes.</h3>
+          <p className="learning-story-item-summary">{snapshot.tasteCalibration.summary}</p>
+        </div>
+        <span className="learning-source-chip">OWNER SIGNAL</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="learning-story-empty">Queue a few drafts and the system will select the most useful taste-calibration set.</p>
+      ) : (
+        <div className="learning-story-list">
+          {items.map((item) => (
+            <article key={`${item.role}:${item.tweet.id}`} className="learning-story-item">
+              <div className="learning-story-item-head">
+                <p className="learning-story-item-title">{item.label}</p>
+                <span className="learning-source-chip">SCORE {item.score}</span>
+              </div>
+              <p className="learning-story-item-summary">{item.tweet.content}</p>
+              <p className="learning-story-item-summary">{item.reason}</p>
+              <div className="learning-story-item-meta learning-calibration-actions">
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  disabled={pendingId === item.tweet.id}
+                  onClick={() => onSignal(item.tweet.id, 'more_like_this')}
+                >
+                  More like this
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  disabled={pendingId === item.tweet.id}
+                  onClick={() => onSignal(item.tweet.id, 'less_like_this')}
+                >
+                  Less like this
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function LearningTab({ agentId }: LearningTabProps) {
   const [snapshot, setSnapshot] = useState<LearningSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingExampleId, setPendingExampleId] = useState<string | null>(null);
+  const [pendingTasteId, setPendingTasteId] = useState<string | null>(null);
 
   const loadSnapshot = useCallback(async () => {
     const res = await fetch(`/api/agents/${agentId}/dashboard?sections=learning`, { cache: 'no-store' });
@@ -741,6 +800,26 @@ export function LearningTab({ agentId }: LearningTabProps) {
       // Keep the existing snapshot if the update fails.
     } finally {
       setPendingExampleId(null);
+    }
+  }, [agentId, loadSnapshot]);
+
+  const submitTasteSignal = useCallback(async (
+    tweetId: string,
+    action: 'more_like_this' | 'less_like_this',
+  ) => {
+    setPendingTasteId(tweetId);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/calibration`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tweetId, action }),
+      });
+      if (!res.ok) throw new Error('Failed to save taste signal');
+      await loadSnapshot();
+    } catch {
+      // Keep the existing snapshot if the update fails.
+    } finally {
+      setPendingTasteId(null);
     }
   }, [agentId, loadSnapshot]);
 
@@ -837,6 +916,12 @@ export function LearningTab({ agentId }: LearningTabProps) {
       </section>
 
       <PersonaModelMap snapshot={snapshot} />
+
+      <TasteCalibrationPanel
+        snapshot={snapshot}
+        pendingId={pendingTasteId}
+        onSignal={submitTasteSignal}
+      />
 
       <section>
         <div className="section-header">
