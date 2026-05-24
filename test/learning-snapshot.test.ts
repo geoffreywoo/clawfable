@@ -72,6 +72,7 @@ const memory: PersonalizationMemory = {
   topicsWithMomentum: ['AI'],
   formatsUnderTested: ['question needs more data'],
   operatorHiddenPreferences: ['Specificity and numbers are often added before approval.'],
+  editTransformations: [],
   identityConstraints: ['Never be cringe'],
   weeklyChanges: ['Approval rate improved this week.'],
   updatedAt: new Date().toISOString(),

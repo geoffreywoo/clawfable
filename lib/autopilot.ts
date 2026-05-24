@@ -53,6 +53,7 @@ import { getAutonomyConfidenceThreshold } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
+import { scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 
 export interface AutopilotResult {
   agentId: string;
@@ -111,6 +112,10 @@ function effectiveConfidence(tweet: { confidenceScore?: number | string | null; 
 function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
   if (mode === 'explore') return true;
   return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= threshold;
+}
+
+function isAutopostableQueuedTweet(tweet: Tweet): boolean {
+  return !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId;
 }
 
 async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[]): Promise<Tweet[]> {
@@ -187,7 +192,7 @@ export async function inspectAutopilotQueue(
   const settings = settingsArg || await getProtocolSettings(agentId);
   const threshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
   const queue = await getQueuedTweets(agentId);
-  const activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+  const activeQueue = queue.filter(isAutopostableQueuedTweet);
   const completeQueue = activeQueue.filter((tweet) => !getTweetCompletenessIssue(tweet.content));
   const confidenceValues = completeQueue.map(effectiveConfidence);
   const staleCutoff = Date.now() - STALE_LOW_CONFIDENCE_QUEUE_MS;
@@ -231,7 +236,7 @@ export async function selfHealAutopilotQueue(
 
   const queuedTweets = await getQueuedTweets(agent.id);
   const completeActiveQueue = queuedTweets
-    .filter((tweet) => !tweet.quarantinedAt && !getTweetCompletenessIssue(tweet.content));
+    .filter((tweet) => isAutopostableQueuedTweet(tweet) && !getTweetCompletenessIssue(tweet.content));
   const archived = await archiveStaleLowConfidenceQueue(
     agent.id,
     completeActiveQueue,
@@ -378,7 +383,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     });
   }
   queue = healedQueue;
-  let activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+  let activeQueue = queue.filter(isAutopostableQueuedTweet);
 
   const primaryProvider = getPrimaryAiProvider();
   const templateFallbackQueue = activeQueue.filter(isTemplateFallbackTweet);
@@ -397,7 +402,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       reason: `Discarded ${templateFallbackQueue.length} template fallback draft${templateFallbackQueue.length === 1 ? '' : 's'} so the queue can refill with richer ${primaryProvider} generations.`,
     });
     queue = await getQueuedTweets(agentId);
-    activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+    activeQueue = queue.filter(isAutopostableQueuedTweet);
   }
 
   // Ensure queue has content
@@ -408,7 +413,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     });
     if (generated > 0) {
       queue = await getQueuedTweets(agentId);
-      activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+      activeQueue = queue.filter(isAutopostableQueuedTweet);
     }
   }
 
@@ -495,7 +500,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
       if (generated > 0) {
         queue = await getQueuedTweets(agentId);
-        activeQueue = queue.filter((tweet) => !tweet.quarantinedAt);
+        activeQueue = queue.filter(isAutopostableQueuedTweet);
         validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue);
         confidenceFiltered = validationPassedQueue.filter((tweet) =>
           clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
@@ -543,6 +548,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
           candidateScore: tweet.candidateScore ?? null,
           generationMode: tweet.generationMode ?? null,
           styleMode: tweet.styleMode ?? 'standard',
+          draftExperimentId: tweet.draftExperimentId ?? null,
+          creativeLane: tweet.creativeLane ?? null,
+          experimentHoldout: tweet.experimentHoldout === true,
         },
       });
 
@@ -628,6 +636,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
         candidateScore: tweet.candidateScore ?? null,
         generationMode: tweet.generationMode ?? null,
         styleMode: tweet.styleMode ?? 'standard',
+        draftExperimentId: tweet.draftExperimentId ?? null,
+        creativeLane: tweet.creativeLane ?? null,
+        experimentHoldout: tweet.experimentHoldout === true,
       },
     });
 
@@ -686,7 +697,7 @@ async function runAutoReply(
   const postLog = await getPostLog(agent.id, 200);
   const repliedToTweetIds = new Set(
     postLog
-      .filter((e) => e.format === 'auto_reply' && e.tweetId)
+      .filter((e) => (e.format === 'auto_reply' || e.format === 'auto_reply_high_value') && e.tweetId)
       .map((e) => String(e.tweetId))
   );
 
@@ -702,27 +713,51 @@ async function runAutoReply(
     directiveLimit: 10,
   });
   const analysis = await getAnalysis(agent.id);
-  const maxReplies = Math.min(unrepliedMentions.length, settings.maxRepliesPerRun || 3);
+  const minReplyValueScore = Math.max(0, Math.min(1, settings.minReplyValueScore ?? 0.58));
+  const scoredMentions = unrepliedMentions
+    .map((mention) => ({
+      mention,
+      value: scoreHighValueReply(mention, { topics: voiceProfile.topics }),
+    }))
+    .filter((item) => !settings.highValueReplyMode || item.value.score >= minReplyValueScore)
+    .sort((a, b) => b.value.score - a.value.score || Date.parse(b.mention.createdAt) - Date.parse(a.mention.createdAt));
+  if (settings.highValueReplyMode && scoredMentions.length === 0) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'auto_reply_high_value',
+      topic: 'mentions',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: `High-value reply mode skipped ${unrepliedMentions.length} mention${unrepliedMentions.length === 1 ? '' : 's'} below ${minReplyValueScore}.`,
+    });
+    return 0;
+  }
+  const maxReplies = Math.min(scoredMentions.length, settings.maxRepliesPerRun || 3);
 
   let repliesSent = 0;
 
-  for (const mention of unrepliedMentions.slice(0, maxReplies)) {
+  for (const scored of scoredMentions.slice(0, maxReplies)) {
+    const { mention } = scored;
     let replyContent = '';
     try {
       // Store the mention if not already stored
       if (!storedTweetIds.has(String(mention.id))) {
         await createMention({
-        agentId: agent.id,
-        author: String(mention.authorName || mention.authorId),
-        authorHandle: `@${String(mention.authorUsername || mention.authorId)}`,
-        content: mention.text,
-        tweetId: mention.id,
-        conversationId: mention.conversationId || null,
-        inReplyToTweetId: mention.inReplyToTweetId || null,
-        engagementLikes: 0,
-        engagementRetweets: 0,
-        createdAt: mention.createdAt,
-      });
+          agentId: agent.id,
+          author: String(mention.authorName || mention.authorId),
+          authorHandle: `@${String(mention.authorUsername || mention.authorId)}`,
+          content: mention.text,
+          tweetId: mention.id,
+          conversationId: mention.conversationId || null,
+          inReplyToTweetId: mention.inReplyToTweetId || null,
+          engagementLikes: 0,
+          engagementRetweets: 0,
+          createdAt: mention.createdAt,
+        });
       }
 
       // Check thread depth — skip if we've already gone N rounds
@@ -783,6 +818,11 @@ async function runAutoReply(
         `@${mention.authorUsername || mention.authorId}`,
         conversationHistory,
         parentContext,
+        {
+          highValueMode: settings.highValueReplyMode === true,
+          value: scored.value,
+          minValueScore: minReplyValueScore,
+        },
       );
 
       if (!replyContent) continue;
@@ -814,10 +854,29 @@ async function runAutoReply(
         tweetId: mention.id,
         xTweetId: result.tweetId,
         content: replyContent,
-        format: 'auto_reply',
+        format: settings.highValueReplyMode ? 'auto_reply_high_value' : 'auto_reply',
         topic: `Reply to @${mention.authorUsername || mention.authorId}`,
         postedAt: new Date().toISOString(),
         source: 'autopilot',
+        reason: settings.highValueReplyMode
+          ? `Value ${scored.value.score}: ${scored.value.reason}`
+          : undefined,
+      });
+      await addLearningSignal(agent.id, {
+        xTweetId: result.tweetId,
+        signalType: 'reply_posted',
+        surface: 'autopilot',
+        rewardDelta: settings.highValueReplyMode ? 0.42 : 0.34,
+        reason: settings.highValueReplyMode
+          ? `High-value auto-reply posted: ${scored.value.reason}`
+          : 'Auto-reply posted.',
+        metadata: {
+          highValueReplyMode: settings.highValueReplyMode === true,
+          replyValueScore: scored.value.score,
+          replyValueReason: scored.value.reason,
+          responseStrategy: scored.value.responseStrategy,
+          targetMentionId: mention.id,
+        },
       });
 
       repliesSent++;
@@ -860,6 +919,11 @@ async function generateReply(
   authorHandle: string,
   conversationHistory: ConversationTurn[] = [],
   parentContext: string | null = null,
+  valueContext: {
+    highValueMode: boolean;
+    value: HighValueReplyScore;
+    minValueScore: number;
+  } | null = null,
 ): Promise<string | null> {
   const systemParts: string[] = [];
 
@@ -892,6 +956,16 @@ ${agent.soulMd}`);
     for (const vt of analysis.viralTweets.slice(0, 5)) {
       systemParts.push(`- [${vt.likes} likes] "${vt.text}"`);
     }
+  }
+
+  if (valueContext?.highValueMode) {
+    systemParts.push(`\n## HIGH-VALUE REPLY MODE
+- Only reply because this mention cleared the value threshold (${valueContext.value.score} >= ${valueContext.minValueScore}).
+- Reason: ${valueContext.value.reason}
+- Response strategy: ${valueContext.value.responseStrategy.replace(/_/g, ' ')}
+- Your reply must add at least one useful new thing: a concrete answer, a sharper distinction, a useful example, a causal explanation, or a high-signal follow-up question.
+- Do not reply with empty agreement, generic thanks, applause, or a dunk that adds no idea.
+- If you cannot add value in this voice, output an empty string.`);
   }
 
   // Thread-aware conversation context
@@ -1147,6 +1221,10 @@ async function refillQueue(
         freshnessScore: item.freshnessScore,
         repetitionRiskScore: item.repetitionRiskScore,
         policyRiskScore: item.policyRiskScore,
+        surpriseScore: item.surpriseScore,
+        creativeRiskScore: item.creativeRiskScore,
+        slopScore: item.slopScore,
+        replyBaitScore: item.replyBaitScore,
         hookType: item.featureTags?.hook ?? null,
         toneType: item.featureTags?.tone ?? null,
         specificityType: item.featureTags?.specificity ?? null,
@@ -1164,8 +1242,24 @@ async function refillQueue(
         scoreProvenance: item.scoreProvenance ?? null,
         sourceLane: item.sourceLane ?? null,
         styleMode: item.styleMode ?? 'standard',
+        creativeLane: item.creativeLane ?? null,
+        targetAudienceSegment: item.targetAudienceSegment ?? null,
+        segmentHypothesis: item.segmentHypothesis ?? null,
+        promptStrategy: item.promptStrategy ?? null,
+        criticScores: item.criticScores ?? null,
+        actionRewardPrediction: item.actionRewardPrediction ?? null,
+        draftExperimentId: item.draftExperimentId ?? null,
+        experimentBatchId: item.experimentBatchId ?? null,
+        experimentHypothesis: item.experimentHypothesis ?? null,
+        experimentHoldout: item.experimentHoldout ?? null,
+        promptVariant: item.promptVariant ?? null,
         trendTopicId: item.trendTopicId ?? null,
         trendHeadline: item.trendHeadline ?? null,
+        mediaExperimentType: item.mediaExperimentType ?? null,
+        mediaBrief: item.mediaBrief ?? null,
+        portfolioRole: item.portfolioRole ?? null,
+        relationshipTargetHandle: item.relationshipTargetHandle ?? null,
+        trendFitScore: item.trendFitScore ?? null,
         xTweetId: null,
         quoteTweetId: null,
         quoteTweetAuthor: null,
@@ -1201,6 +1295,11 @@ interface MarketingTweet {
   styleMode?: import('./types').ContentStyleMode | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
+  mediaExperimentType?: import('./types').MediaExperimentType | null;
+  mediaBrief?: string | null;
+  portfolioRole?: import('./types').PostPortfolioRole | null;
+  relationshipTargetHandle?: string | null;
+  trendFitScore?: number | null;
   generationMode?: 'safe' | 'balanced' | 'explore';
   candidateScore?: number;
   confidenceScore?: number;
@@ -1210,6 +1309,10 @@ interface MarketingTweet {
   freshnessScore?: number;
   repetitionRiskScore?: number;
   policyRiskScore?: number;
+  surpriseScore?: number;
+  creativeRiskScore?: number;
+  slopScore?: number;
+  replyBaitScore?: number;
   hookType?: string | null;
   toneType?: string | null;
   specificityType?: string | null;
@@ -1225,6 +1328,17 @@ interface MarketingTweet {
   globalPriorWeight?: number | null;
   localPriorWeight?: number | null;
   scoreProvenance?: import('./types').CandidateScoreProvenance | null;
+  creativeLane?: import('./types').CreativeLane | null;
+  targetAudienceSegment?: import('./types').AudienceSegment | null;
+  segmentHypothesis?: string | null;
+  promptStrategy?: import('./types').PromptStrategy | null;
+  criticScores?: import('./types').CandidateCriticScores | null;
+  actionRewardPrediction?: import('./types').ActionRewardBreakdown | null;
+  draftExperimentId?: string | null;
+  experimentBatchId?: string | null;
+  experimentHypothesis?: string | null;
+  experimentHoldout?: boolean | null;
+  promptVariant?: string | null;
 }
 
 async function generateMarketingTweets(

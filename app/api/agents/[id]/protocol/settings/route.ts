@@ -36,7 +36,8 @@ export async function PATCH(
 
     const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
       'enabled', 'postsPerDay', 'minQueueSize',
-      'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
+      'autoReply', 'highValueReplyMode', 'minReplyValueScore', 'maxRepliesPerRun', 'replyIntervalMins',
+      'earlyVelocityFollowups', 'supervisedTrendDesk', 'relationshipQueueEnabled', 'portfolioOptimizerEnabled', 'mediaExperimentRate',
       'lengthMix', 'autonomyMode', 'explorationRate', 'trendMixTarget', 'trendTolerance', 'shitpoastEnabled', 'enabledFormats',
       'marketingEnabled', 'marketingMix', 'marketingRole',
       'soulEvolutionMode',
@@ -63,6 +64,24 @@ export async function PATCH(
     }
     if (updates.shitpoastEnabled !== undefined && typeof updates.shitpoastEnabled !== 'boolean') {
       delete updates.shitpoastEnabled;
+    }
+    if (updates.highValueReplyMode !== undefined && typeof updates.highValueReplyMode !== 'boolean') {
+      delete updates.highValueReplyMode;
+    }
+    if (typeof updates.minReplyValueScore === 'number') {
+      updates.minReplyValueScore = Math.max(0.25, Math.min(0.95, Number(updates.minReplyValueScore.toFixed(2))));
+    } else if (updates.minReplyValueScore !== undefined) {
+      delete updates.minReplyValueScore;
+    }
+    for (const flag of ['earlyVelocityFollowups', 'supervisedTrendDesk', 'relationshipQueueEnabled', 'portfolioOptimizerEnabled'] as const) {
+      if (updates[flag] !== undefined && typeof updates[flag] !== 'boolean') {
+        delete updates[flag];
+      }
+    }
+    if (typeof updates.mediaExperimentRate === 'number') {
+      updates.mediaExperimentRate = Math.max(0, Math.min(50, Math.round(updates.mediaExperimentRate)));
+    } else if (updates.mediaExperimentRate !== undefined) {
+      delete updates.mediaExperimentRate;
     }
     if (updates.proactiveLikes !== undefined) {
       updates.proactiveLikes = false;

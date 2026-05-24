@@ -4,6 +4,7 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { generateText } from '@/lib/ai';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
+import { scoreHighValueReply } from '@/lib/virality-signals';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -15,7 +16,7 @@ export async function POST(
     const { agent } = await requireAgentAccess(id);
 
     const body = await request.json();
-    const { content, authorHandle } = body;
+    const { content, authorHandle, highValueMode } = body;
     if (!content || !authorHandle) {
       return NextResponse.json({ error: 'content and authorHandle required' }, { status: 400 });
     }
@@ -25,6 +26,9 @@ export async function POST(
       directiveLimit: 10,
     });
     const analysis = await getAnalysis(id);
+    const valueScore = scoreHighValueReply({ text: content, authorUsername: String(authorHandle).replace(/^@/, '') }, {
+      topics: voiceProfile.topics,
+    });
 
     // Build a rich system prompt with full identity awareness
     const systemParts: string[] = [];
@@ -53,6 +57,13 @@ Preserve the account's authentic voice while increasing the odds of niche attent
     }
     if (memory.neverDoThisAgain.length > 0) {
       systemParts.push(`\n## DO NOT DO THIS\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (highValueMode) {
+      systemParts.push(`\n## HIGH-VALUE REPLY MODE
+- Value score: ${valueScore.score} (${valueScore.reason})
+- Strategy: ${valueScore.responseStrategy.replace(/_/g, ' ')}
+- Add a concrete answer, sharp distinction, useful example, causal explanation, or high-signal follow-up question.
+- Avoid empty applause, generic thanks, and replies that could fit any tweet.`);
     }
 
     systemParts.push(`\n## YOUR SOUL.md

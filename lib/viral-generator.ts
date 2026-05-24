@@ -4,16 +4,27 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, ContentSourceLane, ContentStyleMode, PersonalizationMemory, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, AudienceSegment, CreativeLane, ContentSourceLane, ContentStyleMode, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
 import { judgeCandidates, mutateTopCandidates } from './generation-judging';
+import { inferAudienceSegment } from './virality-signals';
 import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
 import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
 import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
+import {
+  buildMediaBrief,
+  buildPostPortfolioPlan,
+  inferMediaExperimentType,
+  inferPortfolioRole,
+  MEDIA_SEQUENCE,
+  normalizeMediaExperimentType,
+  normalizePortfolioRole,
+  PORTFOLIO_SEQUENCE,
+} from './growth-engine';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -41,6 +52,9 @@ export interface ContentStyleConfig {
   };
   banditPolicy?: BanditPolicy | null;
   sourcePlan?: SourcePlannerPlan | null;
+  mediaExperimentRate?: number;
+  portfolioOptimizerEnabled?: boolean;
+  relationshipQueueEnabled?: boolean;
 }
 
 const DEFAULT_STYLE: ContentStyleConfig = {
@@ -60,6 +74,9 @@ const DEFAULT_STYLE: ContentStyleConfig = {
     momentumTopic: null,
   },
   banditPolicy: null,
+  mediaExperimentRate: 15,
+  portfolioOptimizerEnabled: true,
+  relationshipQueueEnabled: true,
 };
 
 export const ALL_FORMATS = [
@@ -73,8 +90,104 @@ export interface ProtocolTweet {
   rationale: string;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
+  creativeLane?: CreativeLane | null;
+  draftExperimentId?: string | null;
+  experimentBatchId?: string | null;
+  experimentHypothesis?: string | null;
+  experimentHoldout?: boolean | null;
+  promptVariant?: string | null;
+  targetAudienceSegment?: AudienceSegment | null;
+  segmentHypothesis?: string | null;
+  promptStrategy?: PromptStrategy | null;
+  mediaExperimentType?: MediaExperimentType | null;
+  mediaBrief?: string | null;
+  portfolioRole?: PostPortfolioRole | null;
+  relationshipTargetHandle?: string | null;
+  trendFitScore?: number | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
+}
+
+const CREATIVE_LANES: CreativeLane[] = [
+  'operator_take',
+  'contrarian_angle',
+  'story_example',
+  'teaching_threadlet',
+  'weird_memetic',
+  'trend_riff',
+];
+
+const CREATIVE_LANE_GUIDANCE: Record<CreativeLane, string> = {
+  operator_take: 'Native account take. Sounds closest to the strongest manual posts and should clear review with minimal edits.',
+  contrarian_angle: 'Specific disagreement with the default market narrative. Strong claim, but still credible.',
+  story_example: 'A concrete mini-story, example, or observed pattern that makes the idea feel lived-in.',
+  teaching_threadlet: 'Compact educational breakdown. Useful without becoming generic advice content.',
+  weird_memetic: 'Sharper, more surprising, more memorable phrasing. Strange-but-true, not random.',
+  trend_riff: 'Riffs on a live topic through the account’s actual worldview instead of summarizing the trend.',
+};
+
+const PORTFOLIO_ROLE_GUIDANCE: Record<PostPortfolioRole, string> = {
+  proof: 'A concrete proof/data/operator evidence post. Makes a claim feel earned.',
+  contrarian: 'A disagreement with a popular belief. Specific, defensible, and likely to spread.',
+  story: 'A mini-story or observed example. Makes the account feel lived-in and memorable.',
+  reply_bait: 'A substantive question or tension that invites high-quality replies without cheap bait.',
+  trend: 'A timely take on an accepted trend through the account worldview.',
+  media: 'A post whose idea becomes stronger with an image, screenshot, meme, or short video.',
+  relationship: 'A post designed to build ties with a specific audience cluster or account type.',
+};
+
+const MEDIA_EXPERIMENT_GUIDANCE: Record<MediaExperimentType, string> = {
+  text_only: 'No media. The text must carry the whole post.',
+  image: 'Needs one clean visual concept that makes the point concrete.',
+  video: 'Needs a short clip/demo/talking-head concept with one clear beat.',
+  screenshot: 'Needs a screenshot/table/chart/dashboard-style proof artifact.',
+  meme: 'Needs a simple native meme concept that sharpens the point without reducing substance.',
+};
+
+function normalizeCreativeLane(value: unknown): CreativeLane {
+  return CREATIVE_LANES.includes(value as CreativeLane) ? value as CreativeLane : 'operator_take';
+}
+
+function normalizeAudienceSegment(value: unknown, content: string, topic: string): AudienceSegment {
+  const allowed: AudienceSegment[] = [
+    'founders',
+    'ai_builders',
+    'biohackers',
+    'investors',
+    'creator_operators',
+    'technical_operators',
+    'reply_regulars',
+    'generalists',
+  ];
+  return allowed.includes(value as AudienceSegment)
+    ? value as AudienceSegment
+    : inferAudienceSegment(content, topic);
+}
+
+function buildCreativeLanePlan(count: number, sourcePlan: SourcePlannerPlan, shitpoastEnabled: boolean): Map<number, CreativeLane> {
+  const lanes = new Map<number, CreativeLane>();
+  const baseSequence: CreativeLane[] = [
+    'operator_take',
+    'contrarian_angle',
+    'story_example',
+    'teaching_threadlet',
+    'operator_take',
+    'weird_memetic',
+  ];
+
+  for (let slot = 1; slot <= count; slot++) {
+    const sourceSlot = sourcePlan.slots[slot - 1] || null;
+    let lane = baseSequence[(slot - 1) % baseSequence.length];
+    if (sourceSlot?.sourceLane === 'trend_aligned_exploit' || sourceSlot?.sourceLane === 'trend_adjacent_explore') {
+      lane = 'trend_riff';
+    }
+    if (shitpoastEnabled && slot % 5 === 0) {
+      lane = 'weird_memetic';
+    }
+    lanes.set(slot, lane);
+  }
+
+  return lanes;
 }
 
 function normalizeTopicLabel(topic: string): string {
@@ -492,6 +605,39 @@ ${soulMd}`);
     if (memory.operatorHiddenPreferences.length > 0) {
       parts.push(`\n## OPERATOR PREFERENCES (inferred from edits/remixes)\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`);
     }
+    if (memory.editTransformations.length > 0) {
+      parts.push(`\n## EDIT TRANSFORMATION MEMORY\nGenerate closer to the approved after-state from these operator edits:\n${memory.editTransformations.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.referenceBank?.length) {
+      parts.push(`\n## REFERENCE BANK (high-performing examples to study, not copy)\n${memory.referenceBank.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.conversationInsights?.length) {
+      parts.push(`\n## CONVERSATION INSIGHTS\nUse these when a post can invite substantive replies without becoming cheap engagement bait:\n${memory.conversationInsights.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.audienceSegmentLessons?.length) {
+      parts.push(`\n## AUDIENCE SEGMENT LESSONS\n${memory.audienceSegmentLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.promptStrategyLessons?.length) {
+      parts.push(`\n## PROMPT STRATEGY LESSONS\n${memory.promptStrategyLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.portfolioLessons?.length) {
+      parts.push(`\n## POST PORTFOLIO LESSONS\n${memory.portfolioLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.mediaExperimentLessons?.length) {
+      parts.push(`\n## MEDIA EXPERIMENT LESSONS\n${memory.mediaExperimentLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.networkClusterLessons?.length) {
+      parts.push(`\n## NETWORK CLUSTER LESSONS\n${memory.networkClusterLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.relationshipLessons?.length) {
+      parts.push(`\n## RELATIONSHIP LESSONS\n${memory.relationshipLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.viralityPostmortems?.length) {
+      parts.push(`\n## VIRALITY POSTMORTEMS\n${memory.viralityPostmortems.map((item) => `- ${item}`).join('\n')}`);
+    }
+    if (memory.replyMiningInsights?.length) {
+      parts.push(`\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`);
+    }
   }
 
   if (style.bias.scheduledTopic || style.bias.momentumTopic) {
@@ -532,6 +678,18 @@ This batch is allocated by a multi-armed bandit controller. Each slot is an actu
       parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | style=${plan.styleMode} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''} | ${plan.rationale}`);
     }
   }
+
+  parts.push(`\n## CREATIVE LANES
+Each candidate must choose exactly one creative lane. Lanes make the batch a portfolio instead of a pile of similar drafts:
+${CREATIVE_LANES.map((lane) => `- ${lane}: ${CREATIVE_LANE_GUIDANCE[lane]}`).join('\n')}`);
+
+  parts.push(`\n## POST PORTFOLIO ROLES
+Each candidate must choose exactly one portfolio role. The batch should diversify why a post can spread:
+${Object.entries(PORTFOLIO_ROLE_GUIDANCE).map(([role, guidance]) => `- ${role}: ${guidance}`).join('\n')}`);
+
+  parts.push(`\n## MEDIA EXPERIMENTS
+Use media only when it genuinely makes the idea more shareable or legible. If a slot asks for media, include a short mediaBrief:
+${Object.entries(MEDIA_EXPERIMENT_GUIDANCE).map(([type, guidance]) => `- ${type}: ${guidance}`).join('\n')}`);
 
   if (style.shitpoastEnabled) {
     parts.push(`\n## SHITPOAST MODE
@@ -593,8 +751,9 @@ export async function generateViralBatch(
   memory: PersonalizationMemory | null = null,
 ): Promise<RankedProtocolTweet[]> {
   const candidateCount = count <= 1 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
+  const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const sourcePlan = style.sourcePlan || buildSourcePlannerPlan({
-    count,
+    count: candidateCount,
     autonomyMode: style.autonomyMode,
     trendMixTarget: style.trendMixTarget,
     trendTolerance: style.trendTolerance,
@@ -613,7 +772,7 @@ export async function generateViralBatch(
   const explorationRate = Math.max(0, Math.min(100, effectiveStyle.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const slotPlan = buildBanditSlotPlan(effectiveStyle.banditPolicy, {
-    count,
+    count: candidateCount,
     explorationRate,
     biasTopics: [effectiveStyle.bias.momentumTopic, effectiveStyle.bias.scheduledTopic].filter(Boolean) as string[],
     sourcePlan,
@@ -621,16 +780,49 @@ export async function generateViralBatch(
   });
   const maxShitpoast = getShitpoastSlotCount(count, effectiveStyle.shitpoastEnabled);
   const inferredShitpoastSlots = buildShitpoastSlotSet(count, effectiveStyle.shitpoastEnabled);
+  const creativeLanePlan = buildCreativeLanePlan(candidateCount, sourcePlan, effectiveStyle.shitpoastEnabled);
+  const portfolioPlan = buildPostPortfolioPlan({
+    count: candidateCount,
+    settings: {
+      portfolioOptimizerEnabled: effectiveStyle.portfolioOptimizerEnabled,
+      mediaExperimentRate: effectiveStyle.mediaExperimentRate,
+    },
+    learnings,
+  });
+  const trendFitById = new Map(sourcePlan.acceptedTrends.map((trend) => [String(trend.id), trend.fitScores.total]));
+  const creativeSlotGuide = Array.from({ length: candidateCount }, (_, index) => {
+    const slot = index + 1;
+    const lane = creativeLanePlan.get(slot) || 'operator_take';
+    const plan = slotPlan.find((item) => item.slot === slot);
+    const portfolioRole = portfolioPlan[index] || 'proof';
+    const mediaType = inferMediaExperimentType({
+      content: `${plan?.topic || ''} ${plan?.hook || ''} ${plan?.structure || ''}`,
+      portfolioRole,
+      slot,
+      mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
+    });
+    return `- Slot ${slot}: creativeLane=${lane} | portfolioRole=${portfolioRole} | mediaExperimentType=${mediaType}${plan?.holdout ? ' | HOLDOUT=true' : ''}${plan ? ` | ${plan.mode} | ${plan.format}/${plan.topic}/${plan.hook}/${plan.structure}` : ''}`;
+  }).join('\n');
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "styleMode": "standard" or "shitpoast" (must match the slot's style)
+- "creativeLane": one of: ${CREATIVE_LANES.join(', ')}
+- "portfolioRole": one of: ${PORTFOLIO_SEQUENCE.join(', ')}
+- "mediaExperimentType": one of: ${MEDIA_SEQUENCE.join(', ')}
+- "mediaBrief": short visual/media concept, or null for text_only
+- "relationshipTargetHandle": optional handle only if this is aimed at a specific relationship target, else null
+- "targetAudienceSegment": who this is mainly for (founders, ai_builders, biohackers, investors, creator_operators, technical_operators, reply_regulars, or generalists)
+- "segmentHypothesis": one short sentence explaining why that audience should care
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
 ${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
+
+Creative lane assignment:
+${creativeSlotGuide}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
 
@@ -664,6 +856,35 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
           const slotAssignment = slotPlan.find((plan) => plan.slot === slot) || null;
+          const creativeLane = normalizeCreativeLane(parsed.creativeLane || creativeLanePlan.get(slot));
+          const targetAudienceSegment = normalizeAudienceSegment(parsed.targetAudienceSegment, cleanContent, targetTopic);
+          const parsedMediaType = normalizeMediaExperimentType(parsed.mediaExperimentType);
+          const portfolioRole = normalizePortfolioRole(parsed.portfolioRole || portfolioPlan[Math.max(0, slot - 1)] || inferPortfolioRole({
+            content: cleanContent,
+            format,
+            creativeLane,
+            sourceLane: slotAssignment?.sourceLane || null,
+            mediaExperimentType: parsedMediaType,
+          }));
+          const mediaExperimentType = parsed.mediaExperimentType
+            ? parsedMediaType
+            : inferMediaExperimentType({
+                content: cleanContent,
+                portfolioRole,
+                slot,
+                mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
+              });
+          const mediaBrief = mediaExperimentType === 'text_only'
+            ? null
+            : (
+                typeof parsed.mediaBrief === 'string' && parsed.mediaBrief.trim()
+                  ? parsed.mediaBrief.trim().slice(0, 260)
+                  : buildMediaBrief({ content: cleanContent, topic: targetTopic, mediaExperimentType })
+              );
+          const relationshipTargetHandle = typeof parsed.relationshipTargetHandle === 'string' && parsed.relationshipTargetHandle.trim()
+            ? parsed.relationshipTargetHandle.trim().replace(/^@/, '').slice(0, 24)
+            : null;
+          const trendFitScore = slotAssignment?.trendTopicId ? trendFitById.get(String(slotAssignment.trendTopicId)) ?? null : null;
           const styleMode = slotAssignment
             ? normalizeContentStyleMode(slotAssignment.styleMode)
             : (
@@ -687,6 +908,23 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             rationale: parsed.rationale || slotAssignment?.rationale || '',
             sourceLane: slotAssignment?.sourceLane || null,
             styleMode,
+            creativeLane,
+            draftExperimentId: `exp-${experimentBatchId}-${slot || stagedTweets.length + 1}`,
+            experimentBatchId,
+            experimentHypothesis: slotAssignment?.rationale
+              ? `${slotAssignment.rationale} Creative lane: ${creativeLane.replace(/_/g, ' ')}.`
+              : `Test whether ${creativeLane.replace(/_/g, ' ')} improves approval and engagement for ${targetTopic}.`,
+            experimentHoldout: slotAssignment?.holdout === true,
+            promptVariant: creativeLane,
+            targetAudienceSegment,
+            segmentHypothesis: typeof parsed.segmentHypothesis === 'string' && parsed.segmentHypothesis.trim()
+              ? parsed.segmentHypothesis.trim().slice(0, 220)
+              : `Test whether ${targetAudienceSegment.replace(/_/g, ' ')} responds to this ${creativeLane.replace(/_/g, ' ')} angle.`,
+            mediaExperimentType,
+            mediaBrief,
+            portfolioRole,
+            relationshipTargetHandle,
+            trendFitScore,
             trendTopicId: slotAssignment?.trendTopicId || null,
             trendHeadline: slotAssignment?.trendHeadline || null,
           });
@@ -714,6 +952,17 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         topicsWithMomentum: [],
         formatsUnderTested: [],
         operatorHiddenPreferences: [],
+        editTransformations: [],
+        referenceBank: [],
+        conversationInsights: [],
+        audienceSegmentLessons: [],
+        promptStrategyLessons: [],
+        networkClusterLessons: [],
+        mediaExperimentLessons: [],
+        portfolioLessons: [],
+        relationshipLessons: [],
+        viralityPostmortems: [],
+        replyMiningInsights: [],
         identityConstraints: [],
         weeklyChanges: [],
         updatedAt: new Date().toISOString(),
@@ -754,13 +1003,42 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     }
 
     const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts)
-      .map((tweet, index) => ({
-        ...tweet,
-        sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
-        styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
-        trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
-        trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
-      }))
+      .map((tweet, index) => {
+        const slot = index + 1;
+        const creativeLane = creativeLanePlan.get(slot) || 'operator_take';
+        const portfolioRole = portfolioPlan[index] || inferPortfolioRole({
+          content: tweet.content,
+          format: tweet.format,
+          creativeLane,
+          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+        });
+        const mediaExperimentType = inferMediaExperimentType({
+          content: tweet.content,
+          portfolioRole,
+          slot,
+          mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
+        });
+        return {
+          ...tweet,
+          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+          styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
+          creativeLane,
+          draftExperimentId: `exp-${experimentBatchId}-fallback-${slot}`,
+          experimentBatchId,
+          experimentHypothesis: `Fallback template experiment for ${tweet.targetTopic} using ${creativeLane.replace(/_/g, ' ')} and ${portfolioRole.replace(/_/g, ' ')}.`,
+          experimentHoldout: slotPlan[index]?.holdout === true,
+          promptVariant: creativeLane,
+          targetAudienceSegment: inferAudienceSegment(tweet.content, tweet.targetTopic),
+          segmentHypothesis: `Fallback tests whether ${inferAudienceSegment(tweet.content, tweet.targetTopic).replace(/_/g, ' ')} responds to this template.`,
+          mediaExperimentType,
+          mediaBrief: buildMediaBrief({ content: tweet.content, topic: tweet.targetTopic, mediaExperimentType }),
+          portfolioRole,
+          relationshipTargetHandle: null,
+          trendFitScore: sourcePlan.slots[index]?.trendTopicId ? trendFitById.get(String(sourcePlan.slots[index]?.trendTopicId)) ?? null : null,
+          trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
+          trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
+        };
+      })
       .filter((tweet) => !getTweetCompletenessIssue(tweet.content));
     const rankingContext = {
       voiceProfile,
@@ -774,6 +1052,17 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         topicsWithMomentum: [],
         formatsUnderTested: [],
         operatorHiddenPreferences: [],
+        editTransformations: [],
+        referenceBank: [],
+        conversationInsights: [],
+        audienceSegmentLessons: [],
+        promptStrategyLessons: [],
+        networkClusterLessons: [],
+        mediaExperimentLessons: [],
+        portfolioLessons: [],
+        relationshipLessons: [],
+        viralityPostmortems: [],
+        replyMiningInsights: [],
         identityConstraints: [],
         weeklyChanges: [],
         updatedAt: new Date().toISOString(),

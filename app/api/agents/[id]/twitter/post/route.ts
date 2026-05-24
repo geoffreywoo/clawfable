@@ -30,7 +30,11 @@ export async function POST(
     dbTweetId = tweetId ? String(tweetId) : null;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
     existingTweet = dbTweetId ? await getTweet(String(dbTweetId)) : null;
-    isReply = existingTweet?.type === 'reply' || Boolean(replyToId);
+    const inferredReplyToId = existingTweet?.type === 'reply'
+      ? (existingTweet.followupForTweetId || existingTweet.quoteTweetId || null)
+      : null;
+    const effectiveReplyToId = replyToId || inferredReplyToId;
+    isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
 
     const completenessIssue = getTweetCompletenessIssue(String(content));
     if (completenessIssue) {
@@ -55,8 +59,8 @@ export async function POST(
     });
 
     let result: { tweetUrl: string; tweetId: string; username: string };
-    if (replyToId) {
-      result = await replyToTweet(keys, content, replyToId);
+    if (effectiveReplyToId) {
+      result = await replyToTweet(keys, content, String(effectiveReplyToId));
     } else {
       result = await postTweet(keys, content);
     }
@@ -73,6 +77,9 @@ export async function POST(
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
+          draftExperimentId: updated.draftExperimentId ?? null,
+          creativeLane: updated.creativeLane ?? null,
+          experimentHoldout: updated.experimentHoldout === true,
           wasEdited: (existingTweet?.editCount ?? 0) > 0,
         }),
       });
@@ -103,7 +110,11 @@ export async function POST(
         surface: isReply ? 'mentions' : 'manual_post',
         rewardDelta: -0.75,
         reason: message,
-        metadata: metadataWithStyleMode(existingTweet),
+        metadata: metadataWithStyleMode(existingTweet, {
+          draftExperimentId: existingTweet?.draftExperimentId ?? null,
+          creativeLane: existingTweet?.creativeLane ?? null,
+          experimentHoldout: existingTweet?.experimentHoldout === true,
+        }),
       }).catch(() => null);
     }
 

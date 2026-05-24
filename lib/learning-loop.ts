@@ -2,6 +2,7 @@ import type {
   AgentLearnings,
   FeedbackEntry,
   LearningSignal,
+  Mention,
   PersonalizationMemory,
   TweetPerformance,
   VoiceDirectiveRule,
@@ -10,6 +11,21 @@ import type { RemixEntry } from './kv-storage';
 import type { BanditPolicy } from './bandit';
 import type { VoiceProfile } from './soul-parser';
 import { summarizeEditDelta, type EditDeltaSummary } from './outcome-rewards';
+import {
+  summarizeAudienceSegmentLessons,
+  summarizeConversationInsights,
+  summarizePromptStrategyLessons,
+  summarizeReferenceBank,
+} from './virality-signals';
+import {
+  mineReplyInsights,
+  summarizeMediaExperimentLessons,
+  summarizeNetworkClusterLessons,
+  summarizePortfolioLessons,
+  summarizeRelationshipLessons,
+  summarizeReplyMiningInsights,
+  summarizeViralityPostmortemMemory,
+} from './growth-engine';
 
 export { summarizeEditDelta };
 export type { EditDeltaSummary };
@@ -76,6 +92,44 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   return sortCounts(counts).slice(0, 4);
 }
 
+function summarizeEditTransformations(signals: LearningSignal[]): string[] {
+  const counts: Record<string, number> = {};
+
+  for (const signal of signals) {
+    if (signal.signalType !== 'edited_before_queue' && signal.signalType !== 'edited_before_post') continue;
+    const originalHook = typeof signal.metadata?.originalHook === 'string' ? signal.metadata.originalHook : null;
+    const editedHook = typeof signal.metadata?.editedHook === 'string' ? signal.metadata.editedHook : null;
+    const originalTone = typeof signal.metadata?.originalTone === 'string' ? signal.metadata.originalTone : null;
+    const editedTone = typeof signal.metadata?.editedTone === 'string' ? signal.metadata.editedTone : null;
+    const originalSpecificity = typeof signal.metadata?.originalSpecificity === 'string' ? signal.metadata.originalSpecificity : null;
+    const editedSpecificity = typeof signal.metadata?.editedSpecificity === 'string' ? signal.metadata.editedSpecificity : null;
+    const originalStructure = typeof signal.metadata?.originalStructure === 'string' ? signal.metadata.originalStructure : null;
+    const editedStructure = typeof signal.metadata?.editedStructure === 'string' ? signal.metadata.editedStructure : null;
+
+    if (originalHook && editedHook && originalHook !== editedHook) {
+      counts[`Edit pattern: hooks improve when ${originalHook.replace(/_/g, ' ')} becomes ${editedHook.replace(/_/g, ' ')}.`] = (counts[`Edit pattern: hooks improve when ${originalHook.replace(/_/g, ' ')} becomes ${editedHook.replace(/_/g, ' ')}.`] || 0) + 1;
+    }
+    if (originalTone && editedTone && originalTone !== editedTone) {
+      counts[`Edit pattern: tone shifts from ${originalTone.replace(/_/g, ' ')} toward ${editedTone.replace(/_/g, ' ')} before approval.`] = (counts[`Edit pattern: tone shifts from ${originalTone.replace(/_/g, ' ')} toward ${editedTone.replace(/_/g, ' ')} before approval.`] || 0) + 1;
+    }
+    if (originalSpecificity && editedSpecificity && originalSpecificity !== editedSpecificity) {
+      counts[`Edit pattern: specificity moves from ${originalSpecificity.replace(/_/g, ' ')} to ${editedSpecificity.replace(/_/g, ' ')}.`] = (counts[`Edit pattern: specificity moves from ${originalSpecificity.replace(/_/g, ' ')} to ${editedSpecificity.replace(/_/g, ' ')}.`] || 0) + 1;
+    }
+    if (originalStructure && editedStructure && originalStructure !== editedStructure) {
+      counts[`Edit pattern: structure changes from ${originalStructure.replace(/_/g, ' ')} to ${editedStructure.replace(/_/g, ' ')}.`] = (counts[`Edit pattern: structure changes from ${originalStructure.replace(/_/g, ' ')} to ${editedStructure.replace(/_/g, ' ')}.`] || 0) + 1;
+    }
+
+    const originalDraft = typeof signal.metadata?.originalDraft === 'string' ? signal.metadata.originalDraft : null;
+    const editedDraft = typeof signal.metadata?.editedDraft === 'string' ? signal.metadata.editedDraft : null;
+    if (originalDraft && editedDraft) {
+      const line = `Before/after edit: "${originalDraft.slice(0, 100)}" -> "${editedDraft.slice(0, 100)}"`;
+      counts[line] = (counts[line] || 0) + 1;
+    }
+  }
+
+  return sortCounts(counts).slice(0, 5);
+}
+
 function summarizeWeeklyChanges(
   signals: LearningSignal[],
   feedback: FeedbackEntry[],
@@ -122,6 +176,7 @@ export interface BuildPersonalizationMemoryOptions {
   banditPolicy: BanditPolicy | null;
   voiceProfile: VoiceProfile;
   baselineLikes?: number;
+  mentions?: Mention[];
 }
 
 export function buildPersonalizationMemory({
@@ -134,6 +189,7 @@ export function buildPersonalizationMemory({
   banditPolicy,
   voiceProfile,
   baselineLikes = 0,
+  mentions = [],
 }: BuildPersonalizationMemoryOptions): PersonalizationMemory {
   const alwaysDoMoreOfThis = unique([
     ...(learnings?.insights.slice(0, 3) || []),
@@ -152,6 +208,17 @@ export function buildPersonalizationMemory({
     .map((arm) => `${arm.arm} needs more data`);
 
   const operatorHiddenPreferences = summarizeOperatorPreferences(signals, remixPatterns);
+  const editTransformations = summarizeEditTransformations(signals);
+  const referenceBank = summarizeReferenceBank(performanceHistory);
+  const conversationInsights = summarizeConversationInsights(performanceHistory);
+  const audienceSegmentLessons = summarizeAudienceSegmentLessons(performanceHistory);
+  const promptStrategyLessons = summarizePromptStrategyLessons(performanceHistory);
+  const replyMiningInsights = summarizeReplyMiningInsights(mineReplyInsights(mentions));
+  const networkClusterLessons = summarizeNetworkClusterLessons(learnings);
+  const mediaExperimentLessons = summarizeMediaExperimentLessons(learnings);
+  const portfolioLessons = summarizePortfolioLessons(learnings);
+  const relationshipLessons = summarizeRelationshipLessons(learnings);
+  const viralityPostmortems = summarizeViralityPostmortemMemory(learnings);
 
   const identityConstraints = unique([
     ...summarizeDirectiveRules(directiveRules),
@@ -166,6 +233,17 @@ export function buildPersonalizationMemory({
     topicsWithMomentum,
     formatsUnderTested,
     operatorHiddenPreferences,
+    editTransformations,
+    referenceBank,
+    conversationInsights,
+    audienceSegmentLessons,
+    promptStrategyLessons,
+    networkClusterLessons,
+    mediaExperimentLessons,
+    portfolioLessons,
+    relationshipLessons,
+    viralityPostmortems,
+    replyMiningInsights,
     identityConstraints,
     weeklyChanges,
     updatedAt: new Date().toISOString(),

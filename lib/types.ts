@@ -172,6 +172,15 @@ export interface CandidateJudgeBreakdown {
   policySafety: number;
 }
 
+export interface CandidateCriticScores {
+  voice: number;
+  audience: number;
+  novelty: number;
+  slop: number;
+  factualRisk: number;
+  replyPotential: number;
+}
+
 export interface CandidateScoreProvenance {
   localPrior: number;
   globalPrior: number;
@@ -179,6 +188,14 @@ export interface CandidateScoreProvenance {
   predictedReward: number;
   noveltyCoverage: number;
   riskPenalty: number;
+  creativity?: number;
+  holdout?: number;
+  antiSlop?: number;
+  audienceSegment?: number;
+  promptStrategy?: number;
+  portfolio?: number;
+  mediaExperiment?: number;
+  relationship?: number;
 }
 
 export interface RewardBreakdown {
@@ -195,6 +212,19 @@ export interface RewardBreakdown {
   total: number;
   computedAt: string;
   notes: string[];
+  actionRewards?: ActionRewardBreakdown;
+}
+
+export interface ActionRewardBreakdown {
+  likeReward: number;
+  replyReward: number;
+  repostReward: number;
+  impressionReward: number;
+  engagementRateReward: number;
+  profileClickReward: number;
+  followReward: number;
+  negativeFeedbackRisk: number;
+  total: number;
 }
 
 export type ContentSourceLane =
@@ -206,6 +236,65 @@ export type ContentSourceLane =
 export type ContentStyleMode = 'standard' | 'shitpoast';
 
 export type TrendTolerance = 'adjacent' | 'moderate' | 'aggressive';
+
+export type CreativeLane =
+  | 'operator_take'
+  | 'contrarian_angle'
+  | 'story_example'
+  | 'teaching_threadlet'
+  | 'weird_memetic'
+  | 'trend_riff';
+
+export type AudienceSegment =
+  | 'founders'
+  | 'ai_builders'
+  | 'biohackers'
+  | 'investors'
+  | 'creator_operators'
+  | 'technical_operators'
+  | 'reply_regulars'
+  | 'generalists';
+
+export type PromptStrategy =
+  | 'baseline'
+  | 'high_specificity'
+  | 'contrarian'
+  | 'story'
+  | 'weird'
+  | 'trend_riff'
+  | 'reply_bait';
+
+export type MediaExperimentType =
+  | 'text_only'
+  | 'image'
+  | 'video'
+  | 'screenshot'
+  | 'meme';
+
+export type PostPortfolioRole =
+  | 'proof'
+  | 'contrarian'
+  | 'story'
+  | 'reply_bait'
+  | 'trend'
+  | 'media'
+  | 'relationship';
+
+export type PerformanceCheckpoint =
+  | 'initial_15m'
+  | 'early_30m'
+  | 'momentum_2h'
+  | 'full_24h'
+  | 'late';
+
+export type DraftExperimentStatus =
+  | 'generated'
+  | 'approved'
+  | 'edited'
+  | 'posted'
+  | 'rejected'
+  | 'deleted'
+  | 'measured';
 
 export interface Tweet {
   id: string;
@@ -235,6 +324,10 @@ export interface Tweet {
   freshnessScore?: number | null;
   repetitionRiskScore?: number | null;
   policyRiskScore?: number | null;
+  surpriseScore?: number | null;
+  creativeRiskScore?: number | null;
+  slopScore?: number | null;
+  replyBaitScore?: number | null;
   hookType?: TweetHookType | null;
   toneType?: TweetToneType | null;
   specificityType?: TweetSpecificityType | null;
@@ -253,6 +346,24 @@ export interface Tweet {
   rewardBreakdown?: RewardBreakdown | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
+  creativeLane?: CreativeLane | null;
+  targetAudienceSegment?: AudienceSegment | null;
+  segmentHypothesis?: string | null;
+  promptStrategy?: PromptStrategy | null;
+  mediaExperimentType?: MediaExperimentType | null;
+  mediaBrief?: string | null;
+  portfolioRole?: PostPortfolioRole | null;
+  relationshipTargetHandle?: string | null;
+  followupForTweetId?: string | null;
+  followupTrigger?: string | null;
+  trendFitScore?: number | null;
+  criticScores?: CandidateCriticScores | null;
+  actionRewardPrediction?: ActionRewardBreakdown | null;
+  draftExperimentId?: string | null;
+  experimentBatchId?: string | null;
+  experimentHypothesis?: string | null;
+  experimentHoldout?: boolean | null;
+  promptVariant?: string | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
   quarantineReason?: string | null;
@@ -338,6 +449,13 @@ export interface ProtocolSettings {
   activeHoursEnd: number;     // legacy, unused
   minQueueSize: number;       // auto-generate when queue drops below this
   autoReply: boolean;         // auto-reply to new mentions
+  highValueReplyMode?: boolean; // only reply when a mention gives the agent something valuable to add
+  minReplyValueScore?: number;  // 0-1 threshold for high-value reply mode
+  earlyVelocityFollowups?: boolean; // create supervised follow-up drafts when a post is taking off
+  supervisedTrendDesk?: boolean;    // collect trend opportunities without auto-posting unsafe trend spam
+  relationshipQueueEnabled?: boolean; // surface high-value accounts to reply to or study
+  portfolioOptimizerEnabled?: boolean; // balance proof, story, contrarian, trend, media, and reply-bait roles
+  mediaExperimentRate?: number; // 0-100, target share of drafts that carry a visual/media brief
   maxRepliesPerRun: number;   // max replies per cron run (1-10)
   replyIntervalMins: number;  // minimum minutes between reply runs
   lastPostedAt: string | null;
@@ -480,6 +598,27 @@ export interface TweetPerformance {
   wasViral: boolean;       // exceeded the viral threshold
   source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline
   styleMode?: ContentStyleMode;
+  creativeLane?: CreativeLane;
+  targetAudienceSegment?: AudienceSegment;
+  promptStrategy?: PromptStrategy;
+  mediaExperimentType?: MediaExperimentType;
+  mediaBrief?: string;
+  portfolioRole?: PostPortfolioRole;
+  relationshipTargetHandle?: string;
+  followupForTweetId?: string;
+  followupTrigger?: string;
+  trendFitScore?: number;
+  networkCluster?: AudienceSegment;
+  performanceCheckpoint?: PerformanceCheckpoint;
+  actionRewards?: ActionRewardBreakdown;
+  draftExperimentId?: string;
+  experimentBatchId?: string;
+  experimentHoldout?: boolean;
+  surpriseScore?: number;
+  creativeRiskScore?: number;
+  slopScore?: number;
+  replyBaitScore?: number;
+  earlyVelocityScore?: number;
 }
 
 export interface ManualExampleCuration {
@@ -563,6 +702,69 @@ export interface AgentLearnings {
     trainingCount: number;
     trainingSource: 'autopilot' | 'mixed';
   };
+  audienceSegmentPerformance?: Array<{ segment: AudienceSegment; posts: number; avgEngagement: number; wins: number }>;
+  promptStrategyPerformance?: Array<{ strategy: PromptStrategy; posts: number; avgEngagement: number; wins: number }>;
+  mediaExperimentPerformance?: Array<{ type: MediaExperimentType; posts: number; avgEngagement: number; wins: number }>;
+  portfolioRolePerformance?: Array<{ role: PostPortfolioRole; posts: number; avgEngagement: number; wins: number }>;
+  networkClusterPerformance?: Array<{ cluster: AudienceSegment; posts: number; avgEngagement: number; wins: number }>;
+  topRelationshipHandles?: Array<{ handle: string; interactions: number; avgEngagement: number; lastSeenAt: string }>;
+  viralityPostmortems?: ViralityPostmortem[];
+}
+
+export interface DraftExperiment {
+  id: string;
+  agentId: string;
+  tweetId: string | null;
+  xTweetId: string | null;
+  batchId: string | null;
+  slot: number | null;
+  status: DraftExperimentStatus;
+  creativeLane: CreativeLane;
+  sourceLane: ContentSourceLane | null;
+  styleMode: ContentStyleMode;
+  generationMode: AutonomyMode;
+  format: string | null;
+  topic: string | null;
+  hook: TweetHookType | string | null;
+  tone: TweetToneType | string | null;
+  specificity: TweetSpecificityType | string | null;
+  structure: TweetStructureType | string | null;
+  coverageCluster: string | null;
+  hypothesis: string;
+  promptVariant: string;
+  holdout: boolean;
+  predictedReward: number | null;
+  predictedConfidence: number | null;
+  candidateScore: number | null;
+  voiceScore: number | null;
+  noveltyScore: number | null;
+  surpriseScore: number | null;
+  creativeRiskScore: number | null;
+  slopScore: number | null;
+  replyBaitScore: number | null;
+  policyRiskScore: number | null;
+  targetAudienceSegment: AudienceSegment | null;
+  segmentHypothesis: string | null;
+  promptStrategy: PromptStrategy | null;
+  mediaExperimentType?: MediaExperimentType | null;
+  mediaBrief?: string | null;
+  portfolioRole?: PostPortfolioRole | null;
+  relationshipTargetHandle?: string | null;
+  criticScores: CandidateCriticScores | null;
+  actionRewardPrediction: ActionRewardBreakdown | null;
+  immediateReward: number | null;
+  finalReward: number | null;
+  totalReward: number | null;
+  actionRewards: ActionRewardBreakdown | null;
+  earlyVelocityScore: number | null;
+  actualEngagement: number | null;
+  engagementRate: number | null;
+  performanceLift: number | null;
+  lastSignalType: LearningSignalType | null;
+  outcomeNotes: string[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
 }
 
 export interface AccountAnalysis {
@@ -575,9 +777,74 @@ export interface AccountAnalysis {
   contentFingerprint: string;  // summary of what makes this account's content perform
 }
 
+// ─── Growth opportunity types ────────────────────────────────────────────────
+
+export interface TrendOpportunity {
+  id: string;
+  agentId: string;
+  topicId: string;
+  headline: string;
+  category: string;
+  source: string;
+  topTweetId: string | null;
+  topTweetAuthor: string | null;
+  topTweetText: string | null;
+  topTweetLikes: number;
+  fitScore: number;
+  sourceLane: ContentSourceLane | 'reject';
+  suggestedAngle: string;
+  status: 'new' | 'drafted' | 'dismissed';
+  createdAt: string;
+}
+
+export interface RelationshipOpportunity {
+  id: string;
+  agentId: string;
+  handle: string;
+  name: string | null;
+  tweetId: string | null;
+  tweetUrl: string | null;
+  contentSample: string | null;
+  networkCluster: AudienceSegment | null;
+  score: number;
+  reason: string;
+  suggestedAction: 'reply' | 'follow' | 'list' | 'quote' | 'study';
+  status: 'new' | 'acted' | 'dismissed';
+  lastSeenAt: string;
+  createdAt: string;
+}
+
+export interface ReplyMiningInsight {
+  id: string;
+  authorHandle: string;
+  theme: string;
+  prompt: string;
+  opportunityScore: number;
+  createdAt: string;
+}
+
+export interface ViralityPostmortem {
+  id: string;
+  agentId: string;
+  tweetId: string;
+  xTweetId: string;
+  content: string;
+  postedAt: string;
+  analyzedAt: string;
+  score: number;
+  performanceSummary: string;
+  winningFactors: string[];
+  misses: string[];
+  nextExperiments: string[];
+  portfolioRole?: PostPortfolioRole | null;
+  mediaExperimentType?: MediaExperimentType | null;
+  targetAudienceSegment?: AudienceSegment | null;
+  promptStrategy?: PromptStrategy | null;
+}
+
 // ─── Engagement types ────────────────────────────────────────────────────────
 
-export type EngagementCandidateSource = 'feed' | 'pasted';
+export type EngagementCandidateSource = 'feed' | 'pasted' | 'trend' | 'relationship' | 'reply_mined';
 export type EngagementActionType = 'like' | 'reply';
 export type EngagementActionStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'aborted';
 export type EngagementSessionState = 'draft' | 'approved' | 'running' | 'succeeded' | 'failed' | 'aborted';
@@ -595,6 +862,9 @@ export interface EngagementCandidate {
   likes: number;
   createdAt: string;
   topic: string | null;
+  networkCluster?: AudienceSegment | null;
+  opportunityType?: 'reply' | 'follow' | 'list' | 'quote' | 'trend';
+  relationshipReason?: string | null;
   score: number;
   scoreReason: string;
 }
@@ -776,6 +1046,17 @@ export interface PersonalizationMemory {
   topicsWithMomentum: string[];
   formatsUnderTested: string[];
   operatorHiddenPreferences: string[];
+  editTransformations: string[];
+  referenceBank?: string[];
+  conversationInsights?: string[];
+  audienceSegmentLessons?: string[];
+  promptStrategyLessons?: string[];
+  networkClusterLessons?: string[];
+  mediaExperimentLessons?: string[];
+  portfolioLessons?: string[];
+  relationshipLessons?: string[];
+  viralityPostmortems?: string[];
+  replyMiningInsights?: string[];
   identityConstraints: string[];
   weeklyChanges: string[];
   updatedAt: string;

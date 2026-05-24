@@ -42,7 +42,11 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const data = await res.json();
       const visibleTweets = Array.isArray(data.queue)
         ? data.queue.filter((tweet: Tweet): tweet is Tweet =>
-            Boolean(tweet) && (tweet.status === 'queued' || tweet.status === 'deleted_from_x'))
+            Boolean(tweet) && (
+              tweet.status === 'queued'
+              || tweet.status === 'deleted_from_x'
+              || (tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId))
+            ))
         : [];
       setQueue(visibleTweets);
       setAgentConnected(data.agent?.isConnected === 1);
@@ -200,7 +204,13 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const res = await fetch(`/api/agents/${agentId}/twitter/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
+        body: JSON.stringify({
+          content: tweet.content,
+          tweetId: tweet.id,
+          replyToId: tweet.type === 'reply'
+            ? (tweet.followupForTweetId || tweet.quoteTweetId || undefined)
+            : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -295,7 +305,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
   };
 
   const queuedTweets = queue.filter((tweet) => tweet.status === 'queued');
-  const activeQueuedTweets = queuedTweets.filter((tweet) => !tweet.quarantinedAt);
+  const followupDrafts = queue.filter((tweet) => tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId));
+  const activeQueuedTweets = [...followupDrafts, ...queuedTweets.filter((tweet) => !tweet.quarantinedAt)];
   const quarantinedTweets = queuedTweets.filter((tweet) => tweet.quarantinedAt);
   const feedbackTweets = queue.filter((tweet) => tweet.status === 'deleted_from_x');
   const scheduleStatus = autopilotSettings

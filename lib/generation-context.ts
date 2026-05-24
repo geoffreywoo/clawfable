@@ -4,6 +4,7 @@ import {
   getFeedback,
   getLearningSignals,
   getLearnings,
+  getMentions,
   getPerformanceHistory,
   getProtocolSettings,
   getRecentNegativeFeedback,
@@ -37,6 +38,9 @@ const DEFAULT_STYLE: ContentStyleConfig = {
     momentumTopic: null,
   },
   banditPolicy: null,
+  mediaExperimentRate: 15,
+  portfolioOptimizerEnabled: true,
+  relationshipQueueEnabled: true,
 };
 
 interface BuildGenerationContextOptions {
@@ -164,6 +168,7 @@ export async function buildGenerationContext(
     signals,
     baseline,
     globalPrior,
+    mentions,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -178,6 +183,7 @@ export async function buildGenerationContext(
     getLearningSignals(agent.id, 200),
     getBaseline(agent.id),
     getGlobalBanditPrior(),
+    getMentions(agent.id).catch(() => []),
   ]);
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
@@ -242,6 +248,7 @@ export async function buildGenerationContext(
     banditPolicy,
     voiceProfile,
     baselineLikes: baseline?.avgLikes || 0,
+    mentions,
   });
 
   if (memory.alwaysDoMoreOfThis.length > 0) {
@@ -254,6 +261,50 @@ export async function buildGenerationContext(
 
   if (memory.operatorHiddenPreferences.length > 0) {
     voiceProfile.communicationStyle += `\n\n## OPERATOR HIDDEN PREFERENCES\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.editTransformations.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## EDIT TRANSFORMATION MEMORY\nThese are before/after lessons from drafts the operator changed before approval. Generate closer to the after-state.\n${memory.editTransformations.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.referenceBank?.length) {
+    voiceProfile.communicationStyle += `\n\n## HIGH-PERFORMING REFERENCE BANK\nUse these as style and substance anchors without copying exact claims.\n${memory.referenceBank.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.conversationInsights?.length) {
+    voiceProfile.communicationStyle += `\n\n## CONVERSATION LEARNING\nThese patterns tend to earn replies. Use them when the draft can add real substance.\n${memory.conversationInsights.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.audienceSegmentLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## AUDIENCE SEGMENT LESSONS\n${memory.audienceSegmentLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.promptStrategyLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## PROMPT STRATEGY LESSONS\n${memory.promptStrategyLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.portfolioLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## POST PORTFOLIO LESSONS\n${memory.portfolioLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.mediaExperimentLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## MEDIA EXPERIMENT LESSONS\n${memory.mediaExperimentLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.networkClusterLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## NETWORK CLUSTER LESSONS\n${memory.networkClusterLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.relationshipLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## RELATIONSHIP LESSONS\n${memory.relationshipLessons.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.viralityPostmortems?.length) {
+    voiceProfile.communicationStyle += `\n\n## VIRALITY POSTMORTEMS\n${memory.viralityPostmortems.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.replyMiningInsights?.length) {
+    voiceProfile.communicationStyle += `\n\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`;
   }
 
   if (memory.identityConstraints.length > 0) {
@@ -287,6 +338,9 @@ export async function buildGenerationContext(
       momentumTopic: memory.topicsWithMomentum[0] || null,
     },
     banditPolicy,
+    mediaExperimentRate: settings.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
+    portfolioOptimizerEnabled: settings.portfolioOptimizerEnabled ?? DEFAULT_STYLE.portfolioOptimizerEnabled,
+    relationshipQueueEnabled: settings.relationshipQueueEnabled ?? DEFAULT_STYLE.relationshipQueueEnabled,
   };
 
   const recentPosts = liveTweets

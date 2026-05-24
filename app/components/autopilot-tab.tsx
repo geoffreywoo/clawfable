@@ -561,35 +561,119 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 </div>
               </div>
               {settings.autoReply && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
-                  <div className="field">
-                    <label>CHECK EVERY</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
-                      value={settings.replyIntervalMins || 30}
-                      disabled={automationLocked}
-                      onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
-                      {[
-                        { v: 10, l: '10 min' },
-                        { v: 30, l: '30 min' },
-                        { v: 60, l: '1 hour' },
-                        { v: 120, l: '2 hours' },
-                        { v: 240, l: '4 hours' },
-                        { v: 480, l: '8 hours' },
-                        { v: 720, l: '12 hours' },
-                      ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-                    </select>
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
+                    <div className="field">
+                      <label>CHECK EVERY</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.replyIntervalMins || 30}
+                        disabled={automationLocked}
+                        onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
+                        {[
+                          { v: 10, l: '10 min' },
+                          { v: 30, l: '30 min' },
+                          { v: 60, l: '1 hour' },
+                          { v: 120, l: '2 hours' },
+                          { v: 240, l: '4 hours' },
+                          { v: 480, l: '8 hours' },
+                          { v: 720, l: '12 hours' },
+                        ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>MAX REPLIES/RUN</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.maxRepliesPerRun || 3}
+                        disabled={automationLocked}
+                        onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
+                        {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label>MAX REPLIES/RUN</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
-                      value={settings.maxRepliesPerRun || 3}
-                      disabled={automationLocked}
-                      onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
-                      {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: '8px', marginTop: '8px' }}>
+                    <div className="field">
+                      <label>REPLY MODE</label>
+                      <button className="btn btn-sm" style={{
+                        width: '100%',
+                        justifyContent: 'center',
+                        background: settings.highValueReplyMode ? 'var(--primary-soft)' : 'var(--surface-2)',
+                        color: settings.highValueReplyMode ? 'var(--primary)' : 'var(--text-muted)',
+                        border: `1px solid ${settings.highValueReplyMode ? 'var(--primary-border)' : 'var(--border)'}`,
+                      }} disabled={automationLocked} onClick={() => handleUpdateSettings({ highValueReplyMode: !settings.highValueReplyMode })}>
+                        {settings.highValueReplyMode ? 'High-value only' : 'All mentions'}
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label>VALUE BAR</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.minReplyValueScore ?? 0.58}
+                        disabled={automationLocked || !settings.highValueReplyMode}
+                        onChange={(e) => handleUpdateSettings({ minReplyValueScore: Number(e.target.value) })}>
+                        {[
+                          { v: 0.5, l: 'Loose' },
+                          { v: 0.58, l: 'Balanced' },
+                          { v: 0.68, l: 'Strict' },
+                          { v: 0.78, l: 'Elite' },
+                        ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
+            </div>
+
+            {/* Growth Loops */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '8px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>GROWTH LOOPS</p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    Balance portfolio roles, surface opportunities, and draft follow-ups from momentum
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                {[
+                  { key: 'portfolioOptimizerEnabled', label: 'Portfolio', on: settings.portfolioOptimizerEnabled !== false },
+                  { key: 'earlyVelocityFollowups', label: 'Follow-ups', on: settings.earlyVelocityFollowups !== false },
+                  { key: 'supervisedTrendDesk', label: 'Trend desk', on: settings.supervisedTrendDesk !== false },
+                  { key: 'relationshipQueueEnabled', label: 'Relationships', on: settings.relationshipQueueEnabled !== false },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    className="btn btn-sm"
+                    style={{
+                      justifyContent: 'center',
+                      background: item.on ? 'var(--primary-soft)' : 'var(--surface-2)',
+                      color: item.on ? 'var(--primary)' : 'var(--text-muted)',
+                      border: `1px solid ${item.on ? 'var(--primary-border)' : 'var(--border)'}`,
+                    }}
+                    disabled={automationLocked}
+                    onClick={() => handleUpdateSettings({ [item.key]: !item.on } as Partial<ProtocolSettings>)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="field" style={{ marginTop: '8px' }}>
+                <label>MEDIA TEST RATE</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '11px', padding: '4px 6px' }}
+                  value={settings.mediaExperimentRate ?? 15}
+                  disabled={automationLocked || settings.portfolioOptimizerEnabled === false}
+                  onChange={(e) => handleUpdateSettings({ mediaExperimentRate: Number(e.target.value) })}
+                >
+                  {[
+                    { v: 0, l: 'Off' },
+                    { v: 10, l: '10%' },
+                    { v: 15, l: '15%' },
+                    { v: 25, l: '25%' },
+                    { v: 35, l: '35%' },
+                    { v: 50, l: '50%' },
+                  ].map((option) => <option key={option.v} value={option.v}>{option.l}</option>)}
+                </select>
+              </div>
             </div>
 
             {/* Marketing Track — only for spokesperson accounts */}

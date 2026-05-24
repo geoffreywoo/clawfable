@@ -15,6 +15,8 @@ interface TweetDecisionPanelProps {
     | 'freshnessScore'
     | 'repetitionRiskScore'
     | 'policyRiskScore'
+    | 'surpriseScore'
+    | 'creativeRiskScore'
     | 'generationMode'
     | 'format'
     | 'topic'
@@ -33,6 +35,15 @@ interface TweetDecisionPanelProps {
     | 'localPriorWeight'
     | 'scoreProvenance'
     | 'rewardBreakdown'
+    | 'creativeLane'
+    | 'mediaExperimentType'
+    | 'mediaBrief'
+    | 'portfolioRole'
+    | 'relationshipTargetHandle'
+    | 'followupForTweetId'
+    | 'trendFitScore'
+    | 'experimentHypothesis'
+    | 'experimentHoldout'
   >;
   snapshot: LearningSnapshot | null;
 }
@@ -73,6 +84,12 @@ function buildSignals(tweet: TweetDecisionPanelProps['tweet'], snapshot: Learnin
   if (tweet.generationMode === 'explore') signals.push({ label: 'Explore bet', tone: 'warning' });
   if ((tweet.candidateScore ?? 0) >= 80) signals.push({ label: 'Top-ranked candidate', tone: 'positive' });
   if ((tweet.predictedEngagementScore ?? 0) >= 0.7) signals.push({ label: 'Above-baseline engagement forecast', tone: 'positive' });
+  if ((tweet.surpriseScore ?? 0) >= 0.65 && (tweet.creativeRiskScore ?? 1) <= 0.45) signals.push({ label: 'High-surprise creative bet', tone: 'warning' });
+  if (tweet.experimentHoldout) signals.push({ label: 'Learning holdout', tone: 'warning' });
+  if (tweet.portfolioRole) signals.push({ label: `${tweet.portfolioRole.replace(/_/g, ' ')} role`, tone: 'neutral' });
+  if (tweet.mediaExperimentType && tweet.mediaExperimentType !== 'text_only') signals.push({ label: `${tweet.mediaExperimentType} media test`, tone: 'warning' });
+  if (tweet.relationshipTargetHandle) signals.push({ label: `Relationship @${tweet.relationshipTargetHandle}`, tone: 'positive' });
+  if (tweet.followupForTweetId) signals.push({ label: 'Velocity follow-up', tone: 'positive' });
   if ((tweet.repetitionRiskScore ?? 1) <= 0.2) signals.push({ label: 'Low repetition risk', tone: 'positive' });
   if ((tweet.policyRiskScore ?? 0) >= 0.35) signals.push({ label: 'Higher posting risk', tone: 'danger' });
 
@@ -157,10 +174,13 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         <div className="decision-explainer">
           <p className="decision-explainer-label">Why this draft</p>
           <p className="decision-explainer-copy">
-            {tweet.rationale || 'This candidate won the current ranking stack after voice, novelty, reward prediction, and risk were combined.'}
+            {tweet.experimentHypothesis || tweet.rationale || 'This candidate won the current ranking stack after voice, novelty, reward prediction, and risk were combined.'}
           </p>
           <div className="decision-explainer-meta">
             <span className="learning-source-chip">PREDICTED {predictedScore !== null ? `${predictedScore}%` : 'N/A'}</span>
+            {tweet.portfolioRole && <span className="learning-source-chip">{tweet.portfolioRole.replace(/_/g, ' ')}</span>}
+            {tweet.mediaExperimentType && tweet.mediaExperimentType !== 'text_only' && <span className="learning-source-chip">{tweet.mediaExperimentType}</span>}
+            {typeof tweet.trendFitScore === 'number' && <span className="learning-source-chip">TREND FIT {Math.round(tweet.trendFitScore * 100)}%</span>}
             {actualScore !== null && <span className="learning-source-chip">ACTUAL {actualScore}%</span>}
             {insight?.learningDelta !== null && insight?.learningDelta !== undefined && (
               <span className={`learning-source-chip ${toneClass(insight.learningDelta >= 0 ? 'positive' : 'danger')}`}>
@@ -192,21 +212,35 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         </div>
 
         <div className="decision-explainer">
-          <p className="decision-explainer-label">Predicted vs actual</p>
-          <div className="decision-outcome-grid">
-            <div className="decision-outcome-card">
-              <span className="decision-outcome-label">Predicted</span>
-              <strong>{insight?.predictedLabel || 'No prediction yet'}</strong>
-            </div>
-            <div className="decision-outcome-card">
-              <span className="decision-outcome-label">Actual</span>
-              <strong>{insight?.actualLabel || 'Waiting for result'}</strong>
-            </div>
-          </div>
-          <p className="decision-explainer-copy">
-            {insight?.learned || 'When approval and live performance arrive, this panel will show how the prediction compared with reality.'}
-          </p>
+          {tweet.mediaBrief ? (
+            <>
+              <p className="decision-explainer-label">Media brief</p>
+              <p className="decision-explainer-copy">{tweet.mediaBrief}</p>
+            </>
+          ) : (
+            <>
+              <p className="decision-explainer-label">Predicted vs actual</p>
+              <div className="decision-outcome-grid">
+                <div className="decision-outcome-card">
+                  <span className="decision-outcome-label">Predicted</span>
+                  <strong>{insight?.predictedLabel || 'No prediction yet'}</strong>
+                </div>
+                <div className="decision-outcome-card">
+                  <span className="decision-outcome-label">Actual</span>
+                  <strong>{insight?.actualLabel || 'Waiting for result'}</strong>
+                </div>
+              </div>
+              <p className="decision-explainer-copy">
+                {insight?.learned || 'When approval and live performance arrive, this panel will show how the prediction compared with reality.'}
+              </p>
+            </>
+          )}
         </div>
+      </div>
+
+      <div className="decision-score-grid">
+        <ScoreRow label="Surprise" value={tweet.surpriseScore} />
+        <ScoreRow label="Creative risk" value={tweet.creativeRiskScore} invert />
       </div>
 
       <div className="decision-insight-grid">

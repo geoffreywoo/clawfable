@@ -139,6 +139,7 @@ describe('generation route wiring', () => {
         topicsWithMomentum: ['AI'],
         formatsUnderTested: ['question needs more data'],
         operatorHiddenPreferences: ['Question hooks show up in edits'],
+        editTransformations: [],
         identityConstraints: ['Never be cringe'],
         weeklyChanges: ['Approval rate improved this week'],
         updatedAt: new Date().toISOString(),

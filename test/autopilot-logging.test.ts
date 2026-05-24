@@ -479,6 +479,64 @@ describe('autopilot remote debug logging', () => {
     expect(failureEntry.reason).toContain('author=@alice');
   });
 
+  it('filters auto-replies to high-value mentions when high-value mode is enabled', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+      highValueReplyMode: true,
+      minReplyValueScore: 0.58,
+    });
+    mocks.getMentionsFromTwitter.mockResolvedValue([
+      {
+        id: 'mention-low',
+        text: 'nice',
+        authorId: 'user-low',
+        authorName: 'Low Signal',
+        authorUsername: 'low',
+        createdAt: '2026-04-07T12:00:00.000Z',
+        conversationId: 'conv-low',
+        inReplyToTweetId: null,
+      },
+      {
+        id: 'mention-high',
+        text: 'What eval would you run before letting an AI agent touch production workflows?',
+        authorId: 'user-high',
+        authorName: 'Builder',
+        authorUsername: 'builder',
+        createdAt: '2026-04-07T12:05:00.000Z',
+        conversationId: 'conv-high',
+        inReplyToTweetId: null,
+      },
+    ]);
+    mocks.replyToTweet.mockResolvedValue({ tweetId: 'reply-x-1', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('replied');
+    expect(result.repliesSent).toBe(1);
+    expect(mocks.replyToTweet).toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-high');
+    expect(mocks.replyToTweet).not.toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-low');
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: 'mention-high',
+        format: 'auto_reply_high_value',
+        reason: expect.stringContaining('Value'),
+      }),
+    );
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        signalType: 'reply_posted',
+        metadata: expect.objectContaining({
+          highValueReplyMode: true,
+          targetMentionId: 'mention-high',
+        }),
+      }),
+    );
+  });
+
   it('repairs incomplete queued drafts before they can post', async () => {
     mocks.getQueuedTweets.mockResolvedValue([
       {

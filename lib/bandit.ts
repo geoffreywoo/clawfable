@@ -76,6 +76,7 @@ export interface BanditPolicy {
 export interface BanditSlotPlan {
   slot: number;
   mode: 'exploit' | 'explore';
+  holdout: boolean;
   sourceLane: ContentSourceLane;
   styleMode: ContentStyleMode;
   format: string;
@@ -681,6 +682,17 @@ function buildModeSequence(count: number, exploreCount: number): Array<'exploit'
   return modes;
 }
 
+function buildHoldoutSlots(count: number, exploreCount: number): Set<number> {
+  if (count < 8 || exploreCount <= 0) return new Set();
+  const holdoutCount = Math.max(1, Math.round(count * 0.12));
+  const slots = new Set<number>();
+  const step = count / holdoutCount;
+  for (let index = 0; index < holdoutCount; index++) {
+    slots.add(Math.min(count, Math.max(1, Math.round((index + 0.75) * step))));
+  }
+  return slots;
+}
+
 export function buildBanditSlotPlan(
   policy: BanditPolicy | null | undefined,
   {
@@ -695,6 +707,7 @@ export function buildBanditSlotPlan(
 
   const exploreCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const modes = buildModeSequence(count, exploreCount);
+  const holdoutSlots = buildHoldoutSlots(count, exploreCount);
   const exploit = {
     format: sortExploit(policy.formatArms),
     topic: sortExploit(policy.topicArms),
@@ -732,7 +745,8 @@ export function buildBanditSlotPlan(
 
   for (let slot = 0; slot < count; slot++) {
     const sourceSlot = sourcePlan?.slots[slot] || null;
-    const mode = sourceSlot?.mode || modes[slot];
+    const holdout = holdoutSlots.has(slot + 1);
+    const mode = holdout ? 'explore' : (sourceSlot?.mode || modes[slot]);
     const styleMode = shitpoastSlots.has(slot + 1) ? SHITPOAST_STYLE_MODE : STANDARD_STYLE_MODE;
     const familyRankings = mode === 'explore' ? explore : exploit;
     const preferredTopic = sourceSlot?.targetTopic || (biasIndex < normalizedBiasTopics.length ? normalizedBiasTopics[biasIndex] : null);
@@ -825,6 +839,7 @@ export function buildBanditSlotPlan(
     plans.push({
       slot: slot + 1,
       mode,
+      holdout,
       sourceLane,
       styleMode,
       format: format.arm,
@@ -837,7 +852,9 @@ export function buildBanditSlotPlan(
       coverageCluster: `${topic.arm.toLowerCase()}:${selectedHook.arm.toLowerCase()}:${selectedStructure.arm.toLowerCase()}`,
       trendTopicId: sourceSlot?.trendTopicId || null,
       trendHeadline: sourceSlot?.trendHeadline || null,
-      rationale: styleRationale,
+      rationale: holdout
+        ? `${styleRationale} Holdout: deliberately preserve this under-tested creative bet so the policy can learn instead of only exploiting today's winners.`
+        : styleRationale,
     });
   }
 

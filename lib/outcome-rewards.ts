@@ -7,6 +7,7 @@ import type {
   TweetPerformance,
 } from './types';
 import { extractCandidateFeatureTags } from './tweet-features';
+import { computeActionRewards } from './virality-signals';
 
 export interface EditDeltaSummary {
   summary: string;
@@ -34,6 +35,30 @@ function readNumber(value: unknown): number | null {
 
 function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
   return entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+}
+
+function sameUtcHour(left: string, right: string): boolean {
+  const leftDate = new Date(left);
+  const rightDate = new Date(right);
+  if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) return false;
+  return leftDate.getUTCHours() === rightDate.getUTCHours();
+}
+
+function average(values: number[]): number {
+  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function cohortAverage(
+  performance: TweetPerformance,
+  history: TweetPerformance[],
+  predicate: (entry: TweetPerformance) => boolean,
+): number | null {
+  const cohort = history
+    .filter((entry) => entry.xTweetId !== performance.xTweetId && predicate(entry))
+    .slice(0, 30)
+    .map(weightedEngagement);
+  if (cohort.length < 3) return null;
+  return Math.max(1, average(cohort));
 }
 
 function classifyLengthDirection(original: string, edited: string): 'shorter' | 'longer' | null {
@@ -193,13 +218,56 @@ function latencyReward(signal: LearningSignal): number {
 export function computePerformanceLiftReward(
   performance: TweetPerformance | undefined,
   baseline?: { avgLikes: number; avgRetweets: number } | null,
+  history: TweetPerformance[] = [],
 ): number {
   if (!performance) return 0;
-  const baselineScore = baseline
+  const accountBaseline = baseline
     ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2))
     : 12;
-  const lift = (weightedEngagement(performance) - baselineScore) / baselineScore;
-  return round(clamp(lift * 0.55, -0.6, 0.8));
+  const topicBaseline = cohortAverage(
+    performance,
+    history,
+    (entry) => entry.topic.toLowerCase() === performance.topic.toLowerCase(),
+  );
+  const formatBaseline = cohortAverage(
+    performance,
+    history,
+    (entry) => entry.format.toLowerCase() === performance.format.toLowerCase(),
+  );
+  const sourceBaseline = cohortAverage(
+    performance,
+    history,
+    (entry) => entry.source === performance.source,
+  );
+  const hourBaseline = cohortAverage(
+    performance,
+    history,
+    (entry) => sameUtcHour(entry.postedAt, performance.postedAt),
+  );
+  const availableBaselines = [topicBaseline, formatBaseline, sourceBaseline, hourBaseline]
+    .filter((value): value is number => typeof value === 'number');
+  const contextualBaseline = availableBaselines.length > 0
+    ? (accountBaseline * 0.4) + (average(availableBaselines) * 0.6)
+    : accountBaseline;
+  const engagement = weightedEngagement(performance);
+  const engagementLift = (engagement - contextualBaseline) / Math.max(1, contextualBaseline);
+
+  const cohortRates = history
+    .filter((entry) => entry.xTweetId !== performance.xTweetId && entry.impressions > 0)
+    .slice(0, 50)
+    .map((entry) => entry.engagementRate);
+  const rateBaseline = cohortRates.length >= 5 ? average(cohortRates) : null;
+  const rateLift = rateBaseline && performance.impressions > 0
+    ? (performance.engagementRate - rateBaseline) / Math.max(0.1, rateBaseline)
+    : 0;
+  const replyShare = performance.replies / Math.max(1, performance.likes + performance.retweets + performance.replies);
+  const replyBonus = Math.min(0.16, replyShare * 0.45);
+  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.1 ? 0.06 : 0;
+  const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
+    ? Math.min(0.08, replyBonus)
+    : 0;
+
+  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus, -0.6, 0.8));
 }
 
 function addBreakdown(target: RewardBreakdown, delta: Partial<RewardBreakdown>) {
@@ -218,12 +286,14 @@ export function buildOutcomeEpisode({
   tweet,
   signals,
   performance,
+  performanceHistory = [],
   baseline,
 }: {
   agentId: string;
   tweet: Tweet;
   signals: LearningSignal[];
   performance?: TweetPerformance;
+  performanceHistory?: TweetPerformance[];
   baseline?: { avgLikes: number; avgRetweets: number } | null;
 }): OutcomeEpisode {
   const breakdown: RewardBreakdown = {
@@ -250,10 +320,14 @@ export function buildOutcomeEpisode({
     if (typeof signal.metadata?.preferenceHint === 'string') breakdown.notes.push(String(signal.metadata.preferenceHint));
   }
 
-  const performanceLift = computePerformanceLiftReward(performance, baseline);
+  const performanceLift = computePerformanceLiftReward(performance, baseline, performanceHistory);
   if (performanceLift !== 0) {
     breakdown.engagementLift += performanceLift;
     breakdown.notes.push(`Performance lift ${performanceLift >= 0 ? '+' : ''}${Math.round(performanceLift * 100)} vs baseline.`);
+  }
+  if (performance) {
+    breakdown.actionRewards = performance.actionRewards || computeActionRewards(performance, baseline);
+    breakdown.notes.push(`Action reward ${breakdown.actionRewards.total >= 0 ? '+' : ''}${Math.round(breakdown.actionRewards.total * 100)} from likes, replies, reposts, impressions, and rate.`);
   }
 
   breakdown.immediateTotal = round(clamp(
@@ -265,7 +339,7 @@ export function buildOutcomeEpisode({
     breakdown.replyOutcome +
     breakdown.timeToApproval
   ));
-  breakdown.delayedTotal = round(clamp(breakdown.engagementLift));
+  breakdown.delayedTotal = round(clamp(breakdown.engagementLift + ((breakdown.actionRewards?.total || 0) * 0.35)));
   breakdown.total = round(clamp(breakdown.immediateTotal + breakdown.delayedTotal));
   breakdown.notes = [...new Set(breakdown.notes)].slice(0, 8);
 
@@ -322,6 +396,7 @@ export function buildOutcomeEpisodes({
       tweet,
       signals: signalsByTweetId.get(String(tweet.id)) || [],
       performance: performanceByTweetId.get(String(tweet.id)),
+      performanceHistory,
       baseline,
     }))
     .filter((episode) => episode.signals.length > 0 || episode.reward.engagementLift !== 0);

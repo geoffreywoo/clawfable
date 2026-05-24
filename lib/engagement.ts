@@ -1,7 +1,17 @@
 import { parseSoulMd } from './soul-parser';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import { decodeKeys, fetchTweetById, fetchTweetByIdApp } from './twitter-client';
-import { getTrendingCache, listEngagementSessions, setTrendingCache } from './kv-storage';
+import {
+  getLearnings,
+  getProtocolSettings,
+  getRelationshipOpportunities,
+  getTrendingCache,
+  listEngagementSessions,
+  saveTrendOpportunities,
+  setTrendingCache,
+} from './kv-storage';
+import { enrichTrendingTopics } from './source-planner';
+import { buildTrendOpportunities } from './growth-engine';
 import type {
   Agent,
   EngagementAction,
@@ -172,9 +182,9 @@ function candidateFromTrendingTopic(agentId: string, topic: TrendingTopic): Omit
   if (!topic.topTweet) return null;
 
   return {
-    id: `feed:${topic.topTweet.id}`,
+    id: `trend:${topic.topTweet.id}`,
     agentId,
-    source: 'feed',
+    source: 'trend',
     tweetId: topic.topTweet.id,
     tweetUrl: buildNormalizedTweetUrl(topic.topTweet.author, topic.topTweet.id),
     authorId: null,
@@ -184,6 +194,31 @@ function candidateFromTrendingTopic(agentId: string, topic: TrendingTopic): Omit
     likes: topic.topTweet.likes,
     createdAt: topic.timestamp,
     topic: topic.category || null,
+    opportunityType: 'trend',
+    networkCluster: null,
+    relationshipReason: null,
+  };
+}
+
+function candidateFromRelationshipOpportunity(agentId: string, opportunity: Awaited<ReturnType<typeof getRelationshipOpportunities>>[number]): Omit<EngagementCandidate, 'score' | 'scoreReason'> | null {
+  if (!opportunity.tweetId || !opportunity.tweetUrl || !opportunity.contentSample) return null;
+
+  return {
+    id: `relationship:${opportunity.tweetId}`,
+    agentId,
+    source: 'relationship',
+    tweetId: opportunity.tweetId,
+    tweetUrl: opportunity.tweetUrl,
+    authorId: null,
+    authorHandle: opportunity.handle,
+    authorName: opportunity.name,
+    text: normalizeText(opportunity.contentSample),
+    likes: 0,
+    createdAt: opportunity.lastSeenAt,
+    topic: opportunity.networkCluster || null,
+    networkCluster: opportunity.networkCluster,
+    opportunityType: 'reply',
+    relationshipReason: opportunity.reason,
   };
 }
 
@@ -235,14 +270,38 @@ async function getRecentEngagedTweetIds(agentId: string): Promise<Set<string>> {
 }
 
 export async function buildEngagementFeed(agent: Agent): Promise<EngagementCandidate[]> {
-  const topics = await loadTrendingTopics(agent);
-  if (topics.length === 0) return [];
+  const [topics, relationshipOpportunities, learnings, settings] = await Promise.all([
+    loadTrendingTopics(agent),
+    getRelationshipOpportunities(agent.id, 12).catch(() => []),
+    getLearnings(agent.id).catch(() => null),
+    getProtocolSettings(agent.id).catch(() => null),
+  ]);
 
   const soulTopics = parseSoulMd(agent.name, agent.soulMd).topics;
   const recentTargets = await getRecentEngagedTweetIds(agent.id);
-  const candidates = topics
+  if (settings?.supervisedTrendDesk !== false && topics.length > 0) {
+    const enriched = enrichTrendingTopics(
+      topics,
+      parseSoulMd(agent.name, agent.soulMd),
+      learnings,
+      settings?.trendTolerance || 'moderate',
+    );
+    const opportunities = buildTrendOpportunities(agent.id, enriched);
+    if (opportunities.length > 0) {
+      await saveTrendOpportunities(agent.id, opportunities).catch(() => null);
+    }
+  }
+
+  const trendCandidates = topics
     .map((topic) => candidateFromTrendingTopic(agent.id, topic))
     .filter((candidate): candidate is Omit<EngagementCandidate, 'score' | 'scoreReason'> => candidate !== null);
+  const relationshipCandidates = settings?.relationshipQueueEnabled === false
+    ? []
+    : relationshipOpportunities
+        .map((opportunity) => candidateFromRelationshipOpportunity(agent.id, opportunity))
+        .filter((candidate): candidate is Omit<EngagementCandidate, 'score' | 'scoreReason'> => candidate !== null);
+  const candidates = [...relationshipCandidates, ...trendCandidates];
+  if (candidates.length === 0) return [];
 
   return rankEngagementCandidates(candidates, soulTopics, recentTargets).slice(0, TRENDING_FEED_LIMIT);
 }

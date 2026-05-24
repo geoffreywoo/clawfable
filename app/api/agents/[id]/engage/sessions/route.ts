@@ -33,7 +33,9 @@ function normalizeCandidate(candidate: Partial<EngagementCandidate> | null | und
   return {
     id: String(candidate.id || `${candidate.source || 'feed'}:${candidate.tweetId}`),
     agentId: String(candidate.agentId),
-    source: candidate.source === 'pasted' ? 'pasted' : 'feed',
+    source: ['pasted', 'trend', 'relationship', 'reply_mined'].includes(String(candidate.source))
+      ? candidate.source as EngagementCandidate['source']
+      : 'feed',
     tweetId: String(candidate.tweetId),
     tweetUrl: candidate.tweetUrl,
     authorId: candidate.authorId ? String(candidate.authorId) : null,
@@ -43,6 +45,9 @@ function normalizeCandidate(candidate: Partial<EngagementCandidate> | null | und
     likes: Number(candidate.likes || 0),
     createdAt: candidate.createdAt,
     topic: typeof candidate.topic === 'string' ? candidate.topic : null,
+    networkCluster: candidate.networkCluster ?? null,
+    opportunityType: candidate.opportunityType,
+    relationshipReason: candidate.relationshipReason ?? null,
     score: Number(candidate.score || 0),
     scoreReason: typeof candidate.scoreReason === 'string' ? candidate.scoreReason : '',
   };

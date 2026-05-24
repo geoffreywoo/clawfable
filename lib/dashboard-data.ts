@@ -166,8 +166,14 @@ export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
     && !tweet.deletionReason
     && new Date(tweet.postedAt || tweet.createdAt).getTime() > sevenDaysAgo
   );
+  const followupDrafts = allTweets.filter((tweet) =>
+    tweet.status === 'draft'
+    && tweet.type === 'reply'
+    && Boolean(tweet.followupForTweetId)
+    && new Date(tweet.createdAt).getTime() > sevenDaysAgo
+  );
 
-  return [...deletedFromX, ...queued];
+  return [...followupDrafts, ...deletedFromX, ...queued];
 }
 
 export async function getProtocolSnapshot(user: User, agentOrId: Agent | string): Promise<ProtocolSnapshot> {

@@ -1,6 +1,7 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem } from './types';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
+import { computeActionRewards, computeEarlyVelocityScore } from './virality-signals';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev).
@@ -364,7 +365,12 @@ const KEYS = {
   agentProtocol: (id: string) => `agent:${id}:protocol`,
   agentPostLog: (id: string) => `agent:${id}:postlog`,
   agentPerformance: (id: string) => `agent:${id}:performance`,
+  agentExperiments: (id: string) => `agent:${id}:experiments`,
+  draftExperiment: (id: string) => `experiment:${id}`,
   agentLearnings: (id: string) => `agent:${id}:learnings`,
+  agentTrendOpportunities: (id: string) => `agent:${id}:trend_opportunities`,
+  agentRelationshipOpportunities: (id: string) => `agent:${id}:relationship_opportunities`,
+  agentViralityPostmortems: (id: string) => `agent:${id}:virality_postmortems`,
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
   agentEngagementSessions: (id: string) => `agent:${id}:engage_sessions`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
@@ -625,6 +631,12 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentPostLog(id));
   await kvDel(KEYS.agentLearnings(id));
   await kvDel(KEYS.agentPerformance(id));
+  await kvDel(KEYS.agentTrendOpportunities(id));
+  await kvDel(KEYS.agentRelationshipOpportunities(id));
+  await kvDel(KEYS.agentViralityPostmortems(id));
+  const experimentIds = await kvLrange(KEYS.agentExperiments(id), 0, -1);
+  await Promise.all(experimentIds.map((experimentId) => kvDel(KEYS.draftExperiment(String(experimentId)))));
+  await kvDel(KEYS.agentExperiments(id));
   await kvDel(KEYS.agentBaseline(id));
   const engagementSessionIds = await kvLrange(KEYS.agentEngagementSessions(id), 0, -1);
   await Promise.all(engagementSessionIds.map((sessionId) => kvDel(KEYS.engagementSession(String(sessionId)))));
@@ -704,6 +716,16 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     }
     return null;
   };
+  const coerceNullableBoolean = (value: unknown): boolean | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    }
+    return null;
+  };
 
   return {
     ...tweet,
@@ -723,6 +745,10 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     freshnessScore: coerceNullableNumber(tweet.freshnessScore),
     repetitionRiskScore: coerceNullableNumber(tweet.repetitionRiskScore),
     policyRiskScore: coerceNullableNumber(tweet.policyRiskScore),
+    surpriseScore: coerceNullableNumber(tweet.surpriseScore),
+    creativeRiskScore: coerceNullableNumber(tweet.creativeRiskScore),
+    slopScore: coerceNullableNumber(tweet.slopScore),
+    replyBaitScore: coerceNullableNumber(tweet.replyBaitScore),
     hookType: tweet.hookType ?? null,
     toneType: tweet.toneType ?? null,
     specificityType: tweet.specificityType ?? null,
@@ -741,6 +767,24 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     rewardBreakdown: coerceNullableJson(tweet.rewardBreakdown),
     sourceLane: tweet.sourceLane ?? null,
     styleMode: tweet.styleMode === 'shitpoast' ? 'shitpoast' : 'standard',
+    creativeLane: tweet.creativeLane ?? null,
+    targetAudienceSegment: tweet.targetAudienceSegment ?? null,
+    segmentHypothesis: tweet.segmentHypothesis ?? null,
+    promptStrategy: tweet.promptStrategy ?? null,
+    mediaExperimentType: tweet.mediaExperimentType ?? null,
+    mediaBrief: tweet.mediaBrief ?? null,
+    portfolioRole: tweet.portfolioRole ?? null,
+    relationshipTargetHandle: tweet.relationshipTargetHandle ?? null,
+    followupForTweetId: tweet.followupForTweetId ?? null,
+    followupTrigger: tweet.followupTrigger ?? null,
+    trendFitScore: coerceNullableNumber(tweet.trendFitScore),
+    criticScores: coerceNullableJson(tweet.criticScores),
+    actionRewardPrediction: coerceNullableJson(tweet.actionRewardPrediction),
+    draftExperimentId: tweet.draftExperimentId ?? null,
+    experimentBatchId: tweet.experimentBatchId ?? null,
+    experimentHypothesis: tweet.experimentHypothesis ?? null,
+    experimentHoldout: coerceNullableBoolean(tweet.experimentHoldout),
+    promptVariant: tweet.promptVariant ?? null,
     trendTopicId: tweet.trendTopicId ?? null,
     trendHeadline: tweet.trendHeadline ?? null,
     quarantineReason: tweet.quarantineReason ?? null,
@@ -755,6 +799,8 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
     judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
     rewardBreakdown: tweet.rewardBreakdown ? JSON.stringify(tweet.rewardBreakdown) : null,
+    criticScores: tweet.criticScores ? JSON.stringify(tweet.criticScores) : null,
+    actionRewardPrediction: tweet.actionRewardPrediction ? JSON.stringify(tweet.actionRewardPrediction) : null,
   };
 }
 
@@ -827,6 +873,10 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     freshnessScore: data.freshnessScore ?? null,
     repetitionRiskScore: data.repetitionRiskScore ?? null,
     policyRiskScore: data.policyRiskScore ?? null,
+    surpriseScore: data.surpriseScore ?? null,
+    creativeRiskScore: data.creativeRiskScore ?? null,
+    slopScore: data.slopScore ?? null,
+    replyBaitScore: data.replyBaitScore ?? null,
     hookType: data.hookType ?? null,
     toneType: data.toneType ?? null,
     specificityType: data.specificityType ?? null,
@@ -845,6 +895,24 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     rewardBreakdown: data.rewardBreakdown ?? null,
     sourceLane: data.sourceLane ?? null,
     styleMode: data.styleMode ?? 'standard',
+    creativeLane: data.creativeLane ?? null,
+    targetAudienceSegment: data.targetAudienceSegment ?? null,
+    segmentHypothesis: data.segmentHypothesis ?? null,
+    promptStrategy: data.promptStrategy ?? null,
+    mediaExperimentType: data.mediaExperimentType ?? null,
+    mediaBrief: data.mediaBrief ?? null,
+    portfolioRole: data.portfolioRole ?? null,
+    relationshipTargetHandle: data.relationshipTargetHandle ?? null,
+    followupForTweetId: data.followupForTweetId ?? null,
+    followupTrigger: data.followupTrigger ?? null,
+    trendFitScore: data.trendFitScore ?? null,
+    criticScores: data.criticScores ?? null,
+    actionRewardPrediction: data.actionRewardPrediction ?? null,
+    draftExperimentId: data.draftExperimentId ?? null,
+    experimentBatchId: data.experimentBatchId ?? null,
+    experimentHypothesis: data.experimentHypothesis ?? null,
+    experimentHoldout: data.experimentHoldout ?? null,
+    promptVariant: data.promptVariant ?? null,
     trendTopicId: data.trendTopicId ?? null,
     trendHeadline: data.trendHeadline ?? null,
     quarantineReason: data.quarantineReason ?? null,
@@ -855,6 +923,48 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
   await kvLpush(KEYS.agentTweets(data.agentId), id);
   if (tweet.status === 'queued') {
     await kvLpush(KEYS.agentQueue(data.agentId), id);
+  }
+  if (tweet.draftExperimentId) {
+    await createDraftExperiment(data.agentId, {
+      id: tweet.draftExperimentId,
+      tweetId: tweet.id,
+      xTweetId: tweet.xTweetId,
+      batchId: tweet.experimentBatchId ?? null,
+      slot: null,
+      creativeLane: tweet.creativeLane || 'operator_take',
+      sourceLane: tweet.sourceLane ?? null,
+      styleMode: tweet.styleMode ?? 'standard',
+      generationMode: tweet.generationMode ?? 'balanced',
+      format: tweet.format,
+      topic: tweet.topic,
+      hook: tweet.hookType ?? null,
+      tone: tweet.toneType ?? null,
+      specificity: tweet.specificityType ?? null,
+      structure: tweet.structureType ?? null,
+      coverageCluster: tweet.coverageCluster ?? null,
+      hypothesis: tweet.experimentHypothesis || tweet.rationale || 'Test whether this draft earns approval and engagement.',
+      promptVariant: tweet.promptVariant || 'default',
+      holdout: tweet.experimentHoldout === true,
+      predictedReward: tweet.rewardPrediction ?? null,
+      predictedConfidence: tweet.confidenceScore ?? null,
+      candidateScore: tweet.candidateScore ?? null,
+      voiceScore: tweet.voiceScore ?? null,
+      noveltyScore: tweet.noveltyScore ?? null,
+      surpriseScore: tweet.surpriseScore ?? null,
+      creativeRiskScore: tweet.creativeRiskScore ?? null,
+      slopScore: tweet.slopScore ?? null,
+      replyBaitScore: tweet.replyBaitScore ?? null,
+      policyRiskScore: tweet.policyRiskScore ?? null,
+      targetAudienceSegment: tweet.targetAudienceSegment ?? null,
+      segmentHypothesis: tweet.segmentHypothesis ?? null,
+      promptStrategy: tweet.promptStrategy ?? null,
+      mediaExperimentType: tweet.mediaExperimentType ?? null,
+      mediaBrief: tweet.mediaBrief ?? null,
+      portfolioRole: tweet.portfolioRole ?? null,
+      relationshipTargetHandle: tweet.relationshipTargetHandle ?? null,
+      criticScores: tweet.criticScores ?? null,
+      actionRewardPrediction: tweet.actionRewardPrediction ?? null,
+    });
   }
   return tweet;
 }
@@ -1011,6 +1121,13 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   activeHoursEnd: 0,
   minQueueSize: 5,
   autoReply: false,
+  highValueReplyMode: false,
+  minReplyValueScore: 0.58,
+  earlyVelocityFollowups: true,
+  supervisedTrendDesk: true,
+  relationshipQueueEnabled: true,
+  portfolioOptimizerEnabled: true,
+  mediaExperimentRate: 15,
   maxRepliesPerRun: 3,
   replyIntervalMins: 30,
   lastPostedAt: null,
@@ -1133,10 +1250,240 @@ export async function getCronLog(limit = 30): Promise<CronLogEntry[]> {
   return raw.map((s) => parseListEntry<CronLogEntry>(s)).filter((e): e is CronLogEntry => e !== null);
 }
 
+// ─── Draft experiment ledger ─────────────────────────────────────────────────
+
+function normalizeDraftExperiment(experiment: DraftExperiment): DraftExperiment {
+  const numberOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+  const booleanOrFalse = (value: unknown): boolean => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') return value === 'true';
+    return false;
+  };
+  const jsonArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.map(String);
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(String) : [value];
+      } catch {
+        return [value];
+      }
+    }
+    return [];
+  };
+  const jsonObject = <T>(value: unknown): T | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'object') return value as T;
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  return {
+    ...experiment,
+    id: String(experiment.id),
+    agentId: String(experiment.agentId),
+    tweetId: experiment.tweetId ? String(experiment.tweetId) : null,
+    xTweetId: experiment.xTweetId ? String(experiment.xTweetId) : null,
+    batchId: experiment.batchId ? String(experiment.batchId) : null,
+    slot: numberOrNull(experiment.slot),
+    status: experiment.status || 'generated',
+    creativeLane: experiment.creativeLane || 'operator_take',
+    sourceLane: experiment.sourceLane ?? null,
+    styleMode: experiment.styleMode === 'shitpoast' ? 'shitpoast' : 'standard',
+    generationMode: experiment.generationMode || 'balanced',
+    format: experiment.format ?? null,
+    topic: experiment.topic ?? null,
+    hook: experiment.hook ?? null,
+    tone: experiment.tone ?? null,
+    specificity: experiment.specificity ?? null,
+    structure: experiment.structure ?? null,
+    coverageCluster: experiment.coverageCluster ?? null,
+    hypothesis: experiment.hypothesis || 'Test whether this draft earns approval and engagement.',
+    promptVariant: experiment.promptVariant || 'default',
+    holdout: booleanOrFalse(experiment.holdout),
+    predictedReward: numberOrNull(experiment.predictedReward),
+    predictedConfidence: numberOrNull(experiment.predictedConfidence),
+    candidateScore: numberOrNull(experiment.candidateScore),
+    voiceScore: numberOrNull(experiment.voiceScore),
+    noveltyScore: numberOrNull(experiment.noveltyScore),
+    surpriseScore: numberOrNull(experiment.surpriseScore),
+    creativeRiskScore: numberOrNull(experiment.creativeRiskScore),
+    slopScore: numberOrNull(experiment.slopScore),
+    replyBaitScore: numberOrNull(experiment.replyBaitScore),
+    policyRiskScore: numberOrNull(experiment.policyRiskScore),
+    targetAudienceSegment: experiment.targetAudienceSegment ?? null,
+    segmentHypothesis: experiment.segmentHypothesis ?? null,
+    promptStrategy: experiment.promptStrategy ?? null,
+    mediaExperimentType: experiment.mediaExperimentType ?? null,
+    mediaBrief: experiment.mediaBrief ?? null,
+    portfolioRole: experiment.portfolioRole ?? null,
+    relationshipTargetHandle: experiment.relationshipTargetHandle ?? null,
+    criticScores: jsonObject(experiment.criticScores),
+    actionRewardPrediction: jsonObject(experiment.actionRewardPrediction),
+    immediateReward: numberOrNull(experiment.immediateReward),
+    finalReward: numberOrNull(experiment.finalReward),
+    totalReward: numberOrNull(experiment.totalReward),
+    actionRewards: jsonObject(experiment.actionRewards),
+    earlyVelocityScore: numberOrNull(experiment.earlyVelocityScore),
+    actualEngagement: numberOrNull(experiment.actualEngagement),
+    engagementRate: numberOrNull(experiment.engagementRate),
+    performanceLift: numberOrNull(experiment.performanceLift),
+    lastSignalType: experiment.lastSignalType ?? null,
+    outcomeNotes: jsonArray(experiment.outcomeNotes),
+    createdAt: experiment.createdAt || new Date().toISOString(),
+    updatedAt: experiment.updatedAt || new Date().toISOString(),
+    completedAt: experiment.completedAt ?? null,
+  };
+}
+
+function serializeDraftExperiment(experiment: DraftExperiment): Record<string, unknown> {
+  return {
+    ...experiment,
+    outcomeNotes: JSON.stringify(experiment.outcomeNotes || []),
+    criticScores: experiment.criticScores ? JSON.stringify(experiment.criticScores) : null,
+    actionRewardPrediction: experiment.actionRewardPrediction ? JSON.stringify(experiment.actionRewardPrediction) : null,
+    actionRewards: experiment.actionRewards ? JSON.stringify(experiment.actionRewards) : null,
+  };
+}
+
+export async function createDraftExperiment(
+  agentId: string,
+  data: Omit<DraftExperiment, 'agentId' | 'createdAt' | 'updatedAt' | 'completedAt' | 'status' | 'immediateReward' | 'finalReward' | 'totalReward' | 'actionRewards' | 'earlyVelocityScore' | 'actualEngagement' | 'engagementRate' | 'performanceLift' | 'lastSignalType' | 'outcomeNotes'> & Partial<Pick<DraftExperiment, 'status' | 'immediateReward' | 'finalReward' | 'totalReward' | 'actionRewards' | 'earlyVelocityScore' | 'actualEngagement' | 'engagementRate' | 'performanceLift' | 'lastSignalType' | 'outcomeNotes' | 'completedAt'>>
+): Promise<DraftExperiment> {
+  const now = new Date().toISOString();
+  const experiment = normalizeDraftExperiment({
+    agentId,
+    status: 'generated',
+    immediateReward: null,
+    finalReward: null,
+    totalReward: null,
+    actionRewards: null,
+    earlyVelocityScore: null,
+    actualEngagement: null,
+    engagementRate: null,
+    performanceLift: null,
+    lastSignalType: null,
+    outcomeNotes: [],
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...data,
+  } as DraftExperiment);
+
+  await kvHset(KEYS.draftExperiment(experiment.id), serializeDraftExperiment(experiment));
+  await kvLpush(KEYS.agentExperiments(agentId), experiment.id);
+  return experiment;
+}
+
+export async function getDraftExperiment(id: string): Promise<DraftExperiment | null> {
+  const experiment = await kvHgetall<DraftExperiment>(KEYS.draftExperiment(String(id)));
+  return experiment ? normalizeDraftExperiment(experiment) : null;
+}
+
+export async function getDraftExperiments(agentId: string, limit = 100): Promise<DraftExperiment[]> {
+  const ids = await kvLrange(KEYS.agentExperiments(agentId), 0, limit - 1);
+  const experiments = await Promise.all(ids.map((id) => getDraftExperiment(String(id))));
+  return experiments.filter((experiment): experiment is DraftExperiment => experiment !== null);
+}
+
+export async function updateDraftExperiment(
+  id: string,
+  updates: Partial<Omit<DraftExperiment, 'id' | 'agentId' | 'createdAt'>>
+): Promise<DraftExperiment | null> {
+  const current = await getDraftExperiment(id);
+  if (!current) return null;
+  const updated = normalizeDraftExperiment({
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+  await kvHset(KEYS.draftExperiment(id), serializeDraftExperiment(updated));
+  return updated;
+}
+
+async function updateDraftExperimentFromSignal(agentId: string, signal: LearningSignal): Promise<void> {
+  if (!signal.tweetId) return;
+  const tweet = await getTweet(String(signal.tweetId));
+  if (!tweet?.draftExperimentId) return;
+
+  const status =
+    signal.signalType === 'approved_without_edit' ? 'approved' :
+    signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post' ? 'edited' :
+    signal.signalType === 'x_post_succeeded' || signal.signalType === 'reply_posted' ? 'posted' :
+    signal.signalType === 'deleted_from_queue' || signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected' ? 'rejected' :
+    signal.signalType === 'deleted_from_x' ? 'deleted' :
+    undefined;
+
+  const existing = await getDraftExperiment(tweet.draftExperimentId);
+  const notes = [
+    ...(existing?.outcomeNotes || []),
+    signal.reason || (typeof signal.metadata?.preferenceHint === 'string' ? String(signal.metadata.preferenceHint) : ''),
+  ].filter(Boolean).slice(-8);
+  const immediate = typeof existing?.immediateReward === 'number'
+    ? Math.max(-1, Math.min(1, existing.immediateReward + signal.rewardDelta))
+    : signal.rewardDelta;
+
+  await updateDraftExperiment(tweet.draftExperimentId, {
+    tweetId: tweet.id,
+    xTweetId: signal.xTweetId || tweet.xTweetId || null,
+    status: status || existing?.status || 'generated',
+    immediateReward: Number(immediate.toFixed(3)),
+    totalReward: Number(((existing?.finalReward || 0) + immediate).toFixed(3)),
+    lastSignalType: signal.signalType,
+    outcomeNotes: notes,
+    completedAt: status === 'rejected' || status === 'deleted' ? new Date().toISOString() : existing?.completedAt || null,
+  });
+}
+
+async function updateDraftExperimentFromPerformance(agentId: string, entry: TweetPerformance): Promise<void> {
+  const experimentId = entry.draftExperimentId;
+  if (!experimentId) return;
+  const experiment = await getDraftExperiment(experimentId);
+  const engagement = entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+  const lightweightLift = Math.max(-0.6, Math.min(0.8, ((engagement - 12) / 12) * 0.35));
+  const actionRewards = entry.actionRewards || computeActionRewards(entry);
+  const earlyVelocityScore = entry.earlyVelocityScore ?? computeEarlyVelocityScore(entry);
+  const notes = [
+    ...(experiment?.outcomeNotes || []),
+    `Live performance: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies. Action reward ${actionRewards.total >= 0 ? '+' : ''}${actionRewards.total}.`,
+  ].slice(-8);
+
+  await updateDraftExperiment(experimentId, {
+    xTweetId: entry.xTweetId || experiment?.xTweetId || null,
+    status: 'measured',
+    finalReward: Number(lightweightLift.toFixed(3)),
+    actionRewards,
+    earlyVelocityScore,
+    actualEngagement: Number(engagement.toFixed(3)),
+    engagementRate: entry.engagementRate,
+    performanceLift: Number(lightweightLift.toFixed(3)),
+    totalReward: Number(((experiment?.immediateReward || 0) + lightweightLift).toFixed(3)),
+    lastSignalType: 'x_post_succeeded',
+    outcomeNotes: notes,
+    completedAt: new Date().toISOString(),
+  });
+}
+
 // ─── Performance tracking storage ─────────────────────────────────────────────
 
 export async function addPerformanceEntry(agentId: string, entry: TweetPerformance): Promise<void> {
   await kvLpush(KEYS.agentPerformance(agentId), JSON.stringify(entry));
+  await updateDraftExperimentFromPerformance(agentId, entry);
 }
 
 export async function getPerformanceHistory(agentId: string, limit = 50): Promise<TweetPerformance[]> {
@@ -1150,6 +1497,68 @@ export async function getLearnings(agentId: string): Promise<AgentLearnings | nu
 
 export async function saveLearnings(agentId: string, learnings: AgentLearnings): Promise<void> {
   await kvSet(KEYS.agentLearnings(agentId), learnings);
+}
+
+// ─── Growth opportunity storage ──────────────────────────────────────────────
+
+function dedupeById<T extends { id: string; createdAt?: string }>(items: T[], limit: number): T[] {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      if (seen.has(String(item.id))) return false;
+      seen.add(String(item.id));
+      return true;
+    })
+    .sort((a, b) => {
+      const left = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const right = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return right - left;
+    })
+    .slice(0, limit);
+}
+
+export async function saveTrendOpportunities(agentId: string, opportunities: TrendOpportunity[]): Promise<TrendOpportunity[]> {
+  const existing = await getTrendOpportunities(agentId, 50);
+  const merged = dedupeById([...opportunities, ...existing], 50);
+  await kvSet(KEYS.agentTrendOpportunities(agentId), merged);
+  return merged;
+}
+
+export async function getTrendOpportunities(agentId: string, limit = 20): Promise<TrendOpportunity[]> {
+  const data = await kvGet<TrendOpportunity[]>(KEYS.agentTrendOpportunities(agentId));
+  return (data || []).slice(0, limit);
+}
+
+export async function saveRelationshipOpportunities(agentId: string, opportunities: RelationshipOpportunity[]): Promise<RelationshipOpportunity[]> {
+  const existing = await getRelationshipOpportunities(agentId, 50);
+  const merged = dedupeById([...opportunities, ...existing], 50)
+    .sort((a, b) => b.score - a.score || Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
+  await kvSet(KEYS.agentRelationshipOpportunities(agentId), merged);
+  return merged;
+}
+
+export async function getRelationshipOpportunities(agentId: string, limit = 20): Promise<RelationshipOpportunity[]> {
+  const data = await kvGet<RelationshipOpportunity[]>(KEYS.agentRelationshipOpportunities(agentId));
+  return (data || []).slice(0, limit);
+}
+
+export async function saveViralityPostmortem(agentId: string, postmortem: ViralityPostmortem): Promise<ViralityPostmortem[]> {
+  const existing = await getViralityPostmortems(agentId, 50);
+  const merged = dedupeById([postmortem, ...existing], 50);
+  await kvSet(KEYS.agentViralityPostmortems(agentId), merged);
+  return merged;
+}
+
+export async function saveViralityPostmortems(agentId: string, postmortems: ViralityPostmortem[]): Promise<ViralityPostmortem[]> {
+  const existing = await getViralityPostmortems(agentId, 50);
+  const merged = dedupeById([...postmortems, ...existing], 50);
+  await kvSet(KEYS.agentViralityPostmortems(agentId), merged);
+  return merged;
+}
+
+export async function getViralityPostmortems(agentId: string, limit = 20): Promise<ViralityPostmortem[]> {
+  const data = await kvGet<ViralityPostmortem[]>(KEYS.agentViralityPostmortems(agentId));
+  return (data || []).slice(0, limit);
 }
 
 // ─── Baseline storage (frozen engagement snapshot) ──────────────────────────
@@ -1481,6 +1890,7 @@ export async function addLearningSignal(
   deduped.unshift(full);
   const capped = deduped.slice(0, 250);
   await kvSet(KEYS.agentSignals(agentId), capped);
+  await updateDraftExperimentFromSignal(agentId, full);
   return full;
 }
 

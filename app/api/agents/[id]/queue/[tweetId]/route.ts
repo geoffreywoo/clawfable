@@ -44,6 +44,11 @@ export async function PATCH(
           metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
+            originalDraft: updated.originalContent.slice(0, 500),
+            editedDraft: updated.content.slice(0, 500),
+            draftExperimentId: updated.draftExperimentId ?? null,
+            creativeLane: updated.creativeLane ?? null,
+            experimentHoldout: updated.experimentHoldout === true,
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
           }),
         });
@@ -54,6 +59,9 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: 0.85,
           metadata: metadataWithStyleMode(tweet, {
+            draftExperimentId: updated.draftExperimentId ?? null,
+            creativeLane: updated.creativeLane ?? null,
+            experimentHoldout: updated.experimentHoldout === true,
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
           }),
         });
@@ -73,6 +81,11 @@ export async function PATCH(
           metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
+            originalDraft: updated.originalContent.slice(0, 500),
+            editedDraft: updated.content.slice(0, 500),
+            draftExperimentId: updated.draftExperimentId ?? null,
+            creativeLane: updated.creativeLane ?? null,
+            experimentHoldout: updated.experimentHoldout === true,
             timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
           }),
         });
@@ -87,6 +100,9 @@ export async function PATCH(
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
+          draftExperimentId: updated.draftExperimentId ?? null,
+          creativeLane: updated.creativeLane ?? null,
+          experimentHoldout: updated.experimentHoldout === true,
         }),
       });
     }
@@ -113,6 +129,9 @@ export async function PATCH(
           reason: trimmedReason,
           metadata: metadataWithStyleMode(tweet, {
             userProvidedReason: true,
+            draftExperimentId: tweet.draftExperimentId ?? null,
+            creativeLane: tweet.creativeLane ?? null,
+            experimentHoldout: tweet.experimentHoldout === true,
           }),
         });
       } else if (trimmedReason === 'skipped') {
@@ -140,6 +159,9 @@ export async function PATCH(
           inferred: true,
           metadata: metadataWithStyleMode(tweet, {
             userProvidedReason: false,
+            draftExperimentId: tweet.draftExperimentId ?? null,
+            creativeLane: tweet.creativeLane ?? null,
+            experimentHoldout: tweet.experimentHoldout === true,
           }),
         });
       }
@@ -193,6 +215,9 @@ export async function DELETE(
       inferred: !userReason,
       metadata: metadataWithStyleMode(tweet, {
         userProvidedReason: !!userReason,
+        draftExperimentId: tweet.draftExperimentId ?? null,
+        creativeLane: tweet.creativeLane ?? null,
+        experimentHoldout: tweet.experimentHoldout === true,
       }),
     });
 

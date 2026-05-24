@@ -6,6 +6,7 @@ import { buildEngagementDraft } from '@/lib/engagement';
 import { getAnalysis, createTweet, addLearningSignal } from '@/lib/kv-storage';
 import type { EngagementCandidate } from '@/lib/types';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
+import { scoreHighValueReply } from '@/lib/virality-signals';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -40,6 +41,12 @@ export async function POST(
       }),
       getAnalysis(id),
     ]);
+    const valueScore = scoreHighValueReply({
+      text: candidate.text,
+      authorUsername: candidate.authorHandle.replace(/^@/, ''),
+      authorName: candidate.authorName,
+      createdAt: candidate.createdAt,
+    }, { topics: voiceProfile.topics });
 
     const systemParts: string[] = [];
     systemParts.push(`You are @${agent.handle} (${agent.name}). Write a reply to another account on X in this account's voice.`);
@@ -72,6 +79,7 @@ Preserve the account's authentic voice while increasing the odds of niche attent
     systemParts.push(`\n## ENGAGE REPLY RULES
 - Reply to the specific tweet, not a generic topic.
 - Add a point, angle, example, or disagreement. Avoid empty applause.
+- Treat this as high-value reply drafting: value score ${valueScore.score} (${valueScore.reason}); strategy ${valueScore.responseStrategy.replace(/_/g, ' ')}.
 - Keep it concise and screenshotable unless the argument needs more room.
 - Do not mention being an AI, assistant, or prompt.
 - Output only the reply text.`);
@@ -110,6 +118,8 @@ Preserve the account's authentic voice while increasing the odds of niche attent
         targetHandle: candidate.authorHandle,
         targetTweetId: candidate.tweetId,
         candidateScore: candidate.score,
+        replyValueScore: valueScore.score,
+        responseStrategy: valueScore.responseStrategy,
       },
     });
 
