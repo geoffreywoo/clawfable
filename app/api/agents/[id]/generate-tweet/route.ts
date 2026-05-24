@@ -240,6 +240,7 @@ export async function POST(
     const topicText = headline || topic || 'AI and technology';
 
     const response = await generateText({
+      task: 'tweet_generation',
       tier: 'quality',
       maxTokens: 1024,
       system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle}. Write a single tweet about the given topic. Vary the length naturally — short punchy takes or longer structured posts. No hashtags. Be specific and opinionated.`,

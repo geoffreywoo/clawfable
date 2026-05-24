@@ -97,6 +97,7 @@ async function evolveSoul(
       .join('\n');
 
     const response = await generateText({
+      task: 'learning',
       tier: 'quality',
       maxTokens: 4096,
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.

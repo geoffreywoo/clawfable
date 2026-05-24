@@ -87,6 +87,7 @@ async function generateRepairCandidate(agent: Agent, tweet: Tweet, reason: strin
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await generateText({
+      task: 'creative_variant',
       tier: 'quality',
       maxTokens: attempt === 0 ? 1024 : 1536,
       system: `You repair queued X drafts. Output ONLY the repaired tweet text.

@@ -85,6 +85,7 @@ Preserve the account's authentic voice while increasing the odds of niche attent
 - Output only the reply text.`);
 
     const response = await generateText({
+      task: 'reply_generation',
       tier: 'quality',
       maxTokens: 260,
       system: systemParts.join('\n'),

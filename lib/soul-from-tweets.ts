@@ -75,6 +75,7 @@ export async function generateSoulFromTweets(
 
   // Ask the model to reverse-engineer the voice
   const response = await generateText({
+    task: 'soul_generation',
     tier: 'quality',
     maxTokens: 2048,
     system: `You are an expert at analyzing Twitter accounts and reverse-engineering their voice, personality, and posting strategy. You produce SOUL.md files — structured personality profiles that capture exactly how someone tweets.
@@ -141,6 +142,7 @@ Output ONLY the SOUL.md markdown. No commentary.`,
 
   // Extract a quick voice summary
   const summaryResponse = await generateText({
+    task: 'classification',
     tier: 'quality',
     maxTokens: 256,
     system: 'Output a single JSON object with: tone (string), topics (array of strings, max 5), voiceSummary (one sentence).',

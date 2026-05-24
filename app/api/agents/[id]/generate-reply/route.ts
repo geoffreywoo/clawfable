@@ -91,6 +91,7 @@ ${agent.soulMd}`);
 - Replies can be any length. Short and punchy (under 100 chars) often hits hardest. But go longer if the clapback or explanation needs room. X supports up to 4000 chars.`);
 
     const response = await generateText({
+      task: 'reply_generation',
       tier: 'quality',
       maxTokens: 300,
       system: systemParts.join('\n'),

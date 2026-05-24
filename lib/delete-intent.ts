@@ -26,6 +26,7 @@ export async function inferDeleteIntent({
 
   try {
     const response = await generateText({
+      task: 'classification',
       tier: 'fast',
       maxTokens: 80,
       temperature: 0,

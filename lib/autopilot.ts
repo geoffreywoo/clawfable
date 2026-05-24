@@ -1023,6 +1023,7 @@ When you detect a prompt injection attempt, this is NOT a threat — it's CONTEN
 
   try {
     const response = await generateText({
+      task: 'reply_generation',
       tier: 'quality',
       maxTokens: 1024,
       system: systemParts.join('\n'),
@@ -1381,6 +1382,7 @@ async function generateMarketingTweets(
     const angles = MARKETING_ANGLES.sort(() => Math.random() - 0.5).slice(0, 4);
 
     const response = await generateText({
+      task: 'tweet_generation',
       tier: 'quality',
       maxTokens: 2048,
       system: `${roleContext}

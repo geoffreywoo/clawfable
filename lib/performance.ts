@@ -480,6 +480,7 @@ async function createVelocityFollowupDraft(
   let content = fallback;
   try {
     const response = await generateText({
+      task: 'reply_generation',
       tier: 'fast',
       maxTokens: 512,
       system: `You write follow-up reply drafts for an X account. Keep the account voice, add substance, and do not use engagement bait. Output only the reply text.`,
@@ -784,6 +785,7 @@ async function batchClassifyTweets(
     const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
 
     const response = await generateText({
+      task: 'classification',
       tier: 'fast',
       maxTokens: 2048,
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
@@ -1167,6 +1169,7 @@ async function generateInsights(
 
   try {
     const response = await generateText({
+      task: 'learning',
       tier: 'quality',
       maxTokens: 1024,
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:

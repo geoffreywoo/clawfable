@@ -43,6 +43,7 @@ export async function POST(
     let lastIssue: string | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const response = await generateText({
+        task: 'creative_variant',
         tier: 'quality',
         maxTokens: attempt === 0 ? 1024 : 1536,
         system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction.

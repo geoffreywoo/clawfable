@@ -828,6 +828,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
 
   try {
     const response = await generateText({
+      task: 'tweet_generation',
       tier: 'quality',
       maxTokens: 4096,
       system: systemPrompt,
@@ -1098,6 +1099,7 @@ export async function extractStyleSignals(exampleTweets: string[]): Promise<Styl
 
   try {
     const response = await generateText({
+      task: 'classification',
       tier: 'fast',
       maxTokens: 1024,
       system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
@@ -1146,6 +1148,7 @@ export async function generateSoulMd(
       : '';
 
     const response = await generateText({
+      task: 'soul_generation',
       tier: 'quality',
       maxTokens: 1024,
       system: `You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.

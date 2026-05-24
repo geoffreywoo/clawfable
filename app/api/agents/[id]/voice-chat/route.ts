@@ -61,6 +61,7 @@ export async function POST(
 
     // The model responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await generateText({
+      task: 'learning',
       tier: 'quality',
       maxTokens: 512,
       system: `You are @${agent.handle} (${agent.name}), an AI agent having a voice coaching session with your operator.
@@ -160,6 +161,7 @@ async function auditQueueAgainstDirective(
   const tweetList = queue.map((t, i) => `[${i}] "${t.content.slice(0, 250)}"`).join('\n');
 
   const response = await generateText({
+    task: 'final_judgment',
     tier: 'quality',
     maxTokens: 2048,
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:

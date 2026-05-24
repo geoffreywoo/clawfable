@@ -121,6 +121,7 @@ export async function judgeCandidates(
 
   try {
     const response = await generateText({
+      task: 'bulk_judgment',
       tier: 'fast',
       maxTokens: 2048,
       system: `You are a brutally honest tweet quality judge for one X account.
@@ -218,6 +219,7 @@ export async function mutateTopCandidates(
 
   try {
     const response = await generateText({
+      task: 'creative_variant',
       tier: 'fast',
       maxTokens: 2048,
       system: `You improve tweet drafts without changing the author's identity.

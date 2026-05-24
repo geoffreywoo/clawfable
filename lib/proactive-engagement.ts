@@ -96,6 +96,7 @@ export async function generateAgentShoutout(
     const target = otherAgents[Math.floor(Math.random() * otherAgents.length)];
 
     const response = await generateText({
+      task: 'tweet_generation',
       tier: 'quality',
       maxTokens: 200,
       system: `You are @${agent.handle}. Write a brief, natural shoutout tweet mentioning @${target.handle} (${target.name}). The shoutout should feel organic, not forced. Reference their work or perspective. Stay in your voice. Keep it under 200 chars. No hashtags. Output ONLY the tweet text.`,
@@ -145,6 +146,7 @@ export async function studyPeerStyles(
       .join('\n');
 
     const response = await generateText({
+      task: 'classification',
       tier: 'fast',
       maxTokens: 512,
       system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
