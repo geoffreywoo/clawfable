@@ -108,6 +108,7 @@ describe('countPostsInLast24h', () => {
   it('does not count proactive engagement actions as original posts', () => {
     const entries = [
       makePostLogEntry({ format: 'hot_take', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'auto_reply_high_value', source: 'autopilot', action: 'posted' }),
       makePostLogEntry({ format: 'proactive_reply', source: 'autopilot', action: 'posted' }),
       makePostLogEntry({ format: 'proactive_like', source: 'autopilot', action: 'posted' }),
       makePostLogEntry({ format: 'auto_follow', source: 'autopilot', action: 'posted' }),

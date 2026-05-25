@@ -176,6 +176,42 @@ describe('autopilot health watchdog', () => {
     expect(health.lastPostedAt).toBe('2026-04-01T00:00:00.000Z');
   });
 
+  it('does not count auto-replies as the latest successful original autopost', async () => {
+    const health = await evaluateAutopilotHealth(
+      baseAgent,
+      baseSettings,
+      [
+        {
+          id: 'log-reply',
+          agentId: baseAgent.id,
+          tweetId: 'mention-1',
+          xTweetId: 'reply-x-1',
+          content: 'reply',
+          format: 'auto_reply_high_value',
+          topic: 'Reply to @friend',
+          postedAt: '2026-04-02T23:30:00.000Z',
+          source: 'autopilot',
+          action: 'posted',
+        },
+        {
+          id: 'log-post',
+          agentId: baseAgent.id,
+          tweetId: 'tweet-1',
+          xTweetId: 'post-x-1',
+          content: 'original post',
+          format: 'observation',
+          topic: 'AI',
+          postedAt: '2026-04-01T00:00:00.000Z',
+          source: 'autopilot',
+          action: 'posted',
+        },
+      ] as any,
+    );
+
+    expect(health.lastPostedAt).toBe('2026-04-01T00:00:00.000Z');
+    expect(health.details).toContain('Last successful autopost: 2026-04-01T00:00:00.000Z.');
+  });
+
   it('does not trust lastPostedAt when recent logs contain no successful post', async () => {
     const health = await evaluateAutopilotHealth(
       baseAgent,

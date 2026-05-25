@@ -19,17 +19,40 @@ const WATCHDOG_MAX_WINDOW_MS = 48 * 60 * 60 * 1000;
 const FUTURE_COOLDOWN_SKEW_MS = 5 * 60 * 1000;
 const RECENT_EXTERNAL_BLOCKER_MS = 30 * 60 * 1000;
 
-function isSuccessfulPost(entry: PostLogEntry): boolean {
+const NON_ORIGINAL_POST_FORMATS = new Set([
+  'auto_reply',
+  'auto_reply_high_value',
+  'proactive_reply',
+  'proactive_like',
+  'auto_follow',
+  'cron',
+  'learning',
+  'queue_refresh',
+  'system',
+]);
+
+function isOriginalAutopostEntry(entry: PostLogEntry): boolean {
+  const format = (entry.format || '').toLowerCase();
+  if (NON_ORIGINAL_POST_FORMATS.has(format)) return false;
+  if (format.startsWith('auto_reply')) return false;
+  if (format.endsWith('_error')) return false;
+  if (entry.action === 'replied') return false;
+  if (entry.topic?.startsWith('Reply to')) return false;
+  return true;
+}
+
+function isSuccessfulOriginalPost(entry: PostLogEntry): boolean {
   return Boolean(
     entry.tweetId
     && entry.xTweetId
     && (entry.action === 'posted' || !entry.action)
     && (entry.source === 'autopilot' || entry.source === 'cron')
+    && isOriginalAutopostEntry(entry)
   );
 }
 
 function latestSuccessfulPostAt(postLog: PostLogEntry[], settings: ProtocolSettings): string | null {
-  const logged = postLog.find(isSuccessfulPost)?.postedAt || null;
+  const logged = postLog.find(isSuccessfulOriginalPost)?.postedAt || null;
   if (logged) return logged;
   if (postLog.length > 0) return null;
   if (!settings.lastPostedAt) return null;

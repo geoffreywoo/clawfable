@@ -34,6 +34,7 @@ export const MAX_POSTS_PER_DAY_SETTING = 12;
 
 const NON_ORIGINAL_POST_FORMATS = new Set([
   'auto_reply',
+  'auto_reply_high_value',
   'proactive_reply',
   'proactive_like',
   'auto_follow',
