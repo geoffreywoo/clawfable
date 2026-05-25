@@ -1,5 +1,5 @@
 import { parseSoulMd } from './soul-parser';
-import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
+import type { TrendingTopic } from './trending';
 import { decodeKeys, fetchTweetById, fetchTweetByIdApp } from './twitter-client';
 import {
   getLearnings,
@@ -8,7 +8,6 @@ import {
   getTrendingCache,
   listEngagementSessions,
   saveTrendOpportunities,
-  setTrendingCache,
 } from './kv-storage';
 import { enrichTrendingTopics } from './source-planner';
 import { buildTrendOpportunities } from './growth-engine';
@@ -224,32 +223,7 @@ function candidateFromRelationshipOpportunity(agentId: string, opportunity: Awai
 
 async function loadTrendingTopics(agent: Agent): Promise<TrendingTopic[]> {
   const cached = await getTrendingCache(agent.id);
-  if (Array.isArray(cached)) {
-    return cached as TrendingTopic[];
-  }
-
-  if (
-    !agent.isConnected
-    || !agent.apiKey
-    || !agent.apiSecret
-    || !agent.accessToken
-    || !agent.accessSecret
-    || !agent.xUserId
-  ) {
-    return [];
-  }
-
-  const keys = decodeKeys({
-    apiKey: agent.apiKey,
-    apiSecret: agent.apiSecret,
-    accessToken: agent.accessToken,
-    accessSecret: agent.accessSecret,
-  });
-  const topics = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
-  if (topics.length > 0) {
-    await setTrendingCache(agent.id, topics);
-  }
-  return topics;
+  return Array.isArray(cached) ? cached as TrendingTopic[] : [];
 }
 
 async function getRecentEngagedTweetIds(agentId: string): Promise<Set<string>> {

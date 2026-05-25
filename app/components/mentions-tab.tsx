@@ -44,31 +44,61 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
   };
 
   useEffect(() => {
-    (async () => {
-      // Load stored mentions first
-      await loadMentions();
-      let connected = false;
-      try {
-        const a = await fetch(`/api/agents/${agentId}`).then((r) => r.json());
-        connected = a.isConnected === 1;
-        setAgentConnected(connected);
-      } catch {}
-      setLoading(false);
+    let cancelled = false;
 
-      // If connected and no stored mentions, auto-fetch from X
-      if (connected && mentions.length === 0) {
-        setIsRefreshing(true);
-        try {
-          const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data)) setMentions(data);
-          }
-        } catch {}
-        setIsRefreshing(false);
+    (async () => {
+      const [storedMentions] = await Promise.all([
+        fetch(`/api/agents/${agentId}/mentions`)
+          .then((r) => r.ok ? r.json() : [])
+          .catch(() => []),
+        fetch(`/api/agents/${agentId}`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((agent) => {
+            if (!cancelled) {
+              setAgentConnected(agent?.isConnected === 1);
+            }
+          })
+          .catch(() => null),
+      ]);
+
+      if (!cancelled && Array.isArray(storedMentions)) {
+        setMentions(storedMentions);
+      }
+
+      if (!cancelled) {
+        setLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [agentId]);
+
+  const refreshFromTwitter = async () => {
+    if (!agentConnected) {
+      showToast('Connect X API in Settings first');
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch mentions');
+      if (Array.isArray(data)) {
+        setMentions(data);
+        showToast(`${data.length} mentions loaded`);
+      } else {
+        await loadMentions();
+        showToast('Mentions refreshed');
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -147,29 +177,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     } catch {}
   };
 
-  const handleRefresh = async () => {
-    if (!agentConnected) {
-      showToast('Connect X API in Settings first');
-      return;
-    }
-    setIsRefreshing(true);
-    try {
-      const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch mentions');
-      if (Array.isArray(data)) {
-        setMentions(data);
-        showToast(`${data.length} mentions loaded`);
-      } else {
-        await loadMentions();
-        showToast('Mentions refreshed');
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Refresh failed');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  const handleRefresh = refreshFromTwitter;
 
   const handlePostReply = async (mention: Mention) => {
     const draft = replyDrafts[mention.id];

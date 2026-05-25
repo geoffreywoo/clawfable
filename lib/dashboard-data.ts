@@ -36,8 +36,10 @@ import {
   getPostLog,
   getProtocolSettings,
   getQueuedTweets,
+  getTrendingCache,
   getTweets,
   getTweetCount,
+  setTrendingCache,
 } from './kv-storage';
 import type {
   AccountAnalysis,
@@ -249,6 +251,11 @@ export async function getAgentLearningSnapshot(agent: Agent): Promise<LearningSn
 }
 
 export async function getAgentTopics(agent: Agent): Promise<TrendingTopic[]> {
+  const cached = await getTrendingCache(agent.id);
+  return Array.isArray(cached) ? cached as TrendingTopic[] : [];
+}
+
+export async function refreshAgentTopics(agent: Agent): Promise<TrendingTopic[]> {
   if (
     !agent.isConnected
     || !agent.apiKey
@@ -268,7 +275,11 @@ export async function getAgentTopics(agent: Agent): Promise<TrendingTopic[]> {
   });
 
   try {
-    return await fetchTrendingFromFollowing(keys, agent.xUserId);
+    const topics = await fetchTrendingFromFollowing(keys, agent.xUserId);
+    if (topics.length > 0) {
+      await setTrendingCache(agent.id, topics);
+    }
+    return topics;
   } catch {
     return [];
   }
