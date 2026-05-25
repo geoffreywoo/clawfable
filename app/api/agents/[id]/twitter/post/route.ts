@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addLearningSignal, getTweet, invalidateAgentConnection, updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, addPostLogEntry, acquireAutopilotLock, getTweet, invalidateAgentConnection, releaseAutopilotLock, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
-import { isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
+import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
 
@@ -18,6 +18,7 @@ export async function POST(
   let existingTweet = null as Awaited<ReturnType<typeof getTweet>> | null;
   let isReply = false;
   let currentAgent: Awaited<ReturnType<typeof requireAgentAccess>>['agent'] | null = null;
+  let lockOwner: string | null = null;
   try {
     const { agent } = await requireAgentAccess(id);
     currentAgent = agent;
@@ -31,6 +32,17 @@ export async function POST(
     dbTweetId = tweetId ? String(tweetId) : null;
     if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
     existingTweet = dbTweetId ? await getTweet(String(dbTweetId)) : null;
+    if (dbTweetId && (!existingTweet || String(existingTweet.agentId) !== String(id))) {
+      return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
+    }
+    if (existingTweet?.status === 'posted' && existingTweet.xTweetId) {
+      return NextResponse.json({
+        success: true,
+        alreadyPosted: true,
+        tweetUrl: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${existingTweet.xTweetId}`,
+        tweetId: existingTweet.xTweetId,
+      });
+    }
     const inferredReplyToId = existingTweet?.type === 'reply'
       ? (existingTweet.followupForTweetId || existingTweet.quoteTweetId || null)
       : null;
@@ -71,6 +83,30 @@ export async function POST(
       }, { status: 422 });
     }
 
+    const lock = await acquireAutopilotLock(id, `manual-post:${Date.now()}:${dbTweetId || 'ad-hoc'}`, 8 * 60, 'manual');
+    if (!lock.acquired) {
+      const reason = lock.lock
+        ? `Posting already running since ${lock.lock.acquiredAt}; lock expires ${lock.lock.expiresAt}.`
+        : 'Posting already running.';
+      return NextResponse.json({ error: reason, code: 'lock_held' }, { status: 409 });
+    }
+    lockOwner = lock.owner;
+
+    if (dbTweetId) {
+      existingTweet = await getTweet(String(dbTweetId));
+      if (!existingTweet || String(existingTweet.agentId) !== String(id)) {
+        return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
+      }
+      if (existingTweet.status === 'posted' && existingTweet.xTweetId) {
+        return NextResponse.json({
+          success: true,
+          alreadyPosted: true,
+          tweetUrl: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${existingTweet.xTweetId}`,
+          tweetId: existingTweet.xTweetId,
+        });
+      }
+    }
+
     const keys = decodeKeys({
       apiKey: agent.apiKey,
       apiSecret: agent.apiSecret,
@@ -80,35 +116,63 @@ export async function POST(
 
     let result: { tweetUrl: string; tweetId: string; username: string };
     if (effectiveReplyToId) {
-      result = await replyToTweet(keys, content, String(effectiveReplyToId));
+      result = await replyToTweet(keys, content, String(effectiveReplyToId), { username: agent.handle });
     } else {
-      result = await postTweet(keys, content);
+      result = await postTweet(keys, content, { username: agent.handle });
     }
 
+    const postedAt = new Date().toISOString();
+    const persistenceFailures: string[] = [];
     if (dbTweetId) {
-      const updated = await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId, postedAt: new Date().toISOString() });
-      await addLearningSignal(id, {
-        tweetId: String(dbTweetId),
-        xTweetId: result.tweetId,
-        signalType: updated.type === 'reply' ? 'reply_posted' : 'x_post_succeeded',
-        surface: updated.type === 'reply' ? 'mentions' : 'manual_post',
-        rewardDelta: 0.72,
-        metadata: metadataWithStyleMode(updated, {
-          confidenceScore: updated.confidenceScore ?? null,
-          candidateScore: updated.candidateScore ?? null,
-          generationMode: updated.generationMode ?? null,
-          draftExperimentId: updated.draftExperimentId ?? null,
-          creativeLane: updated.creativeLane ?? null,
-          experimentHoldout: updated.experimentHoldout === true,
-          wasEdited: (existingTweet?.editCount ?? 0) > 0,
-        }),
-      });
+      try {
+        const updated = await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId, postedAt });
+        await addLearningSignal(id, {
+          tweetId: String(dbTweetId),
+          xTweetId: result.tweetId,
+          signalType: updated.type === 'reply' ? 'reply_posted' : 'x_post_succeeded',
+          surface: updated.type === 'reply' ? 'mentions' : 'manual_post',
+          rewardDelta: 0.72,
+          metadata: metadataWithStyleMode(updated, {
+            confidenceScore: updated.confidenceScore ?? null,
+            candidateScore: updated.candidateScore ?? null,
+            generationMode: updated.generationMode ?? null,
+            draftExperimentId: updated.draftExperimentId ?? null,
+            creativeLane: updated.creativeLane ?? null,
+            experimentHoldout: updated.experimentHoldout === true,
+            wasEdited: (existingTweet?.editCount ?? 0) > 0,
+          }),
+        });
+      } catch (persistErr) {
+        persistenceFailures.push(persistErr instanceof Error ? persistErr.message : 'tweet persistence failed');
+      }
     }
 
-    return NextResponse.json({ success: true, tweetUrl: result.tweetUrl, tweetId: result.tweetId });
+    await addPostLogEntry(id, {
+      agentId: id,
+      tweetId: dbTweetId || '',
+      xTweetId: result.tweetId,
+      content: String(content),
+      format: isReply ? 'manual_reply' : 'manual_post',
+      topic: existingTweet?.topic || (isReply ? 'reply' : 'manual'),
+      postedAt,
+      source: 'manual',
+      action: 'posted',
+      reason: persistenceFailures.length
+        ? `Posted to X, but local persistence had warnings: ${persistenceFailures.join('; ')}`
+        : 'Posted manually.',
+    }).catch(() => null);
+
+    return NextResponse.json({
+      success: true,
+      tweetUrl: result.tweetUrl,
+      tweetId: result.tweetId,
+      persistenceWarning: persistenceFailures.length ? persistenceFailures.join('; ') : undefined,
+    });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
-    const message = err instanceof Error ? err.message : 'Failed to post tweet';
+    const message = formatActionError(err, isReply ? 'manual_reply' : 'manual_post', {
+      draftId: dbTweetId || undefined,
+    });
     let queueAction: string | null = null;
     let repairedContent: string | null = null;
 
@@ -150,5 +214,9 @@ export async function POST(
       repairedContent,
       queueAction,
     }, { status: 500 });
+  } finally {
+    if (lockOwner) {
+      await releaseAutopilotLock(id, lockOwner).catch(() => false);
+    }
   }
 }

@@ -7,7 +7,7 @@
  * 2. Auto-reply: fetch new mentions, generate replies, post them
  */
 
-import type { Agent, AgentLearnings, ProtocolSettings, Tweet } from './types';
+import type { Agent, AgentLearnings, PostLogEntry, ProtocolSettings, Tweet } from './types';
 import {
   addLearningSignal,
   getProtocolSettings,
@@ -117,6 +117,37 @@ function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyM
 
 function isAutopostableQueuedTweet(tweet: Tweet): boolean {
   return !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId;
+}
+
+const NON_ORIGINAL_LOG_FORMATS = new Set([
+  'auto_reply',
+  'auto_reply_high_value',
+  'proactive_reply',
+  'proactive_like',
+  'auto_follow',
+  'cron',
+  'learning',
+  'queue_refresh',
+  'system',
+]);
+
+function isSuccessfulOriginalPostLogEntry(entry: PostLogEntry): boolean {
+  const format = (entry.format || '').toLowerCase();
+  if (NON_ORIGINAL_LOG_FORMATS.has(format)) return false;
+  if (format.startsWith('auto_reply')) return false;
+  if (format.endsWith('_error')) return false;
+  if (entry.action === 'replied') return false;
+  if (entry.topic?.startsWith('Reply to')) return false;
+  return Boolean(
+    entry.content
+    && entry.xTweetId
+    && (entry.action === 'posted' || !entry.action)
+    && (entry.source === 'autopilot' || entry.source === 'cron' || entry.source === 'manual')
+  );
+}
+
+function latestSuccessfulOriginalPostAt(postLog: PostLogEntry[]): string | null {
+  return postLog.find(isSuccessfulOriginalPostLogEntry)?.postedAt || null;
 }
 
 async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[]): Promise<Tweet[]> {
@@ -396,7 +427,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // Fast feedback: check if any post from the last 2 hours is going viral (3x above average)
   let momentumTopic: string | null = null;
   const veryRecentPosts = postLog
-    .filter((e) => (!e.action || e.action === 'posted') && e.content && new Date(e.postedAt).getTime() > Date.now() - 2 * 60 * 60 * 1000);
+    .filter((e) => isSuccessfulOriginalPostLogEntry(e) && new Date(e.postedAt).getTime() > Date.now() - 2 * 60 * 60 * 1000);
 
   if (veryRecentPosts.length > 0) {
     // We can't check engagement in real-time from post log (no likes stored there),
@@ -512,8 +543,14 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   const minIntervalMs = jitterInterval(Math.round(baseIntervalMs * cooldownMultiplier));
-  if (settings.lastPostedAt) {
-    const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
+  const latestLoggedPostAt = latestSuccessfulOriginalPostAt(postLog);
+  const settingsLastPostedMs = settings.lastPostedAt ? new Date(settings.lastPostedAt).getTime() : NaN;
+  const loggedLastPostedMs = latestLoggedPostAt ? new Date(latestLoggedPostAt).getTime() : NaN;
+  const cadenceAnchor = Number.isFinite(loggedLastPostedMs) && (!Number.isFinite(settingsLastPostedMs) || loggedLastPostedMs > settingsLastPostedMs)
+    ? latestLoggedPostAt
+    : settings.lastPostedAt;
+  if (cadenceAnchor) {
+    const elapsed = Date.now() - new Date(cadenceAnchor).getTime();
     if (elapsed < minIntervalMs) {
       const minsLeft = Math.round((minIntervalMs - elapsed) / 60000);
       return {
@@ -552,7 +589,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   // Pick tweet with diversity awareness (avoids consecutive same-format/topic + near-duplicates)
   const recentPostEntries = postLog
-    .filter((e) => (!e.action || e.action === 'posted') && e.content)
+    .filter(isSuccessfulOriginalPostLogEntry)
     .slice(0, 10)
     .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
   let validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue);
@@ -623,63 +660,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   );
   const tweet = pickDiverseTweet(rankedQueue, recentPostEntries) || rankedQueue[0];
 
+  let result: Awaited<ReturnType<typeof postTweet>>;
   try {
-    const result = await postTweet(keys, tweet.content);
-
-    await updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId, postedAt: new Date().toISOString() });
-
-    await updateProtocolSettings(agentId, {
-      lastPostedAt: new Date().toISOString(),
-      postCooldownUntil: null,
-      totalAutoPosted: settings.totalAutoPosted + 1,
-    });
-
-    await addLearningSignal(agentId, {
-        tweetId: tweet.id,
-        xTweetId: result.tweetId,
-        signalType: 'x_post_succeeded',
-        surface: 'autopilot',
-        rewardDelta: 0.65,
-        metadata: {
-          confidenceScore: effectiveConfidence(tweet),
-          candidateScore: tweet.candidateScore ?? null,
-          generationMode: tweet.generationMode ?? null,
-          styleMode: tweet.styleMode ?? 'standard',
-          draftExperimentId: tweet.draftExperimentId ?? null,
-          creativeLane: tweet.creativeLane ?? null,
-          experimentHoldout: tweet.experimentHoldout === true,
-        },
-      });
-
-    await addPostLogEntry(agentId, {
-      agentId,
-      tweetId: tweet.id,
-      xTweetId: result.tweetId,
-      content: tweet.content,
-      format: tweet.format || tweet.topic || 'unknown',
-      topic: tweet.topic || 'general',
-      postedAt: new Date().toISOString(),
-      source: 'autopilot',
-      reason: `Posted with confidence ${effectiveConfidence(tweet).toFixed(2)} in ${settings.autonomyMode || 'balanced'} mode.`,
-    });
-
-    // Funnel milestones
-    const newTotal = settings.totalAutoPosted + 1;
-    if (newTotal === 1) {
-      await logFunnelEvent(agentId, 'first_post', { xTweetId: result.tweetId });
-    } else if (newTotal === 10) {
-      await logFunnelEvent(agentId, 'tenth_post', { xTweetId: result.tweetId });
-    }
-
-    return {
-      agentId,
-      action: 'posted',
-      reason: `Posted to X as @${result.username}` + (repliesSent > 0 ? ` + ${repliesSent} replies` : ''),
-      tweetId: tweet.id,
-      xTweetId: result.tweetId,
-      content: tweet.content,
-      repliesSent,
-    };
+    result = await postTweet(keys, tweet.content, { username: agent.handle });
   } catch (err) {
     const message = formatActionError(err, 'post_tweet', {
       draftId: tweet.id,
@@ -750,6 +733,85 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       repliesSent,
     };
   }
+
+  const postedAt = new Date().toISOString();
+  const persistenceWarnings: string[] = [];
+  const capturePersistence = async (label: string, write: Promise<unknown>) => {
+    try {
+      await write;
+    } catch (err) {
+      persistenceWarnings.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  await capturePersistence(
+    'tweet_status',
+    updateTweet(tweet.id, { status: 'posted', xTweetId: result.tweetId, postedAt }),
+  );
+
+  await capturePersistence(
+    'protocol_settings',
+    updateProtocolSettings(agentId, {
+      lastPostedAt: postedAt,
+      postCooldownUntil: null,
+      totalAutoPosted: settings.totalAutoPosted + 1,
+    }),
+  );
+
+  await capturePersistence(
+    'learning_signal',
+    addLearningSignal(agentId, {
+      tweetId: tweet.id,
+      xTweetId: result.tweetId,
+      signalType: 'x_post_succeeded',
+      surface: 'autopilot',
+      rewardDelta: 0.65,
+      metadata: {
+        confidenceScore: effectiveConfidence(tweet),
+        candidateScore: tweet.candidateScore ?? null,
+        generationMode: tweet.generationMode ?? null,
+        styleMode: tweet.styleMode ?? 'standard',
+        draftExperimentId: tweet.draftExperimentId ?? null,
+        creativeLane: tweet.creativeLane ?? null,
+        experimentHoldout: tweet.experimentHoldout === true,
+      },
+    }),
+  );
+
+  await capturePersistence(
+    'post_log',
+    addPostLogEntry(agentId, {
+      agentId,
+      tweetId: tweet.id,
+      xTweetId: result.tweetId,
+      content: tweet.content,
+      format: tweet.format || tweet.topic || 'unknown',
+      topic: tweet.topic || 'general',
+      postedAt,
+      source: 'autopilot',
+      reason: `Posted with confidence ${effectiveConfidence(tweet).toFixed(2)} in ${settings.autonomyMode || 'balanced'} mode.`
+        + (persistenceWarnings.length ? ` Persistence warnings: ${persistenceWarnings.join('; ')}` : ''),
+    }),
+  );
+
+  const newTotal = settings.totalAutoPosted + 1;
+  if (newTotal === 1) {
+    await capturePersistence('funnel_event', logFunnelEvent(agentId, 'first_post', { xTweetId: result.tweetId }));
+  } else if (newTotal === 10) {
+    await capturePersistence('funnel_event', logFunnelEvent(agentId, 'tenth_post', { xTweetId: result.tweetId }));
+  }
+
+  return {
+    agentId,
+    action: 'posted',
+    reason: `Posted to X as @${result.username}`
+      + (repliesSent > 0 ? ` + ${repliesSent} replies` : '')
+      + (persistenceWarnings.length ? `; persistence warnings: ${persistenceWarnings.join('; ')}` : ''),
+    tweetId: tweet.id,
+    xTweetId: result.tweetId,
+    content: tweet.content,
+    repliesSent,
+  };
 }
 
 // ─── Auto-reply to mentions ──────────────────────────────────────────────────
@@ -766,6 +828,9 @@ async function runAutoReply(
   try {
     rawMentions = await getMentionsFromTwitter(keys, agent.xUserId);
   } catch (err) {
+    if (isInvalidTwitterCredentialError(err)) {
+      await invalidateAgentConnection(agent.id);
+    }
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -1001,7 +1066,7 @@ async function runAutoReply(
       }
 
       // Post the reply
-      const result = await replyToTweet(keys, replyContent, mention.id);
+      const result = await replyToTweet(keys, replyContent, mention.id, { username: agent.handle });
 
       // Log it
       await addPostLogEntry(agent.id, {
@@ -1045,6 +1110,12 @@ async function runAutoReply(
 
       repliesSent++;
     } catch (err) {
+      const shouldStopReplyRun = isInvalidTwitterCredentialError(err)
+        || isRateLimitTwitterError(err)
+        || isTransientTwitterError(err);
+      if (isInvalidTwitterCredentialError(err)) {
+        await invalidateAgentConnection(agent.id);
+      }
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: mention.id,
@@ -1062,6 +1133,7 @@ async function runAutoReply(
           preview: mention.text,
         }),
       });
+      if (shouldStopReplyRun) break;
     }
   }
 

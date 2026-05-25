@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createMention, getRecentMentions } from '@/lib/kv-storage';
+import { createMention, getRecentMentions, invalidateAgentConnection } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { isInvalidTwitterCredentialError, isRateLimitTwitterError } from '@/lib/twitter-debug';
 
 // GET /api/agents/[id]/twitter/mentions
+function newestMentionTweetId(mentions: Array<{ tweetId: string | number | null }>): string | undefined {
+  let newest: bigint | null = null;
+  for (const mention of mentions) {
+    const id = mention.tweetId == null ? '' : String(mention.tweetId);
+    if (!/^\d+$/.test(id)) continue;
+    const numericId = BigInt(id);
+    if (newest === null || numericId > newest) newest = numericId;
+  }
+  return newest === null ? undefined : newest.toString();
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -26,15 +38,19 @@ export async function GET(
     // Get stored mentions for dedup + sinceId
     const stored = await getRecentMentions(id, 500);
     const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
-    const latestTweetId = stored.length > 0 ? String(stored[0].tweetId) : undefined;
+    const latestTweetId = newestMentionTweetId(stored);
 
     let rawMentions: Awaited<ReturnType<typeof getMentionsFromTwitter>> = [];
     try {
       rawMentions = await getMentionsFromTwitter(keys, String(agent.xUserId), latestTweetId);
     } catch (apiErr) {
+      if (isInvalidTwitterCredentialError(apiErr)) {
+        await invalidateAgentConnection(id);
+        return NextResponse.json({ error: 'X credentials rejected by X. Reconnect the account in Settings.' }, { status: 401 });
+      }
       // Mention timeline may not be available on Free tier
       const msg = apiErr instanceof Error ? apiErr.message : '';
-      if (msg.includes('403') || msg.includes('Rate limit')) {
+      if (msg.includes('403') || isRateLimitTwitterError(apiErr)) {
         return NextResponse.json(stored);
       }
       throw apiErr;

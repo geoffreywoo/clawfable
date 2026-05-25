@@ -12,6 +12,17 @@ import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitte
 import { getBillingSummary } from '@/lib/billing';
 
 // GET /api/cron/post — called by Vercel Cron every 10 minutes
+function newestMentionTweetId(mentions: Array<{ tweetId: string | number | null }>): string | undefined {
+  let newest: bigint | null = null;
+  for (const mention of mentions) {
+    const id = mention.tweetId == null ? '' : String(mention.tweetId);
+    if (!/^\d+$/.test(id)) continue;
+    const numericId = BigInt(id);
+    if (newest === null || numericId > newest) newest = numericId;
+  }
+  return newest === null ? undefined : newest.toString();
+}
+
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -398,7 +409,7 @@ async function refreshMentions(agentId: string): Promise<number> {
   const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
 
   // Pass sinceId to only fetch new mentions (saves API quota on busy accounts)
-  const latestStoredTweetId = stored.length > 0 ? String(stored[0].tweetId) : undefined;
+  const latestStoredTweetId = newestMentionTweetId(stored);
 
   let rawMentions;
   try {

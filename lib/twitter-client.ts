@@ -15,8 +15,21 @@ export interface TwitterKeys {
   accessSecret: string;
 }
 
+interface TweetWriteOptions {
+  username?: string | null;
+}
+
 function normalizeKeyPart(value: string): string {
   return value.trim();
+}
+
+function normalizeUsername(value: string | null | undefined): string | null {
+  const clean = value?.trim().replace(/^@/, '');
+  return clean || null;
+}
+
+function stripHallucinatedStatusUrls(text: string): string {
+  return text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
 }
 
 /**
@@ -38,21 +51,21 @@ function handleApiError(error: unknown, context: TwitterErrorContext): never {
 export async function postTweet(
   keys: TwitterKeys,
   text: string,
+  options: TweetWriteOptions = {},
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
-    const me = await getMe(keys);
+    const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    // Strip any hallucinated x.com/twitter.com status URLs from content
-    const tweetText = text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
+    const tweetText = stripHallucinatedStatusUrls(text);
 
     const result = await rwClient.v2.tweet(tweetText);
 
     const tweetId = result.data.id;
     return {
-      tweetUrl: `https://x.com/${me.username}/status/${tweetId}`,
+      tweetUrl: `https://x.com/${username}/status/${tweetId}`,
       tweetId,
-      username: me.username,
+      username,
     };
   } catch (error) {
     return handleApiError(error, {
@@ -72,20 +85,22 @@ async function createAppReadClient(): Promise<TwitterApi> {
 export async function replyToTweet(
   keys: TwitterKeys,
   text: string,
-  replyToTweetId: string
+  replyToTweetId: string,
+  options: TweetWriteOptions = {},
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
-    const me = await getMe(keys);
+    const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    const result = await rwClient.v2.tweet(text, {
+    const tweetText = stripHallucinatedStatusUrls(text);
+    const result = await rwClient.v2.tweet(tweetText, {
       reply: { in_reply_to_tweet_id: replyToTweetId },
     });
     const newTweetId = result.data.id;
     return {
-      tweetUrl: `https://x.com/${me.username}/status/${newTweetId}`,
+      tweetUrl: `https://x.com/${username}/status/${newTweetId}`,
       tweetId: newTweetId,
-      username: me.username,
+      username,
     };
   } catch (error) {
     return handleApiError(error, {

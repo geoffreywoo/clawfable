@@ -34,6 +34,39 @@ function readNumber(record: Record<string, unknown>, key: string): number | unde
   return typeof value === 'number' ? value : undefined;
 }
 
+function readFirstRecord(value: unknown): Record<string, unknown> | undefined {
+  return Array.isArray(value) && isRecord(value[0]) ? value[0] : undefined;
+}
+
+function readNestedErrorRecord(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const data = isRecord(record.data) ? record.data : undefined;
+  return readFirstRecord(data?.errors)
+    || readFirstRecord(record.errors)
+    || (isRecord(record.error) ? record.error : undefined)
+    || undefined;
+}
+
+function readTwitterStatusCode(record: Record<string, unknown>, data?: Record<string, unknown>, nested?: Record<string, unknown>): number | undefined {
+  return readNumber(record, 'code')
+    ?? readNumber(record, 'statusCode')
+    ?? readNumber(record, 'status')
+    ?? (data ? readNumber(data, 'status') : undefined)
+    ?? (nested ? readNumber(nested, 'status') : undefined);
+}
+
+function readTwitterTitle(data?: Record<string, unknown>, nested?: Record<string, unknown>): string | undefined {
+  return (data ? readString(data, 'title') : undefined)
+    ?? (nested ? readString(nested, 'title') : undefined)
+    ?? (nested ? readString(nested, 'code') : undefined);
+}
+
+function readTwitterDetail(data?: Record<string, unknown>, nested?: Record<string, unknown>): string | undefined {
+  return (data ? readString(data, 'detail') : undefined)
+    ?? (data ? readString(data, 'message') : undefined)
+    ?? (nested ? readString(nested, 'detail') : undefined)
+    ?? (nested ? readString(nested, 'message') : undefined);
+}
+
 function truncate(value: string, max = 96): string {
   const compact = value.replace(/\s+/g, ' ').trim();
   return compact.length > max ? `${compact.slice(0, max - 1)}...` : compact;
@@ -178,9 +211,10 @@ export function normalizeTwitterError(error: unknown, context: TwitterErrorConte
 
   const errorRecord = isRecord(error) ? error : {};
   const data = isRecord(errorRecord.data) ? errorRecord.data : undefined;
-  const statusCode = readNumber(errorRecord, 'code') ?? (data ? readNumber(data, 'status') : undefined);
-  const title = data ? readString(data, 'title') : undefined;
-  const detail = data ? readString(data, 'detail') : undefined;
+  const nested = readNestedErrorRecord(errorRecord);
+  const statusCode = readTwitterStatusCode(errorRecord, data, nested);
+  const title = readTwitterTitle(data, nested);
+  const detail = readTwitterDetail(data, nested);
   const type = data ? readString(data, 'type') : undefined;
   const rawMessage = error instanceof Error ? error.message : String(error);
 

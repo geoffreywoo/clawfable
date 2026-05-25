@@ -325,6 +325,33 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
+  it('uses recent successful post logs as the cadence backstop when settings are stale', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      lastPostedAt: null,
+    });
+    mocks.getPostLog.mockResolvedValue([
+      {
+        id: 'log-posted',
+        agentId: baseAgent.id,
+        tweetId: 'recent-tweet',
+        xTweetId: 'x-recent',
+        content: 'recent original post',
+        format: 'hot_take',
+        topic: 'infra',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'posted',
+      },
+    ]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('Cooldown');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
   it('clears stale template fallback drafts when richer generation is available again', async () => {
     mocks.getQueuedTweets
       .mockResolvedValueOnce([
@@ -349,6 +376,23 @@ describe('autopilot remote debug logging', () => {
     );
     expect(result.action).toBe('posted');
     expect(result.tweetId).toBe(validQueuedTweet.id);
+  });
+
+  it('does not report an X post failure when learning persistence fails after the write succeeded', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-posted-1', username: 'debugbot' });
+    mocks.addLearningSignal.mockRejectedValueOnce(new Error('learning ledger unavailable'));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.xTweetId).toBe('x-posted-1');
+    expect(result.reason).toContain('persistence warnings');
+    expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith(
+      validQueuedTweet.id,
+      expect.objectContaining({ status: 'posted', xTweetId: 'x-posted-1' }),
+    );
   });
 
   it('coerces stringified score fields before logging confidence', async () => {
@@ -389,6 +433,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.postTweet).toHaveBeenCalledWith(
       expect.anything(),
       validQueuedTweet.content,
+      { username: baseAgent.handle },
     );
   });
 
@@ -529,6 +574,76 @@ describe('autopilot remote debug logging', () => {
     expect(failureEntry.reason).toContain('author=@alice');
   });
 
+  it('disconnects the agent when mention fetch rejects credentials', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+    });
+    mocks.getMentionsFromTwitter.mockRejectedValue(new TwitterActionError({
+      action: 'fetch_mentions',
+      statusCode: 401,
+      title: 'Unauthorized',
+      detail: 'Invalid or expired token.',
+    }));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.invalidateAgentConnection).toHaveBeenCalledWith(baseAgent.id);
+    expect(mocks.replyToTweet).not.toHaveBeenCalled();
+  });
+
+  it('stops the reply run after a rate limit instead of hammering more mentions', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+      maxRepliesPerRun: 3,
+    });
+    mocks.getMentionsFromTwitter.mockResolvedValue([
+      {
+        id: 'mention-1',
+        text: 'what is the eval?',
+        authorId: 'user-1',
+        authorName: 'Alice',
+        authorUsername: 'alice',
+        createdAt: '2026-04-07T12:00:00.000Z',
+        conversationId: 'conv-1',
+        inReplyToTweetId: null,
+      },
+      {
+        id: 'mention-2',
+        text: 'what should we ship?',
+        authorId: 'user-2',
+        authorName: 'Bob',
+        authorUsername: 'bob',
+        createdAt: '2026-04-07T12:01:00.000Z',
+        conversationId: 'conv-2',
+        inReplyToTweetId: null,
+      },
+    ]);
+    mocks.replyToTweet.mockRejectedValue(new TwitterActionError({
+      action: 'reply_to_tweet',
+      statusCode: 429,
+      title: 'Too Many Requests',
+      detail: 'Rate limit reached.',
+    }));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.replyToTweet).toHaveBeenCalledTimes(1);
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: 'mention-1',
+        format: 'auto_reply_error',
+        reason: expect.stringContaining('429'),
+      }),
+    );
+  });
+
   it('filters auto-replies to high-value mentions when high-value mode is enabled', async () => {
     mocks.getProtocolSettings.mockResolvedValue({
       ...baseSettings,
@@ -565,8 +680,8 @@ describe('autopilot remote debug logging', () => {
 
     expect(result.action).toBe('replied');
     expect(result.repliesSent).toBe(1);
-    expect(mocks.replyToTweet).toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-high');
-    expect(mocks.replyToTweet).not.toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-low');
+    expect(mocks.replyToTweet).toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-high', { username: baseAgent.handle });
+    expect(mocks.replyToTweet).not.toHaveBeenCalledWith(expect.anything(), 'reply draft', 'mention-low', { username: baseAgent.handle });
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
@@ -664,7 +779,7 @@ describe('autopilot remote debug logging', () => {
       expect.objectContaining({ id: '522' }),
       expect.stringContaining('incomplete trailing fragment')
     );
-    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), 'rebuilt queue draft');
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), 'rebuilt queue draft', { username: baseAgent.handle });
 
     const repairEntry = mocks.addPostLogEntry.mock.calls
       .map(([, entry]) => entry)
