@@ -2,7 +2,7 @@ import { LoginFormButton } from './components/login-form-button';
 import { Logo } from './components/logo';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { getPublicSoulSummaries } from '@/lib/dashboard-data';
-import { MARKETING_COMPARE_ROWS, MARKETING_FAQS, MARKETING_PLANS } from '@/lib/site-marketing';
+import { MARKETING_PLANS } from '@/lib/site-marketing';
 
 function XMark() {
   return (
@@ -10,6 +10,11 @@ function XMark() {
       <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
     </svg>
   );
+}
+
+function previewText(text: string | null | undefined, fallback: string, maxLength = 150) {
+  const clean = (text || fallback).replace(/\s+/g, ' ').trim();
+  return clean.length <= maxLength ? clean : `${clean.slice(0, maxLength).trimEnd()}...`;
 }
 
 export const revalidate = 300;
@@ -233,7 +238,7 @@ export default async function HomePage() {
                           <span className="landing-soul-type">{agent.category}</span>
                         </div>
                         <p className="landing-soul-summary">
-                          {agent.soulSummary || 'Open source SOUL preset'}
+                          {previewText(agent.soulSummary, 'Open source SOUL preset')}
                         </p>
                       </a>
                     ))}
@@ -269,7 +274,7 @@ export default async function HomePage() {
                           </div>
                         </div>
                         <p className="landing-live-summary">
-                          {agent.soulSummary || 'Live public agent'}
+                          {previewText(agent.soulSummary, 'Live public agent')}
                         </p>
                       </a>
                     ))}
@@ -306,7 +311,7 @@ export default async function HomePage() {
               </div>
             </div>
 
-            <section className="pricing-grid">
+            <div className="pricing-grid">
               {MARKETING_PLANS.map((plan) => (
                 <article
                   key={plan.id}
@@ -324,99 +329,16 @@ export default async function HomePage() {
                     <span className="pricing-card-cadence">{plan.cadence}</span>
                   </div>
                   <p className="pricing-card-headline">{plan.headline}</p>
-                  <div className="pricing-card-divider" />
-                  <div className="pricing-card-feature-list">
-                    {plan.features.map((feature) => (
-                      <div key={feature} className="pricing-card-feature">
-                        <span className="pricing-card-feature-mark">+</span>
-                        <span>{feature}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="pricing-card-actions">
-                    <LoginFormButton className={`btn ${plan.recommended ? 'btn-primary' : 'btn-outline'} btn-wide`}>
-                      {plan.id === 'free' ? 'Start free' : `Sign in for ${plan.name}`}
-                    </LoginFormButton>
-                  </div>
                 </article>
               ))}
-            </section>
+            </div>
 
-            <section className="pricing-story-grid">
-              <div className="landing-panel landing-panel-wide">
-                <div className="landing-panel-header">
-                  <span className="landing-panel-label">What changes when you pay</span>
-                  <p className="landing-panel-caption">Free proves the product. Paid takes over the repetitive operating work.</p>
-                </div>
-                <div className="landing-feature-list">
-                  {[
-                    ['FREE IS FOR CALIBRATION', 'Train one agent, inspect the learning loop, and decide whether the system actually sounds like you.'],
-                    ['PRO UNLOCKS EXECUTION', 'Queue execution, auto-replies, and supervised engagement workflows move from manual control to guided operation.'],
-                    ['SCALE UNLOCKS FLEET MANAGEMENT', 'Run more voices at once without collapsing into generic prompts or fragmented workflows.'],
-                  ].map(([title, description]) => (
-                    <div key={title} className="landing-feature-row">
-                      <p className="landing-feature-title">{title}</p>
-                      <p className="landing-feature-desc">{description}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="landing-panel">
-                <div className="landing-panel-header">
-                  <span className="landing-panel-label">Who each plan is for</span>
-                </div>
-                <div className="landing-trust-list">
-                  {[
-                    'Free: a creator proving whether an AI-managed voice actually feels true.',
-                    'Pro: a serious personal brand, founder account, or small fleet that wants daily hands-off execution.',
-                    'Scale: a multi-brand or multi-persona operation that needs room to experiment across many voices.',
-                  ].map((item) => (
-                    <div key={item} className="landing-trust-item">{item}</div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="pricing-compare">
-              <div className="section-header">
-                <div className="section-title">
-                  <h2>Plan comparison</h2>
-                </div>
-              </div>
-              <div className="pricing-compare-table">
-                <div className="pricing-compare-row pricing-compare-head">
-                  <div>FEATURE</div>
-                  <div>FREE</div>
-                  <div>PRO</div>
-                  <div>SCALE</div>
-                </div>
-                {MARKETING_COMPARE_ROWS.map(([feature, free, pro, scale]) => (
-                  <div key={feature} className="pricing-compare-row">
-                    <div className="pricing-compare-feature">{feature}</div>
-                    <div>{free}</div>
-                    <div>{pro}</div>
-                    <div>{scale}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="pricing-faq">
-              <div className="section-header">
-                <div className="section-title">
-                  <h2>FAQ</h2>
-                </div>
-              </div>
-              <div className="pricing-faq-list">
-                {MARKETING_FAQS.map((item) => (
-                  <article key={item.q} className="pricing-faq-item">
-                    <p className="pricing-faq-question">{item.q}</p>
-                    <p className="pricing-faq-answer">{item.a}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
+            <div className="landing-section-footer">
+              <p className="landing-panel-caption">
+                Full feature comparison, FAQ, and billing details live on the pricing page.
+              </p>
+              <a href="/pricing" className="btn btn-outline">Compare plans</a>
+            </div>
           </section>
 
           <section className="landing-final-cta">

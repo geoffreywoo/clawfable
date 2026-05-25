@@ -17,4 +17,5 @@ export const fontMono = IBM_Plex_Mono({
   variable: '--font-mono',
   weight: ['400', '500', '600'],
   display: 'swap',
+  preload: false,
 });
