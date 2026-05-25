@@ -495,6 +495,22 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   const isPeakHour = hasPeakHours && settings.peakHours.includes(currentHour);
   const cooldownMultiplier = hasPeakHours ? (isPeakHour ? 0.4 : 3.0) : 1.0;
 
+  if (settings.postCooldownUntil) {
+    const cooldownUntilMs = new Date(settings.postCooldownUntil).getTime();
+    if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
+      const minsLeft = Math.max(1, Math.round((cooldownUntilMs - Date.now()) / 60000));
+      return {
+        agentId,
+        action: repliesSent > 0 ? 'replied' : 'skipped',
+        reason: repliesSent > 0
+          ? `Sent ${repliesSent} replies. X post API backoff: ${minsLeft}m left.`
+          : `X post API backoff: ${minsLeft}m until retry`,
+        repliesSent,
+      };
+    }
+    await updateProtocolSettings(agentId, { postCooldownUntil: null });
+  }
+
   const minIntervalMs = jitterInterval(Math.round(baseIntervalMs * cooldownMultiplier));
   if (settings.lastPostedAt) {
     const elapsed = Date.now() - new Date(settings.lastPostedAt).getTime();
@@ -614,6 +630,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
     await updateProtocolSettings(agentId, {
       lastPostedAt: new Date().toISOString(),
+      postCooldownUntil: null,
       totalAutoPosted: settings.totalAutoPosted + 1,
     });
 
@@ -691,7 +708,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     if (isRateLimit || isServerError) {
       const backoffMins = isRateLimit ? 60 : 15;
       const pauseUntil = new Date(Date.now() + backoffMins * 60 * 1000).toISOString();
-      await updateProtocolSettings(agentId, { lastPostedAt: pauseUntil });
+      await updateProtocolSettings(agentId, { postCooldownUntil: pauseUntil });
       return {
         agentId,
         action: 'error',

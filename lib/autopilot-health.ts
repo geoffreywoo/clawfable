@@ -31,6 +31,7 @@ function isSuccessfulPost(entry: PostLogEntry): boolean {
 function latestSuccessfulPostAt(postLog: PostLogEntry[], settings: ProtocolSettings): string | null {
   const logged = postLog.find(isSuccessfulPost)?.postedAt || null;
   if (logged) return logged;
+  if (postLog.length > 0) return null;
   if (!settings.lastPostedAt) return null;
 
   const lastPostedMs = new Date(settings.lastPostedAt).getTime();
@@ -38,6 +39,13 @@ function latestSuccessfulPostAt(postLog: PostLogEntry[], settings: ProtocolSetti
     return null;
   }
   return settings.lastPostedAt;
+}
+
+function postBackoffDetails(settings: ProtocolSettings, nowMs: number): string | null {
+  if (!settings.postCooldownUntil) return null;
+  const cooldownMs = new Date(settings.postCooldownUntil).getTime();
+  if (!Number.isFinite(cooldownMs) || cooldownMs <= nowMs) return null;
+  return `X post API retry is paused until ${settings.postCooldownUntil}.`;
 }
 
 export function getAutopilotCadenceMs(settings: ProtocolSettings, now = new Date()): number {
@@ -68,7 +76,7 @@ export async function evaluateAutopilotHealth(
   postLogArg?: PostLogEntry[],
 ): Promise<AutopilotHealthSnapshot> {
   const settings = settingsArg || await getProtocolSettings(agent.id);
-  const postLog = postLogArg || await getPostLog(agent.id, 100);
+  const postLog = postLogArg || await getPostLog(agent.id, 500);
   const queue = await inspectAutopilotQueue(agent.id, settings);
   const now = new Date();
   const nowMs = now.getTime();
@@ -87,6 +95,7 @@ export async function evaluateAutopilotHealth(
   const details: string[] = [];
   const isConnected = Boolean(agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId);
   const futureCooldown = futureCooldownDetails(settings, nowMs);
+  const postBackoff = postBackoffDetails(settings, nowMs);
 
   let status: AutopilotHealthSnapshot['status'] = 'healthy';
   let reason = 'Autopilot is healthy.';
@@ -103,6 +112,11 @@ export async function evaluateAutopilotHealth(
     reason = 'Autopilot cooldown is stuck in the future.';
     externalBlocker = 'cooldown';
     details.push(futureCooldown);
+  } else if (postBackoff) {
+    status = 'watch';
+    reason = 'X post API backoff is active.';
+    externalBlocker = 'x_api';
+    details.push(postBackoff);
   } else if (queue.queueDepth === 0) {
     status = 'degraded';
     reason = 'Autopilot queue is empty.';

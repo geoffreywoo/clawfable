@@ -5,6 +5,7 @@ export type AutopilotScheduleState =
   | 'paused'
   | 'queue_repair'
   | 'waiting_on_queue'
+  | 'api_backoff'
   | 'cooldown'
   | 'window_opening'
   | 'eligible';
@@ -76,6 +77,18 @@ export function getAutopilotScheduleStatus(
 
   const cadence = getCadenceLabel(settings, now);
   const cadencePrefix = `${cadence.label} — `;
+
+  if (settings.postCooldownUntil) {
+    const cooldownUntilMs = new Date(settings.postCooldownUntil).getTime();
+    if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > now.getTime()) {
+      return {
+        state: 'api_backoff',
+        title: 'Schedule live',
+        summary: `${cadencePrefix}X post API backoff active for ${formatDuration(cooldownUntilMs - now.getTime())}. The next cron run after that can retry.`,
+        queueDetail,
+      };
+    }
+  }
 
   if (activeQueueCount === 0 && quarantinedCount > 0) {
     return {

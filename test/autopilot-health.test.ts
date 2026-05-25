@@ -162,6 +162,49 @@ describe('autopilot health watchdog', () => {
     expect(health.postableQueueDepth).toBe(0);
   });
 
+  it('surfaces active X post API backoff separately from successful post cadence', async () => {
+    const health = await evaluateAutopilotHealth(baseAgent, {
+      ...baseSettings,
+      lastPostedAt: '2026-04-01T00:00:00.000Z',
+      postCooldownUntil: '2026-04-03T00:20:00.000Z',
+    });
+
+    expect(health.status).toBe('watch');
+    expect(health.externalBlocker).toBe('x_api');
+    expect(health.reason).toBe('X post API backoff is active.');
+    expect(health.details).toContain('X post API retry is paused until 2026-04-03T00:20:00.000Z.');
+    expect(health.lastPostedAt).toBe('2026-04-01T00:00:00.000Z');
+  });
+
+  it('does not trust lastPostedAt when recent logs contain no successful post', async () => {
+    const health = await evaluateAutopilotHealth(
+      baseAgent,
+      {
+        ...baseSettings,
+        lastPostedAt: '2026-04-02T23:45:00.000Z',
+      },
+      [
+        {
+          id: 'log-error',
+          agentId: baseAgent.id,
+          tweetId: 'tweet-1',
+          xTweetId: '',
+          content: 'failed post',
+          format: 'hot_take',
+          topic: 'AI',
+          postedAt: '2026-04-03T00:00:00.000Z',
+          source: 'cron',
+          action: 'error',
+          reason: 'API error — pausing 15m.',
+        },
+      ] as any,
+    );
+
+    expect(health.status).toBe('degraded');
+    expect(health.reason).toContain('No autopost has landed');
+    expect(health.lastPostedAt).toBeNull();
+  });
+
   it('resets impossible future cooldowns and runs queue self-heal', async () => {
     const futureSettings = {
       ...baseSettings,

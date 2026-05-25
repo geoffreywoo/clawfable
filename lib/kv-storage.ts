@@ -1341,6 +1341,7 @@ const DEFAULT_PROTOCOL: ProtocolSettings = {
   maxRepliesPerRun: 3,
   replyIntervalMins: 30,
   lastPostedAt: null,
+  postCooldownUntil: null,
   lastRepliedAt: null,
   lastReplyCheckedAt: null,
   totalAutoPosted: 0,

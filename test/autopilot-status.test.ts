@@ -67,6 +67,24 @@ describe('getAutopilotScheduleStatus', () => {
     expect(status.summary).toContain('cooling down');
   });
 
+  it('reports X post API backoff separately from normal cadence cooldown', () => {
+    const status = getAutopilotScheduleStatus(
+      makeSettings({
+        peakHours: [17, 18, 19],
+        lastPostedAt: '2026-04-09T18:00:00.000Z',
+        postCooldownUntil: '2026-04-10T01:20:00.000Z',
+      }),
+      {
+        activeQueueCount: 5,
+        quarantinedCount: 0,
+        now: new Date('2026-04-10T01:00:00.000Z'),
+      },
+    );
+
+    expect(status.state).toBe('api_backoff');
+    expect(status.summary).toContain('X post API backoff active');
+  });
+
   it('treats the jitter band as a window opening instead of a fake exact minute', () => {
     const status = getAutopilotScheduleStatus(
       makeSettings({

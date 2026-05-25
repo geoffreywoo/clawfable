@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
@@ -228,6 +228,10 @@ beforeEach(() => {
   }));
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('autopilot remote debug logging', () => {
   it('returns contextual post failure details for remote debugging', async () => {
     mocks.postTweet.mockRejectedValue(new TwitterActionError({
@@ -294,10 +298,31 @@ describe('autopilot remote debug logging', () => {
     expect(result.reason).toContain('pausing 15m');
     expect(mocks.updateProtocolSettings).toHaveBeenCalledWith(
       baseAgent.id,
+      expect.objectContaining({ postCooldownUntil: expect.any(String) }),
+    );
+    expect(mocks.updateProtocolSettings).not.toHaveBeenCalledWith(
+      baseAgent.id,
       expect.objectContaining({ lastPostedAt: expect.any(String) }),
     );
     expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
     expect(mocks.deleteTweet).not.toHaveBeenCalled();
+  });
+
+  it('honors active post API backoff without treating it like a successful post cooldown', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      postCooldownUntil: '2026-04-07T00:15:00.000Z',
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-07T00:05:00.000Z'));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result).toMatchObject({
+      action: 'skipped',
+      reason: 'X post API backoff: 10m until retry',
+    });
+    expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
   it('clears stale template fallback drafts when richer generation is available again', async () => {

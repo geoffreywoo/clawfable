@@ -181,15 +181,15 @@ export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
 
 export async function getProtocolSnapshot(user: User, agentOrId: Agent | string): Promise<ProtocolSnapshot> {
   const agentId = typeof agentOrId === 'string' ? agentOrId : agentOrId.id;
-  const [settings, postLog, agentCount, autopilotHealth] = await Promise.all([
+  const [settings, healthPostLog, agentCount, autopilotHealth] = await Promise.all([
     getProtocolSettings(agentId),
-    getPostLog(agentId, 10),
+    getPostLog(agentId, 500),
     getAccessibleAgentCount(user),
     getAutopilotHealth(agentId),
   ]);
   const liveAutopilotHealth = typeof agentOrId === 'string'
     ? autopilotHealth
-    : await evaluateAutopilotHealth(agentOrId, settings, postLog);
+    : await evaluateAutopilotHealth(agentOrId, settings, healthPostLog);
   const mergedAutopilotHealth = autopilotHealth && liveAutopilotHealth
     ? {
         ...liveAutopilotHealth,
@@ -201,7 +201,7 @@ export async function getProtocolSnapshot(user: User, agentOrId: Agent | string)
 
   return {
     settings,
-    postLog,
+    postLog: healthPostLog.slice(0, 10),
     billing: getBillingSummary(user, agentCount),
     autopilotHealth: mergedAutopilotHealth,
   };

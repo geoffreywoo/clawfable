@@ -584,6 +584,7 @@ export interface ProtocolSettings {
   maxRepliesPerRun: number;   // max replies per cron run (1-10)
   replyIntervalMins: number;  // minimum minutes between reply runs
   lastPostedAt: string | null;
+  postCooldownUntil?: string | null;
   lastRepliedAt: string | null;
   lastReplyCheckedAt?: string | null;
   totalAutoPosted: number;
