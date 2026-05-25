@@ -8,6 +8,8 @@ import { evaluateAutopilotHealth } from './autopilot-health';
 import {
   getPresetSoulProfile,
   getPresetSoulSummaries,
+  toPublicSoulListItem,
+  type PublicSoulListItem,
   type PublicSoulProfile,
   type PublicSoulSummary,
 } from './open-source-souls';
@@ -379,6 +381,11 @@ const getCachedLivePublicSoulProfile = unstable_cache(
 export async function getPublicSoulSummaries(): Promise<PublicSoulSummary[]> {
   const liveSouls = await getCachedPublicSouls();
   return [...getPresetSoulSummaries(), ...liveSouls];
+}
+
+export async function getPublicSoulListItems(): Promise<PublicSoulListItem[]> {
+  const souls = await getPublicSoulSummaries();
+  return souls.map(toPublicSoulListItem);
 }
 
 export async function getPublicSoulProfile(handle: string): Promise<PublicSoulProfile | null> {

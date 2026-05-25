@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { LoginFormButton } from '@/app/components/login-form-button';
 import { Logo } from '@/app/components/logo';
 import { PricingPlanAction } from '@/app/components/pricing-plan-action';
@@ -20,12 +19,12 @@ export default function PricingPage() {
         </div>
         <div className="site-header-right">
           <nav className="site-header-nav">
-            <Link href="/">Home</Link>
-            <Link href="/souls">Soul library</Link>
+            <a href="/">Home</a>
+            <a href="/souls">Soul library</a>
           </nav>
-          <Link href={CONTROL_ROOM_PATH} prefetch={false} className="btn btn-outline btn-sm">
+          <a href={CONTROL_ROOM_PATH} className="btn btn-outline btn-sm">
             Open app
-          </Link>
+          </a>
         </div>
       </header>
 

@@ -12,6 +12,11 @@ export interface PublicSoulSummary {
   xHandle: string | null;
 }
 
+export interface PublicSoulListItem extends Omit<PublicSoulSummary, 'soulMd'> {
+  soulPreview: string;
+  soulLineCount: number;
+}
+
 export interface PublicSoulProfile extends PublicSoulSummary {
   avgRetweets: number;
   formatRankings: Array<{ format: string; count: number; avgEngagement: number }>;
@@ -250,6 +255,22 @@ Consumerism, conformity, AI replacing fake work, founder delusion, status addict
 - Memorable lines matter more than explanation.`,
   },
 ];
+
+export function toPublicSoulListItem(soul: PublicSoulSummary): PublicSoulListItem {
+  const lines = soul.soulMd.split('\n');
+  return {
+    handle: soul.handle,
+    name: soul.name,
+    soulSummary: soul.soulSummary,
+    totalTracked: soul.totalTracked,
+    avgLikes: soul.avgLikes,
+    sourceType: soul.sourceType,
+    category: soul.category,
+    xHandle: soul.xHandle,
+    soulPreview: lines.slice(0, 8).join('\n'),
+    soulLineCount: lines.length,
+  };
+}
 
 export function getPresetSoulSummaries(): PublicSoulSummary[] {
   return PRESET_SOULS.map((preset) => ({

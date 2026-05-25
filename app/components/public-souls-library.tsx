@@ -1,17 +1,15 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { Logo } from '@/app/components/logo';
 import { reportActionError, requestLoginUrl } from '@/app/components/site-actions';
-import type { PublicSoulSummary } from '@/lib/open-source-souls';
+import type { PublicSoulListItem } from '@/lib/open-source-souls';
 
 interface PublicSoulsLibraryProps {
-  souls: PublicSoulSummary[];
+  souls: PublicSoulListItem[];
 }
 
 export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
-  const [expandedHandle, setExpandedHandle] = useState<string | null>(null);
   const [forkingHandle, setForkingHandle] = useState<string | null>(null);
 
   const presetSouls = souls.filter((soul) => soul.sourceType === 'preset');
@@ -28,9 +26,7 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
     }
   };
 
-  const renderSoulCard = (soul: PublicSoulSummary) => {
-    const isExpanded = expandedHandle === soul.handle;
-    const preview = soul.soulMd.split('\n').slice(0, 8).join('\n');
+  const renderSoulCard = (soul: PublicSoulListItem) => {
     const meta =
       soul.sourceType === 'live'
         ? `${soul.totalTracked} tracked posts · ${soul.avgLikes} avg likes`
@@ -59,7 +55,7 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
 
           <div className="soul-card-meta">
             <span>{meta}</span>
-            <span>{soul.soulMd.split('\n').length} lines</span>
+            <span>{soul.soulLineCount} lines</span>
           </div>
         </div>
 
@@ -71,19 +67,13 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
           >
             {forkingHandle === soul.handle ? 'Connecting...' : 'Fork this voice'}
           </button>
-          <Link href={`/souls/${soul.handle}`} className="btn btn-outline">
+          <a href={`/souls/${soul.handle}`} className="btn btn-outline">
             View details
-          </Link>
-          <button
-            className="btn btn-ghost"
-            onClick={() => setExpandedHandle(isExpanded ? null : soul.handle)}
-          >
-            {isExpanded ? 'Hide SOUL.md' : 'Preview SOUL.md'}
-          </button>
+          </a>
         </div>
 
-        <div className={`soul-card-preview${isExpanded ? ' is-expanded' : ''}`}>
-          <pre>{isExpanded ? soul.soulMd : preview}</pre>
+        <div className="soul-card-preview">
+          <pre>{soul.soulPreview}</pre>
         </div>
       </article>
     );
@@ -92,7 +82,7 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
   const renderSoulSection = (
     title: string,
     description: string,
-    items: PublicSoulSummary[],
+    items: PublicSoulListItem[],
     emptyLabel: string,
   ) => (
     <section className="souls-section">
@@ -118,18 +108,18 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
     <div className="page-shell">
       <header className="site-header">
         <div className="site-header-brand">
-          <Link href="/" className="site-header-home-link">
+          <a href="/" className="site-header-home-link">
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
               <p>Authentic X autopilot</p>
             </div>
-          </Link>
+          </a>
         </div>
         <div className="site-header-right">
           <nav className="site-header-nav">
-            <Link href="/">Home</Link>
-            <Link href="/pricing">Pricing</Link>
+            <a href="/">Home</a>
+            <a href="/pricing">Pricing</a>
           </nav>
         </div>
       </header>
@@ -180,9 +170,9 @@ export function PublicSoulsLibrary({ souls }: PublicSoulsLibraryProps) {
 
           <div className="souls-library-footer">
             <p>Every Clawfable voice starts with a SOUL.md and then compounds through review, edits, and real performance.</p>
-            <Link href="/" className="btn btn-outline">
+            <a href="/" className="btn btn-outline">
               Back to home
-            </Link>
+            </a>
           </div>
         </div>
       </main>

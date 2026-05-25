@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { CheckoutButton, LoginButton, PortalButton } from '@/app/components/site-actions';
+import { useState } from 'react';
+import { reportActionError, requestLoginUrl } from '@/app/components/site-actions';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import type { BillingSummary } from '@/lib/types';
 
@@ -47,67 +46,55 @@ interface PricingPlanActionProps {
 }
 
 export function PricingPlanAction({ planId, className }: PricingPlanActionProps) {
-  const [viewer, setViewer] = useState<Viewer | null | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void loadViewer().then((resolvedViewer) => {
-      if (active) {
-        setViewer(resolvedViewer);
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const viewer = await loadViewer();
+      if (!viewer) {
+        window.location.href = await requestLoginUrl();
+        return;
       }
-    });
 
-    return () => {
-      active = false;
-    };
-  }, []);
+      if (planId === 'free') {
+        window.location.href = CONTROL_ROOM_PATH;
+        return;
+      }
 
-  if (viewer === undefined) {
-    return (
-      <button className={className} disabled>
-        Loading...
-      </button>
-    );
-  }
+      if (viewer.billing.grandfathered) {
+        window.location.href = CONTROL_ROOM_PATH;
+        return;
+      }
 
-  if (!viewer) {
-    return (
-      <LoginButton className={className}>
-        {planId === 'free'
-          ? 'Start free'
-          : `Log in for ${planId === 'pro' ? 'Pro' : 'Scale'}`}
-      </LoginButton>
-    );
-  }
+      const endpoint = viewer.billing.isPaid
+        ? '/api/billing/portal'
+        : '/api/billing/checkout';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: endpoint.endsWith('/checkout') ? { 'Content-Type': 'application/json' } : undefined,
+        body: endpoint.endsWith('/checkout') ? JSON.stringify({ plan: planId }) : undefined,
+      });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to open billing');
+      }
+      window.location.href = data.url;
+    } catch (error) {
+      reportActionError(error, planId === 'free' ? 'Failed to start login' : 'Failed to open billing');
+      setLoading(false);
+    }
+  };
 
-  if (planId === 'free') {
-    return (
-      <Link href={CONTROL_ROOM_PATH} prefetch={false} className={className}>
-        Open workspace
-      </Link>
-    );
-  }
-
-  if (viewer.billing.grandfathered) {
-    return (
-      <button className={className} disabled>
-        Grandfathered access
-      </button>
-    );
-  }
-
-  if (viewer.billing.isPaid) {
-    const isCurrentPlan = viewer.billing.plan === planId;
-    return (
-      <PortalButton className={className}>
-        {isCurrentPlan ? 'Manage current plan' : 'Change in billing'}
-      </PortalButton>
-    );
-  }
+  const label = planId === 'free'
+    ? 'Start free'
+    : planId === 'pro'
+      ? 'Unlock Pro'
+      : 'Unlock Scale';
 
   return (
-    <CheckoutButton className={className} plan={planId}>
-      {planId === 'pro' ? 'Unlock Pro' : 'Unlock Scale'}
-    </CheckoutButton>
+    <button className={className} onClick={handleClick} disabled={loading}>
+      {loading ? 'Loading...' : label}
+    </button>
   );
 }

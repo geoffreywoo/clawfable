@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { Logo } from '@/app/components/logo';
 import { reportActionError, requestLoginUrl } from '@/app/components/site-actions';
@@ -36,19 +35,19 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
     <div className="page-shell">
       <header className="site-header">
         <div className="site-header-brand">
-          <Link href="/" className="site-header-home-link">
+          <a href="/" className="site-header-home-link">
             <Logo size={32} />
             <div className="site-header-text">
               <h1>CLAWFABLE</h1>
               <p>Authentic X autopilot</p>
             </div>
-          </Link>
+          </a>
         </div>
         <div className="site-header-right">
           <nav className="site-header-nav">
-            <Link href="/">Home</Link>
-            <Link href="/souls">Soul library</Link>
-            <Link href="/pricing">Pricing</Link>
+            <a href="/">Home</a>
+            <a href="/souls">Soul library</a>
+            <a href="/pricing">Pricing</a>
           </nav>
         </div>
       </header>
@@ -208,9 +207,9 @@ export function PublicSoulProfile({ agent }: PublicSoulProfileProps) {
 
           <div className="souls-library-footer">
             <p>Want to browse more voices before you fork one?</p>
-            <Link href="/souls" className="btn btn-outline">
+            <a href="/souls" className="btn btn-outline">
               Back to soul library
-            </Link>
+            </a>
           </div>
         </div>
       </main>
