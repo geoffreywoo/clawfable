@@ -70,6 +70,41 @@ function performanceEntryKey(tweet: TweetPerformance): string {
   return String(tweet.xTweetId || `${tweet.tweetId}:${tweet.postedAt}:${tweet.content}`);
 }
 
+const CHECKPOINT_ORDER: Array<NonNullable<TweetPerformance['performanceCheckpoint']>> = [
+  'initial_15m',
+  'early_30m',
+  'momentum_2h',
+  'full_24h',
+  'late',
+];
+
+function checkpointRank(checkpoint: TweetPerformance['performanceCheckpoint'] | undefined): number {
+  const index = CHECKPOINT_ORDER.indexOf(checkpoint || 'initial_15m');
+  return index === -1 ? 0 : index;
+}
+
+function latestPerformanceByXId(history: TweetPerformance[]): Map<string, TweetPerformance> {
+  const byId = new Map<string, TweetPerformance>();
+  for (const entry of history) {
+    const id = String(entry.xTweetId || '');
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (!existing || parsePerformanceTimestamp(entry.checkedAt) > parsePerformanceTimestamp(existing.checkedAt)) {
+      byId.set(id, entry);
+    }
+  }
+  return byId;
+}
+
+function shouldTrackPerformanceCheckpoint(existing: TweetPerformance | undefined, postedAt: string, checkedAt: string): boolean {
+  if (!existing) return true;
+  const nextCheckpoint = inferPerformanceCheckpoint(postedAt, checkedAt);
+  if (checkpointRank(nextCheckpoint) <= checkpointRank(existing.performanceCheckpoint)) return false;
+  const lastChecked = parsePerformanceTimestamp(existing.checkedAt);
+  if (!lastChecked) return true;
+  return Date.parse(checkedAt) - lastChecked >= 10 * 60 * 1000;
+}
+
 function sourcePriority(source: TweetPerformance['source']): number {
   switch (source) {
     case 'manual':
@@ -572,7 +607,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
 
   // Get existing performance entries to avoid re-checking
   const existing = await getPerformanceHistory(agent.id, 500);
-  const checkedXIds = new Set(existing.map((e) => String(e.xTweetId)));
+  const latestByXId = latestPerformanceByXId(existing);
   const [postLog, signals, settings] = await Promise.all([
     getPostLog(agent.id, 200),
     getLearningSignals(agent.id, 500),
@@ -631,7 +666,10 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
 
   // Collect new tweets to track
-  const newTweets = timeline.filter((t) => !checkedXIds.has(String(t.id)));
+  const checkedAtForRun = new Date().toISOString();
+  const newTweets = timeline.filter((t) =>
+    shouldTrackPerformanceCheckpoint(latestByXId.get(String(t.id)), t.createdAt, checkedAtForRun)
+  );
   if (newTweets.length === 0) return 0;
 
   // Batch classify manually written tweets via the fast AI tier (up to 20 at a time)

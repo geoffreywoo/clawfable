@@ -4,6 +4,9 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
 import { summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
+import { validateQueueUpdateRequest } from '@/lib/request-validation';
+import { getTweetCompletenessIssue } from '@/lib/survivability';
+import { assessTasteRisk } from '@/lib/virality-signals';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -19,12 +22,30 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { content, status, scheduledAt, deletionReason } = body;
+    const parsed = validateQueueUpdateRequest(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid queue update' }, { status: 400 });
+    }
+    const { content, status, scheduledAt, deletionReason } = parsed.value;
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
     if (status !== undefined) {
-      if (!['draft', 'queued', 'posted'].includes(status)) {
-        return NextResponse.json({ error: 'Invalid tweet status' }, { status: 400 });
+      if (status === 'queued') {
+        const candidateContent = content ?? tweet.content;
+        const completenessIssue = getTweetCompletenessIssue(candidateContent);
+        if (completenessIssue) {
+          return NextResponse.json({ error: completenessIssue }, { status: 422 });
+        }
+        const taste = assessTasteRisk(candidateContent, {
+          surface: tweet.type === 'reply' ? 'reply' : 'post',
+          policyRiskScore: tweet.policyRiskScore,
+          creativeRiskScore: tweet.creativeRiskScore,
+          slopScore: tweet.slopScore,
+          voiceScore: tweet.voiceScore,
+        });
+        if (taste.action === 'block') {
+          return NextResponse.json({ error: `Taste gate blocked queueing: ${taste.reasons.join(', ') || 'quality risk'}` }, { status: 422 });
+        }
       }
       updates.status = status;
     }

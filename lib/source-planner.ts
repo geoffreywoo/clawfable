@@ -53,22 +53,22 @@ const PROMO_PATTERNS = [
 
 const BASE_LANE_BUDGETS: Record<'safe' | 'balanced' | 'explore', Record<ContentSourceLane, number>> = {
   safe: {
-    manual_core_exploit: 0.6,
+    manual_core_exploit: 0.55,
     trend_aligned_exploit: 0.25,
-    trend_adjacent_explore: 0,
+    trend_adjacent_explore: 0.05,
     core_explore_fallback: 0.15,
   },
   balanced: {
-    manual_core_exploit: 0.5,
+    manual_core_exploit: 0.45,
     trend_aligned_exploit: 0.3,
-    trend_adjacent_explore: 0,
-    core_explore_fallback: 0.2,
+    trend_adjacent_explore: 0.1,
+    core_explore_fallback: 0.15,
   },
   explore: {
-    manual_core_exploit: 0.35,
+    manual_core_exploit: 0.3,
     trend_aligned_exploit: 0.35,
-    trend_adjacent_explore: 0,
-    core_explore_fallback: 0.3,
+    trend_adjacent_explore: 0.15,
+    core_explore_fallback: 0.2,
   },
 };
 
@@ -325,7 +325,7 @@ export function buildSourcePlannerPlan({
 
   const baseBudgets = BASE_LANE_BUDGETS[autonomyMode];
   const desiredTrendShare = clamp((trendMixTarget || 0) / 100);
-  const totalTrendCap = baseBudgets.trend_aligned_exploit + baseBudgets.core_explore_fallback;
+  const totalTrendCap = baseBudgets.trend_aligned_exploit + baseBudgets.trend_adjacent_explore + baseBudgets.core_explore_fallback;
   const adjustedTrendShare = Math.min(totalTrendCap, Math.max(0.1, desiredTrendShare));
   const adjustedBudgets: Record<ContentSourceLane, number> = {
     manual_core_exploit: clamp(1 - adjustedTrendShare, 0.25, 0.8),
@@ -334,7 +334,7 @@ export function buildSourcePlannerPlan({
     core_explore_fallback: 0,
   };
   const remainingTrendShare = adjustedTrendShare - adjustedBudgets.trend_aligned_exploit;
-  adjustedBudgets.trend_adjacent_explore = Math.min(baseBudgets.core_explore_fallback, Math.max(0, remainingTrendShare * 0.45));
+  adjustedBudgets.trend_adjacent_explore = Math.min(baseBudgets.trend_adjacent_explore, Math.max(0, remainingTrendShare * 0.45));
   adjustedBudgets.core_explore_fallback = Math.max(0, adjustedTrendShare - adjustedBudgets.trend_aligned_exploit - adjustedBudgets.trend_adjacent_explore);
 
   const laneCounts = allocateCounts(count, adjustedBudgets);

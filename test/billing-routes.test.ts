@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   saveBaseline: vi.fn(),
   addCronLogEntry: vi.fn(),
   addPostLogEntry: vi.fn(),
+  acquireAutopilotLock: vi.fn(),
+  releaseAutopilotLock: vi.fn(),
+  addOutcomeEvent: vi.fn(),
   runAutopilot: vi.fn(),
 }));
 
@@ -48,6 +51,9 @@ vi.mock('@/lib/kv-storage', () => ({
   saveBaseline: mocks.saveBaseline,
   addCronLogEntry: mocks.addCronLogEntry,
   addPostLogEntry: mocks.addPostLogEntry,
+  acquireAutopilotLock: mocks.acquireAutopilotLock,
+  releaseAutopilotLock: mocks.releaseAutopilotLock,
+  addOutcomeEvent: mocks.addOutcomeEvent,
   getUserAgents: vi.fn(),
   getTweets: vi.fn(),
   getMentions: vi.fn(),
@@ -68,6 +74,7 @@ vi.mock('@/lib/setup-state', () => ({
 
 vi.mock('@/lib/survivability', () => ({
   clampPostsPerDay: vi.fn((value: number) => value),
+  getTweetCompletenessIssue: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/autopilot', () => ({
@@ -108,6 +115,13 @@ describe('billing route guards', () => {
     mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.canAccessAgent.mockResolvedValue(false);
     mocks.getAgentByHandle.mockResolvedValue(null);
+    mocks.acquireAutopilotLock.mockResolvedValue({
+      acquired: true,
+      owner: 'test-lock',
+      lock: { owner: 'test-lock', acquiredAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString() },
+    });
+    mocks.releaseAutopilotLock.mockResolvedValue(true);
+    mocks.addOutcomeEvent.mockResolvedValue({});
     mocks.getProtocolSettings.mockResolvedValue({
       enabled: false,
       postsPerDay: 3,

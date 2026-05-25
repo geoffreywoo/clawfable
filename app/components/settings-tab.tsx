@@ -232,7 +232,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               lineHeight: '1.7',
             }}
           >
-            <span style={{ color: 'var(--primary)', fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+            <span style={{ color: 'var(--primary)', fontSize: '9px', letterSpacing: '0', textTransform: 'none', fontWeight: 700 }}>
               Parsed Voice:{' '}
             </span>
             {agent.soulSummary}
@@ -246,7 +246,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             data-testid="button-save-soul"
             style={{ background: soulChanged ? 'var(--primary)' : undefined }}
           >
-            {savingSoul ? 'SAVING...' : 'SAVE CHANGES'}
+            {savingSoul ? 'Saving...' : 'Save changes'}
           </button>
         </div>
       </div>
@@ -267,7 +267,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontFamily: 'var(--font-mono)',
                   fontSize: '11px',
                   fontWeight: 700,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0',
                   color: isConnected ? '#22c55e' : 'var(--primary)',
                 }}
               >
@@ -322,7 +322,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontFamily: 'var(--font-mono)',
                   fontSize: '10px',
                   fontWeight: 700,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0',
                   color: '#c4b5fd',
                   marginBottom: '6px',
                 }}
@@ -373,7 +373,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0' }}>
               SOUL EVOLUTION
             </p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
@@ -419,7 +419,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0' }}>
               OPEN SOURCE SOUL
             </p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
@@ -460,7 +460,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       <div className="danger-zone">
         <div className="flex items-center gap-2 mb-3">
           <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M7 2L13 12H1L7 2z" stroke="#ef4444" strokeWidth="1.3" strokeLinejoin="round" /><line x1="7" y1="6" x2="7" y2="9" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><circle cx="7" cy="10.5" r="0.5" fill="#ef4444" /></svg>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#ef4444' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', textTransform: 'none', color: '#ef4444' }}>
             Danger Zone
           </span>
         </div>
@@ -491,7 +491,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               className="btn btn-ghost btn-sm"
               onClick={() => setDeleteConfirm(false)}
             >
-              CANCEL
+              Cancel
             </button>
           </div>
         )}

@@ -64,7 +64,7 @@ export function getAutopilotScheduleStatus(
   if (!settings.enabled) {
     return {
       state: 'paused',
-      title: 'SCHEDULE PAUSED',
+      title: 'Schedule paused',
       summary: 'Use this as a manual review lane, or enable automation once the voice feels right.',
       queueDetail: 'Nothing will post automatically while the schedule is off.',
     };
@@ -80,7 +80,7 @@ export function getAutopilotScheduleStatus(
   if (activeQueueCount === 0 && quarantinedCount > 0) {
     return {
       state: 'queue_repair',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}queue under repair. ${quarantinedCount} quarantined draft${quarantinedCount === 1 ? ' is' : 's are'} being auto-fixed before posting resumes.`,
       queueDetail,
     };
@@ -89,7 +89,7 @@ export function getAutopilotScheduleStatus(
   if (activeQueueCount === 0) {
     return {
       state: 'waiting_on_queue',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}waiting on an active queue. Autopilot will generate fresh approved drafts before it can post again.`,
       queueDetail,
     };
@@ -98,7 +98,7 @@ export function getAutopilotScheduleStatus(
   if (!settings.lastPostedAt) {
     return {
       state: 'eligible',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}eligible now. The next cron run can post an approved draft if it clears filters.`,
       queueDetail,
     };
@@ -108,7 +108,7 @@ export function getAutopilotScheduleStatus(
   if (!Number.isFinite(lastPostedAtMs)) {
     return {
       state: 'eligible',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}eligible now. The next cron run can post an approved draft if it clears filters.`,
       queueDetail,
     };
@@ -124,7 +124,7 @@ export function getAutopilotScheduleStatus(
   if (elapsedMs < earliestIntervalMs) {
     return {
       state: 'cooldown',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}cooling down for ${formatDuration(earliestIntervalMs - elapsedMs)} before the next posting window can open.`,
       queueDetail,
     };
@@ -133,7 +133,7 @@ export function getAutopilotScheduleStatus(
   if (elapsedMs < latestIntervalMs) {
     return {
       state: 'window_opening',
-      title: 'SCHEDULE LIVE',
+      title: 'Schedule live',
       summary: `${cadencePrefix}posting window opening now. Jitter is in play, so the next cron run may post if an approved draft clears filters.`,
       queueDetail,
     };
@@ -141,7 +141,7 @@ export function getAutopilotScheduleStatus(
 
   return {
     state: 'eligible',
-    title: 'SCHEDULE LIVE',
+    title: 'Schedule live',
     summary: `${cadencePrefix}eligible now. The next cron run can post an approved draft if it clears filters.`,
     queueDetail,
   };

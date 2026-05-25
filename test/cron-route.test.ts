@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   getAgentOwnerId: vi.fn(),
   getUser: vi.fn(),
   updateProtocolSettings: vi.fn(),
+  acquireAutopilotLock: vi.fn(),
+  releaseAutopilotLock: vi.fn(),
+  addOutcomeEvent: vi.fn(),
   runAutopilot: vi.fn(),
   getMentionsFromTwitter: vi.fn(),
   decodeKeys: vi.fn(),
@@ -44,6 +47,9 @@ vi.mock('@/lib/kv-storage', () => ({
   getAgentOwnerId: mocks.getAgentOwnerId,
   getUser: mocks.getUser,
   updateProtocolSettings: mocks.updateProtocolSettings,
+  acquireAutopilotLock: mocks.acquireAutopilotLock,
+  releaseAutopilotLock: mocks.releaseAutopilotLock,
+  addOutcomeEvent: mocks.addOutcomeEvent,
 }));
 
 vi.mock('@/lib/autopilot', () => ({
@@ -127,6 +133,13 @@ describe('cron autopilot isolation', () => {
     mocks.checkPerformance.mockResolvedValue(0);
     mocks.maybeReanalyze.mockResolvedValue(undefined);
     mocks.maybeEvolveSoul.mockResolvedValue({ evolved: false, changeSummary: '' });
+    mocks.acquireAutopilotLock.mockResolvedValue({
+      acquired: true,
+      owner: 'test-lock',
+      lock: { owner: 'test-lock', acquiredAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString() },
+    });
+    mocks.releaseAutopilotLock.mockResolvedValue(true);
+    mocks.addOutcomeEvent.mockResolvedValue({});
   });
 
   it('logs the failure and keeps cron alive when runAutopilot throws', async () => {

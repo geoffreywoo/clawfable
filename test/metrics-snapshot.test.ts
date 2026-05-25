@@ -1,19 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  getAgent: vi.fn(),
   getAnalysis: vi.fn(),
   getMentionCount: vi.fn(),
   getPostLog: vi.fn(),
   getProtocolSettings: vi.fn(),
   getTweets: vi.fn(),
+  saveMetricAvailability: vi.fn(),
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
+  getAgent: mocks.getAgent,
   getAnalysis: mocks.getAnalysis,
   getMentionCount: mocks.getMentionCount,
   getPostLog: mocks.getPostLog,
   getProtocolSettings: mocks.getProtocolSettings,
   getTweets: mocks.getTweets,
+  saveMetricAvailability: mocks.saveMetricAvailability,
 }));
 
 import { getAgentMetricsSnapshot } from '@/lib/metrics-snapshot';
@@ -85,6 +89,15 @@ describe('metrics snapshot', () => {
     mocks.getMentionCount.mockResolvedValue(5377);
     mocks.getPostLog.mockResolvedValue([]);
     mocks.getProtocolSettings.mockResolvedValue({});
+    mocks.getAgent.mockResolvedValue({
+      id: '13',
+      isConnected: 1,
+      apiKey: 'k',
+      apiSecret: 's',
+      accessToken: 't',
+      accessSecret: 'as',
+    });
+    mocks.saveMetricAvailability.mockResolvedValue([]);
     mocks.getAnalysis.mockResolvedValue({
       engagementPatterns: { avgLikes: 14 },
       viralTweets: [{ id: 'viral-1' }],

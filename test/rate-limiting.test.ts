@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { checkRateLimit } from '@/lib/kv-storage';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { acquireAutopilotLock, checkRateLimit, releaseAutopilotLock } from '@/lib/kv-storage';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('Rate limiting', () => {
   it('allows requests up to the limit', async () => {
@@ -41,5 +45,26 @@ describe('Rate limiting', () => {
     // Different agent should be fine
     const bOk = await checkRateLimit('rate-agent-b', 'wizard', 3);
     expect(bOk).toBe(true);
+  });
+
+  it('resets counters after the configured window expires', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-24T00:00:00.000Z'));
+    const key = `rate-ttl-${crypto.randomUUID()}`;
+    expect(await checkRateLimit(key, 'generate', 1, 1000)).toBe(true);
+    expect(await checkRateLimit(key, 'generate', 1, 1000)).toBe(false);
+    vi.setSystemTime(new Date('2026-05-24T00:00:01.100Z'));
+    expect(await checkRateLimit(key, 'generate', 1, 1000)).toBe(true);
+  });
+
+  it('uses an owner token for autopilot locks', async () => {
+    const agentId = `lock-agent-${crypto.randomUUID()}`;
+    const first = await acquireAutopilotLock(agentId, 'owner-1', 60, 'manual');
+    const second = await acquireAutopilotLock(agentId, 'owner-2', 60, 'cron');
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(false);
+    expect(await releaseAutopilotLock(agentId, 'owner-2')).toBe(false);
+    expect(await releaseAutopilotLock(agentId, 'owner-1')).toBe(true);
+    expect((await acquireAutopilotLock(agentId, 'owner-3', 60, 'cron')).acquired).toBe(true);
   });
 });

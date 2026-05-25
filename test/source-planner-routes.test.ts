@@ -42,6 +42,7 @@ vi.mock('@/lib/performance', () => ({
 
 vi.mock('@/lib/survivability', () => ({
   clampPostsPerDay: mocks.clampPostsPerDay,
+  getTweetCompletenessIssue: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/billing', () => ({

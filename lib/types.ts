@@ -113,6 +113,20 @@ export interface AgentDetail {
 
 export type AutonomyMode = 'safe' | 'balanced' | 'explore';
 export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted' | 'deleted_from_x';
+export type MetricAvailabilityStatus =
+  | 'available'
+  | 'not_connected'
+  | 'waiting_for_cron'
+  | 'metric_unavailable'
+  | 'no_posts_yet'
+  | 'no_data_in_window';
+
+export interface MetricAvailability {
+  metricName: string;
+  status: MetricAvailabilityStatus;
+  reason: string;
+  checkedAt: string;
+}
 export type TweetHookType =
   | 'question'
   | 'bold_claim'
@@ -179,6 +193,23 @@ export interface CandidateCriticScores {
   slop: number;
   factualRisk: number;
   replyPotential: number;
+}
+
+export interface CriticVerdict {
+  id: string;
+  agentId: string;
+  tweetId: string;
+  action: 'allow' | 'review' | 'block';
+  score: number;
+  reasons: string[];
+  genericness: number;
+  overclaiming: number;
+  cringe: number;
+  voiceDrift: number;
+  factualRisk: number;
+  engagementBait: number;
+  replySuitability: number;
+  createdAt: string;
 }
 
 export interface CandidateScoreProvenance {
@@ -398,6 +429,93 @@ export interface Metric {
   metricName: string;
   value: number;
   date: string;
+  availability?: MetricAvailability;
+}
+
+export type OutcomeEventType =
+  | 'generated'
+  | 'queued'
+  | 'posted'
+  | 'edited'
+  | 'deleted'
+  | 'metric_checkpoint'
+  | 'calibration_labeled'
+  | 'auto_replied'
+  | 'skipped'
+  | 'reply_outcome'
+  | LearningSignalType;
+
+export interface OutcomeEvent {
+  id: string;
+  agentId: string;
+  eventType: OutcomeEventType;
+  source: 'tweet' | 'learning_signal' | 'cron' | 'manual' | 'autopilot' | 'metrics';
+  tweetId?: string;
+  xTweetId?: string;
+  idempotencyKey: string;
+  rewardDelta?: number;
+  reason?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  createdAt: string;
+}
+
+export interface AutopilotRunPhase {
+  runId: string;
+  agentId: string;
+  phase: string;
+  status: 'started' | 'succeeded' | 'skipped' | 'failed';
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  reason?: string;
+  model?: string;
+  errorCode?: string;
+}
+
+export interface RelationshipProfile {
+  handle: string;
+  agentId: string;
+  displayName: string | null;
+  lastMentionId: string | null;
+  lastInteractionAt: string;
+  topics: string[];
+  relationshipScore: number;
+  interactions: number;
+  repliesSent: number;
+  repliesRejected: number;
+  cooldownUntil: string | null;
+  doNotReply: boolean;
+  lastOutcome: 'posted' | 'rejected' | 'skipped' | null;
+  updatedAt: string;
+}
+
+export interface IdeaAtom {
+  id: string;
+  agentId: string;
+  claim: string;
+  tension: string | null;
+  audience: AudienceSegment | null;
+  proof: string | null;
+  example: string | null;
+  riskNote: string | null;
+  topic: string | null;
+  sourceTweetId: string | null;
+  lastUsedAt: string | null;
+  performance: {
+    generated: number;
+    queued: number;
+    posted: number;
+    rejected: number;
+    avgReward: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ValidationResult<T> {
+  ok: boolean;
+  value?: T;
+  error?: string;
 }
 
 // ─── Create / update input types ─────────────────────────────────────────────
@@ -581,6 +699,10 @@ export interface PostLogEntry {
   source: 'autopilot' | 'manual' | 'cron';
   action?: 'posted' | 'replied' | 'skipped' | 'error' | 'mentions_refreshed' | 'job_executed';
   reason?: string;
+  runId?: string;
+  skipReason?: string;
+  model?: string;
+  errorCode?: string;
 }
 
 // ─── Performance tracking types ──────────────────────────────────────────────

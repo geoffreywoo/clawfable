@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
 import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { clampPostsPerDay } from '@/lib/survivability';
 import { assertCanUseAutopilot, BillingError, getBillingSummary } from '@/lib/billing';
+import { validateProtocolSettingsPatch } from '@/lib/request-validation';
 
 // GET /api/agents/[id]/protocol/settings
 export async function GET(
@@ -33,62 +33,11 @@ export async function PATCH(
     const { user } = await requireAgentAccess(id);
     const body = await request.json();
     const agentCount = await getAccessibleAgentCount(user);
-
-    const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
-      'enabled', 'postsPerDay', 'minQueueSize',
-      'autoReply', 'highValueReplyMode', 'minReplyValueScore', 'maxRepliesPerRun', 'replyIntervalMins',
-      'earlyVelocityFollowups', 'supervisedTrendDesk', 'relationshipQueueEnabled', 'portfolioOptimizerEnabled', 'mediaExperimentRate',
-      'lengthMix', 'autonomyMode', 'explorationRate', 'trendMixTarget', 'trendTolerance', 'shitpoastEnabled', 'enabledFormats',
-      'marketingEnabled', 'marketingMix', 'marketingRole',
-      'soulEvolutionMode',
-      'proactiveReplies', 'proactiveLikes', 'autoFollow', 'agentShoutouts',
-      'contentCalendar',
-    ];
-    const updates: Record<string, unknown> = {};
-    for (const key of allowed) {
-      if (body[key] !== undefined) updates[key] = body[key];
+    const parsed = validateProtocolSettingsPatch(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid settings update' }, { status: 400 });
     }
-
-    // Enforce safe posting limits
-    if (typeof updates.postsPerDay === 'number') {
-      updates.postsPerDay = clampPostsPerDay(updates.postsPerDay);
-    }
-    if (typeof updates.trendMixTarget === 'number') {
-      updates.trendMixTarget = Math.max(0, Math.min(100, Math.round(updates.trendMixTarget)));
-    }
-    if (
-      typeof updates.trendTolerance === 'string'
-      && !['adjacent', 'moderate', 'aggressive'].includes(updates.trendTolerance)
-    ) {
-      delete updates.trendTolerance;
-    }
-    if (updates.shitpoastEnabled !== undefined && typeof updates.shitpoastEnabled !== 'boolean') {
-      delete updates.shitpoastEnabled;
-    }
-    if (updates.highValueReplyMode !== undefined && typeof updates.highValueReplyMode !== 'boolean') {
-      delete updates.highValueReplyMode;
-    }
-    if (typeof updates.minReplyValueScore === 'number') {
-      updates.minReplyValueScore = Math.max(0.25, Math.min(0.95, Number(updates.minReplyValueScore.toFixed(2))));
-    } else if (updates.minReplyValueScore !== undefined) {
-      delete updates.minReplyValueScore;
-    }
-    for (const flag of ['earlyVelocityFollowups', 'supervisedTrendDesk', 'relationshipQueueEnabled', 'portfolioOptimizerEnabled'] as const) {
-      if (updates[flag] !== undefined && typeof updates[flag] !== 'boolean') {
-        delete updates[flag];
-      }
-    }
-    if (typeof updates.mediaExperimentRate === 'number') {
-      updates.mediaExperimentRate = Math.max(0, Math.min(50, Math.round(updates.mediaExperimentRate)));
-    } else if (updates.mediaExperimentRate !== undefined) {
-      delete updates.mediaExperimentRate;
-    }
-    if (updates.proactiveLikes !== undefined) {
-      updates.proactiveLikes = false;
-    }
-    if (updates.proactiveReplies !== undefined) {
-      updates.proactiveReplies = false;
-    }
+    const updates = parsed.value;
 
     const isTryingToEnableAutomation = (
       updates.enabled === true

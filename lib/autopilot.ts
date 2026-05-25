@@ -27,6 +27,7 @@ import {
   getConversationHistory,
   getPerformanceHistory,
   invalidateAgentConnection,
+  upsertRelationshipProfile,
   type ConversationTurn,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
@@ -825,7 +826,16 @@ async function runAutoReply(
   for (const scored of scoredMentions.slice(0, maxReplies)) {
     const { mention } = scored;
     let replyContent = '';
+    const mentionHandle = `@${mention.authorUsername || mention.authorId}`;
     try {
+      await upsertRelationshipProfile(agent.id, {
+        handle: mentionHandle,
+        displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
+        mentionId: mention.id,
+        topic: scored.value.responseStrategy,
+        outcome: 'skipped',
+      }).catch(() => null);
+
       // Store the mention if not already stored
       if (!storedTweetIds.has(String(mention.id))) {
         await createMention({
@@ -945,6 +955,15 @@ async function runAutoReply(
           action: 'skipped',
           reason: `Taste gate held reply for ${tasteAssessment.action}: ${tasteAssessment.reasons.join(', ') || 'quality risk'} (risk ${tasteAssessment.score}, provocation ${tasteAssessment.provocationScore}).`,
         });
+        await upsertRelationshipProfile(agent.id, {
+          handle: mentionHandle,
+          displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
+          mentionId: mention.id,
+          topic: scored.value.responseStrategy,
+          outcome: 'rejected',
+          rejected: true,
+          cooldownMins: 24 * 60,
+        }).catch(() => null);
         await addLearningSignal(agent.id, {
           xTweetId: mention.id,
           signalType: 'reply_rejected',
@@ -997,6 +1016,15 @@ async function runAutoReply(
           targetMentionId: mention.id,
         },
       });
+      await upsertRelationshipProfile(agent.id, {
+        handle: mentionHandle,
+        displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
+        mentionId: mention.id,
+        topic: scored.value.responseStrategy,
+        outcome: 'posted',
+        replied: true,
+        cooldownMins: Math.max(60, settings.replyIntervalMins || 60),
+      }).catch(() => null);
 
       repliesSent++;
     } catch (err) {

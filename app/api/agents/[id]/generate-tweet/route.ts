@@ -11,6 +11,8 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { generateText } from '@/lib/ai';
+import { validateGenerationRequest } from '@/lib/request-validation';
+import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 
 // POST /api/agents/[id]/generate-tweet
 export async function POST(
@@ -33,12 +35,16 @@ export async function POST(
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
+    const parsed = validateGenerationRequest(body, { maxCount: 5, requireTopicOrCount: true });
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid generation request' }, { status: 400 });
+    }
     const {
       topic,
       headline,
       count: batchCount,
       replaceTweetId,
-    } = body as { topic?: string; headline?: string; count?: number; replaceTweetId?: string };
+    } = parsed.value;
     const isPreviewRequest = batchCount !== undefined && !topic && !headline;
 
     if (!isPreviewRequest && !batchCount && !topic && !headline) {
@@ -61,73 +67,12 @@ export async function POST(
         return NextResponse.json({ error: 'Preview tweet not found' }, { status: 404 });
       }
 
-      const requestedCount = typeof batchCount === 'number' ? batchCount : 1;
-      const previewCount = Math.min(Math.max(Math.floor(requestedCount), 1), 5);
+      const previewCount = batchCount ?? 1;
       const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
       const tweets = [];
       for (const item of batch) {
         if (getGeneratedTweetIssue(item.content)) continue;
-        const tweet = await createTweet({
-          agentId: id,
-          content: item.content,
-          type: 'original',
-          status: 'preview',
-          format: item.format || null,
-          topic: item.targetTopic || 'general',
-          rationale: item.rationale,
-          generationMode: item.generationMode,
-          candidateScore: item.candidateScore,
-          confidenceScore: item.confidenceScore,
-          voiceScore: item.voiceScore,
-          noveltyScore: item.noveltyScore,
-          predictedEngagementScore: item.predictedEngagementScore,
-          freshnessScore: item.freshnessScore,
-          repetitionRiskScore: item.repetitionRiskScore,
-          policyRiskScore: item.policyRiskScore,
-          surpriseScore: item.surpriseScore,
-          creativeRiskScore: item.creativeRiskScore,
-          slopScore: item.slopScore,
-          replyBaitScore: item.replyBaitScore,
-          hookType: item.featureTags?.hook ?? null,
-          toneType: item.featureTags?.tone ?? null,
-          specificityType: item.featureTags?.specificity ?? null,
-          structureType: item.featureTags?.structure ?? null,
-          thesis: item.featureTags?.thesis ?? null,
-          coverageCluster: item.coverageCluster ?? null,
-          featureTags: item.featureTags ?? null,
-          judgeScore: item.judgeScore ?? null,
-          judgeBreakdown: item.judgeBreakdown ?? null,
-          judgeNotes: item.judgeNotes ?? null,
-          mutationRound: item.mutationRound ?? null,
-          rewardPrediction: item.rewardPrediction ?? null,
-          globalPriorWeight: item.globalPriorWeight ?? null,
-          localPriorWeight: item.localPriorWeight ?? null,
-          scoreProvenance: item.scoreProvenance ?? null,
-          sourceLane: item.sourceLane ?? null,
-          styleMode: item.styleMode ?? 'standard',
-          creativeLane: item.creativeLane ?? null,
-          targetAudienceSegment: item.targetAudienceSegment ?? null,
-          segmentHypothesis: item.segmentHypothesis ?? null,
-          promptStrategy: item.promptStrategy ?? null,
-          criticScores: item.criticScores ?? null,
-          actionRewardPrediction: item.actionRewardPrediction ?? null,
-          draftExperimentId: item.draftExperimentId ?? null,
-          experimentBatchId: item.experimentBatchId ?? null,
-          experimentHypothesis: item.experimentHypothesis ?? null,
-          experimentHoldout: item.experimentHoldout ?? null,
-          promptVariant: item.promptVariant ?? null,
-          trendTopicId: item.trendTopicId ?? null,
-          trendHeadline: item.trendHeadline ?? null,
-          mediaExperimentType: item.mediaExperimentType ?? null,
-          mediaBrief: item.mediaBrief ?? null,
-          portfolioRole: item.portfolioRole ?? null,
-          relationshipTargetHandle: item.relationshipTargetHandle ?? null,
-          trendFitScore: item.trendFitScore ?? null,
-          xTweetId: null,
-          quoteTweetId: null,
-          quoteTweetAuthor: null,
-          scheduledAt: null,
-        });
+        const tweet = await createTweetFromGeneratedCandidate(id, item, { status: 'preview', topic: item.targetTopic || 'general' });
         tweets.push(tweet);
       }
 
@@ -161,7 +106,7 @@ export async function POST(
         category: topic || 'default',
         timestamp: new Date().toISOString(),
         tweetCount: 1,
-        topTweet: null as any,
+        topTweet: { id: 'manual-topic', text: topicContext, likes: 0, author: agent.handle },
       }];
 
       const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
@@ -171,67 +116,7 @@ export async function POST(
         if (generationIssue) {
           return NextResponse.json({ error: generationIssue }, { status: 502 });
         }
-        const tweet = await createTweet({
-          agentId: id,
-          content: item.content,
-          type: 'original',
-          status: 'draft',
-          format: item.format || null,
-          topic: topicContext,
-          rationale: item.rationale,
-          generationMode: item.generationMode,
-          candidateScore: item.candidateScore,
-          confidenceScore: item.confidenceScore,
-          voiceScore: item.voiceScore,
-          noveltyScore: item.noveltyScore,
-          predictedEngagementScore: item.predictedEngagementScore,
-          freshnessScore: item.freshnessScore,
-          repetitionRiskScore: item.repetitionRiskScore,
-          policyRiskScore: item.policyRiskScore,
-          surpriseScore: item.surpriseScore,
-          creativeRiskScore: item.creativeRiskScore,
-          slopScore: item.slopScore,
-          replyBaitScore: item.replyBaitScore,
-          hookType: item.featureTags?.hook ?? null,
-          toneType: item.featureTags?.tone ?? null,
-          specificityType: item.featureTags?.specificity ?? null,
-          structureType: item.featureTags?.structure ?? null,
-          thesis: item.featureTags?.thesis ?? null,
-          coverageCluster: item.coverageCluster ?? null,
-          featureTags: item.featureTags ?? null,
-          judgeScore: item.judgeScore ?? null,
-          judgeBreakdown: item.judgeBreakdown ?? null,
-          judgeNotes: item.judgeNotes ?? null,
-          mutationRound: item.mutationRound ?? null,
-          rewardPrediction: item.rewardPrediction ?? null,
-          globalPriorWeight: item.globalPriorWeight ?? null,
-          localPriorWeight: item.localPriorWeight ?? null,
-          scoreProvenance: item.scoreProvenance ?? null,
-          sourceLane: item.sourceLane ?? null,
-          styleMode: item.styleMode ?? 'standard',
-          creativeLane: item.creativeLane ?? null,
-          targetAudienceSegment: item.targetAudienceSegment ?? null,
-          segmentHypothesis: item.segmentHypothesis ?? null,
-          promptStrategy: item.promptStrategy ?? null,
-          criticScores: item.criticScores ?? null,
-          actionRewardPrediction: item.actionRewardPrediction ?? null,
-          draftExperimentId: item.draftExperimentId ?? null,
-          experimentBatchId: item.experimentBatchId ?? null,
-          experimentHypothesis: item.experimentHypothesis ?? null,
-          experimentHoldout: item.experimentHoldout ?? null,
-          promptVariant: item.promptVariant ?? null,
-          trendTopicId: item.trendTopicId ?? null,
-          trendHeadline: item.trendHeadline ?? null,
-          mediaExperimentType: item.mediaExperimentType ?? null,
-          mediaBrief: item.mediaBrief ?? null,
-          portfolioRole: item.portfolioRole ?? null,
-          relationshipTargetHandle: item.relationshipTargetHandle ?? null,
-          trendFitScore: item.trendFitScore ?? null,
-          xTweetId: null,
-          quoteTweetId: null,
-          quoteTweetAuthor: null,
-          scheduledAt: null,
-        });
+        const tweet = await createTweetFromGeneratedCandidate(id, item, { status: 'draft', topic: topicContext });
         return NextResponse.json(tweet);
       }
     }

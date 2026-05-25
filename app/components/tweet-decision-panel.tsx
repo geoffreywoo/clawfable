@@ -154,7 +154,7 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
       <div className="decision-panel-top">
         <div className="decision-summary-grid decision-summary-grid-modern">
           <div className="decision-summary-card">
-            <span className="decision-summary-label">Candidate score</span>
+            <span className="decision-summary-label">Overall fit</span>
             <span className="decision-summary-value">{tweet.candidateScore ?? 'N/A'}</span>
           </div>
           <div className="decision-summary-card">
@@ -162,11 +162,11 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
             <span className="decision-summary-value">{pct(tweet.confidenceScore)}</span>
           </div>
           <div className="decision-summary-card">
-            <span className="decision-summary-label">Bet type</span>
+            <span className="decision-summary-label">Draft type</span>
             <span className="decision-summary-value">{betLabel}</span>
           </div>
           <div className="decision-summary-card">
-            <span className="decision-summary-label">Learning state</span>
+            <span className="decision-summary-label">Result state</span>
             <span className={`decision-summary-badge ${toneClass(insightState.tone)}`}>{insightState.label}</span>
           </div>
         </div>
@@ -174,17 +174,17 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         <div className="decision-explainer">
           <p className="decision-explainer-label">Why this draft</p>
           <p className="decision-explainer-copy">
-            {tweet.experimentHypothesis || tweet.rationale || 'This candidate won the current ranking stack after voice, novelty, reward prediction, and risk were combined.'}
+            {tweet.experimentHypothesis || tweet.rationale || 'This draft ranked highest after quality, novelty, predicted value, and risk were weighed together.'}
           </p>
           <div className="decision-explainer-meta">
-            <span className="learning-source-chip">PREDICTED {predictedScore !== null ? `${predictedScore}%` : 'N/A'}</span>
+            <span className="learning-source-chip">Predicted {predictedScore !== null ? `${predictedScore}%` : 'N/A'}</span>
             {tweet.portfolioRole && <span className="learning-source-chip">{tweet.portfolioRole.replace(/_/g, ' ')}</span>}
             {tweet.mediaExperimentType && tweet.mediaExperimentType !== 'text_only' && <span className="learning-source-chip">{tweet.mediaExperimentType}</span>}
-            {typeof tweet.trendFitScore === 'number' && <span className="learning-source-chip">TREND FIT {Math.round(tweet.trendFitScore * 100)}%</span>}
-            {actualScore !== null && <span className="learning-source-chip">ACTUAL {actualScore}%</span>}
+            {typeof tweet.trendFitScore === 'number' && <span className="learning-source-chip">Trend fit {Math.round(tweet.trendFitScore * 100)}%</span>}
+            {actualScore !== null && <span className="learning-source-chip">Actual {actualScore}%</span>}
             {insight?.learningDelta !== null && insight?.learningDelta !== undefined && (
               <span className={`learning-source-chip ${toneClass(insight.learningDelta >= 0 ? 'positive' : 'danger')}`}>
-                DELTA {insight.learningDelta >= 0 ? '+' : ''}{insight.learningDelta}
+                Delta {insight.learningDelta >= 0 ? '+' : ''}{insight.learningDelta}
               </span>
             )}
           </div>
@@ -201,9 +201,12 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         </div>
       )}
 
+      <details className="decision-advanced">
+        <summary>Show scoring details</summary>
+        <div className="decision-advanced-body">
       <div className="decision-insight-grid">
         <div className="decision-explainer">
-          <p className="decision-explainer-label">Winning path</p>
+          <p className="decision-explainer-label">Why it ranked</p>
           <p className="decision-explainer-copy">
             {tweet.scoreProvenance
               ? `Local prior ${Math.round(tweet.scoreProvenance.localPrior * 100)} · shared prior ${Math.round(tweet.scoreProvenance.globalPrior * 100)} · judge ${Math.round(tweet.scoreProvenance.judge * 100)} · predicted reward ${Math.round(tweet.scoreProvenance.predictedReward * 100)}.`
@@ -253,7 +256,7 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
               ))}
             </ul>
           ) : (
-            <p className="decision-explainer-copy">No explicit lesson was strong enough to surface above the baseline ranking stack.</p>
+            <p className="decision-explainer-copy">No explicit lesson was strong enough to surface above the baseline quality checks.</p>
           )}
         </div>
 
@@ -302,19 +305,21 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
       ) : null}
 
       <div className="decision-footer-meta">
-        {tweet.format && <span className="learning-source-chip">FORMAT {tweet.format.replace(/_/g, ' ').toUpperCase()}</span>}
-        {tweet.topic && <span className="learning-source-chip">TOPIC {tweet.topic.toUpperCase()}</span>}
-        {tweet.hookType && <span className="learning-source-chip">HOOK {tweet.hookType.replace(/_/g, ' ').toUpperCase()}</span>}
-        {tweet.toneType && <span className="learning-source-chip">TONE {tweet.toneType.replace(/_/g, ' ').toUpperCase()}</span>}
-        {tweet.specificityType && <span className="learning-source-chip">SPECIFICITY {tweet.specificityType.replace(/_/g, ' ').toUpperCase()}</span>}
-        {tweet.structureType && <span className="learning-source-chip">STRUCTURE {tweet.structureType.replace(/_/g, ' ').toUpperCase()}</span>}
-        {typeof tweet.rewardPrediction === 'number' && <span className="learning-source-chip">REWARD {Math.round(tweet.rewardPrediction * 100)}%</span>}
-        {typeof tweet.localPriorWeight === 'number' && <span className="learning-source-chip">LOCAL {Math.round(tweet.localPriorWeight * 100)}%</span>}
-        {typeof tweet.globalPriorWeight === 'number' && <span className="learning-source-chip">GLOBAL {Math.round(tweet.globalPriorWeight * 100)}%</span>}
-        {typeof tweet.mutationRound === 'number' && tweet.mutationRound > 0 && <span className="learning-source-chip">MUTATION {tweet.mutationRound}</span>}
-        {tweet.coverageCluster && <span className="learning-source-chip">CLUSTER {tweet.coverageCluster.toUpperCase()}</span>}
-        <span className="learning-source-chip">{tweet.content.length} CHARS</span>
+        {tweet.format && <span className="learning-source-chip">Format {tweet.format.replace(/_/g, ' ')}</span>}
+        {tweet.topic && <span className="learning-source-chip">Topic {tweet.topic}</span>}
+        {tweet.hookType && <span className="learning-source-chip">Hook {tweet.hookType.replace(/_/g, ' ')}</span>}
+        {tweet.toneType && <span className="learning-source-chip">Tone {tweet.toneType.replace(/_/g, ' ')}</span>}
+        {tweet.specificityType && <span className="learning-source-chip">Specificity {tweet.specificityType.replace(/_/g, ' ')}</span>}
+        {tweet.structureType && <span className="learning-source-chip">Structure {tweet.structureType.replace(/_/g, ' ')}</span>}
+        {typeof tweet.rewardPrediction === 'number' && <span className="learning-source-chip">Reward {Math.round(tweet.rewardPrediction * 100)}%</span>}
+        {typeof tweet.localPriorWeight === 'number' && <span className="learning-source-chip">Local {Math.round(tweet.localPriorWeight * 100)}%</span>}
+        {typeof tweet.globalPriorWeight === 'number' && <span className="learning-source-chip">Shared {Math.round(tweet.globalPriorWeight * 100)}%</span>}
+        {typeof tweet.mutationRound === 'number' && tweet.mutationRound > 0 && <span className="learning-source-chip">Mutation {tweet.mutationRound}</span>}
+        {tweet.coverageCluster && <span className="learning-source-chip">Cluster {tweet.coverageCluster}</span>}
+        <span className="learning-source-chip">{tweet.content.length} chars</span>
       </div>
+        </div>
+      </details>
     </div>
   );
 }

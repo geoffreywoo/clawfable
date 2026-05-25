@@ -21,13 +21,13 @@ interface InsightsTabProps {
 const INSIGHT_VIEWS: Array<{ id: InsightsView; label: string; copy: string }> = [
   {
     id: 'learning',
-    label: 'Learning',
-    copy: 'What the system believes, what changed this week, and which experiments are still under test.',
+    label: 'What changed',
+    copy: 'What improved, what slipped, and which lessons are shaping the next batch.',
   },
   {
     id: 'results',
     label: 'Results',
-    copy: 'Performance lift, trend lines, and account-level outcomes after the learning loop runs.',
+    copy: 'The simple read on posting consistency, quality, and account-level outcomes.',
   },
 ];
 
@@ -54,7 +54,7 @@ export function InsightsTab({ agentId, initialView = 'learning', onViewChange }:
     <div className="insights-shell">
       <section className="insights-switcher">
         <div>
-          <p className="insights-kicker">Insights focus</p>
+          <p className="insights-kicker">Learn</p>
           <p className="insights-copy">{currentView.copy}</p>
         </div>
         <div className="insights-view-switch" role="tablist" aria-label="Insights sections">

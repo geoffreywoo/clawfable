@@ -258,6 +258,37 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
     return m?.value ?? 0;
   };
 
+  const getMetric = (name: string): Metric | null => metrics.find((m) => m.metricName === name) || null;
+
+  const metricContext = (name: string): string | null => {
+    const metric = getMetric(name);
+    const status = metric?.availability?.status;
+    if (!status || status === 'available') return null;
+    if (status === 'not_connected') return 'Connect X';
+    if (status === 'waiting_for_cron') return 'Waiting for cron';
+    if (status === 'metric_unavailable') return 'Unavailable';
+    if (status === 'no_posts_yet') return 'No posts yet';
+    if (status === 'no_data_in_window') return 'No data in window';
+    return metric?.availability?.reason || null;
+  };
+
+  const whyNoPosts = (): string[] => {
+    const reasons: string[] = [];
+    if (!agentConnected) reasons.push('X is not connected.');
+    if (automationLocked) reasons.push('Automation is locked by the current billing plan.');
+    if (!settings?.enabled) reasons.push('Auto-posting is off.');
+    if (getMetricValue('tweets_queued') === 0) reasons.push('Queue is empty.');
+    if (autopilotHealth?.externalBlocker) reasons.push(autopilotHealth.reason);
+    const lastLock = postLog.find((entry) => entry.format === 'autopilot_lock');
+    if (lastLock?.reason) reasons.push(lastLock.reason);
+    const recentError = postLog.find((entry) => entry.action === 'error');
+    if (recentError?.reason) reasons.push(recentError.reason);
+    if (settings?.enabled && agentConnected && reasons.length === 0 && getMetricValue('tweets_posted') === 0) {
+      reasons.push('Waiting for the next cron/manual run to clear queue and taste gates.');
+    }
+    return [...new Set(reasons)].slice(0, 5);
+  };
+
   const automationLocked = billing ? !billing.canUseAutopilot : false;
 
   if (loading) {
@@ -286,19 +317,69 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
       {/* ─── Metrics Summary ─────────────────────────────────────────────── */}
       <div className="protocol-stats-grid">
         {[
-          { label: 'GENERATED', value: getMetricValue('tweets_generated'), color: undefined },
-          { label: 'POSTED', value: getMetricValue('tweets_posted'), color: '#22c55e' },
-          { label: 'QUEUED', value: getMetricValue('tweets_queued'), color: 'var(--primary)' },
-          { label: 'AUTO-POSTED', value: getMetricValue('auto_posted'), color: '#22c55e' },
-          { label: 'AUTO-REPLIED', value: getMetricValue('auto_replied'), color: '#3b82f6' },
-          { label: 'MENTIONS', value: getMetricValue('mentions'), color: '#3b82f6' },
+          { key: 'tweets_generated', label: 'Generated', value: getMetricValue('tweets_generated'), color: undefined },
+          { key: 'tweets_posted', label: 'Posted', value: getMetricValue('tweets_posted'), color: '#22c55e' },
+          { key: 'tweets_queued', label: 'Approved', value: getMetricValue('tweets_queued'), color: 'var(--primary)' },
+          { key: 'auto_posted', label: 'Auto-posted', value: getMetricValue('auto_posted'), color: '#22c55e' },
+          { key: 'auto_replied', label: 'Auto-replied', value: getMetricValue('auto_replied'), color: '#3b82f6' },
+          { key: 'mentions', label: 'Mentions', value: getMetricValue('mentions'), color: '#3b82f6' },
         ].map((m) => (
           <div key={m.label} className="protocol-stat">
             <span className="protocol-stat-value" style={m.color ? { color: m.color } : undefined}>{m.value}</span>
             <span className="protocol-stat-label">{m.label}</span>
+            {metricContext(m.key) && (
+              <span style={{
+                marginTop: '6px',
+                fontSize: '11px',
+                color: 'var(--text-dim)',
+                textAlign: 'center',
+                minHeight: '16px',
+              }}>
+                {metricContext(m.key)}
+              </span>
+            )}
           </div>
         ))}
       </div>
+
+      {getMetricValue('tweets_posted') === 0 && whyNoPosts().length > 0 && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: '10px',
+          padding: '16px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div>
+              <p style={{
+                margin: 0,
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '0',
+                color: 'var(--primary)',
+              }}>Why no posts yet</p>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: '14px' }}>
+                These are the current blockers or waiting states the system can see.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+            {whyNoPosts().map((reason) => (
+              <div key={reason} style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: 'var(--surface-3)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+                fontSize: '13px',
+              }}>
+                {reason}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {automationLocked && billing && (
         <div style={{
@@ -311,7 +392,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             fontFamily: 'var(--font-mono)',
             fontSize: '10px',
             fontWeight: 700,
-            letterSpacing: '0.1em',
+            letterSpacing: '0',
             color: '#f59e0b',
             marginBottom: '6px',
           }}>
@@ -333,7 +414,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             color: 'var(--text-dim)',
             marginTop: '8px',
           }}>
-            Current access: {billing.label.toUpperCase()} · {billing.agentCount}/{billing.maxAgents} agents
+            Current access: {billing.label} · {billing.agentCount}/{billing.maxAgents} agents
           </p>
           <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
             {billing.checkoutReady && (
@@ -343,7 +424,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             )}
             {billing.portalReady && (
               <button className="btn btn-outline btn-sm" onClick={handlePortal} disabled={billingLoading !== null}>
-                {billingLoading === 'portal' ? 'LOADING...' : 'MANAGE BILLING'}
+                {billingLoading === 'portal' ? 'Loading...' : 'Manage billing'}
               </button>
             )}
           </div>
@@ -354,24 +435,24 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         <div className="control-room-intro">
           <div className="control-room-intro-head">
             <div>
-              <p className="control-room-intro-label">AUTOMATION</p>
-              <h2 className="control-room-intro-title">See what is running, what needs review, and how the voice is being tuned.</h2>
+              <p className="control-room-intro-label">Today</p>
+              <h2 className="control-room-intro-title">See what is ready, blocked, or learning from the latest run.</h2>
             </div>
             <span className="control-room-intro-chip">
-              {(settings.autonomyMode || 'balanced').toUpperCase()} MODE
+              {(settings.autonomyMode || 'balanced')} mode
             </span>
           </div>
           <div className="control-room-intro-grid">
             <div className="control-room-intro-card">
-              <p className="control-room-intro-card-label">Queue</p>
+              <p className="control-room-intro-card-label">Approved queue</p>
               <p className="control-room-intro-card-copy">Approved drafts wait there until you post them or the schedule pulls them live.</p>
             </div>
             <div className="control-room-intro-card">
-              <p className="control-room-intro-card-label">Learning</p>
+              <p className="control-room-intro-card-label">Learning loop</p>
               <p className="control-room-intro-card-copy">Operator edits, deletes, and live performance all feed the next generation cycle.</p>
             </div>
             <div className="control-room-intro-card">
-              <p className="control-room-intro-card-label">Drafts</p>
+              <p className="control-room-intro-card-label">Draft review</p>
               <p className="control-room-intro-card-copy">Ask for fresh drafts whenever you want a new angle, topic, or experiment lane.</p>
             </div>
           </div>
@@ -443,11 +524,11 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                   fontFamily: 'var(--font-mono)',
                   fontSize: '9px',
                   fontWeight: 700,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0',
                   color: getHealthTone(autopilotHealth.status).color,
-                  textTransform: 'uppercase',
+                  textTransform: 'none',
                 }}>
-                  AUTOPILOT WATCHDOG · {getHealthTone(autopilotHealth.status).label}
+                  Automation check · {getHealthTone(autopilotHealth.status).label}
                 </span>
               </div>
               <p style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}>
@@ -508,10 +589,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} disabled={automationLocked} onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}>
-                    {settings.enabled ? 'ON' : 'OFF'}
+                    {settings.enabled ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-POST</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-posting</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Pull from approved queue and post on schedule · {settings.totalAutoPosted} posted
                       {settings.lastPostedAt && ` · last ${getTimeAgo(settings.lastPostedAt)}`}
@@ -521,14 +602,14 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               </div>
               {settings.enabled && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                  <div className="field"><label>POSTS/DAY</label>
+                  <div className="field"><label>Posts per day</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
                       disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
                       {[1, 2, 3, 4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}{n === 12 ? ' (max)' : ''}</option>)}
                     </select>
                   </div>
-                  <div className="field"><label>MIN QUEUE</label>
+                  <div className="field"><label>Minimum queue</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.minQueueSize}
                       disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}>
@@ -549,10 +630,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}>
-                    {settings.autoReply ? 'ON' : 'OFF'}
+                    {settings.autoReply ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-REPLY</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-replies</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Watch mentions and answer on schedule · {settings.totalAutoReplied || 0} replied
                       {settings.lastRepliedAt && ` · last ${getTimeAgo(settings.lastRepliedAt)}`}
@@ -564,7 +645,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
                     <div className="field">
-                      <label>CHECK EVERY</label>
+                      <label>Check every</label>
                       <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                         value={settings.replyIntervalMins || 30}
                         disabled={automationLocked}
@@ -581,7 +662,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                       </select>
                     </div>
                     <div className="field">
-                      <label>MAX REPLIES/RUN</label>
+                      <label>Max replies per run</label>
                       <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                         value={settings.maxRepliesPerRun || 3}
                         disabled={automationLocked}
@@ -592,7 +673,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: '8px', marginTop: '8px' }}>
                     <div className="field">
-                      <label>REPLY MODE</label>
+                      <label>Reply mode</label>
                       <button className="btn btn-sm" style={{
                         width: '100%',
                         justifyContent: 'center',
@@ -604,7 +685,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                       </button>
                     </div>
                     <div className="field">
-                      <label>VALUE BAR</label>
+                      <label>Quality bar</label>
                       <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                         value={settings.minReplyValueScore ?? 0.58}
                         disabled={automationLocked || !settings.highValueReplyMode}
@@ -626,7 +707,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             <div className="protocol-card" style={{ padding: '12px 14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '8px' }}>
                 <div>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>GROWTH LOOPS</p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Growth helpers</p>
                   <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                     Balance portfolio roles, surface opportunities, and draft follow-ups from momentum
                   </p>
@@ -656,7 +737,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 ))}
               </div>
               <div className="field" style={{ marginTop: '8px' }}>
-                <label>MEDIA TEST RATE</label>
+                <label>Media test rate</label>
                 <select
                   className="input"
                   style={{ fontSize: '11px', padding: '4px 6px' }}
@@ -687,10 +768,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: `1px solid ${settings.marketingEnabled ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} onClick={() => handleUpdateSettings({ marketingEnabled: !settings.marketingEnabled })}>
-                    {settings.marketingEnabled ? 'ON' : 'OFF'}
+                    {settings.marketingEnabled ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>MARKETING</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Marketing</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Auto-generate promotional tweets for clawfable.com
                     </p>
@@ -699,14 +780,14 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               </div>
               {settings.marketingEnabled && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                  <div className="field"><label>MIX %</label>
+                  <div className="field"><label>Mix</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.marketingMix || 20}
                       onChange={(e) => handleUpdateSettings({ marketingMix: Number(e.target.value) })}>
                       {[10, 20, 30, 40, 50].map((n) => <option key={n} value={n}>{n}% promotional</option>)}
                     </select>
                   </div>
-                  <div className="field"><label>ROLE</label>
+                  <div className="field"><label>Role</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.marketingRole || 'product'}
                       onChange={(e) => handleUpdateSettings({ marketingRole: e.target.value })}>
@@ -722,7 +803,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
             {/* Always-on jobs */}
             <div className="protocol-card" style={{ padding: '10px 14px', display: 'flex', gap: '12px' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>ALWAYS ON</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>Always on</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                 Mention sync (every 10 min) · Self-learning (daily)
               </span>
@@ -730,6 +811,14 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           </div>
         </div>
       )}
+
+      {settings && (
+        <details className="today-advanced">
+          <summary>
+            <span>Advanced controls and learning details</span>
+            <small>Voice coaching, audience growth, idea mix, and style experiments</small>
+          </summary>
+          <div className="today-advanced-body">
 
       {/* ─── Voice Coaching ─────────────────────────────────────────────── */}
       {settings && (
@@ -852,7 +941,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               {/* Active directives list */}
               {voiceDirectives.length > 0 && (
                 <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'rgba(74,139,103,0.03)' }}>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em', marginBottom: '6px' }}>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0', marginBottom: '6px' }}>
                     Active directives ({voiceDirectives.length})
                   </p>
                   {voiceDirectives.map((d, i) => (
@@ -890,7 +979,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 borderRadius: 'var(--radius-lg)',
                 padding: '12px 16px',
               }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--primary)', marginBottom: '8px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: 'var(--primary)', marginBottom: '8px' }}>
                   From voice coaching ({voiceDirectives.length})
                 </p>
                 {voiceDirectives.map((d, i) => (
@@ -910,7 +999,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 borderRadius: 'var(--radius-lg)',
                 padding: '12px 16px',
               }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#22c55e', marginBottom: '8px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: '#22c55e', marginBottom: '8px' }}>
                   From performance data ({learnedInsights.length})
                 </p>
                 {learnedInsights.map((insight, i) => (
@@ -930,7 +1019,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 borderRadius: 'var(--radius-lg)',
                 padding: '12px 16px',
               }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', color: '#ef4444', marginBottom: '8px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: '#ef4444', marginBottom: '8px' }}>
                   Avoid ({antiPatterns.length})
                 </p>
                 {antiPatterns.map((ap, i) => (
@@ -966,16 +1055,16 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: '1px solid var(--border)',
                     minWidth: '40px',
                   }} disabled>
-                    OFF
+                    Off
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>REPLY TO VIRAL</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Reply to outside threads</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       API replies are disabled because X blocks arbitrary conversation replies. Use Engage for supervised replies.
                     </p>
                   </div>
                 </div>
-                <span className="learning-source-chip">API DISABLED</span>
+                <span className="learning-source-chip">API disabled</span>
               </div>
             </div>
 
@@ -989,10 +1078,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: '1px solid var(--border)',
                     minWidth: '40px',
                   }} disabled>
-                    OFF
+                    Off
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-LIKE DISABLED</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-like unavailable</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       X blocks the API like endpoint for this app. Use supervised Engage likes through the browser companion.
                     </p>
@@ -1011,10 +1100,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: `1px solid ${settings.autoFollow ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoFollow: !settings.autoFollow })}>
-                    {settings.autoFollow ? 'ON' : 'OFF'}
+                    {settings.autoFollow ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>SMART FOLLOW</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Follow for better signals</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Follow relevant accounts for better trending data and inspiration (max 3/run)
                     </p>
@@ -1033,10 +1122,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     border: `1px solid ${settings.agentShoutouts ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} disabled={automationLocked} onClick={() => handleUpdateSettings({ agentShoutouts: !settings.agentShoutouts })}>
-                    {settings.agentShoutouts ? 'ON' : 'OFF'}
+                    {settings.agentShoutouts ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AGENT SHOUTOUTS</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Cross-promote agents</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Cross-promote other Clawfable agents (~15% chance per queue refill)
                     </p>
@@ -1058,15 +1147,15 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 <line x1="5" y1="6" x2="11" y2="6" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
                 <line x1="5" y1="10" x2="9" y2="10" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
-              <h2>Generation controls</h2>
-              <span className="section-count">controls generation output</span>
+              <h2>Draft style</h2>
+              <span className="section-count">controls the next generation batch</span>
             </div>
           </div>
 
           <div className="space-y-3" style={{ marginTop: '8px' }}>
             <div className="protocol-card" style={{ padding: '14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
                   Autonomy mode
                 </p>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
@@ -1075,9 +1164,9 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'safe', label: 'SAFE', hint: 'mostly proven bets with the lowest surprise level' },
-                  { id: 'balanced', label: 'BALANCED', hint: 'blend proven patterns with measured exploration' },
-                  { id: 'explore', label: 'EXPLORE', hint: 'push into new formats and topics to learn faster' },
+                  { id: 'safe', label: 'Safe', hint: 'mostly proven bets with the lowest surprise level' },
+                  { id: 'balanced', label: 'Balanced', hint: 'blend proven patterns with measured exploration' },
+                  { id: 'explore', label: 'Explore', hint: 'push into new formats and topics to learn faster' },
                 ].map((mode) => {
                   const active = (settings.autonomyMode || 'balanced') === mode.id;
                   return (
@@ -1106,8 +1195,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             <div className="protocol-card" style={{ padding: '14px', borderColor: settings.shitpoastEnabled ? 'var(--primary-border)' : 'var(--border)', background: settings.shitpoastEnabled ? 'var(--primary-soft)' : 'var(--surface)' }}>
               <div className="flex items-center justify-between" style={{ gap: '12px' }}>
                 <div>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: settings.shitpoastEnabled ? 'var(--primary)' : 'var(--text-muted)' }}>
-                    Shitpoast
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: settings.shitpoastEnabled ? 'var(--primary)' : 'var(--text-muted)' }}>
+                    Wild-card style
                   </p>
                   <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.5 }}>
                     Sharper, weirder, higher-chaos takes. Capped and still filtered before posting.
@@ -1128,8 +1217,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
             {/* Length mix */}
             <div className="protocol-card" style={{ padding: '14px' }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                LENGTH MIX
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                Length mix
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                 <div className="field">
@@ -1198,7 +1287,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             {/* Format toggles */}
             <div className="protocol-card" style={{ padding: '14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
                   Allowed formats
                 </p>
                 <button
@@ -1206,7 +1295,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                   style={{ fontSize: '9px' }}
                   onClick={() => handleUpdateSettings({ enabledFormats: [] })}
                 >
-                  {(settings.enabledFormats?.length || 0) === 0 ? 'ALL ENABLED' : 'RESET TO ALL'}
+                  {(settings.enabledFormats?.length || 0) === 0 ? 'All enabled' : 'Reset to all'}
                 </button>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -1256,8 +1345,8 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
             <div className="protocol-card" style={{ padding: '14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
                 <div>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
-                    Source-aware planner
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
+                    Idea mix
                   </p>
                   <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     Balance proven manual voice against timely follow-graph trends.
@@ -1270,7 +1359,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
               <div style={{ display: 'grid', gap: '12px' }}>
                 <div className="field">
-                  <label>TREND MIX TARGET</label>
+                  <label>Trend mix target</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="range"
@@ -1288,14 +1377,14 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                 </div>
 
                 <div>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                    TREND TOLERANCE
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    Trend tolerance
                   </p>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {[
-                      { id: 'adjacent', label: 'ADJACENT', hint: 'stay close to core topics' },
-                      { id: 'moderate', label: 'MODERATE', hint: 'allow measured adjacent bets' },
-                      { id: 'aggressive', label: 'AGGRESSIVE', hint: 'push further when network momentum is strong' },
+                      { id: 'adjacent', label: 'Adjacent', hint: 'stay close to core topics' },
+                      { id: 'moderate', label: 'Moderate', hint: 'allow measured adjacent bets' },
+                      { id: 'aggressive', label: 'Aggressive', hint: 'push further when network momentum is strong' },
                     ].map((option) => {
                       const active = (settings.trendTolerance || 'moderate') === option.id;
                       return (
@@ -1325,7 +1414,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                   <div style={{ display: 'grid', gap: '10px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
                       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: learningSnapshot.planner.shitpoast.enabled ? 'var(--primary-soft)' : 'var(--surface-3)' }}>
-                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>Shitpoast</p>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>Wild-card</p>
                         <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>
                           {learningSnapshot.planner.shitpoast.enabled ? `${learningSnapshot.planner.shitpoast.plannedSlots}` : 'Off'}
                         </div>
@@ -1348,7 +1437,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
 
                     {learningSnapshot.planner.acceptedTrends.length > 0 && (
                       <div style={{ display: 'grid', gap: '8px' }}>
-                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
                           Accepted trend candidates
                         </p>
                         {learningSnapshot.planner.acceptedTrends.slice(0, 3).map((trend) => (
@@ -1372,6 +1461,10 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         </div>
       )}
 
+          </div>
+        </details>
+      )}
+
       {/* ─── Activity Log ─────────────────────────────────────────────────── */}
       <div>
         <div className="section-header">
@@ -1388,14 +1481,14 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
         {postLog.length === 0 ? (
           <div style={{ padding: '24px 16px', textAlign: 'center', background: 'var(--surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
-              No activity yet. Enable auto-post or auto-reply, or hit RUN ALL NOW.
+              No activity yet. Enable auto-posting or auto-replies, or run automation now.
             </p>
           </div>
         ) : (
           <div className="space-y-2">
             {postLog.map((entry) => {
               const isPost = entry.action === 'posted' || (!entry.action && entry.xTweetId);
-              const tagLabel = entry.source === 'cron' ? 'CRON' : entry.source === 'autopilot' ? 'AUTO' : 'MANUAL';
+              const tagLabel = entry.source === 'cron' ? 'Cron' : entry.source === 'autopilot' ? 'Auto' : 'Manual';
               const tagColor = entry.action === 'posted' ? '#22c55e'
                 : entry.action === 'replied' ? '#3b82f6'
                 : entry.action === 'error' ? '#ef4444'
@@ -1411,7 +1504,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                         fontSize: '9px', background: `${tagColor}15`, borderColor: `${tagColor}40`, color: tagColor,
                       }}>{tagLabel}</span>
                       {entry.action && entry.action !== 'posted' && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: tagColor, textTransform: 'uppercase' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: tagColor, textTransform: 'none' }}>
                           {entry.action.replace(/_/g, ' ')}
                         </span>
                       )}

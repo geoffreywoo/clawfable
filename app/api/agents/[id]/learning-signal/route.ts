@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, getTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import type { LearningSignal } from '@/lib/types';
 import { metadataWithStyleMode } from '@/lib/style-mode';
+import { validateLearningSignalRequest } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/learning-signal
 export async function POST(
@@ -13,20 +13,11 @@ export async function POST(
   try {
     await requireAgentAccess(id);
     const body = await request.json();
-    const {
-      tweetId,
-      xTweetId,
-      signalType,
-      surface,
-      rewardDelta,
-      reason,
-      inferred,
-      metadata,
-    } = body as Partial<LearningSignal>;
-
-    if (!signalType || !surface || typeof rewardDelta !== 'number') {
-      return NextResponse.json({ error: 'signalType, surface, and rewardDelta are required' }, { status: 400 });
+    const parsed = validateLearningSignalRequest(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid learning signal' }, { status: 400 });
     }
+    const { tweetId, xTweetId, signalType, surface, rewardDelta, reason, inferred, metadata } = parsed.value;
 
     let tweet: Awaited<ReturnType<typeof getTweet>> | null = null;
     if (tweetId) {

@@ -35,7 +35,9 @@ function toneClass(tone: LearningTone): string {
 }
 
 function sourceLabel(source: string): string {
-  return source.replace(/_/g, ' ').toUpperCase();
+  return source
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatMetricValue(card: LearningScoreboardCard): string {
@@ -457,9 +459,9 @@ function PersonaModelMap({ snapshot }: { snapshot: LearningSnapshot }) {
           <h2 className="persona-model-title">What the underlying voice model trusts right now</h2>
         </div>
         <div className="persona-model-head-meta">
-          <span className="learning-source-chip">MODE {snapshot.overview.autonomyMode.toUpperCase()}</span>
+          <span className="learning-source-chip">Mode {snapshot.overview.autonomyMode}</span>
           <span className="learning-source-chip">
-            SOURCE {snapshot.overview.trainingSource ? sourceLabel(snapshot.overview.trainingSource) : 'COLD START'}
+            Source {snapshot.overview.trainingSource ? sourceLabel(snapshot.overview.trainingSource) : 'Cold start'}
           </span>
         </div>
       </div>
@@ -682,9 +684,10 @@ function TasteCalibrationPanel({
 }: {
   snapshot: LearningSnapshot;
   pendingId: string | null;
-  onSignal: (tweetId: string, action: 'more_like_this' | 'less_like_this') => void;
+  onSignal: (tweetId: string, action: 'more_like_this' | 'less_like_this', reason?: string) => void;
 }) {
   const items = snapshot.tasteCalibration.items;
+  const reasonChips = ['too generic', 'too harsh', 'not me', 'too long', 'great angle', 'save concept'];
   return (
     <section className="learning-story-panel">
       <div className="learning-story-head">
@@ -693,7 +696,7 @@ function TasteCalibrationPanel({
           <h3 className="learning-story-title">Teach the account what feels right before the market votes.</h3>
           <p className="learning-story-item-summary">{snapshot.tasteCalibration.summary}</p>
         </div>
-        <span className="learning-source-chip">OWNER SIGNAL</span>
+        <span className="learning-source-chip">Owner signal</span>
       </div>
       {items.length === 0 ? (
         <p className="learning-story-empty">Queue a few drafts and the system will select the most useful taste-calibration set.</p>
@@ -703,10 +706,28 @@ function TasteCalibrationPanel({
             <article key={`${item.role}:${item.tweet.id}`} className="learning-story-item">
               <div className="learning-story-item-head">
                 <p className="learning-story-item-title">{item.label}</p>
-                <span className="learning-source-chip">SCORE {item.score}</span>
+                <span className="learning-source-chip">Score {item.score}</span>
               </div>
               <p className="learning-story-item-summary">{item.tweet.content}</p>
               <p className="learning-story-item-summary">{item.reason}</p>
+              <div className="learning-story-item-meta" style={{ gap: '6px', flexWrap: 'wrap' }}>
+                {reasonChips.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    className="learning-source-chip"
+                    disabled={pendingId === item.tweet.id}
+                    onClick={() => onSignal(
+                      item.tweet.id,
+                      reason === 'great angle' || reason === 'save concept' ? 'more_like_this' : 'less_like_this',
+                      reason,
+                    )}
+                    style={{ cursor: pendingId === item.tweet.id ? 'default' : 'pointer' }}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
               <div className="learning-story-item-meta learning-calibration-actions">
                 <button
                   type="button"
@@ -806,13 +827,14 @@ export function LearningTab({ agentId }: LearningTabProps) {
   const submitTasteSignal = useCallback(async (
     tweetId: string,
     action: 'more_like_this' | 'less_like_this',
+    reason?: string,
   ) => {
     setPendingTasteId(tweetId);
     try {
       const res = await fetch(`/api/agents/${agentId}/calibration`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tweetId, action }),
+        body: JSON.stringify({ tweetId, action, reason }),
       });
       if (!res.ok) throw new Error('Failed to save taste signal');
       await loadSnapshot();
@@ -884,7 +906,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
         <div className="learning-scoreboard">
           <div className="learning-scoreboard-top">
             <div>
-              <p className="learning-hero-label">Learning scoreboard</p>
+          <p className="learning-hero-label">Quality check</p>
               <h2 className="learning-scoreboard-title">Is this agent getting better?</h2>
               <p className="learning-scoreboard-copy">
                 This view defaults to this week vs last week, then lets you drill into what changed, what is under test, and which lessons are actively shaping drafts.
@@ -892,10 +914,10 @@ export function LearningTab({ agentId }: LearningTabProps) {
             </div>
             <div className="learning-scoreboard-meta">
               <span className={`learning-state-chip ${toneClass(scoreboardState.tone)}`}>{scoreboardState.label}</span>
-              <span className="learning-source-chip">THIS WEEK VS LAST WEEK</span>
-              <span className="learning-source-chip">MODE {snapshot.overview.autonomyMode.toUpperCase()}</span>
+              <span className="learning-source-chip">This week vs last week</span>
+              <span className="learning-source-chip">Mode {snapshot.overview.autonomyMode}</span>
               {snapshot.overview.trainingSource && (
-                <span className="learning-source-chip">TRAINING {sourceLabel(snapshot.overview.trainingSource)}</span>
+                <span className="learning-source-chip">Training {sourceLabel(snapshot.overview.trainingSource)}</span>
               )}
             </div>
           </div>
@@ -915,7 +937,12 @@ export function LearningTab({ agentId }: LearningTabProps) {
         </div>
       </section>
 
-      <PersonaModelMap snapshot={snapshot} />
+      <details className="learning-advanced">
+        <summary>Model details</summary>
+        <div className="learning-advanced-body">
+          <PersonaModelMap snapshot={snapshot} />
+        </div>
+      </details>
 
       <TasteCalibrationPanel
         snapshot={snapshot}
@@ -969,10 +996,13 @@ export function LearningTab({ agentId }: LearningTabProps) {
         </div>
       </section>
 
+      <details className="learning-advanced">
+        <summary>Advanced learning details</summary>
+        <div className="learning-advanced-body">
       <section>
         <div className="section-header">
           <div className="section-title">
-            <h2>Source planner</h2>
+            <h2>Idea mix</h2>
             <span className="section-count">how the next batch balances manual voice against network trends</span>
           </div>
         </div>
@@ -1006,9 +1036,9 @@ export function LearningTab({ agentId }: LearningTabProps) {
               ))}
               <article className="learning-story-item">
                 <div className="learning-story-item-head">
-                  <p className="learning-story-item-title">Shitpoast style experiment</p>
+                  <p className="learning-story-item-title">Wild-card style experiment</p>
                   <span className="learning-source-chip">
-                    {snapshot.planner.shitpoast.enabled ? `${snapshot.planner.shitpoast.plannedSlots} planned` : 'OFF'}
+                    {snapshot.planner.shitpoast.enabled ? `${snapshot.planner.shitpoast.plannedSlots} planned` : 'Off'}
                   </span>
                 </div>
                 <p className="learning-story-item-summary">
@@ -1146,8 +1176,8 @@ export function LearningTab({ agentId }: LearningTabProps) {
                     <div className="learning-story-item-head">
                       <p className="learning-story-item-title">{example.likes} likes</p>
                       <div className="learning-story-item-meta">
-                        {example.pinned && <span className="learning-source-chip">PINNED</span>}
-                        {example.blocked && <span className="learning-source-chip">BLOCKED</span>}
+                        {example.pinned && <span className="learning-source-chip">Pinned</span>}
+                        {example.blocked && <span className="learning-source-chip">Blocked</span>}
                       </div>
                     </div>
                     <p className="learning-story-item-summary">{example.content}</p>
@@ -1198,6 +1228,8 @@ export function LearningTab({ agentId }: LearningTabProps) {
           ))}
         </div>
       </section>
+        </div>
+      </details>
 
       <section className="learning-performance-panel">
         <div className="section-header">
@@ -1261,7 +1293,7 @@ export function LearningTab({ agentId }: LearningTabProps) {
               <p className="learning-story-kicker">Learning funnel</p>
               <h3 className="learning-story-title">From generated draft to baseline-beating post</h3>
             </div>
-            <span className="learning-source-chip">4 WEEK WINDOW</span>
+            <span className="learning-source-chip">4 week window</span>
           </div>
           <div className="learning-funnel-grid">
             <FunnelStage label="Generated" value={snapshot.funnel.generated} max={funnelMax} />

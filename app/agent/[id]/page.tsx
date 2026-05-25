@@ -10,6 +10,8 @@ import {
 import { getAgentMetricsSnapshot } from '@/lib/metrics-snapshot';
 import { isSetupIncomplete } from '@/lib/setup-state';
 
+export const dynamic = 'force-dynamic';
+
 interface AgentDashboardPageProps {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ oauth?: string }>;

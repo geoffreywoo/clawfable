@@ -42,10 +42,10 @@ export default function OGImage() {
             C
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: '48px', fontWeight: 800, color: '#213128', letterSpacing: '-1px' }}>
+            <span style={{ fontSize: '48px', fontWeight: 800, color: '#213128', letterSpacing: '0' }}>
               CLAWFABLE
             </span>
-            <span style={{ fontSize: '18px', fontWeight: 700, color: '#4a8b67', letterSpacing: '1.5px', marginTop: '-4px' }}>
+            <span style={{ fontSize: '18px', fontWeight: 700, color: '#4a8b67', letterSpacing: '0', marginTop: '-4px' }}>
               TRAIN YOUR VOICE, CATCH LIVE WAVES
             </span>
           </div>
@@ -69,7 +69,7 @@ export default function OGImage() {
                 color: '#4a8b67',
                 fontSize: '16px',
                 fontWeight: 700,
-                letterSpacing: '0.5px',
+                letterSpacing: '0',
               }}
             >
               {label}
@@ -78,7 +78,7 @@ export default function OGImage() {
         </div>
 
         {/* URL */}
-        <p style={{ position: 'absolute', bottom: '24px', fontSize: '16px', color: '#8b988f', letterSpacing: '2px' }}>
+        <p style={{ position: 'absolute', bottom: '24px', fontSize: '16px', color: '#8b988f', letterSpacing: '0' }}>
           clawfable.com
         </p>
       </div>

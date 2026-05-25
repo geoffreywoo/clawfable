@@ -1,11 +1,30 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem, OutcomeEvent, MetricAvailability, RelationshipProfile, IdeaAtom, CriticVerdict } from './types';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 import { computeActionRewards, computeEarlyVelocityScore } from './virality-signals';
+import { assessTasteRisk } from './virality-signals';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
-// Used when Vercel KV env vars are not set (local dev).
-const memStore: Map<string, unknown> = new Map();
+// Used when Vercel KV env vars are not set (local dev). Next compiles API routes
+// and server components into separate module instances, so keep the fallback on
+// globalThis instead of per-module state.
+const LOCAL_KV_SYMBOL = Symbol.for('clawfable.localKvFallback');
+
+type LocalKvFallback = {
+  memStore: Map<string, unknown>;
+  memExpiry: Map<string, number>;
+};
+
+const localKvFallbackGlobal = globalThis as typeof globalThis & {
+  [LOCAL_KV_SYMBOL]?: LocalKvFallback;
+};
+
+const localKvFallback = localKvFallbackGlobal[LOCAL_KV_SYMBOL] ??= {
+  memStore: new Map<string, unknown>(),
+  memExpiry: new Map<string, number>(),
+};
+
+const { memStore, memExpiry } = localKvFallback;
 
 // ─── KV client accessor ───────────────────────────────────────────────────────
 // Returns the kv client if Vercel KV is available and configured, else null.
@@ -56,6 +75,20 @@ function invalidateCached(key: string): void {
   readCache.delete(key);
 }
 
+function deleteMemKey(key: string): void {
+  memStore.delete(key);
+  memExpiry.delete(key);
+}
+
+function isMemExpired(key: string): boolean {
+  const expiresAt = memExpiry.get(key);
+  if (!expiresAt) return false;
+  if (Date.now() < expiresAt) return false;
+  deleteMemKey(key);
+  invalidateAllNamespaces(key);
+  return true;
+}
+
 // kvDel can target any value type (string/hash/list/set), so it must clear
 // every namespaced cache entry for that raw key. Otherwise a stale cached
 // hash/list/set survives a delete and `getX` returns the old value.
@@ -71,6 +104,7 @@ function normalizeAgentHandle(handle: string | null | undefined): string {
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
+  if (isMemExpired(key)) return null;
   const cached = getCached<T>(key);
   if (cached.hit) return cached.value;
   try {
@@ -90,14 +124,41 @@ async function kvGet<T>(key: string): Promise<T | null> {
   }
 }
 
-async function kvSet(key: string, value: unknown): Promise<void> {
+async function kvSet(key: string, value: unknown, options: { ex?: number; nx?: boolean } = {}): Promise<boolean> {
   invalidateCached(key);
   try {
     const client = await getKvClient();
-    if (!client) { memStore.set(key, value); return; }
-    await client.set(key, value);
+    if (!client) {
+      if (isMemExpired(key)) {
+        // expired keys are removed by isMemExpired
+      } else if (options.nx && memStore.has(key)) {
+        return false;
+      }
+      memStore.set(key, value);
+      if (options.ex && options.ex > 0) {
+        memExpiry.set(key, Date.now() + options.ex * 1000);
+      } else {
+        memExpiry.delete(key);
+      }
+      return true;
+    }
+    const result = Object.keys(options).length > 0
+      ? await client.set(key, value, options)
+      : await client.set(key, value);
+    return result !== null;
   } catch {
+    if (isMemExpired(key)) {
+      // expired keys are removed by isMemExpired
+    } else if (options.nx && memStore.has(key)) {
+      return false;
+    }
     memStore.set(key, value);
+    if (options.ex && options.ex > 0) {
+      memExpiry.set(key, Date.now() + options.ex * 1000);
+    } else {
+      memExpiry.delete(key);
+    }
+    return true;
   }
 }
 
@@ -105,10 +166,10 @@ async function kvDel(key: string): Promise<void> {
   invalidateAllNamespaces(key);
   try {
     const client = await getKvClient();
-    if (!client) { memStore.delete(key); return; }
+    if (!client) { deleteMemKey(key); return; }
     await client.del(key);
   } catch {
-    memStore.delete(key);
+    deleteMemKey(key);
   }
 }
 
@@ -381,6 +442,12 @@ const KEYS = {
   agentVoiceDirectiveRules: (id: string) => `agent:${id}:voice_directive_rules`,
   agentManualExamples: (id: string) => `agent:${id}:manual_examples`,
   agentSignals: (id: string) => `agent:${id}:signals`,
+  agentOutcomeEvents: (id: string) => `agent:${id}:outcome_events`,
+  agentMetricAvailability: (id: string) => `agent:${id}:metric_availability`,
+  agentRelationshipProfiles: (id: string) => `agent:${id}:relationship_profiles`,
+  agentIdeaAtoms: (id: string) => `agent:${id}:idea_atoms`,
+  agentCriticVerdicts: (id: string) => `agent:${id}:critic_verdicts`,
+  agentAutopilotLock: (id: string) => `agent:${id}:autopilot_lock`,
   agentAutopilotHealth: (id: string) => `agent:${id}:autopilot_health`,
   browserPairing: (id: string) => `browser:pairing:${id}`,
   browserPairingByToken: (token: string) => `browser:pairing:token:${token}`,
@@ -412,6 +479,8 @@ const KEYS = {
   agentSoulBackup: (id: string) => `agent:${id}:soul_backup`,
   agentRateLimit: (id: string, action: string) => `ratelimit:${id}:${action}`,
   agentBaseline: (id: string) => `agent:${id}:baseline`,
+  counterOutcomeEvent: () => 'counter:outcome_event',
+  counterIdeaAtom: () => 'counter:idea_atom',
 };
 
 export class AgentHandleConflictError extends Error {
@@ -966,6 +1035,28 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
       actionRewardPrediction: tweet.actionRewardPrediction ?? null,
     });
   }
+  await Promise.all([
+    addOutcomeEvent(data.agentId, {
+      eventType: tweet.status === 'queued' ? 'queued' : tweet.status === 'posted' ? 'posted' : 'generated',
+      source: 'tweet',
+      tweetId: tweet.id,
+      xTweetId: tweet.xTweetId || undefined,
+      idempotencyKey: `tweet:${tweet.id}:created:${tweet.status}`,
+      metadata: {
+        status: tweet.status,
+        type: tweet.type,
+        format: tweet.format,
+        topic: tweet.topic,
+        candidateScore: tweet.candidateScore,
+        confidenceScore: tweet.confidenceScore,
+        sourceLane: tweet.sourceLane,
+        creativeLane: tweet.creativeLane,
+        portfolioRole: tweet.portfolioRole,
+      },
+    }).catch(() => null),
+    addCriticVerdictForTweet(tweet).catch(() => null),
+    recordIdeaAtomFromTweet(tweet).catch(() => null),
+  ]);
   return tweet;
 }
 
@@ -1008,6 +1099,43 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
       await kvLrem(KEYS.agentQueue(existing.agentId), 0, id);
     }
   }
+
+  await Promise.all([
+    data.content !== undefined && data.content !== existing.content
+      ? addOutcomeEvent(existing.agentId, {
+          eventType: 'edited',
+          source: 'tweet',
+          tweetId: updated.id,
+          xTweetId: updated.xTweetId || undefined,
+          idempotencyKey: `tweet:${updated.id}:edited:${updated.editCount}`,
+          metadata: {
+            editCount: updated.editCount ?? 0,
+            status: updated.status,
+            format: updated.format,
+            topic: updated.topic,
+          },
+        }).catch(() => null)
+      : Promise.resolve(null),
+    data.status !== undefined && data.status !== prevStatus
+      ? addOutcomeEvent(existing.agentId, {
+          eventType: data.status === 'deleted_from_x' ? 'deleted' : data.status === 'posted' ? 'posted' : data.status === 'queued' ? 'queued' : 'generated',
+          source: 'tweet',
+          tweetId: updated.id,
+          xTweetId: updated.xTweetId || undefined,
+          idempotencyKey: `tweet:${updated.id}:status:${data.status}`,
+          metadata: {
+            fromStatus: prevStatus,
+            toStatus: data.status,
+            format: updated.format,
+            topic: updated.topic,
+            candidateScore: updated.candidateScore,
+            confidenceScore: updated.confidenceScore,
+          },
+        }).catch(() => null)
+      : Promise.resolve(null),
+    addCriticVerdictForTweet(updated).catch(() => null),
+    recordIdeaAtomFromTweet(updated).catch(() => null),
+  ]);
 
   return updated;
 }
@@ -1239,7 +1367,7 @@ export interface CronLogEntry {
   mentionsRefreshed: number;
   performanceTracked?: number;
   autopilotProcessed: number;
-  results: Array<{ agentId: string; action: string; reason: string; content?: string; repliesSent?: number }>;
+  results: Array<{ agentId: string; action: string; reason: string; content?: string; repliesSent?: number; runId?: string }>;
 }
 
 export async function addCronLogEntry(entry: Omit<CronLogEntry, 'id'>): Promise<void> {
@@ -1486,6 +1614,26 @@ async function updateDraftExperimentFromPerformance(agentId: string, entry: Twee
 
 export async function addPerformanceEntry(agentId: string, entry: TweetPerformance): Promise<void> {
   await kvLpush(KEYS.agentPerformance(agentId), JSON.stringify(entry));
+  await addOutcomeEvent(agentId, {
+    eventType: 'metric_checkpoint',
+    source: 'metrics',
+    tweetId: entry.tweetId || undefined,
+    xTweetId: entry.xTweetId,
+    idempotencyKey: `metric:${entry.xTweetId}:${entry.performanceCheckpoint || 'unknown'}:${entry.checkedAt}`,
+    rewardDelta: entry.actionRewards?.total,
+    reason: `${entry.performanceCheckpoint || 'performance'} checkpoint: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies.`,
+    metadata: {
+      checkpoint: entry.performanceCheckpoint || null,
+      likes: entry.likes,
+      retweets: entry.retweets,
+      replies: entry.replies,
+      impressions: entry.impressions,
+      engagementRate: entry.engagementRate,
+      qualityAdjustedGrowthScore: entry.qualityAdjustedGrowthScore ?? null,
+      source: entry.source,
+    },
+    createdAt: entry.checkedAt,
+  }).catch(() => null);
   await updateDraftExperimentFromPerformance(agentId, entry);
 }
 
@@ -1871,6 +2019,256 @@ const UNIQUE_SIGNAL_TYPES = new Set<LearningSignal['signalType']>([
   'x_post_succeeded',
 ]);
 
+const MAX_OUTCOME_EVENTS = 500;
+const MAX_IDEA_ATOMS = 120;
+const MAX_CRITIC_VERDICTS = 250;
+
+function compactMetadata(metadata: OutcomeEvent['metadata'] | undefined): OutcomeEvent['metadata'] | undefined {
+  if (!metadata) return undefined;
+  const compact: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(metadata).slice(0, 40)) {
+    if (value === null || typeof value === 'boolean') {
+      compact[key] = value;
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      compact[key] = Number(value.toFixed(4));
+    } else if (typeof value === 'string') {
+      compact[key] = value.slice(0, 500);
+    }
+  }
+  return compact;
+}
+
+export async function addOutcomeEvent(
+  agentId: string,
+  event: Omit<OutcomeEvent, 'id' | 'agentId' | 'createdAt'> & { createdAt?: string }
+): Promise<OutcomeEvent> {
+  const createdAt = event.createdAt || new Date().toISOString();
+  const idempotencyKey = event.idempotencyKey || `${event.eventType}:${event.tweetId || event.xTweetId || crypto.randomUUID()}`;
+  const existing = await getOutcomeEvents(agentId, MAX_OUTCOME_EVENTS);
+  const duplicate = existing.find((item) => item.idempotencyKey === idempotencyKey);
+  if (duplicate) return duplicate;
+
+  const counter = await kvIncr(KEYS.counterOutcomeEvent());
+  const full: OutcomeEvent = {
+    id: String(counter),
+    agentId,
+    createdAt,
+    ...event,
+    idempotencyKey,
+    metadata: compactMetadata(event.metadata),
+  };
+  await kvSet(KEYS.agentOutcomeEvents(agentId), [full, ...existing].slice(0, MAX_OUTCOME_EVENTS));
+  return full;
+}
+
+export async function getOutcomeEvents(agentId: string, limit = 100): Promise<OutcomeEvent[]> {
+  const data = await kvGet<OutcomeEvent[]>(KEYS.agentOutcomeEvents(agentId));
+  return (data ?? []).slice(0, limit);
+}
+
+function normalizeIdeaClaim(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .slice(0, 180);
+}
+
+function extractIdeaClaim(tweet: Tweet): string | null {
+  const thesis = normalizeIdeaClaim(tweet.thesis || '');
+  if (thesis.length >= 12) return thesis;
+  const firstLine = normalizeIdeaClaim(tweet.content.split('\n').find((line) => line.trim()) || tweet.content);
+  if (firstLine.length < 12) return null;
+  return firstLine;
+}
+
+async function recordIdeaAtomFromTweet(tweet: Tweet): Promise<void> {
+  const claim = extractIdeaClaim(tweet);
+  if (!claim) return;
+  const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
+  const normalizedClaim = claim.toLowerCase();
+  const now = new Date().toISOString();
+  const found = existing.find((atom) => atom.claim.toLowerCase() === normalizedClaim);
+  const status = tweet.status;
+  const next = found
+    ? {
+        ...found,
+        topic: found.topic || tweet.topic,
+        audience: found.audience || tweet.targetAudienceSegment || null,
+        sourceTweetId: found.sourceTweetId || tweet.id,
+        lastUsedAt: now,
+        performance: {
+          ...found.performance,
+          generated: found.performance.generated + 1,
+          queued: found.performance.queued + (status === 'queued' ? 1 : 0),
+          posted: found.performance.posted + (status === 'posted' ? 1 : 0),
+        },
+        updatedAt: now,
+      }
+    : {
+        id: String(await kvIncr(KEYS.counterIdeaAtom())),
+        agentId: tweet.agentId,
+        claim,
+        tension: tweet.rationale?.slice(0, 240) || null,
+        audience: tweet.targetAudienceSegment || null,
+        proof: tweet.mediaBrief?.slice(0, 240) || null,
+        example: tweet.content.slice(0, 280),
+        riskNote: tweet.policyRiskScore && tweet.policyRiskScore > 0.28 ? `Policy risk ${tweet.policyRiskScore}` : null,
+        topic: tweet.topic,
+        sourceTweetId: tweet.id,
+        lastUsedAt: now,
+        performance: {
+          generated: 1,
+          queued: status === 'queued' ? 1 : 0,
+          posted: status === 'posted' ? 1 : 0,
+          rejected: 0,
+          avgReward: 0,
+        },
+        createdAt: now,
+        updatedAt: now,
+      } satisfies IdeaAtom;
+  const rest = existing.filter((atom) => atom.id !== next.id);
+  await kvSet(KEYS.agentIdeaAtoms(tweet.agentId), [next, ...rest].slice(0, MAX_IDEA_ATOMS));
+}
+
+export async function getIdeaAtoms(agentId: string, limit = 40): Promise<IdeaAtom[]> {
+  const data = await kvGet<IdeaAtom[]>(KEYS.agentIdeaAtoms(agentId));
+  return (data ?? []).slice(0, limit);
+}
+
+function buildCriticVerdict(tweet: Tweet): CriticVerdict {
+  const assessment = assessTasteRisk(tweet.content, {
+    surface: tweet.type === 'reply' ? 'reply' : 'post',
+    policyRiskScore: tweet.policyRiskScore,
+    creativeRiskScore: tweet.creativeRiskScore,
+    slopScore: tweet.slopScore,
+    voiceScore: tweet.voiceScore,
+    highValueScore: tweet.replyBaitScore,
+  });
+  const lower = tweet.content.toLowerCase();
+  const genericness = Math.min(1, (tweet.slopScore ?? 0.18) + (/(game changer|unlock|future of|paradigm shift)/i.test(tweet.content) ? 0.25 : 0));
+  const overclaiming = /\b(always|never|guaranteed|nobody|everyone)\b/i.test(tweet.content) ? 0.65 : Math.min(1, (tweet.policyRiskScore ?? 0.1) + 0.1);
+  const cringe = /(10x|hustle|gm\b|wagmi|based|alpha)/i.test(lower) ? 0.48 : Math.min(1, (tweet.creativeRiskScore ?? 0.18) * 0.6);
+  const voiceDrift = Math.max(0, 1 - (tweet.voiceScore ?? 0.72));
+  const factualRisk = Math.min(1, (tweet.criticScores?.factualRisk ?? tweet.policyRiskScore ?? 0.12));
+  const engagementBait = Math.min(1, (tweet.replyBaitScore ?? 0.1) + (/(agree\?|thoughts\?|what am i missing)/i.test(tweet.content) ? 0.25 : 0));
+  const replySuitability = tweet.type === 'reply' ? Math.min(1, tweet.replyBaitScore ?? 0.55) : Math.min(1, tweet.replyBaitScore ?? 0.25);
+  const score = Number(Math.max(
+    assessment.score,
+    genericness * 0.55,
+    overclaiming * 0.55,
+    cringe * 0.5,
+    voiceDrift * 0.7,
+    factualRisk * 0.65,
+    engagementBait * 0.35,
+  ).toFixed(3));
+  const action = assessment.action === 'block' || score >= 0.68 ? 'block' : assessment.action === 'review' || score >= 0.48 ? 'review' : 'allow';
+  return {
+    id: `${tweet.agentId}:${tweet.id}`,
+    agentId: tweet.agentId,
+    tweetId: tweet.id,
+    action,
+    score,
+    reasons: assessment.reasons.length > 0 ? assessment.reasons : action === 'allow' ? ['cleared deterministic critic'] : ['critic risk threshold exceeded'],
+    genericness: Number(genericness.toFixed(3)),
+    overclaiming: Number(overclaiming.toFixed(3)),
+    cringe: Number(cringe.toFixed(3)),
+    voiceDrift: Number(voiceDrift.toFixed(3)),
+    factualRisk: Number(factualRisk.toFixed(3)),
+    engagementBait: Number(engagementBait.toFixed(3)),
+    replySuitability: Number(replySuitability.toFixed(3)),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function addCriticVerdictForTweet(tweet: Tweet): Promise<CriticVerdict> {
+  const verdict = buildCriticVerdict(tweet);
+  const existing = await getCriticVerdicts(tweet.agentId, MAX_CRITIC_VERDICTS);
+  const rest = existing.filter((item) => item.tweetId !== tweet.id);
+  await kvSet(KEYS.agentCriticVerdicts(tweet.agentId), [verdict, ...rest].slice(0, MAX_CRITIC_VERDICTS));
+  return verdict;
+}
+
+export async function getCriticVerdicts(agentId: string, limit = 100): Promise<CriticVerdict[]> {
+  const data = await kvGet<CriticVerdict[]>(KEYS.agentCriticVerdicts(agentId));
+  return (data ?? []).slice(0, limit);
+}
+
+export async function getMetricAvailability(agentId: string): Promise<MetricAvailability[]> {
+  const data = await kvGet<MetricAvailability[]>(KEYS.agentMetricAvailability(agentId));
+  return data ?? [];
+}
+
+export async function saveMetricAvailability(agentId: string, availability: MetricAvailability[]): Promise<MetricAvailability[]> {
+  await kvSet(KEYS.agentMetricAvailability(agentId), availability);
+  return availability;
+}
+
+function normalizeRelationshipHandle(handle: string | null | undefined): string | null {
+  const normalized = normalizeUsername(handle || '');
+  return normalized || null;
+}
+
+export async function upsertRelationshipProfile(
+  agentId: string,
+  input: {
+    handle: string;
+    displayName?: string | null;
+    mentionId?: string | null;
+    topic?: string | null;
+    outcome?: RelationshipProfile['lastOutcome'];
+    replied?: boolean;
+    rejected?: boolean;
+    cooldownMins?: number;
+  }
+): Promise<RelationshipProfile | null> {
+  const handle = normalizeRelationshipHandle(input.handle);
+  if (!handle) return null;
+  const profiles = await getRelationshipProfiles(agentId, 250);
+  const existing = profiles.find((profile) => profile.handle.toLowerCase() === handle.toLowerCase());
+  const now = new Date().toISOString();
+  const topics = [...new Set([
+    ...(existing?.topics || []),
+    ...(input.topic ? [input.topic.slice(0, 80)] : []),
+  ])].slice(-8);
+  const interactions = (existing?.interactions || 0) + 1;
+  const repliesSent = (existing?.repliesSent || 0) + (input.replied ? 1 : 0);
+  const repliesRejected = (existing?.repliesRejected || 0) + (input.rejected ? 1 : 0);
+  const relationshipScore = Math.max(0, Math.min(1,
+    (existing?.relationshipScore ?? 0.2)
+    + (input.replied ? 0.08 : 0.02)
+    - (input.rejected ? 0.06 : 0)
+    + Math.min(0.2, interactions * 0.01)
+  ));
+  const cooldownUntil = input.cooldownMins
+    ? new Date(Date.now() + input.cooldownMins * 60 * 1000).toISOString()
+    : existing?.cooldownUntil || null;
+  const profile: RelationshipProfile = {
+    handle,
+    agentId,
+    displayName: input.displayName ?? existing?.displayName ?? null,
+    lastMentionId: input.mentionId ?? existing?.lastMentionId ?? null,
+    lastInteractionAt: now,
+    topics,
+    relationshipScore: Number(relationshipScore.toFixed(3)),
+    interactions,
+    repliesSent,
+    repliesRejected,
+    cooldownUntil,
+    doNotReply: existing?.doNotReply ?? false,
+    lastOutcome: input.outcome ?? existing?.lastOutcome ?? null,
+    updatedAt: now,
+  };
+  const rest = profiles.filter((item) => item.handle.toLowerCase() !== handle.toLowerCase());
+  await kvSet(KEYS.agentRelationshipProfiles(agentId), [profile, ...rest].slice(0, 250));
+  return profile;
+}
+
+export async function getRelationshipProfiles(agentId: string, limit = 100): Promise<RelationshipProfile[]> {
+  const data = await kvGet<RelationshipProfile[]>(KEYS.agentRelationshipProfiles(agentId));
+  return (data ?? []).slice(0, limit);
+}
+
 export async function addLearningSignal(
   agentId: string,
   signal: Omit<LearningSignal, 'id' | 'agentId' | 'createdAt'> & { createdAt?: string }
@@ -1894,6 +2292,17 @@ export async function addLearningSignal(
   const capped = deduped.slice(0, 250);
   await kvSet(KEYS.agentSignals(agentId), capped);
   await updateDraftExperimentFromSignal(agentId, full);
+  await addOutcomeEvent(agentId, {
+    eventType: full.signalType,
+    source: 'learning_signal',
+    tweetId: full.tweetId,
+    xTweetId: full.xTweetId,
+    rewardDelta: full.rewardDelta,
+    reason: full.reason,
+    metadata: full.metadata,
+    idempotencyKey: `learning:${full.id}`,
+    createdAt: full.createdAt,
+  }).catch(() => null);
   return full;
 }
 
@@ -2456,13 +2865,57 @@ export async function updateBrowserCompanionPairing(
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────
 
-export async function checkRateLimit(agentId: string, action: string, maxPerHour: number): Promise<boolean> {
+export async function checkRateLimit(agentId: string, action: string, maxPerHour: number, windowMs = 60 * 60 * 1000): Promise<boolean> {
   const key = KEYS.agentRateLimit(agentId, action);
-  const current = await kvGet<number>(key);
-  if (current !== null && current >= maxPerHour) return false;
-  const newVal = (current ?? 0) + 1;
-  await kvSet(key, newVal);
-  // In production KV, we'd set a TTL. In-memory fallback doesn't expire,
-  // but that's acceptable for local dev.
+  const current = await kvGet<{ count: number; resetAt: string }>(key);
+  const resetAtMs = current?.resetAt ? Date.parse(current.resetAt) : 0;
+  const active = current && Number.isFinite(resetAtMs) && resetAtMs > Date.now();
+  const count = active ? current.count : 0;
+  if (count >= maxPerHour) return false;
+  const resetAt = active && current?.resetAt
+    ? current.resetAt
+    : new Date(Date.now() + windowMs).toISOString();
+  const ttlSeconds = Math.max(1, Math.ceil((Date.parse(resetAt) - Date.now()) / 1000));
+  await kvSet(key, { count: count + 1, resetAt }, { ex: ttlSeconds });
   return true;
+}
+
+export interface AutopilotLock {
+  agentId: string;
+  owner: string;
+  purpose: 'cron' | 'manual' | 'autopilot';
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+export async function acquireAutopilotLock(
+  agentId: string,
+  owner = `run:${crypto.randomUUID()}`,
+  ttlSeconds = 8 * 60,
+  purpose: AutopilotLock['purpose'] = 'autopilot',
+): Promise<{ acquired: boolean; owner: string; lock: AutopilotLock | null }> {
+  const now = Date.now();
+  const lock: AutopilotLock = {
+    agentId,
+    owner,
+    purpose,
+    acquiredAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
+  };
+  const acquired = await kvSet(KEYS.agentAutopilotLock(agentId), lock, { nx: true, ex: ttlSeconds });
+  if (acquired) return { acquired: true, owner, lock };
+  const existing = await kvGet<AutopilotLock>(KEYS.agentAutopilotLock(agentId));
+  return { acquired: false, owner, lock: existing };
+}
+
+export async function releaseAutopilotLock(agentId: string, owner: string): Promise<boolean> {
+  const key = KEYS.agentAutopilotLock(agentId);
+  const existing = await kvGet<AutopilotLock>(key);
+  if (!existing || existing.owner !== owner) return false;
+  await kvDel(key);
+  return true;
+}
+
+export async function getAutopilotLock(agentId: string): Promise<AutopilotLock | null> {
+  return kvGet<AutopilotLock>(KEYS.agentAutopilotLock(agentId));
 }

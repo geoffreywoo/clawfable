@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   getPerformanceHistory: vi.fn(),
   addLearningSignal: vi.fn(),
   invalidateAgentConnection: vi.fn(),
+  upsertRelationshipProfile: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
   postTweet: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getPerformanceHistory: mocks.getPerformanceHistory,
   addLearningSignal: mocks.addLearningSignal,
   invalidateAgentConnection: mocks.invalidateAgentConnection,
+  upsertRelationshipProfile: mocks.upsertRelationshipProfile,
 }));
 
 vi.mock('@/lib/generation-context', () => ({
@@ -188,6 +190,7 @@ beforeEach(() => {
   mocks.getTrendingCache.mockResolvedValue([]);
   mocks.setTrendingCache.mockResolvedValue(undefined);
   mocks.addPostLogEntry.mockResolvedValue(undefined);
+  mocks.upsertRelationshipProfile.mockResolvedValue(null);
   mocks.invalidateAgentConnection.mockResolvedValue(undefined);
   mocks.createMention.mockResolvedValue(undefined);
   mocks.updateTweet.mockResolvedValue(undefined);

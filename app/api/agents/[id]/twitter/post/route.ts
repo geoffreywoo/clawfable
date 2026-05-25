@@ -6,6 +6,7 @@ import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
 import { isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
 import { metadataWithStyleMode } from '@/lib/style-mode';
+import { assessTasteRisk } from '@/lib/virality-signals';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -49,6 +50,25 @@ export async function POST(
         }, { status: 422 });
       }
       return NextResponse.json({ error: completenessIssue }, { status: 422 });
+    }
+
+    const taste = assessTasteRisk(String(content), {
+      surface: isReply ? 'reply' : 'post',
+      policyRiskScore: existingTweet?.policyRiskScore,
+      creativeRiskScore: existingTweet?.creativeRiskScore,
+      slopScore: existingTweet?.slopScore,
+      voiceScore: existingTweet?.voiceScore,
+      highValueScore: existingTweet?.replyBaitScore,
+    });
+    if (taste.action === 'block') {
+      return NextResponse.json({
+        error: `Taste gate blocked posting: ${taste.reasons.join(', ') || 'quality risk'}`,
+        tasteRisk: {
+          score: taste.score,
+          action: taste.action,
+          reasons: taste.reasons,
+        },
+      }, { status: 422 });
     }
 
     const keys = decodeKeys({

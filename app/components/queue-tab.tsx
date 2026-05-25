@@ -388,14 +388,14 @@ export function QueueTab({ agentId }: QueueTabProps) {
         {activeQueuedTweets.length > 0 && (
           <div className="flex gap-2">
             <button className="btn btn-outline btn-sm" onClick={handleCopyAll} data-testid="button-copy-all">
-              COPY ALL
+              Copy all
             </button>
             <button
               className="btn btn-sm"
               style={{
-                border: agentConnected ? '1px solid rgba(239,68,68,0.4)' : '1px solid var(--border)',
-                color: agentConnected ? '#ef4444' : 'var(--text-dim)',
-                background: 'transparent',
+                border: agentConnected ? '1px solid var(--primary-border)' : '1px solid var(--border)',
+                color: agentConnected ? 'var(--primary)' : 'var(--text-dim)',
+                background: agentConnected ? 'var(--primary-soft)' : 'transparent',
                 opacity: agentConnected ? 1 : 0.4,
               }}
               disabled={!agentConnected || isPostingAll}
@@ -403,7 +403,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
               data-testid="button-post-all"
               title={!agentConnected ? 'Connect X API in Settings first' : 'Post all queued tweets'}
             >
-              {isPostingAll ? 'POSTING...' : 'POST ALL'}
+              {isPostingAll ? 'Posting...' : 'Post all'}
             </button>
           </div>
         )}
@@ -450,7 +450,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     disabled={!deletionFeedback[tweet.id]?.trim() || submittingDeletionId === tweet.id}
                     onClick={() => handleDeletionFeedback(tweet.id)}
                   >
-                    {submittingDeletionId === tweet.id ? '...' : 'SAVE'}
+                    {submittingDeletionId === tweet.id ? '...' : 'Save'}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
@@ -469,7 +469,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       }
                     }}
                   >
-                    INFER
+                    Infer
                   </button>
                 </div>
               </div>
@@ -504,13 +504,13 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   {tweet.quarantineReason || 'This draft was quarantined after a posting rejection.'}
                 </p>
                 <div className="tweet-actions">
-                  <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>COPY</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>Copy</button>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ color: 'var(--primary)' }}
                     onClick={() => { setEditingId(tweet.id); setEditContent(tweet.content); }}
                   >
-                    EDIT TO RESCUE
+                    Edit to rescue
                   </button>
                 </div>
               </div>
@@ -548,8 +548,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       <span className={`char-count ${editContent.length > 280 ? 'over' : ''}`}>
                         {editContent.length}/280
                       </span>
-                      <button className="btn btn-xs btn-success" onClick={handleSave} data-testid={`button-save-${tweet.id}`}>SAVE</button>
-                      <button className="btn btn-ghost btn-xs" onClick={() => setEditingId(null)} data-testid={`button-cancel-${tweet.id}`}>CANCEL</button>
+                      <button className="btn btn-xs btn-success" onClick={handleSave} data-testid={`button-save-${tweet.id}`}>Save</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => setEditingId(null)} data-testid={`button-cancel-${tweet.id}`}>Cancel</button>
                     </div>
                   </div>
                 ) : (
@@ -562,7 +562,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       <span className="char-count">{tweet.content.length}/280</span>
                       {typeof tweet.confidenceScore === 'number' && (
                         <span className="label" style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
-                          conf {(tweet.confidenceScore * 100).toFixed(0)}%
+                          confidence {(tweet.confidenceScore * 100).toFixed(0)}%
                         </span>
                       )}
                       {tweet.topic && (
@@ -577,7 +577,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                         style={{ paddingInline: 0, color: openDecisionId === tweet.id ? 'var(--primary)' : 'var(--text-muted)' }}
                         onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
                       >
-                        {openDecisionId === tweet.id ? 'HIDE WHY' : 'WHY THIS TWEET'}
+                        {openDecisionId === tweet.id ? 'Hide why' : 'Why this draft'}
                       </button>
                     </div>
                     {openDecisionId === tweet.id && (
@@ -594,8 +594,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)',
                 }}>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                    REMIX DIRECTION
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    Remix direction
                   </p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '8px' }}>
                     {[
@@ -639,7 +639,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       disabled={!customPrompt.trim() || remixingId === tweet.id}
                       onClick={() => handleRemix(tweet, 'custom', customPrompt.trim())}
                     >
-                      {remixingId === tweet.id ? '...' : 'REMIX'}
+                      {remixingId === tweet.id ? '...' : 'Remix'}
                     </button>
                   </div>
                 </div>
@@ -651,7 +651,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{
-                      color: agentConnected ? '#ef4444' : 'var(--text-dim)',
+                      color: agentConnected ? 'var(--primary)' : 'var(--text-dim)',
                       opacity: agentConnected ? 1 : 0.4,
                     }}
                     disabled={!agentConnected || postingId === tweet.id}
@@ -659,7 +659,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     data-testid={`button-post-x-${tweet.id}`}
                     title={!agentConnected ? 'Connect X API first' : 'Post to X'}
                   >
-                    {postingId === tweet.id ? 'POSTING...' : 'POST TO X'}
+                    {postingId === tweet.id ? 'Posting...' : 'Post to X'}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
@@ -734,7 +734,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
               </div>
 
               <div className="wizard-builder-section">
-                <div className="wizard-section-label">DELETE REASON (OPTIONAL)</div>
+                <div className="wizard-section-label">Delete reason (optional)</div>
                 <textarea
                   className="textarea"
                   value={deleteReason}
@@ -749,10 +749,10 @@ export function QueueTab({ agentId }: QueueTabProps) {
 
               <div className="wizard-actions">
                 <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => setDeleteTarget(null)}>
-                  CANCEL
+                  Cancel
                 </button>
                 <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => handleDelete(true)}>
-                  {deleteSubmitting ? 'REMOVING...' : 'SKIP + INFER'}
+                  {deleteSubmitting ? 'Removing...' : 'Skip and infer'}
                 </button>
                 <button
                   className="btn btn-primary"
@@ -760,7 +760,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   onClick={() => handleDelete(false)}
                   style={{ background: deleteReason.trim() ? 'var(--primary)' : undefined }}
                 >
-                  {deleteSubmitting ? 'REMOVING...' : 'SAVE REASON + REMOVE'}
+                  {deleteSubmitting ? 'Removing...' : 'Save reason and remove'}
                 </button>
               </div>
             </div>

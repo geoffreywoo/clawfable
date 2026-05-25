@@ -166,7 +166,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
             fontWeight: 700,
             color: healthScore >= 70 ? '#22c55e' : healthScore >= 40 ? '#f59e0b' : '#ef4444',
           }}>{healthScore}</p>
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>HEALTH SCORE</p>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0' }}>Health score</p>
         </div>
 
         {/* Weekly comparison */}
@@ -183,17 +183,17 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
             minWidth: '280px',
           }}>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>POSTS</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>Posts</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekPosts}</p>
               {lastWeekPosts > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekPosts >= lastWeekPosts ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekPosts, lastWeekPosts)}% vs last week</p>}
             </div>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>AVG LIKES</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>Avg likes</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekAvgLikes}</p>
               {lastWeekAvgLikes > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekAvgLikes >= lastWeekAvgLikes ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekAvgLikes, lastWeekAvgLikes)}% vs last week</p>}
             </div>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>THIS WEEK</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>This week</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 {thisWeek.filter((d) => d.tweetsPosted > 0).length} active days
               </p>
@@ -210,9 +210,9 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
             padding: '14px 20px',
             minWidth: '260px',
           }}>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '6px' }}>AUTOPILOT HEALTH</p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '6px' }}>Automation health</p>
             <p style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: autopilotHealth.status === 'healthy' ? '#2f9a5f' : autopilotHealth.status === 'blocked' ? '#d65c5c' : '#c78528' }}>
-              {autopilotHealth.status.toUpperCase()}
+              {autopilotHealth.status}
             </p>
             <p style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
               {autopilotHealth.reason}
@@ -234,7 +234,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
           padding: '14px 20px',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)' }}>ACTIVATION FUNNEL</p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>Setup progress</p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>{funnel.completionPct}% complete</p>
           </div>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -250,10 +250,10 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
                   fontFamily: 'var(--font-mono)',
                   fontSize: '8px',
                   color: m.reached ? 'var(--primary)' : 'var(--text-dim)',
-                  letterSpacing: '0.05em',
+                  letterSpacing: '0',
                   textAlign: 'center',
                 }}>
-                  {m.event.replace(/_/g, ' ').replace('wizard ', '').toUpperCase()}
+                  {m.event.replace(/_/g, ' ').replace('wizard ', '')}
                 </span>
               </div>
             ))}

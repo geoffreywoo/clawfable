@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
@@ -270,6 +270,42 @@ export async function GET(request: NextRequest) {
       // Run autopilot if auto-post OR auto-reply is enabled (settings already loaded above)
       if (!settings.enabled && !settings.autoReply) continue;
 
+      const runId = `cron:${Date.now()}:${agent.id}`;
+      const lock = await acquireAutopilotLock(agent.id, runId, 8 * 60, 'cron');
+      if (!lock.acquired) {
+        const reason = lock.lock
+          ? `Autopilot already running since ${lock.lock.acquiredAt}; lock expires ${lock.lock.expiresAt}.`
+          : 'Autopilot already running.';
+        const skipped: AutopilotResult = {
+          agentId: agent.id,
+          action: 'skipped',
+          reason,
+        };
+        autopilotResults.push(skipped);
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'autopilot_lock',
+          topic: 'autopilot',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: 'skipped',
+          reason,
+          runId,
+          skipReason: 'lock_held',
+        });
+        await addOutcomeEvent(agent.id, {
+          eventType: 'skipped',
+          source: 'cron',
+          idempotencyKey: `${runId}:lock_held`,
+          reason,
+          metadata: { skipReason: 'lock_held' },
+        }).catch(() => null);
+        continue;
+      }
+
       try {
         if (settings.enabled) {
           await runAutopilotWatchdog(agent, settings);
@@ -292,6 +328,8 @@ export async function GET(request: NextRequest) {
             source: 'cron',
             action: result.action,
             reason: result.reason,
+            runId,
+            skipReason: result.action === 'skipped' ? result.reason || 'skipped' : undefined,
           });
         }
 
@@ -318,8 +356,12 @@ export async function GET(request: NextRequest) {
           source: 'cron',
           action: 'error',
           reason,
+          runId,
+          errorCode: 'run_autopilot',
         });
         await refreshAutopilotHealth(agent).catch(() => null);
+      } finally {
+        await releaseAutopilotLock(agent.id, lock.owner).catch(() => false);
       }
     }
 

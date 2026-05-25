@@ -320,7 +320,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                         rel="noopener noreferrer"
                         style={{ color: 'var(--primary)', fontSize: '10px', fontFamily: 'var(--font-mono)' }}
                       >
-                        VIEW ON X
+                        View on X
                       </a>
                     )}
                   </div>
@@ -354,23 +354,23 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                     )}
                     {typeof replyDrafts[mention.id].confidenceScore === 'number' && (
                       <span className="label" style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
-                        conf {(replyDrafts[mention.id].confidenceScore * 100).toFixed(0)}%
+                        confidence {(replyDrafts[mention.id].confidenceScore * 100).toFixed(0)}%
                       </span>
                     )}
                   </div>
                   <div className="tweet-actions">
-                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id])} data-testid={`button-copy-reply-${mention.id}`}>COPY</button>
-                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(replyDrafts[mention.id])} data-testid={`button-queue-reply-${mention.id}`}>QUEUE</button>
+                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id])} data-testid={`button-copy-reply-${mention.id}`}>Copy</button>
+                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(replyDrafts[mention.id])} data-testid={`button-queue-reply-${mention.id}`}>Approve</button>
                     <button
                       className="btn btn-ghost btn-xs"
-                      style={{ color: agentConnected ? '#ef4444' : 'var(--text-dim)', opacity: agentConnected ? 1 : 0.4 }}
+                      style={{ color: agentConnected ? 'var(--primary)' : 'var(--text-dim)', opacity: agentConnected ? 1 : 0.4 }}
                       disabled={!agentConnected || postingId === mention.id}
                       onClick={() => handlePostReply(mention)}
                       data-testid={`button-post-reply-${mention.id}`}
                     >
-                      {postingId === mention.id ? 'POSTING...' : 'POST REPLY'}
+                      {postingId === mention.id ? 'Posting...' : 'Post reply'}
                     </button>
-                    <button className="btn btn-ghost btn-xs" onClick={() => handleGenerate(mention)} data-testid={`button-regen-reply-${mention.id}`}>REGEN</button>
+                    <button className="btn btn-ghost btn-xs" onClick={() => handleGenerate(mention)} data-testid={`button-regen-reply-${mention.id}`}>Regenerate</button>
                   </div>
                 </div>
               </div>

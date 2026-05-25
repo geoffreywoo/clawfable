@@ -111,7 +111,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
     ? 'GRANDFATHERED ACCESS'
     : billing.plan === 'free'
       ? 'FREE'
-      : `${billing.label.toUpperCase()} · ${billing.status.toUpperCase()}`;
+      : `${billing.label} · ${billing.status}`;
 
   return (
     <div className="page-shell">
@@ -138,7 +138,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
           {!loading && agents.length === 0 && (
             <div className="home-brief home-brief-empty">
               <div className="home-brief-copy">
-                <p className="home-brief-label">{billing.label.toUpperCase()} PLAN</p>
+                <p className="home-brief-label">{billing.label} plan</p>
                 <h2 className="home-brief-title">Your first agent takes about five minutes.</h2>
                 <p className="home-brief-body">
                   Create the agent shell, connect X, draft the voice contract, review the first tweet batch,
@@ -171,7 +171,7 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                       padding: '12px 14px',
                     }}
                   >
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0' }}>
                       PLAN CAPACITY
                     </p>
                     <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text)', marginTop: '6px', lineHeight: 1.6 }}>
@@ -305,8 +305,8 @@ export function HomeMissionControl({ initialUser, initialAgents }: HomeMissionCo
                       fontFamily: 'var(--font-mono)',
                       fontSize: '12px',
                       fontWeight: 600,
-                      letterSpacing: '0.1em',
-                      textTransform: 'uppercase',
+                      letterSpacing: '0',
+                      textTransform: 'none',
                       color: 'var(--text)',
                     }}
                   >

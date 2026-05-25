@@ -328,14 +328,14 @@ export function EngageTab({ agentId }: EngageTabProps) {
 
         <div className="engage-card-actions">
           <button className="btn btn-outline btn-sm" disabled={likeQueued || busy !== null && busy !== `like:${candidate.tweetId}`} onClick={() => void handleQueueLike(candidate)}>
-            {likeQueued ? 'LIKE QUEUED' : 'QUEUE LIKE'}
+            {likeQueued ? 'Like queued' : 'Queue like'}
           </button>
           <button
             className="btn btn-primary btn-sm"
             disabled={replyQueued || busy === `reply:${candidate.tweetId}`}
             onClick={() => void handleDraftReply(candidate)}
           >
-            {replyQueued ? 'REPLY READY' : busy === `reply:${candidate.tweetId}` ? 'DRAFTING…' : 'DRAFT REPLY'}
+            {replyQueued ? 'Reply ready' : busy === `reply:${candidate.tweetId}` ? 'Drafting...' : 'Draft reply'}
           </button>
         </div>
       </article>
@@ -533,7 +533,7 @@ export function EngageTab({ agentId }: EngageTabProps) {
                   <article key={action.id} className="engage-queue-card">
                     <div className="engage-queue-head">
                       <div>
-                        <span className="engage-status-label">{action.type.toUpperCase()}</span>
+                        <span className="engage-status-label">{action.type}</span>
                         <h3 className="engage-card-title">@{action.candidate.authorHandle}</h3>
                       </div>
                       <span className={`engage-session-pill ${action.status}`}>{action.status}</span>

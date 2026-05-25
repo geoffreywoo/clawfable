@@ -3,6 +3,8 @@ import { ControlRoomShell } from '@/app/components/control-room-shell';
 import { getCurrentUser } from '@/lib/auth';
 import { getControlRoomSnapshot } from '@/lib/dashboard-data';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ControlRoomPage() {
   const user = await getCurrentUser();
   if (!user) {

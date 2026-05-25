@@ -189,6 +189,16 @@ describe('source planner', () => {
           tweetCount: 8,
           topTweet: { id: 't1', text: 'AI model launches', likes: 220, author: 'alice' },
         },
+        {
+          id: 12,
+          headline: 'Support agents quietly move from scripts to workflows',
+          source: '@cora',
+          relevanceScore: 70,
+          category: 'support',
+          timestamp: new Date().toISOString(),
+          tweetCount: 3,
+          topTweet: { id: 't12', text: 'Support agents quietly move from scripts to workflows', likes: 10, author: 'cora' },
+        },
       ],
       fallbackTopics: ['startups'],
     });
@@ -196,6 +206,58 @@ describe('source planner', () => {
     expect(plan.slots).toHaveLength(4);
     expect(plan.laneCounts.manual_core_exploit).toBeGreaterThan(0);
     expect(plan.laneCounts.core_explore_fallback).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reserves a small lane for adjacent trend exploration in growth modes', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 10,
+      autonomyMode: 'explore',
+      trendMixTarget: 60,
+      trendTolerance: 'aggressive',
+      voiceProfile: {
+        tone: 'analytical',
+        topics: ['AI agents'],
+        antiGoals: [],
+        communicationStyle: 'sharp',
+        summary: 'summary',
+      },
+      learnings: null,
+      trending: [
+        {
+          id: 10,
+          headline: 'AI agents reshape startup hiring',
+          source: '@alice',
+          relevanceScore: 90,
+          category: 'startups',
+          timestamp: new Date().toISOString(),
+          tweetCount: 5,
+          topTweet: { id: 't10', text: 'AI agents reshape startup hiring', likes: 100, author: 'alice' },
+        },
+        {
+          id: 11,
+          headline: 'Developer tools pricing moves to usage',
+          source: '@bob',
+          relevanceScore: 88,
+          category: 'devtools',
+          timestamp: new Date().toISOString(),
+          tweetCount: 4,
+          topTweet: { id: 't11', text: 'Developer tools pricing moves to usage', likes: 80, author: 'bob' },
+        },
+        {
+          id: 12,
+          headline: 'Support agents quietly move from scripts to workflows',
+          source: '@cora',
+          relevanceScore: 70,
+          category: 'support',
+          timestamp: new Date().toISOString(),
+          tweetCount: 3,
+          topTweet: { id: 't12', text: 'Support agents quietly move from scripts to workflows', likes: 10, author: 'cora' },
+        },
+      ],
+      fallbackTopics: ['AI agents'],
+    });
+
+    expect(plan.laneCounts.trend_adjacent_explore).toBeGreaterThan(0);
   });
 
   it('preserves source-lane assignments and trend ids in bandit slot planning', () => {

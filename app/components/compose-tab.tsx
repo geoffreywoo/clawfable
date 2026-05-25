@@ -237,13 +237,13 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           </p>
           <div className="flex gap-3">
             <button className="btn btn-primary" onClick={() => handleBatchGenerate(3)} disabled={generating} style={{ background: 'var(--primary)' }}>
-              {generating ? 'DRAFTING...' : 'DRAFT 3'}
+              {generating ? 'Drafting...' : 'Draft 3'}
             </button>
             <button className="btn btn-primary" onClick={() => handleBatchGenerate(5)} disabled={generating} style={{ background: 'var(--primary)' }}>
-              DRAFT 5
+              Draft 5
             </button>
             <button className="btn btn-outline" onClick={() => handleBatchGenerate(10)} disabled={generating}>
-              DRAFT 10
+              Draft 10
             </button>
           </div>
         </div>
@@ -297,7 +297,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                     )}
                     {typeof tweet.confidenceScore === 'number' && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                        conf {(tweet.confidenceScore * 100).toFixed(0)}%
+                        confidence {(tweet.confidenceScore * 100).toFixed(0)}%
                       </span>
                     )}
                     {tweet.rationale && (
@@ -313,7 +313,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                     style={{ paddingInline: 0, color: openDecisionId === tweet.id ? 'var(--primary)' : 'var(--text-muted)' }}
                     onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
                   >
-                    {openDecisionId === tweet.id ? 'HIDE WHY' : 'WHY THIS TWEET'}
+                    {openDecisionId === tweet.id ? 'Hide why' : 'Why this draft'}
                   </button>
                 </div>
                 {openDecisionId === tweet.id && (
@@ -322,17 +322,17 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                 <div className="tweet-footer">
                   <span className="char-count">{tweet.content.length} chars</span>
                   <div className="tweet-actions">
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>COPY</button>
-                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(tweet)}>QUEUE</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>Copy</button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(tweet)}>Approve</button>
                     <button
                       className="btn btn-ghost btn-sm"
-                      style={{ color: agentConnected ? '#ef4444' : 'var(--text-dim)', cursor: agentConnected ? 'pointer' : 'not-allowed' }}
+                      style={{ color: agentConnected ? 'var(--primary)' : 'var(--text-dim)', cursor: agentConnected ? 'pointer' : 'not-allowed' }}
                       disabled={!agentConnected || postingId === tweet.id}
                       onClick={() => handlePostNow(tweet)}
                     >
-                      {postingId === tweet.id ? 'POSTING...' : 'POST NOW'}
+                      {postingId === tweet.id ? 'Posting...' : 'Post now'}
                     </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleDiscard(tweet.id)}>DISCARD</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDiscard(tweet.id)}>Discard</button>
                   </div>
                 </div>
               </div>
@@ -393,7 +393,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
                       onClick={() => handleGenerateFromTopic(topic)}
                     >
                       <svg viewBox="0 0 12 12" width="11" height="11" fill="none"><polygon points="2,1 11,6 2,11" fill="#fff" /></svg>
-                      {generatingId === topic.id ? 'DRAFTING...' : 'DRAFT'}
+                      {generatingId === topic.id ? 'Drafting...' : 'Draft'}
                     </button>
                   </div>
                 </div>
@@ -422,7 +422,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
 
           <div className="protocol-section-grid" style={{ marginTop: '8px' }}>
             <div className="protocol-card">
-              <p className="protocol-card-label">TOP FORMATS</p>
+              <p className="protocol-card-label">Top formats</p>
               <div className="protocol-tags">
                 {analysis.engagementPatterns.topFormats.map((f) => (
                   <span key={f} className="protocol-tag">{f.replace(/_/g, ' ')}</span>
@@ -430,7 +430,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
               </div>
             </div>
             <div className="protocol-card">
-              <p className="protocol-card-label">BEST TOPICS</p>
+              <p className="protocol-card-label">Best topics</p>
               <div className="protocol-tags">
                 {analysis.engagementPatterns.topTopics.map((t) => (
                   <span key={t} className="protocol-tag tag-topic">{t}</span>
@@ -438,7 +438,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
               </div>
             </div>
             <div className="protocol-card">
-              <p className="protocol-card-label">ENGAGEMENT</p>
+              <p className="protocol-card-label">Engagement</p>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.8' }}>
                 <div>Avg likes: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{analysis.engagementPatterns.avgLikes}</span></div>
                 <div>Avg RTs: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{analysis.engagementPatterns.avgRetweets}</span></div>
@@ -448,7 +448,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
           </div>
 
           <div className="protocol-fingerprint" style={{ marginTop: '8px' }}>
-            <p className="protocol-card-label">CONTENT FINGERPRINT</p>
+            <p className="protocol-card-label">Content fingerprint</p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text)', lineHeight: '1.7' }}>
               {analysis.contentFingerprint}
             </p>

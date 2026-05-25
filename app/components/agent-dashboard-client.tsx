@@ -8,16 +8,10 @@ import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { SETUP_BANNER_CONTENT, isSetupIncomplete, normalizeSetupStep } from '@/lib/setup-state';
 import type { AutopilotHealthSnapshot, BillingSummary, AgentDetail, AgentSummary, Metric, PostLogEntry, ProtocolSettings } from '@/lib/types';
 
-const ComposeTab = dynamic(() => import('@/app/components/compose-tab').then((mod) => mod.ComposeTab), {
+const ReviewTab = dynamic(() => import('@/app/components/review-tab').then((mod) => mod.ReviewTab), {
   loading: () => <TabSkeleton />,
 });
-const QueueTab = dynamic(() => import('@/app/components/queue-tab').then((mod) => mod.QueueTab), {
-  loading: () => <TabSkeleton />,
-});
-const MentionsTab = dynamic(() => import('@/app/components/mentions-tab').then((mod) => mod.MentionsTab), {
-  loading: () => <TabSkeleton />,
-});
-const EngageTab = dynamic(() => import('@/app/components/engage-tab').then((mod) => mod.EngageTab), {
+const UnifiedEngageTab = dynamic(() => import('@/app/components/unified-engage-tab').then((mod) => mod.UnifiedEngageTab), {
   loading: () => <TabSkeleton />,
 });
 const AutomationTab = dynamic(() => import('@/app/components/autopilot-tab').then((mod) => mod.AutopilotTab), {
@@ -35,46 +29,34 @@ const SetupContinuation = dynamic(() => import('@/app/components/setup-continuat
 
 const TABS = [
   {
-    id: 'automation',
-    label: 'Automation',
-    title: 'Watch the publishing loop and steer the voice.',
-    description: 'Turn posting and reply automation on or off, coach the agent, and review what happened recently.',
+    id: 'today',
+    label: 'Today',
+    title: 'See what needs attention right now.',
+    description: 'Check connection, queue health, automation, blockers, and the next best action from one place.',
   },
   {
-    id: 'compose',
-    label: 'Drafts',
-    title: 'Generate fresh posts from what this account should say next.',
-    description: 'Draft on demand from live topics, account patterns, and the latest learning signals.',
-  },
-  {
-    id: 'queue',
-    label: 'Queue',
-    title: 'Review everything that is ready to go live.',
-    description: 'Post approved drafts, rescue misses, and keep the queue healthy enough for automation to run.',
-  },
-  {
-    id: 'mentions',
-    label: 'Inbox',
-    title: 'Handle replies without losing the thread.',
-    description: 'Refresh mentions, draft responses, and decide which replies belong in the queue or on X right now.',
+    id: 'review',
+    label: 'Review',
+    title: 'Decide what deserves to publish.',
+    description: 'Generate drafts, inspect why they were made, approve strong ones, and rescue or remove weak ones.',
   },
   {
     id: 'engage',
     label: 'Engage',
-    title: 'Run supervised browser sessions for likes and arbitrary-target replies.',
-    description: 'Pair the local companion, rank targets, stage a mixed like/reply queue, approve once, and keep an emergency stop visible.',
+    title: 'Reply when there is real value to add.',
+    description: 'Review mentions, draft high-value replies, and run supervised engagement sessions without losing taste.',
   },
   {
-    id: 'insights',
-    label: 'Insights',
-    title: 'See what the system is learning and whether it is paying off.',
-    description: 'Learning explains the behavior changes. Results shows whether quality and performance are actually improving.',
+    id: 'learn',
+    label: 'Learn',
+    title: 'See whether the account is getting sharper.',
+    description: 'Track quality, what changed this week, and which experiments are helping or hurting.',
   },
   {
     id: 'settings',
     label: 'Settings',
-    title: 'Edit the voice contract and account setup.',
-    description: 'Manage identity, SOUL.md, X connection, live-posting options, and deletion controls from one place.',
+    title: 'Manage account, voice, and posting rules.',
+    description: 'Update identity, SOUL.md, X connection, billing, and advanced account controls.',
   },
 ] as const;
 
@@ -128,36 +110,39 @@ function resolveDashboardLocation(rawTab: string | null, rawView: string | null)
   switch (rawTab) {
     case 'autopilot':
     case 'automation':
-      return { tab: 'automation', insightsView };
+    case 'today':
+      return { tab: 'today', insightsView };
     case 'drafts':
     case 'compose':
-      return { tab: 'compose', insightsView };
     case 'queue':
-      return { tab: 'queue', insightsView };
+    case 'review':
+      return { tab: 'review', insightsView };
     case 'inbox':
     case 'mentions':
-      return { tab: 'mentions', insightsView };
     case 'engage':
       return { tab: 'engage', insightsView };
     case 'metrics':
     case 'results':
-      return { tab: 'insights', insightsView: 'results' };
+      return { tab: 'learn', insightsView: 'results' };
     case 'learning':
     case 'insights':
-      return { tab: 'insights', insightsView };
+    case 'learn':
+      return { tab: 'learn', insightsView };
     case 'settings':
       return { tab: 'settings', insightsView };
     default:
-      return { tab: 'automation', insightsView };
+      return { tab: 'today', insightsView };
   }
 }
 
 function formatUrlTab(tab: TabId): string {
   switch (tab) {
-    case 'compose':
-      return 'drafts';
-    case 'mentions':
-      return 'inbox';
+    case 'today':
+      return 'today';
+    case 'review':
+      return 'review';
+    case 'learn':
+      return 'learn';
     default:
       return tab;
   }
@@ -172,7 +157,7 @@ export function AgentDashboardClient({
 }: AgentDashboardClientProps) {
   const router = useRouter();
   const [agent, setAgent] = useState<AgentDetail | null>(initialAgent);
-  const [activeTab, setActiveTab] = useState<TabId>('automation');
+  const [activeTab, setActiveTab] = useState<TabId>('today');
   const [insightsView, setInsightsView] = useState<InsightsView>('learning');
   const [locationReady, setLocationReady] = useState(false);
   const [showSetupContinuation, setShowSetupContinuation] = useState(shouldOpenSetupContinuation);
@@ -227,7 +212,7 @@ export function AgentDashboardClient({
     const url = new URL(window.location.href);
     url.searchParams.set('tab', formatUrlTab(activeTab));
 
-    if (activeTab === 'insights') {
+    if (activeTab === 'learn') {
       url.searchParams.set('view', insightsView);
     } else {
       url.searchParams.delete('view');
@@ -445,7 +430,7 @@ export function AgentDashboardClient({
               <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
             </svg>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.08em' }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#f59e0b', letterSpacing: '0' }}>
                 Setup incomplete: {SETUP_BANNER_CONTENT[setupStep].title}
               </p>
               <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
@@ -493,18 +478,16 @@ export function AgentDashboardClient({
           </div>
         </section>
 
-        {activeTab === 'compose' && <ComposeTab agentId={agentId} />}
-        {activeTab === 'queue' && <QueueTab agentId={agentId} />}
-        {activeTab === 'mentions' && <MentionsTab agentId={agentId} />}
-        {activeTab === 'engage' && <EngageTab agentId={agentId} />}
-        {activeTab === 'insights' && (
+        {activeTab === 'review' && <ReviewTab agentId={agentId} />}
+        {activeTab === 'engage' && <UnifiedEngageTab agentId={agentId} />}
+        {activeTab === 'learn' && (
           <InsightsTab
             agentId={agentId}
             initialView={insightsView}
             onViewChange={setInsightsView}
           />
         )}
-        {activeTab === 'automation' && <AutomationTab agentId={agentId} initialData={initialAutopilotData} />}
+        {activeTab === 'today' && <AutomationTab agentId={agentId} initialData={initialAutopilotData} />}
         {activeTab === 'settings' && (
           <SettingsTab
             agentId={agentId}

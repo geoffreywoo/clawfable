@@ -492,7 +492,7 @@ export function SetupWizard({
               </div>
               {error && <p className="wizard-error">{error}</p>}
               <div className="wizard-actions">
-                <button className="btn btn-outline" onClick={onClose}>CANCEL</button>
+                <button className="btn btn-outline" onClick={onClose}>Cancel</button>
                 <button
                   className="btn btn-primary"
                   disabled={!handle.trim() || !name.trim() || loading}
@@ -606,14 +606,14 @@ export function SetupWizard({
 
               {error && <p className="wizard-error">{error}</p>}
               <div className="wizard-actions">
-                <button className="btn btn-outline" onClick={onClose}>CANCEL</button>
+                <button className="btn btn-outline" onClick={onClose}>Cancel</button>
                 <button
                   className="btn btn-primary"
                   disabled={!canGenerateVoice || loading}
                   onClick={handleGenerateVoice}
                   style={{ background: canGenerateVoice ? 'var(--primary)' : undefined }}
                 >
-                  {loading ? 'DRAFTING VOICE CONTRACT...' : 'DRAFT VOICE CONTRACT'}
+                  {loading ? 'Drafting voice contract...' : 'Draft voice contract'}
                 </button>
               </div>
             </>
@@ -759,7 +759,7 @@ export function SetupWizard({
                   {error && previewTweets.length > 0 && <p className="wizard-error">{error}</p>}
 
                   <div className="wizard-actions">
-                    <button className="btn btn-outline" onClick={onClose}>CANCEL</button>
+                    <button className="btn btn-outline" onClick={onClose}>Cancel</button>
                     <button
                       className="btn btn-primary"
                       disabled={!canLaunch}

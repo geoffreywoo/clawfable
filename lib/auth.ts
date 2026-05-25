@@ -36,8 +36,11 @@ export async function requireUser(): Promise<User> {
 export async function getCurrentUser(): Promise<User | null> {
   try {
     return await requireUser();
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return null;
+    }
+    throw err;
   }
 }
 

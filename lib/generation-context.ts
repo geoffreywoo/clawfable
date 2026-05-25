@@ -2,6 +2,7 @@ import type { Agent, AgentLearnings, LearningSignal, PersonalizationMemory, Prot
 import {
   getBaseline,
   getFeedback,
+  getIdeaAtoms,
   getLearningSignals,
   getLearnings,
   getMentions,
@@ -169,6 +170,7 @@ export async function buildGenerationContext(
     baseline,
     globalPrior,
     mentions,
+    ideaAtoms,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -184,6 +186,7 @@ export async function buildGenerationContext(
     getBaseline(agent.id),
     getGlobalBanditPrior(),
     getMentions(agent.id).catch(() => []),
+    getIdeaAtoms(agent.id, 24).catch(() => []),
   ]);
 
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
@@ -305,6 +308,14 @@ export async function buildGenerationContext(
 
   if (memory.replyMiningInsights?.length) {
     voiceProfile.communicationStyle += `\n\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (ideaAtoms.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## IDEA GRAPH / THESIS BANK\nUse these claim atoms as reusable concept seeds. Combine them with fresh formats and examples; do not repeat the exact wording.\n${ideaAtoms.slice(0, 12).map((atom) => `- ${atom.claim}${atom.topic ? ` (${atom.topic})` : ''}${atom.performance.posted > 0 ? ` — posted ${atom.performance.posted}x` : ''}`).join('\n')}`;
+    memory.referenceBank = [
+      ...(memory.referenceBank || []),
+      ...ideaAtoms.slice(0, 6).map((atom) => atom.claim),
+    ].slice(0, 18);
   }
 
   if (memory.identityConstraints.length > 0) {
