@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createMention, getMentions } from '@/lib/kv-storage';
+import { createMention, getRecentMentions } from '@/lib/kv-storage';
 import { getMentionsFromTwitter, decodeKeys } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -24,7 +24,7 @@ export async function GET(
     });
 
     // Get stored mentions for dedup + sinceId
-    const stored = await getMentions(id);
+    const stored = await getRecentMentions(id, 500);
     const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
     const latestTweetId = stored.length > 0 ? String(stored[0].tweetId) : undefined;
 
@@ -60,7 +60,7 @@ export async function GET(
     }
 
     // Return fresh sorted list
-    const all = await getMentions(id);
+    const all = await getRecentMentions(id, 100);
     return NextResponse.json(all);
   } catch (err) {
     try { return handleAuthError(err); } catch {}

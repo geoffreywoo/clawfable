@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   deleteTweet: vi.fn(),
   createMention: vi.fn(),
   getMentions: vi.fn(),
+  getRecentMentions: vi.fn(),
   addPostLogEntry: vi.fn(),
   getPostLog: vi.fn(),
   logFunnelEvent: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/lib/kv-storage', () => ({
   deleteTweet: mocks.deleteTweet,
   createMention: mocks.createMention,
   getMentions: mocks.getMentions,
+  getRecentMentions: mocks.getRecentMentions,
   addPostLogEntry: mocks.addPostLogEntry,
   getPostLog: mocks.getPostLog,
   logFunnelEvent: mocks.logFunnelEvent,
@@ -184,6 +186,7 @@ beforeEach(() => {
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
   mocks.getAnalysis.mockResolvedValue(null);
   mocks.getMentions.mockResolvedValue([]);
+  mocks.getRecentMentions.mockResolvedValue([]);
   mocks.getPostLog.mockResolvedValue([]);
   mocks.getConversationHistory.mockResolvedValue([]);
   mocks.getPerformanceHistory.mockResolvedValue([]);

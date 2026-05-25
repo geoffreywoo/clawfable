@@ -5,9 +5,9 @@ import {
   getIdeaAtoms,
   getLearningSignals,
   getLearnings,
-  getMentions,
   getPerformanceHistory,
   getProtocolSettings,
+  getRecentMentions,
   getRecentNegativeFeedback,
   getRemixMemory,
   getRemixPatterns,
@@ -185,7 +185,7 @@ export async function buildGenerationContext(
     getLearningSignals(agent.id, 200),
     getBaseline(agent.id),
     getGlobalBanditPrior(),
-    getMentions(agent.id).catch(() => []),
+    getRecentMentions(agent.id, 100).catch(() => []),
     getIdeaAtoms(agent.id, 24).catch(() => []),
   ]);
 

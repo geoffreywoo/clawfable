@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
   createMention: vi.fn(),
   getMentions: vi.fn(),
+  getRecentMentions: vi.fn(),
   addPostLogEntry: vi.fn(),
   addCronLogEntry: vi.fn(),
   getLearnings: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getAgent: mocks.getAgent,
   createMention: mocks.createMention,
   getMentions: mocks.getMentions,
+  getRecentMentions: mocks.getRecentMentions,
   addPostLogEntry: mocks.addPostLogEntry,
   addCronLogEntry: mocks.addCronLogEntry,
   getLearnings: mocks.getLearnings,
@@ -213,6 +215,7 @@ describe('cron autopilot isolation', () => {
       contentCalendar: {},
     });
     mocks.getMentions.mockResolvedValue([]);
+    mocks.getRecentMentions.mockResolvedValue([]);
     mocks.getMentionsFromTwitter.mockResolvedValue([]);
     mocks.decodeKeys.mockReturnValue({
       appKey: 'key',

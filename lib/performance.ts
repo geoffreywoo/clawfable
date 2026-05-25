@@ -18,7 +18,7 @@ import {
   saveAnalysis,
   addPostLogEntry,
   getPostLog,
-  getMentions,
+  getRecentMentions,
   updateTweet,
   saveFeedback,
   addLearningSignal,
@@ -888,7 +888,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     getTweets(agent.id),
     getManualExampleCuration(agent.id),
     getLearningSignals(agent.id, 500),
-    getMentions(agent.id).catch(() => []),
+    getRecentMentions(agent.id, 500).catch(() => []),
     getPostLog(agent.id, 300).catch(() => []),
   ]);
   const history = normalizeManualPerformanceSources(dedupePerformanceHistory(rawHistory), signals);

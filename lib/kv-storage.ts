@@ -410,6 +410,78 @@ async function kvHgetall<T>(key: string): Promise<T | null> {
   }
 }
 
+function unwrapPipelineResult(value: unknown): unknown {
+  if (Array.isArray(value) && value.length === 2) {
+    const [error, result] = value;
+    if (error === null || error === undefined || error instanceof Error || typeof error === 'string') {
+      return result;
+    }
+  }
+  return value;
+}
+
+async function kvHgetallMany<T>(keys: string[]): Promise<Array<T | null>> {
+  if (keys.length === 0) return [];
+
+  const results = new Array<T | null>(keys.length).fill(null);
+  const misses: Array<{ index: number; key: string; cacheKey: string }> = [];
+
+  keys.forEach((key, index) => {
+    const cacheKey = `hash:${key}`;
+    const cached = getCached<T>(cacheKey);
+    if (cached.hit) {
+      results[index] = cached.value;
+    } else {
+      misses.push({ index, key, cacheKey });
+    }
+  });
+
+  if (misses.length === 0) return results;
+
+  try {
+    const client = await getKvClient();
+    if (!client) {
+      for (const miss of misses) {
+        const value = (memStore.get(miss.key) as T) ?? null;
+        setCached(miss.cacheKey, value);
+        results[miss.index] = value;
+      }
+      return results;
+    }
+
+    if (typeof client.pipeline === 'function') {
+      const pipeline = client.pipeline();
+      for (const miss of misses) {
+        pipeline.hgetall(miss.key);
+      }
+      const values = await pipeline.exec();
+      values.forEach((raw: unknown, offset: number) => {
+        const miss = misses[offset];
+        const value = (unwrapPipelineResult(raw) as T | null) ?? null;
+        setCached(miss.cacheKey, value);
+        results[miss.index] = value;
+      });
+      return results;
+    }
+
+    const values = await Promise.all(misses.map((miss) => client.hgetall(miss.key) as Promise<T | null>));
+    values.forEach((value, offset) => {
+      const miss = misses[offset];
+      const normalized = value ?? null;
+      setCached(miss.cacheKey, normalized);
+      results[miss.index] = normalized;
+    });
+    return results;
+  } catch {
+    for (const miss of misses) {
+      const value = (memStore.get(miss.key) as T) ?? null;
+      setCached(miss.cacheKey, value);
+      results[miss.index] = value;
+    }
+    return results;
+  }
+}
+
 // ─── Key helpers ─────────────────────────────────────────────────────────────
 
 const KEYS = {
@@ -887,7 +959,7 @@ function parseListEntry<T>(entry: unknown): T | null {
 
 export async function getTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentTweets(agentId), 0, -1);
-  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
+  const tweets = await kvHgetallMany<Tweet>(ids.map((id) => KEYS.tweet(String(id))));
   return tweets.filter((t): t is Tweet => t !== null).map(normalizeTweetRecord);
 }
 
@@ -907,7 +979,7 @@ export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
 
 export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentQueue(agentId), 0, -1);
-  const tweets = await Promise.all(ids.map((id) => kvHgetall<Tweet>(KEYS.tweet(String(id)))));
+  const tweets = await kvHgetallMany<Tweet>(ids.map((id) => KEYS.tweet(String(id))));
   return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued').map(normalizeTweetRecord);
 }
 
@@ -1150,13 +1222,23 @@ export async function deleteTweet(id: string): Promise<void> {
 
 // ─── Mention storage ──────────────────────────────────────────────────────────
 
-export async function getMentions(agentId: string): Promise<Mention[]> {
-  const ids = await kvLrange(KEYS.agentMentions(agentId), 0, -1);
-  const mentions = await Promise.all(ids.map((id) => kvHgetall<Mention>(KEYS.mention(String(id)))));
+async function getMentionsRange(agentId: string, start: number, stop: number): Promise<Mention[]> {
+  const ids = await kvLrange(KEYS.agentMentions(agentId), start, stop);
+  const mentions = await kvHgetallMany<Mention>(ids.map((id) => KEYS.mention(String(id))));
   return mentions
     .filter((m): m is Mention => m !== null)
     .map((m) => normalizeId({ ...m, id: String(m.id), tweetId: m.tweetId != null ? String(m.tweetId) : null, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getRecentMentions(agentId: string, limit = 100): Promise<Mention[]> {
+  const safeLimit = Math.max(0, Math.min(1000, Math.floor(limit)));
+  if (safeLimit === 0) return [];
+  return getMentionsRange(agentId, 0, safeLimit - 1);
+}
+
+export async function getMentions(agentId: string): Promise<Mention[]> {
+  return getMentionsRange(agentId, 0, -1);
 }
 
 export async function getMentionCount(agentId: string): Promise<number> {
@@ -2327,8 +2409,9 @@ export async function getConversationHistory(
 ): Promise<ConversationTurn[]> {
   if (!conversationId) return [];
 
-  // Get all stored mentions for this agent
-  const mentions = await getMentions(agentId);
+  // Recent conversation context is enough for reply generation and avoids
+  // scanning very large historical mention archives on busy accounts.
+  const mentions = await getRecentMentions(agentId, 1000);
 
   // Filter to same conversation
   const inConvo = mentions.filter(

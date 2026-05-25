@@ -11,7 +11,10 @@ import {
   updateAgent,
   deleteAgent,
   createTweet,
+  createMention,
   getTweets,
+  getMentions,
+  getRecentMentions,
   getQueuedTweets,
   getAnalysis,
   saveAnalysis,
@@ -131,6 +134,53 @@ describe('kv-storage', () => {
 
       expect(await getUserAgentIds(owner.id)).not.toContain(agent.id);
       expect(await getUserAgentIds(secondary.id)).not.toContain(agent.id);
+    });
+  });
+
+  describe('Mention storage', () => {
+    it('loads bounded recent mentions without scanning the whole archive', async () => {
+      const agent = await createAgent({
+        handle: 'mention-limit-test',
+        name: 'Mention Limit Test',
+        soulMd: '# mentions',
+      } as any);
+
+      await createMention({
+        agentId: agent.id,
+        author: 'Older',
+        authorHandle: '@older',
+        content: 'old mention',
+        tweetId: 'm-1',
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-01T00:00:00.000Z',
+      });
+      await createMention({
+        agentId: agent.id,
+        author: 'Middle',
+        authorHandle: '@middle',
+        content: 'middle mention',
+        tweetId: 'm-2',
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-02T00:00:00.000Z',
+      });
+      await createMention({
+        agentId: agent.id,
+        author: 'Newest',
+        authorHandle: '@newest',
+        content: 'new mention',
+        tweetId: 'm-3',
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-03T00:00:00.000Z',
+      });
+
+      const recent = await getRecentMentions(agent.id, 2);
+      const all = await getMentions(agent.id);
+
+      expect(recent.map((mention) => mention.tweetId)).toEqual(['m-3', 'm-2']);
+      expect(all.map((mention) => mention.tweetId)).toEqual(['m-3', 'm-2', 'm-1']);
     });
   });
 

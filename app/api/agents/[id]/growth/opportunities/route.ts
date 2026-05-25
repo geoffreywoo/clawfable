@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import {
   getLearnings,
-  getMentions,
   getPerformanceHistory,
   getPostLog,
   getProtocolSettings,
+  getRecentMentions,
   getRelationshipOpportunities,
   getTrendOpportunities,
   getViralityPostmortems,
@@ -29,7 +29,7 @@ export async function GET(
     const [settings, learnings, mentions, postLog, performanceHistory] = await Promise.all([
       getProtocolSettings(id),
       getLearnings(id),
-      getMentions(id).catch(() => []),
+      getRecentMentions(id, 500).catch(() => []),
       getPostLog(id, 300).catch(() => []),
       getPerformanceHistory(id, 200).catch(() => []),
     ]);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
@@ -393,7 +393,7 @@ async function refreshMentions(agentId: string): Promise<number> {
   });
 
   // Use stored xUserId instead of burning an API call on getMe()
-  const stored = await getMentions(agentId);
+  const stored = await getRecentMentions(agentId, 500);
   // Coerce tweetId to string — Upstash auto-deserializes numeric-looking strings as numbers
   const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
 

@@ -18,7 +18,7 @@ import {
   updateTweet,
   deleteTweet,
   createMention,
-  getMentions,
+  getRecentMentions,
   addPostLogEntry,
   getPostLog,
   logFunnelEvent,
@@ -770,7 +770,7 @@ async function runAutoReply(
   if (!rawMentions || rawMentions.length === 0) return 0;
 
   // Get existing stored mentions
-  const storedMentions = await getMentions(agent.id);
+  const storedMentions = await getRecentMentions(agent.id, 500);
   const storedTweetIds = new Set(storedMentions.map((m) => String(m.tweetId)).filter(Boolean));
 
   // Track which mentions we've already replied to (check post log for reply entries)
