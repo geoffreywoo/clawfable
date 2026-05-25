@@ -1,5 +1,4 @@
-import Link from 'next/link';
-import { LoginButton } from './components/site-actions';
+import { LoginFormButton } from './components/login-form-button';
 import { Logo } from './components/logo';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { getPublicSoulSummaries } from '@/lib/dashboard-data';
@@ -19,6 +18,8 @@ export default async function HomePage() {
   const publicSouls = await getPublicSoulSummaries();
   const presetSouls = publicSouls.filter((soul) => soul.sourceType === 'preset');
   const liveAgents = publicSouls.filter((soul) => soul.sourceType === 'live');
+  const presetSoulPreview = presetSouls.slice(0, 6);
+  const liveAgentPreview = liveAgents.slice(0, 6);
 
   return (
     <div className="page-shell">
@@ -37,12 +38,12 @@ export default async function HomePage() {
             <a href="#pricing">Pricing</a>
           </nav>
           <div className="site-header-actions">
-            <Link href={CONTROL_ROOM_PATH} className="btn btn-outline site-header-cta">
+            <a href={CONTROL_ROOM_PATH} className="btn btn-outline site-header-cta">
               Open app
-            </Link>
-            <LoginButton className="btn btn-outline site-header-cta">
+            </a>
+            <LoginFormButton className="btn btn-outline site-header-cta">
               Start free
-            </LoginButton>
+            </LoginFormButton>
           </div>
         </div>
       </header>
@@ -67,7 +68,7 @@ export default async function HomePage() {
               </div>
               <div className="landing-cta-row">
                 <div className="landing-cta-actions">
-                  <LoginButton
+                  <LoginFormButton
                     className="landing-cta-btn"
                     style={{ fontSize: '14px', padding: '12px 28px' }}
                   >
@@ -75,7 +76,7 @@ export default async function HomePage() {
                       <XMark />
                       Start free with X
                     </>
-                  </LoginButton>
+                  </LoginFormButton>
                   <a href="#system" className="btn btn-outline landing-cta-secondary">See how it works</a>
                 </div>
                 <p className="landing-cta-note">
@@ -219,9 +220,9 @@ export default async function HomePage() {
                   <span className="landing-panel-label">PRESET SOULS</span>
                   <p className="landing-panel-caption">Forkable templates with unmistakable style, useful when you want a fast starting point.</p>
                 </div>
-                {presetSouls.length > 0 ? (
+                {presetSoulPreview.length > 0 ? (
                   <div className="landing-soul-grid">
-                    {presetSouls.map((agent) => (
+                    {presetSoulPreview.map((agent) => (
                       <a
                         key={agent.handle}
                         href={`/souls/${agent.handle}`}
@@ -249,9 +250,9 @@ export default async function HomePage() {
                   <span className="landing-panel-label">LIVE PUBLIC AGENTS</span>
                   <p className="landing-panel-caption">Real public voices with SOULs and performance histories when available.</p>
                 </div>
-                {liveAgents.length > 0 ? (
+                {liveAgentPreview.length > 0 ? (
                   <div className="landing-live-grid">
-                    {liveAgents.map((agent) => (
+                    {liveAgentPreview.map((agent) => (
                       <a
                         key={agent.handle}
                         href={`/souls/${agent.handle}`}
@@ -285,7 +286,7 @@ export default async function HomePage() {
               <p className="landing-panel-caption">
                 Want the full library view? Browse presets, public voices, and detail pages.
               </p>
-              <Link href="/souls" className="btn btn-outline">Open full soul library</Link>
+              <a href="/souls" className="btn btn-outline">Open full soul library</a>
             </div>
           </section>
 
@@ -298,7 +299,7 @@ export default async function HomePage() {
                 and multi-agent control.
               </p>
               <div className="pricing-hero-actions">
-                <LoginButton className="landing-cta-btn">Start free</LoginButton>
+                <LoginFormButton className="landing-cta-btn">Start free</LoginFormButton>
                 <p className="pricing-hero-note">
                   Setup is review-first. Nothing posts during calibration.
                 </p>
@@ -333,9 +334,9 @@ export default async function HomePage() {
                     ))}
                   </div>
                   <div className="pricing-card-actions">
-                    <LoginButton className={`btn ${plan.recommended ? 'btn-primary' : 'btn-outline'} btn-wide`}>
+                    <LoginFormButton className={`btn ${plan.recommended ? 'btn-primary' : 'btn-outline'} btn-wide`}>
                       {plan.id === 'free' ? 'Start free' : `Sign in for ${plan.name}`}
-                    </LoginButton>
+                    </LoginFormButton>
                   </div>
                 </article>
               ))}
@@ -427,16 +428,16 @@ export default async function HomePage() {
                 </p>
               </div>
               <div className="landing-final-cta-row">
-                <LoginButton className="landing-cta-btn">
+                <LoginFormButton className="landing-cta-btn">
                   <>
                     <XMark />
                     Start free with X
                   </>
-                </LoginButton>
+                </LoginFormButton>
                 <div className="landing-inline-links">
-                  <Link href="/souls">Soul library</Link>
+                  <a href="/souls">Soul library</a>
                   <span>•</span>
-                  <Link href="/pricing">Pricing</Link>
+                  <a href="/pricing">Pricing</a>
                 </div>
               </div>
               <p className="landing-footer">

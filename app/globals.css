@@ -53,6 +53,11 @@ body {
   min-height: 100vh;
 }
 
+.login-form-button {
+  display: contents;
+  margin: 0;
+}
+
 /* ─── Typography ───────────────────────────────────────────────────────────── */
 h1, h2, h3, h4 {
   font-family: var(--font-space);

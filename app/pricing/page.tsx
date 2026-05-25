@@ -1,6 +1,6 @@
 import Link from 'next/link';
+import { LoginFormButton } from '@/app/components/login-form-button';
 import { Logo } from '@/app/components/logo';
-import { LoginButton } from '@/app/components/site-actions';
 import { PricingPlanAction } from '@/app/components/pricing-plan-action';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
 import { MARKETING_COMPARE_ROWS, MARKETING_FAQS, MARKETING_PLANS } from '@/lib/site-marketing';
@@ -23,7 +23,7 @@ export default function PricingPage() {
             <Link href="/">Home</Link>
             <Link href="/souls">Soul library</Link>
           </nav>
-          <Link href={CONTROL_ROOM_PATH} className="btn btn-outline btn-sm">
+          <Link href={CONTROL_ROOM_PATH} prefetch={false} className="btn btn-outline btn-sm">
             Open app
           </Link>
         </div>
@@ -39,7 +39,7 @@ export default function PricingPage() {
               hands-off posting, auto-replies, supervised engagement, and multi-agent control.
             </p>
             <div className="pricing-hero-actions">
-              <LoginButton className="landing-cta-btn">Start free</LoginButton>
+              <LoginFormButton className="landing-cta-btn">Start free</LoginFormButton>
               <p className="pricing-hero-note">
                 Setup is review-first. Nothing posts during calibration.
               </p>

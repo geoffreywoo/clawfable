@@ -82,7 +82,7 @@ export function PricingPlanAction({ planId, className }: PricingPlanActionProps)
 
   if (planId === 'free') {
     return (
-      <Link href={CONTROL_ROOM_PATH} className={className}>
+      <Link href={CONTROL_ROOM_PATH} prefetch={false} className={className}>
         Open workspace
       </Link>
     );
