@@ -97,6 +97,7 @@ Requirements:
 - Follow the non-negotiable Clawfable platform goal: ${getPlatformGoalForHandle(agent.handle)}
 - Return one complete, postable draft with no commentary or quotation marks.
 - Never leave a dangling clause, half sentence, or unfinished ending.
+- Must be 4000 characters or fewer so the X API can post it.
 - Keep the repaired draft at or below the original length when possible.
 - If the failure reason mentions X rejection, duplicate risk, or a failed post request, materially rewrite the phrasing so it is fresher and less likely to be rejected again.
 

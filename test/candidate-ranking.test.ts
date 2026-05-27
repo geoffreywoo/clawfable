@@ -1,5 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { selectTopRankedTweets, type RankedProtocolTweet } from '@/lib/candidate-ranking';
+import {
+  rankGeneratedTweets,
+  selectTopRankedTweets,
+  type CandidateRankingContext,
+  type RankedProtocolTweet,
+} from '@/lib/candidate-ranking';
+
+function rankingContext(): CandidateRankingContext {
+  return {
+    voiceProfile: {
+      tone: 'analyst',
+      topics: ['AI agents', 'startups'],
+      antiGoals: ['generic hype'],
+      communicationStyle: 'specific and operator-led',
+      summary: 'Sharp operator voice about AI agents and startup systems.',
+    },
+    learnings: null,
+    style: {
+      lengthMix: { short: 30, medium: 40, long: 30 },
+      enabledFormats: ['hot_take'],
+      autonomyMode: 'balanced',
+      trendMixTarget: 20,
+      trendTolerance: 'moderate',
+      shitpoastEnabled: false,
+      exploration: {
+        rate: 20,
+        underusedFormats: [],
+        underusedTopics: [],
+      },
+      bias: {
+        scheduledTopic: null,
+        momentumTopic: null,
+      },
+      banditPolicy: null,
+      sourcePlan: null,
+      mediaExperimentRate: 0,
+      portfolioOptimizerEnabled: true,
+      relationshipQueueEnabled: true,
+    },
+    recentPosts: [],
+    allTweets: [],
+    memory: {
+      alwaysDoMoreOfThis: [],
+      neverDoThisAgain: [],
+      topicsWithMomentum: [],
+      formatsUnderTested: [],
+      operatorHiddenPreferences: [],
+      editTransformations: [],
+      identityConstraints: [],
+      weeklyChanges: [],
+      updatedAt: '2026-05-25T00:00:00.000Z',
+    },
+  };
+}
 
 function ranked(overrides: Partial<RankedProtocolTweet> = {}): RankedProtocolTweet {
   return {
@@ -134,5 +187,45 @@ describe('selectTopRankedTweets', () => {
     expect(selected).toHaveLength(2);
     expect(selected[0].content).toContain('visibility');
     expect(selected[1].content).toContain('feedback loops');
+  });
+});
+
+describe('rankGeneratedTweets', () => {
+  it('downranks broad authority claims when they lack proof or mechanism', () => {
+    const featureTags = {
+      hook: 'bold_claim' as const,
+      tone: 'analytical' as const,
+      specificity: 'concrete' as const,
+      structure: 'single_punch' as const,
+      thesis: 'founders ai agents wrong',
+      riskFlags: ['absolute_claim'],
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Founders building AI agents are wrong.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Broad contrarian claim.',
+        featureTags,
+      },
+      {
+        content: 'Founders building AI agents are wrong because evals collapse when memory drifts.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Broad contrarian claim with mechanism.',
+        featureTags,
+      },
+    ], rankingContext());
+
+    const unsupported = ranked.find((candidate) => candidate.content === 'Founders building AI agents are wrong.');
+    const supported = ranked.find((candidate) => candidate.content.includes('because evals collapse'));
+
+    expect(supported).toBeDefined();
+    expect(unsupported).toBeDefined();
+    expect(ranked[0].content).toBe(supported!.content);
+    expect(unsupported!.scoreProvenance.authorityProof).toBeGreaterThan(0);
+    expect(supported!.scoreProvenance.authorityProof).toBe(0);
+    expect(supported!.confidenceScore).toBeGreaterThan(unsupported!.confidenceScore);
   });
 });

@@ -24,6 +24,7 @@ import { buildCoverageCluster, extractCandidateFeatureTags, ideaSimilarity } fro
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE } from './style-mode';
 import {
   buildCriticScores,
+  getAuthorityProofIssue,
   inferAudienceSegment,
   inferPromptStrategy,
   scoreReplyPotential,
@@ -826,8 +827,16 @@ export function rankGeneratedTweets(
     const styleModeScore = scoreStyleMode(candidate, featureTags, policyRiskScore);
     const styleModeAdjustment = getStyleModePerformanceAdjustment(styleMode, context);
     const viralTakeScore = scoreViralTakePotential(candidate, featureTags, policyRiskScore);
+    const authorityProofIssue = getAuthorityProofIssue(candidate.content);
+    const authorityProofPenalty = authorityProofIssue ? 0.36 : 0;
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
-    const riskPenalty = clamp((policyRiskScore * 0.44) + (repetitionRiskScore * 0.24) + (creativeRiskScore * 0.18) + (slopScore * 0.14));
+    const riskPenalty = clamp(
+      (policyRiskScore * 0.44) +
+      (repetitionRiskScore * 0.24) +
+      (creativeRiskScore * 0.18) +
+      (slopScore * 0.14) +
+      authorityProofPenalty
+    );
 
     const scoreProvenance: CandidateScoreProvenance = {
       localPrior: Number((rewardPrediction.local * 0.24).toFixed(3)),
@@ -838,6 +847,7 @@ export function rankGeneratedTweets(
       creativity: Number((surpriseScore * 0.08).toFixed(3)),
       holdout: Number((holdoutScore * 0.05).toFixed(3)),
       antiSlop: Number(((1 - slopScore) * 0.06).toFixed(3)),
+      authorityProof: authorityProofIssue ? Number((authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
       portfolio: Number((portfolioScore * 0.04).toFixed(3)),
@@ -866,7 +876,12 @@ export function rankGeneratedTweets(
       styleModeAdjustment
     );
 
-    confidenceScore = clamp(confidenceScore - (creativeRiskScore * 0.08) - (slopScore * 0.1));
+    confidenceScore = clamp(
+      confidenceScore -
+      (creativeRiskScore * 0.08) -
+      (slopScore * 0.1) -
+      (authorityProofPenalty * 0.16)
+    );
 
     if (context.style.autonomyMode === 'safe') {
       confidenceScore = clamp(confidenceScore + ((1 - policyRiskScore) * 0.08) - (repetitionRiskScore * 0.05));

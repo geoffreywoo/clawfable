@@ -222,6 +222,7 @@ export interface CandidateScoreProvenance {
   creativity?: number;
   holdout?: number;
   antiSlop?: number;
+  authorityProof?: number;
   audienceSegment?: number;
   promptStrategy?: number;
   portfolio?: number;
@@ -906,6 +907,7 @@ export interface AccountAnalysis {
   viralTweets: ViralTweet[];
   engagementPatterns: EngagementPattern;
   followingProfile: FollowingProfile;
+  warnings?: string[];
   contentFingerprint: string;  // summary of what makes this account's content perform
 }
 

@@ -207,6 +207,35 @@ export function scoreHighValueReply(mention: {
   };
 }
 
+export function getReplyOptOutReason(text: string): string | null {
+  const lower = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!lower) return null;
+
+  const optOutPatterns: Array<[RegExp, string]> = [
+    [/\b(?:do not|don't|dont)\s+(?:reply|respond|tag|mention|contact|dm|message)\b/, 'asked not to receive replies or mentions'],
+    [/\bstop\s+(?:replying|responding|tagging|mentioning|contacting|dm(?:ing|'ing)?|messaging)\b/, 'asked the account to stop contacting them'],
+    [/\b(?:please\s+)?stop\s+(?:replying|tagging|mentioning|contacting)\s+(?:me|us)\b/, 'asked the account to stop contacting them'],
+    [/\b(?:unsubscribe|opt\s*out|remove\s+me|leave\s+me\s+alone)\b/, 'explicit opt-out request'],
+    [/\bno\s+more\s+(?:replies|mentions|tags|dms|messages)\b/, 'asked for no more automated contact'],
+  ];
+
+  const matched = optOutPatterns.find(([pattern]) => pattern.test(lower));
+  return matched ? matched[1] : null;
+}
+
+export function getAuthorityProofIssue(content: string): string | null {
+  const text = content.trim();
+  if (!text) return null;
+
+  const broadCertainty = /\b(guaranteed|always|never|everyone|everybody|nobody|no one)\b|\b(the market|founders|investors|operators|creators|builders)\b.{0,90}\b(wrong|miss(?:ing)?|misread|underestimate|overrate|obsolete|dead)\b/i.test(text);
+  if (!broadCertainty) return null;
+
+  const hasSupport = /\b(because|for example|for instance|data|proof|benchmark|case study|we saw|i saw|i tried|after|when|since|the reason|mechanism|incentive|bottleneck|tradeoff|constraint|failure mode|recovery path|eval|metric)\b|\b\d+[%x]?\b|\$\d/i.test(text);
+  if (hasSupport) return null;
+
+  return 'Authority gate held this draft because broad certainty claims need proof, a mechanism, or a concrete example before autoposting.';
+}
+
 export function assessTasteRisk(content: string, options: {
   surface: 'post' | 'reply';
   mentionText?: string | null;

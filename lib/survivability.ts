@@ -32,6 +32,9 @@ export const DAILY_HARD_CAP = 12;
 /** Absolute max postsPerDay the user can configure. */
 export const MAX_POSTS_PER_DAY_SETTING = 12;
 
+/** Longform-aware hard cap for a single X post or reply. */
+export const X_POST_TEXT_LIMIT = 4000;
+
 const NON_ORIGINAL_POST_FORMATS = new Set([
   'auto_reply',
   'auto_reply_high_value',
@@ -177,6 +180,94 @@ export function isNearDuplicate(
   return { isDuplicate: false };
 }
 
+export const RECENT_POST_DUPLICATE_THRESHOLD = 0.72;
+
+export function getRecentPostDuplicateIssue(
+  candidate: string,
+  recentPosts: string[],
+  threshold = RECENT_POST_DUPLICATE_THRESHOLD,
+): string | null {
+  const duplicate = isNearDuplicate(candidate, recentPosts, threshold);
+  if (!duplicate.isDuplicate) return null;
+
+  const score = typeof duplicate.similarity === 'number'
+    ? `${Math.round(duplicate.similarity * 100)}%`
+    : 'high';
+  const preview = (duplicate.matchedContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+  return `Recent duplicate gate: queued draft is ${score} similar to a recent live post${preview ? ` (“${preview}”)` : ''}.`;
+}
+
+export const REPLY_REPETITION_THRESHOLD = 0.68;
+
+export function getReplyRepetitionIssue(
+  reply: string,
+  previousReplies: string[],
+  threshold = REPLY_REPETITION_THRESHOLD,
+): string | null {
+  const previous = previousReplies
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (previous.length === 0) return null;
+
+  const duplicate = isNearDuplicate(reply, previous, threshold);
+  if (!duplicate.isDuplicate) return null;
+
+  const score = typeof duplicate.similarity === 'number'
+    ? `${Math.round(duplicate.similarity * 100)}%`
+    : 'high';
+  const preview = (duplicate.matchedContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+  return `Reply repetition gate: generated reply is ${score} similar to something this account already said in the thread${preview ? ` (“${preview}”)` : ''}.`;
+}
+
+// ─── Internal prompt leak detection ─────────────────────────────────────────
+
+const INTERNAL_PROMPT_LEAK_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  {
+    pattern: /(?:^|\n)\s*#{1,6}\s*(?:operator voice reference|manual\s*\/\s*operator voice anchors|manual topic priors|operator voice directives|style fingerprint|hard blocklist|learnings from account performance|prescriptive rules|soul\.md|voice profile|clawfable platform goal|critical safety rules|reply strategy|autonomy mode|bandit slot plan|creative lanes|post portfolio roles|media experiments|source-aware planner|recently posted|engagement data|audience context|active topic bias|exploration budget)\b/i,
+    label: 'an internal markdown heading',
+  },
+  {
+    pattern: /\bmanual\/operator-written tweets\b/i,
+    label: 'operator-written tweet calibration text',
+  },
+  {
+    pattern: /\bDerived from \d+ manually posted or operator-written tweets\b/i,
+    label: 'operator voice reference metadata',
+  },
+  {
+    pattern: /\bmatch voice, sentiment, tone, topic boundaries\b/i,
+    label: 'voice matching instructions',
+  },
+  {
+    pattern: /\bUse these as VOICE calibration examples\b/i,
+    label: 'voice calibration instructions',
+  },
+  {
+    pattern: /\bVoice anchors:\b/i,
+    label: 'voice anchor metadata',
+  },
+  {
+    pattern: /(?:^|\n)\s*Style analysis:\s*/i,
+    label: 'style analysis metadata',
+  },
+  {
+    pattern: /(?:^|\n)\s*-\s*(?:Tone|Topics|Communication style|Anti-goals|Creator):/i,
+    label: 'voice profile metadata',
+  },
+];
+
+export function getInternalPromptLeakIssue(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const match = INTERNAL_PROMPT_LEAK_PATTERNS.find(({ pattern }) => pattern.test(trimmed));
+  if (!match) return null;
+
+  return `Internal prompt leak gate: draft contains ${match.label}.`;
+}
+
 // ─── Draft completeness detection ──────────────────────────────────────────
 
 const TERMINAL_PUNCTUATION_RE = /[.!?…'")\]]$/;
@@ -250,6 +341,49 @@ export function isCompleteTweetDraft(text: string): boolean {
   return getTweetCompletenessIssue(text) === null;
 }
 
+export function getTweetLengthIssue(
+  text: string,
+  surface: 'post' | 'reply' = 'post',
+): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length <= X_POST_TEXT_LIMIT) return null;
+
+  const label = surface === 'reply' ? 'Reply' : 'Draft';
+  return `${label} is ${trimmed.length} characters; X API posts must be ${X_POST_TEXT_LIMIT} characters or fewer.`;
+}
+
+const X_HANDLE_RE = /(^|[^\w])@([a-zA-Z0-9_]{1,15})\b/g;
+
+function normalizeHandle(value: string): string {
+  return value.replace(/^@/, '').trim().toLowerCase();
+}
+
+export function extractMentionHandles(text: string): string[] {
+  const handles = new Set<string>();
+  for (const match of text.matchAll(X_HANDLE_RE)) {
+    handles.add(match[2].toLowerCase());
+  }
+  return [...handles];
+}
+
+export function getAutopostPolicyIssue(
+  text: string,
+  options: {
+    allowedMentions?: string[];
+    allowMentions?: boolean;
+  } = {},
+): string | null {
+  if (options.allowMentions) return null;
+
+  const allowed = new Set((options.allowedMentions || []).map(normalizeHandle).filter(Boolean));
+  const unsolicited = extractMentionHandles(text)
+    .filter((handle) => !allowed.has(handle));
+
+  if (unsolicited.length === 0) return null;
+
+  return `Autopost blocked because original posts cannot contain unsolicited @mentions: ${unsolicited.map((handle) => `@${handle}`).join(', ')}.`;
+}
+
 export function getGeneratedTweetIssue(
   text: string,
   stopReason?: string | null,
@@ -257,7 +391,7 @@ export function getGeneratedTweetIssue(
   if (stopReason === 'max_tokens') {
     return 'Model output hit the token limit before the draft finished.';
   }
-  return getTweetCompletenessIssue(text);
+  return getInternalPromptLeakIssue(text) || getTweetCompletenessIssue(text);
 }
 
 // ─── Queue selection with diversity ─────────────────────────────────────────

@@ -7,6 +7,7 @@
 
 import TwitterApi from 'twitter-api-v2';
 import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug';
+import { getInternalPromptLeakIssue } from './survivability';
 
 export interface TwitterKeys {
   appKey: string;
@@ -48,6 +49,53 @@ function handleApiError(error: unknown, context: TwitterErrorContext): never {
   throw normalizeTwitterError(error, context);
 }
 
+export function sanitizeTweetText(text: string): string {
+  return text
+    .replace(/\s*https?:\/\/(?:x|twitter)\.com\/(?:i\/web\/status|[^/\s]+\/status)\/\d+\S*/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function getSanitizedTweetTextIssue(
+  text: string,
+  surface: 'post' | 'reply' = 'post',
+): string | null {
+  const tweetText = sanitizeTweetText(text);
+  if (tweetText.length > 0) {
+    return getInternalPromptLeakIssue(tweetText);
+  }
+
+  const label = surface === 'reply' ? 'Reply' : 'Tweet';
+  return `${label} text is empty after removing hallucinated X/Twitter status links.`;
+}
+
+export function getLatestTwitterTweetIdCursor(
+  items: Array<{ tweetId?: string | number | null }>,
+): string | undefined {
+  let latest: { raw: string; value: bigint } | null = null;
+
+  for (const item of items) {
+    const raw = String(item.tweetId ?? '').trim();
+    if (!/^\d+$/.test(raw)) continue;
+
+    const value = BigInt(raw);
+    if (!latest || value > latest.value) {
+      latest = { raw, value };
+    }
+  }
+
+  return latest?.raw;
+}
+
+export const MAX_MENTIONS_PER_FETCH = 300;
+
+function requireSanitizedTweetText(text: string, surface: 'post' | 'reply'): string {
+  const issue = getSanitizedTweetTextIssue(text, surface);
+  if (issue) throw new Error(issue);
+  return sanitizeTweetText(text);
+}
+
 export async function postTweet(
   keys: TwitterKeys,
   text: string,
@@ -55,9 +103,9 @@ export async function postTweet(
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
+    const tweetText = requireSanitizedTweetText(text, 'post');
     const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    const tweetText = stripHallucinatedStatusUrls(text);
 
     const result = await rwClient.v2.tweet(tweetText);
 
@@ -90,9 +138,9 @@ export async function replyToTweet(
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
+    const tweetText = requireSanitizedTweetText(text, 'reply');
     const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    const tweetText = stripHallucinatedStatusUrls(text);
     const result = await rwClient.v2.tweet(tweetText, {
       reply: { in_reply_to_tweet_id: replyToTweetId },
     });
@@ -200,21 +248,28 @@ export async function searchRecentTweets(
 export async function getMentionsFromTwitter(
   keys: TwitterKeys,
   userId: string,
-  sinceId?: string
+  sinceId?: string,
+  maxTotal = MAX_MENTIONS_PER_FETCH,
 ): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
   const client = createClient(keys);
   try {
+    const fetchLimit = Math.max(1, Math.min(MAX_MENTIONS_PER_FETCH, Math.floor(maxTotal)));
     const params: Record<string, unknown> = {
-      max_results: 100,
+      max_results: Math.min(100, fetchLimit),
       'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'conversation_id', 'in_reply_to_user_id', 'referenced_tweets'],
       expansions: ['author_id'],
       'user.fields': ['name', 'username'],
     };
     if (sinceId) params.since_id = sinceId;
-    const result = await client.v2.userMentionTimeline(
+    const timeline = await client.v2.userMentionTimeline(
       userId,
       params as Parameters<typeof client.v2.userMentionTimeline>[1]
     );
+    const initialCount = timeline.data.data?.length || 0;
+    if (initialCount < fetchLimit && !timeline.done) {
+      await timeline.fetchLast(fetchLimit - initialCount);
+    }
+    const result = timeline.data;
 
     // Build a map of author IDs to user info from expansions
     const userMap = new Map<string, { name: string; username: string }>();
@@ -225,7 +280,7 @@ export async function getMentionsFromTwitter(
       }
     }
 
-    return (result.data.data || []).map((tweet) => {
+    return (result.data || []).slice(0, fetchLimit).map((tweet) => {
       const authorId = tweet.author_id || '';
       const user = userMap.get(authorId);
       // Extract in_reply_to from referenced_tweets
@@ -430,8 +485,14 @@ export async function getDeepTimeline(
       paginationToken = (result.data as any).meta?.next_token;
       if (!paginationToken) break;
     }
-  } catch {
-    // Return what we got so far
+  } catch (error) {
+    if (all.length === 0) {
+      return handleApiError(error, {
+        action: 'get_user_timeline',
+        targetUserId: userId,
+      });
+    }
+    // Return what we got so far when a later page fails.
   }
 
   return all;

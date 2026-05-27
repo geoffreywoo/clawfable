@@ -1,21 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createMention, getRecentMentions, invalidateAgentConnection } from '@/lib/kv-storage';
-import { getMentionsFromTwitter, decodeKeys } from '@/lib/twitter-client';
+import { addPostLogEntry, createMention, getRecentMentions, invalidateAgentConnection } from '@/lib/kv-storage';
+import { getMentionsFromTwitter, decodeKeys, getLatestTwitterTweetIdCursor } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { isInvalidTwitterCredentialError, isRateLimitTwitterError } from '@/lib/twitter-debug';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 
 // GET /api/agents/[id]/twitter/mentions
-function newestMentionTweetId(mentions: Array<{ tweetId: string | number | null }>): string | undefined {
-  let newest: bigint | null = null;
-  for (const mention of mentions) {
-    const id = mention.tweetId == null ? '' : String(mention.tweetId);
-    if (!/^\d+$/.test(id)) continue;
-    const numericId = BigInt(id);
-    if (newest === null || numericId > newest) newest = numericId;
-  }
-  return newest === null ? undefined : newest.toString();
-}
-
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,7 +27,7 @@ export async function GET(
     // Get stored mentions for dedup + sinceId
     const stored = await getRecentMentions(id, 500);
     const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
-    const latestTweetId = newestMentionTweetId(stored);
+    const latestTweetId = getLatestTwitterTweetIdCursor(stored);
 
     let rawMentions: Awaited<ReturnType<typeof getMentionsFromTwitter>> = [];
     try {
@@ -46,11 +35,58 @@ export async function GET(
     } catch (apiErr) {
       if (isInvalidTwitterCredentialError(apiErr)) {
         await invalidateAgentConnection(id);
-        return NextResponse.json({ error: 'X credentials rejected by X. Reconnect the account in Settings.' }, { status: 401 });
+        await addPostLogEntry(id, {
+          agentId: id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'manual_mentions_error',
+          topic: 'mentions',
+          postedAt: new Date().toISOString(),
+          source: 'manual',
+          action: 'error',
+          reason: `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatActionError(apiErr, 'fetch_mentions', {
+            handle: `@${agent.handle}`,
+            xUserId: agent.xUserId,
+          })}`,
+        }).catch(() => null);
+        return NextResponse.json({
+          error: 'X credentials rejected by X. Agent disconnected, reconnect in Settings.',
+          mentions: stored,
+        }, { status: 401 });
       }
+
+      const rateLimited = isRateLimitTwitterError(apiErr);
+      if (rateLimited || isTransientTwitterError(apiErr)) {
+        const resetAt = rateLimited ? getTwitterRateLimitResetAt(apiErr) : null;
+        const retryMessage = rateLimited
+          ? `X mention refresh rate limited${resetAt ? ` until ${resetAt}` : ''}. Try again after the reset.`
+          : 'Temporary X mention refresh failure. Try again in a few minutes.';
+        await addPostLogEntry(id, {
+          agentId: id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'manual_mentions_error',
+          topic: 'mentions',
+          postedAt: new Date().toISOString(),
+          source: 'manual',
+          action: 'error',
+          reason: `${retryMessage} ${formatActionError(apiErr, 'fetch_mentions', {
+            handle: `@${agent.handle}`,
+            xUserId: agent.xUserId,
+          })}`,
+          errorCode: rateLimited ? 'x_rate_limit' : 'x_transient',
+        }).catch(() => null);
+        return NextResponse.json({
+          error: retryMessage,
+          mentions: stored,
+        }, { status: rateLimited ? 429 : 503 });
+      }
+
       // Mention timeline may not be available on Free tier
       const msg = apiErr instanceof Error ? apiErr.message : '';
-      if (msg.includes('403') || isRateLimitTwitterError(apiErr)) {
+      if (msg.includes('403')) {
         return NextResponse.json(stored);
       }
       throw apiErr;

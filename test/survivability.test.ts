@@ -5,9 +5,15 @@ import {
   isDailyCapReached,
   isRepetitiveContent,
   isNearDuplicate,
+  getRecentPostDuplicateIssue,
+  getReplyRepetitionIssue,
+  getInternalPromptLeakIssue,
   getTweetCompletenessIssue,
+  getTweetLengthIssue,
   getGeneratedTweetIssue,
   isCompleteTweetDraft,
+  extractMentionHandles,
+  getAutopostPolicyIssue,
   pickDiverseTweet,
   clampPostsPerDay,
   DAILY_HARD_CAP,
@@ -211,6 +217,48 @@ describe('isNearDuplicate', () => {
   });
 });
 
+describe('getRecentPostDuplicateIssue', () => {
+  it('flags queued drafts that are too close to recent live posts', () => {
+    const issue = getRecentPostDuplicateIssue(
+      'Your moat is not distribution if the model can rebuild your feature overnight.',
+      ['Your moat is not distribution when the model can rebuild your feature overnight.']
+    );
+
+    expect(issue).toContain('Recent duplicate gate');
+    expect(issue).toContain('similar');
+  });
+
+  it('allows fresh angles on the same broad topic', () => {
+    const issue = getRecentPostDuplicateIssue(
+      'The useful AI agent benchmark is recovery: can it notice a broken tool call and route around it?',
+      ['Your moat is not distribution when the model can rebuild your feature overnight.']
+    );
+
+    expect(issue).toBeNull();
+  });
+});
+
+describe('getReplyRepetitionIssue', () => {
+  it('flags replies that repeat what the account already said in the thread', () => {
+    const issue = getReplyRepetitionIssue(
+      'The real eval is recovery: can the agent notice a broken tool call and route around it?',
+      ['The real eval is recovery. Can the agent notice a broken tool call and route around it?']
+    );
+
+    expect(issue).toContain('Reply repetition gate');
+    expect(issue).toContain('already said');
+  });
+
+  it('allows replies that add a fresh next step', () => {
+    const issue = getReplyRepetitionIssue(
+      'Next step: log the failed tool call, retry once with a narrower input, then hand off to a human.',
+      ['The real eval is recovery. Can the agent notice a broken tool call and route around it?']
+    );
+
+    expect(issue).toBeNull();
+  });
+});
+
 // ─── Draft completeness detection ──────────────────────────────────────────
 
 describe('getTweetCompletenessIssue', () => {
@@ -248,6 +296,53 @@ describe('getTweetCompletenessIssue', () => {
   it('flags model outputs that hit the token limit before finishing', () => {
     const issue = getGeneratedTweetIssue('complete enough looking text', 'max_tokens');
     expect(issue).toContain('token limit');
+  });
+});
+
+describe('getInternalPromptLeakIssue', () => {
+  it('flags leaked operator voice reference text', () => {
+    const leaked = [
+      'The real edge is tighter feedback loops, faster iteration, and clearer taste.',
+      '',
+      '## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)',
+      'Derived from 193 manually posted or operator-written tweets.',
+    ].join('\n');
+
+    expect(getInternalPromptLeakIssue(leaked)).toContain('Internal prompt leak gate');
+    expect(getGeneratedTweetIssue(leaked)).toContain('Internal prompt leak gate');
+  });
+
+  it('does not block ordinary public product language', () => {
+    expect(getInternalPromptLeakIssue('SOUL.md gives agents a durable voice contract.')).toBeNull();
+  });
+});
+
+describe('getTweetLengthIssue', () => {
+  it('blocks posts and replies above the longform-aware X API text cap', () => {
+    expect(getTweetLengthIssue('x'.repeat(4000), 'post')).toBeNull();
+    expect(getTweetLengthIssue('x'.repeat(4001), 'post')).toContain('Draft is 4001 characters');
+    expect(getTweetLengthIssue('x'.repeat(4001), 'reply')).toContain('Reply is 4001 characters');
+  });
+});
+
+// ─── Autopost policy detection ─────────────────────────────────────────────
+
+describe('getAutopostPolicyIssue', () => {
+  it('extracts unique X handles without treating email addresses as mentions', () => {
+    expect(extractMentionHandles('cc founder@example.com and @Builder_AI because @builder_ai asked')).toEqual(['builder_ai']);
+  });
+
+  it('blocks unsolicited mentions in original autoposts', () => {
+    expect(getAutopostPolicyIssue('Great breakdown from @somefounder on agent workflows')).toContain('@somefounder');
+  });
+
+  it('allows the agent handle and explicit opt-in mention formats', () => {
+    expect(getAutopostPolicyIssue('Shipping notes from @debugbot', {
+      allowedMentions: ['debugbot'],
+    })).toBeNull();
+    expect(getAutopostPolicyIssue('Organic shoutout to @anotheragent', {
+      allowMentions: true,
+    })).toBeNull();
   });
 });
 

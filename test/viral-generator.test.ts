@@ -133,6 +133,73 @@ describe('generateViralBatch', () => {
     expect(batch.some((tweet) => tweet.rationale.toLowerCase().includes('template fallback'))).toBe(true);
   });
 
+  it('keeps internal voice reference text out of deterministic fallback templates', async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')
+    );
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'analyst',
+        topics: ['Career'],
+        antiGoals: [],
+        communicationStyle: [
+          'extremely direct, confrontational, and high-conviction',
+          '',
+          '## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)',
+          'Derived from 193 manually posted or operator-written tweets.',
+        ].join('\n'),
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['analysis'],
+          topTopics: ['Career'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      1,
+      null,
+      null,
+      null,
+      {
+        lengthMix: { short: 0, medium: 100, long: 0 },
+        enabledFormats: ['analysis'],
+        autonomyMode: 'balanced',
+        trendMixTarget: 35,
+        trendTolerance: 'moderate',
+        shitpoastEnabled: false,
+        exploration: { rate: 0, underusedFormats: [], underusedTopics: [] },
+        bias: { scheduledTopic: null, momentumTopic: null },
+        banditPolicy: null,
+      },
+      [],
+      [],
+      null,
+    );
+
+    const content = batch.map((tweet) => tweet.content).join('\n');
+    expect(content).toContain('The mistake people keep making with Career');
+    expect(content).not.toContain('OPERATOR VOICE REFERENCE');
+    expect(content).not.toContain('manual/operator-written');
+    expect(content).not.toContain('Derived from 193');
+  });
+
   it('includes shitpoast instructions and tags capped candidates when enabled', async () => {
     anthropicCreateMock.mockResolvedValue({
       content: [{
@@ -200,6 +267,8 @@ describe('generateViralBatch', () => {
 
     const createCall = anthropicCreateMock.mock.calls[0]?.[0];
     expect(createCall.system).toContain('## SHITPOAST MODE');
+    expect(createCall.system).toContain('Authority claims must earn trust');
+    expect(createCall.system).toContain('proof, a concrete example, a mechanism, a metric, or an observed failure mode');
     expect(createCall.messages[0].content).toContain('"styleMode": "standard" or "shitpoast"');
     expect(batch[0]?.styleMode).toBe('shitpoast');
   });

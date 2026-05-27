@@ -19,8 +19,11 @@ const mocks = vi.hoisted(() => ({
   acquireAutopilotLock: vi.fn(),
   releaseAutopilotLock: vi.fn(),
   addOutcomeEvent: vi.fn(),
+  invalidateAgentConnection: vi.fn(),
+  setAutopilotHealth: vi.fn(),
   runAutopilot: vi.fn(),
   getMentionsFromTwitter: vi.fn(),
+  getLatestTwitterTweetIdCursor: vi.fn(),
   decodeKeys: vi.fn(),
   maybeEvolveSoul: vi.fn(),
   discoverAndFollow: vi.fn(),
@@ -52,6 +55,8 @@ vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   addOutcomeEvent: mocks.addOutcomeEvent,
+  invalidateAgentConnection: mocks.invalidateAgentConnection,
+  setAutopilotHealth: mocks.setAutopilotHealth,
 }));
 
 vi.mock('@/lib/autopilot', () => ({
@@ -60,6 +65,7 @@ vi.mock('@/lib/autopilot', () => ({
 
 vi.mock('@/lib/twitter-client', () => ({
   decodeKeys: mocks.decodeKeys,
+  getLatestTwitterTweetIdCursor: mocks.getLatestTwitterTweetIdCursor,
   getMentionsFromTwitter: mocks.getMentionsFromTwitter,
 }));
 
@@ -79,6 +85,7 @@ vi.mock('@/lib/performance', () => ({
 }));
 
 import { GET } from '@/app/api/cron/post/route';
+import { TwitterActionError } from '@/lib/twitter-debug';
 
 describe('cron autopilot isolation', () => {
   beforeEach(() => {
@@ -142,6 +149,9 @@ describe('cron autopilot isolation', () => {
     });
     mocks.releaseAutopilotLock.mockResolvedValue(true);
     mocks.addOutcomeEvent.mockResolvedValue({});
+    mocks.invalidateAgentConnection.mockResolvedValue(undefined);
+    mocks.setAutopilotHealth.mockResolvedValue({});
+    mocks.getLatestTwitterTweetIdCursor.mockReturnValue(null);
   });
 
   it('logs the failure and keeps cron alive when runAutopilot throws', async () => {
@@ -236,5 +246,95 @@ describe('cron autopilot isolation', () => {
         source: 'cron',
       }),
     );
+  });
+
+  it('logs reset-aware X rate limits from cron mention refresh', async () => {
+    const connectedAgent = {
+      id: 'agent-1',
+      handle: 'geoffreywoo',
+      name: 'Geoffrey Woo',
+      isConnected: 1,
+      apiKey: Buffer.from('key').toString('base64'),
+      apiSecret: Buffer.from('secret').toString('base64'),
+      accessToken: Buffer.from('token').toString('base64'),
+      accessSecret: Buffer.from('access-secret').toString('base64'),
+      xUserId: 'user-1',
+    };
+    mocks.getAgents.mockResolvedValue([connectedAgent]);
+    mocks.getAgent.mockResolvedValue(connectedAgent);
+    mocks.getProtocolSettings.mockResolvedValue({
+      enabled: false,
+      postsPerDay: 6,
+      activeHoursStart: 0,
+      activeHoursEnd: 24,
+      minQueueSize: 10,
+      autoReply: false,
+      maxRepliesPerRun: 3,
+      replyIntervalMins: 30,
+      lastPostedAt: null,
+      lastRepliedAt: null,
+      totalAutoPosted: 0,
+      totalAutoReplied: 0,
+      lengthMix: { short: 30, medium: 30, long: 40 },
+      autonomyMode: 'balanced',
+      explorationRate: 35,
+      enabledFormats: [],
+      qtRatio: 0,
+      marketingEnabled: false,
+      marketingMix: 0,
+      marketingRole: '',
+      soulEvolutionMode: 'off',
+      lastEvolvedAt: null,
+      proactiveReplies: false,
+      proactiveLikes: false,
+      autoFollow: false,
+      agentShoutouts: false,
+      peakHours: [],
+      contentCalendar: {},
+    });
+    mocks.getRecentMentions.mockResolvedValue([{ tweetId: '999' }]);
+    mocks.getLatestTwitterTweetIdCursor.mockReturnValue('999');
+    mocks.getMentionsFromTwitter.mockRejectedValue(new TwitterActionError({
+      action: 'fetch_mentions',
+      statusCode: 429,
+      title: 'Too Many Requests',
+      detail: 'Rate limit exceeded',
+      rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
+    }));
+    mocks.decodeKeys.mockReturnValue({
+      appKey: 'key',
+      appSecret: 'secret',
+      accessToken: 'token',
+      accessSecret: 'access-secret',
+    });
+
+    const response = await GET(new Request('http://localhost/api/cron/post') as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMentionsFromTwitter).toHaveBeenCalledWith(
+      expect.any(Object),
+      'user-1',
+      '999',
+    );
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({
+        format: 'cron_mentions_error',
+        action: 'error',
+        source: 'cron',
+        errorCode: 'x_rate_limit',
+        reason: expect.stringContaining('X mention refresh rate limited until 2026-04-07T12:20:00.000Z'),
+      }),
+    );
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({
+        reason: expect.stringContaining('fetch_mentions [429 Too Many Requests]: Rate limit exceeded'),
+      }),
+    );
+    expect(mocks.addCronLogEntry).toHaveBeenCalledWith(expect.objectContaining({
+      mentionsRefreshed: 0,
+      performanceTracked: 0,
+    }));
   });
 });

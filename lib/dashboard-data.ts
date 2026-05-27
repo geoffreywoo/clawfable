@@ -40,7 +40,9 @@ import {
   getTweets,
   getTweetCount,
   setTrendingCache,
+  addPostLogEntry,
 } from './kv-storage';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import type {
   AccountAnalysis,
   Agent,
@@ -280,8 +282,44 @@ export async function refreshAgentTopics(agent: Agent): Promise<TrendingTopic[]>
       await setTrendingCache(agent.id, topics);
     }
     return topics;
-  } catch {
-    return [];
+  } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X rejected the topic refresh. Connection preserved so queue posting is not interrupted. '
+      : rateLimited
+        ? `X topic refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; using cached topics until a later refresh. `
+        : transient
+          ? 'Transient X topic refresh failure; using cached topics until a later refresh. '
+          : '';
+
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'trend_refresh_error',
+      topic: 'network_growth',
+      postedAt: new Date().toISOString(),
+      source: 'manual',
+      action: 'error',
+      reason: `${prefix}${formatActionError(err, 'refresh_topics', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'refresh_topics',
+    }).catch(() => null);
+
+    const cached = await getTrendingCache(agent.id);
+    return Array.isArray(cached) ? cached as TrendingTopic[] : [];
   }
 }
 

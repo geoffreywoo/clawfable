@@ -12,6 +12,9 @@ import type {
 } from './types';
 import type { TwitterKeys } from './twitter-client';
 import { getDeepTimeline, getFollowing } from './twitter-client';
+import { formatActionError } from './twitter-debug';
+
+type FollowingAccount = Awaited<ReturnType<typeof getFollowing>>[number];
 
 // ─── Tweet format detection ─────────────────────────────────────────────────
 
@@ -125,11 +128,29 @@ export async function analyzeAccount(
   userId: string,
   agentId: string
 ): Promise<AccountAnalysis> {
-  // Fetch deep history + following in parallel
-  const [timelineTweets, followingList] = await Promise.all([
+  // Timeline performance is the learning core; following graph is useful but optional.
+  const [timelineResult, followingResult] = await Promise.allSettled([
     getDeepTimeline(keys, userId, 1000),
     getFollowing(keys, userId, 200),
   ]);
+  if (timelineResult.status === 'rejected') {
+    throw timelineResult.reason;
+  }
+
+  const timelineTweets = timelineResult.value;
+  const warnings: string[] = [];
+  let followingList: FollowingAccount[] = [];
+  if (followingResult.status === 'fulfilled') {
+    followingList = followingResult.value;
+  } else {
+    warnings.push(
+      `Following graph unavailable during analysis; content fingerprint uses timeline performance only. ${formatActionError(
+        followingResult.reason,
+        'get_following',
+        { targetUserId: userId },
+      )}`
+    );
+  }
 
   // Calculate engagement stats
   const totalTweets = timelineTweets.length;
@@ -244,6 +265,7 @@ export async function analyzeAccount(
     viralTweets,
     engagementPatterns,
     followingProfile,
+    ...(warnings.length > 0 ? { warnings } : {}),
     contentFingerprint,
   };
 }

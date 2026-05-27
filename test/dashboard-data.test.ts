@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   setTrendingCache: vi.fn(),
   fetchTrendingFromFollowing: vi.fn(),
   decodeKeys: vi.fn(),
+  addPostLogEntry: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({
@@ -76,6 +77,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getTweetCount: vi.fn(),
   listEngagementSessions: vi.fn(),
   setTrendingCache: mocks.setTrendingCache,
+  addPostLogEntry: mocks.addPostLogEntry,
 }));
 
 vi.mock('@/lib/trending', () => ({
@@ -87,6 +89,7 @@ vi.mock('@/lib/twitter-client', () => ({
 }));
 
 import { getAgentTopics, refreshAgentTopics } from '@/lib/dashboard-data';
+import { TwitterActionError } from '@/lib/twitter-debug';
 
 const agent = {
   id: 'agent-1',
@@ -127,6 +130,7 @@ describe('dashboard data topic loading', () => {
     });
     mocks.fetchTrendingFromFollowing.mockResolvedValue([{ ...cachedTopic, id: 2 }]);
     mocks.setTrendingCache.mockResolvedValue(undefined);
+    mocks.addPostLogEntry.mockResolvedValue(undefined);
   });
 
   it('serves dashboard topics from cache without crawling X', async () => {
@@ -158,5 +162,32 @@ describe('dashboard data topic loading', () => {
       agent.xUserId,
     );
     expect(mocks.setTrendingCache).toHaveBeenCalledWith(agent.id, [{ ...cachedTopic, id: 2 }]);
+  });
+
+  it('keeps cached topics and logs reset-aware X failures when refresh is rate limited', async () => {
+    mocks.fetchTrendingFromFollowing.mockRejectedValue(new TwitterActionError({
+      action: 'refresh_topics',
+      statusCode: 429,
+      title: 'Too Many Requests',
+      detail: 'Rate limit exceeded',
+      rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
+    }));
+
+    const topics = await refreshAgentTopics(agent);
+
+    expect(topics).toEqual([cachedTopic]);
+    expect(mocks.setTrendingCache).not.toHaveBeenCalled();
+    expect(mocks.getTrendingCache).toHaveBeenCalledWith(agent.id);
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({
+        format: 'trend_refresh_error',
+        topic: 'network_growth',
+        source: 'manual',
+        action: 'error',
+        errorCode: 'x_rate_limit',
+        reason: expect.stringContaining('X topic refresh rate limited until 2026-04-07T12:20:00.000Z'),
+      }),
+    );
   });
 });

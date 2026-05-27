@@ -6,6 +6,7 @@
 
 import type { TwitterKeys } from './twitter-client';
 import { getUserTimeline, getFollowing } from './twitter-client';
+import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 
 export interface TrendingTopic {
   id: number;
@@ -43,6 +44,16 @@ interface RawTweet {
   createdAt: string;
 }
 
+function pickRepresentativeTimelineFailure(errors: unknown[]): unknown | null {
+  return (
+    errors.find(isInvalidTwitterCredentialError)
+    || errors.find(isRateLimitTwitterError)
+    || errors.find(isTransientTwitterError)
+    || errors[0]
+    || null
+  );
+}
+
 /**
  * Fetch trending topics from the agent's following graph.
  * Samples timelines from top followed accounts, finds high-engagement posts,
@@ -62,6 +73,7 @@ export async function fetchTrendingFromFollowing(
   const allTweets: RawTweet[] = [];
   const batchSize = 5;
   let failedTimelineFetches = 0;
+  const timelineErrors: unknown[] = [];
 
   for (let i = 0; i < topAccounts.length; i += batchSize) {
     const batch = topAccounts.slice(i, i + batchSize);
@@ -84,12 +96,15 @@ export async function fetchTrendingFromFollowing(
         allTweets.push(...result.value);
       } else {
         failedTimelineFetches++;
+        timelineErrors.push(result.reason);
       }
     }
   }
 
   if (allTweets.length === 0) {
     if (topAccounts.length > 0 && failedTimelineFetches > 0) {
+      const representativeError = pickRepresentativeTimelineFailure(timelineErrors);
+      if (representativeError) throw representativeError;
       throw new Error(`Unable to fetch followed-account timelines from X (${failedTimelineFetches}/${topAccounts.length} failed).`);
     }
     return [];

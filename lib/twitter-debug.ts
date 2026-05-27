@@ -17,6 +17,7 @@ interface TwitterActionErrorInit {
   type?: string;
   rawMessage?: string;
   data?: unknown;
+  rateLimit?: TwitterRateLimitState;
   context?: LogDetails;
 }
 
@@ -67,6 +68,122 @@ function readTwitterDetail(data?: Record<string, unknown>, nested?: Record<strin
     ?? (nested ? readString(nested, 'message') : undefined);
 }
 
+export interface TwitterRateLimitState {
+  limit?: number;
+  remaining?: number;
+  resetAt?: string;
+  resetEpochSeconds?: number;
+}
+
+function readMaybeNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function headerValue(headers: unknown, name: string): unknown {
+  if (!headers) return undefined;
+  const lowerName = name.toLowerCase();
+  const getter = isRecord(headers) ? headers.get : undefined;
+  if (typeof getter === 'function') {
+    return getter.call(headers, name) ?? getter.call(headers, lowerName);
+  }
+  if (isRecord(headers)) {
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === lowerName) return value;
+    }
+  }
+  return undefined;
+}
+
+function parseResetAt(value: unknown): Pick<TwitterRateLimitState, 'resetAt' | 'resetEpochSeconds'> {
+  const numeric = readMaybeNumber(value);
+  if (numeric !== undefined) {
+    const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+    const date = new Date(millis);
+    if (!Number.isFinite(date.getTime())) return {};
+    return {
+      resetAt: date.toISOString(),
+      resetEpochSeconds: Math.floor(millis / 1000),
+    };
+  }
+
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return {
+      resetAt: value.toISOString(),
+      resetEpochSeconds: Math.floor(value.getTime() / 1000),
+    };
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return {
+        resetAt: new Date(parsed).toISOString(),
+        resetEpochSeconds: Math.floor(parsed / 1000),
+      };
+    }
+  }
+
+  return {};
+}
+
+function mergeRateLimit(base: TwitterRateLimitState, next: TwitterRateLimitState): TwitterRateLimitState {
+  return {
+    limit: base.limit ?? next.limit,
+    remaining: base.remaining ?? next.remaining,
+    resetAt: base.resetAt ?? next.resetAt,
+    resetEpochSeconds: base.resetEpochSeconds ?? next.resetEpochSeconds,
+  };
+}
+
+function rateLimitFromObject(value: unknown): TwitterRateLimitState {
+  if (!isRecord(value)) return {};
+  const reset = parseResetAt(value.reset ?? value.resetAt ?? value.reset_at);
+  return {
+    limit: readMaybeNumber(value.limit),
+    remaining: readMaybeNumber(value.remaining),
+    ...reset,
+  };
+}
+
+function rateLimitFromHeaders(headers: unknown): TwitterRateLimitState {
+  const reset = parseResetAt(headerValue(headers, 'x-rate-limit-reset'));
+  return {
+    limit: readMaybeNumber(headerValue(headers, 'x-rate-limit-limit')),
+    remaining: readMaybeNumber(headerValue(headers, 'x-rate-limit-remaining')),
+    ...reset,
+  };
+}
+
+function extractRateLimitState(error: unknown): TwitterRateLimitState | undefined {
+  if (!isRecord(error)) return undefined;
+
+  let state: TwitterRateLimitState = {};
+  state = mergeRateLimit(state, rateLimitFromObject(error.rateLimit));
+  state = mergeRateLimit(state, rateLimitFromObject(error.rate_limit));
+  state = mergeRateLimit(state, rateLimitFromHeaders(error.headers));
+  state = mergeRateLimit(state, rateLimitFromHeaders(error._headers));
+
+  const data = isRecord(error.data) ? error.data : undefined;
+  if (data) {
+    state = mergeRateLimit(state, rateLimitFromObject(data.rateLimit));
+    state = mergeRateLimit(state, rateLimitFromHeaders(data.headers));
+  }
+
+  const response = isRecord(error.response) ? error.response : undefined;
+  if (response) {
+    state = mergeRateLimit(state, rateLimitFromHeaders(response.headers));
+  }
+
+  return state.limit !== undefined || state.remaining !== undefined || state.resetAt !== undefined
+    ? state
+    : undefined;
+}
+
 function truncate(value: string, max = 96): string {
   const compact = value.replace(/\s+/g, ' ').trim();
   return compact.length > max ? `${compact.slice(0, max - 1)}...` : compact;
@@ -88,6 +205,7 @@ export class TwitterActionError extends Error {
   readonly type?: string;
   readonly rawMessage?: string;
   readonly data?: unknown;
+  readonly rateLimit?: TwitterRateLimitState;
   readonly context: LogDetails;
 
   constructor(init: TwitterActionErrorInit) {
@@ -100,6 +218,7 @@ export class TwitterActionError extends Error {
     this.type = init.type;
     this.rawMessage = init.rawMessage;
     this.data = init.data;
+    this.rateLimit = init.rateLimit;
     this.context = init.context || {};
   }
 }
@@ -110,6 +229,11 @@ export function isTwitterActionError(error: unknown): error is TwitterActionErro
 
 export function getActionErrorStatusCode(error: unknown): number | undefined {
   return isTwitterActionError(error) ? error.statusCode : undefined;
+}
+
+export function getTwitterRateLimitResetAt(error: unknown): string | null {
+  const rateLimit = isTwitterActionError(error) ? error.rateLimit : extractRateLimitState(error);
+  return rateLimit?.resetAt || null;
 }
 
 export function isRateLimitTwitterError(error: unknown): boolean {
@@ -158,6 +282,31 @@ export function isInvalidTwitterCredentialError(error: unknown): boolean {
   );
 }
 
+export function isTwitterCreditsDepletedError(error: unknown): boolean {
+  const statusCode = getActionErrorStatusCode(error);
+  if (statusCode !== undefined) {
+    return statusCode === 402;
+  }
+
+  const actionError = isTwitterActionError(error) ? error : null;
+  const summary = (actionError
+    ? [
+        actionError.title,
+        actionError.detail,
+        actionError.rawMessage,
+      ]
+    : [error instanceof Error ? error.message : String(error)])
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    summary.includes('creditsdepleted')
+    || summary.includes('credits depleted')
+    || summary.includes('does not have any credits')
+  );
+}
+
 export function isTransientTwitterError(error: unknown): boolean {
   const statusCode = getActionErrorStatusCode(error);
   if (statusCode !== undefined) {
@@ -202,6 +351,7 @@ export function normalizeTwitterError(error: unknown, context: TwitterErrorConte
       type: error.type,
       rawMessage: error.rawMessage || error.message,
       data: error.data,
+      rateLimit: error.rateLimit,
       context: {
         ...error.context,
         ...mergedContext,
@@ -217,6 +367,7 @@ export function normalizeTwitterError(error: unknown, context: TwitterErrorConte
   const detail = readTwitterDetail(data, nested);
   const type = data ? readString(data, 'type') : undefined;
   const rawMessage = error instanceof Error ? error.message : String(error);
+  const rateLimit = extractRateLimitState(error);
 
   return new TwitterActionError({
     action: context.action,
@@ -226,6 +377,7 @@ export function normalizeTwitterError(error: unknown, context: TwitterErrorConte
     type,
     rawMessage,
     data: data ?? error,
+    rateLimit,
     context: mergedContext,
   });
 }

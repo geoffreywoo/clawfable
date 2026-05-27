@@ -4,24 +4,12 @@ import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMenti
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
-import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
+import { decodeKeys, getLatestTwitterTweetIdCursor, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
-import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { getBillingSummary } from '@/lib/billing';
-
-// GET /api/cron/post — called by Vercel Cron every 10 minutes
-function newestMentionTweetId(mentions: Array<{ tweetId: string | number | null }>): string | undefined {
-  let newest: bigint | null = null;
-  for (const mention of mentions) {
-    const id = mention.tweetId == null ? '' : String(mention.tweetId);
-    if (!/^\d+$/.test(id)) continue;
-    const numericId = BigInt(id);
-    if (newest === null || numericId > newest) newest = numericId;
-  }
-  return newest === null ? undefined : newest.toString();
-}
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -409,7 +397,7 @@ async function refreshMentions(agentId: string): Promise<number> {
   const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
 
   // Pass sinceId to only fetch new mentions (saves API quota on busy accounts)
-  const latestStoredTweetId = newestMentionTweetId(stored);
+  const latestStoredTweetId = getLatestTwitterTweetIdCursor(stored);
 
   let rawMentions;
   try {
@@ -431,6 +419,31 @@ async function refreshMentions(agentId: string): Promise<number> {
           handle: `@${agent.handle}`,
           xUserId: agent.xUserId,
         })}`,
+      });
+      return 0;
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    if (rateLimited || isTransientTwitterError(err)) {
+      const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+      const retryReason = rateLimited
+        ? `X mention refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; will retry on a later cron run.`
+        : 'Transient X mention refresh failure; will retry on a later cron run.';
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'cron_mentions_error',
+        topic: 'mentions',
+        postedAt: new Date().toISOString(),
+        source: 'cron',
+        action: 'error',
+        reason: `${retryReason} ${formatActionError(err, 'fetch_mentions', {
+          handle: `@${agent.handle}`,
+          xUserId: agent.xUserId,
+        })}`,
+        errorCode: rateLimited ? 'x_rate_limit' : 'x_transient',
       });
     }
     return 0;

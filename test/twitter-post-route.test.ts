@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAgent, createTweet, getTweet, updateTweet } from '@/lib/kv-storage';
+import { createAgent, createTweet, getLearningSignals, getTweet, updateTweet } from '@/lib/kv-storage';
 
 const mocks = vi.hoisted(() => ({
   requireAgentAccess: vi.fn(),
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     accessToken: 'access-token',
     accessSecret: 'access-secret',
   })),
+  getSanitizedTweetTextIssue: vi.fn(() => null),
   resolveQueuedTweetFailure: vi.fn(),
   acquireAutopilotLock: vi.fn(),
   releaseAutopilotLock: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/twitter-client', () => ({
   postTweet: mocks.postTweet,
   replyToTweet: mocks.replyToTweet,
   decodeKeys: mocks.decodeKeys,
+  getSanitizedTweetTextIssue: mocks.getSanitizedTweetTextIssue,
 }));
 
 vi.mock('@/lib/queue-healing', () => ({
@@ -46,10 +48,12 @@ vi.mock('@/lib/queue-healing', () => ({
 }));
 
 import { POST } from '@/app/api/agents/[id]/twitter/post/route';
+import { TwitterActionError } from '@/lib/twitter-debug';
 
 describe('twitter post route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getSanitizedTweetTextIssue.mockReturnValue(null);
     mocks.acquireAutopilotLock.mockResolvedValue({
       acquired: true,
       owner: 'manual-post-lock',
@@ -194,6 +198,66 @@ describe('twitter post route', () => {
         action: 'posted',
       }),
     );
+  });
+
+  it('does not train or mutate the queue when X posting is rate limited', async () => {
+    const agent = await createAgent({
+      handle: 'manual-rate-limit-guard',
+      name: 'Manual Rate Limit Guard',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-rate-limit-1',
+    } as any);
+
+    const tweet = await createTweet({
+      agentId: agent.id,
+      content: 'The winning accounts turn audience questions into weekly proof, not random hot takes.',
+      type: 'original',
+      status: 'queued',
+      topic: 'audience',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    mocks.requireAgentAccess.mockResolvedValue({
+      user: { id: 'user-1' },
+      agent,
+    });
+    mocks.postTweet.mockRejectedValue(new TwitterActionError({
+      action: 'post_tweet',
+      statusCode: 429,
+      title: 'Too Many Requests',
+      detail: 'Rate limit exceeded',
+      rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
+    }));
+
+    const response = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) }
+    );
+
+    const data = await response.json();
+    const unchangedTweet = await getTweet(tweet.id);
+    const signals = await getLearningSignals(agent.id, 10);
+
+    expect(response.status).toBe(429);
+    expect(data.retryable).toBe(true);
+    expect(data.queueResolved).toBe(false);
+    expect(data.error).toContain('X posting is rate limited until 2026-04-07T12:20:00.000Z');
+    expect(mocks.resolveQueuedTweetFailure).not.toHaveBeenCalled();
+    expect(unchangedTweet?.status).toBe('queued');
+    expect(unchangedTweet?.content).toBe(tweet.content);
+    expect(signals).toEqual([]);
   });
 
   it('returns an already-posted result without posting a duplicate', async () => {

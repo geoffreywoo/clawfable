@@ -492,6 +492,7 @@ const KEYS = {
   agentTweets: (id: string) => `agent:${id}:tweets`,
   agentQueue: (id: string) => `agent:${id}:queue`,
   agentMentions: (id: string) => `agent:${id}:mentions`,
+  agentMentionByTweet: (agentId: string, tweetId: string) => `agent:${agentId}:mention:tweet:${tweetId}`,
   agentMetrics: (id: string) => `agent:${id}:metrics`,
   agentAnalysis: (id: string) => `agent:${id}:analysis`,
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
@@ -1227,8 +1228,18 @@ async function getMentionsRange(agentId: string, start: number, stop: number): P
   const mentions = await kvHgetallMany<Mention>(ids.map((id) => KEYS.mention(String(id))));
   return mentions
     .filter((m): m is Mention => m !== null)
-    .map((m) => normalizeId({ ...m, id: String(m.id), tweetId: m.tweetId != null ? String(m.tweetId) : null, author: String(m.author || ''), authorHandle: String(m.authorHandle || '') }))
+    .map(normalizeMentionRecord)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function normalizeMentionRecord(mention: Mention): Mention {
+  return normalizeId({
+    ...mention,
+    id: String(mention.id),
+    tweetId: mention.tweetId != null ? String(mention.tweetId) : null,
+    author: String(mention.author || ''),
+    authorHandle: String(mention.authorHandle || ''),
+  });
 }
 
 export async function getRecentMentions(agentId: string, limit = 100): Promise<Mention[]> {
@@ -1248,13 +1259,25 @@ export async function getMentionCount(agentId: string): Promise<number> {
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
   const counter = await kvIncr(KEYS.counterMention());
   const id = String(counter);
+  const tweetId = data.tweetId != null ? String(data.tweetId) : null;
+  const tweetIndexKey = tweetId ? KEYS.agentMentionByTweet(data.agentId, tweetId) : null;
+
+  if (tweetIndexKey) {
+    const claimed = await kvSet(tweetIndexKey, id, { nx: true });
+    if (!claimed) {
+      const existingId = await kvGet<string>(tweetIndexKey);
+      const existing = existingId ? await kvHgetall<Mention>(KEYS.mention(String(existingId))) : null;
+      if (existing) return normalizeMentionRecord(existing);
+    }
+  }
+
   const mention: Mention = {
     id,
     agentId: data.agentId,
     author: data.author,
     authorHandle: data.authorHandle,
     content: data.content,
-    tweetId: data.tweetId ?? null,
+    tweetId,
     conversationId: data.conversationId ?? null,
     inReplyToTweetId: data.inReplyToTweetId ?? null,
     engagementLikes: data.engagementLikes ?? 0,
@@ -1263,6 +1286,9 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
   };
   await kvHset(KEYS.mention(id), mention as unknown as Record<string, unknown>);
   await kvLpush(KEYS.agentMentions(data.agentId), id);
+  if (tweetIndexKey) {
+    await kvSet(tweetIndexKey, id);
+  }
   return mention;
 }
 
@@ -2303,6 +2329,7 @@ export async function upsertRelationshipProfile(
     replied?: boolean;
     rejected?: boolean;
     cooldownMins?: number;
+    doNotReply?: boolean;
   }
 ): Promise<RelationshipProfile | null> {
   const handle = normalizeRelationshipHandle(input.handle);
@@ -2338,7 +2365,7 @@ export async function upsertRelationshipProfile(
     repliesSent,
     repliesRejected,
     cooldownUntil,
-    doNotReply: existing?.doNotReply ?? false,
+    doNotReply: input.doNotReply ?? existing?.doNotReply ?? false,
     lastOutcome: input.outcome ?? existing?.lastOutcome ?? null,
     updatedAt: now,
   };
@@ -2403,6 +2430,11 @@ export interface ConversationTurn {
   tweetId: string;
 }
 
+const CONVERSATION_REPLY_FORMATS = new Set([
+  'auto_reply',
+  'auto_reply_high_value',
+]);
+
 export async function getConversationHistory(
   agentId: string,
   conversationId: string,
@@ -2422,7 +2454,7 @@ export async function getConversationHistory(
   // Get our replies from the post log
   const postLog = await getPostLog(agentId, 100);
   const ourReplies = postLog.filter(
-    (e) => (e.action === 'posted' || !e.action) && e.format === 'auto_reply' && e.content
+    (e) => (e.action === 'posted' || e.action === 'replied' || !e.action) && CONVERSATION_REPLY_FORMATS.has(e.format) && e.content
   );
 
   // Build conversation turns sorted by time
@@ -2439,11 +2471,16 @@ export async function getConversationHistory(
   }
 
   // Match our replies to mentions in this conversation
+  const inConvoByTweetId = new Map(
+    inConvo
+      .map((mention) => [String(mention.tweetId || ''), mention] as const)
+      .filter(([tweetId]) => tweetId.length > 0)
+  );
   for (const reply of ourReplies) {
-    // Check if this reply's topic matches a mention in this conversation
-    const matchedMention = inConvo.find(
-      (m) => reply.topic?.includes(String(m.authorHandle)) && reply.xTweetId
-    );
+    const replyTargetId = String(reply.tweetId || '');
+    const matchedMention = replyTargetId
+      ? inConvoByTweetId.get(replyTargetId)
+      : inConvo.find((m) => reply.topic?.includes(String(m.authorHandle)) && reply.xTweetId);
     if (matchedMention) {
       turns.push({
         role: 'us',

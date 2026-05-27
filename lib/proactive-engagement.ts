@@ -10,7 +10,7 @@ import type { Agent, ProtocolSettings } from './types';
 import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { followUser, getFollowing } from './twitter-client';
-import { formatActionError, isInvalidTwitterCredentialError } from './twitter-debug';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, setTrendingCache, getPerformanceHistory } from './kv-storage';
 import { generateText } from './ai';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
@@ -33,6 +33,17 @@ async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promis
     }
     return fresh;
   } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X rejected the trend refresh. Connection preserved so queue posting is not interrupted. '
+      : rateLimited
+        ? `X trend refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; network growth will retry on a later cron run. `
+        : transient
+          ? 'Transient X trend refresh failure; network growth will retry on a later cron run. '
+          : '';
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -43,9 +54,16 @@ async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promis
       postedAt: new Date().toISOString(),
       source: 'cron',
       action: 'error',
-      reason: formatActionError(err, 'refresh_trending_for_engagement', {
+      reason: `${prefix}${formatActionError(err, 'refresh_trending_for_engagement', {
         handle: `@${agent.handle}`,
-      }),
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'refresh_trending_for_engagement',
     });
     return [];
   }
@@ -202,6 +220,17 @@ export async function discoverAndFollow(
       handle: `@${agent.handle}`,
       xUserId: agent.xUserId,
     });
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X rejected the background following lookup. Connection preserved so queue posting is not interrupted. '
+      : rateLimited
+        ? `X following lookup rate limited${resetAt ? ` until ${resetAt}` : ''}; auto-follow will retry on a later cron run. `
+        : transient
+          ? 'Transient X following lookup failure; auto-follow will retry on a later cron run. '
+          : '';
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -212,9 +241,14 @@ export async function discoverAndFollow(
       postedAt: new Date().toISOString(),
       source: 'autopilot',
       action: 'error',
-      reason: isInvalidTwitterCredentialError(err)
-        ? `X rejected the background following lookup. Connection preserved so queue posting is not interrupted. ${formatted}`
-        : formatted,
+      reason: `${prefix}${formatted}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'get_following',
     });
     return 0;
   }
@@ -308,6 +342,17 @@ export async function discoverAndFollow(
         username: candidate.username,
         why: candidate.reason,
       });
+      const invalidCredentials = isInvalidTwitterCredentialError(err);
+      const rateLimited = isRateLimitTwitterError(err);
+      const transient = !rateLimited && isTransientTwitterError(err);
+      const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+      const prefix = invalidCredentials
+        ? 'X rejected an auto-follow request. Connection preserved so manual posting is not interrupted. '
+        : rateLimited
+          ? `X auto-follow rate limited${resetAt ? ` until ${resetAt}` : ''}; stopping this run and retrying later. `
+          : transient
+            ? 'Transient X auto-follow failure; stopping this run and retrying later. '
+            : '';
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
         tweetId: '',
@@ -318,10 +363,16 @@ export async function discoverAndFollow(
         postedAt: new Date().toISOString(),
         source: 'autopilot',
         action: 'error',
-        reason: isInvalidTwitterCredentialError(err)
-          ? `X rejected an auto-follow request. Connection preserved so manual posting is not interrupted. ${formatted}`
-          : formatted,
+        reason: `${prefix}${formatted}`,
+        errorCode: invalidCredentials
+          ? 'x_invalid_credentials'
+          : rateLimited
+            ? 'x_rate_limit'
+            : transient
+              ? 'x_transient'
+              : 'auto_follow',
       });
+      if (invalidCredentials || rateLimited || transient) break;
     }
   }
 

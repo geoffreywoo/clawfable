@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   AgentHandleConflictError,
+  addPostLogEntry,
   addAgentToUser,
   createAgent,
   getOrCreateUser,
@@ -12,9 +13,11 @@ import {
   deleteAgent,
   createTweet,
   createMention,
+  getMentionCount,
   getTweets,
   getMentions,
   getRecentMentions,
+  getConversationHistory,
   getQueuedTweets,
   getAnalysis,
   saveAnalysis,
@@ -181,6 +184,146 @@ describe('kv-storage', () => {
 
       expect(recent.map((mention) => mention.tweetId)).toEqual(['m-3', 'm-2']);
       expect(all.map((mention) => mention.tweetId)).toEqual(['m-3', 'm-2', 'm-1']);
+    });
+
+    it('dedupes mentions by X tweet id at the storage boundary', async () => {
+      const agent = await createAgent({
+        handle: 'mention-dedupe-test',
+        name: 'Mention Dedupe Test',
+        soulMd: '# mentions',
+      } as any);
+
+      const first = await createMention({
+        agentId: agent.id,
+        author: 'Builder',
+        authorHandle: '@builder',
+        content: 'first copy from cron',
+        tweetId: 'x-mention-dedupe-1',
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-04T00:00:00.000Z',
+      });
+      const duplicate = await createMention({
+        agentId: agent.id,
+        author: 'Builder Duplicate',
+        authorHandle: '@builder',
+        content: 'second copy from manual refresh',
+        tweetId: 'x-mention-dedupe-1',
+        engagementLikes: 9,
+        engagementRetweets: 2,
+        createdAt: '2026-05-04T00:01:00.000Z',
+      });
+
+      expect(duplicate.id).toBe(first.id);
+      expect(await getMentionCount(agent.id)).toBe(1);
+      expect((await getMentions(agent.id)).map((mention) => mention.content)).toEqual(['first copy from cron']);
+    });
+
+    it('includes high-value auto-replies in conversation history', async () => {
+      const agent = await createAgent({
+        handle: 'conversation-history-test',
+        name: 'Conversation History Test',
+        soulMd: '# conversation',
+      } as any);
+
+      await createMention({
+        agentId: agent.id,
+        author: 'Builder',
+        authorHandle: '@builder',
+        content: 'What eval would catch memory drift?',
+        tweetId: 'mention-high-value-1',
+        conversationId: 'conv-high-value',
+        inReplyToTweetId: null,
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-01T12:00:00.000Z',
+      });
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: 'mention-high-value-1',
+        xTweetId: 'reply-high-value-1',
+        content: 'The real eval is recovery after a broken tool call.',
+        format: 'auto_reply_high_value',
+        topic: 'Reply to @builder',
+        postedAt: '2026-05-01T12:01:00.000Z',
+        source: 'autopilot',
+        action: 'replied',
+      });
+
+      const history = await getConversationHistory(agent.id, 'conv-high-value', 5);
+
+      expect(history).toEqual([
+        expect.objectContaining({
+          role: 'them',
+          content: 'What eval would catch memory drift?',
+          tweetId: 'mention-high-value-1',
+        }),
+        expect.objectContaining({
+          role: 'us',
+          content: 'The real eval is recovery after a broken tool call.',
+          tweetId: 'reply-high-value-1',
+        }),
+      ]);
+    });
+
+    it('does not pull replies from a different conversation with the same author', async () => {
+      const agent = await createAgent({
+        handle: 'conversation-target-test',
+        name: 'Conversation Target Test',
+        soulMd: '# conversation target',
+      } as any);
+
+      await createMention({
+        agentId: agent.id,
+        author: 'Builder',
+        authorHandle: '@builder',
+        content: 'Question in the target conversation.',
+        tweetId: 'mention-target-convo',
+        conversationId: 'conv-target',
+        inReplyToTweetId: null,
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-02T12:00:00.000Z',
+      });
+      await createMention({
+        agentId: agent.id,
+        author: 'Builder',
+        authorHandle: '@builder',
+        content: 'Question in another conversation.',
+        tweetId: 'mention-other-convo',
+        conversationId: 'conv-other',
+        inReplyToTweetId: null,
+        engagementLikes: 0,
+        engagementRetweets: 0,
+        createdAt: '2026-05-02T12:05:00.000Z',
+      });
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: 'mention-other-convo',
+        xTweetId: 'reply-other-convo',
+        content: 'This answer belongs to the other conversation.',
+        format: 'auto_reply',
+        topic: 'Reply to @builder',
+        postedAt: '2026-05-02T12:06:00.000Z',
+        source: 'autopilot',
+        action: 'replied',
+      });
+
+      const history = await getConversationHistory(agent.id, 'conv-target', 5);
+
+      expect(history).toEqual([
+        expect.objectContaining({
+          role: 'them',
+          content: 'Question in the target conversation.',
+          tweetId: 'mention-target-convo',
+        }),
+      ]);
+      expect(history).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          role: 'us',
+          tweetId: 'reply-other-convo',
+        }),
+      ]));
     });
   });
 

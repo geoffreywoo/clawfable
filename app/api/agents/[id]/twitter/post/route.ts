@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, addPostLogEntry, acquireAutopilotLock, getTweet, invalidateAgentConnection, releaseAutopilotLock, updateTweet } from '@/lib/kv-storage';
-import { postTweet, replyToTweet, decodeKeys } from '@/lib/twitter-client';
+import { postTweet, replyToTweet, decodeKeys, getSanitizedTweetTextIssue } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { getTweetCompletenessIssue } from '@/lib/survivability';
+import { getTweetCompletenessIssue, getTweetLengthIssue } from '@/lib/survivability';
 import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
-import { formatActionError, isInvalidTwitterCredentialError } from '@/lib/twitter-debug';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
 
@@ -48,6 +48,36 @@ export async function POST(
       : null;
     const effectiveReplyToId = replyToId || inferredReplyToId;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
+
+    const sanitizedIssue = getSanitizedTweetTextIssue(String(content), isReply ? 'reply' : 'post');
+    if (sanitizedIssue) {
+      if (dbTweetId && existingTweet?.status === 'queued') {
+        const resolved = await resolveQueuedTweetFailure(agent, existingTweet, sanitizedIssue);
+        return NextResponse.json({
+          error: sanitizedIssue,
+          autoFixed: resolved.action === 'repaired',
+          queueResolved: true,
+          repairedContent: resolved.tweet?.content ?? null,
+          queueAction: resolved.action,
+        }, { status: 422 });
+      }
+      return NextResponse.json({ error: sanitizedIssue }, { status: 422 });
+    }
+
+    const lengthIssue = getTweetLengthIssue(String(content), isReply ? 'reply' : 'post');
+    if (lengthIssue) {
+      if (dbTweetId && existingTweet?.status === 'queued') {
+        const resolved = await resolveQueuedTweetFailure(agent, existingTweet, lengthIssue);
+        return NextResponse.json({
+          error: lengthIssue,
+          autoFixed: resolved.action === 'repaired',
+          queueResolved: true,
+          repairedContent: resolved.tweet?.content ?? null,
+          queueAction: resolved.action,
+        }, { status: 422 });
+      }
+      return NextResponse.json({ error: lengthIssue }, { status: 422 });
+    }
 
     const completenessIssue = getTweetCompletenessIssue(String(content));
     if (completenessIssue) {
@@ -185,6 +215,25 @@ export async function POST(
         repairedContent: null,
         queueAction: null,
       }, { status: 401 });
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    if (rateLimited || isTransientTwitterError(err)) {
+      const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+      const retryMessage = rateLimited
+        ? `X posting is rate limited${resetAt ? ` until ${resetAt}` : ''}. Try again after the reset.`
+        : 'Temporary X posting failure. Try again in a few minutes.';
+      return NextResponse.json({
+        error: `${retryMessage} ${formatActionError(err, isReply ? 'reply_to_tweet' : 'post_tweet', {
+          handle: currentAgent ? `@${currentAgent.handle}` : undefined,
+          tweetId: dbTweetId,
+        })}`,
+        queueResolved: false,
+        autoFixed: false,
+        repairedContent: null,
+        queueAction: null,
+        retryable: true,
+      }, { status: rateLimited ? 429 : 503 });
     }
 
     if (dbTweetId) {

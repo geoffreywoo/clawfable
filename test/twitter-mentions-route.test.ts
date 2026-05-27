@@ -8,8 +8,19 @@ const mocks = vi.hoisted(() => ({
   }),
   createMention: vi.fn(),
   getRecentMentions: vi.fn(),
+  addPostLogEntry: vi.fn(),
   invalidateAgentConnection: vi.fn(),
   getMentionsFromTwitter: vi.fn(),
+  getLatestTwitterTweetIdCursor: vi.fn((items: Array<{ tweetId?: string | number | null }>) => {
+    let latest: { raw: string; value: bigint } | null = null;
+    for (const item of items) {
+      const raw = String(item.tweetId ?? '').trim();
+      if (!/^\d+$/.test(raw)) continue;
+      const value = BigInt(raw);
+      if (!latest || value > latest.value) latest = { raw, value };
+    }
+    return latest?.raw;
+  }),
   decodeKeys: vi.fn(() => ({
     appKey: 'app-key',
     appSecret: 'app-secret',
@@ -26,11 +37,13 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/kv-storage', () => ({
   createMention: mocks.createMention,
   getRecentMentions: mocks.getRecentMentions,
+  addPostLogEntry: mocks.addPostLogEntry,
   invalidateAgentConnection: mocks.invalidateAgentConnection,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
   getMentionsFromTwitter: mocks.getMentionsFromTwitter,
+  getLatestTwitterTweetIdCursor: mocks.getLatestTwitterTweetIdCursor,
   decodeKeys: mocks.decodeKeys,
 }));
 
@@ -55,6 +68,7 @@ describe('twitter mentions route', () => {
     mocks.getRecentMentions.mockResolvedValue([]);
     mocks.getMentionsFromTwitter.mockResolvedValue([]);
     mocks.createMention.mockResolvedValue(undefined);
+    mocks.addPostLogEntry.mockResolvedValue(undefined);
     mocks.invalidateAgentConnection.mockResolvedValue(undefined);
   });
 

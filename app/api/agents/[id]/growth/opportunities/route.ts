@@ -9,6 +9,7 @@ import {
   getRelationshipOpportunities,
   getTrendOpportunities,
   getViralityPostmortems,
+  addPostLogEntry,
   saveRelationshipOpportunities,
   saveTrendOpportunities,
 } from '@/lib/kv-storage';
@@ -17,6 +18,7 @@ import { fetchTrendingFromFollowing } from '@/lib/trending';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { enrichTrendingTopics } from '@/lib/source-planner';
 import { buildRelationshipOpportunities, buildTrendOpportunities } from '@/lib/growth-engine';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 
 // GET /api/agents/[id]/growth/opportunities
 export async function GET(
@@ -64,7 +66,40 @@ export async function GET(
         if (fresh.length > 0) {
           trendOpportunities = await saveTrendOpportunities(id, fresh);
         }
-      } catch {
+      } catch (err) {
+        const invalidCredentials = isInvalidTwitterCredentialError(err);
+        const rateLimited = isRateLimitTwitterError(err);
+        const transient = !rateLimited && isTransientTwitterError(err);
+        const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+        const prefix = invalidCredentials
+          ? 'X rejected the growth trend refresh. Connection preserved so queue posting is not interrupted. '
+          : rateLimited
+            ? `X growth trend refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; using cached opportunities until a later refresh. `
+            : transient
+              ? 'Transient X growth trend refresh failure; using cached opportunities until a later refresh. '
+              : '';
+        await addPostLogEntry(id, {
+          agentId: id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'trend_refresh_error',
+          topic: 'network_growth',
+          postedAt: new Date().toISOString(),
+          source: 'manual',
+          action: 'error',
+          reason: `${prefix}${formatActionError(err, 'refresh_growth_opportunities', {
+            handle: `@${agent.handle}`,
+            xUserId: agent.xUserId,
+          })}`,
+          errorCode: invalidCredentials
+            ? 'x_invalid_credentials'
+            : rateLimited
+              ? 'x_rate_limit'
+              : transient
+                ? 'x_transient'
+                : 'refresh_growth_opportunities',
+        }).catch(() => null);
         // Return cached opportunities if the X read endpoint is unavailable.
       }
     }

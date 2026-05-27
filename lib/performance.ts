@@ -24,6 +24,7 @@ import {
   addLearningSignal,
   getManualExampleCuration,
   getLearningSignals,
+  invalidateAgentConnection,
   saveRelationshipOpportunities,
   saveViralityPostmortems,
 } from './kv-storage';
@@ -34,7 +35,7 @@ import { generateText } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
-import { formatActionError } from './twitter-debug';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 import {
   computeActionRewards,
@@ -624,6 +625,21 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   try {
     timeline = await getUserTimeline(keys, String(agent.xUserId), 100);
   } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    if (invalidCredentials) {
+      await invalidateAgentConnection(agent.id);
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X credentials rejected by X. Agent disconnected, reconnect in Settings. '
+      : rateLimited
+        ? `X performance timeline read rate limited${resetAt ? ` until ${resetAt}` : ''}; learning will retry on a later cron run. `
+        : transient
+          ? 'Transient X performance timeline failure; learning will retry on a later cron run. '
+          : '';
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
       tweetId: '',
@@ -634,10 +650,17 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       postedAt: new Date().toISOString(),
       source: 'cron',
       action: 'error',
-      reason: formatActionError(err, 'fetch_timeline_for_performance', {
+      reason: `${prefix}${formatActionError(err, 'fetch_timeline_for_performance', {
         handle: `@${agent.handle}`,
         xUserId: agent.xUserId,
-      }),
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'fetch_timeline_for_performance',
     });
     return 0;
   }
@@ -1364,6 +1387,11 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
     if (ageMs < sevenDays) return false;
   }
 
+  const postLog = await getPostLog(agent.id, 200).catch(() => []);
+  if (hasRecentReadEndpointFailure(postLog, 'cron_reanalysis_error')) {
+    return false;
+  }
+
   try {
     const keys = decodeKeys({
       apiKey: agent.apiKey,
@@ -1389,7 +1417,45 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
     });
 
     return true;
-  } catch {
+  } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    if (invalidCredentials) {
+      await invalidateAgentConnection(agent.id).catch(() => null);
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X credentials rejected by X during auto re-analysis. Agent disconnected, reconnect in Settings. '
+      : rateLimited
+        ? `X auto re-analysis rate limited${resetAt ? ` until ${resetAt}` : ''}; learning will retry on a later cron run. `
+        : transient
+          ? 'Transient X auto re-analysis failure; learning will retry on a later cron run. '
+          : '';
+
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'cron_reanalysis_error',
+      topic: 'analysis',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'error',
+      reason: `${prefix}${formatActionError(err, 'reanalyze_account', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'reanalyze_account',
+    }).catch(() => null);
     return false;
   }
 }

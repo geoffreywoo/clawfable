@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessTasteRisk, computeActionRewards, scoreHighValueReply } from '@/lib/virality-signals';
+import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -69,6 +69,19 @@ describe('virality signals', () => {
 
     expect(known.score).toBeGreaterThan(unknown.score);
     expect(known.reason).toContain('known relationship target');
+  });
+
+  it('detects explicit reply opt-out language without treating generic stop words as opt-outs', () => {
+    expect(getReplyOptOutReason('please stop replying to me')).toContain('stop contacting');
+    expect(getReplyOptOutReason('do not tag us again')).toContain('asked not to receive');
+    expect(getReplyOptOutReason('unsubscribe')).toContain('opt-out');
+    expect(getReplyOptOutReason('stop optimizing for demos and start shipping')).toBeNull();
+  });
+
+  it('requires proof or mechanism for broad authority claims', () => {
+    expect(getAuthorityProofIssue('Everyone building AI agents is wrong')).toContain('Authority gate');
+    expect(getAuthorityProofIssue('Everyone building AI agents is wrong because evals collapse when memory drifts')).toBeNull();
+    expect(getAuthorityProofIssue('Most AI agent demos optimize for applause. Production agents optimize for boring recovery paths.')).toBeNull();
   });
 
   it('holds embarrassing replies while allowing sharp substantive posts', () => {

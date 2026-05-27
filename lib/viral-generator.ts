@@ -11,7 +11,7 @@ import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
 import { judgeCandidates, mutateTopCandidates } from './generation-judging';
 import { inferAudienceSegment } from './virality-signals';
-import { getTweetCompletenessIssue, isNearDuplicate } from './survivability';
+import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
 import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
@@ -216,6 +216,25 @@ function buildFallbackClaim(topic: string, tone: string): string {
   return `${topic} is changing faster than the default playbook assumes.`;
 }
 
+function buildFallbackAngle(tone: string): string {
+  const normalizedTone = tone.toLowerCase();
+
+  if (normalizedTone.includes('contrarian') || normalizedTone.includes('provocateur')) {
+    return 'The compounding advantage is learning faster than the people still optimizing the packaging';
+  }
+  if (normalizedTone.includes('optimist')) {
+    return 'The upside goes to people who can turn feedback into product velocity';
+  }
+  if (normalizedTone.includes('analyst')) {
+    return 'The useful question is who learns faster once the feedback loop tightens';
+  }
+  if (normalizedTone.includes('educator')) {
+    return 'The clean way to see it is to separate reach from actual learning rate';
+  }
+
+  return 'The edge is not sounding louder, it is learning faster';
+}
+
 function buildFallbackTemplates(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
@@ -251,7 +270,7 @@ function buildFallbackTemplates(
 
   for (const topic of topics) {
     const claim = buildFallbackClaim(topic, voiceProfile.tone);
-    const angle = `${voiceProfile.communicationStyle.split('.')[0] || 'Stay specific and sharp'}`.trim();
+    const angle = buildFallbackAngle(voiceProfile.tone);
 
     for (const format of formats) {
       if (templates.length >= maxTemplates) break;
@@ -728,7 +747,8 @@ ${formats.join(', ')}
 4. Never be generic. Every tweet needs a specific, opinionated point of view.
 5. Never include links to x.com or twitter.com in tweet text.
 6. Across a batch, vary format, hook, and target topic. Do not write near-duplicates or multiple tweets that make the same point.
-7. Never violate the anti-goals.`);
+7. Authority claims must earn trust: if a tweet uses broad certainty language like everyone, nobody, always, never, guaranteed, or says a market/group is wrong, it must include proof, a concrete example, a mechanism, a metric, or an observed failure mode.
+8. Never violate the anti-goals.`);
 
   parts.push(`\nGenerate ${candidateCount} candidates so a downstream ranker can pick the strongest ${finalCount}. That means you should include a few ambitious bets, not just safe paraphrases.`);
 
@@ -852,7 +872,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
           if (!cleanContent) continue;
-          if (getTweetCompletenessIssue(cleanContent)) continue;
+          if (getGeneratedTweetIssue(cleanContent)) continue;
           const slot = Number(parsed.slot || 0);
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
@@ -1040,7 +1060,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
         };
       })
-      .filter((tweet) => !getTweetCompletenessIssue(tweet.content));
+      .filter((tweet) => !getGeneratedTweetIssue(tweet.content));
     const rankingContext = {
       voiceProfile,
       learnings,
