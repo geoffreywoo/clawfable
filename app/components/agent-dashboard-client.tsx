@@ -62,6 +62,10 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 type InsightsView = 'learning' | 'results';
+type OAuthNotice = {
+  tone: 'success' | 'warning' | 'error';
+  message: string;
+};
 
 interface AutopilotInitialData {
   agentConnected: boolean;
@@ -148,6 +152,55 @@ function formatUrlTab(tab: TabId): string {
   }
 }
 
+function resolveOAuthNotice(params: URLSearchParams): OAuthNotice | null {
+  const oauth = params.get('oauth');
+  if (!oauth) return null;
+
+  if (oauth === 'success') {
+    const username = params.get('username');
+    return {
+      tone: 'success',
+      message: username
+        ? `X connected as @${username}. Continue setup from here.`
+        : 'X connected. Continue setup from here.',
+    };
+  }
+
+  if (oauth === 'denied') {
+    return {
+      tone: 'warning',
+      message: 'X connection was cancelled. Nothing changed.',
+    };
+  }
+
+  return {
+    tone: 'error',
+    message: 'X did not finish connecting. Try again from Today or Settings.',
+  };
+}
+
+function oauthNoticeStyle(tone: OAuthNotice['tone']) {
+  if (tone === 'success') {
+    return {
+      border: '1px solid var(--primary-border)',
+      background: 'var(--primary-soft)',
+      color: 'var(--primary)',
+    };
+  }
+  if (tone === 'warning') {
+    return {
+      border: '1px solid rgba(199, 133, 40, 0.28)',
+      background: 'rgba(199, 133, 40, 0.10)',
+      color: '#c78528',
+    };
+  }
+  return {
+    border: '1px solid rgba(214, 92, 92, 0.28)',
+    background: 'rgba(214, 92, 92, 0.10)',
+    color: 'var(--red)',
+  };
+}
+
 export function AgentDashboardClient({
   agentId,
   initialAgent,
@@ -161,6 +214,7 @@ export function AgentDashboardClient({
   const [insightsView, setInsightsView] = useState<InsightsView>('learning');
   const [locationReady, setLocationReady] = useState(false);
   const [showSetupContinuation, setShowSetupContinuation] = useState(shouldOpenSetupContinuation);
+  const [oauthNotice, setOAuthNotice] = useState<OAuthNotice | null>(null);
   const [otherAgents, setOtherAgents] = useState(initialOtherAgents);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -199,8 +253,16 @@ export function AgentDashboardClient({
   }, [loadDashboardShell]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
     const location = resolveDashboardLocation(params.get('tab'), params.get('view'));
+    const notice = resolveOAuthNotice(params);
+    if (notice) {
+      setOAuthNotice(notice);
+      url.searchParams.delete('oauth');
+      url.searchParams.delete('username');
+      window.history.replaceState(window.history.state, '', url.toString());
+    }
     setActiveTab(location.tab);
     setInsightsView(location.insightsView);
     setLocationReady(true);
@@ -459,6 +521,36 @@ export function AgentDashboardClient({
           );
         })}
       </nav>
+
+      {oauthNotice && (
+        <div style={{
+          margin: '16px 24px 0',
+          padding: '12px 14px',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          ...oauthNoticeStyle(oauthNotice.tone),
+        }}>
+          <p style={{
+            margin: 0,
+            fontFamily: 'var(--font-body)',
+            fontSize: '13px',
+            fontWeight: 650,
+            color: 'var(--text)',
+          }}>
+            {oauthNotice.message}
+          </p>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setOAuthNotice(null)}
+            style={{ flexShrink: 0 }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <main className="dashboard-content">
         {!inSetup && <HealthAlerts agentId={agentId} onNavigateTab={navigateToTab} />}

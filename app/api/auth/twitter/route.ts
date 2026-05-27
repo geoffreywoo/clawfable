@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addPostLogEntry, saveOAuthTemp } from '@/lib/kv-storage';
 import { formatOAuthStartError } from '@/lib/oauth-start-error';
-import { resolveRequestOrigin } from '@/lib/request-origin';
+import { resolveOAuthCallbackOrigin } from '@/lib/request-origin';
 import { generateOAuthLink } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     // Verify login + ownership
     const { agent } = await requireAgentAccess(agentId);
 
-    const origin = resolveRequestOrigin(request);
+    const origin = resolveOAuthCallbackOrigin(request);
     callbackUrl = `${origin}/api/auth/twitter/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       topic: 'auth',
       postedAt: new Date().toISOString(),
       source: 'manual',
-      reason: `Started X connect flow for @${agent.handle}. Waiting for X callback to attach tokens to this agent.`,
+      reason: `Started X connect flow for @${agent.handle}. Waiting for X callback to attach tokens to this agent via ${callbackUrl}.`,
     });
 
     return NextResponse.json({ url });

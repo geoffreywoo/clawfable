@@ -46,6 +46,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [autopilotHealth, setAutopilotHealth] = useState<AutopilotHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
+  const [connectingX, setConnectingX] = useState(false);
   const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [agentHandle, setAgentHandle] = useState('');
@@ -253,6 +254,23 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
     }
   };
 
+  const handleOAuthConnect = async () => {
+    setConnectingX(true);
+    try {
+      const res = await fetch('/api/auth/twitter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start X connection');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to start X connection');
+      setConnectingX(false);
+    }
+  };
+
   const getMetricValue = (name: string): number => {
     const m = metrics.find((m) => m.metricName === name);
     return m?.value ?? 0;
@@ -341,6 +359,42 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
           </div>
         ))}
       </div>
+
+      {!agentConnected && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--primary-border)',
+          borderRadius: '10px',
+          padding: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: '16px',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ minWidth: '240px', flex: 1 }}>
+            <p style={{
+              margin: 0,
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0',
+              color: 'var(--primary)',
+            }}>Connect X to start learning</p>
+            <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6 }}>
+              Authorize the X account this agent should represent. You will return here after X approves the connection.
+            </p>
+          </div>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleOAuthConnect}
+            disabled={connectingX}
+            data-testid="button-connect-x-today"
+          >
+            {connectingX ? 'Connecting...' : 'Connect X'}
+          </button>
+        </div>
+      )}
 
       {getMetricValue('tweets_posted') === 0 && whyNoPosts().length > 0 && (
         <div style={{

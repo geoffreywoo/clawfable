@@ -5,6 +5,15 @@ import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { resolveRequestOrigin } from '@/lib/request-origin';
 
 // GET /api/auth/twitter/callback — Twitter redirects here after user authorizes agent connection
+function agentRedirectUrl(origin: string, agentId: string, params: Record<string, string>): URL {
+  const url = new URL(`/agent/${agentId}`, origin);
+  url.searchParams.set('tab', 'today');
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return url;
+}
+
 export async function GET(request: NextRequest) {
   const oauthToken = request.nextUrl.searchParams.get('oauth_token');
   const oauthVerifier = request.nextUrl.searchParams.get('oauth_verifier');
@@ -26,6 +35,9 @@ export async function GET(request: NextRequest) {
         reason: 'X connect flow was canceled on X before tokens were attached to this agent.',
       }).catch(() => null);
       await deleteOAuthTemp(denied).catch(() => null);
+    }
+    if (deniedTemp?.agentId) {
+      return NextResponse.redirect(agentRedirectUrl(origin, deniedTemp.agentId, { oauth: 'denied' }));
     }
     return NextResponse.redirect(new URL('/?oauth=denied', origin));
   }
@@ -118,7 +130,7 @@ export async function GET(request: NextRequest) {
     await deleteOAuthTemp(oauthToken);
 
     return NextResponse.redirect(
-      new URL(`/agent/${agentId}?oauth=success&username=${screenName}`, origin)
+      agentRedirectUrl(origin, agentId, { oauth: 'success', username: screenName })
     );
   } catch (err) {
     if (temp?.agentId) {
@@ -138,6 +150,9 @@ export async function GET(request: NextRequest) {
       await deleteOAuthTemp(oauthToken).catch(() => null);
     }
     console.error('OAuth callback error:', err instanceof Error ? err.message : err);
+    if (temp?.agentId) {
+      return NextResponse.redirect(agentRedirectUrl(origin, temp.agentId, { oauth: 'error' }));
+    }
     return NextResponse.redirect(new URL('/?oauth=error', origin));
   }
 }

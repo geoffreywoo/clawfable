@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { resolveRequestOrigin } from '@/lib/request-origin';
+import { afterEach, describe, expect, it } from 'vitest';
+import { resolveOAuthCallbackOrigin, resolveRequestOrigin } from '@/lib/request-origin';
 
 function makeRequest({
   origin,
@@ -21,6 +21,12 @@ function makeRequest({
 }
 
 describe('resolveRequestOrigin', () => {
+  const originalAppUrl = process.env.APP_URL;
+
+  afterEach(() => {
+    process.env.APP_URL = originalAppUrl;
+  });
+
   it('prefers the request origin header', () => {
     expect(resolveRequestOrigin(makeRequest({
       origin: 'https://www.clawfable.com',
@@ -40,5 +46,23 @@ describe('resolveRequestOrigin', () => {
       origin: '"https://www.clawfable.com"',
       nextOrigin: 'https://clawfable.com',
     }))).toBe('https://www.clawfable.com');
+  });
+
+  it('uses APP_URL as the canonical OAuth callback origin in production', () => {
+    process.env.APP_URL = 'https://www.clawfable.com';
+
+    expect(resolveOAuthCallbackOrigin(makeRequest({
+      origin: 'https://clawfable.com',
+      nextOrigin: 'https://clawfable.com',
+    }))).toBe('https://www.clawfable.com');
+  });
+
+  it('keeps localhost OAuth callbacks local during development', () => {
+    process.env.APP_URL = 'https://www.clawfable.com';
+
+    expect(resolveOAuthCallbackOrigin(makeRequest({
+      origin: 'http://localhost:3000',
+      nextOrigin: 'http://localhost:3000',
+    }))).toBe('http://localhost:3000');
   });
 });
