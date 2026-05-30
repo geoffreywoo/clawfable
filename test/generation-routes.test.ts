@@ -133,6 +133,7 @@ describe('generation route wiring', () => {
       },
       recentPosts: ['recent tweet'],
       allTweets: [],
+      ideaAtoms: [],
       memory: {
         alwaysDoMoreOfThis: ['Lead with specifics'],
         neverDoThisAgain: ['Avoid generic claims'],
@@ -190,7 +191,8 @@ describe('generation route wiring', () => {
       expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
       ['recent tweet'],
       [],
-      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] })
+      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      []
     );
   });
 
@@ -219,7 +221,8 @@ describe('generation route wiring', () => {
       expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
       ['recent tweet'],
       [],
-      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] })
+      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      []
     );
   });
 

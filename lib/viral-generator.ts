@@ -4,7 +4,7 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, AudienceSegment, CreativeLane, ContentSourceLane, ContentStyleMode, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, AudienceSegment, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
@@ -769,6 +769,7 @@ export async function generateViralBatch(
   recentPosts: string[] = [],
   allTweets: Tweet[] = [],
   memory: PersonalizationMemory | null = null,
+  ideaAtoms: IdeaAtom[] = [],
 ): Promise<RankedProtocolTweet[]> {
   const candidateCount = count <= 1 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
   const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -988,6 +989,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         weeklyChanges: [],
         updatedAt: new Date().toISOString(),
       },
+      ideaAtoms,
     };
     const baseCandidates = stagedTweets.map(({ slot: _slot, ...tweet }) => tweet);
     const judged = await judgeCandidates(baseCandidates, {
@@ -1088,6 +1090,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         weeklyChanges: [],
         updatedAt: new Date().toISOString(),
       },
+      ideaAtoms,
     };
     const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
     return selectTopRankedTweets(ranked, count, { maxShitpoast });

@@ -228,6 +228,7 @@ export interface CandidateScoreProvenance {
   portfolio?: number;
   mediaExperiment?: number;
   relationship?: number;
+  ideaGraph?: number;
   memoryAlignment?: number;
 }
 

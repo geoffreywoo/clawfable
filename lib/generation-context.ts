@@ -1,4 +1,4 @@
-import type { Agent, AgentLearnings, LearningSignal, PersonalizationMemory, ProtocolSettings, Tweet, TweetPerformance } from './types';
+import type { Agent, AgentLearnings, IdeaAtom, LearningSignal, PersonalizationMemory, ProtocolSettings, Tweet, TweetPerformance } from './types';
 import {
   getBaseline,
   getFeedback,
@@ -57,6 +57,7 @@ export interface GenerationContext {
   memory: PersonalizationMemory;
   recentPosts: string[];
   allTweets: Tweet[];
+  ideaAtoms: IdeaAtom[];
 }
 
 const LIVE_CONTENT_STATUSES = new Set(['draft', 'preview', 'queued', 'posted']);
@@ -366,5 +367,6 @@ export async function buildGenerationContext(
     memory,
     recentPosts,
     allTweets,
+    ideaAtoms,
   };
 }

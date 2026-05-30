@@ -9,6 +9,7 @@ import type {
   CreativeLane,
   ContentSourceLane,
   ContentStyleMode,
+  IdeaAtom,
   MediaExperimentType,
   PersonalizationMemory,
   PostPortfolioRole,
@@ -124,6 +125,7 @@ export interface CandidateRankingContext {
   recentPosts: string[];
   allTweets: Tweet[];
   memory: PersonalizationMemory;
+  ideaAtoms?: IdeaAtom[];
 }
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -378,6 +380,60 @@ function scoreMemoryAlignment(
   if (hasAnyTerm(reinforce, ['tactical']) && featureTags.specificity === 'tactical') boost += 0.04;
 
   return clampSigned(boost - penalty, -0.45, 0.25);
+}
+
+function scoreIdeaGraphFit(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const atoms = context.ideaAtoms || [];
+  if (atoms.length === 0) return 0;
+
+  const candidateIdea = {
+    content: candidate.content,
+    thesis: featureTags.thesis,
+    topic: candidate.targetTopic,
+  };
+  const candidateText = candidate.content.toLowerCase();
+  let strongestBoost = 0;
+  let strongestPenalty = 0;
+
+  for (const atom of atoms.slice(0, 40)) {
+    const similarity = ideaSimilarity(candidateIdea, {
+      content: atom.example || atom.claim,
+      thesis: atom.claim,
+      topic: atom.topic,
+    });
+    if (similarity < 0.34) continue;
+
+    const generated = Math.max(atom.performance.generated || 0, 1);
+    const queuedRate = (atom.performance.queued || 0) / generated;
+    const postedRate = (atom.performance.posted || 0) / generated;
+    const rejectionRate = (atom.performance.rejected || 0) / generated;
+    const avgReward = clampSigned(atom.performance.avgReward || 0);
+    const provenStrength = clamp((postedRate * 0.42) + (queuedRate * 0.22) + (Math.max(0, avgReward) * 0.36));
+    const rejectionStrength = clamp((rejectionRate * 0.58) + (Math.max(0, -avgReward) * 0.32));
+    const overusedWithoutProof = generated >= 4 && (atom.performance.posted || 0) <= 1
+      ? clamp((generated - Math.max(atom.performance.posted || 0, atom.performance.queued || 0)) / generated)
+      : 0;
+
+    let boost = similarity * (0.04 + (provenStrength * 0.16));
+    let penalty = similarity * ((rejectionStrength * 0.24) + (overusedWithoutProof * 0.1));
+
+    const normalizedClaim = atom.claim.toLowerCase();
+    if (normalizedClaim.length >= 24 && candidateText.includes(normalizedClaim)) {
+      penalty += 0.12;
+    }
+    if (atom.riskNote && similarity >= 0.52) {
+      penalty += 0.04;
+    }
+
+    strongestBoost = Math.max(strongestBoost, boost);
+    strongestPenalty = Math.max(strongestPenalty, penalty);
+  }
+
+  return clampSigned(strongestBoost - strongestPenalty, -0.28, 0.2);
 }
 
 function scoreVoiceMatch(
@@ -957,6 +1013,7 @@ export function rankGeneratedTweets(
     const authorityProofIssue = getAuthorityProofIssue(candidate.content);
     const authorityProofPenalty = authorityProofIssue ? 0.36 : 0;
     const memoryAlignmentScore = scoreMemoryAlignment(candidate, featureTags, context);
+    const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -964,7 +1021,8 @@ export function rankGeneratedTweets(
       (creativeRiskScore * 0.18) +
       (slopScore * 0.14) +
       authorityProofPenalty +
-      (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0)
+      (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
+      (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0)
     );
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -982,6 +1040,7 @@ export function rankGeneratedTweets(
       portfolio: Number((portfolioScore * 0.04).toFixed(3)),
       mediaExperiment: Number((mediaExperimentScore * 0.03).toFixed(3)),
       relationship: Number((relationshipScore * 0.025).toFixed(3)),
+      ideaGraph: Number((ideaGraphScore * 0.1).toFixed(3)),
       memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
@@ -1003,6 +1062,7 @@ export function rankGeneratedTweets(
       (1 - policyRiskScore) * 0.08 +
       (1 - slopScore) * 0.08 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
+      ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
       styleModeAdjustment
     );
@@ -1037,6 +1097,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.portfolio || 0) +
       (scoreProvenance.mediaExperiment || 0) +
       (scoreProvenance.relationship || 0) +
+      (scoreProvenance.ideaGraph || 0) +
       (scoreProvenance.memoryAlignment || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);

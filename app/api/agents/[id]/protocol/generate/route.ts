@@ -28,12 +28,12 @@ export async function POST(
     }
     const count = parsed.value.count ?? 5;
 
-    const { voiceProfile, learnings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, style, recentPosts, allTweets, memory, ideaAtoms = [] } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory);
+    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms);
     const completeBatch = batch.filter((item) => !getGeneratedTweetIssue(item.content));
 
     if (completeBatch.length === 0) {

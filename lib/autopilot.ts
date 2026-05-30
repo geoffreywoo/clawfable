@@ -2123,7 +2123,7 @@ async function refillQueue(
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
 
-    const { voiceProfile, learnings, settings, style, recentPosts, allTweets, memory } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, settings, style, recentPosts, allTweets, memory, ideaAtoms = [] } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
@@ -2223,7 +2223,7 @@ async function refillQueue(
 
     // Generate organic tweets
     const batch = organicCount > 0
-      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory)
+      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory, ideaAtoms)
       : [];
 
     // Generate marketing tweets (promotional content for clawfable.com)

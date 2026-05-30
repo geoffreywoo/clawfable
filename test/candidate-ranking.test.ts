@@ -5,6 +5,7 @@ import {
   type CandidateRankingContext,
   type RankedProtocolTweet,
 } from '@/lib/candidate-ranking';
+import type { IdeaAtom } from '@/lib/types';
 
 function rankingContext(): CandidateRankingContext {
   return {
@@ -138,6 +139,31 @@ function ranked(overrides: Partial<RankedProtocolTweet> = {}): RankedProtocolTwe
       negativeFeedbackRisk: 0.02,
       total: 0.43,
     },
+  };
+}
+
+function ideaAtom(overrides: Partial<IdeaAtom> & { claim: string }): IdeaAtom {
+  return {
+    id: overrides.id || `atom-${overrides.claim.slice(0, 8)}`,
+    agentId: overrides.agentId || 'agent-1',
+    claim: overrides.claim,
+    tension: overrides.tension ?? null,
+    audience: overrides.audience ?? 'ai_builders',
+    proof: overrides.proof ?? null,
+    example: overrides.example ?? overrides.claim,
+    riskNote: overrides.riskNote ?? null,
+    topic: overrides.topic ?? 'AI agents',
+    sourceTweetId: overrides.sourceTweetId ?? null,
+    lastUsedAt: overrides.lastUsedAt ?? '2026-05-24T00:00:00.000Z',
+    performance: overrides.performance || {
+      generated: 4,
+      queued: 3,
+      posted: 3,
+      rejected: 0,
+      avgReward: 0.52,
+    },
+    createdAt: overrides.createdAt || '2026-05-20T00:00:00.000Z',
+    updatedAt: overrides.updatedAt || '2026-05-24T00:00:00.000Z',
   };
 }
 
@@ -278,5 +304,121 @@ describe('rankGeneratedTweets', () => {
     expect(specific!.scoreProvenance.memoryAlignment).toBeGreaterThan(0);
     expect(specific!.confidenceScore).toBeGreaterThan(generic!.confidenceScore);
     expect(ranked[0].content).toBe(specific!.content);
+  });
+
+  it('uses proven idea atoms as thesis priors without requiring exact wording reuse', () => {
+    const context = rankingContext();
+    context.ideaAtoms = [
+      ideaAtom({
+        claim: 'agent memory eval loops compound faster than dashboards',
+        example: 'Agent teams learn fastest when memory, evals, and shipping loops reinforce each other.',
+        performance: {
+          generated: 5,
+          queued: 4,
+          posted: 4,
+          rejected: 0,
+          avgReward: 0.64,
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agent teams grow faster when memory, evals, and release notes become one weekly loop.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Fresh take on a proven thesis atom.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent memory eval loops compound',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'The best AI agent builders ship better dashboards for every workflow.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Adjacent but not tied to the thesis bank.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent builders ship dashboards',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const proven = ranked.find((candidate) => candidate.content.includes('one weekly loop'));
+    const unrelated = ranked.find((candidate) => candidate.content.includes('better dashboards'));
+
+    expect(proven).toBeDefined();
+    expect(unrelated).toBeDefined();
+    expect(proven!.scoreProvenance.ideaGraph).toBeGreaterThan(0);
+    expect(unrelated!.scoreProvenance.ideaGraph || 0).toBeLessThan(proven!.scoreProvenance.ideaGraph || 0);
+    expect(proven!.confidenceScore).toBeGreaterThan(unrelated!.confidenceScore);
+    expect(ranked[0].content).toBe(proven!.content);
+  });
+
+  it('penalizes rejected or overused idea atoms before they enter the queue again', () => {
+    const context = rankingContext();
+    context.ideaAtoms = [
+      ideaAtom({
+        claim: 'ai agents replace every employee',
+        example: 'AI agents replace every employee by next year.',
+        riskNote: 'Policy risk 0.42',
+        performance: {
+          generated: 6,
+          queued: 1,
+          posted: 0,
+          rejected: 5,
+          avgReward: -0.58,
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agents replace every employee once companies wire them into Slack.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Rejected thesis resurfacing.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'provocative',
+          specificity: 'concrete',
+          structure: 'single_punch',
+          thesis: 'ai agents replace every employee',
+          riskFlags: ['absolute_claim'],
+        },
+      },
+      {
+        content: 'AI agent adoption works when teams retire one manual handoff at a time.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Safer operating lesson.',
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'teams retire manual handoffs',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const rejected = ranked.find((candidate) => candidate.content.includes('replace every employee'));
+    const safer = ranked.find((candidate) => candidate.content.includes('manual handoff'));
+
+    expect(rejected).toBeDefined();
+    expect(safer).toBeDefined();
+    expect(rejected!.scoreProvenance.ideaGraph).toBeLessThan(0);
+    expect(safer!.confidenceScore).toBeGreaterThan(rejected!.confidenceScore);
+    expect(ranked[0].content).toBe(safer!.content);
   });
 });
