@@ -228,4 +228,55 @@ describe('rankGeneratedTweets', () => {
     expect(supported!.scoreProvenance.authorityProof).toBe(0);
     expect(supported!.confidenceScore).toBeGreaterThan(unsupported!.confidenceScore);
   });
+
+  it('uses personalization memory to penalize learned avoid patterns and boost preferred specifics', () => {
+    const context = rankingContext();
+    context.memory = {
+      ...context.memory,
+      alwaysDoMoreOfThis: ['Lead with numbers and specifics.'],
+      neverDoThisAgain: ['too generic', 'vague abstract claims'],
+      operatorHiddenPreferences: ['Specificity and numbers are often added before approval.'],
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agents will change everything.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Broad hype claim.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents change everything',
+          riskFlags: ['thin'],
+        },
+      },
+      {
+        content: 'The best AI agent teams run 30-minute eval reviews before adding new tools.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Specific operator lesson.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams run eval reviews',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const generic = ranked.find((candidate) => candidate.content.includes('change everything'));
+    const specific = ranked.find((candidate) => candidate.content.includes('30-minute eval'));
+
+    expect(generic).toBeDefined();
+    expect(specific).toBeDefined();
+    expect(generic!.scoreProvenance.memoryAlignment).toBeLessThan(0);
+    expect(specific!.scoreProvenance.memoryAlignment).toBeGreaterThan(0);
+    expect(specific!.confidenceScore).toBeGreaterThan(generic!.confidenceScore);
+    expect(ranked[0].content).toBe(specific!.content);
+  });
 });

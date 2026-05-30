@@ -130,6 +130,10 @@ function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function clampSigned(value: number, min = -1, max = 1): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function normalizeTopic(value: string | null | undefined): string {
   return (value || 'general').trim().toLowerCase();
 }
@@ -251,6 +255,129 @@ function computePriorBlend(
     local: clamp(local),
     global: clamp(global),
   };
+}
+
+function hasAnyTerm(text: string, terms: string[]): boolean {
+  return terms.some((term) => text.includes(term));
+}
+
+function hasNumericSpecificity(text: string): boolean {
+  return /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d/i.test(text);
+}
+
+function extractQuotedMemoryPhrases(items: string[]): string[] {
+  const phrases: string[] = [];
+  for (const item of items) {
+    for (const match of item.matchAll(/["']([^"']{4,80})["']/g)) {
+      phrases.push(match[1].trim().toLowerCase());
+    }
+  }
+  return phrases;
+}
+
+function scoreMemoryAlignment(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const text = candidate.content.toLowerCase();
+  const avoidItems = [
+    ...(context.memory.neverDoThisAgain || []),
+    ...(context.memory.identityConstraints || []),
+    ...context.voiceProfile.antiGoals.map((goal) => `Never: ${goal}`),
+  ];
+  const reinforceItems = [
+    ...(context.memory.alwaysDoMoreOfThis || []),
+    ...(context.memory.operatorHiddenPreferences || []),
+    ...(context.memory.editTransformations || []),
+    ...(context.memory.weeklyChanges || []),
+  ];
+  const avoid = avoidItems.join(' ').toLowerCase();
+  const reinforce = reinforceItems.join(' ').toLowerCase();
+
+  let penalty = 0;
+  let boost = 0;
+
+  if (
+    hasAnyTerm(avoid, ['generic', 'vague', 'abstract', 'surface-level', 'surface level', 'thin'])
+    && (featureTags.specificity === 'abstract' || featureTags.riskFlags.includes('thin') || candidate.content.length < 70)
+  ) {
+    penalty += 0.22;
+  }
+
+  if (
+    hasAnyTerm(avoid, ['hype', 'overhype', 'buzzword', 'salesy', 'promotional', 'promo'])
+    && (featureTags.riskFlags.includes('salesy') || /\b(revolutionary|game changer|unlock|10x|viral|crushing it)\b/i.test(candidate.content))
+  ) {
+    penalty += 0.2;
+  }
+
+  if (
+    hasAnyTerm(avoid, ['cringe', 'performative', 'try-hard', 'try hard', 'clickbait', 'engagement bait', 'shouty'])
+    && (
+      featureTags.riskFlags.includes('shouty_caps')
+      || featureTags.riskFlags.includes('overexcited')
+      || scoreReplyPotential(candidate.content, featureTags) > 0.78
+    )
+  ) {
+    penalty += 0.18;
+  }
+
+  if (
+    hasAnyTerm(avoid, ['link', 'hashtag', 'cta', 'call to action', 'sell', 'subscribe', 'dm me'])
+    && (
+      featureTags.riskFlags.includes('link')
+      || featureTags.riskFlags.includes('hashtag')
+      || featureTags.riskFlags.includes('salesy')
+    )
+  ) {
+    penalty += 0.18;
+  }
+
+  if (hasAnyTerm(avoid, ['no question', 'avoid question', 'question hooks']) && featureTags.hook === 'question') {
+    penalty += 0.14;
+  }
+
+  if (hasAnyTerm(avoid, ['no thread', 'avoid thread', 'listicle', 'numbered list']) && featureTags.structure === 'list') {
+    penalty += 0.12;
+  }
+
+  for (const phrase of extractQuotedMemoryPhrases(avoidItems)) {
+    if (text.includes(phrase)) penalty += 0.2;
+  }
+
+  if (
+    hasAnyTerm(reinforce, ['specific', 'specificity', 'numbers', 'data', 'evidence', 'example', 'concrete'])
+    && (
+      ['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)
+      || hasNumericSpecificity(candidate.content)
+    )
+  ) {
+    boost += 0.08;
+  }
+
+  if (hasAnyTerm(reinforce, ['tighten', 'shorter', 'concise']) && candidate.content.length <= 240) {
+    boost += 0.05;
+  }
+
+  if (hasAnyTerm(reinforce, ['deeper', 'longer', 'developed argument']) && candidate.content.length >= 180) {
+    boost += 0.05;
+  }
+
+  if (hasAnyTerm(reinforce, ['question-led', 'question led', 'question hook']) && featureTags.hook === 'question') {
+    boost += 0.07;
+  }
+
+  if (hasAnyTerm(reinforce, ['line-break', 'line break', 'structure', 'readability']) && candidate.content.includes('\n')) {
+    boost += 0.05;
+  }
+
+  if (hasAnyTerm(reinforce, ['contrarian']) && featureTags.hook === 'contrarian') boost += 0.04;
+  if (hasAnyTerm(reinforce, ['story']) && featureTags.structure === 'story_arc') boost += 0.04;
+  if (hasAnyTerm(reinforce, ['comparison']) && featureTags.structure === 'comparison') boost += 0.04;
+  if (hasAnyTerm(reinforce, ['tactical']) && featureTags.specificity === 'tactical') boost += 0.04;
+
+  return clampSigned(boost - penalty, -0.45, 0.25);
 }
 
 function scoreVoiceMatch(
@@ -829,13 +956,15 @@ export function rankGeneratedTweets(
     const viralTakeScore = scoreViralTakePotential(candidate, featureTags, policyRiskScore);
     const authorityProofIssue = getAuthorityProofIssue(candidate.content);
     const authorityProofPenalty = authorityProofIssue ? 0.36 : 0;
+    const memoryAlignmentScore = scoreMemoryAlignment(candidate, featureTags, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
       (repetitionRiskScore * 0.24) +
       (creativeRiskScore * 0.18) +
       (slopScore * 0.14) +
-      authorityProofPenalty
+      authorityProofPenalty +
+      (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0)
     );
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -853,6 +982,7 @@ export function rankGeneratedTweets(
       portfolio: Number((portfolioScore * 0.04).toFixed(3)),
       mediaExperiment: Number((mediaExperimentScore * 0.03).toFixed(3)),
       relationship: Number((relationshipScore * 0.025).toFixed(3)),
+      memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -873,6 +1003,7 @@ export function rankGeneratedTweets(
       (1 - policyRiskScore) * 0.08 +
       (1 - slopScore) * 0.08 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
+      memoryAlignmentScore * 0.16 +
       styleModeAdjustment
     );
 
@@ -906,6 +1037,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.portfolio || 0) +
       (scoreProvenance.mediaExperiment || 0) +
       (scoreProvenance.relationship || 0) +
+      (scoreProvenance.memoryAlignment || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
