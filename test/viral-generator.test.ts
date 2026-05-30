@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateViralBatch } from '@/lib/viral-generator';
+import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 
 const anthropicCreateMock = vi.hoisted(() => vi.fn());
 
@@ -14,6 +15,69 @@ vi.mock('@anthropic-ai/sdk', () => ({
 describe('generateViralBatch', () => {
   beforeEach(() => {
     anthropicCreateMock.mockReset();
+  });
+
+  it('normalizes double-escaped newlines before candidates enter the queueing pipeline', async () => {
+    anthropicCreateMock.mockResolvedValue({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          slot: 1,
+          content: 'The first AI wedge is not the demo.\\n\\nIt is the workflow nobody wants to babysit.',
+          format: 'long_form',
+          targetTopic: 'AI',
+          rationale: 'Specific operator framing.',
+        }),
+      }],
+    });
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'analyst',
+        topics: ['AI'],
+        antiGoals: [],
+        communicationStyle: 'specific and direct',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['long_form'],
+          topTopics: ['AI'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      1,
+      null,
+      null,
+      null,
+      undefined,
+      [],
+      [],
+      null,
+    );
+
+    expect(batch).toHaveLength(1);
+    expect(batch[0].content).toBe('The first AI wedge is not the demo.\n\nIt is the workflow nobody wants to babysit.');
+    expect(batch[0].content).not.toContain('\\n');
+  });
+
+  it('normalizes common escaped newline variants in generated tweet text', () => {
+    expect(normalizeGeneratedTweetContent('one\\r\\ntwo\\n\\nthree\\r')).toBe('one\ntwo\n\nthree');
   });
 
   it('drops incomplete candidates before they enter the queueing pipeline', async () => {

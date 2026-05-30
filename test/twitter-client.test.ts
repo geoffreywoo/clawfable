@@ -126,6 +126,12 @@ describe('sanitizeTweetText', () => {
     ).toBe('context\n\nkeep this https://example.com/proof');
   });
 
+  it('decodes visible escaped newlines before posting', () => {
+    expect(
+      sanitizeTweetText('first line\\n\\nsecond line')
+    ).toBe('first line\n\nsecond line');
+  });
+
   it('reports when sanitizer removes all postable text', () => {
     expect(getSanitizedTweetTextIssue('https://x.com/fake/status/123456789', 'post')).toContain('Tweet text is empty');
     expect(getSanitizedTweetTextIssue('real point https://x.com/fake/status/123456789', 'reply')).toBeNull();

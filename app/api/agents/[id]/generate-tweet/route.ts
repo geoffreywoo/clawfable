@@ -7,6 +7,7 @@ import {
   getPreviewTweets,
 } from '@/lib/kv-storage';
 import { generateViralBatch } from '@/lib/viral-generator';
+import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
@@ -132,9 +133,11 @@ export async function POST(
       prompt: `Write one tweet about: ${topicText}`,
     });
 
-    const content = response.text
-      .trim()
-      .replace(/^["']|["']$/g, ''); // strip wrapping quotes
+    const content = normalizeGeneratedTweetContent(
+      response.text
+        .trim()
+        .replace(/^["']|["']$/g, '') // strip wrapping quotes
+    );
 
     const generationIssue = getGeneratedTweetIssue(content, response.stopReason);
     if (generationIssue) {

@@ -15,6 +15,7 @@ import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import { buildSourcePlannerPlan, type SourcePlannerPlan } from './source-planner';
 import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
+import { normalizeGeneratedTweetContent } from './tweet-text';
 import {
   buildMediaBrief,
   buildPostPortfolioPlan,
@@ -826,7 +827,7 @@ export async function generateViralBatch(
   }).join('\n');
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
-- "content": the tweet text (any length up to 4000 chars — use \\n for line breaks in longer posts)
+- "content": the tweet text (any length up to 4000 chars; represent line breaks as standard JSON escaped newlines, never as visible literal backslash-n text)
 - "format": one of: ${formats.join(', ')}
 - "targetTopic": what topic this tweet is about
 - "styleMode": "standard" or "shitpoast" (must match the slot's style)
@@ -869,7 +870,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         if (parsed.content && parsed.content.length > 0) {
           // Strip hallucinated x.com/twitter.com status URLs from content.
           // Standalone posts should not carry status links or quote-tweet URLs.
-          const cleanContent = parsed.content
+          const cleanContent = normalizeGeneratedTweetContent(parsed.content)
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
           if (!cleanContent) continue;

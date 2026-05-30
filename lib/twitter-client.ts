@@ -8,6 +8,7 @@
 import TwitterApi from 'twitter-api-v2';
 import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug';
 import { getInternalPromptLeakIssue } from './survivability';
+import { normalizeGeneratedTweetContent } from './tweet-text';
 
 export interface TwitterKeys {
   appKey: string;
@@ -50,7 +51,7 @@ function handleApiError(error: unknown, context: TwitterErrorContext): never {
 }
 
 export function sanitizeTweetText(text: string): string {
-  return text
+  return normalizeGeneratedTweetContent(text)
     .replace(/\s*https?:\/\/(?:x|twitter)\.com\/(?:i\/web\/status|[^/\s]+\/status)\/\d+\S*/gi, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
