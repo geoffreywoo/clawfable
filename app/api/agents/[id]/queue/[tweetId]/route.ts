@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addLearningSignal, deleteTweet, getTweet, saveFeedback, updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, deleteTweet, getTweet, markIdeaAtomRejectedForTweet, saveFeedback, updateTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
 import { summarizeEditDelta } from '@/lib/learning-loop';
@@ -242,6 +242,7 @@ export async function DELETE(
       }),
     });
 
+    await markIdeaAtomRejectedForTweet(tweet, intentSummary);
     await deleteTweet(tweetId);
     return NextResponse.json({
       success: true,
