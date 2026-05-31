@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   rankGeneratedTweets,
   selectTopRankedTweets,
@@ -217,6 +217,15 @@ describe('selectTopRankedTweets', () => {
 });
 
 describe('rankGeneratedTweets', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-30T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('downranks broad authority claims when they lack proof or mechanism', () => {
     const featureTags = {
       hook: 'bold_claim' as const,
@@ -420,5 +429,120 @@ describe('rankGeneratedTweets', () => {
     expect(rejected!.scoreProvenance.ideaGraph).toBeLessThan(0);
     expect(safer!.confidenceScore).toBeGreaterThan(rejected!.confidenceScore);
     expect(ranked[0].content).toBe(safer!.content);
+  });
+
+  it('cools down recently saturated thesis atoms even when they previously worked', () => {
+    const context = rankingContext();
+    context.ideaAtoms = [
+      ideaAtom({
+        claim: 'agent teams need eval loops before adding tools',
+        example: 'Agent teams need eval loops before adding tools because tool sprawl hides memory failures.',
+        lastUsedAt: '2026-05-29T12:00:00.000Z',
+        performance: {
+          generated: 18,
+          queued: 14,
+          posted: 12,
+          rejected: 0,
+          avgReward: 0.72,
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Agent teams need eval loops before adding tools because tool sprawl hides memory failures.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Successful thesis resurfacing too soon.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams need eval loops before adding tools',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'The best AI agent teams start with one boring escalation rule before they add autonomy.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Fresh adjacent operating lesson.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams start boring escalation rule',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const saturated = ranked.find((candidate) => candidate.content.includes('tool sprawl'));
+    const fresh = ranked.find((candidate) => candidate.content.includes('escalation rule'));
+
+    expect(saturated).toBeDefined();
+    expect(fresh).toBeDefined();
+    expect(saturated!.scoreProvenance.ideaGraph).toBeLessThan(0);
+    expect(fresh!.confidenceScore).toBeGreaterThan(saturated!.confidenceScore);
+    expect(ranked[0].content).toBe(fresh!.content);
+  });
+
+  it('penalizes stale unproven thesis atoms instead of treating them as reusable seeds', () => {
+    const context = rankingContext();
+    context.ideaAtoms = [
+      ideaAtom({
+        claim: 'founders replace product intuition with ai copilots',
+        example: 'Founders replace product intuition with AI copilots.',
+        lastUsedAt: '2026-01-15T12:00:00.000Z',
+        performance: {
+          generated: 5,
+          queued: 1,
+          posted: 0,
+          rejected: 2,
+          avgReward: -0.22,
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Founders replace product intuition with AI copilots once research gets cheap.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Old unproven thesis coming back.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'concrete',
+          structure: 'single_punch',
+          thesis: 'founders replace product intuition with ai copilots',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'AI founders get more leverage when copilots make research traces easier to audit.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Safer refined thesis.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'ai founders audit research traces',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const stale = ranked.find((candidate) => candidate.content.includes('replace product intuition'));
+    const refined = ranked.find((candidate) => candidate.content.includes('research traces'));
+
+    expect(stale).toBeDefined();
+    expect(refined).toBeDefined();
+    expect(stale!.scoreProvenance.ideaGraph).toBeLessThan(0);
+    expect(refined!.confidenceScore).toBeGreaterThan(stale!.confidenceScore);
   });
 });

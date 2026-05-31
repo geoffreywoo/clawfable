@@ -398,6 +398,7 @@ function scoreIdeaGraphFit(
   const candidateText = candidate.content.toLowerCase();
   let strongestBoost = 0;
   let strongestPenalty = 0;
+  const now = Date.now();
 
   for (const atom of atoms.slice(0, 40)) {
     const similarity = ideaSimilarity(candidateIdea, {
@@ -412,14 +413,29 @@ function scoreIdeaGraphFit(
     const postedRate = (atom.performance.posted || 0) / generated;
     const rejectionRate = (atom.performance.rejected || 0) / generated;
     const avgReward = clampSigned(atom.performance.avgReward || 0);
+    const lastUsedAt = atom.lastUsedAt || atom.updatedAt || atom.createdAt;
+    const lastUsedMs = lastUsedAt ? new Date(lastUsedAt).getTime() : Number.NaN;
+    const daysSinceUse = Number.isFinite(lastUsedMs)
+      ? Math.max(0, (now - lastUsedMs) / (24 * 60 * 60 * 1000))
+      : 999;
+    const recentReusePressure = clamp((10 - Math.min(daysSinceUse, 10)) / 10);
+    const saturationPressure = clamp((generated - Math.max(3, atom.performance.posted || 0)) / 12);
     const provenStrength = clamp((postedRate * 0.42) + (queuedRate * 0.22) + (Math.max(0, avgReward) * 0.36));
     const rejectionStrength = clamp((rejectionRate * 0.58) + (Math.max(0, -avgReward) * 0.32));
     const overusedWithoutProof = generated >= 4 && (atom.performance.posted || 0) <= 1
       ? clamp((generated - Math.max(atom.performance.posted || 0, atom.performance.queued || 0)) / generated)
       : 0;
+    const staleUnproven = daysSinceUse >= 60 && (atom.performance.posted || 0) === 0 && avgReward <= 0
+      ? clamp((daysSinceUse - 45) / 90)
+      : 0;
 
     let boost = similarity * (0.04 + (provenStrength * 0.16));
-    let penalty = similarity * ((rejectionStrength * 0.24) + (overusedWithoutProof * 0.1));
+    let penalty = similarity * (
+      (rejectionStrength * 0.24) +
+      (overusedWithoutProof * 0.1) +
+      (recentReusePressure * saturationPressure * 0.34) +
+      (staleUnproven * 0.16)
+    );
 
     const normalizedClaim = atom.claim.toLowerCase();
     if (normalizedClaim.length >= 24 && candidateText.includes(normalizedClaim)) {
