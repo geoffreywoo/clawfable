@@ -867,4 +867,98 @@ describe('rankGeneratedTweets', () => {
     expect(anchored!.confidenceScore).toBeGreaterThan(priorMiss!.confidenceScore);
     expect(ranked[0].content).toBe(anchored!.content);
   });
+
+  it('penalizes drafts that copy trusted operator anchors too closely', () => {
+    const context = rankingContext();
+    const styleFingerprint = {
+      avgLength: 120,
+      shortPct: 80,
+      mediumPct: 20,
+      longPct: 0,
+      questionRatio: 0,
+      usesLineBreaks: false,
+      usesEmojis: false,
+      usesNumbers: false,
+      topHooks: ['bold_claim'],
+      topTones: ['analytical'],
+      antiPatterns: [],
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+    const anchor = performanceAnchor({
+      tweetId: 'anchor-copy-1',
+      content: 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+      thesis: 'agent teams failed eval visible rollback rule',
+      likes: 64,
+      retweets: 13,
+      replies: 8,
+    });
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-05-29T00:00:00.000Z',
+      totalTracked: 12,
+      avgLikes: 12,
+      avgRetweets: 2,
+      bestPerformers: [],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint,
+      operatorVoiceReference: {
+        sampleCount: 1,
+        bestPerformers: [anchor],
+        pinnedExamples: [],
+        styleFingerprint,
+      },
+      sourceBreakdown: {
+        autopilot: 6,
+        manual: 6,
+        timeline: 0,
+        trainingCount: 12,
+        trainingSource: 'mixed',
+      },
+    } satisfies AgentLearnings;
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: anchor.content,
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Copied operator anchor.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams failed eval visible rollback rule',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'AI agent teams earn trust when a failed eval writes the rollback owner into tomorrow morning\'s checklist.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Uses the anchor as a seed with new wording and a concrete mechanism.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams failed eval rollback owner checklist',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const copied = ranked.find((candidate) => candidate.content === anchor.content);
+    const reworked = ranked.find((candidate) => candidate.content.includes('tomorrow morning'));
+
+    expect(copied).toBeDefined();
+    expect(reworked).toBeDefined();
+    expect(copied!.scoreProvenance.operatorAnchor).toBeGreaterThan(0);
+    expect(copied!.scoreProvenance.anchorCopyRisk).toBeLessThan(0);
+    expect(reworked!.scoreProvenance.anchorCopyRisk).toBe(0);
+    expect(reworked!.confidenceScore).toBeGreaterThan(copied!.confidenceScore);
+    expect(ranked[0].content).toBe(reworked!.content);
+  });
 });

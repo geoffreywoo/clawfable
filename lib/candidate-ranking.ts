@@ -185,14 +185,7 @@ function scoreOperatorAnchorFit(
   featureTags: CandidateFeatureTags,
   context: CandidateRankingContext,
 ): number {
-  const operatorReference = context.learnings?.operatorVoiceReference;
-  const positiveAnchors = [
-    ...(operatorReference?.pinnedExamples || []),
-    ...(operatorReference?.bestPerformers || []),
-    ...(!operatorReference?.bestPerformers?.length && !operatorReference?.pinnedExamples?.length
-      ? (context.learnings?.bestPerformers || [])
-      : []),
-  ];
+  const positiveAnchors = getPositiveOperatorAnchors(context);
   const negativeAnchors = context.learnings?.worstPerformers || [];
 
   if (positiveAnchors.length === 0 && negativeAnchors.length === 0) return 0;
@@ -227,6 +220,48 @@ function scoreOperatorAnchorFit(
   }
 
   return clampSigned(strongestBoost - strongestPenalty, -0.22, 0.22);
+}
+
+function getPositiveOperatorAnchors(context: CandidateRankingContext): TweetPerformance[] {
+  const operatorReference = context.learnings?.operatorVoiceReference;
+  return [
+    ...(operatorReference?.pinnedExamples || []),
+    ...(operatorReference?.bestPerformers || []),
+    ...(!operatorReference?.bestPerformers?.length && !operatorReference?.pinnedExamples?.length
+      ? (context.learnings?.bestPerformers || [])
+      : []),
+  ];
+}
+
+function scoreOperatorAnchorCopyRisk(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const positiveAnchors = getPositiveOperatorAnchors(context);
+  if (positiveAnchors.length === 0) return 0;
+
+  let strongestRisk = 0;
+  for (const anchor of positiveAnchors.slice(0, 12)) {
+    const duplicate = isNearDuplicate(candidate.content, [anchor.content], 0.82);
+    if (!duplicate.isDuplicate) continue;
+
+    const thesisSimilarity = ideaSimilarity(
+      { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
+      { content: anchor.content, thesis: anchor.thesis, topic: anchor.topic },
+    );
+    const similarity = duplicate.similarity || 0.82;
+    const sameTopic = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic);
+    const risk = clamp(
+      0.46 +
+      ((similarity - 0.82) * 1.35) +
+      (thesisSimilarity >= 0.7 ? 0.14 : 0) +
+      (sameTopic ? 0.08 : 0),
+    );
+    strongestRisk = Math.max(strongestRisk, risk);
+  }
+
+  return strongestRisk;
 }
 
 function stableExperimentId(candidate: RankableProtocolTweet, coverageCluster: string): string {
@@ -1185,6 +1220,7 @@ export function rankGeneratedTweets(
     const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
     const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
     const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
+    const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1196,6 +1232,7 @@ export function rankGeneratedTweets(
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
       (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
       (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
+      (anchorCopyRiskScore * 0.32) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1219,6 +1256,7 @@ export function rankGeneratedTweets(
       outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
+      anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1244,6 +1282,7 @@ export function rankGeneratedTweets(
       memoryAlignmentScore * 0.16 +
       outcomeCalibrationScore * 0.18 +
       operatorAnchorScore * 0.16 +
+      (-anchorCopyRiskScore * 0.22) +
       styleModeAdjustment
     );
 
@@ -1282,6 +1321,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.outcomeCalibration || 0) +
       (scoreProvenance.conversationQuality || 0) +
       (scoreProvenance.operatorAnchor || 0) +
+      (scoreProvenance.anchorCopyRisk || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
