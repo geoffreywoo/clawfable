@@ -436,6 +436,83 @@ function scoreIdeaGraphFit(
   return clampSigned(strongestBoost - strongestPenalty, -0.28, 0.2);
 }
 
+function readTweetScore(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? clamp(value) : null;
+}
+
+function getPredictedOutcome(tweet: Tweet): number | null {
+  return readTweetScore(tweet.predictedEngagementScore)
+    ?? readTweetScore(tweet.rewardPrediction)
+    ?? readTweetScore(tweet.confidenceScore)
+    ?? (typeof tweet.candidateScore === 'number' ? clamp(tweet.candidateScore / 100) : null);
+}
+
+function getObservedOutcome(tweet: Tweet): number | null {
+  if (typeof tweet.rewardBreakdown?.total === 'number' && Number.isFinite(tweet.rewardBreakdown.total)) {
+    return clamp((tweet.rewardBreakdown.total + 1) / 2);
+  }
+
+  if (tweet.status === 'deleted_from_x') return 0.08;
+  if (tweet.status === 'posted') return null;
+  return null;
+}
+
+function scoreOutcomeCalibration(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  coverageCluster: string,
+  context: CandidateRankingContext,
+): number {
+  let weightedError = 0;
+  let evidenceWeight = 0;
+
+  for (const tweet of context.allTweets.slice(0, 80)) {
+    const observed = getObservedOutcome(tweet);
+    const predicted = getPredictedOutcome(tweet);
+    if (observed === null || predicted === null) continue;
+
+    const tweetFeatureTags = tweet.featureTags || (
+      tweet.hookType && tweet.toneType && tweet.specificityType && tweet.structureType
+        ? {
+            hook: tweet.hookType,
+            tone: tweet.toneType,
+            specificity: tweet.specificityType,
+            structure: tweet.structureType,
+            thesis: tweet.thesis || buildCoverageCluster(tweet.content, tweet.topic).split(':').slice(1).join(':'),
+            riskFlags: [],
+          }
+        : extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis })
+    );
+    const tweetCluster = tweet.coverageCluster || buildCoverageCluster(tweet.content, tweet.topic, tweetFeatureTags.thesis);
+    const similarity = ideaSimilarity(
+      { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
+      { content: tweet.content, thesis: tweetFeatureTags.thesis, topic: tweet.topic },
+    );
+
+    let weight = 0;
+    const semanticMatch = tweetCluster.toLowerCase() === coverageCluster.toLowerCase() || similarity >= 0.24;
+
+    if (tweetCluster.toLowerCase() === coverageCluster.toLowerCase()) weight += 0.64;
+    if (similarity >= 0.24) weight += similarity * 0.42;
+    if (normalizeTopic(tweet.topic) === normalizeTopic(candidate.targetTopic)) weight += 0.16;
+    if (normalizeFormat(tweet.format) === normalizeFormat(candidate.format)) weight += 0.12;
+    if (String(tweetFeatureTags.hook).toLowerCase() === featureTags.hook.toLowerCase()) weight += 0.07;
+    if (String(tweetFeatureTags.tone).toLowerCase() === featureTags.tone.toLowerCase()) weight += 0.05;
+    if (String(tweetFeatureTags.specificity).toLowerCase() === featureTags.specificity.toLowerCase()) weight += 0.06;
+    if (String(tweetFeatureTags.structure).toLowerCase() === featureTags.structure.toLowerCase()) weight += 0.06;
+    if (tweet.status === 'deleted_from_x') weight += 0.1;
+    if (!semanticMatch) weight *= 0.45;
+
+    if (weight < 0.34) continue;
+    const error = clampSigned(observed - predicted);
+    weightedError += error * Math.min(weight, 1.35);
+    evidenceWeight += Math.min(weight, 1.35);
+  }
+
+  if (evidenceWeight < 0.8) return 0;
+  return clampSigned((weightedError / evidenceWeight) * 0.72, -0.28, 0.2);
+}
+
 function scoreVoiceMatch(
   candidate: RankableProtocolTweet,
   voiceProfile: VoiceProfile,
@@ -1014,6 +1091,7 @@ export function rankGeneratedTweets(
     const authorityProofPenalty = authorityProofIssue ? 0.36 : 0;
     const memoryAlignmentScore = scoreMemoryAlignment(candidate, featureTags, context);
     const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
+    const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1022,7 +1100,8 @@ export function rankGeneratedTweets(
       (slopScore * 0.14) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
-      (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0)
+      (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
+      (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0)
     );
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -1042,6 +1121,7 @@ export function rankGeneratedTweets(
       relationship: Number((relationshipScore * 0.025).toFixed(3)),
       ideaGraph: Number((ideaGraphScore * 0.1).toFixed(3)),
       memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
+      outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1064,6 +1144,7 @@ export function rankGeneratedTweets(
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
       ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
+      outcomeCalibrationScore * 0.18 +
       styleModeAdjustment
     );
 
@@ -1099,6 +1180,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.relationship || 0) +
       (scoreProvenance.ideaGraph || 0) +
       (scoreProvenance.memoryAlignment || 0) +
+      (scoreProvenance.outcomeCalibration || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
