@@ -5,7 +5,7 @@ import {
   type CandidateRankingContext,
   type RankedProtocolTweet,
 } from '@/lib/candidate-ranking';
-import type { IdeaAtom } from '@/lib/types';
+import type { IdeaAtom, Tweet } from '@/lib/types';
 
 function rankingContext(): CandidateRankingContext {
   return {
@@ -164,6 +164,58 @@ function ideaAtom(overrides: Partial<IdeaAtom> & { claim: string }): IdeaAtom {
     },
     createdAt: overrides.createdAt || '2026-05-20T00:00:00.000Z',
     updatedAt: overrides.updatedAt || '2026-05-24T00:00:00.000Z',
+  };
+}
+
+function historicalTweet(overrides: Partial<Tweet> = {}): Tweet {
+  return {
+    id: overrides.id || 'tweet-1',
+    agentId: overrides.agentId || 'agent-1',
+    content: overrides.content || 'AI agent teams learn fastest when memory, evals, and shipping loops reinforce each other.',
+    originalContent: overrides.originalContent ?? null,
+    type: overrides.type || 'original',
+    status: overrides.status || 'posted',
+    format: overrides.format || 'hot_take',
+    topic: overrides.topic || 'AI agents',
+    xTweetId: overrides.xTweetId ?? 'x-1',
+    quoteTweetId: overrides.quoteTweetId ?? null,
+    quoteTweetAuthor: overrides.quoteTweetAuthor ?? null,
+    scheduledAt: overrides.scheduledAt ?? null,
+    deletionReason: overrides.deletionReason ?? null,
+    predictedEngagementScore: overrides.predictedEngagementScore ?? 0.78,
+    confidenceScore: overrides.confidenceScore ?? 0.76,
+    rewardPrediction: overrides.rewardPrediction ?? 0.74,
+    hookType: overrides.hookType ?? 'bold_claim',
+    toneType: overrides.toneType ?? 'analytical',
+    specificityType: overrides.specificityType ?? 'tactical',
+    structureType: overrides.structureType ?? 'single_punch',
+    thesis: overrides.thesis ?? 'agent memory eval loops compound',
+    coverageCluster: overrides.coverageCluster ?? 'ai agents:agent memory eval loops compound',
+    featureTags: overrides.featureTags ?? {
+      hook: 'bold_claim',
+      tone: 'analytical',
+      specificity: 'tactical',
+      structure: 'single_punch',
+      thesis: 'agent memory eval loops compound',
+      riskFlags: [],
+    },
+    rewardBreakdown: overrides.rewardBreakdown ?? {
+      approval: 0,
+      editBurden: 0,
+      deletionPenalty: 0,
+      postingOutcome: 0,
+      copySignal: 0,
+      replyOutcome: 0,
+      timeToApproval: 0,
+      engagementLift: 0,
+      immediateTotal: 0,
+      delayedTotal: -0.5,
+      total: -0.5,
+      computedAt: '2026-05-24T00:00:00.000Z',
+      notes: ['Similar pattern underperformed after posting.'],
+    },
+    createdAt: overrides.createdAt || '2026-05-24T00:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -544,5 +596,96 @@ describe('rankGeneratedTweets', () => {
     expect(refined).toBeDefined();
     expect(stale!.scoreProvenance.ideaGraph).toBeLessThan(0);
     expect(refined!.confidenceScore).toBeGreaterThan(stale!.confidenceScore);
+  });
+
+  it('calibrates ranking down when similar high-confidence posts underperformed', () => {
+    const context = rankingContext();
+    context.allTweets = [
+      historicalTweet({
+        id: 'past-miss-1',
+        content: 'AI agent teams grow faster when memory, evals, and release notes become one weekly loop.',
+        predictedEngagementScore: 0.84,
+        confidenceScore: 0.82,
+        rewardPrediction: 0.8,
+        rewardBreakdown: {
+          approval: 0,
+          editBurden: 0,
+          deletionPenalty: 0,
+          postingOutcome: 0,
+          copySignal: 0,
+          replyOutcome: 0,
+          timeToApproval: 0,
+          engagementLift: -0.68,
+          immediateTotal: 0,
+          delayedTotal: -0.68,
+          total: -0.68,
+          computedAt: '2026-05-24T00:00:00.000Z',
+          notes: ['High-confidence loop framing missed the baseline.'],
+        },
+      }),
+      historicalTweet({
+        id: 'past-miss-2',
+        content: 'The agent memory eval loop sounds useful until nobody owns the weekly review.',
+        predictedEngagementScore: 0.76,
+        confidenceScore: 0.74,
+        rewardPrediction: 0.72,
+        rewardBreakdown: {
+          approval: 0,
+          editBurden: 0,
+          deletionPenalty: 0,
+          postingOutcome: 0,
+          copySignal: 0,
+          replyOutcome: 0,
+          timeToApproval: 0,
+          engagementLift: -0.44,
+          immediateTotal: 0,
+          delayedTotal: -0.44,
+          total: -0.44,
+          computedAt: '2026-05-25T00:00:00.000Z',
+          notes: ['Similar thesis underperformed again.'],
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agent teams grow fastest when memory, evals, and release notes compound in one loop.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resurfaces a recently missed pattern.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent memory eval loops compound',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'The useful AI agent benchmark is whether one handoff disappears from the team by Friday.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Different concrete operator lesson.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent benchmark removes handoff',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const repeatMiss = ranked.find((candidate) => candidate.content.includes('one loop'));
+    const freshLesson = ranked.find((candidate) => candidate.content.includes('handoff disappears'));
+
+    expect(repeatMiss).toBeDefined();
+    expect(freshLesson).toBeDefined();
+    expect(repeatMiss!.scoreProvenance.outcomeCalibration).toBeLessThan(0);
+    expect(freshLesson!.scoreProvenance.outcomeCalibration || 0).toBeGreaterThan(repeatMiss!.scoreProvenance.outcomeCalibration || 0);
+    expect(freshLesson!.confidenceScore).toBeGreaterThan(repeatMiss!.confidenceScore);
+    expect(ranked[0].content).toBe(freshLesson!.content);
   });
 });
