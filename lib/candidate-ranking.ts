@@ -373,6 +373,105 @@ function hasNumericSpecificity(text: string): boolean {
   return /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d/i.test(text);
 }
 
+const PHRASE_REUSE_STOPWORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'against',
+  'because',
+  'before',
+  'being',
+  'between',
+  'every',
+  'from',
+  'have',
+  'into',
+  'just',
+  'more',
+  'most',
+  'over',
+  'that',
+  'their',
+  'then',
+  'there',
+  'these',
+  'they',
+  'this',
+  'when',
+  'where',
+  'which',
+  'while',
+  'with',
+  'without',
+  'your',
+]);
+
+function normalizePhraseWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[@#][a-z0-9_]+/g, ' ')
+    .match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) || [];
+}
+
+function isDistinctivePhraseWindow(words: string[]): boolean {
+  const distinctive = words.filter((word) =>
+    /\d/.test(word) ||
+    (word.length >= 5 && !PHRASE_REUSE_STOPWORDS.has(word))
+  );
+  return distinctive.length >= 2;
+}
+
+function buildDistinctivePhrases(text: string): Map<string, number> {
+  const words = normalizePhraseWords(text);
+  const phrases = new Map<string, number>();
+
+  for (const size of [7, 6, 5]) {
+    if (words.length < size) continue;
+    for (let index = 0; index <= words.length - size; index++) {
+      const window = words.slice(index, index + size);
+      if (!isDistinctivePhraseWindow(window)) continue;
+      phrases.set(window.join(' '), size);
+    }
+  }
+
+  return phrases;
+}
+
+function scorePhraseReuseRisk(candidate: RankableProtocolTweet, context: CandidateRankingContext): number {
+  const candidatePhrases = buildDistinctivePhrases(candidate.content);
+  if (candidatePhrases.size === 0) return 0;
+
+  const sourceTexts = [
+    ...context.recentPosts,
+    ...context.allTweets
+      .filter((tweet) => ['draft', 'preview', 'queued', 'posted'].includes(tweet.status))
+      .slice(0, 40)
+      .map((tweet) => tweet.content),
+  ].filter((text) => text.trim() && text.trim() !== candidate.content.trim());
+
+  let strongestRisk = 0;
+
+  for (const sourceText of sourceTexts) {
+    const sourcePhrases = buildDistinctivePhrases(sourceText);
+    if (sourcePhrases.size === 0) continue;
+
+    let matched = 0;
+    let sourceRisk = 0;
+    for (const [phrase, size] of candidatePhrases) {
+      if (!sourcePhrases.has(phrase)) continue;
+      matched += 1;
+      sourceRisk = Math.max(sourceRisk, size === 7 ? 0.62 : size === 6 ? 0.5 : 0.36);
+    }
+
+    if (matched >= 2) sourceRisk += 0.1;
+    if (matched >= 4) sourceRisk += 0.08;
+    strongestRisk = Math.max(strongestRisk, sourceRisk);
+  }
+
+  return clamp(strongestRisk);
+}
+
 function extractQuotedMemoryPhrases(items: string[]): string[] {
   const phrases: string[] = [];
   for (const item of items) {
@@ -1221,6 +1320,7 @@ export function rankGeneratedTweets(
     const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
     const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
+    const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1233,6 +1333,7 @@ export function rankGeneratedTweets(
       (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
       (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
       (anchorCopyRiskScore * 0.32) +
+      (phraseReuseRiskScore * 0.24) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1257,6 +1358,7 @@ export function rankGeneratedTweets(
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
+      phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1283,6 +1385,7 @@ export function rankGeneratedTweets(
       outcomeCalibrationScore * 0.18 +
       operatorAnchorScore * 0.16 +
       (-anchorCopyRiskScore * 0.22) +
+      (-phraseReuseRiskScore * 0.18) +
       styleModeAdjustment
     );
 
@@ -1322,6 +1425,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.conversationQuality || 0) +
       (scoreProvenance.operatorAnchor || 0) +
       (scoreProvenance.anchorCopyRisk || 0) +
+      (scoreProvenance.phraseReuseRisk || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);

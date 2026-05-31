@@ -757,6 +757,69 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(substantive!.content);
   });
 
+  it('downranks drafts that recycle distinctive recent phrasing', () => {
+    const context = rankingContext();
+    context.allTweets = [
+      historicalTweet({
+        id: 'recent-phrase-1',
+        status: 'queued',
+        content: 'The useful AI agent benchmark is whether one handoff disappears from the team by Friday.',
+        thesis: 'agent benchmark removes handoff',
+        coverageCluster: 'ai agents:agent benchmark removes handoff',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent benchmark removes handoff',
+          riskFlags: [],
+        },
+        rewardBreakdown: null,
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Founders should measure agents by whether one handoff disappears from the team by Friday.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Strong thesis but borrows the recent phrasing.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'founders measure agents by removed handoff',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'A better agent benchmark: one named owner deletes a manual escalation before the week ends.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Same strategic direction with fresh wording.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent benchmark owner deletes manual escalation',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const recycled = ranked.find((candidate) => candidate.content.includes('handoff disappears'));
+    const fresh = ranked.find((candidate) => candidate.content.includes('manual escalation'));
+
+    expect(recycled).toBeDefined();
+    expect(fresh).toBeDefined();
+    expect(recycled!.scoreProvenance.phraseReuseRisk).toBeLessThan(0);
+    expect(fresh!.scoreProvenance.phraseReuseRisk).toBe(0);
+    expect(fresh!.confidenceScore).toBeGreaterThan(recycled!.confidenceScore);
+    expect(ranked[0].content).toBe(fresh!.content);
+  });
+
   it('uses operator voice anchors to prefer trusted human-shaped theses over prior misses', () => {
     const context = rankingContext();
     const styleFingerprint = {
