@@ -1128,7 +1128,11 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
       },
     }).catch(() => null),
     addCriticVerdictForTweet(tweet).catch(() => null),
-    recordIdeaAtomFromTweet(tweet).catch(() => null),
+    recordIdeaAtomFromTweet(tweet, {
+      generatedDelta: 1,
+      queuedDelta: tweet.status === 'queued' ? 1 : 0,
+      postedDelta: tweet.status === 'posted' ? 1 : 0,
+    }).catch(() => null),
   ]);
   return tweet;
 }
@@ -1207,7 +1211,13 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
         }).catch(() => null)
       : Promise.resolve(null),
     addCriticVerdictForTweet(updated).catch(() => null),
-    recordIdeaAtomFromTweet(updated, prevStatus).catch(() => null),
+    recordIdeaAtomFromTweet(updated, {
+      generatedDelta: data.content !== undefined && data.content !== existing.content ? 1 : 0,
+      queuedDelta: data.status === 'queued' && prevStatus !== 'queued' ? 1 : 0,
+      postedDelta: data.status === 'posted' && prevStatus !== 'posted' ? 1 : 0,
+      rejectedDelta: data.status === 'deleted_from_x' && prevStatus !== 'deleted_from_x' ? 1 : 0,
+      riskNote: data.status === 'deleted_from_x' ? data.deletionReason || existing.deletionReason || null : null,
+    }).catch(() => null),
   ]);
 
   return updated;
@@ -1723,6 +1733,16 @@ async function updateDraftExperimentFromPerformance(agentId: string, entry: Twee
 
 export async function addPerformanceEntry(agentId: string, entry: TweetPerformance): Promise<void> {
   await kvLpush(KEYS.agentPerformance(agentId), JSON.stringify(entry));
+  const measuredReward = entry.actionRewards?.total ?? computeActionRewards(entry).total;
+  if (entry.tweetId) {
+    const tweet = await getTweet(String(entry.tweetId));
+    if (tweet) {
+      await updateIdeaAtomOutcomeFromTweet(tweet, {
+        rewardDelta: measuredReward,
+        riskNote: entry.slopScore && entry.slopScore > 0.35 ? `Slop risk ${entry.slopScore}` : null,
+      }).catch(() => null);
+    }
+  }
   await addOutcomeEvent(agentId, {
     eventType: 'metric_checkpoint',
     source: 'metrics',
@@ -2191,31 +2211,41 @@ function extractIdeaClaim(tweet: Tweet): string | null {
   return firstLine;
 }
 
-async function recordIdeaAtomFromTweet(tweet: Tweet, previousStatus?: Tweet['status'] | null): Promise<void> {
+function blendIdeaAtomReward(current: number, next: number, observations: number): number {
+  const weight = Math.max(0, Math.min(1000, Math.floor(observations)));
+  const blended = ((current * weight) + next) / (weight + 1);
+  return Number(Math.max(-1, Math.min(1, blended)).toFixed(3));
+}
+
+async function recordIdeaAtomFromTweet(
+  tweet: Tweet,
+  counts: {
+    generatedDelta?: number;
+    queuedDelta?: number;
+    postedDelta?: number;
+    rejectedDelta?: number;
+    riskNote?: string | null;
+  } = {}
+): Promise<void> {
   const claim = extractIdeaClaim(tweet);
   if (!claim) return;
   const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
   const normalizedClaim = claim.toLowerCase();
   const now = new Date().toISOString();
   const found = existing.find((atom) => atom.claim.toLowerCase() === normalizedClaim);
-  const status = tweet.status;
-  const generatedDelta = found ? (!previousStatus && found.sourceTweetId !== tweet.id ? 1 : 0) : 1;
-  const queuedDelta = found
-    ? status === 'queued' && previousStatus !== 'queued' ? 1 : 0
-    : status === 'queued' ? 1 : 0;
-  const postedDelta = found
-    ? status === 'posted' && previousStatus !== 'posted' ? 1 : 0
-    : status === 'posted' ? 1 : 0;
-  const rejectedDelta = found
-    ? status === 'deleted_from_x' && previousStatus !== 'deleted_from_x' ? 1 : 0
-    : status === 'deleted_from_x' ? 1 : 0;
+  const generatedDelta = Math.max(0, counts.generatedDelta || 0);
+  const queuedDelta = Math.max(0, counts.queuedDelta || 0);
+  const postedDelta = Math.max(0, counts.postedDelta || 0);
+  const rejectedDelta = Math.max(0, counts.rejectedDelta || 0);
+  const riskNote = counts.riskNote?.trim() || null;
   const next = found
     ? {
         ...found,
+        riskNote: riskNote || found.riskNote,
         topic: found.topic || tweet.topic,
         audience: found.audience || tweet.targetAudienceSegment || null,
         sourceTweetId: generatedDelta > 0 ? tweet.id : found.sourceTweetId || tweet.id,
-        lastUsedAt: generatedDelta > 0 || queuedDelta > 0 || postedDelta > 0 ? now : found.lastUsedAt,
+        lastUsedAt: generatedDelta > 0 || queuedDelta > 0 || postedDelta > 0 || rejectedDelta > 0 ? now : found.lastUsedAt,
         performance: {
           ...found.performance,
           generated: found.performance.generated + generatedDelta,
@@ -2233,12 +2263,12 @@ async function recordIdeaAtomFromTweet(tweet: Tweet, previousStatus?: Tweet['sta
         audience: tweet.targetAudienceSegment || null,
         proof: tweet.mediaBrief?.slice(0, 240) || null,
         example: tweet.content.slice(0, 280),
-        riskNote: tweet.policyRiskScore && tweet.policyRiskScore > 0.28 ? `Policy risk ${tweet.policyRiskScore}` : null,
+        riskNote: riskNote || (tweet.policyRiskScore && tweet.policyRiskScore > 0.28 ? `Policy risk ${tweet.policyRiskScore}` : null),
         topic: tweet.topic,
         sourceTweetId: tweet.id,
         lastUsedAt: now,
         performance: {
-          generated: 1,
+          generated: Math.max(1, generatedDelta),
           queued: queuedDelta,
           posted: postedDelta,
           rejected: rejectedDelta,
@@ -2255,43 +2285,50 @@ export async function markIdeaAtomRejectedForTweet(tweet: Tweet, reason?: string
   const claim = extractIdeaClaim(tweet);
   if (!claim) return;
   const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
-  const normalizedClaim = claim.toLowerCase();
-  const now = new Date().toISOString();
+  const found = existing.find((atom) => atom.claim.toLowerCase() === claim.toLowerCase());
   const trimmedReason = reason?.trim();
-  const rejectionNote = trimmedReason ? `Rejected: ${trimmedReason.slice(0, 170)}` : null;
+  await recordIdeaAtomFromTweet(tweet, {
+    generatedDelta: found ? 0 : 1,
+    queuedDelta: !found && tweet.status === 'queued' ? 1 : 0,
+    postedDelta: !found && tweet.status === 'posted' ? 1 : 0,
+    rejectedDelta: 1,
+    riskNote: trimmedReason ? `Rejected: ${trimmedReason.slice(0, 170)}` : null,
+  });
+}
+
+async function updateIdeaAtomOutcomeFromTweet(
+  tweet: Tweet,
+  outcome: { rewardDelta?: number | null; rejectedDelta?: number; postedDelta?: number; riskNote?: string | null }
+): Promise<void> {
+  const claim = extractIdeaClaim(tweet);
+  if (!claim) return;
+
+  await recordIdeaAtomFromTweet(tweet);
+
+  const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
+  const normalizedClaim = claim.toLowerCase();
   const found = existing.find((atom) => atom.claim.toLowerCase() === normalizedClaim);
-  const next = found
-    ? {
-        ...found,
-        riskNote: rejectionNote || found.riskNote,
-        performance: {
-          ...found.performance,
-          rejected: found.performance.rejected + 1,
-        },
-        updatedAt: now,
-      }
-    : {
-        id: String(await kvIncr(KEYS.counterIdeaAtom())),
-        agentId: tweet.agentId,
-        claim,
-        tension: tweet.rationale?.slice(0, 240) || null,
-        audience: tweet.targetAudienceSegment || null,
-        proof: tweet.mediaBrief?.slice(0, 240) || null,
-        example: tweet.content.slice(0, 280),
-        riskNote: rejectionNote || (tweet.policyRiskScore && tweet.policyRiskScore > 0.28 ? `Policy risk ${tweet.policyRiskScore}` : null),
-        topic: tweet.topic,
-        sourceTweetId: tweet.id,
-        lastUsedAt: tweet.createdAt,
-        performance: {
-          generated: 1,
-          queued: tweet.status === 'queued' ? 1 : 0,
-          posted: tweet.status === 'posted' ? 1 : 0,
-          rejected: 1,
-          avgReward: 0,
-        },
-        createdAt: now,
-        updatedAt: now,
-      } satisfies IdeaAtom;
+  if (!found) return;
+
+  const rejectedDelta = Math.max(0, outcome.rejectedDelta || 0);
+  const rewardDelta = typeof outcome.rewardDelta === 'number' && Number.isFinite(outcome.rewardDelta)
+    ? Math.max(-1, Math.min(1, outcome.rewardDelta))
+    : null;
+  const observations = found.performance.generated + found.performance.queued + found.performance.posted + found.performance.rejected;
+  const next: IdeaAtom = {
+    ...found,
+    riskNote: outcome.riskNote || found.riskNote,
+    lastUsedAt: new Date().toISOString(),
+    performance: {
+      ...found.performance,
+      posted: found.performance.posted + Math.max(0, outcome.postedDelta || 0),
+      rejected: found.performance.rejected + rejectedDelta,
+      avgReward: rewardDelta === null
+        ? found.performance.avgReward
+        : blendIdeaAtomReward(found.performance.avgReward || 0, rewardDelta, observations),
+    },
+    updatedAt: new Date().toISOString(),
+  };
   const rest = existing.filter((atom) => atom.id !== next.id);
   await kvSet(KEYS.agentIdeaAtoms(tweet.agentId), [next, ...rest].slice(0, MAX_IDEA_ATOMS));
 }
@@ -2458,6 +2495,24 @@ export async function addLearningSignal(
   const capped = deduped.slice(0, 250);
   await kvSet(KEYS.agentSignals(agentId), capped);
   await updateDraftExperimentFromSignal(agentId, full);
+  if (full.tweetId) {
+    const tweet = await getTweet(String(full.tweetId));
+    if (tweet) {
+      const rejectedDelta = (
+        full.signalType === 'deleted_from_queue'
+        || full.signalType === 'deleted_from_x'
+        || full.signalType === 'x_post_rejected'
+        || full.signalType === 'reply_rejected'
+        || full.signalType === 'taste_less_like_this'
+      ) ? 1 : 0;
+      await updateIdeaAtomOutcomeFromTweet(tweet, {
+        rewardDelta: full.rewardDelta,
+        rejectedDelta,
+        postedDelta: full.signalType === 'x_post_succeeded' && tweet.status !== 'posted' ? 1 : 0,
+        riskNote: rejectedDelta > 0 ? full.reason || 'Rejected by operator signal' : null,
+      }).catch(() => null);
+    }
+  }
   await addOutcomeEvent(agentId, {
     eventType: full.signalType,
     source: 'learning_signal',

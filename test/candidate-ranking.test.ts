@@ -597,7 +597,6 @@ describe('rankGeneratedTweets', () => {
     expect(stale!.scoreProvenance.ideaGraph).toBeLessThan(0);
     expect(refined!.confidenceScore).toBeGreaterThan(stale!.confidenceScore);
   });
-
   it('calibrates ranking down when similar high-confidence posts underperformed', () => {
     const context = rankingContext();
     context.allTweets = [
