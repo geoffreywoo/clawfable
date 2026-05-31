@@ -28,6 +28,7 @@ import {
   getAuthorityProofIssue,
   inferAudienceSegment,
   inferPromptStrategy,
+  scoreConversationValue,
   scoreReplyPotential,
   scoreSlopRisk,
 } from './virality-signals';
@@ -867,22 +868,26 @@ function buildSegmentHypothesis(
 function predictActionRewards({
   rewardPrediction,
   replyPotential,
+  conversationQuality,
   slopScore,
   audienceScore,
   creativeRiskScore,
 }: {
   rewardPrediction: number;
   replyPotential: number;
+  conversationQuality: number;
   slopScore: number;
   audienceScore: number;
   creativeRiskScore: number;
 }): ActionRewardBreakdown {
   const likeReward = clamp((rewardPrediction * 0.24) + (audienceScore * 0.08), 0, 0.42);
   const repostReward = clamp((rewardPrediction * 0.18) + ((1 - slopScore) * 0.06), 0, 0.36);
-  const replyReward = clamp(replyPotential * 0.28, 0, 0.32);
-  const impressionReward = clamp((rewardPrediction * 0.12) + (replyPotential * 0.08), 0, 0.28);
+  const qualityAdjustedReplyPotential = replyPotential * conversationQuality;
+  const replyReward = clamp(qualityAdjustedReplyPotential * 0.28, 0, 0.32);
+  const impressionReward = clamp((rewardPrediction * 0.12) + (qualityAdjustedReplyPotential * 0.08), 0, 0.28);
   const engagementRateReward = clamp((rewardPrediction * 0.12) + ((1 - slopScore) * 0.05), 0, 0.25);
-  const negativeFeedbackRisk = clamp((slopScore * 0.16) + (creativeRiskScore * 0.12), 0, 0.28);
+  const baitRisk = replyPotential > 0.55 ? (1 - conversationQuality) * 0.12 : 0;
+  const negativeFeedbackRisk = clamp((slopScore * 0.16) + (creativeRiskScore * 0.12) + baitRisk, 0, 0.28);
   const total = clamp(
     likeReward + replyReward + repostReward + impressionReward + engagementRateReward - negativeFeedbackRisk,
     -0.6,
@@ -1097,6 +1102,7 @@ export function rankGeneratedTweets(
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
     const slopScore = scoreSlopRisk(candidate.content, featureTags);
     const replyBaitScore = scoreReplyPotential(candidate.content, featureTags);
+    const conversationQualityScore = scoreConversationValue(candidate.content, featureTags);
     const surpriseScore = scoreSurprise(candidate, featureTags, context, noveltyScore, repetitionRiskScore);
     const creativeRiskScore = scoreCreativeRisk(candidate, featureTags, voiceScore, policyRiskScore, surpriseScore, repetitionRiskScore);
     const styleMode = normalizeContentStyleMode(candidate.styleMode);
@@ -1117,7 +1123,8 @@ export function rankGeneratedTweets(
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
-      (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0)
+      (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
+      (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
     const scoreProvenance: CandidateScoreProvenance = {
@@ -1138,6 +1145,7 @@ export function rankGeneratedTweets(
       ideaGraph: Number((ideaGraphScore * 0.1).toFixed(3)),
       memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
       outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
+      conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1153,7 +1161,8 @@ export function rankGeneratedTweets(
       relationshipScore * 0.025 +
       judgeScore * 0.2 +
       viralTakeScore * 0.1 +
-      replyBaitScore * 0.04 +
+      (replyBaitScore * conversationQualityScore) * 0.06 +
+      (conversationQualityScore - 0.5) * 0.06 +
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08 +
       (1 - slopScore) * 0.08 +
@@ -1197,6 +1206,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.ideaGraph || 0) +
       (scoreProvenance.memoryAlignment || 0) +
       (scoreProvenance.outcomeCalibration || 0) +
+      (scoreProvenance.conversationQuality || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
@@ -1207,6 +1217,7 @@ export function rankGeneratedTweets(
     const actionRewardPrediction = candidate.actionRewardPrediction || predictActionRewards({
       rewardPrediction: rewardPrediction.reward,
       replyPotential: replyBaitScore,
+      conversationQuality: conversationQualityScore,
       slopScore,
       audienceScore,
       creativeRiskScore,

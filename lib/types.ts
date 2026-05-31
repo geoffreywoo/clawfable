@@ -231,6 +231,7 @@ export interface CandidateScoreProvenance {
   ideaGraph?: number;
   memoryAlignment?: number;
   outcomeCalibration?: number;
+  conversationQuality?: number;
 }
 
 export interface RewardBreakdown {

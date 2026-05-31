@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from '@/lib/virality-signals';
+import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -35,6 +35,31 @@ describe('virality signals', () => {
     expect(highValue.responseStrategy).toBe('answer_question');
     expect(praise.score).toBeLessThan(0.5);
     expect(spam.score).toBeLessThan(0.5);
+  });
+
+  it('scores contextual conversation prompts above generic engagement bait', () => {
+    const generic = scoreConversationValue('Thoughts on AI agents?', {
+      hook: 'question',
+      tone: 'casual',
+      specificity: 'abstract',
+      structure: 'question_led',
+      thesis: 'ai agents thoughts',
+      riskFlags: ['thin'],
+    });
+    const substantive = scoreConversationValue(
+      'AI agents get safer when every failed eval creates a 24-hour rollback rule. Where does this break in your workflow?',
+      {
+        hook: 'question',
+        tone: 'analytical',
+        specificity: 'tactical',
+        structure: 'question_led',
+        thesis: 'agent eval rollback workflow',
+        riskFlags: [],
+      },
+    );
+
+    expect(generic).toBeLessThan(0.35);
+    expect(substantive).toBeGreaterThan(0.65);
   });
 
   it('turns observed actions into a bounded reward vector', () => {

@@ -109,6 +109,36 @@ export function scoreReplyPotential(content: string, featureTags: CandidateFeatu
   return clamp(score);
 }
 
+export function scoreConversationValue(content: string, featureTags: CandidateFeatureTags): number {
+  const text = content.trim();
+  const lower = text.toLowerCase();
+  let score = 0.34;
+
+  const hasQuestion = /\?/.test(text) || featureTags.hook === 'question';
+  const hasMechanism = /\b(because|when|if|after|before|until|tradeoff|constraint|failure mode|recovery path|example|for instance)\b/i.test(text);
+  const hasSpecificProof = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
+  const hasDistinction = /\b(not|isn't|aren't)\b.{0,80}\b(but|because)\b|\bvs\b| versus | compared to |\binstead of\b/i.test(text);
+  const asksForUsefulInput = /\b(where does this break|what am i missing|what would you change|which part is wrong|what would make this fail|edge case)\b/i.test(text);
+  const genericBait = /\b(thoughts\??|what do you think\??|agree or disagree\??|reply below|drop your|hot take\??)\b/i.test(text);
+
+  if (hasQuestion) score += 0.1;
+  if (hasMechanism) score += 0.16;
+  if (hasSpecificProof || ['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)) score += 0.16;
+  if (hasDistinction || featureTags.structure === 'comparison') score += 0.12;
+  if (asksForUsefulInput) score += 0.12;
+  if (featureTags.hook === 'contrarian' && hasMechanism) score += 0.08;
+  if (text.length >= 80 && text.length <= 420) score += 0.08;
+
+  if (genericBait) score -= 0.24;
+  if (hasQuestion && text.length < 70) score -= 0.18;
+  if (featureTags.specificity === 'abstract') score -= 0.12;
+  if (featureTags.riskFlags.includes('thin')) score -= 0.14;
+  if (featureTags.riskFlags.includes('salesy') || featureTags.riskFlags.includes('link')) score -= 0.16;
+  if ((lower.match(/\b(people|things|stuff|content|value|interesting)\b/g) || []).length >= 3) score -= 0.08;
+
+  return Number(clamp(score).toFixed(3));
+}
+
 export function scoreHighValueReply(mention: {
   text: string;
   authorUsername?: string | null;

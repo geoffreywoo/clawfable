@@ -688,4 +688,48 @@ describe('rankGeneratedTweets', () => {
     expect(freshLesson!.confidenceScore).toBeGreaterThan(repeatMiss!.confidenceScore);
     expect(ranked[0].content).toBe(freshLesson!.content);
   });
+
+  it('does not let generic engagement bait outrank substantive conversation prompts', () => {
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Thoughts on AI agents?',
+        format: 'question',
+        targetTopic: 'AI agents',
+        rationale: 'Generic reply bait.',
+        featureTags: {
+          hook: 'question',
+          tone: 'casual',
+          specificity: 'abstract',
+          structure: 'question_led',
+          thesis: 'ai agents thoughts',
+          riskFlags: ['thin'],
+        },
+      },
+      {
+        content: 'AI agents get safer when every failed eval creates a 24-hour rollback rule. Where does this break in your workflow?',
+        format: 'question',
+        targetTopic: 'AI agents',
+        rationale: 'Specific conversation prompt with a mechanism.',
+        featureTags: {
+          hook: 'question',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'question_led',
+          thesis: 'agent eval rollback workflow',
+          riskFlags: [],
+        },
+      },
+    ], rankingContext());
+
+    const generic = ranked.find((candidate) => candidate.content.includes('Thoughts on'));
+    const substantive = ranked.find((candidate) => candidate.content.includes('rollback rule'));
+
+    expect(generic).toBeDefined();
+    expect(substantive).toBeDefined();
+    expect(generic!.scoreProvenance.conversationQuality).toBeLessThan(0);
+    expect(substantive!.scoreProvenance.conversationQuality).toBeGreaterThan(0);
+    expect(substantive!.actionRewardPrediction.replyReward).toBeGreaterThan(generic!.actionRewardPrediction.replyReward);
+    expect(substantive!.confidenceScore).toBeGreaterThan(generic!.confidenceScore);
+    expect(ranked[0].content).toBe(substantive!.content);
+  });
 });
