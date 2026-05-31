@@ -1207,7 +1207,7 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
         }).catch(() => null)
       : Promise.resolve(null),
     addCriticVerdictForTweet(updated).catch(() => null),
-    recordIdeaAtomFromTweet(updated).catch(() => null),
+    recordIdeaAtomFromTweet(updated, prevStatus).catch(() => null),
   ]);
 
   return updated;
@@ -2191,7 +2191,7 @@ function extractIdeaClaim(tweet: Tweet): string | null {
   return firstLine;
 }
 
-async function recordIdeaAtomFromTweet(tweet: Tweet): Promise<void> {
+async function recordIdeaAtomFromTweet(tweet: Tweet, previousStatus?: Tweet['status'] | null): Promise<void> {
   const claim = extractIdeaClaim(tweet);
   if (!claim) return;
   const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
@@ -2199,18 +2199,29 @@ async function recordIdeaAtomFromTweet(tweet: Tweet): Promise<void> {
   const now = new Date().toISOString();
   const found = existing.find((atom) => atom.claim.toLowerCase() === normalizedClaim);
   const status = tweet.status;
+  const generatedDelta = found ? (!previousStatus && found.sourceTweetId !== tweet.id ? 1 : 0) : 1;
+  const queuedDelta = found
+    ? status === 'queued' && previousStatus !== 'queued' ? 1 : 0
+    : status === 'queued' ? 1 : 0;
+  const postedDelta = found
+    ? status === 'posted' && previousStatus !== 'posted' ? 1 : 0
+    : status === 'posted' ? 1 : 0;
+  const rejectedDelta = found
+    ? status === 'deleted_from_x' && previousStatus !== 'deleted_from_x' ? 1 : 0
+    : status === 'deleted_from_x' ? 1 : 0;
   const next = found
     ? {
         ...found,
         topic: found.topic || tweet.topic,
         audience: found.audience || tweet.targetAudienceSegment || null,
-        sourceTweetId: found.sourceTweetId || tweet.id,
-        lastUsedAt: now,
+        sourceTweetId: generatedDelta > 0 ? tweet.id : found.sourceTweetId || tweet.id,
+        lastUsedAt: generatedDelta > 0 || queuedDelta > 0 || postedDelta > 0 ? now : found.lastUsedAt,
         performance: {
           ...found.performance,
-          generated: found.performance.generated + 1,
-          queued: found.performance.queued + (status === 'queued' ? 1 : 0),
-          posted: found.performance.posted + (status === 'posted' ? 1 : 0),
+          generated: found.performance.generated + generatedDelta,
+          queued: found.performance.queued + queuedDelta,
+          posted: found.performance.posted + postedDelta,
+          rejected: found.performance.rejected + rejectedDelta,
         },
         updatedAt: now,
       }
@@ -2228,9 +2239,54 @@ async function recordIdeaAtomFromTweet(tweet: Tweet): Promise<void> {
         lastUsedAt: now,
         performance: {
           generated: 1,
-          queued: status === 'queued' ? 1 : 0,
-          posted: status === 'posted' ? 1 : 0,
-          rejected: 0,
+          queued: queuedDelta,
+          posted: postedDelta,
+          rejected: rejectedDelta,
+          avgReward: 0,
+        },
+        createdAt: now,
+        updatedAt: now,
+      } satisfies IdeaAtom;
+  const rest = existing.filter((atom) => atom.id !== next.id);
+  await kvSet(KEYS.agentIdeaAtoms(tweet.agentId), [next, ...rest].slice(0, MAX_IDEA_ATOMS));
+}
+
+export async function markIdeaAtomRejectedForTweet(tweet: Tweet, reason?: string | null): Promise<void> {
+  const claim = extractIdeaClaim(tweet);
+  if (!claim) return;
+  const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
+  const normalizedClaim = claim.toLowerCase();
+  const now = new Date().toISOString();
+  const trimmedReason = reason?.trim();
+  const rejectionNote = trimmedReason ? `Rejected: ${trimmedReason.slice(0, 170)}` : null;
+  const found = existing.find((atom) => atom.claim.toLowerCase() === normalizedClaim);
+  const next = found
+    ? {
+        ...found,
+        riskNote: rejectionNote || found.riskNote,
+        performance: {
+          ...found.performance,
+          rejected: found.performance.rejected + 1,
+        },
+        updatedAt: now,
+      }
+    : {
+        id: String(await kvIncr(KEYS.counterIdeaAtom())),
+        agentId: tweet.agentId,
+        claim,
+        tension: tweet.rationale?.slice(0, 240) || null,
+        audience: tweet.targetAudienceSegment || null,
+        proof: tweet.mediaBrief?.slice(0, 240) || null,
+        example: tweet.content.slice(0, 280),
+        riskNote: rejectionNote || (tweet.policyRiskScore && tweet.policyRiskScore > 0.28 ? `Policy risk ${tweet.policyRiskScore}` : null),
+        topic: tweet.topic,
+        sourceTweetId: tweet.id,
+        lastUsedAt: tweet.createdAt,
+        performance: {
+          generated: 1,
+          queued: tweet.status === 'queued' ? 1 : 0,
+          posted: tweet.status === 'posted' ? 1 : 0,
+          rejected: 1,
           avgReward: 0,
         },
         createdAt: now,

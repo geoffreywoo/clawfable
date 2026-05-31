@@ -4,6 +4,7 @@ import {
   getAgent,
   getPreviewTweets,
   logFunnelEvent,
+  markIdeaAtomRejectedForTweet,
   updateAgent,
   updateProtocolSettings,
   updateTweet,
@@ -76,6 +77,8 @@ export async function launchAgentFromPreview({
       },
     });
   }));
+  const rejectedTweets = previewTweets.filter((tweet) => !approvedIdSet.has(tweet.id));
+  await Promise.all(rejectedTweets.map((tweet) => markIdeaAtomRejectedForTweet(tweet, 'Not selected during setup review')));
   await Promise.all(rejectedIds.map((id) => deleteTweet(id)));
 
   await updateProtocolSettings(agentId, {
