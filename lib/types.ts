@@ -232,6 +232,7 @@ export interface CandidateScoreProvenance {
   memoryAlignment?: number;
   outcomeCalibration?: number;
   conversationQuality?: number;
+  operatorAnchor?: number;
 }
 
 export interface RewardBreakdown {

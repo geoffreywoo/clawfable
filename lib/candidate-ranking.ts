@@ -15,6 +15,7 @@ import type {
   PostPortfolioRole,
   PromptStrategy,
   Tweet,
+  TweetPerformance,
   AutonomyMode,
 } from './types';
 import type { VoiceProfile } from './soul-parser';
@@ -157,6 +158,75 @@ function normalizeCreativeLane(value: CreativeLane | string | null | undefined):
     default:
       return 'operator_take';
   }
+}
+
+function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
+  return entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+}
+
+function scorePerformanceAnchorQuality(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
+  return clamp(0.42 + Math.min(0.42, weightedEngagement(entry) / 180));
+}
+
+function featureAnchorMatch(
+  featureTags: CandidateFeatureTags,
+  entry: Pick<TweetPerformance, 'hook' | 'tone' | 'specificity' | 'structure'>,
+): number {
+  let score = 0;
+  if (entry.hook && String(entry.hook).toLowerCase() === featureTags.hook.toLowerCase()) score += 0.3;
+  if (entry.tone && String(entry.tone).toLowerCase() === featureTags.tone.toLowerCase()) score += 0.24;
+  if (entry.specificity && String(entry.specificity).toLowerCase() === featureTags.specificity.toLowerCase()) score += 0.24;
+  if (entry.structure && String(entry.structure).toLowerCase() === featureTags.structure.toLowerCase()) score += 0.22;
+  return clamp(score);
+}
+
+function scoreOperatorAnchorFit(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const operatorReference = context.learnings?.operatorVoiceReference;
+  const positiveAnchors = [
+    ...(operatorReference?.pinnedExamples || []),
+    ...(operatorReference?.bestPerformers || []),
+    ...(!operatorReference?.bestPerformers?.length && !operatorReference?.pinnedExamples?.length
+      ? (context.learnings?.bestPerformers || [])
+      : []),
+  ];
+  const negativeAnchors = context.learnings?.worstPerformers || [];
+
+  if (positiveAnchors.length === 0 && negativeAnchors.length === 0) return 0;
+
+  let strongestBoost = 0;
+  for (const anchor of positiveAnchors.slice(0, 12)) {
+    const similarity = ideaSimilarity(
+      { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
+      { content: anchor.content, thesis: anchor.thesis, topic: anchor.topic },
+    );
+    const featureMatch = featureAnchorMatch(featureTags, anchor);
+    const topicMatch = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic) ? 1 : 0;
+    const anchorFit = clamp((similarity * 0.58) + (featureMatch * 0.28) + (topicMatch * 0.14));
+    if (anchorFit < 0.28) continue;
+
+    const quality = scorePerformanceAnchorQuality(anchor);
+    strongestBoost = Math.max(strongestBoost, anchorFit * (0.08 + quality * 0.16));
+  }
+
+  let strongestPenalty = 0;
+  for (const anchor of negativeAnchors.slice(0, 10)) {
+    const similarity = ideaSimilarity(
+      { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
+      { content: anchor.content, thesis: anchor.thesis, topic: anchor.topic },
+    );
+    const featureMatch = featureAnchorMatch(featureTags, anchor);
+    const topicMatch = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic) ? 1 : 0;
+    const anchorFit = clamp((similarity * 0.66) + (featureMatch * 0.22) + (topicMatch * 0.12));
+    if (anchorFit < 0.34) continue;
+
+    strongestPenalty = Math.max(strongestPenalty, anchorFit * 0.2);
+  }
+
+  return clampSigned(strongestBoost - strongestPenalty, -0.22, 0.22);
 }
 
 function stableExperimentId(candidate: RankableProtocolTweet, coverageCluster: string): string {
@@ -1114,6 +1184,7 @@ export function rankGeneratedTweets(
     const memoryAlignmentScore = scoreMemoryAlignment(candidate, featureTags, context);
     const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
     const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
+    const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1124,6 +1195,7 @@ export function rankGeneratedTweets(
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
       (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
+      (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1146,6 +1218,7 @@ export function rankGeneratedTweets(
       memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
       outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
+      operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1170,6 +1243,7 @@ export function rankGeneratedTweets(
       ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
       outcomeCalibrationScore * 0.18 +
+      operatorAnchorScore * 0.16 +
       styleModeAdjustment
     );
 
@@ -1207,6 +1281,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.memoryAlignment || 0) +
       (scoreProvenance.outcomeCalibration || 0) +
       (scoreProvenance.conversationQuality || 0) +
+      (scoreProvenance.operatorAnchor || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);

@@ -5,7 +5,7 @@ import {
   type CandidateRankingContext,
   type RankedProtocolTweet,
 } from '@/lib/candidate-ranking';
-import type { IdeaAtom, Tweet } from '@/lib/types';
+import type { AgentLearnings, IdeaAtom, Tweet, TweetPerformance } from '@/lib/types';
 
 function rankingContext(): CandidateRankingContext {
   return {
@@ -215,6 +215,31 @@ function historicalTweet(overrides: Partial<Tweet> = {}): Tweet {
       notes: ['Similar pattern underperformed after posting.'],
     },
     createdAt: overrides.createdAt || '2026-05-24T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function performanceAnchor(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
+  return {
+    tweetId: overrides.tweetId || 'perf-1',
+    xTweetId: overrides.xTweetId || 'x-perf-1',
+    content: overrides.content || 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+    format: overrides.format || 'hot_take',
+    topic: overrides.topic || 'AI agents',
+    hook: overrides.hook || 'bold_claim',
+    tone: overrides.tone || 'analytical',
+    specificity: overrides.specificity || 'tactical',
+    structure: overrides.structure || 'single_punch',
+    thesis: overrides.thesis || 'agent teams failed eval visible rollback rule',
+    postedAt: overrides.postedAt || '2026-05-20T00:00:00.000Z',
+    checkedAt: overrides.checkedAt || '2026-05-21T00:00:00.000Z',
+    likes: overrides.likes ?? 42,
+    retweets: overrides.retweets ?? 8,
+    replies: overrides.replies ?? 6,
+    impressions: overrides.impressions ?? 3200,
+    engagementRate: overrides.engagementRate ?? 0.017,
+    wasViral: overrides.wasViral ?? true,
+    source: overrides.source || 'manual',
     ...overrides,
   };
 }
@@ -730,5 +755,116 @@ describe('rankGeneratedTweets', () => {
     expect(substantive!.actionRewardPrediction.replyReward).toBeGreaterThan(generic!.actionRewardPrediction.replyReward);
     expect(substantive!.confidenceScore).toBeGreaterThan(generic!.confidenceScore);
     expect(ranked[0].content).toBe(substantive!.content);
+  });
+
+  it('uses operator voice anchors to prefer trusted human-shaped theses over prior misses', () => {
+    const context = rankingContext();
+    const styleFingerprint = {
+      avgLength: 120,
+      shortPct: 80,
+      mediumPct: 20,
+      longPct: 0,
+      questionRatio: 0,
+      usesLineBreaks: false,
+      usesEmojis: false,
+      usesNumbers: false,
+      topHooks: ['bold_claim'],
+      topTones: ['analytical'],
+      antiPatterns: [],
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-05-29T00:00:00.000Z',
+      totalTracked: 12,
+      avgLikes: 12,
+      avgRetweets: 2,
+      bestPerformers: [],
+      worstPerformers: [
+        performanceAnchor({
+          tweetId: 'miss-1',
+          content: 'AI agents become magic when autonomy expands across every team.',
+          thesis: 'ai agents magic autonomy expands every team',
+          likes: 1,
+          retweets: 0,
+          replies: 0,
+          wasViral: false,
+          source: 'autopilot',
+        }),
+      ],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint,
+      operatorVoiceReference: {
+        sampleCount: 2,
+        bestPerformers: [
+          performanceAnchor({
+            tweetId: 'anchor-1',
+            content: 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+            thesis: 'agent teams failed eval visible rollback rule',
+          }),
+        ],
+        pinnedExamples: [
+          performanceAnchor({
+            tweetId: 'pin-1',
+            content: 'The safest autonomy roadmap is boring: one failed eval, one owner, one rollback note.',
+            thesis: 'safest autonomy roadmap failed eval owner rollback note',
+            likes: 58,
+            retweets: 12,
+            replies: 9,
+          }),
+        ],
+        styleFingerprint,
+      },
+      sourceBreakdown: {
+        autopilot: 6,
+        manual: 6,
+        timeline: 0,
+        trainingCount: 12,
+        trainingSource: 'mixed',
+      },
+    } satisfies AgentLearnings;
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agent teams build trust when every failed eval leaves one owner and a visible rollback note.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resembles a pinned operator anchor with fresh wording.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams failed eval owner visible rollback note',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'AI agents become magic when autonomy expands across every team.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Repeats a weak miss.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents magic autonomy expands every team',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const anchored = ranked.find((candidate) => candidate.content.includes('visible rollback note'));
+    const priorMiss = ranked.find((candidate) => candidate.content.includes('become magic'));
+
+    expect(anchored).toBeDefined();
+    expect(priorMiss).toBeDefined();
+    expect(anchored!.scoreProvenance.operatorAnchor).toBeGreaterThan(0);
+    expect(priorMiss!.scoreProvenance.operatorAnchor).toBeLessThan(0);
+    expect(anchored!.confidenceScore).toBeGreaterThan(priorMiss!.confidenceScore);
+    expect(ranked[0].content).toBe(anchored!.content);
   });
 });
