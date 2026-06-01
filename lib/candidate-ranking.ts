@@ -1092,6 +1092,43 @@ function scorePortfolioRolePerformance(
   return clamp(score);
 }
 
+function inferHistoricalPortfolioRole(tweet: Tweet): PostPortfolioRole {
+  return normalizePortfolioRole(tweet.portfolioRole || inferPortfolioRole({
+    content: tweet.content,
+    format: tweet.format,
+    creativeLane: tweet.creativeLane,
+    sourceLane: tweet.sourceLane,
+    mediaExperimentType: normalizeMediaExperimentType(tweet.mediaExperimentType),
+  }));
+}
+
+function scorePortfolioDiversity(
+  role: PostPortfolioRole,
+  context: CandidateRankingContext,
+): number {
+  const recentRoles = context.allTweets
+    .filter((tweet) => ['draft', 'preview', 'queued', 'posted'].includes(tweet.status))
+    .slice(0, 24)
+    .map(inferHistoricalPortfolioRole);
+
+  if (recentRoles.length < 3) return 0;
+
+  const roleCount = recentRoles.filter((recentRole) => recentRole === role).length;
+  const roleShare = roleCount / recentRoles.length;
+  let score = 0;
+
+  if (roleCount === 0) score += 0.08;
+  if (roleCount === 1 && recentRoles.length >= 8) score += 0.04;
+  if (roleShare >= 0.5) score -= 0.18;
+  else if (roleShare >= 0.38) score -= 0.1;
+  if (roleCount >= 5) score -= 0.08;
+
+  if (role === 'relationship' && context.style.relationshipQueueEnabled === false) score -= 0.12;
+  if (role === 'media' && (context.style.mediaExperimentRate ?? 15) <= 0) score -= 0.1;
+
+  return clampSigned(score, -0.26, 0.12);
+}
+
 function scoreMediaExperimentPerformance(
   type: MediaExperimentType,
   role: PostPortfolioRole,
@@ -1386,6 +1423,7 @@ export function rankGeneratedTweets(
     const audienceScore = scoreAudienceSegment(candidate, context, targetAudienceSegment);
     const promptStrategyScore = scorePromptStrategyPerformance(promptStrategy, context);
     const portfolioScore = scorePortfolioRolePerformance(portfolioRole, context);
+    const portfolioDiversityScore = scorePortfolioDiversity(portfolioRole, context);
     const mediaExperimentScore = scoreMediaExperimentPerformance(mediaExperimentType, portfolioRole, context, featureTags);
     const relationshipScore = scoreRelationshipTarget(relationshipTargetHandle, portfolioRole, context);
     const judgeScore = scoreJudge(candidate);
@@ -1420,6 +1458,7 @@ export function rankGeneratedTweets(
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
       (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
       (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
+      (portfolioDiversityScore < 0 ? Math.abs(portfolioDiversityScore) * 0.18 : 0) +
       (anchorCopyRiskScore * 0.32) +
       (phraseReuseRiskScore * 0.24) +
       (approvalFrictionScore < 0 ? Math.abs(approvalFrictionScore) * 0.2 : 0) +
@@ -1439,6 +1478,7 @@ export function rankGeneratedTweets(
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
       portfolio: Number((portfolioScore * 0.04).toFixed(3)),
+      portfolioDiversity: Number((portfolioDiversityScore * 0.12).toFixed(3)),
       mediaExperiment: Number((mediaExperimentScore * 0.03).toFixed(3)),
       relationship: Number((relationshipScore * 0.025).toFixed(3)),
       ideaGraph: Number((ideaGraphScore * 0.1).toFixed(3)),
@@ -1460,6 +1500,7 @@ export function rankGeneratedTweets(
       sourceLaneScore * 0.08 +
       audienceScore * 0.06 +
       portfolioScore * 0.04 +
+      portfolioDiversityScore * 0.22 +
       mediaExperimentScore * 0.025 +
       relationshipScore * 0.025 +
       judgeScore * 0.2 +
@@ -1508,6 +1549,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.audienceSegment || 0) +
       (scoreProvenance.promptStrategy || 0) +
       (scoreProvenance.portfolio || 0) +
+      (scoreProvenance.portfolioDiversity || 0) +
       (scoreProvenance.mediaExperiment || 0) +
       (scoreProvenance.relationship || 0) +
       (scoreProvenance.ideaGraph || 0) +
@@ -1606,12 +1648,21 @@ export function selectTopRankedTweets(
 ): RankedProtocolTweet[] {
   const selected: RankedProtocolTweet[] = [];
   const usedClusters = new Set<string>();
+  const selectedRoles = new Map<PostPortfolioRole, number>();
   const maxShitpoast = options.maxShitpoast ?? Number.POSITIVE_INFINITY;
   const minHoldouts = options.minHoldouts ?? (count >= 4 ? 1 : 0);
+  const maxSamePortfolioRole = Math.max(1, Math.ceil(count * 0.5));
   let shitpoastSelected = 0;
 
-  const canSelect = (candidate: RankedProtocolTweet) => {
+  const canSelect = (candidate: RankedProtocolTweet, enforcePortfolioDiversity = false) => {
     if (candidate.styleMode === SHITPOAST_STYLE_MODE && shitpoastSelected >= maxShitpoast) return false;
+    if (
+      enforcePortfolioDiversity &&
+      selected.length < count - 1 &&
+      (selectedRoles.get(candidate.portfolioRole) || 0) >= maxSamePortfolioRole
+    ) {
+      return false;
+    }
     const cluster = candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, candidate.featureTags?.thesis);
     const nearDuplicate = selected.some((item) =>
       isNearDuplicate(item.content, [candidate.content]).isDuplicate
@@ -1632,6 +1683,7 @@ export function selectTopRankedTweets(
     const cluster = candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, candidate.featureTags?.thesis);
     selected.push(candidate);
     usedClusters.add(cluster);
+    selectedRoles.set(candidate.portfolioRole, (selectedRoles.get(candidate.portfolioRole) || 0) + 1);
     if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
   };
 
@@ -1644,11 +1696,19 @@ export function selectTopRankedTweets(
 
   for (const candidate of holdoutCandidates) {
     if (selected.length >= Math.min(count, minHoldouts)) break;
-    if (!canSelect(candidate)) continue;
+    if (!canSelect(candidate, true)) continue;
     addCandidate(candidate);
   }
 
   for (const candidate of ranked) {
+    if (selected.includes(candidate)) continue;
+    if (!canSelect(candidate, true)) continue;
+    addCandidate(candidate);
+    if (selected.length === count) break;
+  }
+
+  for (const candidate of ranked) {
+    if (selected.length === count) break;
     if (selected.includes(candidate)) continue;
     if (!canSelect(candidate)) continue;
     addCandidate(candidate);

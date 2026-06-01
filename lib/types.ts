@@ -226,6 +226,7 @@ export interface CandidateScoreProvenance {
   audienceSegment?: number;
   promptStrategy?: number;
   portfolio?: number;
+  portfolioDiversity?: number;
   mediaExperiment?: number;
   relationship?: number;
   ideaGraph?: number;
