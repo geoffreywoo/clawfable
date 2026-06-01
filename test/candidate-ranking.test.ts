@@ -384,6 +384,66 @@ describe('rankGeneratedTweets', () => {
     expect(supported!.confidenceScore).toBeGreaterThan(unsupported!.confidenceScore);
   });
 
+  it('does not let a high headline judge score hide weak critic dimensions', () => {
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agent teams become compound learning systems when autonomy expands across every workflow.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Headline score is high, but the breakdown says the draft is off-voice and vague.',
+        judgeScore: 0.94,
+        judgeBreakdown: {
+          overall: 0.94,
+          voiceFit: 0.28,
+          clarity: 0.48,
+          novelty: 0.34,
+          audienceFit: 0.4,
+          policySafety: 0.82,
+        },
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'agent autonomy compounds workflows',
+          riskFlags: ['thin'],
+        },
+      },
+      {
+        content: 'AI agent teams learn faster when every failed eval becomes a named rollback rule by Friday.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Lower headline score, but the breakdown is consistently strong.',
+        judgeScore: 0.74,
+        judgeBreakdown: {
+          overall: 0.74,
+          voiceFit: 0.78,
+          clarity: 0.76,
+          novelty: 0.7,
+          audienceFit: 0.76,
+          policySafety: 0.88,
+        },
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'failed eval creates rollback rule',
+          riskFlags: [],
+        },
+      },
+    ], rankingContext());
+
+    const overruled = ranked.find((candidate) => candidate.content.includes('compound learning systems'));
+    const consistent = ranked.find((candidate) => candidate.content.includes('rollback rule'));
+
+    expect(overruled).toBeDefined();
+    expect(consistent).toBeDefined();
+    expect(overruled!.scoreProvenance.judge).toBeLessThan(consistent!.scoreProvenance.judge);
+    expect(consistent!.confidenceScore).toBeGreaterThan(overruled!.confidenceScore);
+    expect(ranked[0].content).toBe(consistent!.content);
+  });
+
   it('uses personalization memory to penalize learned avoid patterns and boost preferred specifics', () => {
     const context = rankingContext();
     context.memory = {
