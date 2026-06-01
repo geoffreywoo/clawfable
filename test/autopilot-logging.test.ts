@@ -770,6 +770,40 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
+  it('only lets explicit exploration candidates bypass confidence in explore mode', async () => {
+    const lowConfidenceDefault = {
+      ...validQueuedTweet,
+      id: 'explore-default-low',
+      content: 'normal low confidence draft should still need review',
+      generationMode: 'balanced',
+      confidenceScore: 0.49,
+      candidateScore: 98,
+    };
+    const explicitExplore = {
+      ...validQueuedTweet,
+      id: 'explore-tagged-low',
+      content: 'explicit exploration draft can test a new angle',
+      generationMode: 'explore',
+      confidenceScore: 0.41,
+      candidateScore: 52,
+    };
+
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      autonomyMode: 'explore',
+    });
+    mocks.getQueuedTweets.mockResolvedValue([lowConfidenceDefault, explicitExplore]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-explore-tagged', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe('explore-tagged-low');
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), explicitExplore.content, {
+      username: baseAgent.handle,
+    });
+  });
+
   it('logs reset-aware trend refresh failures during queue refill without blocking generation', async () => {
     const staleLowConfidenceTweets = [
       {

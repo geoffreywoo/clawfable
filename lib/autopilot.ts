@@ -142,9 +142,16 @@ function effectiveConfidence(tweet: { confidenceScore?: number | string | null; 
   return candidateScore !== null ? candidateScore / 100 : 0.67;
 }
 
+function effectiveAutopostThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): number {
+  if (mode === 'explore' && tweet.generationMode !== 'explore') {
+    return getAutonomyConfidenceThreshold('balanced');
+  }
+  return threshold;
+}
+
 function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
-  if (mode === 'explore') return true;
-  return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= threshold;
+  if (mode === 'explore' && tweet.generationMode === 'explore') return true;
+  return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= effectiveAutopostThreshold(tweet, mode, threshold);
 }
 
 function isAutopostableQueuedTweet(tweet: Tweet): boolean {
@@ -555,13 +562,15 @@ async function archiveStaleLowConfidenceQueue(
   agentId: string,
   tweets: Tweet[],
   threshold: number,
+  mode: ProtocolSettings['autonomyMode'],
   now = Date.now(),
   force = false,
 ): Promise<number> {
   const staleLowConfidenceTweets = tweets.filter((tweet) => {
     const createdAt = new Date(tweet.createdAt).getTime();
+    const tweetThreshold = effectiveAutopostThreshold(tweet, mode, threshold);
     return (force || (Number.isFinite(createdAt) && now - createdAt >= STALE_LOW_CONFIDENCE_QUEUE_MS))
-      && effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON < threshold;
+      && effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON < tweetThreshold;
   });
 
   if (staleLowConfidenceTweets.length === 0) return 0;
@@ -569,7 +578,7 @@ async function archiveStaleLowConfidenceQueue(
   await Promise.all(staleLowConfidenceTweets.map((tweet) => updateTweet(tweet.id, {
     status: 'draft',
     quarantinedAt: new Date(now).toISOString(),
-    quarantineReason: `Auto-archived from autopost queue: confidence ${effectiveConfidence(tweet).toFixed(3)} stayed below the active threshold ${threshold.toFixed(2)}.`,
+    quarantineReason: `Auto-archived from autopost queue: confidence ${effectiveConfidence(tweet).toFixed(3)} stayed below the active threshold ${effectiveAutopostThreshold(tweet, mode, threshold).toFixed(2)}.`,
   })));
 
   await addPostLogEntry(agentId, {
@@ -644,6 +653,7 @@ export async function selfHealAutopilotQueue(
     agent.id,
     completeActiveQueue,
     before.threshold,
+    settings.autonomyMode || 'balanced',
     Date.now(),
     options.forceArchiveLowConfidence,
   );
@@ -924,7 +934,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   );
 
   if (confidenceFiltered.length === 0) {
-    const archived = await archiveStaleLowConfidenceQueue(agentId, validationPassedQueue, confidenceThreshold);
+    const archived = await archiveStaleLowConfidenceQueue(agentId, validationPassedQueue, confidenceThreshold, settings.autonomyMode || 'balanced');
     if (archived > 0) {
       const generated = await refillQueue(agent, Math.max(settings.minQueueSize + 3, archived), {
         scheduledTopic: todaysTopic,

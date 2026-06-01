@@ -1195,6 +1195,89 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(reworked!.content);
   });
 
+  it('keeps learned-caution candidates out of safe generation mode even when the headline score is high', () => {
+    const context = rankingContext();
+    const anchor = performanceAnchor({
+      tweetId: 'safe-mode-anchor-copy',
+      content: 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+      thesis: 'agent teams failed eval visible rollback rule',
+      likes: 72,
+      retweets: 16,
+      replies: 10,
+    });
+    const styleFingerprint = {
+      avgLength: 120,
+      shortPct: 80,
+      mediumPct: 20,
+      longPct: 0,
+      questionRatio: 0,
+      usesLineBreaks: false,
+      usesEmojis: false,
+      usesNumbers: false,
+      topHooks: ['bold_claim'],
+      topTones: ['analytical'],
+      antiPatterns: [],
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-05-29T00:00:00.000Z',
+      totalTracked: 12,
+      avgLikes: 12,
+      avgRetweets: 2,
+      bestPerformers: [],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint,
+      operatorVoiceReference: {
+        sampleCount: 1,
+        bestPerformers: [anchor],
+        pinnedExamples: [],
+        styleFingerprint,
+      },
+      sourceBreakdown: {
+        autopilot: 6,
+        manual: 6,
+        timeline: 0,
+        trainingCount: 12,
+        trainingSource: 'mixed',
+      },
+    } satisfies AgentLearnings;
+
+    const [copied] = rankGeneratedTweets([
+      {
+        content: anchor.content,
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Copied high-performing operator anchor.',
+        judgeScore: 0.94,
+        judgeBreakdown: {
+          overall: 0.94,
+          voiceFit: 0.9,
+          clarity: 0.9,
+          novelty: 0.86,
+          audienceFit: 0.9,
+          policySafety: 0.92,
+        },
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams failed eval visible rollback rule',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    expect(copied.scoreProvenance.operatorAnchor).toBeGreaterThan(0);
+    expect(copied.scoreProvenance.anchorCopyRisk).toBeLessThan(0);
+    expect(copied.scoreProvenance.learnedReviewCaution).toBeLessThan(0);
+    expect(copied.generationMode).toBe('balanced');
+  });
+
   it('downranks portfolio roles that already dominate the live queue', () => {
     const context = rankingContext();
     context.allTweets = Array.from({ length: 6 }, (_, index) => historicalTweet({

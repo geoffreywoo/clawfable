@@ -1355,6 +1355,7 @@ function inferGenerationMode(
   context: CandidateRankingContext,
   confidence: number,
   policyRisk: number,
+  learnedReviewCaution: number,
 ): AutonomyMode {
   const normalizedTopic = normalizeTopic(candidate.targetTopic);
   const normalizedFormat = normalizeFormat(candidate.format);
@@ -1364,9 +1365,37 @@ function inferGenerationMode(
     Boolean(getBanditArmScore(context, 'hook', featureTags.hook)?.coldStart) ||
     Boolean(getBanditArmScore(context, 'structure', featureTags.structure)?.coldStart);
 
-  if (isExplorationBet) return 'explore';
-  if (confidence >= 0.74 && policyRisk <= 0.22) return 'safe';
+  if (isExplorationBet && learnedReviewCaution < 0.32) return 'explore';
+  if (confidence >= 0.74 && policyRisk <= 0.22 && learnedReviewCaution < 0.18) return 'safe';
   return 'balanced';
+}
+
+function scoreLearnedReviewCaution({
+  ideaGraphScore,
+  memoryAlignmentScore,
+  outcomeCalibrationScore,
+  operatorAnchorScore,
+  anchorCopyRiskScore,
+  phraseReuseRiskScore,
+  approvalFrictionScore,
+}: {
+  ideaGraphScore: number;
+  memoryAlignmentScore: number;
+  outcomeCalibrationScore: number;
+  operatorAnchorScore: number;
+  anchorCopyRiskScore: number;
+  phraseReuseRiskScore: number;
+  approvalFrictionScore: number;
+}): number {
+  return clamp(
+    Math.max(0, -ideaGraphScore) * 0.95 +
+    Math.max(0, -memoryAlignmentScore) * 0.75 +
+    Math.max(0, -outcomeCalibrationScore) * 1.05 +
+    Math.max(0, -operatorAnchorScore) * 0.8 +
+    Math.max(0, -approvalFrictionScore) * 0.9 +
+    anchorCopyRiskScore * 0.95 +
+    phraseReuseRiskScore * 0.65
+  );
 }
 
 export function getAutonomyConfidenceThreshold(mode: AutonomyMode): number {
@@ -1447,6 +1476,15 @@ export function rankGeneratedTweets(
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
     const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
     const approvalFrictionScore = scoreApprovalFriction(candidate, featureTags, context);
+    const learnedReviewCautionScore = scoreLearnedReviewCaution({
+      ideaGraphScore,
+      memoryAlignmentScore,
+      outcomeCalibrationScore,
+      operatorAnchorScore,
+      anchorCopyRiskScore,
+      phraseReuseRiskScore,
+      approvalFrictionScore,
+    });
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1489,6 +1527,7 @@ export function rankGeneratedTweets(
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
       phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
       approvalFriction: Number((approvalFrictionScore * 0.12).toFixed(3)),
+      learnedReviewCaution: Number((-learnedReviewCautionScore * 0.08).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1587,7 +1626,7 @@ export function rankGeneratedTweets(
 
     return {
       ...candidate,
-      generationMode: inferGenerationMode(candidate, featureTags, context, confidenceScore, policyRiskScore),
+      generationMode: inferGenerationMode(candidate, featureTags, context, confidenceScore, policyRiskScore, learnedReviewCautionScore),
       candidateScore,
       confidenceScore: Number(confidenceScore.toFixed(3)),
       voiceScore: Number(voiceScore.toFixed(3)),
