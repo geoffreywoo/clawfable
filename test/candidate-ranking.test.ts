@@ -291,6 +291,49 @@ describe('selectTopRankedTweets', () => {
     expect(selected[0].content).toContain('visibility');
     expect(selected[1].content).toContain('feedback loops');
   });
+
+  it('diversifies portfolio roles before filling a batch with more of the same shape', () => {
+    const selected = selectTopRankedTweets([
+      ranked({
+        content: 'Proof post: agents get safer when failed evals name the rollback owner.',
+        candidateScore: 96,
+        portfolioRole: 'proof',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'tactical', structure: 'single_punch', thesis: 'failed eval rollback owner', riskFlags: [] },
+        coverageCluster: 'ai agents:failed eval rollback owner',
+      }),
+      ranked({
+        content: 'Proof post: a 24-hour rollback note beats another autonomy dashboard.',
+        candidateScore: 95,
+        portfolioRole: 'proof',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'data_driven', structure: 'comparison', thesis: 'rollback note beats dashboard', riskFlags: [] },
+        coverageCluster: 'ai agents:rollback note beats dashboard',
+      }),
+      ranked({
+        content: 'Proof post: teams should count deleted handoffs before they count agent demos.',
+        candidateScore: 94,
+        portfolioRole: 'proof',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'tactical', structure: 'comparison', thesis: 'deleted handoffs before demos', riskFlags: [] },
+        coverageCluster: 'ai agents:deleted handoffs before demos',
+      }),
+      ranked({
+        content: 'Story post: last week a boring escalation rule saved an agent rollout.',
+        candidateScore: 82,
+        portfolioRole: 'story',
+        featureTags: { hook: 'story', tone: 'earnest', specificity: 'story_led', structure: 'story_arc', thesis: 'escalation rule saved rollout', riskFlags: [] },
+        coverageCluster: 'ai agents:escalation rule saved rollout',
+      }),
+      ranked({
+        content: 'Contrarian post: most teams add autonomy before they can explain failures.',
+        candidateScore: 80,
+        portfolioRole: 'contrarian',
+        featureTags: { hook: 'contrarian', tone: 'analytical', specificity: 'concrete', structure: 'single_punch', thesis: 'teams add autonomy before explaining failures', riskFlags: [] },
+        coverageCluster: 'ai agents:autonomy before explaining failures',
+      }),
+    ], 4);
+
+    expect(selected.map((candidate) => candidate.portfolioRole)).toEqual(['proof', 'proof', 'story', 'contrarian']);
+    expect(selected.some((candidate) => candidate.content.includes('deleted handoffs'))).toBe(false);
+  });
 });
 
 describe('rankGeneratedTweets', () => {
@@ -1023,5 +1066,61 @@ describe('rankGeneratedTweets', () => {
     expect(reworked!.scoreProvenance.anchorCopyRisk).toBe(0);
     expect(reworked!.confidenceScore).toBeGreaterThan(copied!.confidenceScore);
     expect(ranked[0].content).toBe(reworked!.content);
+  });
+
+  it('downranks portfolio roles that already dominate the live queue', () => {
+    const context = rankingContext();
+    context.allTweets = Array.from({ length: 6 }, (_, index) => historicalTweet({
+      id: `recent-proof-${index}`,
+      content: `Proof-shaped queue item ${index}: agents need measurable rollback rules before more autonomy.`,
+      portfolioRole: 'proof',
+      coverageCluster: `ai agents:recent proof ${index}`,
+      thesis: `recent proof ${index}`,
+      rewardBreakdown: null,
+    }));
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Agent teams earn trust when every failed eval produces one named rollback owner.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Another proof-shaped operating claim.',
+        portfolioRole: 'proof',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'failed eval named rollback owner',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'Last week, one boring rollback owner saved an agent launch that looked ready on paper.',
+        format: 'story',
+        targetTopic: 'AI agents',
+        rationale: 'A story-shaped version of the same operator lesson.',
+        portfolioRole: 'story',
+        creativeLane: 'story_example',
+        featureTags: {
+          hook: 'story',
+          tone: 'earnest',
+          specificity: 'story_led',
+          structure: 'story_arc',
+          thesis: 'rollback owner saved agent launch',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const saturatedProof = ranked.find((candidate) => candidate.portfolioRole === 'proof');
+    const freshStory = ranked.find((candidate) => candidate.portfolioRole === 'story');
+
+    expect(saturatedProof).toBeDefined();
+    expect(freshStory).toBeDefined();
+    expect(saturatedProof!.scoreProvenance.portfolioDiversity).toBeLessThan(0);
+    expect(freshStory!.scoreProvenance.portfolioDiversity).toBeGreaterThan(0);
+    expect(freshStory!.confidenceScore).toBeGreaterThan(saturatedProof!.confidenceScore);
+    expect(ranked[0].portfolioRole).toBe('story');
   });
 });
