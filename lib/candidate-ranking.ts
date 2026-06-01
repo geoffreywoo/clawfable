@@ -1172,17 +1172,34 @@ function scoreViralTakePotential(
   return clamp(score);
 }
 
+function scoreJudgeBreakdown(breakdown: CandidateJudgeBreakdown): number {
+  const weighted = (
+    breakdown.voiceFit * 0.28 +
+    breakdown.clarity * 0.18 +
+    breakdown.novelty * 0.18 +
+    breakdown.audienceFit * 0.2 +
+    breakdown.policySafety * 0.16
+  );
+  const weakDimensionPenalty = (
+    Math.max(0, 0.58 - breakdown.voiceFit) * 0.36 +
+    Math.max(0, 0.56 - breakdown.clarity) * 0.24 +
+    Math.max(0, 0.5 - breakdown.novelty) * 0.18 +
+    Math.max(0, 0.56 - breakdown.audienceFit) * 0.22 +
+    Math.max(0, 0.72 - breakdown.policySafety) * 0.32
+  );
+
+  return clamp(weighted - weakDimensionPenalty);
+}
+
 function scoreJudge(candidate: RankableProtocolTweet): number {
-  if (typeof candidate.judgeScore === 'number') return clamp(candidate.judgeScore);
   if (candidate.judgeBreakdown) {
-    return clamp(
-      candidate.judgeBreakdown.voiceFit * 0.28 +
-      candidate.judgeBreakdown.clarity * 0.18 +
-      candidate.judgeBreakdown.novelty * 0.18 +
-      candidate.judgeBreakdown.audienceFit * 0.2 +
-      candidate.judgeBreakdown.policySafety * 0.16
-    );
+    const breakdownScore = scoreJudgeBreakdown(candidate.judgeBreakdown);
+    if (typeof candidate.judgeScore === 'number') {
+      return clamp(Math.min(candidate.judgeScore, breakdownScore + 0.04));
+    }
+    return breakdownScore;
   }
+  if (typeof candidate.judgeScore === 'number') return clamp(candidate.judgeScore);
   return 0.5;
 }
 
