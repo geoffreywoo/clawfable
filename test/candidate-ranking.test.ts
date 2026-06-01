@@ -820,6 +820,73 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(fresh!.content);
   });
 
+  it('learns from operator edit friction before approving similar drafts', () => {
+    const context = rankingContext();
+    context.allTweets = [
+      historicalTweet({
+        id: 'edited-before-approval-1',
+        status: 'posted',
+        originalContent: 'AI agents will change everything once autonomy is everywhere.',
+        content: 'AI agents earn trust when one failed eval names a rollback owner before autonomy expands.',
+        editCount: 2,
+        approvedAt: '2026-05-27T12:00:00.000Z',
+        topic: 'AI agents',
+        thesis: 'agent failed eval rollback owner trust',
+        coverageCluster: 'ai agents:agent failed eval rollback owner trust',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent failed eval rollback owner trust',
+          riskFlags: [],
+        },
+        rewardBreakdown: null,
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agents will change everything because autonomy is spreading everywhere.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resembles the draft the operator had to rewrite.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents change everything autonomy everywhere',
+          riskFlags: ['thin'],
+        },
+      },
+      {
+        content: 'AI agents earn trust when a failed eval writes one rollback owner into the next checklist.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resembles the operator-approved final shape without copying it.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent failed eval rollback owner checklist',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const preEditShape = ranked.find((candidate) => candidate.content.includes('change everything'));
+    const approvedShape = ranked.find((candidate) => candidate.content.includes('rollback owner'));
+
+    expect(preEditShape).toBeDefined();
+    expect(approvedShape).toBeDefined();
+    expect(preEditShape!.scoreProvenance.approvalFriction).toBeLessThan(0);
+    expect(approvedShape!.scoreProvenance.approvalFriction).toBeGreaterThan(0);
+    expect(approvedShape!.confidenceScore).toBeGreaterThan(preEditShape!.confidenceScore);
+    expect(ranked[0].content).toBe(approvedShape!.content);
+  });
+
   it('uses operator voice anchors to prefer trusted human-shaped theses over prior misses', () => {
     const context = rankingContext();
     const styleFingerprint = {

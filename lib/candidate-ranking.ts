@@ -678,6 +678,87 @@ function getObservedOutcome(tweet: Tweet): number | null {
   return null;
 }
 
+function getTweetFeatureTags(tweet: Tweet): CandidateFeatureTags {
+  return tweet.featureTags || (
+    tweet.hookType && tweet.toneType && tweet.specificityType && tweet.structureType
+      ? {
+          hook: tweet.hookType,
+          tone: tweet.toneType,
+          specificity: tweet.specificityType,
+          structure: tweet.structureType,
+          thesis: tweet.thesis || buildCoverageCluster(tweet.content, tweet.topic).split(':').slice(1).join(':'),
+          riskFlags: [],
+        }
+      : extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis })
+  );
+}
+
+function scoreFeatureShapeMatch(left: CandidateFeatureTags, right: CandidateFeatureTags): number {
+  let score = 0;
+  if (left.hook === right.hook) score += 0.26;
+  if (left.tone === right.tone) score += 0.2;
+  if (left.specificity === right.specificity) score += 0.27;
+  if (left.structure === right.structure) score += 0.27;
+  return clamp(score);
+}
+
+function scoreApprovalFriction(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const candidateIdea = {
+    content: candidate.content,
+    thesis: featureTags.thesis,
+    topic: candidate.targetTopic,
+  };
+  let strongestBoost = 0;
+  let strongestPenalty = 0;
+
+  for (const tweet of context.allTweets.slice(0, 90)) {
+    const approved = Boolean(tweet.approvedAt) || tweet.status === 'queued' || tweet.status === 'posted';
+    const editCount = Math.max(0, tweet.editCount || 0);
+    const originalContent = (tweet.originalContent || '').trim();
+    const finalContent = tweet.content.trim();
+    const hasEditedOriginal = editCount > 0 && originalContent && originalContent !== finalContent;
+    const finalTags = getTweetFeatureTags(tweet);
+    const finalSimilarity = ideaSimilarity(candidateIdea, {
+      content: finalContent,
+      thesis: finalTags.thesis,
+      topic: tweet.topic,
+    });
+    const shapeMatch = scoreFeatureShapeMatch(featureTags, finalTags);
+
+    if (approved && editCount === 0 && finalSimilarity >= 0.3) {
+      const cleanApprovalBoost = finalSimilarity * (0.06 + shapeMatch * 0.08);
+      strongestBoost = Math.max(strongestBoost, cleanApprovalBoost);
+    }
+
+    if (approved && hasEditedOriginal && finalSimilarity >= 0.34) {
+      const finalShapeBoost = finalSimilarity * (0.04 + shapeMatch * 0.07);
+      strongestBoost = Math.max(strongestBoost, finalShapeBoost);
+    }
+
+    if (!hasEditedOriginal) continue;
+
+    const originalTags = extractCandidateFeatureTags(originalContent, { topic: tweet.topic });
+    const originalSimilarity = ideaSimilarity(candidateIdea, {
+      content: originalContent,
+      thesis: originalTags.thesis,
+      topic: tweet.topic,
+    });
+    if (originalSimilarity < 0.3) continue;
+
+    const originalShapeMatch = scoreFeatureShapeMatch(featureTags, originalTags);
+    const editBurden = clamp((editCount * 0.08) + (originalShapeMatch * 0.12), 0.08, 0.28);
+    const resemblesRejectedDraft = originalSimilarity >= finalSimilarity - 0.04;
+    const penalty = originalSimilarity * editBurden * (resemblesRejectedDraft ? 1.2 : 0.72);
+    strongestPenalty = Math.max(strongestPenalty, penalty);
+  }
+
+  return clampSigned(strongestBoost - strongestPenalty, -0.24, 0.18);
+}
+
 function scoreOutcomeCalibration(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
@@ -692,18 +773,7 @@ function scoreOutcomeCalibration(
     const predicted = getPredictedOutcome(tweet);
     if (observed === null || predicted === null) continue;
 
-    const tweetFeatureTags = tweet.featureTags || (
-      tweet.hookType && tweet.toneType && tweet.specificityType && tweet.structureType
-        ? {
-            hook: tweet.hookType,
-            tone: tweet.toneType,
-            specificity: tweet.specificityType,
-            structure: tweet.structureType,
-            thesis: tweet.thesis || buildCoverageCluster(tweet.content, tweet.topic).split(':').slice(1).join(':'),
-            riskFlags: [],
-          }
-        : extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis })
-    );
+    const tweetFeatureTags = getTweetFeatureTags(tweet);
     const tweetCluster = tweet.coverageCluster || buildCoverageCluster(tweet.content, tweet.topic, tweetFeatureTags.thesis);
     const similarity = ideaSimilarity(
       { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
@@ -1321,6 +1391,7 @@ export function rankGeneratedTweets(
     const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
     const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
+    const approvalFrictionScore = scoreApprovalFriction(candidate, featureTags, context);
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
       (policyRiskScore * 0.44) +
@@ -1334,6 +1405,7 @@ export function rankGeneratedTweets(
       (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
       (anchorCopyRiskScore * 0.32) +
       (phraseReuseRiskScore * 0.24) +
+      (approvalFrictionScore < 0 ? Math.abs(approvalFrictionScore) * 0.2 : 0) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1359,6 +1431,7 @@ export function rankGeneratedTweets(
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
       phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
+      approvalFriction: Number((approvalFrictionScore * 0.12).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
@@ -1386,6 +1459,7 @@ export function rankGeneratedTweets(
       operatorAnchorScore * 0.16 +
       (-anchorCopyRiskScore * 0.22) +
       (-phraseReuseRiskScore * 0.18) +
+      approvalFrictionScore * 0.16 +
       styleModeAdjustment
     );
 
@@ -1426,6 +1500,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.operatorAnchor || 0) +
       (scoreProvenance.anchorCopyRisk || 0) +
       (scoreProvenance.phraseReuseRisk || 0) +
+      (scoreProvenance.approvalFriction || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);

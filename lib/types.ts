@@ -235,6 +235,7 @@ export interface CandidateScoreProvenance {
   operatorAnchor?: number;
   anchorCopyRisk?: number;
   phraseReuseRisk?: number;
+  approvalFriction?: number;
 }
 
 export interface RewardBreakdown {
