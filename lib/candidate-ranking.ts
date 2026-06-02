@@ -759,6 +759,119 @@ function scoreApprovalFriction(
   return clampSigned(strongestBoost - strongestPenalty, -0.24, 0.18);
 }
 
+function collectRejectionLessonText(tweet: Tweet): string[] {
+  const notes = tweet.rewardBreakdown?.notes || [];
+  return [
+    tweet.deletionReason,
+    tweet.quarantineReason,
+    ...notes,
+  ]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item));
+}
+
+function scoreReasonApplicability(reasonText: string, candidate: RankableProtocolTweet, featureTags: CandidateFeatureTags): number {
+  const reason = reasonText.toLowerCase();
+  let score = 0;
+
+  if (
+    hasAnyTerm(reason, ['generic', 'vague', 'thin', 'abstract', 'surface-level', 'surface level'])
+    && (featureTags.specificity === 'abstract' || featureTags.riskFlags.includes('thin') || candidate.content.length < 80)
+  ) {
+    score += 0.42;
+  }
+  if (
+    hasAnyTerm(reason, ['salesy', 'promotional', 'promo', 'cta', 'call to action', 'subscribe', 'sign up', 'sell'])
+    && (
+      featureTags.riskFlags.includes('salesy')
+      || /\b(sign up|subscribe|buy|join|dm me|try it|book a call)\b/i.test(candidate.content)
+    )
+  ) {
+    score += 0.44;
+  }
+  if (
+    hasAnyTerm(reason, ['overclaim', 'unsupported', 'too broad', 'absolute', 'unearned', 'no proof'])
+    && (featureTags.riskFlags.includes('absolute_claim') || getAuthorityProofIssue(candidate.content))
+  ) {
+    score += 0.4;
+  }
+  if (
+    hasAnyTerm(reason, ['cringe', 'try-hard', 'try hard', 'shouty', 'bait', 'engagement bait'])
+    && (
+      featureTags.riskFlags.includes('shouty_caps')
+      || featureTags.riskFlags.includes('overexcited')
+      || scoreReplyPotential(candidate.content, featureTags) > 0.72
+    )
+  ) {
+    score += 0.36;
+  }
+  if (
+    hasAnyTerm(reason, ['too long', 'wordy', 'rambling', 'dense'])
+    && candidate.content.length > 360
+  ) {
+    score += 0.28;
+  }
+  if (
+    hasAnyTerm(reason, ['off voice', 'off-brand', 'off brand', 'not my voice', 'unlike the operator'])
+    && ['sarcastic', 'playful', 'urgent', 'provocative'].includes(featureTags.tone)
+  ) {
+    score += 0.3;
+  }
+
+  return clamp(score);
+}
+
+function scoreRejectionLesson(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const candidateIdea = {
+    content: candidate.content,
+    thesis: featureTags.thesis,
+    topic: candidate.targetTopic,
+  };
+  let strongestPenalty = 0;
+
+  for (const tweet of context.allTweets.slice(0, 100)) {
+    const observed = getObservedOutcome(tweet);
+    const lessonText = collectRejectionLessonText(tweet);
+    const hasExplicitRejectionText = Boolean(tweet.deletionReason?.trim() || tweet.quarantineReason?.trim());
+    const negativeRewardTotal = typeof tweet.rewardBreakdown?.total === 'number' && tweet.rewardBreakdown.total <= -0.25;
+    const isRejected = tweet.status === 'deleted_from_x'
+      || (observed !== null && observed <= 0.35)
+      || hasExplicitRejectionText
+      || negativeRewardTotal;
+    if (!isRejected) continue;
+
+    const tweetTags = getTweetFeatureTags(tweet);
+    const similarity = ideaSimilarity(candidateIdea, {
+      content: tweet.content,
+      thesis: tweetTags.thesis,
+      topic: tweet.topic,
+    });
+    const shapeMatch = scoreFeatureShapeMatch(featureTags, tweetTags);
+    const topicMatch = normalizeTopic(tweet.topic) === normalizeTopic(candidate.targetTopic) ? 1 : 0;
+    const reasonApplicability = scoreReasonApplicability(lessonText.join(' '), candidate, featureTags);
+
+    if (similarity < 0.28 && shapeMatch < 0.72 && reasonApplicability < 0.24) continue;
+
+    const negativeOutcome = observed === null ? 0.5 : clamp(1 - observed);
+    const explicitReason = lessonText.length > 0 ? 0.12 : 0;
+    const deletedPenalty = tweet.status === 'deleted_from_x' ? 0.1 : 0;
+    const evidence = clamp(
+      (similarity * 0.5) +
+      (shapeMatch * 0.18) +
+      (topicMatch * 0.08) +
+      (reasonApplicability * 0.34),
+    );
+    const penalty = evidence * (0.08 + (negativeOutcome * 0.18) + explicitReason + deletedPenalty);
+    strongestPenalty = Math.max(strongestPenalty, penalty);
+  }
+
+  return -clamp(strongestPenalty, 0, 0.28);
+}
+
 function scoreOutcomeCalibration(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
@@ -1378,6 +1491,7 @@ function scoreLearnedReviewCaution({
   anchorCopyRiskScore,
   phraseReuseRiskScore,
   approvalFrictionScore,
+  rejectionLessonScore,
 }: {
   ideaGraphScore: number;
   memoryAlignmentScore: number;
@@ -1386,6 +1500,7 @@ function scoreLearnedReviewCaution({
   anchorCopyRiskScore: number;
   phraseReuseRiskScore: number;
   approvalFrictionScore: number;
+  rejectionLessonScore: number;
 }): number {
   return clamp(
     Math.max(0, -ideaGraphScore) * 0.95 +
@@ -1393,6 +1508,7 @@ function scoreLearnedReviewCaution({
     Math.max(0, -outcomeCalibrationScore) * 1.05 +
     Math.max(0, -operatorAnchorScore) * 0.8 +
     Math.max(0, -approvalFrictionScore) * 0.9 +
+    Math.max(0, -rejectionLessonScore) * 1.05 +
     anchorCopyRiskScore * 0.95 +
     phraseReuseRiskScore * 0.65
   );
@@ -1476,6 +1592,7 @@ export function rankGeneratedTweets(
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
     const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
     const approvalFrictionScore = scoreApprovalFriction(candidate, featureTags, context);
+    const rejectionLessonScore = scoreRejectionLesson(candidate, featureTags, context);
     const learnedReviewCautionScore = scoreLearnedReviewCaution({
       ideaGraphScore,
       memoryAlignmentScore,
@@ -1484,6 +1601,7 @@ export function rankGeneratedTweets(
       anchorCopyRiskScore,
       phraseReuseRiskScore,
       approvalFrictionScore,
+      rejectionLessonScore,
     });
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
@@ -1500,6 +1618,7 @@ export function rankGeneratedTweets(
       (anchorCopyRiskScore * 0.32) +
       (phraseReuseRiskScore * 0.24) +
       (approvalFrictionScore < 0 ? Math.abs(approvalFrictionScore) * 0.2 : 0) +
+      (rejectionLessonScore < 0 ? Math.abs(rejectionLessonScore) * 0.26 : 0) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1527,6 +1646,7 @@ export function rankGeneratedTweets(
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
       phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
       approvalFriction: Number((approvalFrictionScore * 0.12).toFixed(3)),
+      rejectionLesson: Number((rejectionLessonScore * 0.14).toFixed(3)),
       learnedReviewCaution: Number((-learnedReviewCautionScore * 0.08).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
@@ -1557,6 +1677,7 @@ export function rankGeneratedTweets(
       (-anchorCopyRiskScore * 0.22) +
       (-phraseReuseRiskScore * 0.18) +
       approvalFrictionScore * 0.16 +
+      rejectionLessonScore * 0.18 +
       styleModeAdjustment
     );
 
@@ -1599,6 +1720,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.anchorCopyRisk || 0) +
       (scoreProvenance.phraseReuseRisk || 0) +
       (scoreProvenance.approvalFriction || 0) +
+      (scoreProvenance.rejectionLesson || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);

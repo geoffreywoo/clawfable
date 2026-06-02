@@ -237,6 +237,7 @@ export interface CandidateScoreProvenance {
   anchorCopyRisk?: number;
   phraseReuseRisk?: number;
   approvalFriction?: number;
+  rejectionLesson?: number;
   learnedReviewCaution?: number;
 }
 

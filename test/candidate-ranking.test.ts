@@ -1278,6 +1278,89 @@ describe('rankGeneratedTweets', () => {
     expect(copied.generationMode).toBe('balanced');
   });
 
+  it('uses retained rejection reasons to avoid similar risky drafts', () => {
+    const context = rankingContext();
+    context.allTweets = [
+      historicalTweet({
+        id: 'deleted-salesy-1',
+        status: 'deleted_from_x',
+        content: 'Sign up for the AI agent growth system that unlocks viral content on autopilot.',
+        topic: 'AI agents',
+        deletionReason: 'Too salesy and promotional for this operator voice.',
+        predictedEngagementScore: 0.82,
+        confidenceScore: 0.8,
+        rewardPrediction: 0.78,
+        rewardBreakdown: {
+          approval: 0,
+          editBurden: 0,
+          deletionPenalty: -0.95,
+          postingOutcome: 0,
+          copySignal: 0,
+          replyOutcome: 0,
+          timeToApproval: 0,
+          engagementLift: 0,
+          immediateTotal: -0.95,
+          delayedTotal: 0,
+          total: -0.95,
+          computedAt: '2026-05-27T00:00:00.000Z',
+          notes: ['Operator deleted this because it sounded promotional.'],
+        },
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'casual',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agent growth viral autopilot',
+          riskFlags: ['salesy'],
+        },
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Sign up for AI agent autopilot and unlock viral growth without doing the work.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resurfaces the rejected promotional shape.',
+        judgeScore: 0.82,
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'casual',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agent autopilot unlock viral growth',
+          riskFlags: ['salesy'],
+        },
+      },
+      {
+        content: 'AI agent teams grow when one failed post becomes a clearer taste rule before the next queue refill.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Keeps the growth lesson but removes the promotional ask.',
+        judgeScore: 0.74,
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'failed post creates taste rule before refill',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const rejectedShape = ranked.find((candidate) => candidate.content.includes('Sign up'));
+    const refined = ranked.find((candidate) => candidate.content.includes('taste rule'));
+
+    expect(rejectedShape).toBeDefined();
+    expect(refined).toBeDefined();
+    expect(rejectedShape!.scoreProvenance.rejectionLesson).toBeLessThan(0);
+    expect(rejectedShape!.scoreProvenance.learnedReviewCaution).toBeLessThan(0);
+    expect(refined!.scoreProvenance.rejectionLesson).toBe(0);
+    expect(refined!.confidenceScore).toBeGreaterThan(rejectedShape!.confidenceScore);
+    expect(ranked[0].content).toBe(refined!.content);
+  });
+
   it('downranks portfolio roles that already dominate the live queue', () => {
     const context = rankingContext();
     context.allTweets = Array.from({ length: 6 }, (_, index) => historicalTweet({
