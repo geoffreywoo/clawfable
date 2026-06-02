@@ -678,6 +678,22 @@ function getObservedOutcome(tweet: Tweet): number | null {
   return null;
 }
 
+function getOutcomeEvidenceTimestamp(tweet: Tweet): string {
+  return tweet.rewardBreakdown?.computedAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt;
+}
+
+function scoreOutcomeEvidenceRecency(tweet: Tweet): number {
+  const timestamp = getOutcomeEvidenceTimestamp(tweet);
+  const measuredAt = new Date(timestamp).getTime();
+  if (!Number.isFinite(measuredAt)) return 0.65;
+
+  const daysOld = Math.max(0, (Date.now() - measuredAt) / (24 * 60 * 60 * 1000));
+  if (daysOld <= 21) return 1;
+  if (daysOld >= 150) return 0.15;
+
+  return clamp(1 - ((daysOld - 21) / 129) * 0.85, 0.15, 1);
+}
+
 function getTweetFeatureTags(tweet: Tweet): CandidateFeatureTags {
   return tweet.featureTags || (
     tweet.hookType && tweet.toneType && tweet.specificityType && tweet.structureType
@@ -906,6 +922,7 @@ function scoreOutcomeCalibration(
     if (String(tweetFeatureTags.structure).toLowerCase() === featureTags.structure.toLowerCase()) weight += 0.06;
     if (tweet.status === 'deleted_from_x') weight += 0.1;
     if (!semanticMatch) weight *= 0.45;
+    weight *= scoreOutcomeEvidenceRecency(tweet);
 
     if (weight < 0.34) continue;
     const error = clampSigned(observed - predicted);

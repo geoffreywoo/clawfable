@@ -816,6 +816,83 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(freshLesson!.content);
   });
 
+  it('discounts stale outcome misses before suppressing a similar thesis again', () => {
+    const recentContext = rankingContext();
+    recentContext.allTweets = [
+      historicalTweet({
+        id: 'recent-miss',
+        content: 'AI agent teams grow fastest when memory, evals, and release notes compound in one loop.',
+        predictedEngagementScore: 0.84,
+        confidenceScore: 0.82,
+        rewardPrediction: 0.8,
+        rewardBreakdown: {
+          approval: 0,
+          editBurden: 0,
+          deletionPenalty: 0,
+          postingOutcome: 0,
+          copySignal: 0,
+          replyOutcome: 0,
+          timeToApproval: 0,
+          engagementLift: -0.68,
+          immediateTotal: 0,
+          delayedTotal: -0.68,
+          total: -0.68,
+          computedAt: '2026-05-24T00:00:00.000Z',
+          notes: ['Recent loop framing missed the baseline.'],
+        },
+      }),
+    ];
+    const staleContext = rankingContext();
+    staleContext.allTweets = [
+      historicalTweet({
+        id: 'stale-miss',
+        content: 'AI agent teams grow fastest when memory, evals, and release notes compound in one loop.',
+        predictedEngagementScore: 0.84,
+        confidenceScore: 0.82,
+        rewardPrediction: 0.8,
+        postedAt: '2025-11-01T00:00:00.000Z',
+        createdAt: '2025-11-01T00:00:00.000Z',
+        rewardBreakdown: {
+          approval: 0,
+          editBurden: 0,
+          deletionPenalty: 0,
+          postingOutcome: 0,
+          copySignal: 0,
+          replyOutcome: 0,
+          timeToApproval: 0,
+          engagementLift: -0.68,
+          immediateTotal: 0,
+          delayedTotal: -0.68,
+          total: -0.68,
+          computedAt: '2025-11-02T00:00:00.000Z',
+          notes: ['Old loop framing missed the baseline.'],
+        },
+      }),
+    ];
+
+    const candidate = {
+      content: 'AI agent teams grow fastest when memory, evals, and release notes compound in one loop.',
+      format: 'hot_take',
+      targetTopic: 'AI agents',
+      rationale: 'Resurfaces an old pattern.',
+      featureTags: {
+        hook: 'bold_claim' as const,
+        tone: 'analytical' as const,
+        specificity: 'tactical' as const,
+        structure: 'single_punch' as const,
+        thesis: 'agent memory eval loops compound',
+        riskFlags: [],
+      },
+    };
+
+    const [recentlyMissed] = rankGeneratedTweets([candidate], recentContext);
+    const [staleMissed] = rankGeneratedTweets([candidate], staleContext);
+
+    expect(recentlyMissed.scoreProvenance.outcomeCalibration).toBeLessThan(0);
+    expect(staleMissed.scoreProvenance.outcomeCalibration).toBe(0);
+    expect(staleMissed.confidenceScore).toBeGreaterThan(recentlyMissed.confidenceScore);
+  });
+
   it('does not let generic engagement bait outrank substantive conversation prompts', () => {
     const ranked = rankGeneratedTweets([
       {
