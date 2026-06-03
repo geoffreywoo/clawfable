@@ -58,7 +58,7 @@ export async function POST(
         return NextResponse.json({ error: 'Run account analysis before generating preview tweets' }, { status: 400 });
       }
 
-      const { voiceProfile, learnings, style, recentPosts, allTweets, memory, ideaAtoms = [] } = await buildGenerationContext(agent, {
+      const { voiceProfile, learnings, style, recentPosts, allTweets, memory, ideaAtoms = [], signals = [] } = await buildGenerationContext(agent, {
         negativeLimit: 10,
         directiveLimit: 10,
       });
@@ -69,7 +69,7 @@ export async function POST(
       }
 
       const previewCount = batchCount ?? 1;
-      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms);
+      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
       const tweets = [];
       for (const item of batch) {
         if (getGeneratedTweetIssue(item.content)) continue;
@@ -90,7 +90,7 @@ export async function POST(
     }
 
     const analysis = await getAnalysis(id);
-    const { voiceProfile, learnings, style, recentPosts, allTweets, memory, ideaAtoms = [] } = await buildGenerationContext(agent, {
+    const { voiceProfile, learnings, style, recentPosts, allTweets, memory, ideaAtoms = [], signals = [] } = await buildGenerationContext(agent, {
       negativeLimit: 10,
       directiveLimit: 10,
     });
@@ -110,7 +110,7 @@ export async function POST(
         topTweet: { id: 'manual-topic', text: topicContext, likes: 0, author: agent.handle },
       }];
 
-      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms);
+      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
       if (batch.length > 0) {
         const item = batch[0];
         const generationIssue = getGeneratedTweetIssue(item.content);

@@ -5,7 +5,7 @@ import {
   type CandidateRankingContext,
   type RankedProtocolTweet,
 } from '@/lib/candidate-ranking';
-import type { AgentLearnings, IdeaAtom, Tweet, TweetPerformance } from '@/lib/types';
+import type { AgentLearnings, IdeaAtom, LearningSignal, Tweet, TweetPerformance } from '@/lib/types';
 
 function rankingContext(): CandidateRankingContext {
   return {
@@ -216,6 +216,22 @@ function historicalTweet(overrides: Partial<Tweet> = {}): Tweet {
     },
     createdAt: overrides.createdAt || '2026-05-24T00:00:00.000Z',
     ...overrides,
+  };
+}
+
+function learningSignal(overrides: Partial<LearningSignal> & { signalType: LearningSignal['signalType']; tweetId: string }): LearningSignal {
+  return {
+    id: overrides.id || `signal-${overrides.signalType}-${overrides.tweetId}`,
+    agentId: overrides.agentId || 'agent-1',
+    tweetId: overrides.tweetId,
+    xTweetId: overrides.xTweetId,
+    signalType: overrides.signalType,
+    surface: overrides.surface || 'queue',
+    rewardDelta: overrides.rewardDelta ?? (overrides.signalType === 'taste_less_like_this' ? -0.56 : 0.52),
+    createdAt: overrides.createdAt || '2026-05-29T12:00:00.000Z',
+    reason: overrides.reason,
+    inferred: overrides.inferred,
+    metadata: overrides.metadata,
   };
 }
 
@@ -1436,6 +1452,106 @@ describe('rankGeneratedTweets', () => {
     expect(refined!.scoreProvenance.rejectionLesson).toBe(0);
     expect(refined!.confidenceScore).toBeGreaterThan(rejectedShape!.confidenceScore);
     expect(ranked[0].content).toBe(refined!.content);
+  });
+
+  it('uses explicit taste calibration labels as ranking priors', () => {
+    const context = rankingContext();
+    context.allTweets = [
+      historicalTweet({
+        id: 'taste-like-1',
+        status: 'preview',
+        content: 'AI agent teams earn trust when every failed eval creates one named rollback owner.',
+        topic: 'AI agents',
+        format: 'hot_take',
+        creativeLane: 'operator_take',
+        thesis: 'failed eval named rollback owner trust',
+        coverageCluster: 'ai agents:failed eval named rollback owner trust',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'failed eval named rollback owner trust',
+          riskFlags: [],
+        },
+        rewardBreakdown: null,
+      }),
+      historicalTweet({
+        id: 'taste-avoid-1',
+        status: 'preview',
+        content: 'AI agents will change everything once every company unlocks viral autonomous growth.',
+        topic: 'AI agents',
+        format: 'hot_take',
+        creativeLane: 'operator_take',
+        thesis: 'ai agents change everything viral growth',
+        coverageCluster: 'ai agents:ai agents change everything viral growth',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'casual',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents change everything viral growth',
+          riskFlags: ['thin', 'salesy'],
+        },
+        rewardBreakdown: null,
+      }),
+    ];
+    context.signals = [
+      learningSignal({
+        tweetId: 'taste-like-1',
+        signalType: 'taste_more_like_this',
+        reason: 'This is the useful operating shape.',
+        rewardDelta: 0.6,
+      }),
+      learningSignal({
+        tweetId: 'taste-avoid-1',
+        signalType: 'taste_less_like_this',
+        reason: 'Too broad and promotional.',
+        rewardDelta: -0.62,
+      }),
+    ];
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'AI agent teams build trust when one failed eval writes a rollback owner into the next checklist.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Fresh version of a liked taste-calibration shape.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'failed eval rollback owner checklist trust',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'AI agents will change everything when companies unlock viral autonomous growth.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Resembles a taste-calibration rejection.',
+        featureTags: {
+          hook: 'bold_claim',
+          tone: 'casual',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents change everything viral growth',
+          riskFlags: ['thin', 'salesy'],
+        },
+      },
+    ], context);
+
+    const preferred = ranked.find((candidate) => candidate.content.includes('rollback owner'));
+    const avoided = ranked.find((candidate) => candidate.content.includes('viral autonomous growth'));
+
+    expect(preferred).toBeDefined();
+    expect(avoided).toBeDefined();
+    expect(preferred!.scoreProvenance.tasteCalibration).toBeGreaterThan(0);
+    expect(avoided!.scoreProvenance.tasteCalibration).toBeLessThan(0);
+    expect(avoided!.scoreProvenance.learnedReviewCaution).toBeLessThan(0);
+    expect(preferred!.confidenceScore).toBeGreaterThan(avoided!.confidenceScore);
+    expect(ranked[0].content).toBe(preferred!.content);
   });
 
   it('downranks portfolio roles that already dominate the live queue', () => {

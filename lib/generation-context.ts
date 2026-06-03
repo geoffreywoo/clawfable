@@ -58,6 +58,7 @@ export interface GenerationContext {
   recentPosts: string[];
   allTweets: Tweet[];
   ideaAtoms: IdeaAtom[];
+  signals: LearningSignal[];
 }
 
 const LIVE_CONTENT_STATUSES = new Set(['draft', 'preview', 'queued', 'posted']);
@@ -368,5 +369,6 @@ export async function buildGenerationContext(
     recentPosts,
     allTweets,
     ideaAtoms,
+    signals,
   };
 }

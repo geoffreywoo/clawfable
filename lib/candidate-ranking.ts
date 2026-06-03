@@ -10,6 +10,7 @@ import type {
   ContentSourceLane,
   ContentStyleMode,
   IdeaAtom,
+  LearningSignal,
   MediaExperimentType,
   PersonalizationMemory,
   PostPortfolioRole,
@@ -128,6 +129,7 @@ export interface CandidateRankingContext {
   allTweets: Tweet[];
   memory: PersonalizationMemory;
   ideaAtoms?: IdeaAtom[];
+  signals?: LearningSignal[];
 }
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -888,6 +890,115 @@ function scoreRejectionLesson(
   return -clamp(strongestPenalty, 0, 0.28);
 }
 
+function scoreTasteSignalRecency(signal: LearningSignal): number {
+  const createdAt = new Date(signal.createdAt).getTime();
+  if (!Number.isFinite(createdAt)) return 0.5;
+
+  const daysOld = Math.max(0, (Date.now() - createdAt) / (24 * 60 * 60 * 1000));
+  if (daysOld <= 14) return 1;
+  if (daysOld >= 90) return 0.2;
+  return clamp(1 - ((daysOld - 14) / 76) * 0.8, 0.2, 1);
+}
+
+function scoreTasteAnchorEvidence(
+  candidate: RankableProtocolTweet,
+  candidateTags: CandidateFeatureTags,
+  anchor: Pick<Tweet, 'content' | 'topic' | 'format' | 'creativeLane'>,
+  anchorTags: CandidateFeatureTags,
+): number {
+  const similarity = ideaSimilarity(
+    { content: candidate.content, thesis: candidateTags.thesis, topic: candidate.targetTopic },
+    { content: anchor.content, thesis: anchorTags.thesis, topic: anchor.topic },
+  );
+  const shapeMatch = scoreFeatureShapeMatch(candidateTags, anchorTags);
+  const topicMatch = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic) ? 1 : 0;
+  const formatMatch = normalizeFormat(anchor.format) === normalizeFormat(candidate.format) ? 1 : 0;
+  const laneMatch = anchor.creativeLane && normalizeCreativeLane(anchor.creativeLane) === normalizeCreativeLane(candidate.creativeLane)
+    ? 1
+    : 0;
+
+  return clamp(
+    (similarity * 0.5) +
+    (shapeMatch * 0.28) +
+    (topicMatch * 0.12) +
+    (formatMatch * 0.07) +
+    (laneMatch * 0.05),
+  );
+}
+
+function scoreTasteCalibrationPrior(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  const tasteSignals = (context.signals || [])
+    .filter((signal) =>
+      signal.signalType === 'taste_more_like_this'
+      || signal.signalType === 'taste_less_like_this'
+      || signal.signalType === 'taste_calibration_edit'
+    )
+    .slice(0, 80);
+
+  if (tasteSignals.length === 0) return 0;
+
+  const tweetsById = new Map(context.allTweets.map((tweet) => [String(tweet.id), tweet]));
+  let strongestBoost = 0;
+  let strongestPenalty = 0;
+
+  for (const signal of tasteSignals) {
+    if (!signal.tweetId) continue;
+    const tweet = tweetsById.get(String(signal.tweetId));
+    if (!tweet) continue;
+
+    const recency = scoreTasteSignalRecency(signal);
+    const strength = clamp(Math.abs(signal.rewardDelta || 0.35), 0.25, 0.75);
+    const hasExplicitReason = Boolean(signal.reason || typeof signal.metadata?.preferenceHint === 'string');
+    const explicitReason = hasExplicitReason ? 0.04 : 0;
+    const tweetTags = getTweetFeatureTags(tweet);
+
+    if (signal.signalType === 'taste_more_like_this') {
+      const evidence = scoreTasteAnchorEvidence(candidate, featureTags, tweet, tweetTags);
+      if (evidence < 0.3) continue;
+      strongestBoost = Math.max(strongestBoost, evidence * recency * (0.08 + strength * 0.2 + explicitReason));
+      continue;
+    }
+
+    if (signal.signalType === 'taste_less_like_this') {
+      const evidence = scoreTasteAnchorEvidence(candidate, featureTags, tweet, tweetTags);
+      if (evidence < 0.28) continue;
+      strongestPenalty = Math.max(strongestPenalty, evidence * recency * (0.1 + strength * 0.24 + explicitReason));
+      continue;
+    }
+
+    const editedDraft = typeof signal.metadata?.editedDraft === 'string'
+      ? signal.metadata.editedDraft.trim()
+      : '';
+    if (!editedDraft) {
+      const evidence = scoreTasteAnchorEvidence(candidate, featureTags, tweet, tweetTags);
+      if (evidence >= 0.34) {
+        strongestBoost = Math.max(strongestBoost, evidence * recency * (0.05 + strength * 0.12));
+      }
+      continue;
+    }
+
+    const editedTags = extractCandidateFeatureTags(editedDraft, { topic: tweet.topic });
+    const editedEvidence = scoreTasteAnchorEvidence(candidate, featureTags, {
+      ...tweet,
+      content: editedDraft,
+    }, editedTags);
+    const originalEvidence = scoreTasteAnchorEvidence(candidate, featureTags, tweet, tweetTags);
+
+    if (editedEvidence >= 0.3) {
+      strongestBoost = Math.max(strongestBoost, editedEvidence * recency * (0.07 + strength * 0.16));
+    }
+    if (originalEvidence >= 0.34 && originalEvidence >= editedEvidence - 0.04) {
+      strongestPenalty = Math.max(strongestPenalty, originalEvidence * recency * (0.05 + strength * 0.12));
+    }
+  }
+
+  return clampSigned(strongestBoost - strongestPenalty, -0.3, 0.24);
+}
+
 function scoreOutcomeCalibration(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
@@ -1509,6 +1620,7 @@ function scoreLearnedReviewCaution({
   phraseReuseRiskScore,
   approvalFrictionScore,
   rejectionLessonScore,
+  tasteCalibrationScore,
 }: {
   ideaGraphScore: number;
   memoryAlignmentScore: number;
@@ -1518,6 +1630,7 @@ function scoreLearnedReviewCaution({
   phraseReuseRiskScore: number;
   approvalFrictionScore: number;
   rejectionLessonScore: number;
+  tasteCalibrationScore: number;
 }): number {
   return clamp(
     Math.max(0, -ideaGraphScore) * 0.95 +
@@ -1526,6 +1639,7 @@ function scoreLearnedReviewCaution({
     Math.max(0, -operatorAnchorScore) * 0.8 +
     Math.max(0, -approvalFrictionScore) * 0.9 +
     Math.max(0, -rejectionLessonScore) * 1.05 +
+    Math.max(0, -tasteCalibrationScore) * 1.1 +
     anchorCopyRiskScore * 0.95 +
     phraseReuseRiskScore * 0.65
   );
@@ -1610,6 +1724,7 @@ export function rankGeneratedTweets(
     const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
     const approvalFrictionScore = scoreApprovalFriction(candidate, featureTags, context);
     const rejectionLessonScore = scoreRejectionLesson(candidate, featureTags, context);
+    const tasteCalibrationScore = scoreTasteCalibrationPrior(candidate, featureTags, context);
     const learnedReviewCautionScore = scoreLearnedReviewCaution({
       ideaGraphScore,
       memoryAlignmentScore,
@@ -1619,6 +1734,7 @@ export function rankGeneratedTweets(
       phraseReuseRiskScore,
       approvalFrictionScore,
       rejectionLessonScore,
+      tasteCalibrationScore,
     });
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
@@ -1636,6 +1752,7 @@ export function rankGeneratedTweets(
       (phraseReuseRiskScore * 0.24) +
       (approvalFrictionScore < 0 ? Math.abs(approvalFrictionScore) * 0.2 : 0) +
       (rejectionLessonScore < 0 ? Math.abs(rejectionLessonScore) * 0.26 : 0) +
+      (tasteCalibrationScore < 0 ? Math.abs(tasteCalibrationScore) * 0.28 : 0) +
       (replyBaitScore > 0.55 ? (1 - conversationQualityScore) * 0.16 : 0)
     );
 
@@ -1664,6 +1781,7 @@ export function rankGeneratedTweets(
       phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
       approvalFriction: Number((approvalFrictionScore * 0.12).toFixed(3)),
       rejectionLesson: Number((rejectionLessonScore * 0.14).toFixed(3)),
+      tasteCalibration: Number((tasteCalibrationScore * 0.16).toFixed(3)),
       learnedReviewCaution: Number((-learnedReviewCautionScore * 0.08).toFixed(3)),
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
@@ -1695,6 +1813,7 @@ export function rankGeneratedTweets(
       (-phraseReuseRiskScore * 0.18) +
       approvalFrictionScore * 0.16 +
       rejectionLessonScore * 0.18 +
+      tasteCalibrationScore * 0.18 +
       styleModeAdjustment
     );
 
@@ -1738,6 +1857,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.phraseReuseRisk || 0) +
       (scoreProvenance.approvalFriction || 0) +
       (scoreProvenance.rejectionLesson || 0) +
+      (scoreProvenance.tasteCalibration || 0) +
       (1 - scoreProvenance.riskPenalty)
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);

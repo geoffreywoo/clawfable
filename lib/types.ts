@@ -238,6 +238,7 @@ export interface CandidateScoreProvenance {
   phraseReuseRisk?: number;
   approvalFriction?: number;
   rejectionLesson?: number;
+  tasteCalibration?: number;
   learnedReviewCaution?: number;
 }
 

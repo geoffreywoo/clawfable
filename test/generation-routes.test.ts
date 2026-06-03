@@ -192,6 +192,7 @@ describe('generation route wiring', () => {
       ['recent tweet'],
       [],
       expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      [],
       []
     );
   });
@@ -222,6 +223,7 @@ describe('generation route wiring', () => {
       ['recent tweet'],
       [],
       expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      [],
       []
     );
   });
