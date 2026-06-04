@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 
 export type AiProvider = 'openai' | 'anthropic';
 export type AiModelTier = 'quality' | 'fast';
+export type OpenAiReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type AiTask =
   | 'tweet_generation'
   | 'creative_variant'
@@ -37,6 +38,7 @@ export interface GenerateTextOptions {
   modelChain?: AiModelTarget[];
   maxTokens: number;
   temperature?: number;
+  openAiReasoningEffort?: OpenAiReasoningEffort;
 }
 
 export interface GenerateTextResult {
@@ -47,33 +49,26 @@ export interface GenerateTextResult {
 }
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
-const OPENAI_QUALITY_MODEL = process.env.OPENAI_MODEL_QUALITY || 'gpt-5.5';
-const OPENAI_QUALITY_FALLBACK_MODEL = process.env.OPENAI_MODEL_QUALITY_FALLBACK || 'gpt-5.4';
-const OPENAI_FAST_MODEL = process.env.OPENAI_MODEL_FAST || 'gpt-5.4-mini';
-const ANTHROPIC_QUALITY_MODEL = process.env.ANTHROPIC_MODEL_QUALITY || 'claude-sonnet-4-20250514';
-const ANTHROPIC_OPUS_MODEL = process.env.ANTHROPIC_MODEL_OPUS || 'claude-opus-4-1-20250805';
-const ANTHROPIC_FAST_MODEL = process.env.ANTHROPIC_MODEL_FAST || 'claude-haiku-4-5-20251001';
+const OPENAI_LATEST_MODEL = 'gpt-5.5';
+const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-20250514';
+const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
-const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
-const OAI_QUALITY_FALLBACK: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_FALLBACK_MODEL };
-const OAI_FAST: AiModelTarget = { provider: 'openai', model: OPENAI_FAST_MODEL };
+const OAI_LATEST: AiModelTarget = { provider: 'openai', model: OPENAI_LATEST_MODEL };
 const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_QUALITY_MODEL };
-const CLAUDE_OPUS: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_OPUS_MODEL };
-const CLAUDE_FAST: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_FAST_MODEL };
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
-  tweet_generation: [OAI_QUALITY, OAI_QUALITY_FALLBACK, CLAUDE_QUALITY],
-  creative_variant: [OAI_QUALITY, CLAUDE_QUALITY, OAI_QUALITY_FALLBACK],
-  bulk_judgment: [OAI_FAST, OAI_QUALITY, CLAUDE_QUALITY],
-  final_judgment: [OAI_QUALITY, CLAUDE_QUALITY, OAI_QUALITY_FALLBACK],
-  reply_generation: [OAI_QUALITY, OAI_QUALITY_FALLBACK, CLAUDE_QUALITY],
-  reply_scoring: [OAI_FAST, OAI_QUALITY, CLAUDE_QUALITY],
-  learning: [OAI_QUALITY, CLAUDE_QUALITY, OAI_QUALITY_FALLBACK],
-  classification: [OAI_FAST, CLAUDE_FAST, OAI_QUALITY_FALLBACK],
-  soul_generation: [OAI_QUALITY, CLAUDE_QUALITY, OAI_QUALITY_FALLBACK],
-  exceptional: [OAI_QUALITY, CLAUDE_OPUS, CLAUDE_QUALITY],
-  default_quality: [OAI_QUALITY, OAI_QUALITY_FALLBACK, CLAUDE_QUALITY],
-  default_fast: [OAI_FAST, CLAUDE_FAST, OAI_QUALITY_FALLBACK],
+  tweet_generation: [OAI_LATEST, CLAUDE_QUALITY],
+  creative_variant: [OAI_LATEST, CLAUDE_QUALITY],
+  bulk_judgment: [OAI_LATEST, CLAUDE_QUALITY],
+  final_judgment: [OAI_LATEST, CLAUDE_QUALITY],
+  reply_generation: [OAI_LATEST, CLAUDE_QUALITY],
+  reply_scoring: [OAI_LATEST, CLAUDE_QUALITY],
+  learning: [OAI_LATEST, CLAUDE_QUALITY],
+  classification: [OAI_LATEST, CLAUDE_QUALITY],
+  soul_generation: [OAI_LATEST, CLAUDE_QUALITY],
+  exceptional: [OAI_LATEST, CLAUDE_QUALITY],
+  default_quality: [OAI_LATEST, CLAUDE_QUALITY],
+  default_fast: [OAI_LATEST, CLAUDE_QUALITY],
 };
 
 function getInputMessages({ prompt, messages }: Pick<GenerateTextOptions, 'prompt' | 'messages'>): AiMessage[] {
@@ -103,6 +98,66 @@ function getOpenAiStopReason(response: any): string | null {
   return typeof response?.status === 'string' ? response.status : null;
 }
 
+function normalizeOpenAiModelName(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+function getGpt5MinorVersion(model: string): number | null {
+  const match = normalizeOpenAiModelName(model).match(/^gpt-5\.(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function getOpenAiReasoningEnvKey(task: AiTask): string {
+  return `OPENAI_REASONING_EFFORT_${task.toUpperCase()}`;
+}
+
+function readOpenAiReasoningEffort(value: string | undefined): OpenAiReasoningEffort | null {
+  const effort = value?.trim().toLowerCase();
+  if (!effort) return null;
+  return OPENAI_REASONING_EFFORTS.has(effort as OpenAiReasoningEffort)
+    ? effort as OpenAiReasoningEffort
+    : null;
+}
+
+function getAllowedOpenAiReasoningEfforts(model: string): Set<OpenAiReasoningEffort> {
+  const normalized = normalizeOpenAiModelName(model);
+  if (/^gpt-5-pro(?:[.-]|$)/.test(normalized)) return new Set(['high']);
+  if (/^o[1-9]/.test(normalized)) return new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
+  if (!/^gpt-5(?:[.-]|$)/.test(normalized)) return new Set();
+
+  const minor = getGpt5MinorVersion(normalized);
+  const base = new Set<OpenAiReasoningEffort>(['minimal', 'low', 'medium', 'high']);
+  if (minor !== null && minor >= 1) base.add('none');
+  if (
+    (minor !== null && minor >= 2)
+    || /^gpt-5\.1-codex-max(?:[.-]|$)/.test(normalized)
+  ) {
+    base.add('xhigh');
+  }
+  return base;
+}
+
+function getDefaultOpenAiReasoningEffort(model: string): OpenAiReasoningEffort | null {
+  const allowed = getAllowedOpenAiReasoningEfforts(model);
+  if (allowed.has('none')) return 'none';
+  return null;
+}
+
+function getConfiguredOpenAiReasoningEffort(options: GenerateTextOptions): OpenAiReasoningEffort | null {
+  return options.openAiReasoningEffort
+    || (options.task ? readOpenAiReasoningEffort(process.env[getOpenAiReasoningEnvKey(options.task)]) : null)
+    || readOpenAiReasoningEffort(process.env.OPENAI_REASONING_EFFORT);
+}
+
+function getOpenAiReasoning(options: GenerateTextOptions, model: string): { effort: OpenAiReasoningEffort } | undefined {
+  const allowed = getAllowedOpenAiReasoningEfforts(model);
+  if (allowed.size === 0) return undefined;
+
+  const effort = getConfiguredOpenAiReasoningEffort(options) || getDefaultOpenAiReasoningEffort(model);
+  if (!effort || !allowed.has(effort)) return undefined;
+  return { effort };
+}
+
 function isProviderConfigured(provider: AiProvider): boolean {
   if (provider === 'openai') return Boolean(process.env.OPENAI_API_KEY);
   return Boolean(process.env.ANTHROPIC_API_KEY || IS_TEST_ENV);
@@ -125,7 +180,10 @@ export function getModelChainForTask(task: AiTask, tier: AiModelTier = 'quality'
 }
 
 function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
-  if (options.modelChain?.length) return dedupeTargets(options.modelChain);
+  if (options.modelChain?.length) {
+    const taskFallbacks = options.task ? getModelChainForTask(options.task, options.tier) : [];
+    return dedupeTargets([...taskFallbacks, ...options.modelChain]);
+  }
   if (options.task) return getModelChainForTask(options.task, options.tier);
   return getModelChainForTask(options.tier === 'fast' ? 'default_fast' : 'default_quality', options.tier);
 }
@@ -135,12 +193,14 @@ async function generateWithOpenAi(options: GenerateTextOptions, model: string): 
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null;
   if (!openai) throw new Error('OPENAI_API_KEY is not configured');
+  const reasoning = getOpenAiReasoning(options, model);
 
   const response = await openai.responses.create({
     model,
     instructions: options.system,
     input: getInputMessages(options),
     max_output_tokens: options.maxTokens,
+    ...(reasoning ? { reasoning } : {}),
     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
   });
 
