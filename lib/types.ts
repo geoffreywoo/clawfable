@@ -1207,6 +1207,7 @@ export interface PersonalizationMemory {
   relationshipLessons?: string[];
   viralityPostmortems?: string[];
   replyMiningInsights?: string[];
+  outcomeFatigueLessons?: string[];
   identityConstraints: string[];
   weeklyChanges: string[];
   updatedAt: string;

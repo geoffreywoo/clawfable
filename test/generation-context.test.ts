@@ -430,4 +430,54 @@ describe('generation context', () => {
     expect(context.memory.referenceBank).toContain(proven.thesis);
     expect(context.memory.referenceBank).not.toContain('ai agents replace every employee');
   });
+
+  it('injects outcome fatigue lessons for high-confidence shapes that underperform', async () => {
+    const agent = await createAgent({
+      handle: 'context-agent-fatigue',
+      name: 'Context Agent Fatigue',
+      soulMd: '# SOUL\n\nTasteful AI operator notes.',
+    } as any);
+
+    await createTweet({
+      agentId: agent.id,
+      content: 'AI agents only compound when the eval loop catches bad memory before it reaches users.',
+      type: 'original',
+      status: 'posted',
+      format: 'hot_take',
+      topic: 'AI agents',
+      xTweetId: 'x-fatigue-1',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+      predictedEngagementScore: 0.82,
+      rewardPrediction: 0.76,
+      hookType: 'bold_claim',
+      toneType: 'analytical',
+      specificityType: 'concrete',
+      structureType: 'single_punch',
+      thesis: 'eval loop catches bad memory before users',
+      rewardBreakdown: {
+        approval: 0.8,
+        editBurden: 0,
+        deletionPenalty: 0,
+        postingOutcome: 0.3,
+        copySignal: 0,
+        replyOutcome: 0,
+        timeToApproval: 0,
+        engagementLift: -0.34,
+        immediateTotal: 1,
+        delayedTotal: -0.42,
+        total: 0.58,
+        computedAt: '2026-05-25T00:00:00.000Z',
+        notes: ['Strong approval but poor engagement after posting.'],
+      },
+    });
+
+    const context = await buildGenerationContext(agent);
+
+    expect(context.memory.outcomeFatigueLessons?.[0]).toContain('Outcome fatigue: hot_take on AI agents');
+    expect(context.memory.outcomeFatigueLessons?.[0]).toContain('eval loop catches bad memory before users');
+    expect(context.voiceProfile.communicationStyle).toContain('## OUTCOME FATIGUE MEMORY');
+    expect(context.voiceProfile.communicationStyle).toContain('Avoid repeating the same shape');
+  });
 });

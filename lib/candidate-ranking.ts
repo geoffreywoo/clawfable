@@ -493,6 +493,7 @@ function scoreMemoryAlignment(
   const avoidItems = [
     ...(context.memory.neverDoThisAgain || []),
     ...(context.memory.identityConstraints || []),
+    ...(context.memory.outcomeFatigueLessons || []),
     ...context.voiceProfile.antiGoals.map((goal) => `Never: ${goal}`),
   ];
   const reinforceItems = [

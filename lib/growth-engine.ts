@@ -455,6 +455,7 @@ export function defaultPersonalizationMemory(): PersonalizationMemory {
     relationshipLessons: [],
     viralityPostmortems: [],
     replyMiningInsights: [],
+    outcomeFatigueLessons: [],
     identityConstraints: [],
     weeklyChanges: [],
     updatedAt: new Date().toISOString(),

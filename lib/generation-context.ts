@@ -382,6 +382,7 @@ export async function buildGenerationContext(
     performanceHistory: normalizedPerformanceHistory,
     banditPolicy,
     voiceProfile,
+    allTweets,
     baselineLikes: baseline?.avgLikes || 0,
     mentions,
   });
@@ -440,6 +441,10 @@ export async function buildGenerationContext(
 
   if (memory.replyMiningInsights?.length) {
     voiceProfile.communicationStyle += `\n\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`;
+  }
+
+  if (memory.outcomeFatigueLessons?.length) {
+    voiceProfile.communicationStyle += `\n\n## OUTCOME FATIGUE MEMORY\nThese were high-confidence drafts or approved posts that later underperformed. Avoid repeating the same shape; mutate the proof, claim, or structure before trying again.\n${memory.outcomeFatigueLessons.map((item) => `- ${item}`).join('\n')}`;
   }
 
   const curatedIdeaBank = curateIdeaBankForGeneration(ideaAtoms, { reusableLimit: 12, cautionLimit: 6, referenceLimit: 8 });

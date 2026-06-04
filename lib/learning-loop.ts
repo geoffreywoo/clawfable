@@ -4,6 +4,7 @@ import type {
   LearningSignal,
   Mention,
   PersonalizationMemory,
+  Tweet,
   TweetPerformance,
   VoiceDirectiveRule,
 } from './types';
@@ -163,6 +164,116 @@ function summarizeWeeklyChanges(
   return changes.slice(0, 4);
 }
 
+function readScore(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return value > 1 ? Math.max(0, Math.min(1, value / 100)) : Math.max(0, Math.min(1, value));
+}
+
+function readTweetPromise(tweet: Tweet): number | null {
+  return readScore(tweet.predictedEngagementScore)
+    ?? readScore(tweet.rewardPrediction)
+    ?? readScore(tweet.confidenceScore)
+    ?? readScore(tweet.judgeScore)
+    ?? readScore(tweet.candidateScore);
+}
+
+function tweetOutcomeSeverity(tweet: Tweet): number {
+  const reward = tweet.rewardBreakdown;
+  if (!reward) return 0;
+
+  const total = typeof reward.total === 'number' && Number.isFinite(reward.total) ? reward.total : 0;
+  const delayed = typeof reward.delayedTotal === 'number' && Number.isFinite(reward.delayedTotal) ? reward.delayedTotal : 0;
+  const engagementLift = typeof reward.engagementLift === 'number' && Number.isFinite(reward.engagementLift) ? reward.engagementLift : 0;
+  const actionTotal = typeof reward.actionRewards?.total === 'number' && Number.isFinite(reward.actionRewards.total)
+    ? reward.actionRewards.total
+    : 0;
+
+  return Math.max(
+    total < -0.1 ? Math.abs(total) : 0,
+    delayed < -0.16 ? Math.abs(delayed) : 0,
+    engagementLift < -0.2 ? Math.abs(engagementLift) : 0,
+    actionTotal < -0.2 ? Math.abs(actionTotal) : 0,
+  );
+}
+
+function summarizeOutcomeFatigueLessons(tweets: Tweet[]): string[] {
+  const groups = new Map<string, {
+    topic: string;
+    format: string;
+    hook: string;
+    specificity: string;
+    structure: string;
+    count: number;
+    totalPromise: number;
+    totalReward: number;
+    totalSeverity: number;
+    newestAt: number;
+    thesis: string | null;
+  }>();
+
+  for (const tweet of tweets) {
+    if (!tweet.rewardBreakdown) continue;
+    if (tweet.status !== 'posted' && tweet.status !== 'deleted_from_x') continue;
+
+    const promise = readTweetPromise(tweet);
+    if (promise === null || promise < 0.62) continue;
+
+    const severity = tweetOutcomeSeverity(tweet);
+    if (severity < 0.16) continue;
+
+    const topic = (tweet.topic || 'general').trim();
+    const format = (tweet.format || 'unknown').trim();
+    const hook = (tweet.featureTags?.hook || tweet.hookType || 'unknown').replace(/_/g, ' ');
+    const specificity = (tweet.featureTags?.specificity || tweet.specificityType || 'unknown').replace(/_/g, ' ');
+    const structure = (tweet.featureTags?.structure || tweet.structureType || 'unknown').replace(/_/g, ' ');
+    const key = [topic, format, hook, specificity, structure].map((value) => value.toLowerCase()).join('|');
+    const rewardTotal = typeof tweet.rewardBreakdown.total === 'number' && Number.isFinite(tweet.rewardBreakdown.total)
+      ? tweet.rewardBreakdown.total
+      : 0;
+    const timestamp = tweet.rewardBreakdown.computedAt || tweet.postedAt || tweet.createdAt;
+    const observedAt = new Date(timestamp).getTime();
+
+    const current = groups.get(key) || {
+      topic,
+      format,
+      hook,
+      specificity,
+      structure,
+      count: 0,
+      totalPromise: 0,
+      totalReward: 0,
+      totalSeverity: 0,
+      newestAt: 0,
+      thesis: null,
+    };
+
+    current.count += 1;
+    current.totalPromise += promise;
+    current.totalReward += rewardTotal;
+    current.totalSeverity += severity;
+    if (Number.isFinite(observedAt) && observedAt > current.newestAt) {
+      current.newestAt = observedAt;
+      current.thesis = tweet.thesis || tweet.featureTags?.thesis || null;
+    }
+    groups.set(key, current);
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => {
+      const severityDiff = (b.totalSeverity / b.count) - (a.totalSeverity / a.count);
+      if (severityDiff !== 0) return severityDiff;
+      return b.newestAt - a.newestAt;
+    })
+    .slice(0, 5)
+    .map((group) => {
+      const avgPromise = Math.round((group.totalPromise / group.count) * 100);
+      const avgReward = group.totalReward / group.count;
+      const countLabel = `${group.count} post${group.count === 1 ? '' : 's'}`;
+      const thesis = group.thesis ? ` Recent thesis: ${group.thesis.slice(0, 90)}.` : '';
+      return `Outcome fatigue: ${group.format} on ${group.topic} with ${group.hook} hook / ${group.specificity} specificity / ${group.structure} structure underperformed after strong predicted fit (${countLabel}, avg promise ${avgPromise}%, avg reward ${avgReward >= 0 ? '+' : ''}${avgReward.toFixed(2)}). Cool down this shape or rebuild it with fresher proof, a narrower claim, and a different structure.${thesis}`;
+    });
+}
+
 function summarizeDirectiveRules(rules: VoiceDirectiveRule[]): string[] {
   return unique(rules.map((rule) => {
     const scopeLabel = rule.scope.type === 'general'
@@ -181,6 +292,7 @@ export interface BuildPersonalizationMemoryOptions {
   performanceHistory: TweetPerformance[];
   banditPolicy: BanditPolicy | null;
   voiceProfile: VoiceProfile;
+  allTweets?: Tweet[];
   baselineLikes?: number;
   mentions?: Mention[];
 }
@@ -194,6 +306,7 @@ export function buildPersonalizationMemory({
   performanceHistory,
   banditPolicy,
   voiceProfile,
+  allTweets = [],
   baselineLikes = 0,
   mentions = [],
 }: BuildPersonalizationMemoryOptions): PersonalizationMemory {
@@ -225,6 +338,7 @@ export function buildPersonalizationMemory({
   const portfolioLessons = summarizePortfolioLessons(learnings);
   const relationshipLessons = summarizeRelationshipLessons(learnings);
   const viralityPostmortems = summarizeViralityPostmortemMemory(learnings);
+  const outcomeFatigueLessons = summarizeOutcomeFatigueLessons(allTweets);
 
   const identityConstraints = unique([
     ...summarizeDirectiveRules(directiveRules),
@@ -250,6 +364,7 @@ export function buildPersonalizationMemory({
     relationshipLessons,
     viralityPostmortems,
     replyMiningInsights,
+    outcomeFatigueLessons,
     identityConstraints,
     weeklyChanges,
     updatedAt: new Date().toISOString(),

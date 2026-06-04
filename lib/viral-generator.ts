@@ -658,6 +658,9 @@ ${soulMd}`);
     if (memory.replyMiningInsights?.length) {
       parts.push(`\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`);
     }
+    if (memory.outcomeFatigueLessons?.length) {
+      parts.push(`\n## OUTCOME FATIGUE MEMORY\nAvoid repeating these recently underperforming high-confidence shapes unless the proof, claim, or structure changes meaningfully:\n${memory.outcomeFatigueLessons.map((item) => `- ${item}`).join('\n')}`);
+    }
   }
 
   if (style.bias.scheduledTopic || style.bias.momentumTopic) {

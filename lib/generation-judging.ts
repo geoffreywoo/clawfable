@@ -149,6 +149,7 @@ ${memory?.neverDoThisAgain?.length ? `- Avoid: ${memory.neverDoThisAgain.slice(0
 ${memory?.referenceBank?.length ? `- Reference bank: ${memory.referenceBank.slice(0, 3).join(' | ')}` : ''}
 ${memory?.conversationInsights?.length ? `- Conversation lessons: ${memory.conversationInsights.slice(0, 2).join(' | ')}` : ''}
 ${memory?.audienceSegmentLessons?.length ? `- Audience lessons: ${memory.audienceSegmentLessons.slice(0, 2).join(' | ')}` : ''}
+${memory?.outcomeFatigueLessons?.length ? `- Outcome fatigue: ${memory.outcomeFatigueLessons.slice(0, 2).join(' | ')}` : ''}
 
 Output one JSON object per line, no markdown.`,
       prompt: `Judge these candidates:\n\n${prompt}`,
@@ -233,6 +234,7 @@ ${memory?.operatorHiddenPreferences?.length ? `Operator preferences: ${memory.op
 ${memory?.editTransformations?.length ? `Operator edit transformations: ${memory.editTransformations.slice(0, 3).join(' | ')}` : ''}
 ${memory?.conversationInsights?.length ? `Conversation lessons: ${memory.conversationInsights.slice(0, 2).join(' | ')}` : ''}
 ${memory?.promptStrategyLessons?.length ? `Prompt strategy lessons: ${memory.promptStrategyLessons.slice(0, 2).join(' | ')}` : ''}
+${memory?.outcomeFatigueLessons?.length ? `Outcome fatigue: ${memory.outcomeFatigueLessons.slice(0, 2).join(' | ')}` : ''}
 
 Output one JSON object per line with:
 - idx
