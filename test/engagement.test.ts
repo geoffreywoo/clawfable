@@ -50,6 +50,57 @@ describe('engagement helpers', () => {
     expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
   });
 
+  it('prefers substantive reply openings over shallow viral bait', () => {
+    const ranked = rankEngagementCandidates(
+      [
+        candidate({
+          tweetId: 'bait',
+          likes: 1400,
+          text: 'Hot take: AI agents replace every employee by December. Agree or disagree? Drop your handle below.',
+          topic: 'agents',
+          createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        }),
+        candidate({
+          tweetId: 'substance',
+          likes: 260,
+          text: 'We moved AI agents from demos to production only after adding eval reviews, rollback owners, and a weekly failure-mode note. Where does this break?',
+          topic: 'agents',
+          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        }),
+      ],
+      ['ai', 'agents', 'evals', 'workflow'],
+    );
+
+    expect(ranked[0].tweetId).toBe('substance');
+    expect(ranked[0].scoreReason).toContain('substantive reply opening');
+    expect(ranked[1].scoreReason).toContain('low reply depth');
+  });
+
+  it('penalizes hostile pile-ons even when they have velocity', () => {
+    const ranked = rankEngagementCandidates(
+      [
+        candidate({
+          tweetId: 'pile-on',
+          likes: 900,
+          text: 'Every AI founder saying evals matter is a clown. Ratio this fraud.',
+          topic: 'agents',
+          createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        }),
+        candidate({
+          tweetId: 'challenge',
+          likes: 240,
+          text: 'I disagree that evals are the bottleneck. In practice the hard part is deciding which workflow owns the rollback when memory drifts.',
+          topic: 'agents',
+          createdAt: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+        }),
+      ],
+      ['ai', 'agents', 'evals', 'workflow'],
+    );
+
+    expect(ranked[0].tweetId).toBe('challenge');
+    expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
+  });
+
   it('recomputes session state from action statuses', () => {
     expect(nextSessionState([], 'draft')).toBe('draft');
     expect(nextSessionState([

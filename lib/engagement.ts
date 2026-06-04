@@ -19,6 +19,7 @@ import type {
   EngagementDraft,
   EngagementSessionState,
 } from './types';
+import { scoreHighValueReply } from './virality-signals';
 
 export const BROWSER_COMPANION_LOCAL_URL = 'http://127.0.0.1:48123';
 
@@ -120,6 +121,36 @@ function recentEngagementPenalty(tweetId: string, recentTargets: Set<string>): n
   return recentTargets.has(tweetId) ? 0.45 : 1;
 }
 
+function scoreReplyOpportunityQuality(candidate: Omit<EngagementCandidate, 'score' | 'scoreReason'>, soulTopics: string[]): number {
+  const text = candidate.text.trim();
+  const highValue = scoreHighValueReply({
+    text,
+    authorUsername: candidate.authorHandle,
+    authorName: candidate.authorName,
+    createdAt: candidate.createdAt,
+  }, { topics: soulTopics });
+
+  let quality = highValue.score;
+  const hasMechanism = /\b(because|when|if|after|before|tradeoff|constraint|failure mode|example|for instance|we saw|i tried|in practice)\b/i.test(text);
+  const hasSpecificity = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(eval|metric|workflow|benchmark|case study|production|customer|launch)\b/i.test(text);
+  const asksUsefulQuestion = /\b(what am i missing|where does this break|what would you change|which part is wrong|edge case|failure mode)\b/i.test(text);
+  const shallowBait = /\b(drop your|reply below|follow for|retweet if|rt if|tag someone|agree or disagree|thoughts\??|hot take\??)\b/i.test(text);
+  const hostilePileOn = /\b(idiot|moron|clown|cope|ngmi|scam|fraud|destroyed|ratio|dumbest)\b/i.test(text);
+  const promotional = /(https?:\/\/|airdrop|giveaway|whitelist|promo code|check dm|dm me)/i.test(text);
+
+  if (hasMechanism) quality += 0.08;
+  if (hasSpecificity) quality += 0.08;
+  if (asksUsefulQuestion) quality += 0.1;
+  if (candidate.source === 'relationship') quality += 0.06;
+  if (candidate.relationshipReason) quality += 0.04;
+  if (shallowBait) quality -= 0.4;
+  if (hostilePileOn) quality -= 0.32;
+  if (promotional) quality -= 0.24;
+  if (text.length < 45 && !/\?/.test(text)) quality -= 0.1;
+
+  return Math.max(0, Math.min(1, quality));
+}
+
 function formatScoreReason(parts: Array<[string, number]>): string {
   return parts
     .sort((a, b) => b[1] - a[1])
@@ -137,22 +168,28 @@ export function scoreEngagementCandidate(
   const recencyScore = scoreRecency(candidate.createdAt);
   const velocityScore = scoreVelocity(candidate.likes, candidate.createdAt);
   const relationshipPenalty = recentEngagementPenalty(candidate.tweetId, recentTargets);
+  const replyQualityScore = scoreReplyOpportunityQuality(candidate, soulTopics);
 
   const composite = (
-    velocityScore * 0.42 +
-    topicScore * 0.28 +
-    recencyScore * 0.2 +
-    Math.min(1, Math.log10(candidate.likes + 1) / 3) * 0.1
+    velocityScore * 0.34 +
+    topicScore * 0.24 +
+    recencyScore * 0.16 +
+    replyQualityScore * 0.18 +
+    Math.min(1, Math.log10(candidate.likes + 1) / 3) * 0.08
   ) * relationshipPenalty;
+  const scoreReason = formatScoreReason([
+    [topicScore >= 0.72 ? 'strong voice match' : 'topic-adjacent', topicScore],
+    [velocityScore >= 0.72 ? 'high velocity' : 'moderate velocity', velocityScore],
+    [replyQualityScore >= 0.62 ? 'substantive reply opening' : 'low reply depth', replyQualityScore],
+    [recencyScore >= 0.66 ? 'fresh thread' : 'older thread', recencyScore],
+    [relationshipPenalty < 1 ? 'recently engaged' : 'clear engagement lane', relationshipPenalty],
+  ]);
 
   return {
     score: Math.round(composite * 100),
-    scoreReason: formatScoreReason([
-      [topicScore >= 0.72 ? 'strong voice match' : 'topic-adjacent', topicScore],
-      [velocityScore >= 0.72 ? 'high velocity' : 'moderate velocity', velocityScore],
-      [recencyScore >= 0.66 ? 'fresh thread' : 'older thread', recencyScore],
-      [relationshipPenalty < 1 ? 'recently engaged' : 'clear engagement lane', relationshipPenalty],
-    ]),
+    scoreReason: replyQualityScore < 0.62 && !scoreReason.includes('low reply depth')
+      ? ['low reply depth', ...scoreReason.split(' · ')].slice(0, 3).join(' · ')
+      : scoreReason,
   };
 }
 
