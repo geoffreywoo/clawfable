@@ -63,6 +63,7 @@ import { resolveQueuedTweetFailure } from './queue-healing';
 import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
+import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 
 export interface AutopilotResult {
   agentId: string;
@@ -2259,90 +2260,121 @@ async function refillQueue(
       } catch { /* non-critical */ }
     }
 
-    const allBatch = [...batch, ...marketingBatch, ...shoutoutBatch];
+    let allBatch = [...batch, ...marketingBatch, ...shoutoutBatch];
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
     const recentContent = allTweets.slice(0, 50).map((tweet) => tweet.content);
 
     let added = 0;
-    for (const item of allBatch) {
-      const completenessIssue = getTweetCompletenessIssue(item.content);
-      if (completenessIssue) continue;
-      const policyIssue = getAutopostPolicyIssue(item.content, {
-        allowedMentions: [agent.handle],
-        allowMentions: item.format === 'shoutout',
-      });
-      if (policyIssue) continue;
-      const authorityIssue = getAuthorityProofIssue(item.content);
-      if (authorityIssue) continue;
-      if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) continue;
-      recentContent.unshift(item.content);
+    const addBatchItems = async (items: typeof allBatch, duplicateThreshold: number): Promise<number> => {
+      let addedFromBatch = 0;
+      for (const item of items) {
+        const fallbackMetadata = 'hookType' in item ? item : null;
+        const completenessIssue = getTweetCompletenessIssue(item.content);
+        if (completenessIssue) continue;
+        const policyIssue = getAutopostPolicyIssue(item.content, {
+          allowedMentions: [agent.handle],
+          allowMentions: item.format === 'shoutout',
+        });
+        if (policyIssue) continue;
+        const authorityIssue = getAuthorityProofIssue(item.content);
+        if (authorityIssue) continue;
+        if (isNearDuplicate(item.content, recentContent, duplicateThreshold).isDuplicate) continue;
+        recentContent.unshift(item.content);
 
-      await createTweet({
-        agentId: agent.id,
-        content: item.content,
-        type: 'original',
-        status: 'queued',
-        format: item.format || null,
-        topic: item.targetTopic,
-        rationale: item.rationale,
-        generationMode: item.generationMode,
-        candidateScore: item.candidateScore,
-        confidenceScore: item.confidenceScore,
-        voiceScore: item.voiceScore,
-        noveltyScore: item.noveltyScore,
-        predictedEngagementScore: item.predictedEngagementScore,
-        freshnessScore: item.freshnessScore,
-        repetitionRiskScore: item.repetitionRiskScore,
-        policyRiskScore: item.policyRiskScore,
-        surpriseScore: item.surpriseScore,
-        creativeRiskScore: item.creativeRiskScore,
-        slopScore: item.slopScore,
-        replyBaitScore: item.replyBaitScore,
-        hookType: item.featureTags?.hook ?? null,
-        toneType: item.featureTags?.tone ?? null,
-        specificityType: item.featureTags?.specificity ?? null,
-        structureType: item.featureTags?.structure ?? null,
-        thesis: item.featureTags?.thesis ?? null,
-        coverageCluster: item.coverageCluster ?? null,
-        featureTags: item.featureTags ?? null,
-        judgeScore: item.judgeScore ?? null,
-        judgeBreakdown: item.judgeBreakdown ?? null,
-        judgeNotes: item.judgeNotes ?? null,
-        mutationRound: item.mutationRound ?? null,
-        rewardPrediction: item.rewardPrediction ?? null,
-        globalPriorWeight: item.globalPriorWeight ?? null,
-        localPriorWeight: item.localPriorWeight ?? null,
-        scoreProvenance: item.scoreProvenance ?? null,
-        sourceLane: item.sourceLane ?? null,
-        styleMode: item.styleMode ?? 'standard',
-        creativeLane: item.creativeLane ?? null,
-        targetAudienceSegment: item.targetAudienceSegment ?? null,
-        segmentHypothesis: item.segmentHypothesis ?? null,
-        promptStrategy: item.promptStrategy ?? null,
-        criticScores: item.criticScores ?? null,
-        actionRewardPrediction: item.actionRewardPrediction ?? null,
-        draftExperimentId: item.draftExperimentId ?? null,
-        experimentBatchId: item.experimentBatchId ?? null,
-        experimentHypothesis: item.experimentHypothesis ?? null,
-        experimentHoldout: item.experimentHoldout ?? null,
-        promptVariant: item.promptVariant ?? null,
-        trendTopicId: item.trendTopicId ?? null,
-        trendHeadline: item.trendHeadline ?? null,
-        mediaExperimentType: item.mediaExperimentType ?? null,
-        mediaBrief: item.mediaBrief ?? null,
-        portfolioRole: item.portfolioRole ?? null,
-        relationshipTargetHandle: item.relationshipTargetHandle ?? null,
-        trendFitScore: item.trendFitScore ?? null,
-        xTweetId: null,
-        quoteTweetId: null,
-        quoteTweetAuthor: null,
-        scheduledAt: null,
+        await createTweet({
+          agentId: agent.id,
+          content: item.content,
+          type: 'original',
+          status: 'queued',
+          format: item.format || null,
+          topic: item.targetTopic,
+          rationale: item.rationale,
+          generationMode: item.generationMode,
+          candidateScore: item.candidateScore,
+          confidenceScore: item.confidenceScore,
+          voiceScore: item.voiceScore,
+          noveltyScore: item.noveltyScore,
+          predictedEngagementScore: item.predictedEngagementScore,
+          freshnessScore: item.freshnessScore,
+          repetitionRiskScore: item.repetitionRiskScore,
+          policyRiskScore: item.policyRiskScore,
+          surpriseScore: item.surpriseScore,
+          creativeRiskScore: item.creativeRiskScore,
+          slopScore: item.slopScore,
+          replyBaitScore: item.replyBaitScore,
+          hookType: item.featureTags?.hook ?? fallbackMetadata?.hookType ?? null,
+          toneType: item.featureTags?.tone ?? fallbackMetadata?.toneType ?? null,
+          specificityType: item.featureTags?.specificity ?? fallbackMetadata?.specificityType ?? null,
+          structureType: item.featureTags?.structure ?? fallbackMetadata?.structureType ?? null,
+          thesis: item.featureTags?.thesis ?? fallbackMetadata?.thesis ?? null,
+          coverageCluster: item.coverageCluster ?? null,
+          featureTags: item.featureTags ?? null,
+          judgeScore: item.judgeScore ?? null,
+          judgeBreakdown: item.judgeBreakdown ?? null,
+          judgeNotes: item.judgeNotes ?? null,
+          mutationRound: item.mutationRound ?? null,
+          rewardPrediction: item.rewardPrediction ?? null,
+          globalPriorWeight: item.globalPriorWeight ?? null,
+          localPriorWeight: item.localPriorWeight ?? null,
+          scoreProvenance: item.scoreProvenance ?? null,
+          sourceLane: item.sourceLane ?? null,
+          styleMode: item.styleMode ?? 'standard',
+          creativeLane: item.creativeLane ?? null,
+          targetAudienceSegment: item.targetAudienceSegment ?? null,
+          segmentHypothesis: item.segmentHypothesis ?? null,
+          promptStrategy: item.promptStrategy ?? null,
+          criticScores: item.criticScores ?? null,
+          actionRewardPrediction: item.actionRewardPrediction ?? null,
+          draftExperimentId: item.draftExperimentId ?? null,
+          experimentBatchId: item.experimentBatchId ?? null,
+          experimentHypothesis: item.experimentHypothesis ?? null,
+          experimentHoldout: item.experimentHoldout ?? null,
+          promptVariant: item.promptVariant ?? null,
+          trendTopicId: item.trendTopicId ?? null,
+          trendHeadline: item.trendHeadline ?? null,
+          mediaExperimentType: item.mediaExperimentType ?? null,
+          mediaBrief: item.mediaBrief ?? null,
+          portfolioRole: item.portfolioRole ?? null,
+          relationshipTargetHandle: item.relationshipTargetHandle ?? null,
+          trendFitScore: item.trendFitScore ?? null,
+          xTweetId: null,
+          quoteTweetId: null,
+          quoteTweetAuthor: null,
+          scheduledAt: null,
+        });
+        addedFromBatch++;
+      }
+      return addedFromBatch;
+    };
+
+    added += await addBatchItems(allBatch, 0.55);
+
+    if (added === 0 && organicCount > 0) {
+      allBatch = buildEmergencyQueueFallbacks({
+        topics: voiceProfile.topics,
+        recentContent,
+        count: Math.max(organicCount, Math.min(count, settings.minQueueSize || 3)),
       });
-      added++;
+      added += await addBatchItems(allBatch, 0.72);
     }
+
     return added;
-  } catch {
+  } catch (err) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'refill_queue_error',
+      topic: 'generation',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'error',
+      reason: formatActionError(err, 'refill_queue', {
+        handle: `@${agent.handle}`,
+      }),
+    }).catch(() => null);
     return 0;
   }
 }
@@ -2387,10 +2419,10 @@ interface MarketingTweet {
   creativeRiskScore?: number;
   slopScore?: number;
   replyBaitScore?: number;
-  hookType?: string | null;
-  toneType?: string | null;
-  specificityType?: string | null;
-  structureType?: string | null;
+  hookType?: import('./types').TweetHookType | null;
+  toneType?: import('./types').TweetToneType | null;
+  specificityType?: import('./types').TweetSpecificityType | null;
+  structureType?: import('./types').TweetStructureType | null;
   thesis?: string | null;
   coverageCluster?: string | null;
   featureTags?: import('./types').CandidateFeatureTags | null;
