@@ -65,6 +65,7 @@ export async function PATCH(
           metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
+            preferenceHints: editSummary.preferenceHints.join('\n') || null,
             originalDraft: updated.originalContent.slice(0, 500),
             editedDraft: updated.content.slice(0, 500),
             draftExperimentId: updated.draftExperimentId ?? null,
@@ -102,6 +103,7 @@ export async function PATCH(
           metadata: metadataWithStyleMode(tweet, {
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
+            preferenceHints: editSummary.preferenceHints.join('\n') || null,
             originalDraft: updated.originalContent.slice(0, 500),
             editedDraft: updated.content.slice(0, 500),
             draftExperimentId: updated.draftExperimentId ?? null,

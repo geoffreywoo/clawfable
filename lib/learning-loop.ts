@@ -45,6 +45,20 @@ function sortCounts(entries: Record<string, number>): string[] {
     .map(([value]) => value);
 }
 
+function readPreferenceHints(metadata: LearningSignal['metadata']): string[] {
+  const hints: string[] = [];
+  const singleHint = typeof metadata?.preferenceHint === 'string' ? metadata.preferenceHint.trim() : '';
+  if (singleHint) hints.push(singleHint);
+
+  const packedHints = typeof metadata?.preferenceHints === 'string' ? metadata.preferenceHints : '';
+  for (const hint of packedHints.split(/\n+/)) {
+    const trimmed = hint.trim();
+    if (trimmed) hints.push(trimmed);
+  }
+
+  return unique(hints);
+}
+
 function buildMomentumTopics(
   performanceHistory: TweetPerformance[],
   baselineLikes: number,
@@ -81,8 +95,9 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   }
 
   for (const signal of signals) {
-    const hint = typeof signal.metadata?.preferenceHint === 'string' ? signal.metadata.preferenceHint : null;
-    if (hint) counts[hint] = (counts[hint] || 0) + 1;
+    for (const hint of readPreferenceHints(signal.metadata)) {
+      counts[hint] = (counts[hint] || 0) + 1;
+    }
     const lengthDirection = typeof signal.metadata?.lengthDirection === 'string' ? signal.metadata.lengthDirection : null;
     if (lengthDirection === 'shorter') counts['Operators often tighten drafts before approving them.'] = (counts['Operators often tighten drafts before approving them.'] || 0) + 1;
     if (lengthDirection === 'longer') counts['Operators sometimes want deeper, more developed arguments.'] = (counts['Operators sometimes want deeper, more developed arguments.'] || 0) + 1;
