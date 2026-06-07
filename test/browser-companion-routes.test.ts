@@ -3,6 +3,7 @@ import { GET as nextActionGET } from '@/app/api/browser-companion/actions/next/r
 import { POST as reportActionPOST } from '@/app/api/browser-companion/actions/[actionId]/report/route';
 import {
   addAgentToUser,
+  addLearningSignal,
   createAgent,
   createBrowserCompanionPairing,
   createEngagementSession,
@@ -251,5 +252,91 @@ describe('browser companion routes', () => {
     expect(updatedDraft?.xTweetId).toBe('posted-reply-1');
     expect(updatedDraft?.followupForTweetId).toBe('root-target-1');
     expect(updatedDraft?.replyConversationId).toBe('root-target-1');
+  });
+
+  it('skips duplicate pending browser reply actions before claim', async () => {
+    const user = await getOrCreateUser('browser-user-5', 'browserdupe', 'Browser Duplicate');
+    const agent = await createAgent({
+      handle: 'browser-dupe-agent',
+      name: 'Browser Duplicate Agent',
+      soulMd: '# soul',
+    } as any);
+    await addAgentToUser(user.id, agent.id);
+    await addLearningSignal(agent.id, {
+      xTweetId: 'posted-reply-existing',
+      signalType: 'reply_posted',
+      surface: 'engage',
+      rewardDelta: 0.34,
+      metadata: {
+        targetTweetId: 'duplicate-root-target',
+      },
+    });
+    const draft = await createTweet({
+      agentId: agent.id,
+      content: 'duplicate reply should not leave the app',
+      type: 'reply',
+      status: 'draft',
+      topic: 'engage',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: 'builder',
+      followupForTweetId: 'duplicate-root-target',
+      replyConversationId: 'duplicate-root-target',
+      scheduledAt: null,
+    });
+    const action = {
+      ...makeLikeAction('duplicate-root-target'),
+      id: 'action-reply-duplicate-root-target',
+      type: 'reply' as const,
+      candidate: {
+        ...makeLikeAction('duplicate-root-target').candidate,
+        agentId: agent.id,
+      },
+      draft: {
+        tweetId: draft.id,
+        content: draft.content,
+        originalContent: draft.content,
+        edited: false,
+        updatedAt: draft.createdAt,
+      },
+    };
+    const session = await createEngagementSession({
+      agentId: agent.id,
+      state: 'approved',
+      actions: [action],
+      machineLabel: null,
+      approvedAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null,
+      abortedAt: null,
+      lastError: null,
+    });
+
+    const pairing = await createBrowserCompanionPairing(user.id, 'Ops Mac');
+    const response = await nextActionGET(new Request('http://localhost/api/browser-companion/actions/next', {
+      headers: {
+        Authorization: `Bearer ${pairing.token}`,
+      },
+    }) as any);
+    const data = await response.json();
+    const [updatedSession, postLog, signals] = await Promise.all([
+      getEngagementSession(session.id),
+      getPostLog(agent.id, 20),
+      getLearningSignals(agent.id, 20),
+    ]);
+
+    expect(response.status).toBe(200);
+    expect(data.action).toBeNull();
+    expect(updatedSession?.actions[0].status).toBe('skipped');
+    expect(updatedSession?.actions[0].failureReason).toContain('already replied to root duplicate-root-target');
+    expect(postLog.some((entry) =>
+      entry.format === 'engage_reply_duplicate_gate'
+      && entry.tweetId === draft.id
+    )).toBe(true);
+    expect(signals.some((signal) =>
+      signal.signalType === 'reply_rejected'
+      && signal.metadata?.qualityGate === 'duplicate_reply_conversation'
+      && signal.metadata?.targetTweetId === 'duplicate-root-target'
+    )).toBe(true);
   });
 });
