@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildEmergencyQueueFallbacks } from '@/lib/emergency-queue-fallback';
-import type { PersonalizationMemory } from '@/lib/types';
+import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
 function memory(overrides: Partial<PersonalizationMemory> = {}): PersonalizationMemory {
   return {
@@ -14,6 +14,74 @@ function memory(overrides: Partial<PersonalizationMemory> = {}): Personalization
     weeklyChanges: [],
     updatedAt: '2026-06-07T00:00:00.000Z',
     ...overrides,
+  };
+}
+
+function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
+  return {
+    tweetId: overrides.tweetId || 'manual-anchor-1',
+    xTweetId: overrides.xTweetId || 'x-manual-anchor-1',
+    content: overrides.content || 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+    format: overrides.format || 'hot_take',
+    topic: overrides.topic || 'AI agents',
+    hook: overrides.hook || 'bold_claim',
+    tone: overrides.tone || 'analytical',
+    specificity: overrides.specificity || 'tactical',
+    structure: overrides.structure || 'single_punch',
+    thesis: overrides.thesis || 'agent teams failed eval visible rollback rule',
+    postedAt: overrides.postedAt || '2026-06-01T00:00:00.000Z',
+    checkedAt: overrides.checkedAt || '2026-06-02T00:00:00.000Z',
+    likes: overrides.likes ?? 84,
+    retweets: overrides.retweets ?? 18,
+    replies: overrides.replies ?? 11,
+    impressions: overrides.impressions ?? 6000,
+    engagementRate: overrides.engagementRate ?? 0.0188,
+    wasViral: overrides.wasViral ?? true,
+    source: overrides.source || 'manual',
+  };
+}
+
+function learningsWithOperatorAnchor(): AgentLearnings {
+  const styleFingerprint = {
+    avgLength: 118,
+    shortPct: 85,
+    mediumPct: 15,
+    longPct: 0,
+    questionRatio: 0,
+    usesLineBreaks: false,
+    usesEmojis: false,
+    usesNumbers: false,
+    topHooks: ['bold_claim'],
+    topTones: ['analytical'],
+    antiPatterns: [],
+    updatedAt: '2026-06-07T00:00:00.000Z',
+  };
+
+  return {
+    agentId: 'agent-1',
+    updatedAt: '2026-06-07T00:00:00.000Z',
+    totalTracked: 18,
+    avgLikes: 14,
+    avgRetweets: 3,
+    bestPerformers: [],
+    worstPerformers: [],
+    formatRankings: [],
+    topicRankings: [],
+    insights: [],
+    styleFingerprint,
+    operatorVoiceReference: {
+      sampleCount: 4,
+      bestPerformers: [performance()],
+      pinnedExamples: [],
+      styleFingerprint,
+    },
+    sourceBreakdown: {
+      autopilot: 4,
+      manual: 14,
+      timeline: 0,
+      trainingCount: 18,
+      trainingSource: 'mixed',
+    },
   };
 }
 
@@ -58,5 +126,27 @@ describe('emergency queue fallback', () => {
     expect(drafts[0].content).toContain('That is evidence.');
     expect(drafts[0].scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
     expect(drafts[0].confidenceScore).toBeGreaterThan(drafts[3].confidenceScore);
+  });
+
+  it('uses operator anchors to shape emergency fallback drafts without copying anchor text', () => {
+    const anchorContent = 'AI agent teams earn trust when every failed eval creates a visible rollback rule.';
+    const drafts = buildEmergencyQueueFallbacks({
+      topics: ['AI agents', 'Startups'],
+      recentContent: [],
+      count: 3,
+      learnings: learningsWithOperatorAnchor(),
+    });
+
+    const anchored = drafts.find((draft) => draft.rationale.includes('Operator-anchor emergency fallback'));
+
+    expect(anchored).toBeDefined();
+    expect(anchored!.targetTopic).toBe('ai agents');
+    expect(anchored!.hookType).toBe('bold_claim');
+    expect(anchored!.toneType).toBe('analytical');
+    expect(anchored!.content).not.toBe(anchorContent);
+    expect(anchored!.content).not.toContain('every failed eval creates a visible rollback rule');
+    expect(anchored!.scoreProvenance?.operatorAnchor).toBeGreaterThan(0);
+    expect(anchored!.scoreProvenance?.anchorCopyRisk || 0).toBe(0);
+    expect(anchored!.confidenceScore).toBeGreaterThan(drafts[1].confidenceScore);
   });
 });

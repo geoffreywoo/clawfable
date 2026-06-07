@@ -2437,6 +2437,7 @@ async function refillQueue(
         recentContent,
         count: Math.max(organicCount, Math.min(count, settings.minQueueSize || 3)),
         memory,
+        learnings,
       });
       added += await addBatchItems(allBatch, 0.72);
     }
