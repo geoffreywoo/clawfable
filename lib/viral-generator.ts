@@ -4,7 +4,7 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet, TweetHookType, TweetSpecificityType, TweetStructureType, TweetToneType } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
@@ -34,6 +34,18 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   topicPreferences: [],
   rawExtraction: '',
 };
+
+const FALLBACK_STOP_WORDS = new Set([
+  'about', 'after', 'again', 'agent', 'agents', 'around', 'because', 'before',
+  'being', 'every', 'from', 'have', 'into', 'people', 'really', 'still',
+  'their', 'there', 'these', 'thing', 'those', 'tweet', 'tweets', 'when',
+  'where', 'while', 'with', 'without', 'would', 'your',
+]);
+
+const FALLBACK_HOOKS: TweetHookType[] = ['question', 'bold_claim', 'data_point', 'story', 'observation', 'contrarian', 'listicle', 'callout', 'prediction', 'confession', 'how_to', 'unknown'];
+const FALLBACK_TONES: TweetToneType[] = ['sarcastic', 'earnest', 'analytical', 'provocative', 'educational', 'casual', 'urgent', 'playful', 'unknown'];
+const FALLBACK_SPECIFICITY: TweetSpecificityType[] = ['abstract', 'concrete', 'data_driven', 'tactical', 'story_led', 'unknown'];
+const FALLBACK_STRUCTURES: TweetStructureType[] = ['single_punch', 'stacked_lines', 'argument', 'story_arc', 'list', 'question_led', 'comparison', 'manifesto', 'unknown'];
 
 export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
@@ -361,12 +373,150 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
   return templates;
 }
 
+function fallbackKeywords(input: string | null | undefined, limit = 4): string[] {
+  return Array.from(new Set(String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !FALLBACK_STOP_WORDS.has(token))))
+    .slice(0, limit);
+}
+
+function titleCaseFallbackTopic(topic: string): string {
+  return normalizeTopicLabel(topic)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function normalizeFallbackHook(value: string | null | undefined, fallback: TweetHookType = 'bold_claim'): TweetHookType {
+  return FALLBACK_HOOKS.includes(value as TweetHookType) ? value as TweetHookType : fallback;
+}
+
+function normalizeFallbackTone(value: string | null | undefined, fallback: TweetToneType = 'analytical'): TweetToneType {
+  return FALLBACK_TONES.includes(value as TweetToneType) ? value as TweetToneType : fallback;
+}
+
+function normalizeFallbackSpecificity(value: string | null | undefined, fallback: TweetSpecificityType = 'concrete'): TweetSpecificityType {
+  return FALLBACK_SPECIFICITY.includes(value as TweetSpecificityType) ? value as TweetSpecificityType : fallback;
+}
+
+function normalizeFallbackStructure(value: string | null | undefined, fallback: TweetStructureType = 'single_punch'): TweetStructureType {
+  return FALLBACK_STRUCTURES.includes(value as TweetStructureType) ? value as TweetStructureType : fallback;
+}
+
+
+function buildAnchorFallbackContent({
+  topic,
+  thesisKeywords,
+  usesLineBreaks,
+  hook,
+}: {
+  topic: string;
+  thesisKeywords: string[];
+  usesLineBreaks: boolean;
+  hook: string;
+}): string {
+  const label = titleCaseFallbackTopic(topic) || 'This market';
+  const [first = 'constraint', second = 'behavior', third = 'feedback'] = thesisKeywords;
+  const lowerHook = hook.toLowerCase();
+
+  if (lowerHook === 'question') {
+    return usesLineBreaks
+      ? `What would prove ${label} is actually working?\n\nNot more noise.\n\nA ${first} changes.\nA ${second} repeats.\nA ${third} gets easier to see.`
+      : `What would prove ${label} is working? A ${first} changes, a ${second} repeats, and a ${third} gets easier to see.`;
+  }
+
+  if (lowerHook === 'listicle') {
+    return usesLineBreaks
+      ? `${label} gets less fake when you can name three things:\n\n1. the ${first}\n2. the ${second}\n3. the ${third}\n\nNo list, no thesis.`
+      : `${label} gets less fake when you can name the ${first}, the ${second}, and the ${third}. No list, no thesis.`;
+  }
+
+  if (lowerHook === 'observation') {
+    return usesLineBreaks
+      ? `Observation:\n\n${label} trust shows up in boring places.\n\nA ${first} gets owned.\nA ${second} changes.\nA ${third} survives contact with reality.`
+      : `Observation: ${label} trust shows up when a ${first} gets owned, a ${second} changes, and a ${third} survives contact with reality.`;
+  }
+
+  return usesLineBreaks
+    ? `${label} earns trust in the unglamorous part.\n\nOne ${first} gets named.\nOne ${second} changes.\nOne ${third} survives the next check.`
+    : `${label} earns trust when one ${first} gets named, one ${second} changes, and one ${third} survives the next check.`;
+}
+
+function buildOperatorAnchorFallbackTemplates(
+  topics: string[],
+  learnings: AgentLearnings | null | undefined,
+): ProtocolTweet[] {
+  const reference = learnings?.operatorVoiceReference;
+  if (!reference || reference.sampleCount <= 0) return [];
+
+  const anchors = [
+    ...(reference.pinnedExamples || []),
+    ...reference.bestPerformers,
+  ].filter((anchor) => anchor.content && anchor.content.trim());
+  if (anchors.length === 0) return [];
+
+  const fp = reference.styleFingerprint;
+  const templates: ProtocolTweet[] = [];
+  const seen = new Set<string>();
+
+  for (const anchor of anchors.slice(0, 4)) {
+    const topic = normalizeTopicLabel(anchor.topic || topics.find((item) => item) || 'general');
+    const topicMatchesFallbackPool = topics.some((item) => item.toLowerCase() === topic.toLowerCase());
+    const targetTopic = topicMatchesFallbackPool ? topic : normalizeTopicLabel(topics[0] || topic);
+    const hook = normalizeFallbackHook(anchor.hook || fp.topHooks[0], 'bold_claim');
+    const tone = normalizeFallbackTone(anchor.tone || fp.topTones[0], 'analytical');
+    const specificity = normalizeFallbackSpecificity(anchor.specificity, fp.usesNumbers ? 'data_driven' : 'concrete');
+    const structure = normalizeFallbackStructure(anchor.structure, fp.usesLineBreaks ? 'stacked_lines' : 'single_punch');
+    const thesisKeywords = fallbackKeywords(anchor.thesis || anchor.content, 5);
+    const content = buildAnchorFallbackContent({
+      topic: targetTopic,
+      thesisKeywords,
+      usesLineBreaks: fp.usesLineBreaks || structure === 'stacked_lines' || structure === 'list',
+      hook,
+    });
+    const key = content.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    templates.push({
+      content,
+      format: anchor.format || 'hot_take',
+      targetTopic,
+      rationale: 'Operator-anchor template fallback: adapts proven human-written hook, tone, and structure without copying anchor text.',
+      featureTags: {
+        hook,
+        tone,
+        specificity,
+        structure,
+        thesis: `${targetTopic.toLowerCase()} ${thesisKeywords.slice(0, 4).join(' ')}`.trim(),
+        riskFlags: [],
+      },
+      judgeScore: 0.84,
+      judgeBreakdown: {
+        overall: 0.84,
+        voiceFit: 0.86,
+        clarity: 0.82,
+        novelty: 0.76,
+        audienceFit: 0.82,
+        policySafety: 0.9,
+      },
+      judgeNotes: 'Operator-anchor fallback: matches proven human-written shape while avoiding verbatim reuse.',
+    });
+  }
+
+  return templates;
+}
+
 function buildFallbackTemplates(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
   count: number,
   style: ContentStyleConfig,
   recentPosts: string[],
+  learnings: AgentLearnings | null = null,
   memory: PersonalizationMemory | null = null,
 ): ProtocolTweet[] {
   const topics = Array.from(new Set([
@@ -395,6 +545,11 @@ function buildFallbackTemplates(
     contentSeen.add(normalized);
     templates.push(tweet);
   };
+
+  for (const anchorTemplate of buildOperatorAnchorFallbackTemplates(topics, learnings)) {
+    addTemplate(anchorTemplate);
+    if (templates.length >= maxTemplates) break;
+  }
 
   for (const topic of topics) {
     const claim = buildFallbackClaim(topic, voiceProfile.tone);
@@ -1163,7 +1318,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       throw err; // Real code bug or malformed request — surface it.
     }
 
-    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts, memory)
+    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts, learnings, memory)
       .map((tweet, index) => {
         const slot = index + 1;
         const creativeLane = creativeLanePlan.get(slot) || 'operator_take';

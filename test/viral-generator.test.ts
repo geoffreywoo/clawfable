@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
-import type { PersonalizationMemory } from '@/lib/types';
+import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
 const anthropicCreateMock = vi.hoisted(() => vi.fn());
 
@@ -30,6 +30,73 @@ describe('generateViralBatch', () => {
       weeklyChanges: [],
       updatedAt: '2026-06-07T00:00:00.000Z',
       ...overrides,
+    };
+  }
+
+  function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
+    return {
+      tweetId: overrides.tweetId || 'manual-anchor-1',
+      xTweetId: overrides.xTweetId || 'x-manual-anchor-1',
+      content: overrides.content || 'AI agent teams earn trust when every failed eval creates a visible rollback rule.',
+      format: overrides.format || 'hot_take',
+      topic: overrides.topic || 'AI agents',
+      hook: overrides.hook || 'bold_claim',
+      tone: overrides.tone || 'analytical',
+      specificity: overrides.specificity || 'tactical',
+      structure: overrides.structure || 'single_punch',
+      thesis: overrides.thesis || 'agent teams failed eval visible rollback rule',
+      postedAt: overrides.postedAt || '2026-06-01T00:00:00.000Z',
+      checkedAt: overrides.checkedAt || '2026-06-02T00:00:00.000Z',
+      likes: overrides.likes ?? 84,
+      retweets: overrides.retweets ?? 18,
+      replies: overrides.replies ?? 11,
+      impressions: overrides.impressions ?? 6000,
+      engagementRate: overrides.engagementRate ?? 0.0188,
+      wasViral: overrides.wasViral ?? true,
+      source: overrides.source || 'manual',
+    };
+  }
+
+  function learningsWithOperatorAnchor(): AgentLearnings {
+    const styleFingerprint = {
+      avgLength: 118,
+      shortPct: 85,
+      mediumPct: 15,
+      longPct: 0,
+      questionRatio: 0,
+      usesLineBreaks: false,
+      usesEmojis: false,
+      usesNumbers: false,
+      topHooks: ['bold_claim'],
+      topTones: ['analytical'],
+      antiPatterns: [],
+      updatedAt: '2026-06-07T00:00:00.000Z',
+    };
+    return {
+      agentId: 'agent-1',
+      updatedAt: '2026-06-07T00:00:00.000Z',
+      totalTracked: 18,
+      avgLikes: 14,
+      avgRetweets: 3,
+      bestPerformers: [],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint,
+      operatorVoiceReference: {
+        sampleCount: 4,
+        bestPerformers: [performance()],
+        pinnedExamples: [],
+        styleFingerprint,
+      },
+      sourceBreakdown: {
+        autopilot: 4,
+        manual: 14,
+        timeline: 0,
+        trainingCount: 18,
+        trainingSource: 'mixed',
+      },
     };
   }
 
@@ -270,6 +337,64 @@ describe('generateViralBatch', () => {
     expect(memoryAligned!.targetTopic).toBe('AI agents');
     expect(memoryAligned!.content).toContain('That is evidence.');
     expect(memoryAligned!.scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
+  });
+
+  it('uses operator anchors to shape provider-error fallback without copying anchor text', async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')
+    );
+
+    const anchorContent = 'AI agent teams earn trust when every failed eval creates a visible rollback rule.';
+    const batch = await generateViralBatch(
+      {
+        tone: 'analyst',
+        topics: ['AI agents', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'specific and direct',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take', 'analysis'],
+          topTopics: ['AI agents', 'startups'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      3,
+      null,
+      learningsWithOperatorAnchor(),
+      null,
+      undefined,
+      [],
+      [],
+      null,
+    );
+
+    const anchored = batch.find((tweet) => tweet.rationale.includes('Operator-anchor template fallback'));
+
+    expect(anchored).toBeDefined();
+    expect(anchored!.targetTopic).toBe('AI agents');
+    expect(anchored!.featureTags.hook).toBe('bold_claim');
+    expect(anchored!.featureTags.tone).toBe('analytical');
+    expect(anchored!.content).not.toBe(anchorContent);
+    expect(anchored!.content).not.toContain('every failed eval creates a visible rollback rule');
+    expect(anchored!.scoreProvenance.operatorAnchor).toBeGreaterThan(0);
+    expect(anchored!.scoreProvenance.anchorCopyRisk || 0).toBe(0);
   });
 
   it('keeps internal voice reference text out of deterministic fallback templates', async () => {
