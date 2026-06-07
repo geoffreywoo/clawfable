@@ -1216,6 +1216,68 @@ describe('autopilot remote debug logging', () => {
     expect(handledFormatsForDeferred).toEqual([]);
   });
 
+  it('limits auto-replies to one mention per root conversation in the same run', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+      maxRepliesPerRun: 3,
+    });
+    mocks.getMentionsFromTwitter.mockResolvedValue([
+      {
+        id: 'mention-root-a',
+        text: 'Can you explain the first-order effect?',
+        authorId: 'user-one',
+        authorName: 'Builder One',
+        authorUsername: 'one',
+        createdAt: '2026-04-07T12:03:00.000Z',
+        conversationId: 'root-conversation',
+        inReplyToTweetId: 'root-tweet',
+      },
+      {
+        id: 'mention-root-b',
+        text: 'What is the second-order effect?',
+        authorId: 'user-two',
+        authorName: 'Builder Two',
+        authorUsername: 'two',
+        createdAt: '2026-04-07T12:02:00.000Z',
+        conversationId: 'root-conversation',
+        inReplyToTweetId: 'root-tweet',
+      },
+    ]);
+    mocks.replyToTweet.mockResolvedValue({ tweetId: 'reply-root-1', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('replied');
+    expect(result.repliesSent).toBe(1);
+    expect(mocks.replyToTweet).toHaveBeenCalledTimes(1);
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    const repliedMentionId = mocks.replyToTweet.mock.calls[0][2];
+    const skippedMentionId = repliedMentionId === 'mention-root-a' ? 'mention-root-b' : 'mention-root-a';
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: skippedMentionId,
+        format: 'auto_reply_thread_depth_gate',
+        action: 'skipped',
+        reason: expect.stringContaining('already sent 1 auto-reply in this conversation'),
+      }),
+    );
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        xTweetId: skippedMentionId,
+        signalType: 'reply_rejected',
+        metadata: expect.objectContaining({
+          qualityGate: 'conversation_reply_limit',
+          conversationId: 'root-conversation',
+          maxDepth: 1,
+        }),
+      }),
+    );
+  });
+
   it('disconnects the agent when reply posting rejects X credentials', async () => {
     mocks.getProtocolSettings.mockResolvedValue({
       ...baseSettings,
@@ -1680,8 +1742,7 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
-  it('holds auto-replies that repeat an earlier answer in the same thread', async () => {
-    const repeatedReply = 'The real eval is recovery: can the agent notice a broken tool call and route around it?';
+  it('holds auto-replies before generation when the root conversation already has an answer', async () => {
     mocks.getProtocolSettings.mockResolvedValue({
       ...baseSettings,
       enabled: false,
@@ -1707,36 +1768,20 @@ describe('autopilot remote debug logging', () => {
         createdAt: '2026-04-07T11:58:00.000Z',
       },
     ]);
-    mocks.generateText.mockResolvedValue({
-      text: repeatedReply,
-      stopReason: 'end_turn',
-      provider: 'openai',
-      model: 'gpt-5.4',
-    });
-    mocks.getReplyRepetitionIssue.mockImplementation((_reply: string, previousReplies: string[]) =>
-      previousReplies.length > 0
-        ? 'Reply repetition gate: generated reply is 94% similar to something this account already said in the thread.'
-        : null
-    );
-
     const result = await runAutopilot(baseAgent);
 
     expect(result.repliesSent).toBe(0);
+    expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.replyToTweet).not.toHaveBeenCalled();
-    expect(mocks.getReplyRepetitionIssue).toHaveBeenCalledWith(
-      repeatedReply,
-      expect.arrayContaining([
-        expect.stringContaining('real eval is recovery'),
-      ]),
-    );
+    expect(mocks.getReplyRepetitionIssue).not.toHaveBeenCalled();
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
         tweetId: 'mention-repeat',
-        content: repeatedReply,
-        format: 'auto_reply_repetition_gate',
+        content: 'Can you say more about the eval?',
+        format: 'auto_reply_thread_depth_gate',
         action: 'skipped',
-        reason: expect.stringContaining('Reply repetition gate'),
+        reason: expect.stringContaining('already sent 1 replies'),
       }),
     );
     expect(mocks.addLearningSignal).toHaveBeenCalledWith(
@@ -1745,9 +1790,11 @@ describe('autopilot remote debug logging', () => {
         xTweetId: 'mention-repeat',
         signalType: 'reply_rejected',
         metadata: expect.objectContaining({
-          qualityGate: 'reply_repetition',
+          qualityGate: 'thread_depth',
           targetMentionId: 'mention-repeat',
-          previousThreadReplies: 1,
+          conversationId: 'conv-repeat',
+          ourReplies: 1,
+          maxDepth: 1,
         }),
       }),
     );
@@ -2026,7 +2073,7 @@ describe('autopilot remote debug logging', () => {
           targetMentionId: 'mention-depth-limit',
           conversationId: 'conv-depth-limit',
           ourReplies: 3,
-          maxDepth: 3,
+          maxDepth: 1,
         }),
       }),
     );

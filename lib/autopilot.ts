@@ -119,6 +119,12 @@ const HANDLED_AUTO_REPLY_FORMATS = new Set([
   'auto_reply_empty_generation',
 ]);
 const AUTO_REPLY_HANDLED_LOG_LIMIT = 1000;
+const MAX_AUTO_REPLIES_PER_CONVERSATION = 1;
+
+const POSTED_AUTO_REPLY_FORMATS = new Set([
+  'auto_reply',
+  'auto_reply_high_value',
+]);
 
 function isTemplateFallbackTweet(tweet: { rationale?: string | null }): boolean {
   return typeof tweet.rationale === 'string' && tweet.rationale.toLowerCase().includes('template fallback');
@@ -1181,6 +1187,17 @@ async function runAutoReply(
       .filter((e) => HANDLED_AUTO_REPLY_FORMATS.has(String(e.format || '')) && e.tweetId)
       .map((e) => String(e.tweetId))
   );
+  const storedConversationByTweetId = new Map(
+    storedMentions
+      .filter((mention) => mention.tweetId && mention.conversationId)
+      .map((mention) => [String(mention.tweetId), String(mention.conversationId)] as const)
+  );
+  const repliedConversationIds = new Set(
+    postLog
+      .filter((e) => POSTED_AUTO_REPLY_FORMATS.has(String(e.format || '')) && e.tweetId)
+      .map((e) => storedConversationByTweetId.get(String(e.tweetId)))
+      .filter((conversationId): conversationId is string => Boolean(conversationId))
+  );
 
   const storedUnrepliedMentions = storedMentions
     .filter((mention) => mention.tweetId && !repliedToTweetIds.has(String(mention.tweetId)))
@@ -1450,6 +1467,49 @@ async function runAutoReply(
     let replyContent = '';
     const mentionHandle = `@${mention.authorUsername || mention.authorId}`;
     try {
+      if (mention.conversationId && repliedConversationIds.has(String(mention.conversationId))) {
+        await storeMentionIfNeeded(agent, mention, storedTweetIds);
+        const reason = `Conversation reply gate: already sent ${MAX_AUTO_REPLIES_PER_CONVERSATION} auto-reply in this conversation.`;
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: mention.id,
+          xTweetId: '',
+          content: mention.text,
+          format: 'auto_reply_thread_depth_gate',
+          topic: `Reply to @${mention.authorUsername || mention.authorId}`,
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason,
+        });
+        await upsertRelationshipProfile(agent.id, {
+          handle: mentionHandle,
+          displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
+          mentionId: mention.id,
+          topic: scored.value.responseStrategy,
+          outcome: 'rejected',
+          rejected: true,
+          cooldownMins: 24 * 60,
+        }).catch(() => null);
+        await addLearningSignal(agent.id, {
+          xTweetId: mention.id,
+          signalType: 'reply_rejected',
+          surface: 'autopilot',
+          rewardDelta: -0.18,
+          reason,
+          inferred: true,
+          metadata: {
+            qualityGate: 'conversation_reply_limit',
+            highValueReplyMode: settings.highValueReplyMode === true,
+            replyValueScore: scored.value.score,
+            targetMentionId: mention.id,
+            conversationId: mention.conversationId,
+            maxDepth: MAX_AUTO_REPLIES_PER_CONVERSATION,
+          },
+        });
+        continue;
+      }
+
       await upsertRelationshipProfile(agent.id, {
         handle: mentionHandle,
         displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
@@ -1475,7 +1535,7 @@ async function runAutoReply(
       }
 
       // Check thread depth — skip if we've already gone N rounds
-      const maxDepth = 3;
+      const maxDepth = MAX_AUTO_REPLIES_PER_CONVERSATION;
       if (mention.conversationId) {
         const convoHistory = await getConversationHistory(agent.id, mention.conversationId, 10);
         const ourReplies = convoHistory.filter((t) => t.role === 'us');
@@ -1874,6 +1934,9 @@ async function runAutoReply(
         replied: true,
         cooldownMins: Math.max(60, settings.replyIntervalMins || 60),
       }).catch(() => null);
+      if (mention.conversationId) {
+        repliedConversationIds.add(String(mention.conversationId));
+      }
 
       repliesSent++;
     } catch (err) {
