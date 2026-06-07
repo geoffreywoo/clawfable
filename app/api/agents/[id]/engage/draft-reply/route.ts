@@ -7,6 +7,7 @@ import { getAnalysis, createTweet, addLearningSignal } from '@/lib/kv-storage';
 import type { EngagementCandidate } from '@/lib/types';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
+import { hasPostedReplyForConversation } from '@/lib/reply-conversation-guard';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -32,6 +33,12 @@ export async function POST(
 
     if (!validCandidate(candidate, id)) {
       return NextResponse.json({ error: 'candidate is required' }, { status: 400 });
+    }
+    if (await hasPostedReplyForConversation(id, candidate.tweetId)) {
+      return NextResponse.json({
+        error: 'This account has already replied to that root conversation.',
+        code: 'duplicate_reply_conversation',
+      }, { status: 409 });
     }
 
     const [{ voiceProfile, memory }, analysis] = await Promise.all([
@@ -106,6 +113,8 @@ Preserve the account's authentic voice while increasing the odds of niche attent
       xTweetId: null,
       quoteTweetId: null,
       quoteTweetAuthor: candidate.authorHandle,
+      followupForTweetId: candidate.tweetId,
+      replyConversationId: candidate.tweetId,
       scheduledAt: null,
     });
 

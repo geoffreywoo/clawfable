@@ -6,10 +6,12 @@ import {
   createAgent,
   createBrowserCompanionPairing,
   createEngagementSession,
+  createTweet,
   getEngagementSession,
   getLearningSignals,
   getOrCreateUser,
   getPostLog,
+  getTweet,
 } from '@/lib/kv-storage';
 
 function makeLikeAction(tweetId: string) {
@@ -175,5 +177,79 @@ describe('browser companion routes', () => {
       && entry.reason?.includes('@builder')
     )).toBe(true);
     expect(updatedSession?.actions[0].status).toBe('succeeded');
+  });
+
+  it('records the root target when a browser companion reply succeeds', async () => {
+    const user = await getOrCreateUser('browser-user-4', 'browserreply', 'Browser Reply');
+    const agent = await createAgent({
+      handle: 'browser-reply-agent',
+      name: 'Browser Reply Agent',
+      soulMd: '# soul',
+    } as any);
+    await addAgentToUser(user.id, agent.id);
+    const draft = await createTweet({
+      agentId: agent.id,
+      content: 'workflow quality beats demo quality',
+      type: 'reply',
+      status: 'draft',
+      topic: 'engage',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: 'builder',
+      scheduledAt: null,
+    });
+
+    const replyAction = {
+      ...makeLikeAction('root-target-1'),
+      id: 'action-reply-root-target-1',
+      type: 'reply' as const,
+      candidate: {
+        ...makeLikeAction('root-target-1').candidate,
+        agentId: agent.id,
+      },
+      draft: {
+        tweetId: draft.id,
+        content: draft.content,
+        originalContent: draft.content,
+        edited: false,
+        updatedAt: draft.createdAt,
+      },
+    };
+    const session = await createEngagementSession({
+      agentId: agent.id,
+      state: 'approved',
+      actions: [replyAction],
+      machineLabel: null,
+      approvedAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null,
+      abortedAt: null,
+      lastError: null,
+    });
+
+    const pairing = await createBrowserCompanionPairing(user.id, 'Ops Mac');
+    const reportResponse = await reportActionPOST(
+      new Request(`http://localhost/api/browser-companion/actions/${replyAction.id}/report`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${pairing.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId: session.id,
+          status: 'succeeded',
+          resultTweetId: 'posted-reply-1',
+          resultTweetUrl: 'https://x.com/browserreply/status/posted-reply-1',
+        }),
+      }) as any,
+      { params: Promise.resolve({ actionId: replyAction.id }) }
+    );
+    const updatedDraft = await getTweet(draft.id);
+
+    expect(reportResponse.status).toBe(200);
+    expect(updatedDraft?.status).toBe('posted');
+    expect(updatedDraft?.xTweetId).toBe('posted-reply-1');
+    expect(updatedDraft?.followupForTweetId).toBe('root-target-1');
+    expect(updatedDraft?.replyConversationId).toBe('root-target-1');
   });
 });

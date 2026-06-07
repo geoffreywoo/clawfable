@@ -5,6 +5,7 @@ import { buildGenerationContext } from '@/lib/generation-context';
 import { generateText } from '@/lib/ai';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
+import { hasPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -17,8 +18,16 @@ export async function POST(
 
     const body = await request.json();
     const { content, authorHandle, highValueMode } = body;
+    const targetTweetId = normalizeTweetTarget(body?.targetTweetId || body?.tweetId || body?.replyToId);
+    const replyConversationId = normalizeTweetTarget(body?.conversationId) || targetTweetId;
     if (!content || !authorHandle) {
       return NextResponse.json({ error: 'content and authorHandle required' }, { status: 400 });
+    }
+    if (await hasPostedReplyForConversation(id, replyConversationId)) {
+      return NextResponse.json({
+        error: 'This account has already replied to that root conversation.',
+        code: 'duplicate_reply_conversation',
+      }, { status: 409 });
     }
 
     const { voiceProfile, memory } = await buildGenerationContext(agent, {
@@ -111,6 +120,8 @@ ${agent.soulMd}`);
       xTweetId: null,
       quoteTweetId: null,
       quoteTweetAuthor: null,
+      followupForTweetId: targetTweetId,
+      replyConversationId,
       scheduledAt: null,
     });
     return NextResponse.json(tweet);

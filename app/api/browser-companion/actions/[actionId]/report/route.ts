@@ -43,6 +43,8 @@ async function recordActionOutcome(
         status: 'posted',
         xTweetId: resultTweetId,
         postedAt: now,
+        followupForTweetId: action.candidate.tweetId,
+        replyConversationId: action.candidate.tweetId,
       });
 
       await addLearningSignal(agentId, {

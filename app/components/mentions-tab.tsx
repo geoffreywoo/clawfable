@@ -136,7 +136,12 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       const res = await fetch(`/api/agents/${agentId}/generate-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: mention.content, authorHandle: mention.authorHandle }),
+        body: JSON.stringify({
+          content: mention.content,
+          authorHandle: mention.authorHandle,
+          targetTweetId: mention.tweetId,
+          conversationId: mention.conversationId || mention.tweetId,
+        }),
       });
       const tweet = await res.json();
       setReplyDrafts((prev) => ({ ...prev, [mention.id]: tweet }));
@@ -190,6 +195,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
         body: JSON.stringify({
           content: draft.content,
           replyToId: mention.tweetId || undefined,
+          conversationId: mention.conversationId || mention.tweetId || undefined,
           tweetId: draft.id,
         }),
       });

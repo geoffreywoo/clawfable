@@ -406,6 +406,7 @@ export interface Tweet {
   portfolioRole?: PostPortfolioRole | null;
   relationshipTargetHandle?: string | null;
   followupForTweetId?: string | null;
+  replyConversationId?: string | null;
   followupTrigger?: string | null;
   trendFitScore?: number | null;
   criticScores?: CandidateCriticScores | null;

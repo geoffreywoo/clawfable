@@ -7,6 +7,7 @@ import { resolveQueuedTweetFailure } from '@/lib/queue-healing';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
+import { findPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -46,8 +47,14 @@ export async function POST(
     const inferredReplyToId = existingTweet?.type === 'reply'
       ? (existingTweet.followupForTweetId || existingTweet.quoteTweetId || null)
       : null;
-    const effectiveReplyToId = replyToId || inferredReplyToId;
+    const effectiveReplyToId = normalizeTweetTarget(replyToId) || inferredReplyToId;
+    let replyConversationId = normalizeTweetTarget(body?.conversationId || body?.replyConversationId)
+      || existingTweet?.replyConversationId
+      || null;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
+    if (isReply && !replyConversationId) {
+      replyConversationId = existingTweet?.followupForTweetId || existingTweet?.quoteTweetId || effectiveReplyToId;
+    }
 
     const sanitizedIssue = getSanitizedTweetTextIssue(String(content), isReply ? 'reply' : 'post');
     if (sanitizedIssue) {
@@ -135,6 +142,38 @@ export async function POST(
           tweetId: existingTweet.xTweetId,
         });
       }
+      if (isReply && !replyConversationId) {
+        replyConversationId = existingTweet.replyConversationId
+          || existingTweet.followupForTweetId
+          || existingTweet.quoteTweetId
+          || effectiveReplyToId;
+      }
+    }
+
+    if (isReply) {
+      const duplicateReply = await findPostedReplyForConversation(id, replyConversationId, dbTweetId);
+      if (duplicateReply) {
+        const reason = `Reply conversation gate: this account already posted reply ${duplicateReply.xTweetId} for conversation ${replyConversationId}.`;
+        await addPostLogEntry(id, {
+          agentId: id,
+          tweetId: dbTweetId || '',
+          xTweetId: '',
+          content: String(content),
+          format: 'manual_reply_duplicate_gate',
+          topic: existingTweet?.topic || 'reply',
+          postedAt: new Date().toISOString(),
+          source: 'manual',
+          action: 'skipped',
+          reason,
+        }).catch(() => null);
+        return NextResponse.json({
+          error: 'This account has already replied to that root conversation.',
+          code: 'duplicate_reply_conversation',
+          duplicateSource: duplicateReply.source,
+          existingTweetId: duplicateReply.tweetId,
+          existingXTweetId: duplicateReply.xTweetId,
+        }, { status: 409 });
+      }
     }
 
     const keys = decodeKeys({
@@ -155,7 +194,13 @@ export async function POST(
     const persistenceFailures: string[] = [];
     if (dbTweetId) {
       try {
-        const updated = await updateTweet(String(dbTweetId), { status: 'posted', xTweetId: result.tweetId, postedAt });
+        const updated = await updateTweet(String(dbTweetId), {
+          status: 'posted',
+          xTweetId: result.tweetId,
+          postedAt,
+          followupForTweetId: isReply ? effectiveReplyToId : existingTweet?.followupForTweetId,
+          replyConversationId: isReply ? replyConversationId : existingTweet?.replyConversationId,
+        });
         await addLearningSignal(id, {
           tweetId: String(dbTweetId),
           xTweetId: result.tweetId,
@@ -165,6 +210,8 @@ export async function POST(
           metadata: metadataWithStyleMode(updated, {
             confidenceScore: updated.confidenceScore ?? null,
             candidateScore: updated.candidateScore ?? null,
+            targetTweetId: isReply ? effectiveReplyToId ?? null : null,
+            replyConversationId: isReply ? replyConversationId ?? null : null,
             generationMode: updated.generationMode ?? null,
             draftExperimentId: updated.draftExperimentId ?? null,
             creativeLane: updated.creativeLane ?? null,

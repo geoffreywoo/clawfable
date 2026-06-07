@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAgent, createTweet, getLearningSignals, getTweet, updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, createAgent, createTweet, getLearningSignals, getTweet, updateTweet } from '@/lib/kv-storage';
 
 const mocks = vi.hoisted(() => ({
   requireAgentAccess: vi.fn(),
@@ -299,6 +299,135 @@ describe('twitter post route', () => {
     expect(data.alreadyPosted).toBe(true);
     expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
     expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('blocks a second manual reply to the same root conversation before calling X', async () => {
+    const agent = await createAgent({
+      handle: 'manual-reply-root-guard',
+      name: 'Manual Reply Guard',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-guard-1',
+    } as any);
+    await createTweet({
+      agentId: agent.id,
+      content: 'already answered this root',
+      type: 'reply',
+      status: 'posted',
+      topic: 'reply',
+      xTweetId: 'x-existing-reply',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      followupForTweetId: 'target-reply-a',
+      replyConversationId: 'root-tweet-1',
+      scheduledAt: null,
+    });
+    const draft = await createTweet({
+      agentId: agent.id,
+      content: 'second answer to same root',
+      type: 'reply',
+      status: 'draft',
+      topic: 'reply',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      followupForTweetId: 'target-reply-b',
+      replyConversationId: 'root-tweet-1',
+      scheduledAt: null,
+    });
+    mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+
+    const response = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: draft.content,
+          tweetId: draft.id,
+          replyToId: 'target-reply-b',
+          conversationId: 'root-tweet-1',
+        }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) }
+    );
+    const data = await response.json();
+    const unchangedDraft = await getTweet(draft.id);
+
+    expect(response.status).toBe(409);
+    expect(data.code).toBe('duplicate_reply_conversation');
+    expect(mocks.replyToTweet).not.toHaveBeenCalled();
+    expect(unchangedDraft?.status).toBe('draft');
+    expect(unchangedDraft?.xTweetId).toBeNull();
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({
+        tweetId: draft.id,
+        format: 'manual_reply_duplicate_gate',
+        action: 'skipped',
+      }),
+    );
+  });
+
+  it('uses legacy reply_posted signals to block repeated root replies', async () => {
+    const agent = await createAgent({
+      handle: 'manual-reply-legacy-guard',
+      name: 'Manual Reply Legacy Guard',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-guard-1',
+    } as any);
+    await addLearningSignal(agent.id, {
+      xTweetId: 'legacy-posted-reply',
+      signalType: 'reply_posted',
+      surface: 'engage',
+      rewardDelta: 0.34,
+      metadata: {
+        targetTweetId: 'legacy-root-tweet',
+      },
+    });
+    const draft = await createTweet({
+      agentId: agent.id,
+      content: 'new answer to old root',
+      type: 'reply',
+      status: 'draft',
+      topic: 'reply',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      followupForTweetId: 'legacy-root-tweet',
+      replyConversationId: 'legacy-root-tweet',
+      scheduledAt: null,
+    });
+    mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+
+    const response = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: draft.content,
+          tweetId: draft.id,
+          replyToId: 'legacy-root-tweet',
+          conversationId: 'legacy-root-tweet',
+        }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) }
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(data.code).toBe('duplicate_reply_conversation');
+    expect(data.duplicateSource).toBe('learning_signal');
+    expect(data.existingXTweetId).toBe('legacy-posted-reply');
+    expect(mocks.replyToTweet).not.toHaveBeenCalled();
   });
 
   it('rejects tweet ids that do not belong to the agent', async () => {
