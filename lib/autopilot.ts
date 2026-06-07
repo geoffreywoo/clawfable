@@ -2355,6 +2355,7 @@ async function refillQueue(
         topics: voiceProfile.topics,
         recentContent,
         count: Math.max(organicCount, Math.min(count, settings.minQueueSize || 3)),
+        memory,
       });
       added += await addBatchItems(allBatch, 0.72);
     }
