@@ -59,6 +59,43 @@ function readPreferenceHints(metadata: LearningSignal['metadata']): string[] {
   return unique(hints);
 }
 
+function isFallbackRationale(value: string | null | undefined): boolean {
+  const rationale = String(value || '').toLowerCase();
+  return rationale.includes('template fallback')
+    || rationale.includes('emergency fallback')
+    || rationale.includes('emergency deterministic');
+}
+
+export function buildFallbackLearningMetadata(
+  tweet: Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis'>,
+): Record<string, string | number | boolean | null> {
+  const draftExperimentId = String(tweet.draftExperimentId || '');
+  const fallbackKind = isFallbackRationale(tweet.rationale)
+    ? String(tweet.rationale || '').toLowerCase().includes('emergency')
+      ? 'emergency_queue_fallback'
+      : 'provider_template_fallback'
+    : tweet.sourceLane === 'core_explore_fallback' || draftExperimentId.includes('-fallback-')
+      ? 'provider_template_fallback'
+      : null;
+
+  if (!fallbackKind) return {};
+
+  const memoryAlignment = readScore(tweet.scoreProvenance?.memoryAlignment);
+  const authorityProof = readScore(tweet.scoreProvenance?.authorityProof);
+  const conversationQuality = readScore(tweet.scoreProvenance?.conversationQuality);
+
+  return {
+    generationFallback: true,
+    fallbackKind,
+    fallbackMemoryAligned: Boolean(memoryAlignment && memoryAlignment > 0),
+    fallbackMemoryAlignment: memoryAlignment,
+    fallbackAuthorityProof: authorityProof,
+    fallbackConversationQuality: conversationQuality,
+    fallbackSourceLane: tweet.sourceLane || null,
+    fallbackThesis: tweet.featureTags?.thesis || tweet.thesis || null,
+  };
+}
+
 function buildMomentumTopics(
   performanceHistory: TweetPerformance[],
   baselineLikes: number,
@@ -106,6 +143,39 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   }
 
   return sortCounts(counts).slice(0, 4);
+}
+
+function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[] {
+  const counts: Record<string, number> = {};
+
+  for (const signal of signals) {
+    if (signal.metadata?.generationFallback !== true) continue;
+    const memoryAligned = signal.metadata.fallbackMemoryAligned === true;
+    const kind = typeof signal.metadata.fallbackKind === 'string'
+      ? signal.metadata.fallbackKind.replace(/_/g, ' ')
+      : 'fallback draft';
+    const thesis = typeof signal.metadata.fallbackThesis === 'string' ? signal.metadata.fallbackThesis.trim() : '';
+    const thesisLabel = thesis ? ` Thesis: ${thesis.slice(0, 90)}.` : '';
+
+    if (signal.signalType === 'approved_without_edit' || signal.signalType === 'x_post_succeeded') {
+      const line = memoryAligned
+        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${thesisLabel}`;
+      counts[line] = (counts[line] || 0) + 1;
+    }
+
+    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
+      const line = `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${thesisLabel}`;
+      counts[line] = (counts[line] || 0) + 1;
+    }
+
+    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
+      const line = `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${thesisLabel}`;
+      counts[line] = (counts[line] || 0) + 1;
+    }
+  }
+
+  return sortCounts(counts).slice(0, 3);
 }
 
 function summarizeEditTransformations(signals: LearningSignal[]): string[] {
@@ -341,7 +411,10 @@ export function buildPersonalizationMemory({
     .slice(0, 4)
     .map((arm) => `${arm.arm} needs more data`);
 
-  const operatorHiddenPreferences = summarizeOperatorPreferences(signals, remixPatterns);
+  const operatorHiddenPreferences = unique([
+    ...summarizeFallbackOutcomePreferences(signals),
+    ...summarizeOperatorPreferences(signals, remixPatterns),
+  ]).slice(0, 5);
   const editTransformations = summarizeEditTransformations(signals);
   const referenceBank = summarizeReferenceBank(performanceHistory);
   const conversationInsights = summarizeConversationInsights(performanceHistory);

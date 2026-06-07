@@ -65,6 +65,7 @@ import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
+import { buildFallbackLearningMetadata } from './learning-loop';
 
 export interface AutopilotResult {
   agentId: string;
@@ -1093,6 +1094,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       surface: 'autopilot',
       rewardDelta: 0.65,
       metadata: {
+        ...buildFallbackLearningMetadata(tweet),
         confidenceScore: effectiveConfidence(tweet),
         candidateScore: tweet.candidateScore ?? null,
         generationMode: tweet.generationMode ?? null,

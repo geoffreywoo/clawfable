@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, deleteTweet, getTweet, markIdeaAtomRejectedForTweet, saveFeedback, updateTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
-import { summarizeEditDelta } from '@/lib/learning-loop';
+import { buildFallbackLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
@@ -62,7 +62,8 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
-          metadata: metadataWithStyleMode(tweet, {
+          metadata: metadataWithStyleMode(updated, {
+            ...buildFallbackLearningMetadata(updated),
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
@@ -80,7 +81,8 @@ export async function PATCH(
           signalType: 'approved_without_edit',
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: 0.85,
-          metadata: metadataWithStyleMode(tweet, {
+          metadata: metadataWithStyleMode(updated, {
+            ...buildFallbackLearningMetadata(updated),
             draftExperimentId: updated.draftExperimentId ?? null,
             creativeLane: updated.creativeLane ?? null,
             experimentHoldout: updated.experimentHoldout === true,
@@ -100,7 +102,8 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : 'manual_post',
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
-          metadata: metadataWithStyleMode(tweet, {
+          metadata: metadataWithStyleMode(updated, {
+            ...buildFallbackLearningMetadata(updated),
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
@@ -120,6 +123,7 @@ export async function PATCH(
         surface: tweet.type === 'reply' ? 'mentions' : 'manual_post',
         rewardDelta: 0.7,
         metadata: metadataWithStyleMode(updated, {
+          ...buildFallbackLearningMetadata(updated),
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
@@ -151,6 +155,7 @@ export async function PATCH(
           rewardDelta: -0.95,
           reason: trimmedReason,
           metadata: metadataWithStyleMode(tweet, {
+            ...buildFallbackLearningMetadata(tweet),
             userProvidedReason: true,
             draftExperimentId: tweet.draftExperimentId ?? null,
             creativeLane: tweet.creativeLane ?? null,
@@ -181,6 +186,7 @@ export async function PATCH(
           reason: inferredReason,
           inferred: true,
           metadata: metadataWithStyleMode(tweet, {
+            ...buildFallbackLearningMetadata(tweet),
             userProvidedReason: false,
             draftExperimentId: tweet.draftExperimentId ?? null,
             creativeLane: tweet.creativeLane ?? null,
@@ -237,6 +243,7 @@ export async function DELETE(
       reason: intentSummary,
       inferred: !userReason,
       metadata: metadataWithStyleMode(tweet, {
+        ...buildFallbackLearningMetadata(tweet),
         userProvidedReason: !!userReason,
         draftExperimentId: tweet.draftExperimentId ?? null,
         creativeLane: tweet.creativeLane ?? null,
