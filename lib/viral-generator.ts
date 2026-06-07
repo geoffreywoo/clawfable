@@ -4,7 +4,7 @@
  */
 
 import { generateText } from './ai';
-import type { AccountAnalysis, AgentLearnings, AudienceSegment, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
+import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
@@ -107,6 +107,10 @@ export interface ProtocolTweet {
   trendFitScore?: number | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
+  featureTags?: CandidateFeatureTags | null;
+  judgeScore?: number | null;
+  judgeBreakdown?: CandidateJudgeBreakdown | null;
+  judgeNotes?: string | null;
 }
 
 const CREATIVE_LANES: CreativeLane[] = [
@@ -236,14 +240,137 @@ function buildFallbackAngle(tone: string): string {
   return 'The edge is not sounding louder, it is learning faster';
 }
 
+type FallbackMemoryPreference = 'specificity' | 'structure' | 'conversation';
+
+function fallbackMemoryText(memory: PersonalizationMemory | null | undefined): string {
+  if (!memory) return '';
+  return [
+    ...(memory.alwaysDoMoreOfThis || []),
+    ...(memory.operatorHiddenPreferences || []),
+    ...(memory.editTransformations || []),
+    ...(memory.conversationInsights || []),
+    ...(memory.promptStrategyLessons || []),
+    ...(memory.weeklyChanges || []),
+  ].join(' ').toLowerCase();
+}
+
+function inferFallbackMemoryPreferences(memory: PersonalizationMemory | null | undefined): FallbackMemoryPreference[] {
+  const text = fallbackMemoryText(memory);
+  if (!text) return [];
+
+  const preferences: FallbackMemoryPreference[] = [];
+  if (/\b(specific|specifics|concrete|evidence|example|mechanism|metric|numbers|proof|tactical)\b/.test(text)) {
+    preferences.push('specificity');
+  }
+  if (/\b(line-break|line break|structure|structured|readability|scannable|list|clearer build)\b/.test(text)) {
+    preferences.push('structure');
+  }
+  if (/\b(reply|replies|conversation|substantive|question|debate|disagree)\b/.test(text)) {
+    preferences.push('conversation');
+  }
+
+  return preferences;
+}
+
+function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemory | null | undefined): ProtocolTweet[] {
+  const preferences = inferFallbackMemoryPreferences(memory);
+  const templates: ProtocolTweet[] = [];
+  if (preferences.length === 0) return templates;
+
+  if (preferences.includes('specificity')) {
+    templates.push({
+      content: `The ${topic} take worth trusting is the one that names the behavior change.\n\nNot "people care more now."\n\nA buyer switches tools.\nA team changes workflow.\nA user comes back unprompted.\n\nThat is evidence.`,
+      format: 'analysis',
+      targetTopic: topic,
+      rationale: 'Memory-aligned template fallback: operator preferences favor specificity, evidence, and concrete examples.',
+      featureTags: {
+        hook: 'observation',
+        tone: 'analytical',
+        specificity: 'concrete',
+        structure: 'list',
+        thesis: `${topic.toLowerCase()} trust comes from behavior evidence`,
+        riskFlags: [],
+      },
+      judgeScore: 0.82,
+      judgeBreakdown: {
+        overall: 0.82,
+        voiceFit: 0.78,
+        clarity: 0.86,
+        novelty: 0.78,
+        audienceFit: 0.8,
+        policySafety: 0.9,
+      },
+      judgeNotes: 'Memory-aligned fallback: concrete behavior evidence with readable structure.',
+    });
+  }
+
+  if (preferences.includes('structure')) {
+    templates.push({
+      content: `${topic} gets clearer when the argument has a shape:\n\n1. what changed\n2. who felt it first\n3. what old habit broke\n4. what compounds if the pattern keeps going\n\nMost takes skip step two and become vague.`,
+      format: 'long_form',
+      targetTopic: topic,
+      rationale: 'Memory-aligned template fallback: operator edits favor line-break structure and scannable reasoning.',
+      featureTags: {
+        hook: 'listicle',
+        tone: 'analytical',
+        specificity: 'tactical',
+        structure: 'list',
+        thesis: `${topic.toLowerCase()} arguments improve with structure`,
+        riskFlags: [],
+      },
+      judgeScore: 0.8,
+      judgeBreakdown: {
+        overall: 0.8,
+        voiceFit: 0.76,
+        clarity: 0.88,
+        novelty: 0.74,
+        audienceFit: 0.78,
+        policySafety: 0.9,
+      },
+      judgeNotes: 'Memory-aligned fallback: operator-preferred line-break structure.',
+    });
+  }
+
+  if (preferences.includes('conversation')) {
+    templates.push({
+      content: `Serious ${topic} question:\n\nwhat is the smallest repeated behavior that would prove the market is actually moving, not just talking louder?`,
+      format: 'question',
+      targetTopic: topic,
+      rationale: 'Memory-aligned template fallback: conversation lessons favor substantive questions over cheap engagement bait.',
+      featureTags: {
+        hook: 'question',
+        tone: 'analytical',
+        specificity: 'tactical',
+        structure: 'question_led',
+        thesis: `${topic.toLowerCase()} movement should be tested through behavior`,
+        riskFlags: [],
+      },
+      judgeScore: 0.78,
+      judgeBreakdown: {
+        overall: 0.78,
+        voiceFit: 0.74,
+        clarity: 0.82,
+        novelty: 0.74,
+        audienceFit: 0.82,
+        policySafety: 0.88,
+      },
+      judgeNotes: 'Memory-aligned fallback: substantive question instead of cheap engagement bait.',
+    });
+  }
+
+  return templates;
+}
+
 function buildFallbackTemplates(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
   count: number,
   style: ContentStyleConfig,
   recentPosts: string[],
+  memory: PersonalizationMemory | null = null,
 ): ProtocolTweet[] {
   const topics = Array.from(new Set([
+    ...(memory?.topicsWithMomentum || []),
     ...(style.bias.momentumTopic ? [style.bias.momentumTopic] : []),
     ...(style.bias.scheduledTopic ? [style.bias.scheduledTopic] : []),
     ...analysis.engagementPatterns.topTopics,
@@ -272,6 +399,11 @@ function buildFallbackTemplates(
   for (const topic of topics) {
     const claim = buildFallbackClaim(topic, voiceProfile.tone);
     const angle = buildFallbackAngle(voiceProfile.tone);
+
+    for (const memoryTemplate of buildMemoryFallbackTemplates(topic, memory)) {
+      addTemplate(memoryTemplate);
+      if (templates.length >= maxTemplates) break;
+    }
 
     for (const format of formats) {
       if (templates.length >= maxTemplates) break;
@@ -1031,7 +1163,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       throw err; // Real code bug or malformed request — surface it.
     }
 
-    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts)
+    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts, memory)
       .map((tweet, index) => {
         const slot = index + 1;
         const creativeLane = creativeLanePlan.get(slot) || 'operator_take';

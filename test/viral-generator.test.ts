@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateViralBatch } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
+import type { PersonalizationMemory } from '@/lib/types';
 
 const anthropicCreateMock = vi.hoisted(() => vi.fn());
 
@@ -16,6 +17,21 @@ describe('generateViralBatch', () => {
   beforeEach(() => {
     anthropicCreateMock.mockReset();
   });
+
+  function memory(overrides: Partial<PersonalizationMemory> = {}): PersonalizationMemory {
+    return {
+      alwaysDoMoreOfThis: [],
+      neverDoThisAgain: [],
+      topicsWithMomentum: [],
+      formatsUnderTested: [],
+      operatorHiddenPreferences: [],
+      editTransformations: [],
+      identityConstraints: [],
+      weeklyChanges: [],
+      updatedAt: '2026-06-07T00:00:00.000Z',
+      ...overrides,
+    };
+  }
 
   it('normalizes double-escaped newlines before candidates enter the queueing pipeline', async () => {
     anthropicCreateMock.mockResolvedValue({
@@ -195,6 +211,65 @@ describe('generateViralBatch', () => {
     expect(batch).toHaveLength(3);
     expect(batch.every((tweet) => tweet.content.length > 0)).toBe(true);
     expect(batch.some((tweet) => tweet.rationale.toLowerCase().includes('template fallback'))).toBe(true);
+  });
+
+  it('uses learned memory when provider-error fallback templates are ranked', async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')
+    );
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'analyst',
+        topics: ['startups'],
+        antiGoals: [],
+        communicationStyle: 'specific and direct',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['analysis', 'question'],
+          topTopics: ['startups'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      3,
+      null,
+      null,
+      null,
+      undefined,
+      [],
+      [],
+      memory({
+        topicsWithMomentum: ['AI agents'],
+        operatorHiddenPreferences: [
+          'Operators add sharper specifics, evidence, or examples before approving.',
+        ],
+      }),
+    );
+
+    const memoryAligned = batch.find((tweet) => tweet.rationale.includes('Memory-aligned template fallback'));
+
+    expect(batch).toHaveLength(3);
+    expect(memoryAligned).toBeDefined();
+    expect(memoryAligned!.targetTopic).toBe('AI agents');
+    expect(memoryAligned!.content).toContain('That is evidence.');
+    expect(memoryAligned!.scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
   });
 
   it('keeps internal voice reference text out of deterministic fallback templates', async () => {
