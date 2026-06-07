@@ -5,6 +5,13 @@ import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, Per
 import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
 
+type JudgeContext = {
+  voiceProfile?: VoiceProfile;
+  analysis?: AccountAnalysis;
+  learnings?: AgentLearnings | null;
+  memory?: PersonalizationMemory | null;
+};
+
 export interface JudgedCandidate extends RankableProtocolTweet {
   featureTags: CandidateFeatureTags;
   coverageCluster: string;
@@ -17,26 +24,145 @@ function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function heuristicJudge(candidate: RankableProtocolTweet): JudgedCandidate {
+function normalizeForSearch(value: string | null | undefined): string {
+  return (value || '').toLowerCase().replace(/[_-]/g, ' ');
+}
+
+function hasAnyTerm(text: string, terms: string[]): boolean {
+  const normalized = normalizeForSearch(text);
+  return terms.some((term) => normalized.includes(term));
+}
+
+function contextText(items: Array<string | null | undefined>): string {
+  return items.filter((item): item is string => Boolean(item?.trim())).join(' ');
+}
+
+function scoreContextualMemoryFit(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: JudgeContext,
+): { boost: number; penalty: number; notes: string[] } {
+  const memory = context.memory;
+  const notes: string[] = [];
+  if (!memory) return { boost: 0, penalty: 0, notes };
+
+  const reinforce = contextText([
+    ...(memory.alwaysDoMoreOfThis || []),
+    ...(memory.operatorHiddenPreferences || []),
+    ...(memory.editTransformations || []),
+    ...(memory.conversationInsights || []),
+    ...(memory.promptStrategyLessons || []),
+  ]);
+  const avoid = contextText([
+    ...(memory.neverDoThisAgain || []),
+    ...(memory.identityConstraints || []),
+    ...(memory.outcomeFatigueLessons || []),
+  ]);
+
+  let boost = 0;
+  let penalty = 0;
+  const hasSpecificity = ['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)
+    || /\b\d+[%x]?\b|\b(example|specific|because|mechanism|proof)\b/i.test(candidate.content);
+  const hasReadableStructure = candidate.content.split('\n').filter((line) => line.trim()).length >= 2
+    || ['stacked_lines', 'list', 'comparison', 'argument'].includes(featureTags.structure);
+  const hasConversationSubstance = /\b(reply|question|conversation|debate|disagree|why|because)\b/i.test(candidate.content)
+    && candidate.content.length >= 80;
+
+  if (hasAnyTerm(reinforce, ['specific', 'specificity', 'numbers', 'data', 'evidence', 'example', 'concrete', 'mechanism', 'proof']) && hasSpecificity) {
+    boost += 0.08;
+    notes.push('memory-aligned specificity');
+  }
+
+  if (hasAnyTerm(reinforce, ['line break', 'structure', 'readability', 'clearer build']) && hasReadableStructure) {
+    boost += 0.05;
+    notes.push('memory-aligned structure');
+  }
+
+  if (hasAnyTerm(reinforce, ['reply', 'conversation', 'substance', 'real substance']) && hasConversationSubstance) {
+    boost += 0.04;
+    notes.push('memory-aligned conversation value');
+  }
+
+  if (
+    hasAnyTerm(avoid, ['generic', 'vague', 'abstract', 'thin', 'surface level', 'surface-level'])
+    && (featureTags.specificity === 'abstract' || featureTags.riskFlags.includes('thin') || candidate.content.length < 70)
+  ) {
+    penalty += 0.1;
+    notes.push('memory conflict: generic');
+  }
+
+  if (
+    hasAnyTerm(avoid, ['hype', 'buzzword', 'salesy', 'promotional', 'cta', 'call to action', 'subscribe', 'dm me'])
+    && (featureTags.riskFlags.includes('salesy') || /\b(unlock|10x|viral|subscribe|dm me|sign up|buy now)\b/i.test(candidate.content))
+  ) {
+    penalty += 0.12;
+    notes.push('memory conflict: promotional');
+  }
+
+  return {
+    boost: clamp(boost, 0, 0.18),
+    penalty: clamp(penalty, 0, 0.22),
+    notes,
+  };
+}
+
+function scoreContextualVoiceFit(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: JudgeContext,
+): number {
+  let score = candidate.targetTopic ? 0.72 : 0.58;
+  const normalizedTopic = normalizeForSearch(candidate.targetTopic);
+
+  if (context.voiceProfile?.topics.some((topic) => normalizeForSearch(topic) === normalizedTopic)) {
+    score += 0.08;
+  }
+
+  if (context.learnings?.styleFingerprint?.topHooks.some((hook) => normalizeForSearch(hook) === normalizeForSearch(featureTags.hook))) {
+    score += 0.04;
+  }
+
+  if (context.learnings?.styleFingerprint?.topTones.some((tone) => normalizeForSearch(tone) === normalizeForSearch(featureTags.tone))) {
+    score += 0.04;
+  }
+
+  const antiGoals = context.voiceProfile?.antiGoals || [];
+  if (antiGoals.some((goal) => goal.length > 4 && normalizeForSearch(candidate.content).includes(normalizeForSearch(goal)))) {
+    score -= 0.18;
+  }
+
+  const memoryFit = scoreContextualMemoryFit(candidate, featureTags, context);
+  score += memoryFit.boost * 0.8;
+  score -= memoryFit.penalty;
+
+  return clamp(score, 0.34, 0.9);
+}
+
+function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext = {}): JudgedCandidate {
   const featureTags = candidate.featureTags || extractCandidateFeatureTags(candidate.content, {
     topic: candidate.targetTopic,
   });
+  const memoryFit = scoreContextualMemoryFit(candidate, featureTags, context);
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
   const novelty = clamp(featureTags.riskFlags.includes('thin') ? 0.48 : 0.68);
-  const audienceFit = clamp(/\b(founder|operator|builder|market|product|ai|startup)\b/i.test(candidate.content) ? 0.72 : 0.58);
-  const policySafety = clamp(1 - (featureTags.riskFlags.length * 0.12), 0.32, 0.88);
-  const voiceFit = clamp(
-    candidate.targetTopic ? 0.72 : 0.58,
-    0.52,
-    0.82,
+  const audienceFit = clamp(
+    (/\b(founder|operator|builder|market|product|ai|startup)\b/i.test(candidate.content) ? 0.72 : 0.58)
+    + (memoryFit.notes.includes('memory-aligned conversation value') ? 0.04 : 0)
   );
+  const policySafety = clamp(
+    1 - (featureTags.riskFlags.length * 0.12) - (memoryFit.penalty * 0.5) + (memoryFit.boost * 0.25),
+    0.32,
+    0.9,
+  );
+  const voiceFit = scoreContextualVoiceFit(candidate, featureTags, context);
   const overall = clamp(
     voiceFit * 0.28 +
-    clarity * 0.18 +
-    novelty * 0.18 +
+    clamp(clarity + (memoryFit.notes.includes('memory-aligned structure') ? 0.04 : 0)) * 0.18 +
+    clamp(novelty + memoryFit.boost - memoryFit.penalty) * 0.18 +
     audienceFit * 0.2 +
     policySafety * 0.16
   );
+  const memoryNote = memoryFit.notes.length > 0 ? ` ${memoryFit.notes.slice(0, 2).join('; ')}.` : '';
 
   return {
     ...candidate,
@@ -51,13 +177,14 @@ function heuristicJudge(candidate: RankableProtocolTweet): JudgedCandidate {
       audienceFit: Number(audienceFit.toFixed(3)),
       policySafety: Number(policySafety.toFixed(3)),
     },
-    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.`,
+    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}`,
   };
 }
 
 function parseScoredLines(
   text: string,
   candidates: RankableProtocolTweet[],
+  context: JudgeContext,
 ): JudgedCandidate[] {
   const judged = new Map<number, JudgedCandidate>();
 
@@ -94,7 +221,7 @@ function parseScoredLines(
     }
   }
 
-  return candidates.map((candidate, idx) => judged.get(idx) || heuristicJudge(candidate));
+  return candidates.map((candidate, idx) => judged.get(idx) || heuristicJudge(candidate, context));
 }
 
 export async function judgeCandidates(
@@ -111,8 +238,9 @@ export async function judgeCandidates(
     memory: PersonalizationMemory | null;
   },
 ): Promise<JudgedCandidate[]> {
+  const judgeContext = { voiceProfile, analysis, learnings, memory };
   if (candidates.length === 0 || !hasTextGenerationProvider()) {
-    return candidates.map(heuristicJudge);
+    return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
   }
 
   const prompt = candidates.map((candidate, idx) =>
@@ -146,6 +274,8 @@ Ground rules:
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}
 ${learnings?.operatorVoiceReference?.bestPerformers?.length ? `- Manual/operator anchors are high-signal for voice, sentiment, tone, and topics: ${learnings.operatorVoiceReference.bestPerformers.slice(0, 3).map((entry) => `"${entry.content.slice(0, 120)}"`).join(' | ')}` : ''}
 ${memory?.neverDoThisAgain?.length ? `- Avoid: ${memory.neverDoThisAgain.slice(0, 3).join(' | ')}` : ''}
+${memory?.operatorHiddenPreferences?.length ? `- Operator preferences: ${memory.operatorHiddenPreferences.slice(0, 3).join(' | ')}` : ''}
+${memory?.editTransformations?.length ? `- Operator edit transformations: ${memory.editTransformations.slice(0, 2).join(' | ')}` : ''}
 ${memory?.referenceBank?.length ? `- Reference bank: ${memory.referenceBank.slice(0, 3).join(' | ')}` : ''}
 ${memory?.conversationInsights?.length ? `- Conversation lessons: ${memory.conversationInsights.slice(0, 2).join(' | ')}` : ''}
 ${memory?.audienceSegmentLessons?.length ? `- Audience lessons: ${memory.audienceSegmentLessons.slice(0, 2).join(' | ')}` : ''}
@@ -155,9 +285,9 @@ Output one JSON object per line, no markdown.`,
       prompt: `Judge these candidates:\n\n${prompt}`,
     });
 
-    return parseScoredLines(response.text, candidates);
+    return parseScoredLines(response.text, candidates, judgeContext);
   } catch {
-    return candidates.map(heuristicJudge);
+    return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
   }
 }
 
