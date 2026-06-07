@@ -6,6 +6,7 @@ import { generateText } from '@/lib/ai';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
 import { hasPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -22,6 +23,12 @@ export async function POST(
     const replyConversationId = normalizeTweetTarget(body?.conversationId) || targetTweetId;
     if (!content || !authorHandle) {
       return NextResponse.json({ error: 'content and authorHandle required' }, { status: 400 });
+    }
+    if (areRepliesDisabled()) {
+      return NextResponse.json({
+        error: REPLY_AUTOMATION_DISABLED_REASON,
+        code: 'reply_emergency_disabled',
+      }, { status: 503 });
     }
     if (await hasPostedReplyForConversation(id, replyConversationId)) {
       return NextResponse.json({

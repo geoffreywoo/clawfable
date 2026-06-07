@@ -339,4 +339,91 @@ describe('browser companion routes', () => {
       && signal.metadata?.targetTweetId === 'duplicate-root-target'
     )).toBe(true);
   });
+
+  it('skips pending browser replies when reply automation is disabled', async () => {
+    const previous = process.env.DISABLE_CLAWFABLE_REPLIES;
+    process.env.DISABLE_CLAWFABLE_REPLIES = 'true';
+    try {
+      const user = await getOrCreateUser('browser-user-6', 'browseroff', 'Browser Off');
+      const agent = await createAgent({
+        handle: 'browser-off-agent',
+        name: 'Browser Off Agent',
+        soulMd: '# soul',
+      } as any);
+      await addAgentToUser(user.id, agent.id);
+      const draft = await createTweet({
+        agentId: agent.id,
+        content: 'reply should be disabled',
+        type: 'reply',
+        status: 'draft',
+        topic: 'engage',
+        xTweetId: null,
+        quoteTweetId: null,
+        quoteTweetAuthor: 'builder',
+        followupForTweetId: 'disabled-root-target',
+        replyConversationId: 'disabled-root-target',
+        scheduledAt: null,
+      });
+      const action = {
+        ...makeLikeAction('disabled-root-target'),
+        id: 'action-reply-disabled-root-target',
+        type: 'reply' as const,
+        candidate: {
+          ...makeLikeAction('disabled-root-target').candidate,
+          agentId: agent.id,
+        },
+        draft: {
+          tweetId: draft.id,
+          content: draft.content,
+          originalContent: draft.content,
+          edited: false,
+          updatedAt: draft.createdAt,
+        },
+      };
+      const session = await createEngagementSession({
+        agentId: agent.id,
+        state: 'approved',
+        actions: [action],
+        machineLabel: null,
+        approvedAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        abortedAt: null,
+        lastError: null,
+      });
+
+      const pairing = await createBrowserCompanionPairing(user.id, 'Ops Mac');
+      const response = await nextActionGET(new Request('http://localhost/api/browser-companion/actions/next', {
+        headers: {
+          Authorization: `Bearer ${pairing.token}`,
+        },
+      }) as any);
+      const data = await response.json();
+      const [updatedSession, postLog, signals] = await Promise.all([
+        getEngagementSession(session.id),
+        getPostLog(agent.id, 20),
+        getLearningSignals(agent.id, 20),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(data.action).toBeNull();
+      expect(updatedSession?.actions[0].status).toBe('skipped');
+      expect(updatedSession?.actions[0].failureReason).toContain('temporarily disabled');
+      expect(postLog.some((entry) =>
+        entry.format === 'engage_reply_emergency_disabled'
+        && entry.tweetId === draft.id
+      )).toBe(true);
+      expect(signals.some((signal) =>
+        signal.signalType === 'reply_rejected'
+        && signal.metadata?.qualityGate === 'reply_emergency_disabled'
+        && signal.metadata?.targetTweetId === 'disabled-root-target'
+      )).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DISABLE_CLAWFABLE_REPLIES;
+      } else {
+        process.env.DISABLE_CLAWFABLE_REPLIES = previous;
+      }
+    }
+  });
 });

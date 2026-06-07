@@ -12,6 +12,7 @@ import {
 } from '@/lib/kv-storage';
 import { nextSessionState } from '@/lib/engagement';
 import { findPostedReplyForConversation } from '@/lib/reply-conversation-guard';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 
 async function findNextSession(agentIds: string[]) {
   const sessions = await Promise.all(agentIds.map(async (agentId) => ({
@@ -61,6 +62,53 @@ export async function GET(request: NextRequest) {
 
       const pendingAction = next.session.actions[pendingIndex];
       if (pendingAction.type === 'reply') {
+        if (areRepliesDisabled()) {
+          const now = new Date().toISOString();
+          const actions = next.session.actions.map((action, index) => (
+            index === pendingIndex
+              ? {
+                  ...action,
+                  status: 'skipped' as const,
+                  failureReason: REPLY_AUTOMATION_DISABLED_REASON,
+                  completedAt: now,
+                }
+              : action
+          ));
+          const state = nextSessionState(actions, next.session.state);
+          await updateEngagementSession(next.session.id, {
+            actions,
+            state,
+            completedAt: ['succeeded', 'failed', 'aborted'].includes(state) ? now : null,
+            lastError: null,
+          });
+          await addLearningSignal(next.agent.id, {
+            tweetId: pendingAction.draft?.tweetId,
+            xTweetId: pendingAction.candidate.tweetId,
+            signalType: 'reply_rejected',
+            surface: 'engage',
+            rewardDelta: -0.25,
+            reason: REPLY_AUTOMATION_DISABLED_REASON,
+            inferred: true,
+            metadata: {
+              qualityGate: 'reply_emergency_disabled',
+              targetTweetId: pendingAction.candidate.tweetId,
+            },
+          }).catch(() => null);
+          await addPostLogEntry(next.agent.id, {
+            agentId: next.agent.id,
+            tweetId: pendingAction.draft?.tweetId || '',
+            xTweetId: '',
+            content: pendingAction.draft?.content || pendingAction.candidate.text,
+            format: 'engage_reply_emergency_disabled',
+            topic: pendingAction.candidate.topic || 'engage',
+            postedAt: now,
+            source: 'manual',
+            action: 'skipped',
+            reason: REPLY_AUTOMATION_DISABLED_REASON,
+          }).catch(() => null);
+          continue;
+        }
+
         const duplicate = await findPostedReplyForConversation(
           next.agent.id,
           pendingAction.candidate.tweetId,

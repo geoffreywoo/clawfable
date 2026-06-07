@@ -8,6 +8,7 @@ import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredenti
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { findPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -54,6 +55,24 @@ export async function POST(
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
     if (isReply && !replyConversationId) {
       replyConversationId = existingTweet?.followupForTweetId || existingTweet?.quoteTweetId || effectiveReplyToId;
+    }
+    if (isReply && areRepliesDisabled()) {
+      await addPostLogEntry(id, {
+        agentId: id,
+        tweetId: dbTweetId || '',
+        xTweetId: '',
+        content: String(content),
+        format: 'manual_reply_emergency_disabled',
+        topic: existingTweet?.topic || 'reply',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        action: 'skipped',
+        reason: REPLY_AUTOMATION_DISABLED_REASON,
+      }).catch(() => null);
+      return NextResponse.json({
+        error: REPLY_AUTOMATION_DISABLED_REASON,
+        code: 'reply_emergency_disabled',
+      }, { status: 503 });
     }
 
     const sanitizedIssue = getSanitizedTweetTextIssue(String(content), isReply ? 'reply' : 'post');

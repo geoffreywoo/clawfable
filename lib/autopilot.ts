@@ -64,6 +64,7 @@ import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 
 export interface AutopilotResult {
   agentId: string;
@@ -1147,6 +1148,21 @@ async function runAutoReply(
   settings: ProtocolSettings
 ): Promise<AutoReplyRunOutcome> {
   if (!agent.xUserId) return { repliesSent: 0 };
+  if (areRepliesDisabled()) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'auto_reply_emergency_disabled',
+      topic: 'mentions',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: REPLY_AUTOMATION_DISABLED_REASON,
+    }).catch(() => null);
+    return { repliesSent: 0 };
+  }
 
   const storedMentions = await getRecentMentions(agent.id, 500);
   const storedTweetIds = new Set(storedMentions.map((m) => String(m.tweetId)).filter(Boolean));

@@ -8,6 +8,7 @@ import type { EngagementCandidate } from '@/lib/types';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
 import { hasPostedReplyForConversation } from '@/lib/reply-conversation-guard';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -33,6 +34,12 @@ export async function POST(
 
     if (!validCandidate(candidate, id)) {
       return NextResponse.json({ error: 'candidate is required' }, { status: 400 });
+    }
+    if (areRepliesDisabled()) {
+      return NextResponse.json({
+        error: REPLY_AUTOMATION_DISABLED_REASON,
+        code: 'reply_emergency_disabled',
+      }, { status: 503 });
     }
     if (await hasPostedReplyForConversation(id, candidate.tweetId)) {
       return NextResponse.json({
