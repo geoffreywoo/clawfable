@@ -83,12 +83,17 @@ export function buildFallbackLearningMetadata(
   const memoryAlignment = readScore(tweet.scoreProvenance?.memoryAlignment);
   const authorityProof = readScore(tweet.scoreProvenance?.authorityProof);
   const conversationQuality = readScore(tweet.scoreProvenance?.conversationQuality);
+  const operatorAnchor = readScore(tweet.scoreProvenance?.operatorAnchor);
+  const anchorCopyRisk = readScoreMagnitude(tweet.scoreProvenance?.anchorCopyRisk);
 
   return {
     generationFallback: true,
     fallbackKind,
     fallbackMemoryAligned: Boolean(memoryAlignment && memoryAlignment > 0),
     fallbackMemoryAlignment: memoryAlignment,
+    fallbackOperatorAnchor: Boolean(operatorAnchor && operatorAnchor > 0),
+    fallbackOperatorAnchorScore: operatorAnchor,
+    fallbackAnchorCopyRisk: anchorCopyRisk,
     fallbackAuthorityProof: authorityProof,
     fallbackConversationQuality: conversationQuality,
     fallbackSourceLane: tweet.sourceLane || null,
@@ -151,26 +156,38 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
   for (const signal of signals) {
     if (signal.metadata?.generationFallback !== true) continue;
     const memoryAligned = signal.metadata.fallbackMemoryAligned === true;
+    const operatorAnchored = signal.metadata.fallbackOperatorAnchor === true;
     const kind = typeof signal.metadata.fallbackKind === 'string'
       ? signal.metadata.fallbackKind.replace(/_/g, ' ')
       : 'fallback draft';
+    const kindLabel = operatorAnchored ? `operator-anchor ${kind}` : kind;
     const thesis = typeof signal.metadata.fallbackThesis === 'string' ? signal.metadata.fallbackThesis.trim() : '';
     const thesisLabel = thesis ? ` Thesis: ${thesis.slice(0, 90)}.` : '';
+    const copyRisk = typeof signal.metadata.fallbackAnchorCopyRisk === 'number' ? signal.metadata.fallbackAnchorCopyRisk : 0;
+    const copyRiskLabel = operatorAnchored && copyRisk > 0.05
+      ? ` Anchor copy risk was ${Math.round(copyRisk * 100)}%, so keep varying the literal wording.`
+      : '';
 
     if (signal.signalType === 'approved_without_edit' || signal.signalType === 'x_post_succeeded') {
-      const line = memoryAligned
+      const line = operatorAnchored
+        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${thesisLabel}`
+        : memoryAligned
         ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${thesisLabel}`
         : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
-      const line = `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${thesisLabel}`;
+      const line = operatorAnchored
+        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
-      const line = `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${thesisLabel}`;
+      const line = operatorAnchored
+        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
   }
@@ -252,6 +269,12 @@ function summarizeWeeklyChanges(
 function readScore(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value > 1 ? Math.max(0, Math.min(1, value / 100)) : Math.max(0, Math.min(1, value));
+}
+
+function readScoreMagnitude(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const normalized = Math.abs(value > 1 ? value / 100 : value);
+  return Math.max(0, Math.min(1, normalized));
 }
 
 function readTweetPromise(tweet: Tweet): number | null {

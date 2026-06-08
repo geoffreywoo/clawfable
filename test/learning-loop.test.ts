@@ -87,6 +87,8 @@ describe('buildPersonalizationMemory', () => {
         noveltyCoverage: 0.05,
         riskPenalty: 0,
         memoryAlignment: 0.18,
+        operatorAnchor: 0.22,
+        anchorCopyRisk: -0.06,
         authorityProof: 0.08,
         conversationQuality: 0.12,
       },
@@ -97,6 +99,9 @@ describe('buildPersonalizationMemory', () => {
       fallbackKind: 'provider_template_fallback',
       fallbackMemoryAligned: true,
       fallbackMemoryAlignment: 0.18,
+      fallbackOperatorAnchor: true,
+      fallbackOperatorAnchorScore: 0.22,
+      fallbackAnchorCopyRisk: 0.06,
       fallbackSourceLane: 'core_explore_fallback',
       fallbackThesis: 'ai agents trust comes from behavior evidence',
     });
@@ -147,6 +152,58 @@ describe('buildPersonalizationMemory', () => {
       expect.arrayContaining([
         expect.stringContaining('memory-aligned provider template fallback drafts can survive approval/posting'),
         expect.stringContaining('emergency queue fallback drafts were rejected'),
+      ]),
+    );
+  });
+
+  it('learns operator-anchor fallback outcomes separately from generic fallback outcomes', () => {
+    const personalization = buildPersonalizationMemory({
+      feedback: [],
+      signals: [
+        learningSignal({
+          id: 'posted-anchor-fallback',
+          signalType: 'x_post_succeeded',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackMemoryAligned: true,
+            fallbackOperatorAnchor: true,
+            fallbackOperatorAnchorScore: 0.22,
+            fallbackAnchorCopyRisk: 0,
+            fallbackThesis: 'ai agents trust comes from behavior evidence',
+          },
+        }),
+        learningSignal({
+          id: 'posted-generic-fallback',
+          tweetId: 'tweet-2',
+          signalType: 'x_post_succeeded',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackMemoryAligned: false,
+            fallbackOperatorAnchor: false,
+            fallbackThesis: 'ai agents trust comes from behavior evidence',
+          },
+        }),
+      ],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['AI agents'],
+        antiGoals: [],
+        communicationStyle: 'specific and operator-led',
+        summary: 'Sharp AI operator voice.',
+      },
+    });
+
+    expect(personalization.operatorHiddenPreferences).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('operator-anchor provider template fallback drafts can survive approval/posting'),
+        expect.stringContaining('provider template fallback drafts survived approval/posting'),
       ]),
     );
   });
