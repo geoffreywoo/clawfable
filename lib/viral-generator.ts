@@ -398,7 +398,17 @@ function buildFallbackTemplates(
     templates.push(tweet);
   };
 
-  for (const anchorTemplate of buildOperatorAnchorFallbackTemplates({ topics, learnings })) {
+  const anchorTemplates = buildOperatorAnchorFallbackTemplates({
+    topics,
+    learnings,
+    memory,
+    fallbackKind: 'provider_template_fallback',
+  });
+  for (const anchorTemplate of anchorTemplates) {
+    const judgeScore = Math.max(0.68, Math.min(0.9, 0.84 + anchorTemplate.outcomeScore));
+    const outcomeNotes = anchorTemplate.outcomeNotes.length
+      ? ` ${anchorTemplate.outcomeNotes.join(' ')}`
+      : '';
     addTemplate({
       content: anchorTemplate.content,
       format: anchorTemplate.format || 'hot_take',
@@ -412,16 +422,16 @@ function buildFallbackTemplates(
         thesis: anchorTemplate.thesis,
         riskFlags: [],
       },
-      judgeScore: 0.84,
+      judgeScore,
       judgeBreakdown: {
-        overall: 0.84,
-        voiceFit: 0.86,
+        overall: judgeScore,
+        voiceFit: Math.max(0.68, Math.min(0.9, 0.86 + anchorTemplate.outcomeScore)),
         clarity: 0.82,
         novelty: 0.76,
         audienceFit: 0.82,
         policySafety: 0.9,
       },
-      judgeNotes: 'Operator-anchor fallback: matches proven human-written shape while avoiding verbatim reuse.',
+      judgeNotes: `Operator-anchor fallback: matches proven human-written shape while avoiding verbatim reuse.${outcomeNotes}`,
     });
     if (templates.length >= maxTemplates) break;
   }

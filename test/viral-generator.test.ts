@@ -397,6 +397,62 @@ describe('generateViralBatch', () => {
     expect(anchored!.scoreProvenance.anchorCopyRisk || 0).toBe(0);
   });
 
+  it('threads rejected anchor fallback lessons into provider-error fallback provenance', async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')
+    );
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'analyst',
+        topics: ['AI agents', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'specific and direct',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take', 'analysis'],
+          topTopics: ['AI agents', 'startups'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      4,
+      null,
+      learningsWithOperatorAnchor(),
+      null,
+      undefined,
+      [],
+      [],
+      memory({
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor provider template fallback drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording. Thesis: ai agents teams earn trust failed eval.',
+        ],
+      }),
+    );
+
+    const anchored = batch.find((tweet) => tweet.rationale.includes('Operator-anchor template fallback'));
+
+    expect(anchored).toBeDefined();
+    expect(anchored!.judgeNotes).toContain('prior rejection');
+    expect(anchored!.scoreProvenance.operatorAnchorOutcome).toBeLessThan(0);
+  });
+
   it('keeps internal voice reference text out of deterministic fallback templates', async () => {
     anthropicCreateMock.mockRejectedValue(
       new Error('Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')

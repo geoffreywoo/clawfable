@@ -48,6 +48,15 @@ type EmergencyTemplateSeed = Omit<
   | 'replyBaitScore'
   | 'scoreProvenance'
 > & { rationale?: string };
+type EmergencyOperatorAnchorTemplateSeed = EmergencyTemplateSeed & {
+  anchorCopyRisk?: number;
+  operatorAnchorOutcomeScore?: number;
+  operatorAnchorOutcomeNotes?: string[];
+};
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, value));
+}
 
 function cleanTopic(topic: string | null | undefined): string {
   return String(topic || '').trim().replace(/^#+\s*/, '') || 'startups';
@@ -83,7 +92,7 @@ function inferMemoryPreferences(memory: PersonalizationMemory | null | undefined
   if (!text) return [];
 
   const preferences: EmergencyMemoryPreference[] = [];
-  if (hasAnyTerm(text, ['specific', 'specifics', 'concrete', 'evidence', 'example', 'mechanism', 'metric', 'numbers', 'tactical'])) {
+  if (hasAnyTerm(text, ['specific', 'specifics', 'concrete', 'evidence', 'proof', 'example', 'mechanism', 'metric', 'numbers', 'tactical'])) {
     preferences.push('specificity');
   }
   if (hasAnyTerm(text, ['line-break', 'line break', 'structure', 'structured', 'readability', 'scannable', 'list'])) {
@@ -99,10 +108,13 @@ function inferMemoryPreferences(memory: PersonalizationMemory | null | undefined
 function buildOperatorAnchorTemplates(
   topics: string[],
   learnings: AgentLearnings | null | undefined,
-): EmergencyTemplateSeed[] {
+  memory: PersonalizationMemory | null | undefined,
+): EmergencyOperatorAnchorTemplateSeed[] {
   return buildOperatorAnchorFallbackTemplates({
     topics,
     learnings,
+    memory,
+    fallbackKind: 'emergency_queue_fallback',
     targetTopicCase: 'lower',
   }).map((template) => ({
     content: template.content,
@@ -114,6 +126,9 @@ function buildOperatorAnchorTemplates(
     specificityType: template.specificityType,
     structureType: template.structureType,
     thesis: template.thesis,
+    anchorCopyRisk: template.anchorCopyRisk,
+    operatorAnchorOutcomeScore: template.outcomeScore,
+    operatorAnchorOutcomeNotes: template.outcomeNotes,
   }));
 }
 
@@ -169,19 +184,29 @@ function buildMemoryAlignedTemplates(topic: string, memory: PersonalizationMemor
 }
 
 function hydrateTemplate(item: EmergencyTemplateSeed): EmergencyQueueFallback {
+  const {
+    operatorAnchorOutcomeScore = 0,
+    operatorAnchorOutcomeNotes = [],
+    anchorCopyRisk = 0,
+    ...base
+  } = item as EmergencyOperatorAnchorTemplateSeed;
   const rationale = item.rationale || 'Emergency deterministic queue refill while paid AI providers are unavailable.';
   const isMemoryAligned = rationale.toLowerCase().includes('memory-aligned');
   const isOperatorAnchor = rationale.toLowerCase().includes('operator-anchor');
+  const outcomeScore = isOperatorAnchor ? Math.max(-0.22, Math.min(0.18, operatorAnchorOutcomeScore)) : 0;
+  const outcomeNote = operatorAnchorOutcomeNotes.length
+    ? ` ${operatorAnchorOutcomeNotes.join(' ')}`
+    : '';
 
   return {
-    ...item,
-    rationale,
+    ...base,
+    rationale: `${rationale}${outcomeNote}`,
     generationMode: 'explore' as const,
-    candidateScore: isOperatorAnchor ? 94 : isMemoryAligned ? 92 : 88,
-    confidenceScore: isOperatorAnchor ? 0.88 : isMemoryAligned ? 0.86 : 0.82,
-    voiceScore: isOperatorAnchor ? 0.88 : isMemoryAligned ? 0.84 : 0.78,
+    candidateScore: Math.round((isOperatorAnchor ? 94 : isMemoryAligned ? 92 : 88) + (outcomeScore * 40)),
+    confidenceScore: clamp((isOperatorAnchor ? 0.88 : isMemoryAligned ? 0.86 : 0.82) + (outcomeScore * 0.22)),
+    voiceScore: clamp((isOperatorAnchor ? 0.88 : isMemoryAligned ? 0.84 : 0.78) + (outcomeScore * 0.18)),
     noveltyScore: isOperatorAnchor ? 0.76 : isMemoryAligned ? 0.74 : 0.7,
-    predictedEngagementScore: isOperatorAnchor ? 0.77 : isMemoryAligned ? 0.75 : 0.72,
+    predictedEngagementScore: clamp((isOperatorAnchor ? 0.77 : isMemoryAligned ? 0.75 : 0.72) + (outcomeScore * 0.16)),
     freshnessScore: 0.68,
     repetitionRiskScore: 0.12,
     policyRiskScore: 0.04,
@@ -202,7 +227,8 @@ function hydrateTemplate(item: EmergencyTemplateSeed): EmergencyQueueFallback {
       memoryAlignment: isMemoryAligned ? 0.18 : isOperatorAnchor ? 0.08 : 0,
       conversationQuality: item.hookType === 'question' ? 0.12 : 0.04,
       operatorAnchor: isOperatorAnchor ? 0.22 : 0,
-      anchorCopyRisk: 0,
+      operatorAnchorOutcome: isOperatorAnchor ? Number((outcomeScore * 0.16).toFixed(3)) : 0,
+      anchorCopyRisk: isOperatorAnchor && anchorCopyRisk > 0 ? Number((-anchorCopyRisk * 0.12).toFixed(3)) : 0,
     },
   };
 }
@@ -298,9 +324,9 @@ export function buildEmergencyQueueFallbacks({
     ...DEFAULT_TOPICS,
   ])].filter(Boolean);
   const candidates = [
-    ...buildOperatorAnchorTemplates(topicPool, learnings).map(hydrateTemplate),
+    ...buildOperatorAnchorTemplates(topicPool, learnings, memory).map(hydrateTemplate),
     ...topicPool.flatMap((topic) => buildTemplates(topic, memory)),
-  ];
+  ].sort((a, b) => b.candidateScore - a.candidateScore || b.confidenceScore - a.confidenceScore);
   const selected: EmergencyQueueFallback[] = [];
   const seen = [...recentContent];
 

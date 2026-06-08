@@ -41,6 +41,7 @@ import {
   normalizeMediaExperimentType,
   normalizePortfolioRole,
 } from './growth-engine';
+import { scoreOperatorAnchorFallbackOutcome } from './operator-anchor-fallback';
 
 export interface RankableProtocolTweet {
   content: string;
@@ -264,6 +265,32 @@ function scoreOperatorAnchorCopyRisk(
   }
 
   return strongestRisk;
+}
+
+function scoreOperatorAnchorFallbackOutcomeFit(
+  candidate: RankableProtocolTweet,
+  featureTags: CandidateFeatureTags,
+  context: CandidateRankingContext,
+): number {
+  if (!/operator-anchor .*fallback/i.test(candidate.rationale || '')) return 0;
+
+  const fallbackKind = /emergency/i.test(candidate.rationale || '')
+    ? 'emergency_queue_fallback'
+    : 'provider_template_fallback';
+
+  return scoreOperatorAnchorFallbackOutcome({
+    template: {
+      content: candidate.content,
+      targetTopic: candidate.targetTopic,
+      hookType: featureTags.hook,
+      toneType: featureTags.tone,
+      specificityType: featureTags.specificity,
+      structureType: featureTags.structure,
+      thesis: featureTags.thesis,
+    },
+    memory: context.memory,
+    fallbackKind,
+  }).score;
 }
 
 function stableExperimentId(candidate: RankableProtocolTweet, coverageCluster: string): string {
@@ -1617,6 +1644,7 @@ function scoreLearnedReviewCaution({
   memoryAlignmentScore,
   outcomeCalibrationScore,
   operatorAnchorScore,
+  operatorAnchorOutcomeScore,
   anchorCopyRiskScore,
   phraseReuseRiskScore,
   approvalFrictionScore,
@@ -1627,6 +1655,7 @@ function scoreLearnedReviewCaution({
   memoryAlignmentScore: number;
   outcomeCalibrationScore: number;
   operatorAnchorScore: number;
+  operatorAnchorOutcomeScore: number;
   anchorCopyRiskScore: number;
   phraseReuseRiskScore: number;
   approvalFrictionScore: number;
@@ -1638,6 +1667,7 @@ function scoreLearnedReviewCaution({
     Math.max(0, -memoryAlignmentScore) * 0.75 +
     Math.max(0, -outcomeCalibrationScore) * 1.05 +
     Math.max(0, -operatorAnchorScore) * 0.8 +
+    Math.max(0, -operatorAnchorOutcomeScore) * 0.85 +
     Math.max(0, -approvalFrictionScore) * 0.9 +
     Math.max(0, -rejectionLessonScore) * 1.05 +
     Math.max(0, -tasteCalibrationScore) * 1.1 +
@@ -1721,6 +1751,7 @@ export function rankGeneratedTweets(
     const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
     const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
     const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
+    const operatorAnchorOutcomeScore = scoreOperatorAnchorFallbackOutcomeFit(candidate, featureTags, context);
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
     const phraseReuseRiskScore = scorePhraseReuseRisk(candidate, context);
     const approvalFrictionScore = scoreApprovalFriction(candidate, featureTags, context);
@@ -1731,6 +1762,7 @@ export function rankGeneratedTweets(
       memoryAlignmentScore,
       outcomeCalibrationScore,
       operatorAnchorScore,
+      operatorAnchorOutcomeScore,
       anchorCopyRiskScore,
       phraseReuseRiskScore,
       approvalFrictionScore,
@@ -1748,6 +1780,7 @@ export function rankGeneratedTweets(
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
       (outcomeCalibrationScore < 0 ? Math.abs(outcomeCalibrationScore) * 0.22 : 0) +
       (operatorAnchorScore < 0 ? Math.abs(operatorAnchorScore) * 0.18 : 0) +
+      (operatorAnchorOutcomeScore < 0 ? Math.abs(operatorAnchorOutcomeScore) * 0.2 : 0) +
       (portfolioDiversityScore < 0 ? Math.abs(portfolioDiversityScore) * 0.18 : 0) +
       (anchorCopyRiskScore * 0.32) +
       (phraseReuseRiskScore * 0.24) +
@@ -1778,6 +1811,7 @@ export function rankGeneratedTweets(
       outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
+      operatorAnchorOutcome: Number((operatorAnchorOutcomeScore * 0.16).toFixed(3)),
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
       phraseReuseRisk: Number((-phraseReuseRiskScore * 0.1).toFixed(3)),
       approvalFriction: Number((approvalFrictionScore * 0.12).toFixed(3)),
@@ -1810,6 +1844,7 @@ export function rankGeneratedTweets(
       memoryAlignmentScore * 0.16 +
       outcomeCalibrationScore * 0.18 +
       operatorAnchorScore * 0.16 +
+      operatorAnchorOutcomeScore * 0.18 +
       (-anchorCopyRiskScore * 0.22) +
       (-phraseReuseRiskScore * 0.18) +
       approvalFrictionScore * 0.16 +
@@ -1854,6 +1889,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.outcomeCalibration || 0) +
       (scoreProvenance.conversationQuality || 0) +
       (scoreProvenance.operatorAnchor || 0) +
+      (scoreProvenance.operatorAnchorOutcome || 0) +
       (scoreProvenance.anchorCopyRisk || 0) +
       (scoreProvenance.phraseReuseRisk || 0) +
       (scoreProvenance.approvalFriction || 0) +

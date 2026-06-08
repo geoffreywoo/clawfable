@@ -1,5 +1,5 @@
 import { isNearDuplicate } from './survivability';
-import type { AgentLearnings, TweetHookType, TweetSpecificityType, TweetStructureType, TweetToneType } from './types';
+import type { AgentLearnings, PersonalizationMemory, TweetHookType, TweetSpecificityType, TweetStructureType, TweetToneType } from './types';
 
 export interface OperatorAnchorFallbackTemplate {
   content: string;
@@ -11,6 +11,25 @@ export interface OperatorAnchorFallbackTemplate {
   structureType: TweetStructureType;
   thesis: string;
   anchorCopyRisk: number;
+  outcomeScore: number;
+  outcomeNotes: string[];
+}
+
+export type OperatorAnchorFallbackKind = 'provider_template_fallback' | 'emergency_queue_fallback';
+
+export interface OperatorAnchorFallbackOutcomeInput {
+  content: string;
+  targetTopic: string;
+  hookType: TweetHookType;
+  toneType: TweetToneType;
+  specificityType: TweetSpecificityType;
+  structureType: TweetStructureType;
+  thesis: string;
+}
+
+export interface OperatorAnchorFallbackOutcomeGuidance {
+  score: number;
+  notes: string[];
 }
 
 const ANCHOR_STOP_WORDS = new Set([
@@ -24,6 +43,10 @@ const FALLBACK_HOOKS: TweetHookType[] = ['question', 'bold_claim', 'data_point',
 const FALLBACK_TONES: TweetToneType[] = ['sarcastic', 'earnest', 'analytical', 'provocative', 'educational', 'casual', 'urgent', 'playful', 'unknown'];
 const FALLBACK_SPECIFICITY: TweetSpecificityType[] = ['abstract', 'concrete', 'data_driven', 'tactical', 'story_led', 'unknown'];
 const FALLBACK_STRUCTURES: TweetStructureType[] = ['single_punch', 'stacked_lines', 'argument', 'story_arc', 'list', 'question_led', 'comparison', 'manifesto', 'unknown'];
+
+function clampSigned(value: number, min = -1, max = 1): number {
+  return Math.max(min, Math.min(max, value));
+}
 
 function cleanTopic(topic: string | null | undefined): string {
   return String(topic || '').trim().replace(/^#+\s*/, '') || 'startups';
@@ -48,6 +71,100 @@ function anchorKeywords(input: string | null | undefined, limit = 5): string[] {
     .split(/\s+/)
     .filter((token) => token.length >= 4 && !ANCHOR_STOP_WORDS.has(token))))
     .slice(0, limit);
+}
+
+function outcomeLessonLines(memory: PersonalizationMemory | null | undefined): string[] {
+  return [
+    ...(memory?.operatorHiddenPreferences || []),
+    ...(memory?.alwaysDoMoreOfThis || []),
+    ...(memory?.neverDoThisAgain || []),
+    ...(memory?.weeklyChanges || []),
+  ].filter((line) => /fallback lesson:\s*operator-anchor/i.test(line));
+}
+
+function lessonMatchesKind(line: string, kind: OperatorAnchorFallbackKind): boolean {
+  const text = line.toLowerCase().replace(/_/g, ' ');
+  if (kind === 'provider_template_fallback' && text.includes('provider template fallback')) return true;
+  if (kind === 'emergency_queue_fallback' && text.includes('emergency queue fallback')) return true;
+  return !text.includes('provider template fallback') && !text.includes('emergency queue fallback');
+}
+
+function tokenizeForOutcome(value: string | null | undefined): string[] {
+  return Array.from(new Set(String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !ANCHOR_STOP_WORDS.has(token))));
+}
+
+function tokenOverlapScore(left: string, right: string): number {
+  const leftTokens = tokenizeForOutcome(left);
+  if (leftTokens.length === 0) return 0;
+  const rightTokens = new Set(tokenizeForOutcome(right));
+  const matches = leftTokens.filter((token) => rightTokens.has(token)).length;
+  return matches / leftTokens.length;
+}
+
+function templateHasFreshProof(input: OperatorAnchorFallbackOutcomeInput): boolean {
+  if (['concrete', 'data_driven', 'tactical', 'story_led'].includes(input.specificityType)) return true;
+  return /\b(behavior|evidence|proof|metric|specific|verify|measurable|owner|rollback|changed|repeats)\b/i.test(input.content);
+}
+
+export function scoreOperatorAnchorFallbackOutcome({
+  template,
+  memory,
+  fallbackKind,
+}: {
+  template: OperatorAnchorFallbackOutcomeInput;
+  memory: PersonalizationMemory | null | undefined;
+  fallbackKind: OperatorAnchorFallbackKind;
+}): OperatorAnchorFallbackOutcomeGuidance {
+  const lines = outcomeLessonLines(memory).filter((line) => lessonMatchesKind(line, fallbackKind));
+  if (lines.length === 0) return { score: 0, notes: [] };
+
+  const topic = normalizeTopicLabel(template.targetTopic).toLowerCase();
+  const hasFreshProof = templateHasFreshProof(template);
+  let score = 0;
+  const notes: string[] = [];
+
+  for (const line of lines) {
+    const text = line.toLowerCase();
+    const thesisMatch = Math.max(
+      tokenOverlapScore(template.thesis, text),
+      tokenOverlapScore(template.content, text) * 0.7,
+    );
+    const topicMatch = topic && text.includes(topic) ? 0.4 : 0;
+    const matchStrength = Math.max(thesisMatch, topicMatch);
+    const isApproved = /survive(?:d)? approval|approval\/posting|posted/.test(text);
+    const isRejected = /rejected|do not trust|cool down/.test(text);
+    const isEdited = /needed operator edits|needed edits|relearn/.test(text);
+
+    if (isApproved && matchStrength >= 0.18) {
+      const boost = 0.05 + (Math.min(matchStrength, 0.8) * 0.1);
+      score += boost;
+      notes.push('Anchor fallback outcome: prior approval/posting matched this topic or proof shape.');
+    }
+
+    if (isRejected) {
+      const penalty = matchStrength >= 0.18
+        ? (hasFreshProof ? 0.12 : 0.18)
+        : 0.04;
+      score -= penalty;
+      notes.push(matchStrength >= 0.18
+        ? 'Anchor fallback outcome: prior rejection matched this topic or proof shape, so cool it down.'
+        : 'Anchor fallback outcome: recent operator-anchor fallback rejection lowers blind reuse.');
+    }
+
+    if (isEdited && matchStrength >= 0.18) {
+      score -= hasFreshProof ? 0.04 : 0.08;
+      notes.push('Anchor fallback outcome: similar anchor fallback needed edits, so require stronger proof.');
+    }
+  }
+
+  return {
+    score: Number(clampSigned(score, -0.22, 0.18).toFixed(3)),
+    notes: Array.from(new Set(notes)).slice(0, 3),
+  };
 }
 
 function normalizeHook(value: string | null | undefined, fallback: TweetHookType = 'bold_claim'): TweetHookType {
@@ -144,10 +261,14 @@ function buildAnchorFallbackContent({
 export function buildOperatorAnchorFallbackTemplates({
   topics,
   learnings,
+  memory = null,
+  fallbackKind = 'provider_template_fallback',
   targetTopicCase = 'preserve',
 }: {
   topics: string[];
   learnings: AgentLearnings | null | undefined;
+  memory?: PersonalizationMemory | null;
+  fallbackKind?: OperatorAnchorFallbackKind;
   targetTopicCase?: 'preserve' | 'lower';
 }): OperatorAnchorFallbackTemplate[] {
   const reference = learnings?.operatorVoiceReference;
@@ -186,6 +307,20 @@ export function buildOperatorAnchorFallbackTemplates({
     );
     if (copyRisk >= 0.7) continue;
 
+    const outcome = scoreOperatorAnchorFallbackOutcome({
+      template: {
+        content,
+        targetTopic,
+        hookType: hook,
+        toneType: tone,
+        specificityType: specificity,
+        structureType: structure,
+        thesis: `${targetTopic.toLowerCase()} ${thesisKeywords.slice(0, 4).join(' ')}`.trim(),
+      },
+      memory,
+      fallbackKind,
+    });
+
     const key = content.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -200,8 +335,10 @@ export function buildOperatorAnchorFallbackTemplates({
       structureType: structure,
       thesis: `${targetTopic.toLowerCase()} ${thesisKeywords.slice(0, 4).join(' ')}`.trim(),
       anchorCopyRisk: copyRisk,
+      outcomeScore: outcome.score,
+      outcomeNotes: outcome.notes,
     });
   }
 
-  return templates;
+  return templates.sort((a, b) => b.outcomeScore - a.outcomeScore);
 }

@@ -149,4 +149,25 @@ describe('emergency queue fallback', () => {
     expect(anchored!.scoreProvenance?.anchorCopyRisk || 0).toBe(0);
     expect(anchored!.confidenceScore).toBeGreaterThan(drafts[1].confidenceScore);
   });
+
+  it('cools down emergency anchor fallbacks after matching rejection lessons', () => {
+    const drafts = buildEmergencyQueueFallbacks({
+      topics: ['AI agents', 'Startups'],
+      recentContent: [],
+      count: 3,
+      learnings: learningsWithOperatorAnchor(),
+      memory: memory({
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor emergency queue fallback drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording. Thesis: ai agents teams earn trust failed eval.',
+        ],
+      }),
+    });
+
+    const anchored = drafts.find((draft) => draft.rationale.includes('Operator-anchor emergency fallback'));
+
+    expect(anchored).toBeDefined();
+    expect(anchored!.scoreProvenance?.operatorAnchorOutcome).toBeLessThan(0);
+    expect(drafts[0].rationale).not.toContain('Operator-anchor emergency fallback');
+    expect(anchored!.candidateScore).toBeLessThan(drafts[0].candidateScore);
+  });
 });

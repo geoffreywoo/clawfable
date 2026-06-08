@@ -234,6 +234,7 @@ export interface CandidateScoreProvenance {
   outcomeCalibration?: number;
   conversationQuality?: number;
   operatorAnchor?: number;
+  operatorAnchorOutcome?: number;
   anchorCopyRisk?: number;
   phraseReuseRisk?: number;
   approvalFriction?: number;
