@@ -1,4 +1,5 @@
 import { isNearDuplicate } from './survivability';
+import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
 import type { AgentLearnings, CandidateScoreProvenance, PersonalizationMemory, TweetHookType, TweetSpecificityType, TweetStructureType, TweetToneType } from './types';
 
 export interface EmergencyQueueFallback {
@@ -29,16 +30,6 @@ export interface EmergencyQueueFallback {
 
 const DEFAULT_TOPICS = ['startups', 'product', 'founders', 'markets', 'taste', 'distribution'];
 type EmergencyMemoryPreference = 'specificity' | 'structure' | 'conversation';
-const ANCHOR_STOP_WORDS = new Set([
-  'about', 'after', 'again', 'agent', 'agents', 'around', 'because', 'before',
-  'being', 'every', 'from', 'have', 'into', 'people', 'really', 'still',
-  'their', 'there', 'these', 'thing', 'those', 'tweet', 'tweets', 'when',
-  'where', 'while', 'with', 'without', 'would', 'your',
-]);
-const FALLBACK_HOOKS: TweetHookType[] = ['question', 'bold_claim', 'data_point', 'story', 'observation', 'contrarian', 'listicle', 'callout', 'prediction', 'confession', 'how_to', 'unknown'];
-const FALLBACK_TONES: TweetToneType[] = ['sarcastic', 'earnest', 'analytical', 'provocative', 'educational', 'casual', 'urgent', 'playful', 'unknown'];
-const FALLBACK_SPECIFICITY: TweetSpecificityType[] = ['abstract', 'concrete', 'data_driven', 'tactical', 'story_led', 'unknown'];
-const FALLBACK_STRUCTURES: TweetStructureType[] = ['single_punch', 'stacked_lines', 'argument', 'story_arc', 'list', 'question_led', 'comparison', 'manifesto', 'unknown'];
 type EmergencyTemplateSeed = Omit<
   EmergencyQueueFallback,
   | 'rationale'
@@ -105,120 +96,25 @@ function inferMemoryPreferences(memory: PersonalizationMemory | null | undefined
   return preferences;
 }
 
-function anchorKeywords(input: string | null | undefined, limit = 4): string[] {
-  return Array.from(new Set(String(input || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token.length >= 4 && !ANCHOR_STOP_WORDS.has(token))))
-    .slice(0, limit);
-}
-
-function normalizeHook(value: string | null | undefined, fallback: TweetHookType = 'bold_claim'): TweetHookType {
-  return FALLBACK_HOOKS.includes(value as TweetHookType) ? value as TweetHookType : fallback;
-}
-
-function normalizeTone(value: string | null | undefined, fallback: TweetToneType = 'analytical'): TweetToneType {
-  return FALLBACK_TONES.includes(value as TweetToneType) ? value as TweetToneType : fallback;
-}
-
-function normalizeSpecificity(value: string | null | undefined, fallback: TweetSpecificityType = 'concrete'): TweetSpecificityType {
-  return FALLBACK_SPECIFICITY.includes(value as TweetSpecificityType) ? value as TweetSpecificityType : fallback;
-}
-
-function normalizeStructure(value: string | null | undefined, fallback: TweetStructureType = 'single_punch'): TweetStructureType {
-  return FALLBACK_STRUCTURES.includes(value as TweetStructureType) ? value as TweetStructureType : fallback;
-}
-
-function buildAnchorFallbackContent({
-  topic,
-  thesisKeywords,
-  usesLineBreaks,
-  hook,
-}: {
-  topic: string;
-  thesisKeywords: string[];
-  usesLineBreaks: boolean;
-  hook: TweetHookType;
-}): string {
-  const label = titleCaseTopic(topic) || 'This market';
-  const [first = 'constraint', second = 'behavior', third = 'feedback'] = thesisKeywords;
-
-  if (hook === 'question') {
-    return usesLineBreaks
-      ? `What would prove ${label} is actually working?\n\nNot louder consensus.\n\nA ${first} changes.\nA ${second} repeats.\nA ${third} gets easier to inspect.`
-      : `What would prove ${label} is working? A ${first} changes, a ${second} repeats, and a ${third} gets easier to inspect.`;
-  }
-
-  if (hook === 'listicle') {
-    return usesLineBreaks
-      ? `${label} gets less vague when you can name three things:\n\n1. the ${first}\n2. the ${second}\n3. the ${third}\n\nNo list, no thesis.`
-      : `${label} gets less vague when you can name the ${first}, the ${second}, and the ${third}. No list, no thesis.`;
-  }
-
-  if (hook === 'observation') {
-    return usesLineBreaks
-      ? `Observation:\n\n${label} trust shows up in quiet places.\n\nA ${first} gets owned.\nA ${second} changes.\nA ${third} survives the next check.`
-      : `Observation: ${label} trust shows up when a ${first} gets owned, a ${second} changes, and a ${third} survives the next check.`;
-  }
-
-  return usesLineBreaks
-    ? `${label} earns trust in the part nobody wants to fake.\n\nOne ${first} gets named.\nOne ${second} changes.\nOne ${third} survives contact with reality.`
-    : `${label} earns trust when one ${first} gets named, one ${second} changes, and one ${third} survives contact with reality.`;
-}
-
 function buildOperatorAnchorTemplates(
   topics: string[],
   learnings: AgentLearnings | null | undefined,
 ): EmergencyTemplateSeed[] {
-  const reference = learnings?.operatorVoiceReference;
-  if (!reference || reference.sampleCount <= 0) return [];
-
-  const anchors = [
-    ...(reference.pinnedExamples || []),
-    ...reference.bestPerformers,
-  ].filter((anchor) => anchor.content && anchor.content.trim());
-  if (anchors.length === 0) return [];
-
-  const topicPool = topics.map(cleanTopic);
-  const fp = reference.styleFingerprint;
-  const templates: EmergencyTemplateSeed[] = [];
-  const seen = new Set<string>();
-
-  for (const anchor of anchors.slice(0, 4)) {
-    const anchorTopic = cleanTopic(anchor.topic || topicPool[0] || 'general').toLowerCase();
-    const topic = topicPool.some((item) => item.toLowerCase() === anchorTopic)
-      ? anchorTopic
-      : cleanTopic(topicPool[0] || anchorTopic).toLowerCase();
-    const hook = normalizeHook(anchor.hook || fp.topHooks[0], 'bold_claim');
-    const tone = normalizeTone(anchor.tone || fp.topTones[0], 'analytical');
-    const specificity = normalizeSpecificity(anchor.specificity, fp.usesNumbers ? 'data_driven' : 'concrete');
-    const structure = normalizeStructure(anchor.structure, fp.usesLineBreaks ? 'stacked_lines' : 'single_punch');
-    const thesisKeywords = anchorKeywords(anchor.thesis || anchor.content, 5);
-    const content = buildAnchorFallbackContent({
-      topic,
-      thesisKeywords,
-      usesLineBreaks: fp.usesLineBreaks || structure === 'stacked_lines' || structure === 'list',
-      hook,
-    });
-    const key = content.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    templates.push({
-      content,
-      format: anchor.format || 'operator_take',
-      targetTopic: topic,
-      rationale: 'Operator-anchor emergency fallback: adapts proven human-written hook, tone, and structure without copying anchor text.',
-      hookType: hook,
-      toneType: tone,
-      specificityType: specificity,
-      structureType: structure,
-      thesis: `${topic} ${thesisKeywords.slice(0, 4).join(' ')}`.trim(),
-    });
-  }
-
-  return templates;
+  return buildOperatorAnchorFallbackTemplates({
+    topics,
+    learnings,
+    targetTopicCase: 'lower',
+  }).map((template) => ({
+    content: template.content,
+    format: template.format || 'operator_take',
+    targetTopic: template.targetTopic,
+    rationale: 'Operator-anchor emergency fallback: adapts proven human-written hook, tone, and structure without copying anchor text.',
+    hookType: template.hookType,
+    toneType: template.toneType,
+    specificityType: template.specificityType,
+    structureType: template.structureType,
+    thesis: template.thesis,
+  }));
 }
 
 function buildMemoryAlignedTemplates(topic: string, memory: PersonalizationMemory | null | undefined): EmergencyTemplateSeed[] {
