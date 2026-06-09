@@ -219,5 +219,106 @@ describe('buildPersonalizationMemory', () => {
         expect.stringContaining('Shape: bold_claim/single_punch/tactical.'),
       ]),
     );
+    expect(personalization.fallbackShapeOutcomes).toEqual([
+      expect.objectContaining({
+        fallbackKind: 'provider_template_fallback',
+        shape: 'bold_claim/single_punch/tactical',
+        approved: 0,
+        posted: 1,
+        edited: 0,
+        rejected: 0,
+        total: 1,
+        netScore: 0.25,
+      }),
+    ]);
+  });
+
+  it('aggregates repeated operator-anchor fallback shape outcomes into compact counters', () => {
+    const personalization = buildPersonalizationMemory({
+      feedback: [],
+      signals: [
+        learningSignal({
+          id: 'shape-posted-1',
+          signalType: 'x_post_succeeded',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'shape-approved-1',
+          signalType: 'approved_without_edit',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'shape-rejected-1',
+          signalType: 'deleted_from_queue',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'question',
+            fallbackSpecificity: 'concrete',
+            fallbackStructure: 'list',
+          },
+        }),
+        learningSignal({
+          id: 'shape-rejected-2',
+          tweetId: 'tweet-2',
+          signalType: 'x_post_rejected',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'question',
+            fallbackSpecificity: 'concrete',
+            fallbackStructure: 'list',
+          },
+        }),
+      ],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['AI agents'],
+        antiGoals: [],
+        communicationStyle: 'specific and operator-led',
+        summary: 'Sharp AI operator voice.',
+      },
+    });
+
+    expect(personalization.fallbackShapeOutcomes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fallbackKind: 'provider_template_fallback',
+          shape: 'bold_claim/single_punch/tactical',
+          approved: 1,
+          posted: 1,
+          total: 2,
+          netScore: 0.425,
+        }),
+        expect.objectContaining({
+          fallbackKind: 'provider_template_fallback',
+          shape: 'question/list/concrete',
+          rejected: 2,
+          total: 2,
+          netScore: -0.6,
+        }),
+      ]),
+    );
   });
 });

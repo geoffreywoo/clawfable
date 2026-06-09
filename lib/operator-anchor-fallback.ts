@@ -126,6 +126,23 @@ function structuredShapeScore(line: string, template: OperatorAnchorFallbackOutc
   return { score, hasShape: true };
 }
 
+function matchingShapeCounter(
+  memory: PersonalizationMemory | null | undefined,
+  fallbackKind: OperatorAnchorFallbackKind,
+  template: OperatorAnchorFallbackOutcomeInput,
+) {
+  const hook = normalizeShapeToken(template.hookType);
+  const structure = normalizeShapeToken(template.structureType);
+  const specificity = normalizeShapeToken(template.specificityType);
+
+  return (memory?.fallbackShapeOutcomes || []).find((counter) =>
+    counter.fallbackKind === fallbackKind
+    && normalizeShapeToken(counter.hook) === hook
+    && normalizeShapeToken(counter.structure) === structure
+    && normalizeShapeToken(counter.specificity) === specificity
+  );
+}
+
 function templateHasFreshProof(input: OperatorAnchorFallbackOutcomeInput): boolean {
   if (['concrete', 'data_driven', 'tactical', 'story_led'].includes(input.specificityType)) return true;
   return /\b(behavior|evidence|proof|metric|specific|verify|measurable|owner|rollback|changed|repeats)\b/i.test(input.content);
@@ -140,6 +157,25 @@ export function scoreOperatorAnchorFallbackOutcome({
   memory: PersonalizationMemory | null | undefined;
   fallbackKind: OperatorAnchorFallbackKind;
 }): OperatorAnchorFallbackOutcomeGuidance {
+  const shapeCounter = matchingShapeCounter(memory, fallbackKind, template);
+  if (shapeCounter) {
+    const counterScore = shapeCounter.netScore >= 0
+      ? Math.min(0.18, 0.04 + (shapeCounter.netScore * 0.16))
+      : Math.max(-0.22, -0.05 + (shapeCounter.netScore * 0.15));
+    const direction = shapeCounter.netScore >= 0
+      ? 'approval/posting'
+      : shapeCounter.rejected > shapeCounter.edited
+        ? 'rejection'
+        : 'operator edits';
+
+    return {
+      score: Number(counterScore.toFixed(3)),
+      notes: [
+        `Anchor fallback outcome: ${shapeCounter.total} structured ${direction} signal${shapeCounter.total === 1 ? '' : 's'} matched this fallback shape.`,
+      ],
+    };
+  }
+
   const lines = outcomeLessonLines(memory).filter((line) => lessonMatchesKind(line, fallbackKind));
   if (lines.length === 0) return { score: 0, notes: [] };
 

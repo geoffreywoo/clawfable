@@ -173,4 +173,41 @@ describe('operator anchor fallback templates', () => {
     expect(templates[0].outcomeScore).toBe(0);
     expect(templates[0].outcomeNotes).toEqual([]);
   });
+
+  it('uses compact fallback shape counters before broad lesson text', () => {
+    const templates = buildOperatorAnchorFallbackTemplates({
+      topics: ['AI agents'],
+      learnings: learnings(performance({
+        thesis: 'teams earn trust failed eval',
+      })),
+      memory: memory({
+        fallbackShapeOutcomes: [
+          {
+            fallbackKind: 'provider_template_fallback',
+            shape: 'bold_claim/single_punch/tactical',
+            hook: 'bold_claim',
+            structure: 'single_punch',
+            specificity: 'tactical',
+            approved: 0,
+            posted: 0,
+            edited: 0,
+            rejected: 4,
+            total: 4,
+            netScore: -1,
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        ],
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor provider template fallback drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text. Shape: bold_claim/single_punch/tactical.',
+        ],
+      }),
+      fallbackKind: 'provider_template_fallback',
+    });
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0].outcomeScore).toBe(-0.2);
+    expect(templates[0].outcomeNotes).toEqual([
+      'Anchor fallback outcome: 4 structured rejection signals matched this fallback shape.',
+    ]);
+  });
 });

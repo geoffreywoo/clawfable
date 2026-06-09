@@ -1198,6 +1198,7 @@ export interface PersonalizationMemory {
   topicsWithMomentum: string[];
   formatsUnderTested: string[];
   operatorHiddenPreferences: string[];
+  fallbackShapeOutcomes?: FallbackShapeOutcomeCounter[];
   editTransformations: string[];
   referenceBank?: string[];
   conversationInsights?: string[];
@@ -1212,6 +1213,21 @@ export interface PersonalizationMemory {
   outcomeFatigueLessons?: string[];
   identityConstraints: string[];
   weeklyChanges: string[];
+  updatedAt: string;
+}
+
+export interface FallbackShapeOutcomeCounter {
+  fallbackKind: string;
+  shape: string;
+  hook: string;
+  structure: string;
+  specificity: string;
+  approved: number;
+  posted: number;
+  edited: number;
+  rejected: number;
+  total: number;
+  netScore: number;
   updatedAt: string;
 }
 

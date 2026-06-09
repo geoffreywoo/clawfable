@@ -1,5 +1,6 @@
 import type {
   AgentLearnings,
+  FallbackShapeOutcomeCounter,
   FeedbackEntry,
   LearningSignal,
   Mention,
@@ -202,6 +203,63 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
   }
 
   return sortCounts(counts).slice(0, 3);
+}
+
+function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShapeOutcomeCounter[] {
+  const counters = new Map<string, FallbackShapeOutcomeCounter>();
+
+  for (const signal of signals) {
+    if (signal.metadata?.generationFallback !== true) continue;
+    if (signal.metadata.fallbackOperatorAnchor !== true) continue;
+
+    const fallbackKind = typeof signal.metadata.fallbackKind === 'string' ? signal.metadata.fallbackKind.trim() : '';
+    const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
+    const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
+    const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
+    if (!fallbackKind || !hook || !structure || !specificity) continue;
+
+    const shape = [hook, structure, specificity].join('/');
+    const key = `${fallbackKind}:${shape}`;
+    const current = counters.get(key) || {
+      fallbackKind,
+      shape,
+      hook,
+      structure,
+      specificity,
+      approved: 0,
+      posted: 0,
+      edited: 0,
+      rejected: 0,
+      total: 0,
+      netScore: 0,
+      updatedAt: signal.createdAt,
+    };
+
+    if (signal.signalType === 'approved_without_edit') current.approved += 1;
+    if (signal.signalType === 'x_post_succeeded') current.posted += 1;
+    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') current.edited += 1;
+    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') current.rejected += 1;
+
+    current.total = current.approved + current.posted + current.edited + current.rejected;
+    if (new Date(signal.createdAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      current.updatedAt = signal.createdAt;
+    }
+    counters.set(key, current);
+  }
+
+  return [...counters.values()]
+    .filter((counter) => counter.total > 0)
+    .map((counter) => {
+      const raw = (counter.approved * 0.7) + counter.posted - (counter.edited * 0.45) - (counter.rejected * 1.2);
+      const confidence = Math.min(1, counter.total / 4);
+      const netScore = Math.max(-1, Math.min(1, (raw / Math.max(counter.total, 1)) * confidence));
+      return {
+        ...counter,
+        netScore: Number(netScore.toFixed(3)),
+      };
+    })
+    .sort((a, b) => Math.abs(b.netScore) - Math.abs(a.netScore) || b.total - a.total || a.shape.localeCompare(b.shape))
+    .slice(0, 8);
 }
 
 function summarizeEditTransformations(signals: LearningSignal[]): string[] {
@@ -447,6 +505,7 @@ export function buildPersonalizationMemory({
     ...summarizeFallbackOutcomePreferences(signals),
     ...summarizeOperatorPreferences(signals, remixPatterns),
   ]).slice(0, 5);
+  const fallbackShapeOutcomes = summarizeFallbackShapeOutcomes(signals);
   const editTransformations = summarizeEditTransformations(signals);
   const referenceBank = summarizeReferenceBank(performanceHistory);
   const conversationInsights = summarizeConversationInsights(performanceHistory);
@@ -473,6 +532,7 @@ export function buildPersonalizationMemory({
     topicsWithMomentum,
     formatsUnderTested,
     operatorHiddenPreferences,
+    fallbackShapeOutcomes,
     editTransformations,
     referenceBank,
     conversationInsights,
