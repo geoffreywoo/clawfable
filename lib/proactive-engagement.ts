@@ -14,6 +14,26 @@ import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredenti
 import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, setTrendingCache, getPerformanceHistory } from './kv-storage';
 import { generateText } from './ai';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
+import { formatShoutoutSoulSummaryForPrompt, getShoutoutMaxTokens } from './promotion-prompt';
+
+const PEER_STYLE_TWEET_LIMIT = 6;
+const PEER_STYLE_TWEET_TEXT_LIMIT = 160;
+const PEER_STYLE_MAX_TOKENS = 384;
+
+type PeerStyleTweet = { text: string; likes: number; author: string };
+
+function compactPeerStyleTweetText(text: string): string {
+  const compacted = text.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= PEER_STYLE_TWEET_TEXT_LIMIT) return compacted;
+  return `${compacted.slice(0, PEER_STYLE_TWEET_TEXT_LIMIT - 3).trimEnd()}...`;
+}
+
+export function formatPeerStyleTweetList(tweets: PeerStyleTweet[]): string {
+  return tweets
+    .slice(0, PEER_STYLE_TWEET_LIMIT)
+    .map((tweet) => `@${tweet.author} (${tweet.likes} likes): "${compactPeerStyleTweetText(tweet.text)}"`)
+    .join('\n');
+}
 
 async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promise<TrendingTopic[]> {
   const cached = await getTrendingCache(agent.id) as TrendingTopic[] | null;
@@ -116,9 +136,9 @@ export async function generateAgentShoutout(
     const response = await generateText({
       task: 'tweet_generation',
       tier: 'quality',
-      maxTokens: 200,
+      maxTokens: getShoutoutMaxTokens(),
       system: `You are @${agent.handle}. Write a brief, natural shoutout tweet mentioning @${target.handle} (${target.name}). The shoutout should feel organic, not forced. Reference their work or perspective. Stay in your voice. Keep it under 200 chars. No hashtags. Output ONLY the tweet text.`,
-      prompt: `Write a shoutout for @${target.handle}. Their soul summary: "${target.soulSummary || target.name}". Make it feel natural.`,
+      prompt: `Write a shoutout for @${target.handle}. Their soul summary: "${formatShoutoutSoulSummaryForPrompt(target.soulSummary, target.name)}". Make it feel natural.`,
     });
 
     const content = response.text
@@ -154,19 +174,17 @@ export async function studyPeerStyles(
 
   const topTweets = [...topTweetsByAuthor.values()]
     .sort((a, b) => b.likes - a.likes)
-    .slice(0, 8);
+    .slice(0, PEER_STYLE_TWEET_LIMIT);
 
   if (topTweets.length < 3) return [];
 
   try {
-    const tweetList = topTweets
-      .map((t) => `@${t.author} (${t.likes} likes): "${t.text.slice(0, 200)}"`)
-      .join('\n');
+    const tweetList = formatPeerStyleTweetList(topTweets);
 
     const response = await generateText({
       task: 'classification',
       tier: 'fast',
-      maxTokens: 512,
+      maxTokens: PEER_STYLE_MAX_TOKENS,
       system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
       prompt: `These are the top-performing tweets from accounts in this agent's network right now:\n\n${tweetList}\n\nWhat style patterns are working? Be specific and actionable.`,
     });

@@ -7,6 +7,23 @@ interface InferDeleteIntentInput {
 }
 
 const FALLBACK_DELETE_INTENT = 'Likely off-voice, low-conviction, unclear, or not useful enough to keep in queue.';
+const DELETE_INTENT_SOUL_LIMIT = 600;
+const DELETE_INTENT_TWEET_LIMIT = 700;
+
+function compactDeleteIntentPromptText(value: string, limit: number): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= limit) return compacted;
+  return `${compacted.slice(0, limit - 3).trimEnd()}...`;
+}
+
+export function formatDeleteIntentSoulForPrompt(soulMd: string | null): string {
+  if (!soulMd?.trim()) return 'No SOUL.md provided';
+  return compactDeleteIntentPromptText(soulMd, DELETE_INTENT_SOUL_LIMIT);
+}
+
+export function formatDeleteIntentTweetForPrompt(tweetText: string): string {
+  return compactDeleteIntentPromptText(tweetText, DELETE_INTENT_TWEET_LIMIT);
+}
 
 function cleanIntentSummary(text: string): string {
   return text
@@ -28,16 +45,16 @@ export async function inferDeleteIntent({
     const response = await generateText({
       task: 'classification',
       tier: 'fast',
-      maxTokens: 80,
+      maxTokens: 48,
       temperature: 0,
       system: `You infer why a human operator removed a queued tweet. Return one short sentence under 18 words. Focus on voice, clarity, angle, credibility, usefulness, or timing. Do not mention being an AI.`,
       prompt: `Agent: ${agentName}
 
 Voice reference:
-${(soulMd || 'No SOUL.md provided').slice(0, 1200)}
+${formatDeleteIntentSoulForPrompt(soulMd)}
 
 Deleted queued tweet:
-${tweetText}
+${formatDeleteIntentTweetForPrompt(tweetText)}
 
 What is the most likely reason the operator removed this?`,
     });

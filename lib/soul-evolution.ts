@@ -22,6 +22,19 @@ import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_TRACKED_FOR_EVOLUTION = 50;
+const SOUL_EVOLUTION_PROMPT_SOUL_LIMIT = 6000;
+
+export function formatSoulForEvolutionPrompt(soulMd: string): string {
+  const trimmed = soulMd.trim();
+  if (trimmed.length <= SOUL_EVOLUTION_PROMPT_SOUL_LIMIT) return trimmed;
+  return `${trimmed.slice(0, SOUL_EVOLUTION_PROMPT_SOUL_LIMIT).trimEnd()}\n\n[SOUL.md trimmed for evolution prompt; preserve the existing structure and identity.]`;
+}
+
+export function getSoulEvolutionMaxTokens(currentSoulLength: number): number {
+  if (currentSoulLength <= 2500) return 2048;
+  if (currentSoulLength <= SOUL_EVOLUTION_PROMPT_SOUL_LIMIT) return 3072;
+  return 4096;
+}
 
 export interface EvolutionResult {
   evolved: boolean;
@@ -79,6 +92,7 @@ async function evolveSoul(
     if (!currentSoul || currentSoul.length < 50) {
       return { evolved: false, reason: 'No SOUL.md to evolve' };
     }
+    const promptSoul = formatSoulForEvolutionPrompt(currentSoul);
 
     // Gather operator signals that soul evolution should respect
     const [directiveRules, negFeedback] = await Promise.all([
@@ -99,7 +113,7 @@ async function evolveSoul(
     const response = await generateText({
       task: 'learning',
       tier: 'quality',
-      maxTokens: 4096,
+      maxTokens: getSoulEvolutionMaxTokens(currentSoul.length),
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.
 
 RULES:
@@ -113,7 +127,7 @@ RULES:
 
 After the SOUL.md, output one line starting with "CHANGES:" summarizing what you changed in under 50 words.`,
       prompt: `CURRENT SOUL.md:
-${currentSoul}
+${promptSoul}
 
 PERFORMANCE DATA (${learnings.totalTracked} tweets tracked):
 Avg likes: ${learnings.avgLikes}, Avg RTs: ${learnings.avgRetweets}

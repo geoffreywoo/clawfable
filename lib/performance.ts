@@ -71,6 +71,45 @@ function performanceEntryKey(tweet: TweetPerformance): string {
   return String(tweet.xTweetId || `${tweet.tweetId}:${tweet.postedAt}:${tweet.content}`);
 }
 
+export function getLearningInsightPromptLimits(historyLength: number): { rankingRows: number; examples: number; textChars: number } {
+  if (historyLength < 12) return { rankingRows: 4, examples: 4, textChars: 180 };
+  if (historyLength < 30) return { rankingRows: 6, examples: 6, textChars: 220 };
+  return { rankingRows: 8, examples: 8, textChars: 250 };
+}
+
+export function getLearningInsightMaxTokens(historyLength: number): number {
+  if (historyLength < 12) return 768;
+  return 1024;
+}
+
+export function formatLearningInsightTweetExample(tweet: TweetPerformance, textChars: number): string {
+  const content = tweet.content.replace(/\s+/g, ' ').trim();
+  const text = content.length <= textChars
+    ? content
+    : `${content.slice(0, textChars - 3).trimEnd()}...`;
+  return `- [${tweet.likes} likes, ${tweet.retweets} RTs, source:${tweet.source}] "${text}"`;
+}
+
+const TWEET_CLASSIFICATION_TEXT_LIMIT = 220;
+
+export function getTweetClassificationMaxTokens(tweetCount: number): number {
+  if (tweetCount <= 5) return 768;
+  if (tweetCount <= 10) return 1280;
+  return 2048;
+}
+
+function compactClassificationTweetText(text: string): string {
+  const compacted = text.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= TWEET_CLASSIFICATION_TEXT_LIMIT) return compacted;
+  return `${compacted.slice(0, TWEET_CLASSIFICATION_TEXT_LIMIT - 3).trimEnd()}...`;
+}
+
+export function formatTweetClassificationList(tweets: Array<{ id: string; text: string }>): string {
+  return tweets
+    .map((tweet, index) => `[${index}] "${compactClassificationTweetText(tweet.text)}"`)
+    .join('\n');
+}
+
 const CHECKPOINT_ORDER: Array<NonNullable<TweetPerformance['performanceCheckpoint']>> = [
   'initial_15m',
   'early_30m',
@@ -513,6 +552,30 @@ function qualityGrowthScore(entry: TweetPerformance): number {
     ?? 50;
 }
 
+const VELOCITY_FOLLOWUP_SOUL_LIMIT = 1000;
+const VELOCITY_FOLLOWUP_POST_LIMIT = 1200;
+
+function compactVelocityFollowupPromptText(value: string, limit: number): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= limit) return compacted;
+  return `${compacted.slice(0, limit - 3).trimEnd()}...`;
+}
+
+export function formatVelocityFollowupSoulForPrompt(soulMd: string | null | undefined): string {
+  if (!soulMd?.trim()) return 'No SOUL.md provided.';
+  return compactVelocityFollowupPromptText(soulMd, VELOCITY_FOLLOWUP_SOUL_LIMIT);
+}
+
+export function formatVelocityFollowupPostForPrompt(content: string): string {
+  return compactVelocityFollowupPromptText(content, VELOCITY_FOLLOWUP_POST_LIMIT);
+}
+
+export function getVelocityFollowupMaxTokens(originalLength: number): number {
+  if (originalLength <= 280) return 256;
+  if (originalLength <= 1000) return 384;
+  return 512;
+}
+
 async function createVelocityFollowupDraft(
   agent: Agent,
   entry: TweetPerformance,
@@ -526,17 +589,19 @@ async function createVelocityFollowupDraft(
   const fallback = buildVelocityFollowupFallback(entry);
   let content = fallback;
   try {
+    const promptSoul = formatVelocityFollowupSoulForPrompt(agent.soulMd);
+    const promptPost = formatVelocityFollowupPostForPrompt(entry.content);
     const response = await generateText({
       task: 'reply_generation',
       tier: 'fast',
-      maxTokens: 512,
+      maxTokens: getVelocityFollowupMaxTokens(entry.content.length),
       system: `You write follow-up reply drafts for an X account. Keep the account voice, add substance, and do not use engagement bait. Output only the reply text.`,
       prompt: `Account: ${agent.name} (@${agent.handle})
 SOUL.md:
-${agent.soulMd.slice(0, 1800)}
+${promptSoul}
 
 Original post taking off:
-"${entry.content}"
+"${promptPost}"
 
 Metrics now: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies, ${entry.impressions} impressions.
 
@@ -855,12 +920,12 @@ async function batchClassifyTweets(
   if (tweets.length === 0) return result;
 
   try {
-    const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
+    const tweetList = formatTweetClassificationList(tweets);
 
     const response = await generateText({
       task: 'classification',
       tier: 'fast',
-      maxTokens: 2048,
+      maxTokens: getTweetClassificationMaxTokens(tweets.length),
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
 - "idx": the tweet index number
 - "format": one of: hot_take, question, data_point, short_punch, long_form, analysis, observation, thread_hook, story, announcement
@@ -1245,8 +1310,9 @@ async function generateInsights(
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
-  const best = sorted.slice(0, 10);
-  const worst = sorted.slice(-10);
+  const promptLimits = getLearningInsightPromptLimits(history.length);
+  const best = sorted.slice(0, promptLimits.examples);
+  const worst = sorted.slice(-promptLimits.examples);
   const operatorTweets = history.filter((t) => t.source !== 'autopilot');
   const autopilotTweets = history.filter((t) => t.source === 'autopilot');
   const trainingSetLabel = sourceBreakdown.trainingSource === 'autopilot'
@@ -1259,7 +1325,7 @@ async function generateInsights(
     const response = await generateText({
       task: 'learning',
       tier: 'quality',
-      maxTokens: 1024,
+      maxTokens: getLearningInsightMaxTokens(history.length),
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")
 2. Grounded in the data (reference actual numbers)
@@ -1281,16 +1347,16 @@ STYLE FINGERPRINT (computed from top 30 tweets):
 - Anti-patterns: ${styleFingerprint.antiPatterns.join('; ') || 'none detected'}
 
 FORMAT RANKINGS:
-${formatRankings.slice(0, 8).map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
+${formatRankings.slice(0, promptLimits.rankingRows).map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
 
 TOPIC RANKINGS:
-${topicRankings.slice(0, 8).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
+${topicRankings.slice(0, promptLimits.rankingRows).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
 
-TOP 10 TWEETS (with full text so you can analyze style):
-${best.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
+TOP ${best.length} TWEETS (with representative text so you can analyze style):
+${best.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
-BOTTOM 10 TWEETS:
-${worst.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
+BOTTOM ${worst.length} TWEETS:
+${worst.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
 Generate prescriptive rules for improving content quality. Focus on style patterns, not just topics.`,
     });

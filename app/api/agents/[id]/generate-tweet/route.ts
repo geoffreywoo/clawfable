@@ -14,6 +14,11 @@ import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { generateText } from '@/lib/ai';
 import { validateGenerationRequest } from '@/lib/request-validation';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import {
+  formatSingleTweetStyleForPrompt,
+  formatSingleTweetTopicForPrompt,
+  getSingleTweetFallbackMaxTokens,
+} from '@/lib/single-tweet-prompt';
 
 // POST /api/agents/[id]/generate-tweet
 export async function POST(
@@ -124,13 +129,14 @@ export async function POST(
 
     // Fallback: simple one-shot generation without analysis
     const topicText = headline || topic || 'AI and technology';
+    const promptTopic = formatSingleTweetTopicForPrompt(topicText);
 
     const response = await generateText({
       task: 'tweet_generation',
       tier: 'quality',
-      maxTokens: 1024,
-      system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${voiceProfile.communicationStyle}. Write a single tweet about the given topic. Vary the length naturally — short punchy takes or longer structured posts. No hashtags. Be specific and opinionated.`,
-      prompt: `Write one tweet about: ${topicText}`,
+      maxTokens: getSingleTweetFallbackMaxTokens(topicText.length),
+      system: `You are a tweet ghostwriter. Voice: ${voiceProfile.tone}. Style: ${formatSingleTweetStyleForPrompt(voiceProfile.communicationStyle)}. Write a single tweet about the given topic. Vary the length naturally — short punchy takes or longer structured posts. No hashtags. Be specific and opinionated.`,
+      prompt: `Write one tweet about: ${promptTopic}`,
     });
 
     const content = normalizeGeneratedTweetContent(

@@ -3,7 +3,15 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
 import type { VoiceDirective, VoiceDirectiveRule } from '@/lib/types';
 import { generateText } from '@/lib/ai';
-import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
+import { getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
+import {
+  formatDirectiveAuditTweetList,
+  formatVoiceChatMessagesForPrompt,
+  formatVoiceChatSoulForPrompt,
+  formatVoiceDirectiveRulesForPrompt,
+  getDirectiveAuditMaxTokens,
+  getVoiceChatResponseMaxTokens,
+} from '@/lib/voice-chat-prompt';
 
 // GET /api/agents/[id]/voice-chat — get chat history + active directives
 export async function GET(
@@ -63,14 +71,17 @@ export async function POST(
     const response = await generateText({
       task: 'learning',
       tier: 'quality',
-      maxTokens: 512,
+      maxTokens: getVoiceChatResponseMaxTokens({
+        messageLength: message.trim().length,
+        directiveCount: activeDirectiveRules.length,
+      }),
       system: `You are @${agent.handle} (${agent.name}), an AI agent having a voice coaching session with your operator.
 
 YOUR SOUL.md:
-${(agent.soulMd || '').slice(0, 1500)}
+${formatVoiceChatSoulForPrompt(agent.soulMd)}
 
 EXISTING STANDING DIRECTIVES (already locked in):
-${activeDirectiveRules.length > 0 ? activeDirectiveRules.map((rule, i) => formatVoiceDirectiveRule(rule, i)).join('\n') : 'None yet'}
+${formatVoiceDirectiveRulesForPrompt(activeDirectiveRules)}
 
 The operator is giving you feedback about your voice, style, or content. Your job:
 1. Respond in your agent voice (stay in character, be brief, 1-3 sentences)
@@ -84,10 +95,7 @@ Examples of good directives:
 - "DIRECTIVE: Keep tweets under 180 characters unless it's a deep analysis post"
 
 If the operator is just chatting (not giving voice feedback), respond naturally and output "DIRECTIVE: none"`,
-      messages: chatHistory.slice(-6).map((m) => ({
-        role: m.role === 'operator' ? 'user' as const : 'assistant' as const,
-        content: m.content,
-      })).concat([{ role: 'user' as const, content: message.trim() }]),
+      messages: formatVoiceChatMessagesForPrompt(chatHistory, message.trim()),
     });
 
     const responseText = response.text;
@@ -157,13 +165,12 @@ async function auditQueueAgainstDirective(
   const queue = await getQueuedTweets(agentId);
   if (queue.length === 0) return { purged: 0, rewritten: 0 };
 
-  // Send all queued tweets to the model for audit
-  const tweetList = queue.map((t, i) => `[${i}] "${t.content.slice(0, 250)}"`).join('\n');
+  const tweetList = formatDirectiveAuditTweetList(queue);
 
   const response = await generateText({
     task: 'final_judgment',
     tier: 'quality',
-    maxTokens: 2048,
+    maxTokens: getDirectiveAuditMaxTokens(queue.length),
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:
 - PASS: tweet already complies with the directive
 - REWRITE: tweet violates the directive but can be fixed. Output the rewritten version.

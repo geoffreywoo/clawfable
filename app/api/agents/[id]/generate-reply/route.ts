@@ -7,6 +7,12 @@ import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
 import { hasPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
+import {
+  formatReplyMemoryForPrompt,
+  formatReplyReferenceTweetsForPrompt,
+  formatReplySoulForPrompt,
+  formatReplyTargetTextForPrompt,
+} from '@/lib/reply-prompt';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -68,11 +74,9 @@ Preserve the account's authentic voice while increasing the odds of niche attent
 - Topics: ${voiceProfile.topics.join(', ')}
 - Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
 
-    if (memory.alwaysDoMoreOfThis.length > 0) {
-      systemParts.push(`\n## DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.neverDoThisAgain.length > 0) {
-      systemParts.push(`\n## DO NOT DO THIS\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
+    const memoryPrompt = formatReplyMemoryForPrompt(memory);
+    if (memoryPrompt) {
+      systemParts.push(`\n${memoryPrompt}`);
     }
     if (highValueMode) {
       systemParts.push(`\n## HIGH-VALUE REPLY MODE
@@ -82,15 +86,17 @@ Preserve the account's authentic voice while increasing the odds of niche attent
 - Avoid empty applause, generic thanks, and replies that could fit any tweet.`);
     }
 
-    systemParts.push(`\n## YOUR SOUL.md
-${agent.soulMd}`);
+    const soulPrompt = formatReplySoulForPrompt(agent.soulMd);
+    if (soulPrompt) {
+      systemParts.push(`\n## YOUR SOUL.md
+${soulPrompt}`);
+    }
 
     // Include viral tweets as style examples
     if (analysis && analysis.viralTweets.length > 0) {
+      const referenceTweets = formatReplyReferenceTweetsForPrompt(analysis.viralTweets);
       systemParts.push(`\n## YOUR BEST TWEETS (match this energy and style)`);
-      for (const vt of analysis.viralTweets.slice(0, 5)) {
-        systemParts.push(`- [${vt.likes} likes] "${vt.text}"`);
-      }
+      systemParts.push(referenceTweets);
     }
 
     systemParts.push(`\n## REPLY STRATEGY
@@ -111,7 +117,7 @@ ${agent.soulMd}`);
       tier: 'quality',
       maxTokens: 300,
       system: systemParts.join('\n'),
-      prompt: `${authorHandle} tweeted this at you:\n\n"${content}"\n\nWrite your reply.`,
+      prompt: `${authorHandle} tweeted this at you:\n\n"${formatReplyTargetTextForPrompt(content)}"\n\nWrite your reply.`,
     });
 
     const replyContent = response.text

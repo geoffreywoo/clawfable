@@ -105,4 +105,32 @@ describe('resolveQueuedTweetFailure', () => {
     expect(result.detail).toContain('Anthropic overloaded');
     expect(mocks.deleteTweet).toHaveBeenCalledWith(baseTweet.id);
   });
+
+  it('sends bounded repair prompt context to the model', async () => {
+    mocks.anthropicCreate.mockResolvedValue({
+      content: [{ type: 'text', text: 'anthropic policy claims need concrete receipts before they sound credible' }],
+      stop_reason: 'end_turn',
+    });
+
+    await resolveQueuedTweetFailure(
+      {
+        ...baseAgent,
+        soulMd: `# soul\n${'voice detail '.repeat(160)}SOUL_SENTINEL`,
+      },
+      {
+        ...baseTweet,
+        content: `core thesis ${'draft detail '.repeat(220)}DRAFT_SENTINEL`,
+        quarantinedAt: '2026-04-10T01:00:00.000Z',
+      },
+      `post_tweet duplicate ${'failure metadata '.repeat(80)}REASON_SENTINEL`,
+    );
+
+    const call = mocks.anthropicCreate.mock.calls[0]?.[0];
+    const prompt = String(call?.messages?.[0]?.content || '');
+    expect(call.max_tokens).toBe(1024);
+    expect(call.system).not.toContain('SOUL_SENTINEL');
+    expect(prompt).toContain('core thesis');
+    expect(prompt).not.toContain('DRAFT_SENTINEL');
+    expect(prompt).not.toContain('REASON_SENTINEL');
+  });
 });

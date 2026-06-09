@@ -12,6 +12,39 @@ type JudgeContext = {
   memory?: PersonalizationMemory | null;
 };
 
+export type CandidateJudgeMode = 'model' | 'heuristic';
+const JUDGE_CANDIDATE_CONTENT_LIMIT = 1200;
+const MUTATION_CANDIDATE_CONTENT_LIMIT = 1000;
+const MUTATION_CRITIC_NOTE_LIMIT = 220;
+
+export function formatCandidateContentForJudgePrompt(content: string): string {
+  if (content.length <= JUDGE_CANDIDATE_CONTENT_LIMIT) return content;
+  return `${content.slice(0, JUDGE_CANDIDATE_CONTENT_LIMIT).trimEnd()}\n[trimmed for critic; full draft is used by ranking and output]`;
+}
+
+export function formatMutationCandidateForPrompt(candidate: JudgedCandidate, idx: number): string {
+  const content = candidate.content.length <= MUTATION_CANDIDATE_CONTENT_LIMIT
+    ? candidate.content
+    : `${candidate.content.slice(0, MUTATION_CANDIDATE_CONTENT_LIMIT).trimEnd()}\n[trimmed for mutation; preserve the core thesis]`;
+  const notes = candidate.judgeNotes.length <= MUTATION_CRITIC_NOTE_LIMIT
+    ? candidate.judgeNotes
+    : `${candidate.judgeNotes.slice(0, MUTATION_CRITIC_NOTE_LIMIT).trimEnd()}...`;
+  return `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\ncontent=${content}\ncritic=${notes}`;
+}
+
+export function getMutationMaxTokens(targetCount: number): number {
+  if (targetCount <= 2) return 1024;
+  if (targetCount === 3) return 1536;
+  return 2048;
+}
+
+export function getBulkJudgeMaxTokens(candidateCount: number): number {
+  if (candidateCount <= 4) return 768;
+  if (candidateCount <= 8) return 1280;
+  if (candidateCount <= 12) return 1536;
+  return 2048;
+}
+
 export interface JudgedCandidate extends RankableProtocolTweet {
   featureTags: CandidateFeatureTags;
   coverageCluster: string;
@@ -231,27 +264,29 @@ export async function judgeCandidates(
     analysis,
     learnings,
     memory,
+    mode = 'model',
   }: {
     voiceProfile: VoiceProfile;
     analysis: AccountAnalysis;
     learnings: AgentLearnings | null;
     memory: PersonalizationMemory | null;
+    mode?: CandidateJudgeMode;
   },
 ): Promise<JudgedCandidate[]> {
   const judgeContext = { voiceProfile, analysis, learnings, memory };
-  if (candidates.length === 0 || !hasTextGenerationProvider()) {
+  if (candidates.length === 0 || mode === 'heuristic' || !hasTextGenerationProvider()) {
     return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
   }
 
   const prompt = candidates.map((candidate, idx) =>
-    `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\n${candidate.content}`
+    `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\n${formatCandidateContentForJudgePrompt(candidate.content)}`
   ).join('\n\n');
 
   try {
     const response = await generateText({
       task: 'bulk_judgment',
       tier: 'fast',
-      maxTokens: 2048,
+      maxTokens: getBulkJudgeMaxTokens(candidates.length),
       system: `You are a brutally honest tweet quality judge for one X account.
 Score each candidate from 0 to 1 on:
 - overall
@@ -344,15 +379,13 @@ export async function mutateTopCandidates(
     return [];
   }
 
-  const prompt = mutationTargets.map((candidate, idx) =>
-    `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\ncontent=${candidate.content}\ncritic=${candidate.judgeNotes}`
-  ).join('\n\n');
+  const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
     const response = await generateText({
       task: 'creative_variant',
       tier: 'fast',
-      maxTokens: 2048,
+      maxTokens: getMutationMaxTokens(mutationTargets.length),
       system: `You improve tweet drafts without changing the author's identity.
 Rules:
 - Keep the same core thesis.

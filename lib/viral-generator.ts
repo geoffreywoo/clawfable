@@ -3,7 +3,7 @@
  * Optimized for standalone posts, with supervised Engage handling live-network piggybacking.
  */
 
-import { generateText } from './ai';
+import { generateText, hasTextGenerationProvider } from './ai';
 import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
@@ -17,6 +17,7 @@ import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 import { normalizeGeneratedTweetContent } from './tweet-text';
 import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
+import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt, hasPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import {
   buildMediaBrief,
   buildPostPortfolioPlan,
@@ -35,6 +36,98 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   topicPreferences: [],
   rawExtraction: '',
 };
+
+const STYLE_EXTRACTION_EXAMPLE_LIMIT = 12;
+const STYLE_EXTRACTION_EXAMPLE_CHAR_LIMIT = 280;
+const SOUL_EXAMPLE_LIMIT = 6;
+const SOUL_EXAMPLE_CHAR_LIMIT = 220;
+
+export function getTweetGenerationMaxTokens(candidateCount: number): number {
+  if (candidateCount <= 12) return 3072;
+  if (candidateCount <= 14) return 3584;
+  return 4096;
+}
+
+export function getStyleExtractionMaxTokens(exampleCount: number): number {
+  if (exampleCount <= 4) return 512;
+  if (exampleCount <= 8) return 768;
+  return 1024;
+}
+
+export function getSoulGenerationMaxTokens(exampleCount: number): number {
+  if (exampleCount === 0) return 768;
+  return 1024;
+}
+
+export function getRecentPostsPromptLimit(finalCount: number): number {
+  if (finalCount <= 1) return 8;
+  if (finalCount <= 3) return 12;
+  return 15;
+}
+
+export function getTrendingPromptLimit(finalCount: number): number {
+  if (finalCount <= 1) return 4;
+  if (finalCount <= 3) return 6;
+  return 8;
+}
+
+export function getAccountEvidencePromptLimits(finalCount: number): {
+  topPosts: number;
+  rankingRows: number;
+  bestWorstExamples: number;
+  manualVoiceAnchors: number;
+  manualTopicPriors: number;
+} {
+  if (finalCount <= 1) {
+    return {
+      topPosts: 3,
+      rankingRows: 3,
+      bestWorstExamples: 2,
+      manualVoiceAnchors: 2,
+      manualTopicPriors: 4,
+    };
+  }
+  if (finalCount <= 3) {
+    return {
+      topPosts: 4,
+      rankingRows: 4,
+      bestWorstExamples: 2,
+      manualVoiceAnchors: 2,
+      manualTopicPriors: 5,
+    };
+  }
+  return {
+    topPosts: 5,
+    rankingRows: 5,
+    bestWorstExamples: 3,
+    manualVoiceAnchors: 3,
+    manualTopicPriors: 6,
+  };
+}
+
+function compactExampleTweet(value: string, maxChars: number): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= maxChars) return compacted;
+  return `${compacted.slice(0, maxChars - 3).trimEnd()}...`;
+}
+
+export function formatStyleExtractionExamples(exampleTweets: string[]): string {
+  return exampleTweets
+    .map((tweet) => compactExampleTweet(tweet, STYLE_EXTRACTION_EXAMPLE_CHAR_LIMIT))
+    .filter(Boolean)
+    .slice(0, STYLE_EXTRACTION_EXAMPLE_LIMIT)
+    .map((tweet, index) => `${index + 1}. "${tweet}"`)
+    .join('\n');
+}
+
+export function formatSoulExampleTweets(exampleTweets: string[]): string {
+  return exampleTweets
+    .map((tweet) => compactExampleTweet(tweet, SOUL_EXAMPLE_CHAR_LIMIT))
+    .filter(Boolean)
+    .slice(0, SOUL_EXAMPLE_LIMIT)
+    .map((tweet) => `- "${tweet}"`)
+    .join('\n');
+}
 
 export interface ContentStyleConfig {
   lengthMix: { short: number; medium: number; long: number };
@@ -632,9 +725,11 @@ ${soulMd}`);
 - Peak posting hours (UTC): ${ep.topHours.join(', ') || 'unknown'}
 - Content fingerprint: ${analysis.contentFingerprint}`);
 
+  const evidenceLimits = getAccountEvidencePromptLimits(finalCount);
+
   if (analysis.viralTweets.length > 0) {
     parts.push(`\n## THIS ACCOUNT'S TOP POSTS (study the style, length, and tone — match it)`);
-    for (const vt of analysis.viralTweets.slice(0, 5)) {
+    for (const vt of analysis.viralTweets.slice(0, evidenceLimits.topPosts)) {
       parts.push(`- [${vt.likes} likes, ${vt.retweets} RTs] "${vt.text}"`);
     }
   }
@@ -648,8 +743,9 @@ ${soulMd}`);
 
   // Trending context + viral tweet styles to study
   if (trending && trending.length > 0) {
+    const trendingLimit = getTrendingPromptLimit(finalCount);
     parts.push(`\n## WHAT'S TRENDING RIGHT NOW (ride these waves — timely content outperforms generic takes)`);
-    for (const t of trending.slice(0, 8)) {
+    for (const t of trending.slice(0, trendingLimit)) {
       parts.push(`\n### [${t.category}] ${t.headline}`);
       parts.push(`Source: ${t.source} · ${t.tweetCount} posts in network`);
       if (t.topTweet) {
@@ -679,28 +775,28 @@ ${soulMd}`);
 
     if (learnings.formatRankings.length > 0) {
       parts.push(`\nFormat performance (${trainingSourceLabel} tweets):`);
-      for (const f of learnings.formatRankings.slice(0, 5)) {
+      for (const f of learnings.formatRankings.slice(0, evidenceLimits.rankingRows)) {
         parts.push(`- ${f.format}: avg ${f.avgEngagement} engagement (${f.count} tweets)`);
       }
     }
 
     if (learnings.topicRankings.length > 0) {
       parts.push(`\nTopic performance (${trainingSourceLabel} tweets):`);
-      for (const t of learnings.topicRankings.slice(0, 5)) {
+      for (const t of learnings.topicRankings.slice(0, evidenceLimits.rankingRows)) {
         parts.push(`- ${t.topic}: avg ${t.avgEngagement} engagement (${t.count} tweets)`);
       }
     }
 
     if (learnings.bestPerformers.length > 0) {
       parts.push(`\nBEST ${trainingSourceLabel.toUpperCase()} tweets (do MORE like these):`);
-      for (const t of learnings.bestPerformers.slice(0, 3)) {
+      for (const t of learnings.bestPerformers.slice(0, evidenceLimits.bestWorstExamples)) {
         parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
       }
     }
 
     if (learnings.worstPerformers.length > 0) {
       parts.push(`\nWORST ${trainingSourceLabel.toUpperCase()} tweets (do LESS like these):`);
-      for (const t of learnings.worstPerformers.slice(0, 3)) {
+      for (const t of learnings.worstPerformers.slice(0, evidenceLimits.bestWorstExamples)) {
         parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
       }
     }
@@ -742,14 +838,14 @@ ${soulMd}`);
       if (!fp.usesEmojis) parts.push(`- Strong human-written posts avoid emojis`);
       if (fp.topHooks.length > 0) parts.push(`- Human-preferred hooks: ${fp.topHooks.join(', ')}`);
       if (fp.topTones.length > 0) parts.push(`- Human-preferred tones: ${fp.topTones.join(', ')}`);
-      for (const t of humanRef.bestPerformers.slice(0, 3)) {
+      for (const t of humanRef.bestPerformers.slice(0, evidenceLimits.manualVoiceAnchors)) {
         parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, 180)}"`);
       }
     }
 
     if (learnings.manualTopicProfile && learnings.manualTopicProfile.length > 0) {
       parts.push(`\n## MANUAL TOPIC PRIORS (topics and angles proven in human-written tweets)`);
-      for (const cluster of learnings.manualTopicProfile.slice(0, 6)) {
+      for (const cluster of learnings.manualTopicProfile.slice(0, evidenceLimits.manualTopicPriors)) {
         parts.push(`- ${cluster.topic}: "${cluster.angle}" (${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement)`);
       }
     }
@@ -757,8 +853,9 @@ ${soulMd}`);
 
   // Recent posts — avoid repeating
   if (recentPosts.length > 0) {
+    const recentPostLimit = getRecentPostsPromptLimit(finalCount);
     parts.push(`\n## RECENTLY POSTED (DO NOT repeat these topics, angles, or phrasing — be FRESH)`);
-    for (const post of recentPosts.slice(0, 15)) {
+    for (const post of recentPosts.slice(0, recentPostLimit)) {
       parts.push(`- "${post.slice(0, 150)}"`);
     }
   }
@@ -787,52 +884,9 @@ ${soulMd}`);
   });
   const shitpoastSlots = slotPlan.filter((plan) => plan.styleMode === SHITPOAST_STYLE_MODE).length;
 
-  if (memory) {
-    if (memory.alwaysDoMoreOfThis.length > 0) {
-      parts.push(`\n## PERSONALIZATION: DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.neverDoThisAgain.length > 0) {
-      parts.push(`\n## PERSONALIZATION: AVOID THIS\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.operatorHiddenPreferences.length > 0) {
-      parts.push(`\n## OPERATOR PREFERENCES (inferred from edits/remixes)\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.editTransformations.length > 0) {
-      parts.push(`\n## EDIT TRANSFORMATION MEMORY\nGenerate closer to the approved after-state from these operator edits:\n${memory.editTransformations.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.referenceBank?.length) {
-      parts.push(`\n## REFERENCE BANK (high-performing examples to study, not copy)\n${memory.referenceBank.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.conversationInsights?.length) {
-      parts.push(`\n## CONVERSATION INSIGHTS\nUse these when a post can invite substantive replies without becoming cheap engagement bait:\n${memory.conversationInsights.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.audienceSegmentLessons?.length) {
-      parts.push(`\n## AUDIENCE SEGMENT LESSONS\n${memory.audienceSegmentLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.promptStrategyLessons?.length) {
-      parts.push(`\n## PROMPT STRATEGY LESSONS\n${memory.promptStrategyLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.portfolioLessons?.length) {
-      parts.push(`\n## POST PORTFOLIO LESSONS\n${memory.portfolioLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.mediaExperimentLessons?.length) {
-      parts.push(`\n## MEDIA EXPERIMENT LESSONS\n${memory.mediaExperimentLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.networkClusterLessons?.length) {
-      parts.push(`\n## NETWORK CLUSTER LESSONS\n${memory.networkClusterLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.relationshipLessons?.length) {
-      parts.push(`\n## RELATIONSHIP LESSONS\n${memory.relationshipLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.viralityPostmortems?.length) {
-      parts.push(`\n## VIRALITY POSTMORTEMS\n${memory.viralityPostmortems.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.replyMiningInsights?.length) {
-      parts.push(`\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.outcomeFatigueLessons?.length) {
-      parts.push(`\n## OUTCOME FATIGUE MEMORY\nAvoid repeating these recently underperforming high-confidence shapes unless the proof, claim, or structure changes meaningfully:\n${memory.outcomeFatigueLessons.map((item) => `- ${item}`).join('\n')}`);
-    }
+  const memoryPrompt = buildPersonalizationMemoryPrompt(memory);
+  if (memoryPrompt && !hasPersonalizationMemoryPrompt(voiceProfile.communicationStyle)) {
+    parts.push(`\n${PERSONALIZATION_MEMORY_PROMPT_HEADER}\n${memoryPrompt}`);
   }
 
   if (style.bias.scheduledTopic || style.bias.momentumTopic) {
@@ -964,9 +1018,7 @@ export async function generateViralBatch(
     ...style,
     sourcePlan,
   };
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, effectiveStyle, recentPosts, memory);
 
-  const formats = effectiveStyle.enabledFormats.length > 0 ? effectiveStyle.enabledFormats : ALL_FORMATS;
   const explorationRate = Math.max(0, Math.min(100, effectiveStyle.exploration.rate ?? DEFAULT_STYLE.exploration.rate));
   const explorationCount = count >= 4 ? Math.max(1, Math.round((count * explorationRate) / 100)) : 0;
   const slotPlan = buildBanditSlotPlan(effectiveStyle.banditPolicy, {
@@ -988,6 +1040,87 @@ export async function generateViralBatch(
     learnings,
   });
   const trendFitById = new Map(sourcePlan.acceptedTrends.map((trend) => [String(trend.id), trend.fitScores.total]));
+  const rankingMemory = memory || {
+    alwaysDoMoreOfThis: [],
+    neverDoThisAgain: [],
+    topicsWithMomentum: [],
+    formatsUnderTested: [],
+    operatorHiddenPreferences: [],
+    editTransformations: [],
+    referenceBank: [],
+    conversationInsights: [],
+    audienceSegmentLessons: [],
+    promptStrategyLessons: [],
+    networkClusterLessons: [],
+    mediaExperimentLessons: [],
+    portfolioLessons: [],
+    relationshipLessons: [],
+    viralityPostmortems: [],
+    replyMiningInsights: [],
+    identityConstraints: [],
+    weeklyChanges: [],
+    updatedAt: new Date().toISOString(),
+  };
+
+  const rankFallbackTweets = (): RankedProtocolTweet[] => {
+    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts, learnings, memory)
+      .map((tweet, index) => {
+        const slot = index + 1;
+        const creativeLane = creativeLanePlan.get(slot) || 'operator_take';
+        const portfolioRole = portfolioPlan[index] || inferPortfolioRole({
+          content: tweet.content,
+          format: tweet.format,
+          creativeLane,
+          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+        });
+        const mediaExperimentType = inferMediaExperimentType({
+          content: tweet.content,
+          portfolioRole,
+          slot,
+          mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
+        });
+        return {
+          ...tweet,
+          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
+          styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
+          creativeLane,
+          draftExperimentId: `exp-${experimentBatchId}-fallback-${slot}`,
+          experimentBatchId,
+          experimentHypothesis: `Fallback template experiment for ${tweet.targetTopic} using ${creativeLane.replace(/_/g, ' ')} and ${portfolioRole.replace(/_/g, ' ')}.`,
+          experimentHoldout: slotPlan[index]?.holdout === true,
+          promptVariant: creativeLane,
+          targetAudienceSegment: inferAudienceSegment(tweet.content, tweet.targetTopic),
+          segmentHypothesis: `Fallback tests whether ${inferAudienceSegment(tweet.content, tweet.targetTopic).replace(/_/g, ' ')} responds to this template.`,
+          mediaExperimentType,
+          mediaBrief: buildMediaBrief({ content: tweet.content, topic: tweet.targetTopic, mediaExperimentType }),
+          portfolioRole,
+          relationshipTargetHandle: null,
+          trendFitScore: sourcePlan.slots[index]?.trendTopicId ? trendFitById.get(String(sourcePlan.slots[index]?.trendTopicId)) ?? null : null,
+          trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
+          trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
+        };
+      })
+      .filter((tweet) => !getGeneratedTweetIssue(tweet.content));
+    const rankingContext = {
+      voiceProfile,
+      learnings,
+      style: effectiveStyle,
+      recentPosts,
+      allTweets,
+      memory: rankingMemory,
+      ideaAtoms,
+      signals,
+    };
+    const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
+    return selectTopRankedTweets(ranked, count, { maxShitpoast });
+  };
+
+  if (!hasTextGenerationProvider()) {
+    return rankFallbackTweets();
+  }
+
+  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, effectiveStyle, recentPosts, memory);
+  const formats = effectiveStyle.enabledFormats.length > 0 ? effectiveStyle.enabledFormats : ALL_FORMATS;
   const creativeSlotGuide = Array.from({ length: candidateCount }, (_, index) => {
     const slot = index + 1;
     const lane = creativeLanePlan.get(slot) || 'operator_take';
@@ -999,7 +1132,9 @@ export async function generateViralBatch(
       slot,
       mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
     });
-    return `- Slot ${slot}: creativeLane=${lane} | portfolioRole=${portfolioRole} | mediaExperimentType=${mediaType}${plan?.holdout ? ' | HOLDOUT=true' : ''}${plan ? ` | ${plan.mode} | ${plan.format}/${plan.topic}/${plan.hook}/${plan.structure}` : ''}`;
+    return plan
+      ? `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|${plan.holdout ? 'holdout:1' : 'holdout:0'}|${plan.mode}|${plan.format}|${plan.topic}|${plan.hook}|${plan.tone}|${plan.specificity}|${plan.structure}`
+      : `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|holdout:0|auto|any|any|any|any|any|any`;
   }).join('\n');
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
@@ -1019,7 +1154,7 @@ export async function generateViralBatch(
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
 ${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
 
-Creative lane assignment:
+Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure
 ${creativeSlotGuide}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
@@ -1028,7 +1163,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     const response = await generateText({
       task: 'tweet_generation',
       tier: 'quality',
-      maxTokens: 4096,
+      maxTokens: getTweetGenerationMaxTokens(candidateCount),
       system: systemPrompt,
       prompt: userPrompt,
     });
@@ -1145,41 +1280,25 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       style: effectiveStyle,
       recentPosts,
       allTweets,
-      memory: memory || {
-        alwaysDoMoreOfThis: [],
-        neverDoThisAgain: [],
-        topicsWithMomentum: [],
-        formatsUnderTested: [],
-        operatorHiddenPreferences: [],
-        editTransformations: [],
-        referenceBank: [],
-        conversationInsights: [],
-        audienceSegmentLessons: [],
-        promptStrategyLessons: [],
-        networkClusterLessons: [],
-        mediaExperimentLessons: [],
-        portfolioLessons: [],
-        relationshipLessons: [],
-        viralityPostmortems: [],
-        replyMiningInsights: [],
-        identityConstraints: [],
-        weeklyChanges: [],
-        updatedAt: new Date().toISOString(),
-      },
+      memory: rankingMemory,
       ideaAtoms,
       signals,
     };
     const baseCandidates = stagedTweets.map(({ slot: _slot, ...tweet }) => tweet);
+    const baseJudgeMode = count <= 1 ? 'heuristic' : 'model';
     const judged = await judgeCandidates(baseCandidates, {
       voiceProfile,
       analysis,
       learnings,
       memory,
+      mode: baseJudgeMode,
     });
-    const mutatedCandidates = await mutateTopCandidates(judged, {
-      voiceProfile,
-      memory,
-    });
+    const mutatedCandidates = count >= 2
+      ? await mutateTopCandidates(judged, {
+          voiceProfile,
+          memory,
+        })
+      : [];
     const judgedMutations = mutatedCandidates.length > 0
       ? await judgeCandidates(
           mutatedCandidates.filter((candidate) => !isNearDuplicate(candidate.content, baseCandidates.map((item) => item.content), 0.58).isDuplicate),
@@ -1188,6 +1307,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             analysis,
             learnings,
             memory,
+            mode: 'heuristic',
           },
         )
       : [];
@@ -1203,76 +1323,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       throw err; // Real code bug or malformed request — surface it.
     }
 
-    const fallbackTweets = buildFallbackTemplates(voiceProfile, analysis, count, effectiveStyle, recentPosts, learnings, memory)
-      .map((tweet, index) => {
-        const slot = index + 1;
-        const creativeLane = creativeLanePlan.get(slot) || 'operator_take';
-        const portfolioRole = portfolioPlan[index] || inferPortfolioRole({
-          content: tweet.content,
-          format: tweet.format,
-          creativeLane,
-          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
-        });
-        const mediaExperimentType = inferMediaExperimentType({
-          content: tweet.content,
-          portfolioRole,
-          slot,
-          mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
-        });
-        return {
-          ...tweet,
-          sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
-          styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
-          creativeLane,
-          draftExperimentId: `exp-${experimentBatchId}-fallback-${slot}`,
-          experimentBatchId,
-          experimentHypothesis: `Fallback template experiment for ${tweet.targetTopic} using ${creativeLane.replace(/_/g, ' ')} and ${portfolioRole.replace(/_/g, ' ')}.`,
-          experimentHoldout: slotPlan[index]?.holdout === true,
-          promptVariant: creativeLane,
-          targetAudienceSegment: inferAudienceSegment(tweet.content, tweet.targetTopic),
-          segmentHypothesis: `Fallback tests whether ${inferAudienceSegment(tweet.content, tweet.targetTopic).replace(/_/g, ' ')} responds to this template.`,
-          mediaExperimentType,
-          mediaBrief: buildMediaBrief({ content: tweet.content, topic: tweet.targetTopic, mediaExperimentType }),
-          portfolioRole,
-          relationshipTargetHandle: null,
-          trendFitScore: sourcePlan.slots[index]?.trendTopicId ? trendFitById.get(String(sourcePlan.slots[index]?.trendTopicId)) ?? null : null,
-          trendTopicId: sourcePlan.slots[index]?.trendTopicId || null,
-          trendHeadline: sourcePlan.slots[index]?.trendHeadline || null,
-        };
-      })
-      .filter((tweet) => !getGeneratedTweetIssue(tweet.content));
-    const rankingContext = {
-      voiceProfile,
-      learnings,
-      style: effectiveStyle,
-      recentPosts,
-      allTweets,
-      memory: memory || {
-        alwaysDoMoreOfThis: [],
-        neverDoThisAgain: [],
-        topicsWithMomentum: [],
-        formatsUnderTested: [],
-        operatorHiddenPreferences: [],
-        editTransformations: [],
-        referenceBank: [],
-        conversationInsights: [],
-        audienceSegmentLessons: [],
-        promptStrategyLessons: [],
-        networkClusterLessons: [],
-        mediaExperimentLessons: [],
-        portfolioLessons: [],
-        relationshipLessons: [],
-        viralityPostmortems: [],
-        replyMiningInsights: [],
-        identityConstraints: [],
-        weeklyChanges: [],
-        updatedAt: new Date().toISOString(),
-      },
-      ideaAtoms,
-      signals,
-    };
-    const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
-    return selectTopRankedTweets(ranked, count, { maxShitpoast });
+    return rankFallbackTweets();
   }
 }
 
@@ -1298,16 +1349,17 @@ export async function generateViralTweet(
 
 export async function extractStyleSignals(exampleTweets: string[]): Promise<StyleSignals> {
   if (exampleTweets.length === 0) return DEFAULT_STYLE_SIGNALS;
+  const exampleSection = formatStyleExtractionExamples(exampleTweets);
 
   try {
     const response = await generateText({
       task: 'classification',
       tier: 'fast',
-      maxTokens: 1024,
+      maxTokens: getStyleExtractionMaxTokens(exampleTweets.length),
       system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
       prompt: `Analyze these tweets and extract the writing style:
 
-${exampleTweets.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+${exampleSection}
 
 Output a JSON object with:
 - "sentenceLength": "short" | "medium" | "long" | "mixed"
@@ -1345,14 +1397,15 @@ export async function generateSoulMd(
   agentName: string,
 ): Promise<string> {
   try {
+    const formattedExamples = formatSoulExampleTweets(exampleTweets);
     const examplesSection = exampleTweets.length > 0
-      ? `\n\nExample tweets this agent admires or has written:\n${exampleTweets.map(t => `- "${t}"`).join('\n')}`
+      ? `\n\nExample tweets this agent admires or has written:\n${formattedExamples}`
       : '';
 
     const response = await generateText({
       task: 'soul_generation',
       tier: 'quality',
-      maxTokens: 1024,
+      maxTokens: getSoulGenerationMaxTokens(exampleTweets.length),
       system: `You generate SOUL.md personality profiles for Twitter bot agents. Output markdown only, no commentary.
 
 Every SOUL.md must inherit this non-editable Clawfable platform goal: ${CLAWFABLE_PLATFORM_GOAL}`,

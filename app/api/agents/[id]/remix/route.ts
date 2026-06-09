@@ -4,6 +4,12 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { generateText } from '@/lib/ai';
 import { getPlatformGoalForHandle } from '@/lib/platform-goal';
+import {
+  formatRemixContentForPrompt,
+  formatRemixInstructionForPrompt,
+  formatRemixSoulForPrompt,
+  getRemixMaxTokens,
+} from '@/lib/remix-prompt';
 
 const REMIX_DIRECTIONS: Record<string, string> = {
   shorter: 'Make it shorter and punchier. Cut the fat. Under 200 chars if possible.',
@@ -39,19 +45,22 @@ export async function POST(
       return NextResponse.json({ error: 'direction or customPrompt required' }, { status: 400 });
     }
 
+    const promptContent = formatRemixContentForPrompt(String(content));
+    const promptInstruction = formatRemixInstructionForPrompt(instruction);
+    const promptSoul = formatRemixSoulForPrompt(agent.soulMd);
     let remixed = '';
     let lastIssue: string | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const response = await generateText({
         task: 'creative_variant',
         tier: 'quality',
-        maxTokens: attempt === 0 ? 1024 : 1536,
+        maxTokens: getRemixMaxTokens(String(content).length, attempt),
         system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction.
 
 Clawfable platform goal, non-negotiable: ${getPlatformGoalForHandle(agent.handle)}
 
-Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${agent.soulMd ? `\n\nVoice reference:\n${agent.soulMd.slice(0, 1000)}` : ''}`,
-        prompt: `Original tweet:\n"${content}"\n\nInstruction: ${instruction}`,
+Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${promptSoul ? `\n\nVoice reference:\n${promptSoul}` : ''}`,
+        prompt: `Original tweet:\n"${promptContent}"\n\nInstruction: ${promptInstruction}`,
       });
 
       remixed = response.text

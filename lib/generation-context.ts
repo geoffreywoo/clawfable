@@ -19,6 +19,7 @@ import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
 import { buildBanditPolicy } from './bandit';
 import { buildPersonalizationMemory } from './learning-loop';
+import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
 
@@ -387,64 +388,9 @@ export async function buildGenerationContext(
     mentions,
   });
 
-  if (memory.alwaysDoMoreOfThis.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## ALWAYS DO MORE OF THIS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.neverDoThisAgain.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## NEVER DO THIS AGAIN\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.operatorHiddenPreferences.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## OPERATOR HIDDEN PREFERENCES\n${memory.operatorHiddenPreferences.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.editTransformations.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## EDIT TRANSFORMATION MEMORY\nThese are before/after lessons from drafts the operator changed before approval. Generate closer to the after-state.\n${memory.editTransformations.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.referenceBank?.length) {
-    voiceProfile.communicationStyle += `\n\n## HIGH-PERFORMING REFERENCE BANK\nUse these as style and substance anchors without copying exact claims.\n${memory.referenceBank.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.conversationInsights?.length) {
-    voiceProfile.communicationStyle += `\n\n## CONVERSATION LEARNING\nThese patterns tend to earn replies. Use them when the draft can add real substance.\n${memory.conversationInsights.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.audienceSegmentLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## AUDIENCE SEGMENT LESSONS\n${memory.audienceSegmentLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.promptStrategyLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## PROMPT STRATEGY LESSONS\n${memory.promptStrategyLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.portfolioLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## POST PORTFOLIO LESSONS\n${memory.portfolioLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.mediaExperimentLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## MEDIA EXPERIMENT LESSONS\n${memory.mediaExperimentLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.networkClusterLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## NETWORK CLUSTER LESSONS\n${memory.networkClusterLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.relationshipLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## RELATIONSHIP LESSONS\n${memory.relationshipLessons.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.viralityPostmortems?.length) {
-    voiceProfile.communicationStyle += `\n\n## VIRALITY POSTMORTEMS\n${memory.viralityPostmortems.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.replyMiningInsights?.length) {
-    voiceProfile.communicationStyle += `\n\n## REPLY-MINED IDEAS\n${memory.replyMiningInsights.map((item) => `- ${item}`).join('\n')}`;
-  }
-
-  if (memory.outcomeFatigueLessons?.length) {
-    voiceProfile.communicationStyle += `\n\n## OUTCOME FATIGUE MEMORY\nThese were high-confidence drafts or approved posts that later underperformed. Avoid repeating the same shape; mutate the proof, claim, or structure before trying again.\n${memory.outcomeFatigueLessons.map((item) => `- ${item}`).join('\n')}`;
+  const memoryPrompt = buildPersonalizationMemoryPrompt(memory);
+  if (memoryPrompt) {
+    voiceProfile.communicationStyle += `\n\n${PERSONALIZATION_MEMORY_PROMPT_HEADER}\n${memoryPrompt}`;
   }
 
   const curatedIdeaBank = curateIdeaBankForGeneration(ideaAtoms, { reusableLimit: 12, cautionLimit: 6, referenceLimit: 8 });

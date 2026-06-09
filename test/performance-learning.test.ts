@@ -19,7 +19,18 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 
-import { autoAdjustSettings, buildLearnings } from '@/lib/performance';
+import {
+  autoAdjustSettings,
+  buildLearnings,
+  formatLearningInsightTweetExample,
+  formatTweetClassificationList,
+  formatVelocityFollowupPostForPrompt,
+  formatVelocityFollowupSoulForPrompt,
+  getLearningInsightMaxTokens,
+  getLearningInsightPromptLimits,
+  getTweetClassificationMaxTokens,
+  getVelocityFollowupMaxTokens,
+} from '@/lib/performance';
 
 function performanceEntry(overrides: Record<string, unknown>) {
   return {
@@ -45,6 +56,63 @@ function performanceEntry(overrides: Record<string, unknown>) {
 }
 
 describe('performance learning smoke', () => {
+  it('budgets learning insight prompt examples by history size', () => {
+    expect(getLearningInsightPromptLimits(8)).toEqual({ rankingRows: 4, examples: 4, textChars: 180 });
+    expect(getLearningInsightPromptLimits(20)).toEqual({ rankingRows: 6, examples: 6, textChars: 220 });
+    expect(getLearningInsightPromptLimits(40)).toEqual({ rankingRows: 8, examples: 8, textChars: 250 });
+    expect(getLearningInsightMaxTokens(8)).toBe(768);
+    expect(getLearningInsightMaxTokens(20)).toBe(1024);
+  });
+
+  it('compacts tweet examples for learning insight prompts', () => {
+    const line = formatLearningInsightTweetExample(performanceEntry({
+      tweetId: 'long-example',
+      content: `AI agent evals ${'need visible rollback proof '.repeat(20)}FINAL_LEARNING_SENTINEL`,
+      likes: 42,
+      retweets: 7,
+      source: 'manual',
+    }) as any, 120);
+
+    expect(line).toContain('[42 likes, 7 RTs, source:manual]');
+    expect(line).toContain('AI agent evals');
+    expect(line).not.toContain('FINAL_LEARNING_SENTINEL');
+    expect(line).toContain('...');
+  });
+
+  it('budgets tweet classification completions by batch size', () => {
+    expect(getTweetClassificationMaxTokens(1)).toBe(768);
+    expect(getTweetClassificationMaxTokens(5)).toBe(768);
+    expect(getTweetClassificationMaxTokens(10)).toBe(1280);
+    expect(getTweetClassificationMaxTokens(20)).toBe(2048);
+  });
+
+  it('compacts tweet text for classification prompts', () => {
+    const list = formatTweetClassificationList([
+      {
+        id: 'long-classification',
+        text: `AI agent evals ${'need visible rollback proof '.repeat(20)}FINAL_CLASSIFICATION_SENTINEL`,
+      },
+    ]);
+
+    expect(list).toContain('[0] "AI agent evals');
+    expect(list).toContain('...');
+    expect(list).not.toContain('FINAL_CLASSIFICATION_SENTINEL');
+  });
+
+  it('budgets velocity follow-up prompt context and completion size', () => {
+    const soul = formatVelocityFollowupSoulForPrompt(`# soul\n${'voice detail '.repeat(140)}SOUL_SENTINEL`);
+    const post = formatVelocityFollowupPostForPrompt(`core post ${'argument detail '.repeat(160)}POST_SENTINEL`);
+
+    expect(soul.length).toBeLessThan(1050);
+    expect(soul).not.toContain('SOUL_SENTINEL');
+    expect(post.length).toBeLessThan(1250);
+    expect(post).toContain('core post');
+    expect(post).not.toContain('POST_SENTINEL');
+    expect(getVelocityFollowupMaxTokens(120)).toBe(256);
+    expect(getVelocityFollowupMaxTokens(600)).toBe(384);
+    expect(getVelocityFollowupMaxTokens(1600)).toBe(512);
+  });
+
   it('builds autonomous policy learnings from autopilot history once enough data exists', async () => {
     const agent = await createAgent({
       handle: 'perf-agent-1',

@@ -45,6 +45,35 @@ const CONTENT_REPAIR_PATTERNS = [
   'text is too long',
   'content is invalid',
 ];
+const REPAIR_SOUL_PROMPT_LIMIT = 1200;
+const REPAIR_REASON_PROMPT_LIMIT = 500;
+const REPAIR_DRAFT_PROMPT_LIMIT = 1800;
+
+function compactRepairPromptText(value: string, limit: number): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= limit) return compacted;
+  return `${compacted.slice(0, limit - 3).trimEnd()}...`;
+}
+
+export function formatRepairSoulForPrompt(soulMd: string | null | undefined): string {
+  if (!soulMd?.trim()) return 'No SOUL.md provided.';
+  return compactRepairPromptText(soulMd, REPAIR_SOUL_PROMPT_LIMIT);
+}
+
+export function formatRepairReasonForPrompt(reason: string): string {
+  return compactRepairPromptText(reason || 'Unknown failure reason.', REPAIR_REASON_PROMPT_LIMIT);
+}
+
+export function formatRepairDraftForPrompt(content: string): string {
+  return compactRepairPromptText(content, REPAIR_DRAFT_PROMPT_LIMIT);
+}
+
+export function getRepairMaxTokens(originalLength: number, attempt: number): number {
+  const retryExtra = attempt > 0 ? 256 : 0;
+  if (originalLength <= 280) return 512 + retryExtra;
+  if (originalLength <= 1000) return 768 + retryExtra;
+  return 1024 + retryExtra;
+}
 
 function cleanRepairedDraft(text: string): string {
   return text
@@ -83,13 +112,16 @@ export function classifyQueuedTweetIssue(reason: string | null | undefined): Que
 
 async function generateRepairCandidate(agent: Agent, tweet: Tweet, reason: string): Promise<string | null> {
   const mustRewriteMore = requiresMaterialRewrite(reason);
+  const promptSoul = formatRepairSoulForPrompt(agent.soulMd);
+  const promptReason = formatRepairReasonForPrompt(reason);
+  const promptDraft = formatRepairDraftForPrompt(tweet.content);
   let lastIssue: string | null = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await generateText({
       task: 'creative_variant',
       tier: 'quality',
-      maxTokens: attempt === 0 ? 1024 : 1536,
+      maxTokens: getRepairMaxTokens(tweet.content.length, attempt),
       system: `You repair queued X drafts. Output ONLY the repaired tweet text.
 
 Requirements:
@@ -102,14 +134,14 @@ Requirements:
 - If the failure reason mentions X rejection, duplicate risk, or a failed post request, materially rewrite the phrasing so it is fresher and less likely to be rejected again.
 
 Voice reference:
-${agent.soulMd.slice(0, 1800)}`,
+${promptSoul}`,
       prompt: `Agent: @${agent.handle} (${agent.name})
 Format: ${tweet.format || 'unknown'}
 Topic: ${tweet.topic || 'general'}
-Failure reason: ${reason}
+Failure reason: ${promptReason}
 
 Original draft:
-${tweet.content}
+${promptDraft}
 
 Repair this queued draft so it is complete and ready to post.${attempt === 1 ? ' The first repair was not good enough. Rewrite more boldly and make the ending unmistakably complete.' : ''}`,
     });

@@ -18,6 +18,47 @@ export interface SoulFromTweetsResult {
   voiceSummary: string;
 }
 
+const SOUL_HISTORY_TOP_LIMIT = 10;
+const SOUL_HISTORY_RECENT_LIMIT = 12;
+const SOUL_HISTORY_SAMPLE_LIMIT = 16;
+const SOUL_HISTORY_BOTTOM_LIMIT = 6;
+const SOUL_HISTORY_SUMMARY_LIMIT = 8;
+const SOUL_HISTORY_TWEET_CHAR_LIMIT = 280;
+
+type TweetLike = { text: string; likes: number; retweets?: number };
+
+function compactTweetText(text: string): string {
+  const compacted = text.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= SOUL_HISTORY_TWEET_CHAR_LIMIT) return compacted;
+  return `${compacted.slice(0, SOUL_HISTORY_TWEET_CHAR_LIMIT - 3).trimEnd()}...`;
+}
+
+function formatTweetLine(tweet: TweetLike, includeStats = false): string {
+  const text = compactTweetText(tweet.text);
+  if (!includeStats) return `"${text}"`;
+  return `[${tweet.likes} likes, ${tweet.retweets || 0} RTs] "${text}"`;
+}
+
+export function formatSoulHistoryTweets(
+  tweets: TweetLike[],
+  options: { limit: number; includeStats?: boolean },
+): string {
+  return tweets
+    .slice(0, options.limit)
+    .map((tweet) => formatTweetLine(tweet, Boolean(options.includeStats)))
+    .join('\n\n');
+}
+
+export function getSoulFromTweetsMaxTokens(tweetCount: number): number {
+  if (tweetCount < 25) return 1536;
+  return 2048;
+}
+
+export function getSoulSummaryMaxTokens(tweetCount: number): number {
+  if (tweetCount < 25) return 192;
+  return 256;
+}
+
 /**
  * Fetch deep tweet history and generate a SOUL.md that captures the account's actual voice.
  */
@@ -77,7 +118,7 @@ export async function generateSoulFromTweets(
   const response = await generateText({
     task: 'soul_generation',
     tier: 'quality',
-    maxTokens: 2048,
+    maxTokens: getSoulFromTweetsMaxTokens(timeline.length),
     system: `You are an expert at analyzing Twitter accounts and reverse-engineering their voice, personality, and posting strategy. You produce SOUL.md files — structured personality profiles that capture exactly how someone tweets.
 
 Be specific and detailed. Don't be generic. The SOUL.md should be so accurate that someone reading it could write tweets indistinguishable from the original account.
@@ -93,16 +134,16 @@ Every SOUL.md must inherit this non-editable Clawfable platform goal: ${CLAWFABL
 - Following context: ${followingContext || 'unknown'}
 
 ## TOP PERFORMING TWEETS (sorted by engagement)
-${topTweets.slice(0, 15).map(t => `[${t.likes} likes, ${t.retweets} RTs] "${t.text}"`).join('\n\n')}
+${formatSoulHistoryTweets(topTweets, { limit: SOUL_HISTORY_TOP_LIMIT, includeStats: true })}
 
 ## RECENT TWEETS
-${recent.map(t => `"${t.text}"`).join('\n\n')}
+${formatSoulHistoryTweets(recent, { limit: SOUL_HISTORY_RECENT_LIMIT })}
 
 ## SAMPLE OF ALL TWEETS (for style patterns)
-${sampleTweets.map(t => `"${t.text}"`).join('\n\n')}
+${formatSoulHistoryTweets(sampleTweets, { limit: SOUL_HISTORY_SAMPLE_LIMIT })}
 
 ## LOWEST PERFORMING TWEETS (what to avoid)
-${bottomTweets.map(t => `[${t.likes} likes] "${t.text}"`).join('\n\n')}
+${formatSoulHistoryTweets(bottomTweets, { limit: SOUL_HISTORY_BOTTOM_LIMIT, includeStats: true })}
 
 ---
 
@@ -144,9 +185,9 @@ Output ONLY the SOUL.md markdown. No commentary.`,
   const summaryResponse = await generateText({
     task: 'classification',
     tier: 'quality',
-    maxTokens: 256,
+    maxTokens: getSoulSummaryMaxTokens(timeline.length),
     system: 'Output a single JSON object with: tone (string), topics (array of strings, max 5), voiceSummary (one sentence).',
-    prompt: `Based on these top tweets, classify the voice:\n${topTweets.slice(0, 10).map(t => `"${t.text}"`).join('\n')}\n\nJSON only, no markdown.`,
+    prompt: `Based on these top tweets, classify the voice:\n${formatSoulHistoryTweets(topTweets, { limit: SOUL_HISTORY_SUMMARY_LIMIT })}\n\nJSON only, no markdown.`,
   });
 
   let detectedTone = 'contrarian';

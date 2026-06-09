@@ -34,9 +34,20 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 
-import { maybeEvolveSoul } from '@/lib/soul-evolution';
+import { formatSoulForEvolutionPrompt, getSoulEvolutionMaxTokens, maybeEvolveSoul } from '@/lib/soul-evolution';
 
 describe('soul evolution smoke', () => {
+  it('budgets SOUL evolution prompts and completions by current soul size', () => {
+    const longSoul = `# SOUL.md\n\n${'identity line '.repeat(700)}SOUL_EVOLUTION_SENTINEL`;
+    const formatted = formatSoulForEvolutionPrompt(longSoul);
+
+    expect(getSoulEvolutionMaxTokens(1200)).toBe(2048);
+    expect(getSoulEvolutionMaxTokens(4000)).toBe(3072);
+    expect(getSoulEvolutionMaxTokens(8000)).toBe(4096);
+    expect(formatted).toContain('[SOUL.md trimmed for evolution prompt');
+    expect(formatted).not.toContain('SOUL_EVOLUTION_SENTINEL');
+  });
+
   it('feeds operator directives and rejections into soul evolution', async () => {
     const agent = await createAgent({
       handle: 'soul-evolution-agent',
@@ -130,7 +141,9 @@ Primary objective: Write thoughtful tweets.`,
     expect(result.reason).toContain('awaiting approval');
     expect(result.changeSummary).toContain('tightened the voice');
     expect(createMock).toHaveBeenCalled();
-    const prompt = String((createMock as any).mock.calls?.[0]?.[0]?.messages?.[0]?.content || '');
+    const call = (createMock as any).mock.calls?.[0]?.[0];
+    const prompt = String(call?.messages?.[0]?.content || '');
+    expect(call.max_tokens).toBe(2048);
     expect(prompt).toContain('Lead with concrete observations.');
     expect(prompt).toContain('Lesson: Concrete openings feel more native to the operator than abstract framing.');
     expect(prompt).toContain('generic filler tweet (why it was rejected: Too generic)');

@@ -9,6 +9,12 @@ import { getPlatformGoalForHandle } from '@/lib/platform-goal';
 import { scoreHighValueReply } from '@/lib/virality-signals';
 import { hasPostedReplyForConversation } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
+import {
+  formatReplyMemoryForPrompt,
+  formatReplyReferenceTweetsForPrompt,
+  formatReplySoulForPrompt,
+  formatReplyTargetTextForPrompt,
+} from '@/lib/reply-prompt';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -74,20 +80,19 @@ Preserve the account's authentic voice while increasing the odds of niche attent
 - Topics: ${voiceProfile.topics.join(', ') || 'the agent voice topics'}
 - Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
 
-    if (memory.alwaysDoMoreOfThis.length > 0) {
-      systemParts.push(`\n## REINFORCED PATTERNS\n${memory.alwaysDoMoreOfThis.map((item) => `- ${item}`).join('\n')}`);
-    }
-    if (memory.neverDoThisAgain.length > 0) {
-      systemParts.push(`\n## AVOID\n${memory.neverDoThisAgain.map((item) => `- ${item}`).join('\n')}`);
+    const memoryPrompt = formatReplyMemoryForPrompt(memory);
+    if (memoryPrompt) {
+      systemParts.push(`\n${memoryPrompt}`);
     }
 
-    systemParts.push(`\n## SOUL.md\n${agent.soulMd.slice(0, 2200)}`);
+    const soulPrompt = formatReplySoulForPrompt(agent.soulMd);
+    if (soulPrompt) {
+      systemParts.push(`\n## SOUL.md\n${soulPrompt}`);
+    }
 
     if (analysis?.viralTweets?.length) {
       systemParts.push('\n## STRONG REFERENCE TWEETS');
-      for (const tweet of analysis.viralTweets.slice(0, 4)) {
-        systemParts.push(`- [${tweet.likes} likes] "${tweet.text}"`);
-      }
+      systemParts.push(formatReplyReferenceTweetsForPrompt(analysis.viralTweets));
     }
 
     systemParts.push(`\n## ENGAGE REPLY RULES
@@ -103,7 +108,7 @@ Preserve the account's authentic voice while increasing the odds of niche attent
       tier: 'quality',
       maxTokens: 260,
       system: systemParts.join('\n'),
-      prompt: `Target tweet from @${candidate.authorHandle}:\n\n"${candidate.text}"\n\nWrite the best reply for @${agent.handle}.`,
+      prompt: `Target tweet from @${candidate.authorHandle}:\n\n"${formatReplyTargetTextForPrompt(candidate.text)}"\n\nWrite the best reply for @${agent.handle}.`,
     });
 
     const content = response.text.trim().replace(/^["']|["']$/g, '');

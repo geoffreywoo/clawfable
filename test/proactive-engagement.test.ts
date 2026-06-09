@@ -43,7 +43,7 @@ vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
 }));
 
-import { discoverAndFollow, likeNetworkTweets, replyToViralTweets } from '@/lib/proactive-engagement';
+import { discoverAndFollow, formatPeerStyleTweetList, generateAgentShoutout, likeNetworkTweets, replyToViralTweets, studyPeerStyles } from '@/lib/proactive-engagement';
 import { TwitterActionError } from '@/lib/twitter-debug';
 import type { Agent, ProtocolSettings } from '@/lib/types';
 
@@ -119,6 +119,75 @@ describe('proactive engagement', () => {
     expect(sent).toBe(0);
     expect(mocks.fetchTrendingFromFollowing).not.toHaveBeenCalled();
     expect(mocks.replyToTweet).not.toHaveBeenCalled();
+  });
+
+  it('compacts peer style tweets before classification prompts', () => {
+    const list = formatPeerStyleTweetList(Array.from({ length: 8 }, (_, index) => ({
+      author: `builder${index + 1}`,
+      likes: 200 - index,
+      text: `peer tweet ${index + 1} ${'with repeated style context '.repeat(20)}PEER_SENTINEL_${index + 1}`,
+    })));
+
+    expect(list).toContain('@builder1');
+    expect(list).toContain('@builder6');
+    expect(list).not.toContain('@builder7');
+    expect(list).not.toContain('PEER_SENTINEL_1');
+    expect(list).toContain('...');
+  });
+
+  it('uses compact peer style prompts and smaller output budget', async () => {
+    mocks.getTrendingCache.mockResolvedValue(Array.from({ length: 8 }, (_, index) => ({
+      ...trendingTopic,
+      id: index + 1,
+      topTweet: {
+        id: `peer-${index + 1}`,
+        text: `peer tweet ${index + 1} ${'with repeated style context '.repeat(20)}PEER_SENTINEL_${index + 1}`,
+        likes: 200 - index,
+        author: `builder${index + 1}`,
+      },
+    })));
+    mocks.generateText.mockResolvedValue({
+      text: '- Tweets that open with concrete mechanisms get more replies\n- Short proof beats abstract claims',
+    });
+
+    const insights = await studyPeerStyles(agent);
+
+    const call = mocks.generateText.mock.calls[0]?.[0];
+    expect(call).toEqual(expect.objectContaining({
+      task: 'classification',
+      tier: 'fast',
+      maxTokens: 384,
+    }));
+    expect(call.prompt).toContain('@builder6');
+    expect(call.prompt).not.toContain('@builder7');
+    expect(call.prompt).not.toContain('PEER_SENTINEL_1');
+    expect(insights).toContain('Tweets that open with concrete mechanisms get more replies');
+  });
+
+  it('uses compact shoutout summaries and smaller output budget', async () => {
+    mocks.getAgents.mockResolvedValue([
+      agent,
+      {
+        ...agent,
+        id: 'agent-2',
+        handle: 'builderbot',
+        name: 'Builder Bot',
+        soulSummary: `builder voice ${'summary detail '.repeat(40)}SHOUTOUT_SENTINEL`,
+      },
+    ]);
+    mocks.generateText.mockResolvedValue({ text: 'builderbot keeps shipping receipts in public' });
+
+    const shoutout = await generateAgentShoutout(agent);
+
+    const call = mocks.generateText.mock.calls[0]?.[0];
+    expect(shoutout?.targetHandle).toBe('builderbot');
+    expect(call).toEqual(expect.objectContaining({
+      task: 'tweet_generation',
+      tier: 'quality',
+      maxTokens: 128,
+    }));
+    expect(call.prompt).toContain('@builderbot');
+    expect(call.prompt).not.toContain('SHOUTOUT_SENTINEL');
   });
 
   it('backs off proactive trend refresh after a recent X read endpoint failure', async () => {
