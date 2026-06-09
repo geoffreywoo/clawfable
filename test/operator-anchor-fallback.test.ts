@@ -135,4 +135,42 @@ describe('operator anchor fallback templates', () => {
     expect(templates[0].outcomeScore).toBeLessThan(0);
     expect(templates[0].outcomeNotes.join(' ')).toContain('prior rejection');
   });
+
+  it('matches structured fallback shape lessons without relying on thesis text', () => {
+    const templates = buildOperatorAnchorFallbackTemplates({
+      topics: ['AI agents'],
+      learnings: learnings(performance({
+        thesis: 'teams earn trust failed eval',
+      })),
+      memory: memory({
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor provider template fallback drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording. Shape: bold_claim/single_punch/tactical.',
+        ],
+      }),
+      fallbackKind: 'provider_template_fallback',
+    });
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0].outcomeScore).toBeLessThan(0);
+    expect(templates[0].outcomeNotes.join(' ')).toContain('fallback shape');
+  });
+
+  it('does not cool unrelated structured fallback shapes blindly', () => {
+    const templates = buildOperatorAnchorFallbackTemplates({
+      topics: ['AI agents'],
+      learnings: learnings(performance({
+        thesis: 'teams earn trust failed eval',
+      })),
+      memory: memory({
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor provider template fallback drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording. Shape: question/list/concrete.',
+        ],
+      }),
+      fallbackKind: 'provider_template_fallback',
+    });
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0].outcomeScore).toBe(0);
+    expect(templates[0].outcomeNotes).toEqual([]);
+  });
 });

@@ -103,6 +103,10 @@ describe('buildPersonalizationMemory', () => {
       fallbackOperatorAnchorScore: 0.22,
       fallbackAnchorCopyRisk: 0.06,
       fallbackSourceLane: 'core_explore_fallback',
+      fallbackHook: 'observation',
+      fallbackTone: 'analytical',
+      fallbackSpecificity: 'concrete',
+      fallbackStructure: 'list',
       fallbackThesis: 'ai agents trust comes from behavior evidence',
     });
   });
@@ -170,6 +174,10 @@ describe('buildPersonalizationMemory', () => {
             fallbackOperatorAnchor: true,
             fallbackOperatorAnchorScore: 0.22,
             fallbackAnchorCopyRisk: 0,
+            fallbackHook: 'bold_claim',
+            fallbackTone: 'analytical',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
             fallbackThesis: 'ai agents trust comes from behavior evidence',
           },
         }),
@@ -204,6 +212,11 @@ describe('buildPersonalizationMemory', () => {
       expect.arrayContaining([
         expect.stringContaining('operator-anchor provider template fallback drafts can survive approval/posting'),
         expect.stringContaining('provider template fallback drafts survived approval/posting'),
+      ]),
+    );
+    expect(personalization.operatorHiddenPreferences).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Shape: bold_claim/single_punch/tactical.'),
       ]),
     );
   });

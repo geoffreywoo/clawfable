@@ -97,6 +97,10 @@ export function buildFallbackLearningMetadata(
     fallbackAuthorityProof: authorityProof,
     fallbackConversationQuality: conversationQuality,
     fallbackSourceLane: tweet.sourceLane || null,
+    fallbackHook: tweet.featureTags?.hook || null,
+    fallbackTone: tweet.featureTags?.tone || null,
+    fallbackSpecificity: tweet.featureTags?.specificity || null,
+    fallbackStructure: tweet.featureTags?.structure || null,
     fallbackThesis: tweet.featureTags?.thesis || tweet.thesis || null,
   };
 }
@@ -163,6 +167,11 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
     const kindLabel = operatorAnchored ? `operator-anchor ${kind}` : kind;
     const thesis = typeof signal.metadata.fallbackThesis === 'string' ? signal.metadata.fallbackThesis.trim() : '';
     const thesisLabel = thesis ? ` Thesis: ${thesis.slice(0, 90)}.` : '';
+    const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
+    const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
+    const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
+    const shape = [hook, structure, specificity].filter(Boolean).join('/');
+    const shapeLabel = shape ? ` Shape: ${shape}.` : '';
     const copyRisk = typeof signal.metadata.fallbackAnchorCopyRisk === 'number' ? signal.metadata.fallbackAnchorCopyRisk : 0;
     const copyRiskLabel = operatorAnchored && copyRisk > 0.05
       ? ` Anchor copy risk was ${Math.round(copyRisk * 100)}%, so keep varying the literal wording.`
@@ -170,24 +179,24 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
 
     if (signal.signalType === 'approved_without_edit' || signal.signalType === 'x_post_succeeded') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${thesisLabel}`
+        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${shapeLabel}${thesisLabel}`
         : memoryAligned
-        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${thesisLabel}`;
+        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${shapeLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${shapeLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${thesisLabel}`;
+        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${shapeLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${shapeLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${thesisLabel}`;
+        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${shapeLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${shapeLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
   }

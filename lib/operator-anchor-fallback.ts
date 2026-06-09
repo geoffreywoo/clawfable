@@ -105,6 +105,27 @@ function tokenOverlapScore(left: string, right: string): number {
   return matches / leftTokens.length;
 }
 
+function normalizeShapeToken(value: string | null | undefined): string {
+  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function structuredShapeScore(line: string, template: OperatorAnchorFallbackOutcomeInput): { score: number; hasShape: boolean } {
+  const match = line.match(/\bshape:\s*([a-z0-9_ -]+)\/([a-z0-9_ -]+)\/([a-z0-9_ -]+)/i);
+  if (!match) return { score: 0, hasShape: false };
+
+  const [, hook, structure, specificity] = match;
+  const hookMatches = normalizeShapeToken(hook) === normalizeShapeToken(template.hookType);
+  const structureMatches = normalizeShapeToken(structure) === normalizeShapeToken(template.structureType);
+  const specificityMatches = normalizeShapeToken(specificity) === normalizeShapeToken(template.specificityType);
+
+  let score = 0;
+  if (hookMatches && structureMatches) score += 0.44;
+  else if (hookMatches || structureMatches) score += 0.14;
+  if (specificityMatches) score += 0.18;
+
+  return { score, hasShape: true };
+}
+
 function templateHasFreshProof(input: OperatorAnchorFallbackOutcomeInput): boolean {
   if (['concrete', 'data_driven', 'tactical', 'story_led'].includes(input.specificityType)) return true;
   return /\b(behavior|evidence|proof|metric|specific|verify|measurable|owner|rollback|changed|repeats)\b/i.test(input.content);
@@ -134,7 +155,9 @@ export function scoreOperatorAnchorFallbackOutcome({
       tokenOverlapScore(template.content, text) * 0.7,
     );
     const topicMatch = topic && text.includes(topic) ? 0.4 : 0;
-    const matchStrength = Math.max(thesisMatch, topicMatch);
+    const shapeMatch = structuredShapeScore(line, template);
+    if (shapeMatch.hasShape && shapeMatch.score < 0.18) continue;
+    const matchStrength = Math.max(thesisMatch, topicMatch, shapeMatch.score);
     const isApproved = /survive(?:d)? approval|approval\/posting|posted/.test(text);
     const isRejected = /rejected|do not trust|cool down/.test(text);
     const isEdited = /needed operator edits|needed edits|relearn/.test(text);
@@ -142,16 +165,17 @@ export function scoreOperatorAnchorFallbackOutcome({
     if (isApproved && matchStrength >= 0.18) {
       const boost = 0.05 + (Math.min(matchStrength, 0.8) * 0.1);
       score += boost;
-      notes.push('Anchor fallback outcome: prior approval/posting matched this topic or proof shape.');
+      notes.push('Anchor fallback outcome: prior approval/posting matched this topic, fallback shape, or proof pattern.');
     }
 
     if (isRejected) {
+      if (shapeMatch.hasShape && matchStrength < 0.18) continue;
       const penalty = matchStrength >= 0.18
         ? (hasFreshProof ? 0.12 : 0.18)
         : 0.04;
       score -= penalty;
       notes.push(matchStrength >= 0.18
-        ? 'Anchor fallback outcome: prior rejection matched this topic or proof shape, so cool it down.'
+        ? 'Anchor fallback outcome: prior rejection matched this topic, fallback shape, or proof pattern, so cool it down.'
         : 'Anchor fallback outcome: recent operator-anchor fallback rejection lowers blind reuse.');
     }
 
