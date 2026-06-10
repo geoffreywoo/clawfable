@@ -42,6 +42,7 @@ import {
   normalizePortfolioRole,
 } from './growth-engine';
 import { scoreOperatorAnchorFallbackOutcome } from './operator-anchor-fallback';
+import { scoreGenericFallbackShapeOutcome } from './fallback-shape-outcome';
 
 export interface RankableProtocolTweet {
   content: string;
@@ -293,10 +294,6 @@ function scoreOperatorAnchorFallbackOutcomeFit(
   }).score;
 }
 
-function normalizeShapeToken(value: string | null | undefined): string {
-  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-}
-
 function scoreGenericFallbackShapeOutcomeFit(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
@@ -308,30 +305,14 @@ function scoreGenericFallbackShapeOutcomeFit(
   const fallbackKind = /emergency/i.test(rationale)
     ? 'emergency_queue_fallback'
     : 'provider_template_fallback';
-  const topic = normalizeTopic(candidate.targetTopic).replace(/[_-]+/g, ' ');
-  const hook = normalizeShapeToken(featureTags.hook);
-  const structure = normalizeShapeToken(featureTags.structure);
-  const specificity = normalizeShapeToken(featureTags.specificity);
-
-  const counter = (context.memory.fallbackShapeOutcomes || [])
-    .filter((item) =>
-      item.fallbackKind === fallbackKind
-      && (!item.topic || normalizeTopic(item.topic).replace(/[_-]+/g, ' ') === topic)
-      && normalizeShapeToken(item.hook) === hook
-      && normalizeShapeToken(item.structure) === structure
-      && normalizeShapeToken(item.specificity) === specificity
-    )
-    .sort((a, b) =>
-      Number(Boolean(b.topic)) - Number(Boolean(a.topic))
-      || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    )[0];
-
-  if (!counter) return 0;
-
-  const score = counter.netScore >= 0
-    ? Math.min(0.16, 0.035 + (counter.netScore * 0.14))
-    : Math.max(-0.2, -0.045 + (counter.netScore * 0.14));
-  return Number(score.toFixed(3));
+  return scoreGenericFallbackShapeOutcome({
+    memory: context.memory,
+    fallbackKind,
+    topic: candidate.targetTopic,
+    hook: featureTags.hook,
+    structure: featureTags.structure,
+    specificity: featureTags.specificity,
+  }).score;
 }
 
 function stableExperimentId(candidate: RankableProtocolTweet, coverageCluster: string): string {

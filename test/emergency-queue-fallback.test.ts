@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildEmergencyQueueFallbacks } from '@/lib/emergency-queue-fallback';
+import { scoreGenericFallbackShapeOutcome } from '@/lib/fallback-shape-outcome';
 import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
 function memory(overrides: Partial<PersonalizationMemory> = {}): PersonalizationMemory {
@@ -126,6 +127,83 @@ describe('emergency queue fallback', () => {
     expect(drafts[0].content).toContain('That is evidence.');
     expect(drafts[0].scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
     expect(drafts[0].confidenceScore).toBeGreaterThan(drafts[3].confidenceScore);
+  });
+
+  it('boosts generic emergency fallback shapes with matching approval outcomes', () => {
+    const drafts = buildEmergencyQueueFallbacks({
+      topics: ['AI agents'],
+      recentContent: [],
+      count: 2,
+      memory: memory({
+        fallbackShapeOutcomes: [
+          {
+            fallbackKind: 'emergency_queue_fallback',
+            topic: 'AI agents',
+            shape: 'question/argument/tactical',
+            hook: 'question',
+            structure: 'argument',
+            specificity: 'tactical',
+            approved: 3,
+            posted: 1,
+            edited: 0,
+            rejected: 0,
+            total: 4,
+            netScore: 1.4,
+            latestOutcome: 'posted',
+            latestOutcomeAt: '2026-06-08T00:00:00.000Z',
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    expect(drafts[0].content).toContain('The useful question in AI Agents');
+    expect(drafts[0].rationale).toContain('Fallback shape outcome');
+    expect(drafts[0].scoreProvenance?.fallbackShapeOutcome).toBeGreaterThan(0);
+    expect(drafts[0].scoreProvenance?.operatorAnchorOutcome).toBe(0);
+    expect(drafts[0].candidateScore).toBeGreaterThan(drafts[1].candidateScore);
+  });
+
+  it('cools generic emergency fallback shapes with matching rejection outcomes', () => {
+    const negativeMemory = memory({
+      fallbackShapeOutcomes: [
+        {
+          fallbackKind: 'emergency_queue_fallback',
+          topic: 'AI agents',
+          shape: 'question/argument/tactical',
+          hook: 'question',
+          structure: 'argument',
+          specificity: 'tactical',
+          approved: 0,
+          posted: 0,
+          edited: 0,
+          rejected: 3,
+          total: 3,
+          netScore: -1.2,
+          latestOutcome: 'rejected',
+          latestOutcomeAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+    });
+    const drafts = buildEmergencyQueueFallbacks({
+      topics: ['AI agents'],
+      recentContent: [],
+      count: 2,
+      memory: negativeMemory,
+    });
+    const outcome = scoreGenericFallbackShapeOutcome({
+      memory: negativeMemory,
+      fallbackKind: 'emergency_queue_fallback',
+      topic: 'AI agents',
+      hook: 'question',
+      structure: 'argument',
+      specificity: 'tactical',
+    });
+
+    expect(drafts[0].content).not.toContain('The useful question in AI Agents');
+    expect(outcome.score).toBeLessThan(0);
+    expect(outcome.note).toContain('Fallback shape outcome');
   });
 
   it('uses operator anchors to shape emergency fallback drafts without copying anchor text', () => {

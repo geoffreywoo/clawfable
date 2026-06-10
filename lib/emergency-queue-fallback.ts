@@ -1,5 +1,6 @@
 import { isNearDuplicate } from './survivability';
 import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
+import { scoreGenericFallbackShapeOutcome } from './fallback-shape-outcome';
 import type { AgentLearnings, CandidateScoreProvenance, PersonalizationMemory, TweetHookType, TweetSpecificityType, TweetStructureType, TweetToneType } from './types';
 
 export interface EmergencyQueueFallback {
@@ -183,7 +184,7 @@ function buildMemoryAlignedTemplates(topic: string, memory: PersonalizationMemor
   return templates;
 }
 
-function hydrateTemplate(item: EmergencyTemplateSeed): EmergencyQueueFallback {
+function hydrateTemplate(item: EmergencyTemplateSeed, memory: PersonalizationMemory | null | undefined): EmergencyQueueFallback {
   const {
     operatorAnchorOutcomeScore = 0,
     operatorAnchorOutcomeNotes = [],
@@ -193,9 +194,22 @@ function hydrateTemplate(item: EmergencyTemplateSeed): EmergencyQueueFallback {
   const rationale = item.rationale || 'Emergency deterministic queue refill while paid AI providers are unavailable.';
   const isMemoryAligned = rationale.toLowerCase().includes('memory-aligned');
   const isOperatorAnchor = rationale.toLowerCase().includes('operator-anchor');
-  const outcomeScore = isOperatorAnchor ? Math.max(-0.22, Math.min(0.18, operatorAnchorOutcomeScore)) : 0;
+  const anchorOutcomeScore = isOperatorAnchor ? Math.max(-0.22, Math.min(0.18, operatorAnchorOutcomeScore)) : 0;
+  const genericOutcome = isOperatorAnchor
+    ? { score: 0, note: null }
+    : scoreGenericFallbackShapeOutcome({
+      memory,
+      fallbackKind: 'emergency_queue_fallback',
+      topic: base.targetTopic,
+      hook: base.hookType,
+      structure: base.structureType,
+      specificity: base.specificityType,
+    });
+  const outcomeScore = isOperatorAnchor ? anchorOutcomeScore : genericOutcome.score;
   const outcomeNote = operatorAnchorOutcomeNotes.length
     ? ` ${operatorAnchorOutcomeNotes.join(' ')}`
+    : genericOutcome.note
+      ? ` ${genericOutcome.note}`
     : '';
 
   return {
@@ -228,6 +242,7 @@ function hydrateTemplate(item: EmergencyTemplateSeed): EmergencyQueueFallback {
       conversationQuality: item.hookType === 'question' ? 0.12 : 0.04,
       operatorAnchor: isOperatorAnchor ? 0.22 : 0,
       operatorAnchorOutcome: isOperatorAnchor ? Number((outcomeScore * 0.16).toFixed(3)) : 0,
+      fallbackShapeOutcome: !isOperatorAnchor ? Number((outcomeScore * 0.16).toFixed(3)) : 0,
       anchorCopyRisk: isOperatorAnchor && anchorCopyRisk > 0 ? Number((-anchorCopyRisk * 0.12).toFixed(3)) : 0,
     },
   };
@@ -302,7 +317,7 @@ function buildTemplates(topic: string, memory: PersonalizationMemory | null | un
 
   const allTemplates = [...memoryAligned, ...templates];
 
-  return allTemplates.map(hydrateTemplate);
+  return allTemplates.map((template) => hydrateTemplate(template, memory));
 }
 
 export function buildEmergencyQueueFallbacks({
@@ -324,7 +339,7 @@ export function buildEmergencyQueueFallbacks({
     ...DEFAULT_TOPICS,
   ])].filter(Boolean);
   const candidates = [
-    ...buildOperatorAnchorTemplates(topicPool, learnings, memory).map(hydrateTemplate),
+    ...buildOperatorAnchorTemplates(topicPool, learnings, memory).map((template) => hydrateTemplate(template, memory)),
     ...topicPool.flatMap((topic) => buildTemplates(topic, memory)),
   ].sort((a, b) => b.candidateScore - a.candidateScore || b.confidenceScore - a.confidenceScore);
   const selected: EmergencyQueueFallback[] = [];
