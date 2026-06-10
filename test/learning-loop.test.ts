@@ -321,4 +321,102 @@ describe('buildPersonalizationMemory', () => {
       ]),
     );
   });
+
+  it('weights recent fallback shape outcomes more heavily than stale ones', () => {
+    const personalization = buildPersonalizationMemory({
+      feedback: [],
+      signals: [
+        learningSignal({
+          id: 'old-shape-approved-1',
+          signalType: 'approved_without_edit',
+          createdAt: '2026-03-01T12:00:00.000Z',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'old-shape-approved-2',
+          signalType: 'approved_without_edit',
+          createdAt: '2026-03-02T12:00:00.000Z',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'old-shape-approved-3',
+          signalType: 'approved_without_edit',
+          createdAt: '2026-03-03T12:00:00.000Z',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'old-shape-approved-4',
+          signalType: 'approved_without_edit',
+          createdAt: '2026-03-04T12:00:00.000Z',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'recent-shape-rejected',
+          signalType: 'deleted_from_queue',
+          createdAt: '2026-06-07T12:00:00.000Z',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+      ],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['AI agents'],
+        antiGoals: [],
+        communicationStyle: 'specific and operator-led',
+        summary: 'Sharp AI operator voice.',
+      },
+    });
+
+    expect(personalization.fallbackShapeOutcomes).toEqual([
+      expect.objectContaining({
+        fallbackKind: 'provider_template_fallback',
+        shape: 'bold_claim/single_punch/tactical',
+        approved: 4,
+        rejected: 1,
+        total: 5,
+        netScore: expect.any(Number),
+        updatedAt: '2026-06-07T12:00:00.000Z',
+      }),
+    ]);
+    expect(personalization.fallbackShapeOutcomes?.[0].netScore).toBeLessThan(0);
+  });
 });

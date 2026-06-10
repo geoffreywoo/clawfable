@@ -167,11 +167,12 @@ export function scoreOperatorAnchorFallbackOutcome({
       : shapeCounter.rejected > shapeCounter.edited
         ? 'rejection'
         : 'operator edits';
+    const successCount = shapeCounter.approved + shapeCounter.posted;
 
     return {
       score: Number(counterScore.toFixed(3)),
       notes: [
-        `Anchor fallback outcome: ${shapeCounter.total} structured ${direction} signal${shapeCounter.total === 1 ? '' : 's'} matched this fallback shape.`,
+        `Anchor fallback outcome: ${shapeCounter.total} structured signals matched this fallback shape (${successCount} approval/posting, ${shapeCounter.edited} edit, ${shapeCounter.rejected} rejection; net ${direction}).`,
       ],
     };
   }

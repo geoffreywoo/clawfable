@@ -207,7 +207,7 @@ describe('operator anchor fallback templates', () => {
     expect(templates).toHaveLength(1);
     expect(templates[0].outcomeScore).toBe(-0.2);
     expect(templates[0].outcomeNotes).toEqual([
-      'Anchor fallback outcome: 4 structured rejection signals matched this fallback shape.',
+      'Anchor fallback outcome: 4 structured signals matched this fallback shape (0 approval/posting, 0 edit, 4 rejection; net rejection).',
     ]);
   });
 });

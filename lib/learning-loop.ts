@@ -206,11 +206,21 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
 }
 
 function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShapeOutcomeCounter[] {
-  const counters = new Map<string, FallbackShapeOutcomeCounter>();
+  type WeightedFallbackShapeOutcomeCounter = FallbackShapeOutcomeCounter & {
+    weightedRaw: number;
+    weightedTotal: number;
+  };
 
-  for (const signal of signals) {
-    if (signal.metadata?.generationFallback !== true) continue;
-    if (signal.metadata.fallbackOperatorAnchor !== true) continue;
+  const fallbackSignals = signals.filter((signal) =>
+    signal.metadata?.generationFallback === true && signal.metadata.fallbackOperatorAnchor === true
+  );
+  const referenceTime = Math.max(
+    0,
+    ...fallbackSignals.map((signal) => new Date(signal.createdAt).getTime()).filter(Number.isFinite),
+  );
+  const counters = new Map<string, WeightedFallbackShapeOutcomeCounter>();
+
+  for (const signal of fallbackSignals) {
 
     const fallbackKind = typeof signal.metadata.fallbackKind === 'string' ? signal.metadata.fallbackKind.trim() : '';
     const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
@@ -233,14 +243,40 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
       total: 0,
       netScore: 0,
       updatedAt: signal.createdAt,
+      weightedRaw: 0,
+      weightedTotal: 0,
     };
 
-    if (signal.signalType === 'approved_without_edit') current.approved += 1;
-    if (signal.signalType === 'x_post_succeeded') current.posted += 1;
-    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') current.edited += 1;
-    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') current.rejected += 1;
+    let rawSignalScore = 0;
+    if (signal.signalType === 'approved_without_edit') {
+      current.approved += 1;
+      rawSignalScore = 0.7;
+    }
+    if (signal.signalType === 'x_post_succeeded') {
+      current.posted += 1;
+      rawSignalScore = 1;
+    }
+    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
+      current.edited += 1;
+      rawSignalScore = -0.45;
+    }
+    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
+      current.rejected += 1;
+      rawSignalScore = -1.2;
+    }
 
     current.total = current.approved + current.posted + current.edited + current.rejected;
+    if (rawSignalScore !== 0 && referenceTime > 0) {
+      const observedAt = new Date(signal.createdAt).getTime();
+      const ageDays = Number.isFinite(observedAt) ? Math.max(0, (referenceTime - observedAt) / (24 * 60 * 60 * 1000)) : 0;
+      const recencyWeight = ageDays <= 14
+        ? 1
+        : ageDays >= 90
+          ? 0.35
+          : 1 - ((ageDays - 14) / 76 * 0.65);
+      current.weightedRaw += rawSignalScore * recencyWeight;
+      current.weightedTotal += recencyWeight;
+    }
     if (new Date(signal.createdAt).getTime() >= new Date(current.updatedAt).getTime()) {
       current.updatedAt = signal.createdAt;
     }
@@ -250,11 +286,11 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
   return [...counters.values()]
     .filter((counter) => counter.total > 0)
     .map((counter) => {
-      const raw = (counter.approved * 0.7) + counter.posted - (counter.edited * 0.45) - (counter.rejected * 1.2);
-      const confidence = Math.min(1, counter.total / 4);
-      const netScore = Math.max(-1, Math.min(1, (raw / Math.max(counter.total, 1)) * confidence));
+      const confidence = Math.min(1, counter.weightedTotal / 4);
+      const netScore = Math.max(-1, Math.min(1, (counter.weightedRaw / Math.max(counter.weightedTotal, 1)) * confidence));
+      const { weightedRaw: _weightedRaw, weightedTotal: _weightedTotal, ...publicCounter } = counter;
       return {
-        ...counter,
+        ...publicCounter,
         netScore: Number(netScore.toFixed(3)),
       };
     })
