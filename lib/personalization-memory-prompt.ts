@@ -12,6 +12,7 @@ type MemoryPromptGroup = {
 };
 
 const MAX_MEMORY_LINE_LENGTH = 180;
+const FALLBACK_SHAPE_OUTCOME_LIMIT = 3;
 export const PERSONALIZATION_MEMORY_PROMPT_HEADER = '## PERSONALIZATION MEMORY';
 
 const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
@@ -58,6 +59,44 @@ function compactMemoryLine(value: string): string {
   return `${singleLine.slice(0, MAX_MEMORY_LINE_LENGTH - 3).trimEnd()}...`;
 }
 
+function label(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    || 'unknown';
+}
+
+function fallbackShapeOutcomeLine(counter: NonNullable<PersonalizationMemory['fallbackShapeOutcomes']>[number]): string {
+  const successCount = counter.approved + counter.posted;
+  const topic = counter.topic ? ` on ${label(counter.topic)}` : '';
+  const direction = counter.netScore >= 0
+    ? 'reuse with fresh proof'
+    : counter.rejected > counter.edited
+      ? 'cool before reuse'
+      : 'expect operator edits';
+  const line = `${label(counter.fallbackKind)}${topic}: ${label(counter.hook)} / ${label(counter.structure)} / ${label(counter.specificity)} had ${counter.total} signals (${successCount} approval/post, ${counter.edited} edits, ${counter.rejected} rejects; net ${counter.netScore}). ${direction}.`;
+  return compactMemoryLine(line);
+}
+
+function fallbackShapeOutcomeSection(memory: PersonalizationMemory): { section: string | null; omitted: number } {
+  const counters = memory.fallbackShapeOutcomes || [];
+  const lines = counters
+    .filter((counter) => counter.total > 0)
+    .map(fallbackShapeOutcomeLine)
+    .filter(Boolean);
+  const uniqueLines = [...new Set(lines)];
+  if (uniqueLines.length === 0) return { section: null, omitted: 0 };
+
+  return {
+    section: [
+      '## FALLBACK SHAPE OUTCOMES',
+      'These compact counters summarize deterministic fallback drafts. Use winners carefully; mutate or avoid shapes with repeated edits or rejections.',
+      ...uniqueLines.slice(0, FALLBACK_SHAPE_OUTCOME_LIMIT).map((item) => `- ${item}`),
+    ].join('\n'),
+    omitted: Math.max(0, uniqueLines.length - FALLBACK_SHAPE_OUTCOME_LIMIT),
+  };
+}
+
 export function buildPersonalizationMemoryPrompt(memory: PersonalizationMemory | null | undefined): string {
   if (!memory) return '';
 
@@ -76,6 +115,12 @@ export function buildPersonalizationMemoryPrompt(memory: PersonalizationMemory |
       ...items.slice(0, group.limit).map((item) => `- ${item}`),
     ].filter(Boolean).join('\n');
     sections.push(body);
+  }
+
+  const fallbackOutcome = fallbackShapeOutcomeSection(memory);
+  if (fallbackOutcome.section) {
+    sections.push(fallbackOutcome.section);
+    omittedCount += fallbackOutcome.omitted;
   }
 
   if (omittedCount > 0) {
