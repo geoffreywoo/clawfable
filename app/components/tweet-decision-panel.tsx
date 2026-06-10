@@ -1,6 +1,7 @@
 'use client';
 
 import type { LearningSnapshot, LearningStatusState } from '@/lib/learning-snapshot';
+import { formatDecisionProvenanceSummary } from '@/lib/decision-provenance';
 import type { Tweet } from '@/lib/types';
 
 interface TweetDecisionPanelProps {
@@ -208,9 +209,7 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
         <div className="decision-explainer">
           <p className="decision-explainer-label">Why it ranked</p>
           <p className="decision-explainer-copy">
-            {tweet.scoreProvenance
-              ? `Local prior ${Math.round(tweet.scoreProvenance.localPrior * 100)} · shared prior ${Math.round(tweet.scoreProvenance.globalPrior * 100)} · judge ${Math.round(tweet.scoreProvenance.judge * 100)} · predicted reward ${Math.round(tweet.scoreProvenance.predictedReward * 100)}.`
-              : 'This draft won on the current ensemble ranking and learning memory.'}
+            {formatDecisionProvenanceSummary(tweet.scoreProvenance)}
           </p>
         </div>
 
