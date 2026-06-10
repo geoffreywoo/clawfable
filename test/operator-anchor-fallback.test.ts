@@ -195,6 +195,8 @@ describe('operator anchor fallback templates', () => {
             rejected: 4,
             total: 4,
             netScore: -1,
+            latestOutcome: 'rejected',
+            latestOutcomeAt: '2026-06-08T00:00:00.000Z',
             updatedAt: '2026-06-08T00:00:00.000Z',
           },
         ],
@@ -208,7 +210,7 @@ describe('operator anchor fallback templates', () => {
     expect(templates).toHaveLength(1);
     expect(templates[0].outcomeScore).toBe(-0.2);
     expect(templates[0].outcomeNotes).toEqual([
-      'Anchor fallback outcome: 4 structured signals matched this fallback shape (0 approval/posting, 0 edit, 4 rejection; net rejection).',
+      'Anchor fallback outcome: 4 structured signals matched this fallback shape (0 approval/posting, 0 edit, 4 rejection; net rejection; latest rejected 2026-06-08).',
     ]);
   });
 

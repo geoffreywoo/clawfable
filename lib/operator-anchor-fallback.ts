@@ -188,11 +188,14 @@ export function scoreOperatorAnchorFallbackOutcome({
         ? 'rejection'
         : 'operator edits';
     const successCount = shapeCounter.approved + shapeCounter.posted;
+    const latest = shapeCounter.latestOutcome
+      ? `; latest ${shapeCounter.latestOutcome} ${String(shapeCounter.latestOutcomeAt || shapeCounter.updatedAt).slice(0, 10)}`
+      : '';
 
     return {
       score: Number(counterScore.toFixed(3)),
       notes: [
-        `Anchor fallback outcome: ${shapeCounter.total} structured signals matched this fallback shape (${successCount} approval/posting, ${shapeCounter.edited} edit, ${shapeCounter.rejected} rejection; net ${direction}).`,
+        `Anchor fallback outcome: ${shapeCounter.total} structured signals matched this fallback shape (${successCount} approval/posting, ${shapeCounter.edited} edit, ${shapeCounter.rejected} rejection; net ${direction}${latest}).`,
       ],
     };
   }

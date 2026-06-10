@@ -1229,6 +1229,8 @@ export interface FallbackShapeOutcomeCounter {
   rejected: number;
   total: number;
   netScore: number;
+  latestOutcome?: 'approved' | 'posted' | 'edited' | 'rejected';
+  latestOutcomeAt?: string;
   updatedAt: string;
 }
 

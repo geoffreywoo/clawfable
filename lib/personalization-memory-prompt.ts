@@ -12,6 +12,7 @@ type MemoryPromptGroup = {
 };
 
 const MAX_MEMORY_LINE_LENGTH = 180;
+const MAX_FALLBACK_SHAPE_LINE_LENGTH = 220;
 const FALLBACK_SHAPE_OUTCOME_LIMIT = 3;
 export const PERSONALIZATION_MEMORY_PROMPT_HEADER = '## PERSONALIZATION MEMORY';
 
@@ -59,6 +60,12 @@ function compactMemoryLine(value: string): string {
   return `${singleLine.slice(0, MAX_MEMORY_LINE_LENGTH - 3).trimEnd()}...`;
 }
 
+function compactFallbackShapeLine(value: string): string {
+  const singleLine = value.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= MAX_FALLBACK_SHAPE_LINE_LENGTH) return singleLine;
+  return `${singleLine.slice(0, MAX_FALLBACK_SHAPE_LINE_LENGTH - 3).trimEnd()}...`;
+}
+
 function label(value: string | null | undefined): string {
   return String(value || '')
     .trim()
@@ -69,13 +76,16 @@ function label(value: string | null | undefined): string {
 function fallbackShapeOutcomeLine(counter: NonNullable<PersonalizationMemory['fallbackShapeOutcomes']>[number]): string {
   const successCount = counter.approved + counter.posted;
   const topic = counter.topic ? ` on ${label(counter.topic)}` : '';
+  const latest = counter.latestOutcome
+    ? ` Latest: ${label(counter.latestOutcome)} ${String(counter.latestOutcomeAt || counter.updatedAt).slice(0, 10)}.`
+    : '';
   const direction = counter.netScore >= 0
     ? 'reuse with fresh proof'
     : counter.rejected > counter.edited
       ? 'cool before reuse'
       : 'expect operator edits';
-  const line = `${label(counter.fallbackKind)}${topic}: ${label(counter.hook)} / ${label(counter.structure)} / ${label(counter.specificity)} had ${counter.total} signals (${successCount} approval/post, ${counter.edited} edits, ${counter.rejected} rejects; net ${counter.netScore}). ${direction}.`;
-  return compactMemoryLine(line);
+  const line = `${label(counter.fallbackKind)}${topic}: ${label(counter.hook)} / ${label(counter.structure)} / ${label(counter.specificity)} had ${counter.total} signals (${successCount} approval/post, ${counter.edited} edits, ${counter.rejected} rejects; net ${counter.netScore}).${latest} ${direction}.`;
+  return compactFallbackShapeLine(line);
 }
 
 function fallbackShapeOutcomeSection(memory: PersonalizationMemory): { section: string | null; omitted: number } {

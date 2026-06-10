@@ -231,6 +231,8 @@ describe('buildPersonalizationMemory', () => {
         rejected: 0,
         total: 1,
         netScore: 0.25,
+        latestOutcome: 'posted',
+        latestOutcomeAt: '2026-06-07T12:00:00.000Z',
       }),
     ]);
   });
@@ -317,6 +319,7 @@ describe('buildPersonalizationMemory', () => {
           posted: 1,
           total: 2,
           netScore: 0.425,
+          latestOutcome: 'approved',
         }),
         expect.objectContaining({
           fallbackKind: 'provider_template_fallback',
@@ -325,6 +328,7 @@ describe('buildPersonalizationMemory', () => {
           rejected: 2,
           total: 2,
           netScore: -0.6,
+          latestOutcome: 'rejected',
         }),
       ]),
     );
@@ -485,6 +489,8 @@ describe('buildPersonalizationMemory', () => {
         rejected: 1,
         total: 5,
         netScore: expect.any(Number),
+        latestOutcome: 'rejected',
+        latestOutcomeAt: '2026-06-07T12:00:00.000Z',
         updatedAt: '2026-06-07T12:00:00.000Z',
       }),
     ]);

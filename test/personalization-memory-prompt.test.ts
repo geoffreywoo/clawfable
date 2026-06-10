@@ -92,6 +92,8 @@ describe('buildPersonalizationMemoryPrompt', () => {
           rejected: 4,
           total: 6,
           netScore: -0.7,
+          latestOutcome: 'rejected',
+          latestOutcomeAt: '2026-06-08T00:00:00.000Z',
           updatedAt: '2026-06-08T00:00:00.000Z',
         },
       ],
@@ -101,6 +103,7 @@ describe('buildPersonalizationMemoryPrompt', () => {
     expect(prompt).toContain('provider template fallback on AI agents');
     expect(prompt).toContain('bold claim / single punch / tactical had 6 signals');
     expect(prompt).toContain('2 approval/post, 0 edits, 4 rejects; net -0.7');
+    expect(prompt).toContain('Latest: rejected 2026-06-08');
     expect(prompt).toContain('cool before reuse');
   });
 

@@ -224,7 +224,6 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
   const counters = new Map<string, WeightedFallbackShapeOutcomeCounter>();
 
   for (const signal of fallbackSignals) {
-
     const fallbackKind = typeof signal.metadata.fallbackKind === 'string' ? signal.metadata.fallbackKind.trim() : '';
     const topic = typeof signal.metadata.fallbackTopic === 'string' ? signal.metadata.fallbackTopic.trim() : '';
     const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
@@ -253,21 +252,26 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
     };
 
     let rawSignalScore = 0;
+    let latestOutcome: FallbackShapeOutcomeCounter['latestOutcome'] | null = null;
     if (signal.signalType === 'approved_without_edit') {
       current.approved += 1;
       rawSignalScore = 0.7;
+      latestOutcome = 'approved';
     }
     if (signal.signalType === 'x_post_succeeded') {
       current.posted += 1;
       rawSignalScore = 1;
+      latestOutcome = 'posted';
     }
     if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
       current.edited += 1;
       rawSignalScore = -0.45;
+      latestOutcome = 'edited';
     }
     if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
       current.rejected += 1;
       rawSignalScore = -1.2;
+      latestOutcome = 'rejected';
     }
 
     current.total = current.approved + current.posted + current.edited + current.rejected;
@@ -282,8 +286,13 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
       current.weightedRaw += rawSignalScore * recencyWeight;
       current.weightedTotal += recencyWeight;
     }
-    if (new Date(signal.createdAt).getTime() >= new Date(current.updatedAt).getTime()) {
+    const signalTime = new Date(signal.createdAt).getTime();
+    if (Number.isFinite(signalTime) && signalTime >= new Date(current.updatedAt).getTime()) {
       current.updatedAt = signal.createdAt;
+      if (latestOutcome) {
+        current.latestOutcome = latestOutcome;
+        current.latestOutcomeAt = signal.createdAt;
+      }
     }
     counters.set(key, current);
   }
