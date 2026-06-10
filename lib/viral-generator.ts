@@ -684,6 +684,14 @@ ${CLAWFABLE_PLATFORM_GOAL}
 
 Every draft must preserve the account's authentic voice while increasing its odds of niche attention, conversation, and virality.`);
 
+  parts.push(`\n## ANTI-SLOP BAR
+Commenters should not be able to tell this was generated.
+- Avoid default AI cadence: "not X, Y", "the real edge/moat/question", "most people don't realize", "the winners will be", and over-clean "what changed / who felt it / what compounds" scaffolds.
+- Do not lean on abstract founder words unless anchored to something observed: leverage, moat, signal, optics, systems, velocity, feedback loop, playbook, narrative, compounding.
+- Prefer one weirdly specific observation, lived example, named failure mode, concrete metric, or uncomfortable tradeoff over polished advice.
+- Imperfect human rhythm is better than symmetrical consultant prose. Vary sentence shape. Use fragments when the voice supports it.
+- If a draft could fit any AI/startup account after swapping the topic noun, throw it away.`);
+
   // Time-of-day awareness: match content tone to audience mood
   const hour = new Date().getUTCHours();
   const timeSlot =
@@ -978,7 +986,8 @@ ${formats.join(', ')}
 5. Never include links to x.com or twitter.com in tweet text.
 6. Across a batch, vary format, hook, and target topic. Do not write near-duplicates or multiple tweets that make the same point.
 7. Authority claims must earn trust: if a tweet uses broad certainty language like everyone, nobody, always, never, guaranteed, or says a market/group is wrong, it must include proof, a concrete example, a mechanism, a metric, or an observed failure mode.
-8. Never violate the anti-goals.`);
+8. Avoid recognizable AI-post templates: "not X, but Y"; "the real edge is"; "most people miss"; numbered lists that could be generated for any topic; clean abstraction stacks without lived proof.
+9. Never violate the anti-goals.`);
 
   parts.push(`\nGenerate ${candidateCount} candidates so a downstream ranker can pick the strongest ${finalCount}. That means you should include a few ambitious bets, not just safe paraphrases.`);
 

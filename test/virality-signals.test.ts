@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply } from '@/lib/virality-signals';
+import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -107,6 +107,34 @@ describe('virality signals', () => {
     expect(getAuthorityProofIssue('Everyone building AI agents is wrong')).toContain('Authority gate');
     expect(getAuthorityProofIssue('Everyone building AI agents is wrong because evals collapse when memory drifts')).toBeNull();
     expect(getAuthorityProofIssue('Most AI agent demos optimize for applause. Production agents optimize for boring recovery paths.')).toBeNull();
+  });
+
+  it('flags recognizable AI-post cadence more than concrete human observations', () => {
+    const generic = scoreSlopRisk(
+      'The real edge in AI agents is not the demo, but the feedback loop. Most people are still optimizing for optics. The winners will be the teams that build systems where learning compounds.',
+      {
+        hook: 'bold_claim',
+        tone: 'analytical',
+        specificity: 'abstract',
+        structure: 'argument',
+        thesis: 'ai agents feedback loop compounds',
+        riskFlags: [],
+      },
+    );
+    const concrete = scoreSlopRisk(
+      'The weird tell on agent teams: nobody knows who owns the rollback button after the first failed eval. That is usually where the autonomy roadmap quietly dies.',
+      {
+        hook: 'observation',
+        tone: 'analytical',
+        specificity: 'tactical',
+        structure: 'single_punch',
+        thesis: 'agent teams need rollback ownership',
+        riskFlags: [],
+      },
+    );
+
+    expect(generic).toBeGreaterThanOrEqual(0.55);
+    expect(concrete).toBeLessThan(0.25);
   });
 
   it('holds embarrassing replies while allowing sharp substantive posts', () => {

@@ -1801,7 +1801,7 @@ export function rankGeneratedTweets(
       (policyRiskScore * 0.44) +
       (repetitionRiskScore * 0.24) +
       (creativeRiskScore * 0.18) +
-      (slopScore * 0.14) +
+      (slopScore * 0.24) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
@@ -1826,7 +1826,7 @@ export function rankGeneratedTweets(
       noveltyCoverage: Number((((noveltyScore + freshnessScore + sourceLaneScore) / 3) * 0.16).toFixed(3)),
       creativity: Number((surpriseScore * 0.08).toFixed(3)),
       holdout: Number((holdoutScore * 0.05).toFixed(3)),
-      antiSlop: Number(((1 - slopScore) * 0.06).toFixed(3)),
+      antiSlop: Number(((1 - slopScore) * 0.1).toFixed(3)),
       authorityProof: authorityProofIssue ? Number((authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
@@ -1867,7 +1867,7 @@ export function rankGeneratedTweets(
       (conversationQualityScore - 0.5) * 0.06 +
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08 +
-      (1 - slopScore) * 0.08 +
+      (1 - slopScore) * 0.12 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
       ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
@@ -1886,7 +1886,7 @@ export function rankGeneratedTweets(
     confidenceScore = clamp(
       confidenceScore -
       (creativeRiskScore * 0.08) -
-      (slopScore * 0.1) -
+      (slopScore * 0.18) -
       (authorityProofPenalty * 0.16)
     );
 

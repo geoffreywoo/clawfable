@@ -83,16 +83,50 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
     'the real question',
     'paradigm',
     'leverage',
+    'moat',
+    'compounds',
+    'feedback loop',
+    'default playbook',
+    'legacy assumption',
+    'people are sleeping on',
+    'the winners will be',
+    'the common mistake',
+    'most takes',
+    'real edge',
+    'real moat',
   ];
   const genericHits = genericPhrases.filter((phrase) => lower.includes(phrase)).length;
-  score += Math.min(0.36, genericHits * 0.08);
+  score += Math.min(0.42, genericHits * 0.08);
+
+  const syntheticCadencePatterns = [
+    /\bnot\s+[^.\n]{3,80}\bbut\b/i,
+    /\bnot\s+[^.\n]{3,80}\bit'?s\b/i,
+    /\bthe (real|actual) (edge|moat|bottleneck|question|shift|winners?)\b/i,
+    /\bmost people (don'?t realize|miss|think|are still)\b/i,
+    /\bpeople (are still|keep|confuse|optimize for)\b/i,
+    /\bthe winners will be\b/i,
+    /\bthis is (how|why|where) .* compounds?\b/i,
+    /\bthat is the (shift|edge|moat|bottleneck|point)\b/i,
+  ];
+  const cadenceHits = syntheticCadencePatterns.filter((pattern) => pattern.test(content)).length;
+  score += Math.min(0.3, cadenceHits * 0.1);
+
+  const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook)\b/g) || [];
+  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(for example|because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow)\b/i.test(content);
+  if (abstractPowerWords.length >= 4 && !hasConcreteAnchor) score += 0.18;
+  if (abstractPowerWords.length >= 6) score += 0.1;
+
+  const numberedLines = content.split('\n').filter((line) => /^\s*\d+\.\s+\S/.test(line)).length;
+  if (numberedLines >= 4 && !hasConcreteAnchor) score += 0.12;
+
   if (featureTags.specificity === 'abstract') score += 0.18;
   if (featureTags.riskFlags.includes('thin')) score += 0.16;
-  if (content.length > 220 && !/\b\d+[%x]?\b|\bfor example\b|\bbecause\b|\bwhen\b/i.test(content)) score += 0.12;
+  if (content.length > 220 && !hasConcreteAnchor) score += 0.12;
   if (/^(i think|in my opinion|here'?s|the thing is)/i.test(content.trim())) score += 0.12;
   if ((content.match(/\b(people|things|stuff|value|content|insight)\b/gi) || []).length >= 4) score += 0.1;
   if (featureTags.specificity === 'data_driven' || featureTags.specificity === 'tactical' || featureTags.specificity === 'story_led') score -= 0.12;
   if (featureTags.structure === 'story_arc' || featureTags.structure === 'comparison') score -= 0.06;
+  if (hasConcreteAnchor && cadenceHits <= 1 && genericHits <= 2) score -= 0.08;
   return clamp(score);
 }
 

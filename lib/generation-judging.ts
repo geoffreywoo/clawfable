@@ -306,6 +306,8 @@ Ground rules:
 - Account fingerprint: ${analysis.contentFingerprint}
 - Top formats: ${analysis.engagementPatterns.topFormats.join(', ') || 'unknown'}
 - Top topics: ${analysis.engagementPatterns.topTopics.join(', ') || 'unknown'}
+- Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
+- Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}
 ${learnings?.operatorVoiceReference?.bestPerformers?.length ? `- Manual/operator anchors are high-signal for voice, sentiment, tone, and topics: ${learnings.operatorVoiceReference.bestPerformers.slice(0, 3).map((entry) => `"${entry.content.slice(0, 120)}"`).join(' | ')}` : ''}
 ${memory?.neverDoThisAgain?.length ? `- Avoid: ${memory.neverDoThisAgain.slice(0, 3).join(' | ')}` : ''}

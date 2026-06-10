@@ -1196,4 +1196,57 @@ describe('generateViralBatch', () => {
     expect(createCall.system).toContain('trend headline 8');
     expect(batch[0]?.styleMode).toBe('shitpoast');
   });
+
+  it('adds anti-slop constraints to generation prompts', async () => {
+    anthropicCreateMock.mockResolvedValue({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          slot: 1,
+          content: 'The weird tell on agent teams is nobody owns the rollback button after the first failed eval.',
+          format: 'hot_take',
+          targetTopic: 'AI agents',
+          rationale: 'Specific operator observation.',
+        }),
+      }],
+    });
+
+    await generateViralBatch(
+      {
+        tone: 'analytical',
+        topics: ['AI agents'],
+        antiGoals: ['generic hype'],
+        communicationStyle: 'specific operator observations',
+        summary: 'summary',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take'],
+          topTopics: ['AI agents'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      1,
+    );
+
+    const system = String(anthropicCreateMock.mock.calls[0]?.[0]?.system || '');
+    expect(system).toContain('## ANTI-SLOP BAR');
+    expect(system).toContain('not X, Y');
+    expect(system).toContain('If a draft could fit any AI/startup account after swapping the topic noun, throw it away.');
+  });
 });
