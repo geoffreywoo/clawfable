@@ -1454,6 +1454,90 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(refined!.content);
   });
 
+  it('uses structured fallback shape outcomes to rank generic template fallbacks', () => {
+    const context = rankingContext();
+    context.memory = {
+      ...context.memory,
+      fallbackShapeOutcomes: [
+        {
+          fallbackKind: 'provider_template_fallback',
+          topic: 'AI agents',
+          shape: 'observation/single_punch/abstract',
+          hook: 'observation',
+          structure: 'single_punch',
+          specificity: 'abstract',
+          approved: 0,
+          posted: 0,
+          edited: 1,
+          rejected: 4,
+          total: 5,
+          netScore: -0.82,
+          updatedAt: '2026-05-30T00:00:00.000Z',
+        },
+        {
+          fallbackKind: 'provider_template_fallback',
+          topic: 'AI agents',
+          shape: 'listicle/list/tactical',
+          hook: 'listicle',
+          structure: 'list',
+          specificity: 'tactical',
+          approved: 3,
+          posted: 2,
+          edited: 0,
+          rejected: 0,
+          total: 5,
+          netScore: 0.88,
+          updatedAt: '2026-05-30T00:00:00.000Z',
+        },
+      ],
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'Observation: AI agents are changing faster than most people expect.',
+        format: 'observation',
+        targetTopic: 'AI agents',
+        rationale: 'Template fallback: short observational frame built for reply and bookmark energy.',
+        judgeScore: 0.82,
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'single_punch',
+          thesis: 'ai agents changing faster',
+          riskFlags: ['thin'],
+        },
+      },
+      {
+        content: 'AI agent teams get cleaner signal from three checks: who owns the failed eval, what changed after it, and whether the next launch repeated the mistake.',
+        format: 'analysis',
+        targetTopic: 'AI agents',
+        rationale: 'Template fallback: structured analysis aligned to the account voice.',
+        judgeScore: 0.78,
+        featureTags: {
+          hook: 'listicle',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'list',
+          thesis: 'agent teams learn from failed eval ownership',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const cooled = ranked.find((candidate) => candidate.content.startsWith('Observation:'));
+    const boosted = ranked.find((candidate) => candidate.content.includes('three checks'));
+
+    expect(cooled).toBeDefined();
+    expect(boosted).toBeDefined();
+    expect(cooled!.scoreProvenance.fallbackShapeOutcome).toBeLessThan(0);
+    expect(cooled!.scoreProvenance.learnedReviewCaution).toBeLessThan(0);
+    expect(boosted!.scoreProvenance.fallbackShapeOutcome).toBeGreaterThan(0);
+    expect(boosted!.scoreProvenance.operatorAnchorOutcome).toBe(0);
+    expect(boosted!.confidenceScore).toBeGreaterThan(cooled!.confidenceScore);
+    expect(ranked[0].content).toBe(boosted!.content);
+  });
+
   it('uses explicit taste calibration labels as ranking priors', () => {
     const context = rankingContext();
     context.allTweets = [
