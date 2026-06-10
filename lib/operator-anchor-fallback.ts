@@ -109,6 +109,20 @@ function normalizeShapeToken(value: string | null | undefined): string {
   return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+function normalizeOutcomeTopic(value: string | null | undefined): string {
+  return normalizeTopicLabel(value || '').toLowerCase();
+}
+
+function structuredTopicMatches(line: string, template: OperatorAnchorFallbackOutcomeInput): boolean {
+  const match = line.match(/\btopic:\s*([^.]+)/i);
+  if (!match) return true;
+
+  const [, lessonTopic] = match;
+  const normalizedLessonTopic = normalizeOutcomeTopic(lessonTopic);
+  const normalizedTemplateTopic = normalizeOutcomeTopic(template.targetTopic);
+  return Boolean(normalizedLessonTopic && normalizedTemplateTopic && normalizedLessonTopic === normalizedTemplateTopic);
+}
+
 function structuredShapeScore(line: string, template: OperatorAnchorFallbackOutcomeInput): { score: number; hasShape: boolean } {
   const match = line.match(/\bshape:\s*([a-z0-9_ -]+)\/([a-z0-9_ -]+)\/([a-z0-9_ -]+)/i);
   if (!match) return { score: 0, hasShape: false };
@@ -134,13 +148,19 @@ function matchingShapeCounter(
   const hook = normalizeShapeToken(template.hookType);
   const structure = normalizeShapeToken(template.structureType);
   const specificity = normalizeShapeToken(template.specificityType);
+  const topic = normalizeOutcomeTopic(template.targetTopic);
 
-  return (memory?.fallbackShapeOutcomes || []).find((counter) =>
+  const matches = (memory?.fallbackShapeOutcomes || []).filter((counter) =>
     counter.fallbackKind === fallbackKind
+    && (!counter.topic || normalizeOutcomeTopic(counter.topic) === topic)
     && normalizeShapeToken(counter.hook) === hook
     && normalizeShapeToken(counter.structure) === structure
     && normalizeShapeToken(counter.specificity) === specificity
   );
+  return matches.sort((a, b) =>
+    Number(Boolean(b.topic)) - Number(Boolean(a.topic))
+    || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  )[0];
 }
 
 function templateHasFreshProof(input: OperatorAnchorFallbackOutcomeInput): boolean {
@@ -187,6 +207,7 @@ export function scoreOperatorAnchorFallbackOutcome({
 
   for (const line of lines) {
     const text = line.toLowerCase();
+    if (!structuredTopicMatches(line, template)) continue;
     const thesisMatch = Math.max(
       tokenOverlapScore(template.thesis, text),
       tokenOverlapScore(template.content, text) * 0.7,

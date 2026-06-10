@@ -68,7 +68,7 @@ function isFallbackRationale(value: string | null | undefined): boolean {
 }
 
 export function buildFallbackLearningMetadata(
-  tweet: Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis'>,
+  tweet: Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis' | 'topic'>,
 ): Record<string, string | number | boolean | null> {
   const draftExperimentId = String(tweet.draftExperimentId || '');
   const fallbackKind = isFallbackRationale(tweet.rationale)
@@ -98,6 +98,7 @@ export function buildFallbackLearningMetadata(
     fallbackAuthorityProof: authorityProof,
     fallbackConversationQuality: conversationQuality,
     fallbackSourceLane: tweet.sourceLane || null,
+    fallbackTopic: tweet.topic || null,
     fallbackHook: tweet.featureTags?.hook || null,
     fallbackTone: tweet.featureTags?.tone || null,
     fallbackSpecificity: tweet.featureTags?.specificity || null,
@@ -168,6 +169,8 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
     const kindLabel = operatorAnchored ? `operator-anchor ${kind}` : kind;
     const thesis = typeof signal.metadata.fallbackThesis === 'string' ? signal.metadata.fallbackThesis.trim() : '';
     const thesisLabel = thesis ? ` Thesis: ${thesis.slice(0, 90)}.` : '';
+    const topic = typeof signal.metadata.fallbackTopic === 'string' ? signal.metadata.fallbackTopic.trim() : '';
+    const topicLabel = topic ? ` Topic: ${topic.slice(0, 48)}.` : '';
     const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
     const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
     const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
@@ -180,24 +183,24 @@ function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[
 
     if (signal.signalType === 'approved_without_edit' || signal.signalType === 'x_post_succeeded') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${shapeLabel}${thesisLabel}`
+        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
         : memoryAligned
-        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${shapeLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${shapeLabel}${thesisLabel}`;
+        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${shapeLabel}${topicLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${shapeLabel}${topicLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${shapeLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${shapeLabel}${thesisLabel}`;
+        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${shapeLabel}${topicLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
 
     if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
       const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${shapeLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${shapeLabel}${thesisLabel}`;
+        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
+        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${shapeLabel}${topicLabel}${thesisLabel}`;
       counts[line] = (counts[line] || 0) + 1;
     }
   }
@@ -223,15 +226,17 @@ function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShap
   for (const signal of fallbackSignals) {
 
     const fallbackKind = typeof signal.metadata.fallbackKind === 'string' ? signal.metadata.fallbackKind.trim() : '';
+    const topic = typeof signal.metadata.fallbackTopic === 'string' ? signal.metadata.fallbackTopic.trim() : '';
     const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
     const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
     const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
     if (!fallbackKind || !hook || !structure || !specificity) continue;
 
     const shape = [hook, structure, specificity].join('/');
-    const key = `${fallbackKind}:${shape}`;
+    const key = `${fallbackKind}:${topic.toLowerCase()}:${shape}`;
     const current = counters.get(key) || {
       fallbackKind,
+      topic: topic || undefined,
       shape,
       hook,
       structure,

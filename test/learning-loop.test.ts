@@ -70,6 +70,7 @@ describe('buildPersonalizationMemory', () => {
       rationale: 'Memory-aligned template fallback: operator preferences favor specificity.',
       sourceLane: 'core_explore_fallback',
       draftExperimentId: 'exp-batch-fallback-1',
+      topic: 'AI agents',
       featureTags: {
         hook: 'observation',
         tone: 'analytical',
@@ -92,7 +93,7 @@ describe('buildPersonalizationMemory', () => {
         authorityProof: 0.08,
         conversationQuality: 0.12,
       },
-    } as Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis'>);
+    } as Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis' | 'topic'>);
 
     expect(metadata).toMatchObject({
       generationFallback: true,
@@ -103,6 +104,7 @@ describe('buildPersonalizationMemory', () => {
       fallbackOperatorAnchorScore: 0.22,
       fallbackAnchorCopyRisk: 0.06,
       fallbackSourceLane: 'core_explore_fallback',
+      fallbackTopic: 'AI agents',
       fallbackHook: 'observation',
       fallbackTone: 'analytical',
       fallbackSpecificity: 'concrete',
@@ -244,6 +246,7 @@ describe('buildPersonalizationMemory', () => {
             generationFallback: true,
             fallbackKind: 'provider_template_fallback',
             fallbackOperatorAnchor: true,
+            fallbackTopic: 'AI agents',
             fallbackHook: 'bold_claim',
             fallbackSpecificity: 'tactical',
             fallbackStructure: 'single_punch',
@@ -256,6 +259,7 @@ describe('buildPersonalizationMemory', () => {
             generationFallback: true,
             fallbackKind: 'provider_template_fallback',
             fallbackOperatorAnchor: true,
+            fallbackTopic: 'AI agents',
             fallbackHook: 'bold_claim',
             fallbackSpecificity: 'tactical',
             fallbackStructure: 'single_punch',
@@ -268,6 +272,7 @@ describe('buildPersonalizationMemory', () => {
             generationFallback: true,
             fallbackKind: 'provider_template_fallback',
             fallbackOperatorAnchor: true,
+            fallbackTopic: 'Startups',
             fallbackHook: 'question',
             fallbackSpecificity: 'concrete',
             fallbackStructure: 'list',
@@ -281,6 +286,7 @@ describe('buildPersonalizationMemory', () => {
             generationFallback: true,
             fallbackKind: 'provider_template_fallback',
             fallbackOperatorAnchor: true,
+            fallbackTopic: 'Startups',
             fallbackHook: 'question',
             fallbackSpecificity: 'concrete',
             fallbackStructure: 'list',
@@ -305,6 +311,7 @@ describe('buildPersonalizationMemory', () => {
       expect.arrayContaining([
         expect.objectContaining({
           fallbackKind: 'provider_template_fallback',
+          topic: 'AI agents',
           shape: 'bold_claim/single_punch/tactical',
           approved: 1,
           posted: 1,
@@ -313,10 +320,74 @@ describe('buildPersonalizationMemory', () => {
         }),
         expect.objectContaining({
           fallbackKind: 'provider_template_fallback',
+          topic: 'Startups',
           shape: 'question/list/concrete',
           rejected: 2,
           total: 2,
           netScore: -0.6,
+        }),
+      ]),
+    );
+  });
+
+  it('keeps operator-anchor fallback shape counters separated by topic', () => {
+    const personalization = buildPersonalizationMemory({
+      feedback: [],
+      signals: [
+        learningSignal({
+          id: 'ai-shape-posted',
+          signalType: 'x_post_succeeded',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackTopic: 'AI agents',
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+        learningSignal({
+          id: 'startup-shape-rejected',
+          signalType: 'deleted_from_queue',
+          metadata: {
+            generationFallback: true,
+            fallbackKind: 'provider_template_fallback',
+            fallbackOperatorAnchor: true,
+            fallbackTopic: 'Startups',
+            fallbackHook: 'bold_claim',
+            fallbackSpecificity: 'tactical',
+            fallbackStructure: 'single_punch',
+          },
+        }),
+      ],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['AI agents'],
+        antiGoals: [],
+        communicationStyle: 'specific and operator-led',
+        summary: 'Sharp AI operator voice.',
+      },
+    });
+
+    expect(personalization.fallbackShapeOutcomes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          topic: 'AI agents',
+          shape: 'bold_claim/single_punch/tactical',
+          posted: 1,
+          rejected: 0,
+        }),
+        expect.objectContaining({
+          topic: 'Startups',
+          shape: 'bold_claim/single_punch/tactical',
+          posted: 0,
+          rejected: 1,
         }),
       ]),
     );

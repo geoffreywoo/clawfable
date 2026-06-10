@@ -1218,6 +1218,7 @@ export interface PersonalizationMemory {
 
 export interface FallbackShapeOutcomeCounter {
   fallbackKind: string;
+  topic?: string;
   shape: string;
   hook: string;
   structure: string;

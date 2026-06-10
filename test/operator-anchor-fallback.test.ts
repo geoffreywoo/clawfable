@@ -184,6 +184,7 @@ describe('operator anchor fallback templates', () => {
         fallbackShapeOutcomes: [
           {
             fallbackKind: 'provider_template_fallback',
+            topic: 'AI agents',
             shape: 'bold_claim/single_punch/tactical',
             hook: 'bold_claim',
             structure: 'single_punch',
@@ -209,5 +210,57 @@ describe('operator anchor fallback templates', () => {
     expect(templates[0].outcomeNotes).toEqual([
       'Anchor fallback outcome: 4 structured signals matched this fallback shape (0 approval/posting, 0 edit, 4 rejection; net rejection).',
     ]);
+  });
+
+  it('ignores same-shape counters from a different fallback topic', () => {
+    const templates = buildOperatorAnchorFallbackTemplates({
+      topics: ['AI agents'],
+      learnings: learnings(performance({
+        thesis: 'teams earn trust failed eval',
+      })),
+      memory: memory({
+        fallbackShapeOutcomes: [
+          {
+            fallbackKind: 'provider_template_fallback',
+            topic: 'Startups',
+            shape: 'bold_claim/single_punch/tactical',
+            hook: 'bold_claim',
+            structure: 'single_punch',
+            specificity: 'tactical',
+            approved: 0,
+            posted: 0,
+            edited: 0,
+            rejected: 4,
+            total: 4,
+            netScore: -1,
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        ],
+      }),
+      fallbackKind: 'provider_template_fallback',
+    });
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0].outcomeScore).toBe(0);
+    expect(templates[0].outcomeNotes).toEqual([]);
+  });
+
+  it('ignores different-topic structured lesson text for the same fallback shape', () => {
+    const templates = buildOperatorAnchorFallbackTemplates({
+      topics: ['AI agents'],
+      learnings: learnings(performance({
+        thesis: 'teams earn trust failed eval',
+      })),
+      memory: memory({
+        operatorHiddenPreferences: [
+          'Fallback lesson: operator-anchor provider template fallback drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording. Shape: bold_claim/single_punch/tactical. Topic: Startups.',
+        ],
+      }),
+      fallbackKind: 'provider_template_fallback',
+    });
+
+    expect(templates).toHaveLength(1);
+    expect(templates[0].outcomeScore).toBe(0);
+    expect(templates[0].outcomeNotes).toEqual([]);
   });
 });
