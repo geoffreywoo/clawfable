@@ -31,6 +31,15 @@ describe('queue route', () => {
       quoteTweetId: null,
       quoteTweetAuthor: null,
       scheduledAt: null,
+      scoreProvenance: {
+        localPrior: 0.12,
+        globalPrior: 0.08,
+        predictedReward: 0.21,
+        judge: 0.34,
+        noveltyCoverage: 0.05,
+        riskPenalty: 0.1,
+        operatorAnchorOutcome: 0.031,
+      },
     });
 
     const deletedTweet = await createTweet({
@@ -69,5 +78,9 @@ describe('queue route', () => {
     );
     expect(data.map((tweet: { id: string }) => tweet.id)).not.toContain(postedTweet.id);
     expect(data.every((tweet: { status: string }) => tweet.status === 'queued' || tweet.status === 'deleted_from_x')).toBe(true);
+    expect(data.find((tweet: { id: string }) => tweet.id === queuedTweet.id)).toMatchObject({
+      decisionSummary: 'Local prior 12 · shared prior 8 · judge 34 · predicted reward 21. Learning adjustments: operator-anchor fallback memory +3.',
+      learningAdjustmentSummary: 'operator-anchor fallback memory +3',
+    });
   });
 });

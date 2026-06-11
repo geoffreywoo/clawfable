@@ -1,4 +1,5 @@
 import { createTweet } from './kv-storage';
+import { withDecisionProvenanceSummary } from './decision-provenance';
 import type { CreateTweetInput, Tweet } from './types';
 import type { RankedProtocolTweet } from './candidate-ranking';
 
@@ -73,5 +74,6 @@ export async function createTweetFromGeneratedCandidate(
     quoteTweetAuthor: null,
     scheduledAt: null,
   };
-  return createTweet(data);
+  const tweet = await createTweet(data);
+  return withDecisionProvenanceSummary(tweet);
 }

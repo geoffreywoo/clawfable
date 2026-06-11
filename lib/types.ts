@@ -396,6 +396,8 @@ export interface Tweet {
   globalPriorWeight?: number | null;
   localPriorWeight?: number | null;
   scoreProvenance?: CandidateScoreProvenance | null;
+  decisionSummary?: string | null;
+  learningAdjustmentSummary?: string | null;
   rewardBreakdown?: RewardBreakdown | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;

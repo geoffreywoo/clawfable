@@ -1,6 +1,7 @@
 import { unstable_cache } from 'next/cache';
 import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
+import { withDecisionProvenanceSummary } from './decision-provenance';
 import { BROWSER_COMPANION_LOCAL_URL, buildEngagementFeed } from './engagement';
 import { buildGenerationContext } from './generation-context';
 import { buildLearningSnapshot, type LearningSnapshot } from './learning-snapshot';
@@ -178,7 +179,7 @@ export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
     && new Date(tweet.createdAt).getTime() > sevenDaysAgo
   );
 
-  return [...followupDrafts, ...deletedFromX, ...queued];
+  return [...followupDrafts, ...deletedFromX, ...queued].map(withDecisionProvenanceSummary);
 }
 
 export async function getProtocolSnapshot(user: User, agentOrId: Agent | string): Promise<ProtocolSnapshot> {
