@@ -84,5 +84,7 @@ describe('generateViralBatch without a text provider', () => {
     expect(batch).toHaveLength(3);
     expect(batch.some((tweet) => tweet.targetTopic === 'AI agents')).toBe(true);
     expect(batch.some((tweet) => tweet.rationale.includes('Memory-aligned template fallback'))).toBe(true);
+    expect(batch.map((tweet) => tweet.content).join('\n')).not.toMatch(/the real edge|real moat|the winners will be|most people don'?t realize|default playbook/i);
+    expect(batch.every((tweet) => tweet.slopScore < 0.55)).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ import { isNearDuplicate } from './survivability';
 import { buildCoverageCluster, extractCandidateFeatureTags, ideaSimilarity } from './tweet-features';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE } from './style-mode';
 import {
+  assessFormulaicCadence,
   buildCriticScores,
   getAuthorityProofIssue,
   inferAudienceSegment,
@@ -841,12 +842,19 @@ function collectRejectionLessonText(tweet: Tweet): string[] {
 function scoreReasonApplicability(reasonText: string, candidate: RankableProtocolTweet, featureTags: CandidateFeatureTags): number {
   const reason = reasonText.toLowerCase();
   let score = 0;
+  const formulaicCadence = assessFormulaicCadence(candidate.content);
 
   if (
     hasAnyTerm(reason, ['generic', 'vague', 'thin', 'abstract', 'surface-level', 'surface level'])
     && (featureTags.specificity === 'abstract' || featureTags.riskFlags.includes('thin') || candidate.content.length < 80)
   ) {
     score += 0.42;
+  }
+  if (
+    hasAnyTerm(reason, ['ai slop', 'slop', 'formulaic', 'pattern-like', 'pattern like', 'generated', 'ai cadence', 'template', 'consultant'])
+    && (formulaicCadence.score >= 0.28 || featureTags.specificity === 'abstract' || featureTags.riskFlags.includes('thin'))
+  ) {
+    score += 0.46;
   }
   if (
     hasAnyTerm(reason, ['salesy', 'promotional', 'promo', 'cta', 'call to action', 'subscribe', 'sign up', 'sell'])
@@ -1548,24 +1556,27 @@ function scoreViralTakePotential(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
   policyRiskScore: number,
+  formulaicCadenceScore = 0,
 ): number {
   const text = candidate.content;
-  const lower = text.toLowerCase();
   const normalizedFormat = normalizeFormat(candidate.format);
   let score = 0.38;
+  const hasConcreteAnchor = /\b\d+[%x]?\b|\$\d|\b(because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow|rollback|incident)\b/i.test(text);
 
   if (['hot_take', 'short_punch', 'observation'].includes(normalizedFormat)) score += 0.13;
   if (['contrarian', 'bold_claim', 'callout', 'prediction', 'confession'].includes(featureTags.hook)) score += 0.16;
   if (['provocative', 'sarcastic', 'playful', 'analytical'].includes(featureTags.tone)) score += 0.08;
   if (['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)) score += 0.12;
-  if (/\b(most people|everyone|nobody|founders|operators|investors)\b.+\b(wrong|misread|underestimate|overrate|miss)\b/i.test(text)) score += 0.1;
-  if (/\b(not|isn't|aren't)\b.{0,80}\b(but|it's|it is|because)\b/i.test(text) || /\bvs\b| versus | compared to /i.test(text)) score += 0.06;
+  if (/\b(most people|everyone|nobody|founders|operators|investors)\b.+\b(wrong|misread|underestimate|overrate|miss)\b/i.test(text) && hasConcreteAnchor) score += 0.08;
+  if ((/\b(not|isn't|aren't)\b.{0,80}\b(but|it's|it is|because)\b/i.test(text) || /\bvs\b| versus | compared to /i.test(text)) && hasConcreteAnchor) score += 0.04;
   if (/\b\d+[%x]?\b|\$\d/.test(text)) score += 0.05;
   if (text.length >= 60 && text.length <= 360) score += 0.06;
   if (text.length > 1200) score -= 0.05;
   if (featureTags.riskFlags.includes('thin')) score -= 0.08;
   if (featureTags.riskFlags.includes('salesy')) score -= 0.12;
   if (policyRiskScore >= 0.35) score -= 0.2;
+  if (formulaicCadenceScore >= 0.32 && !hasConcreteAnchor) score -= 0.16;
+  else if (formulaicCadenceScore >= 0.5) score -= 0.08;
 
   return clamp(score);
 }
@@ -1673,6 +1684,7 @@ function scoreLearnedReviewCaution({
   approvalFrictionScore,
   rejectionLessonScore,
   tasteCalibrationScore,
+  formulaicCadenceScore,
 }: {
   ideaGraphScore: number;
   memoryAlignmentScore: number;
@@ -1685,6 +1697,7 @@ function scoreLearnedReviewCaution({
   approvalFrictionScore: number;
   rejectionLessonScore: number;
   tasteCalibrationScore: number;
+  formulaicCadenceScore: number;
 }): number {
   return clamp(
     Math.max(0, -ideaGraphScore) * 0.95 +
@@ -1697,7 +1710,8 @@ function scoreLearnedReviewCaution({
     Math.max(0, -rejectionLessonScore) * 1.05 +
     Math.max(0, -tasteCalibrationScore) * 1.1 +
     anchorCopyRiskScore * 0.95 +
-    phraseReuseRiskScore * 0.65
+    phraseReuseRiskScore * 0.65 +
+    formulaicCadenceScore * 0.4
   );
 }
 
@@ -1761,6 +1775,7 @@ export function rankGeneratedTweets(
     const judgeScore = scoreJudge(candidate);
     const repetitionRiskScore = scoreRepetitionRisk(candidate, featureTags, context);
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
+    const formulaicCadenceScore = assessFormulaicCadence(candidate.content).score;
     const slopScore = scoreSlopRisk(candidate.content, featureTags);
     const replyBaitScore = scoreReplyPotential(candidate.content, featureTags);
     const conversationQualityScore = scoreConversationValue(candidate.content, featureTags);
@@ -1769,7 +1784,7 @@ export function rankGeneratedTweets(
     const styleMode = normalizeContentStyleMode(candidate.styleMode);
     const styleModeScore = scoreStyleMode(candidate, featureTags, policyRiskScore);
     const styleModeAdjustment = getStyleModePerformanceAdjustment(styleMode, context);
-    const viralTakeScore = scoreViralTakePotential(candidate, featureTags, policyRiskScore);
+    const viralTakeScore = scoreViralTakePotential(candidate, featureTags, policyRiskScore, formulaicCadenceScore);
     const authorityProofIssue = getAuthorityProofIssue(candidate.content);
     const authorityProofPenalty = authorityProofIssue ? 0.36 : 0;
     const memoryAlignmentScore = scoreMemoryAlignment(candidate, featureTags, context);
@@ -1795,6 +1810,7 @@ export function rankGeneratedTweets(
       approvalFrictionScore,
       rejectionLessonScore,
       tasteCalibrationScore,
+      formulaicCadenceScore,
     });
     const holdoutScore = candidate.experimentHoldout ? clamp((surpriseScore * 0.7) + ((1 - creativeRiskScore) * 0.3)) : 0;
     const riskPenalty = clamp(
@@ -1802,6 +1818,7 @@ export function rankGeneratedTweets(
       (repetitionRiskScore * 0.24) +
       (creativeRiskScore * 0.18) +
       (slopScore * 0.24) +
+      (formulaicCadenceScore * 0.18) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
@@ -1838,6 +1855,7 @@ export function rankGeneratedTweets(
       memoryAlignment: Number((memoryAlignmentScore * 0.16).toFixed(3)),
       outcomeCalibration: Number((outcomeCalibrationScore * 0.14).toFixed(3)),
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
+      formulaicCadence: Number((-formulaicCadenceScore * 0.1).toFixed(3)),
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
       operatorAnchorOutcome: Number((operatorAnchorOutcomeScore * 0.16).toFixed(3)),
       fallbackShapeOutcome: Number((fallbackShapeOutcomeScore * 0.16).toFixed(3)),
@@ -1887,6 +1905,7 @@ export function rankGeneratedTweets(
       confidenceScore -
       (creativeRiskScore * 0.08) -
       (slopScore * 0.18) -
+      (formulaicCadenceScore * 0.1) -
       (authorityProofPenalty * 0.16)
     );
 
@@ -1918,6 +1937,7 @@ export function rankGeneratedTweets(
       (scoreProvenance.memoryAlignment || 0) +
       (scoreProvenance.outcomeCalibration || 0) +
       (scoreProvenance.conversationQuality || 0) +
+      (scoreProvenance.formulaicCadence || 0) +
       (scoreProvenance.operatorAnchor || 0) +
       (scoreProvenance.operatorAnchorOutcome || 0) +
       (scoreProvenance.fallbackShapeOutcome || 0) +

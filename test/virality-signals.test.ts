@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
+import { assessFormulaicCadence, assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -135,6 +135,21 @@ describe('virality signals', () => {
 
     expect(generic).toBeGreaterThanOrEqual(0.55);
     expect(concrete).toBeLessThan(0.25);
+  });
+
+  it('separates formulaic cadence from concrete operator evidence', () => {
+    const formulaic = assessFormulaicCadence(
+      'The real edge in AI agents is not the demo, but the feedback loop. Most people miss this. The winners will be the teams where learning compounds.'
+    );
+    const concrete = assessFormulaicCadence(
+      'The weird tell on agent teams: nobody knows who owns the rollback button after the first failed eval.'
+    );
+
+    expect(formulaic.score).toBeGreaterThanOrEqual(0.5);
+    expect(formulaic.hits).toContain('the-real-x');
+    expect(formulaic.hits).toContain('not-x-but-y');
+    expect(concrete.score).toBeLessThan(0.2);
+    expect(concrete.hasConcreteAnchor).toBe(true);
   });
 
   it('holds embarrassing replies while allowing sharp substantive posts', () => {

@@ -931,7 +931,7 @@ describe('generateViralBatch', () => {
     expect(batch).toHaveLength(3);
     expect(memoryAligned).toBeDefined();
     expect(memoryAligned!.targetTopic).toBe('AI agents');
-    expect(memoryAligned!.content).toContain('That is evidence.');
+    expect(memoryAligned!.content).toContain('Changed behavior is harder to fake.');
     expect(memoryAligned!.scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
   });
 
@@ -1110,7 +1110,8 @@ describe('generateViralBatch', () => {
     );
 
     const content = batch.map((tweet) => tweet.content).join('\n');
-    expect(content).toContain('The mistake people keep making with Career');
+    expect(content).toContain('The useful Career tell is boring');
+    expect(content).toContain('The proof is usually unglamorous');
     expect(content).not.toContain('OPERATOR VOICE REFERENCE');
     expect(content).not.toContain('manual/operator-written');
     expect(content).not.toContain('Derived from 193');

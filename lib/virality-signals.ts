@@ -26,6 +26,12 @@ export interface TasteRiskAssessment {
   reasons: string[];
 }
 
+export interface FormulaicCadenceAssessment {
+  score: number;
+  hits: string[];
+  hasConcreteAnchor: boolean;
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -67,9 +73,63 @@ export function inferPromptStrategy({
   return 'baseline';
 }
 
+export function assessFormulaicCadence(content: string): FormulaicCadenceAssessment {
+  const text = content.trim();
+  const lower = text.toLowerCase();
+  const hits: string[] = [];
+  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|hr|hrs|hour|hours|day|days|week|weeks)?\b|\$\d|\b(for example|because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow|rollback|incident|support queue|exception log|churned|deleted|approval|handoff)\b/i.test(text);
+  const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook|distribution)\b/g) || [];
+
+  const patterns: Array<[RegExp, string]> = [
+    [/\bnot\s+[^.\n]{3,90}\bbut\b/i, 'not-x-but-y'],
+    [/\bnot\s+[^.\n]{3,90}\bit'?s\b/i, 'not-x-its-y'],
+    [/\bthe (real|actual) (edge|moat|bottleneck|question|shift|winner|winners)\b/i, 'the-real-x'],
+    [/\bmost people (don'?t realize|miss|think|are still|keep|confuse|optimize for)\b/i, 'most-people-frame'],
+    [/\bpeople (are still|keep|confuse|optimize for)\b/i, 'people-keep-frame'],
+    [/\bthe winners will be\b/i, 'winners-will-be'],
+    [/\bthis is (how|why|where) .* compounds?\b/i, 'this-is-how-compounds'],
+    [/\bthat is the (shift|edge|moat|bottleneck|point)\b/i, 'that-is-the-x'],
+    [/\bdefault playbook\b/i, 'default-playbook'],
+    [/\blegacy assumption\b/i, 'legacy-assumption'],
+  ];
+
+  for (const [pattern, label] of patterns) {
+    if (pattern.test(text)) hits.push(label);
+  }
+
+  if (abstractPowerWords.length >= 3 && !hasConcreteAnchor) hits.push('abstract-stack-without-proof');
+  if (abstractPowerWords.length >= 5) hits.push('abstract-word-pileup');
+
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const numberedLines = lines.filter((line) => /^\d+\.\s+\S/.test(line)).length;
+  if (numberedLines >= 3 && !hasConcreteAnchor) hits.push('neat-numbered-scaffold');
+
+  const shortBalancedLines = lines.filter((line) => /^[a-z][^.!?]{8,90}[.!?]?$/i.test(line)).length;
+  if (lines.length >= 4 && shortBalancedLines >= 3 && abstractPowerWords.length >= 2 && !hasConcreteAnchor) {
+    hits.push('balanced-consultant-lines');
+  }
+
+  if (/^(observation|serious question|data point|hot take):/i.test(text) && !hasConcreteAnchor) {
+    hits.push('generic-label-open');
+  }
+
+  const score = clamp(
+    (hits.length * 0.12) +
+    (hasConcreteAnchor ? -0.08 : 0.08) +
+    (abstractPowerWords.length >= 4 ? 0.08 : 0),
+  );
+
+  return {
+    score: Number(score.toFixed(3)),
+    hits,
+    hasConcreteAnchor,
+  };
+}
+
 export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags): number {
   const lower = content.toLowerCase();
   let score = 0.08;
+  const cadence = assessFormulaicCadence(content);
   const genericPhrases = [
     'game changer',
     'unlock',
@@ -98,21 +158,9 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   const genericHits = genericPhrases.filter((phrase) => lower.includes(phrase)).length;
   score += Math.min(0.42, genericHits * 0.08);
 
-  const syntheticCadencePatterns = [
-    /\bnot\s+[^.\n]{3,80}\bbut\b/i,
-    /\bnot\s+[^.\n]{3,80}\bit'?s\b/i,
-    /\bthe (real|actual) (edge|moat|bottleneck|question|shift|winners?)\b/i,
-    /\bmost people (don'?t realize|miss|think|are still)\b/i,
-    /\bpeople (are still|keep|confuse|optimize for)\b/i,
-    /\bthe winners will be\b/i,
-    /\bthis is (how|why|where) .* compounds?\b/i,
-    /\bthat is the (shift|edge|moat|bottleneck|point)\b/i,
-  ];
-  const cadenceHits = syntheticCadencePatterns.filter((pattern) => pattern.test(content)).length;
-  score += Math.min(0.3, cadenceHits * 0.1);
-
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook)\b/g) || [];
   const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(for example|because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow)\b/i.test(content);
+  score += Math.min(0.42, cadence.score * 0.72);
   if (abstractPowerWords.length >= 4 && !hasConcreteAnchor) score += 0.18;
   if (abstractPowerWords.length >= 6) score += 0.1;
 
@@ -126,7 +174,7 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   if ((content.match(/\b(people|things|stuff|value|content|insight)\b/gi) || []).length >= 4) score += 0.1;
   if (featureTags.specificity === 'data_driven' || featureTags.specificity === 'tactical' || featureTags.specificity === 'story_led') score -= 0.12;
   if (featureTags.structure === 'story_arc' || featureTags.structure === 'comparison') score -= 0.06;
-  if (hasConcreteAnchor && cadenceHits <= 1 && genericHits <= 2) score -= 0.08;
+  if (hasConcreteAnchor && cadence.hits.length <= 1 && genericHits <= 2) score -= 0.08;
   return clamp(score);
 }
 

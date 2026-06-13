@@ -233,6 +233,7 @@ export interface CandidateScoreProvenance {
   memoryAlignment?: number;
   outcomeCalibration?: number;
   conversationQuality?: number;
+  formulaicCadence?: number;
   operatorAnchor?: number;
   operatorAnchorOutcome?: number;
   fallbackShapeOutcome?: number;

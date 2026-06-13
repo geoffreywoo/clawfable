@@ -297,41 +297,41 @@ function buildFallbackClaim(topic: string, tone: string): string {
   const normalizedTone = tone.toLowerCase();
 
   if (normalizedTone.includes('contrarian')) {
-    return `${topic} is still being framed around the wrong bottleneck.`;
+    return `${topic} gets easier to read when you look for the behavior that changed, not the slogan.`;
   }
   if (normalizedTone.includes('optimist')) {
-    return `The upside in ${topic} is bigger than most people realize.`;
+    return `${topic} looks healthier when a small team quietly changes its weekly operating habit.`;
   }
   if (normalizedTone.includes('analyst')) {
-    return `The market is misreading what actually compounds in ${topic}.`;
+    return `The useful ${topic} tell is boring: who changes a workflow before the headline arrives.`;
   }
   if (normalizedTone.includes('provocateur')) {
-    return `Most of the ${topic} conversation is theater, not edge.`;
+    return `A lot of ${topic} discourse is just people describing the press release back to each other.`;
   }
   if (normalizedTone.includes('educator')) {
-    return `If you want to understand ${topic}, start with the incentives.`;
+    return `If you want to understand ${topic}, ask what got easier for one specific user this week.`;
   }
 
-  return `${topic} is changing faster than the default playbook assumes.`;
+  return `${topic} gets interesting when the same person changes what they do on Tuesday morning.`;
 }
 
 function buildFallbackAngle(tone: string): string {
   const normalizedTone = tone.toLowerCase();
 
   if (normalizedTone.includes('contrarian') || normalizedTone.includes('provocateur')) {
-    return 'The compounding advantage is learning faster than the people still optimizing the packaging';
+    return 'The tell is the abandoned workaround nobody misses a week later';
   }
   if (normalizedTone.includes('optimist')) {
-    return 'The upside goes to people who can turn feedback into product velocity';
+    return 'The optimistic version is visible in small repeated habits, not launch copy';
   }
   if (normalizedTone.includes('analyst')) {
-    return 'The useful question is who learns faster once the feedback loop tightens';
+    return 'The useful question is who has to change budget, workflow, or ownership first';
   }
   if (normalizedTone.includes('educator')) {
-    return 'The clean way to see it is to separate reach from actual learning rate';
+    return 'The clean way to see it is to separate what people say from what they stop doing';
   }
 
-  return 'The edge is not sounding louder, it is learning faster';
+  return 'The sharpest signal is usually the tiny old behavior that disappears';
 }
 
 type FallbackMemoryPreference = 'specificity' | 'structure' | 'conversation';
@@ -373,7 +373,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
 
   if (preferences.includes('specificity')) {
     templates.push({
-      content: `The ${topic} take worth trusting is the one that names the behavior change.\n\nNot "people care more now."\n\nA buyer switches tools.\nA team changes workflow.\nA user comes back unprompted.\n\nThat is evidence.`,
+      content: `The ${topic} take I trust names the behavior change.\n\nA buyer switches tools.\nA team rewrites the handoff.\nA user comes back without a reminder.\n\nVibes are cheap. Changed behavior is harder to fake.`,
       format: 'analysis',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: operator preferences favor specificity, evidence, and concrete examples.',
@@ -400,7 +400,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
 
   if (preferences.includes('structure')) {
     templates.push({
-      content: `${topic} gets clearer when the argument has a shape:\n\n1. what changed\n2. who felt it first\n3. what old habit broke\n4. what compounds if the pattern keeps going\n\nMost takes skip step two and become vague.`,
+      content: `${topic} gets clearer when the argument names:\n\n- what changed\n- who felt it first\n- which old habit broke\n- what artifact would prove it next week\n\nSkip the artifact and it turns into vibes.`,
       format: 'long_form',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: operator edits favor line-break structure and scannable reasoning.',
@@ -427,7 +427,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
 
   if (preferences.includes('conversation')) {
     templates.push({
-      content: `Serious ${topic} question:\n\nwhat is the smallest repeated behavior that would prove the market is actually moving, not just talking louder?`,
+      content: `${topic} question I would actually want answered:\n\nwhat repeated behavior would prove the market moved, even if nobody posted a chart?`,
       format: 'question',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: conversation lessons favor substantive questions over cheap engagement bait.',
@@ -544,23 +544,23 @@ function buildFallbackTemplates(
       switch (format) {
         case 'hot_take':
           addTemplate({
-            content: `${claim}\n\nThe winners will be the people who optimize for signal, not optics.`,
+            content: `${claim}\n\nWatch for the person who changes a calendar, budget, or handoff before they update the deck.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: contrarian claim with a clean operator takeaway.',
+            rationale: 'Template fallback: behavior-change claim with an operator proof check.',
           });
           break;
         case 'analysis':
           addTemplate({
-            content: `The mistake people keep making with ${topic} is assuming distribution is the moat.\n\nThe real edge is tighter feedback loops, faster iteration, and clearer taste.\n\n${angle}.`,
+            content: `${claim}\n\nThe proof is usually unglamorous: a shorter review loop, a renamed owner, a deleted workaround, or a support queue that gets quieter.\n\n${angle}.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: structured analysis aligned to the account voice.',
+            rationale: 'Template fallback: structured analysis anchored to operator evidence.',
           });
           break;
         case 'observation':
           addTemplate({
-            content: `Observation:\n\nmost people talking about ${topic} are optimizing for narrative.\n\nthe operators are optimizing for compounding advantages.`,
+            content: `${topic} observation:\n\nwhen the work is real, the language gets less impressive.\n\nPeople stop saying "platform shift" and start asking who owns the next handoff.`,
             format,
             targetTopic: topic,
             rationale: 'Template fallback: short observational frame built for reply and bookmark energy.',
@@ -568,7 +568,7 @@ function buildFallbackTemplates(
           break;
         case 'question':
           addTemplate({
-            content: `Serious question:\n\nwhat does ${topic} look like when you remove the legacy assumption everyone is still building around?`,
+            content: `${topic} question:\n\nwhat is the smallest artifact that would make you believe the behavior changed?\n\nCalendar invite, budget line, support ticket, shipped diff, something else?`,
             format,
             targetTopic: topic,
             rationale: 'Template fallback: question-led prompt designed to trigger thoughtful replies.',
@@ -576,7 +576,7 @@ function buildFallbackTemplates(
           break;
         case 'data_point':
           addTemplate({
-            content: `Data point:\n\nwhen a market shifts from rewarding hype to rewarding iteration speed, almost every incumbent reads the change too late.\n\n${topic} looks a lot like that right now.`,
+            content: `${topic} data point I would rather see:\n\nhow many times did the old workaround get used this week?\n\nIf that number quietly falls, the market learned something before the narrative caught up.`,
             format,
             targetTopic: topic,
             rationale: 'Template fallback: pseudo-data framing without inventing fake numbers.',
@@ -584,7 +584,7 @@ function buildFallbackTemplates(
           break;
         case 'short_punch':
           addTemplate({
-            content: `${topic} rewards builders.\n\nnot narrators.`,
+            content: `${topic} is real when a boring workaround disappears.`,
             format,
             targetTopic: topic,
             rationale: 'Template fallback: short punchy contrast for fast engagement.',
@@ -592,15 +592,15 @@ function buildFallbackTemplates(
           break;
         case 'long_form':
           addTemplate({
-            content: `The common mistake in ${topic} discourse is confusing visibility with leverage.\n\nVisibility gets attention.\nLeverage compounds outcomes.\n\nThe people winning this cycle are the ones building systems that learn faster than their competitors.\n\nThat is the real moat.`,
+            content: `${topic} discourse gets too clean too fast.\n\nI would rather know:\n\n- who changed the workflow\n- what old habit broke\n- which owner got renamed\n- what support ticket stopped appearing\n\nThat is where the actual adoption usually leaks out first.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: longer structured argument for depth-oriented readers.',
+            rationale: 'Template fallback: longer proof-seeking argument for depth-oriented readers.',
           });
           break;
         default:
           addTemplate({
-            content: `${claim}\n\nThat is the shift most people are still underestimating.`,
+            content: `${claim}\n\nThe useful proof is the quiet behavior change that would still matter if nobody announced it.`,
             format,
             targetTopic: topic,
             rationale: 'Template fallback: generic resilient format when richer generation is unavailable.',

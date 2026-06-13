@@ -400,6 +400,49 @@ describe('rankGeneratedTweets', () => {
     expect(supported!.confidenceScore).toBeGreaterThan(unsupported!.confidenceScore);
   });
 
+  it('penalizes formulaic AI cadence even when the shape looks viral', () => {
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'The real edge in AI agents is not the demo, but the feedback loop. Most people miss this. The winners will be teams where learning compounds.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Recognizable generated-post cadence.',
+        featureTags: {
+          hook: 'contrarian',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'argument',
+          thesis: 'ai agents feedback loops compound',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'The weird tell on agent teams: nobody knows who owns the rollback button after the first failed eval. That is usually where the autonomy roadmap quietly dies.',
+        format: 'hot_take',
+        targetTopic: 'AI agents',
+        rationale: 'Concrete operator failure mode.',
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'agent teams need rollback ownership',
+          riskFlags: [],
+        },
+      },
+    ], rankingContext());
+
+    const formulaic = ranked.find((candidate) => candidate.content.includes('real edge'));
+    const concrete = ranked.find((candidate) => candidate.content.includes('rollback button'));
+
+    expect(formulaic).toBeDefined();
+    expect(concrete).toBeDefined();
+    expect(formulaic!.scoreProvenance.formulaicCadence).toBeLessThan(0);
+    expect(concrete!.scoreProvenance.formulaicCadence).toBeGreaterThanOrEqual(-0.02);
+    expect(concrete!.confidenceScore).toBeGreaterThan(formulaic!.confidenceScore);
+    expect(ranked[0].content).toBe(concrete!.content);
+  });
+
   it('does not let a high headline judge score hide weak critic dimensions', () => {
     const ranked = rankGeneratedTweets([
       {
