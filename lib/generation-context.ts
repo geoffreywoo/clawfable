@@ -22,6 +22,7 @@ import { buildPersonalizationMemory } from './learning-loop';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
+import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopicForAccount } from './account-topic-policy';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -322,11 +323,13 @@ export async function buildGenerationContext(
     getIdeaAtoms(agent.id, 24).catch(() => []),
   ]);
 
-  const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+  const effectiveLearnings = applyAccountLearningPolicy(agent.handle, learnings);
+  const voiceProfile = applyAccountTopicPolicy(agent.handle, parseSoulMd(agent.name, agent.soulMd));
   const liveTweets = allTweets.filter((tweet) => LIVE_CONTENT_STATUSES.has(tweet.status));
+  const accountTopicAllowed = (topic: string | null | undefined) => !shouldSuppressTopicForAccount(agent.handle, topic);
 
   // Bootstrap with wizard-derived style only until live learnings have enough evidence.
-  if ((!learnings || learnings.totalTracked < 10) && styleSignals?.rawExtraction) {
+  if ((!effectiveLearnings || effectiveLearnings.totalTracked < 10) && styleSignals?.rawExtraction) {
     voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
   }
 
@@ -338,13 +341,13 @@ export async function buildGenerationContext(
     voiceProfile.communicationStyle += `\n\n## OPERATOR STYLE PREFERENCES (from remix history — follow these)\n${remixPatterns.map((item) => `- ${item}`).join('\n')}`;
   }
 
-  if (learnings?.operatorVoiceReference && learnings.operatorVoiceReference.bestPerformers.length > 0) {
-    const reference = learnings.operatorVoiceReference;
+  if (effectiveLearnings?.operatorVoiceReference && effectiveLearnings.operatorVoiceReference.bestPerformers.length > 0) {
+    const reference = effectiveLearnings.operatorVoiceReference;
     voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)\nDerived from ${reference.sampleCount} manually posted or operator-written tweets.\n${describeStyleFingerprint(reference.styleFingerprint).join('\n')}\nVoice anchors:\n${reference.bestPerformers.map((entry) => `- "${entry.content.slice(0, 180)}"`).join('\n')}\nUse these as VOICE calibration examples. Reuse the energy, sentiment, and phrasing discipline, not the exact claim.`;
   }
 
-  if (learnings?.manualTopicProfile && learnings.manualTopicProfile.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## MANUAL TOPIC PRIORS (topics that overperform in operator-written posts)\n${learnings.manualTopicProfile.slice(0, 6).map((cluster) => `- ${cluster.topic}: ${cluster.angle} (${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement)`).join('\n')}`;
+  if (effectiveLearnings?.manualTopicProfile && effectiveLearnings.manualTopicProfile.length > 0) {
+    voiceProfile.communicationStyle += `\n\n## MANUAL TOPIC PRIORS (topics that overperform in operator-written posts)\n${effectiveLearnings.manualTopicProfile.slice(0, 6).map((cluster) => `- ${cluster.topic}: ${cluster.angle} (${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement)`).join('\n')}`;
   }
 
   const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
@@ -360,10 +363,11 @@ export async function buildGenerationContext(
   const allowedFormats = settings.enabledFormats.length > 0 ? settings.enabledFormats : ALL_FORMATS;
   const candidateTopics = [...new Set([
     ...voiceProfile.topics,
-    ...(learnings?.topicRankings.map((entry) => entry.topic) || []),
-    ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic)),
+    ...(effectiveLearnings?.topicRankings.map((entry) => entry.topic) || []),
+    ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic) && accountTopicAllowed(topic)),
   ])];
-  const normalizedPerformanceHistory = normalizeManualPerformanceSources(performanceHistory, signals);
+  const normalizedPerformanceHistory = normalizeManualPerformanceSources(performanceHistory, signals)
+    .filter((entry) => accountTopicAllowed(entry.topic));
   const banditPolicy = buildBanditPolicy({
     performanceHistory: normalizedPerformanceHistory,
     feedback,
@@ -379,7 +383,7 @@ export async function buildGenerationContext(
     signals,
     remixPatterns: remixMemory,
     directiveRules: activeDirectiveRules,
-    learnings,
+    learnings: effectiveLearnings,
     performanceHistory: normalizedPerformanceHistory,
     banditPolicy,
     voiceProfile,
@@ -451,7 +455,7 @@ export async function buildGenerationContext(
 
   return {
     voiceProfile,
-    learnings,
+    learnings: effectiveLearnings,
     settings,
     style,
     memory,
