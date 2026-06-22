@@ -27,6 +27,8 @@ describe('account topic policy', () => {
       'deep tech',
     ]));
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
+    expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffreywoo');
+    expect(profile.antiGoals.join(' ')).toContain('ai slop');
   });
 
   it('filters crypto-only learned priors for @geoffreywoo', () => {

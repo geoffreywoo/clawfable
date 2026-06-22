@@ -4,6 +4,7 @@ import type { VoiceProfile } from './soul-parser';
 import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, PersonalizationMemory } from './types';
 import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
+import { scoreSlopRisk } from './virality-signals';
 
 type JudgeContext = {
   voiceProfile?: VoiceProfile;
@@ -176,18 +177,19 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     topic: candidate.targetTopic,
   });
   const memoryFit = scoreContextualMemoryFit(candidate, featureTags, context);
+  const slopRisk = scoreSlopRisk(candidate.content, featureTags);
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
-  const novelty = clamp(featureTags.riskFlags.includes('thin') ? 0.48 : 0.68);
+  const novelty = clamp((featureTags.riskFlags.includes('thin') ? 0.48 : 0.68) - (slopRisk >= 0.45 ? 0.14 : 0));
   const audienceFit = clamp(
     (/\b(founder|operator|builder|market|product|ai|startup)\b/i.test(candidate.content) ? 0.72 : 0.58)
     + (memoryFit.notes.includes('memory-aligned conversation value') ? 0.04 : 0)
   );
   const policySafety = clamp(
-    1 - (featureTags.riskFlags.length * 0.12) - (memoryFit.penalty * 0.5) + (memoryFit.boost * 0.25),
+    1 - (featureTags.riskFlags.length * 0.12) - (memoryFit.penalty * 0.5) - (slopRisk * 0.18) + (memoryFit.boost * 0.25),
     0.32,
     0.9,
   );
-  const voiceFit = scoreContextualVoiceFit(candidate, featureTags, context);
+  const voiceFit = clamp(scoreContextualVoiceFit(candidate, featureTags, context) - (slopRisk >= 0.5 ? 0.12 : slopRisk * 0.08), 0.34, 0.9);
   const overall = clamp(
     voiceFit * 0.28 +
     clamp(clarity + (memoryFit.notes.includes('memory-aligned structure') ? 0.04 : 0)) * 0.18 +
@@ -196,6 +198,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     policySafety * 0.16
   );
   const memoryNote = memoryFit.notes.length > 0 ? ` ${memoryFit.notes.slice(0, 2).join('; ')}.` : '';
+  const slopNote = slopRisk >= 0.45 ? ` Slop risk ${slopRisk.toFixed(2)}: too generated/formulaic.` : '';
 
   return {
     ...candidate,
@@ -210,7 +213,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
       audienceFit: Number(audienceFit.toFixed(3)),
       policySafety: Number(policySafety.toFixed(3)),
     },
-    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}`,
+    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}`,
   };
 }
 
@@ -306,8 +309,10 @@ Ground rules:
 - Account fingerprint: ${analysis.contentFingerprint}
 - Top formats: ${analysis.engagementPatterns.topFormats.join(', ') || 'unknown'}
 - Top topics: ${analysis.engagementPatterns.topTopics.join(', ') || 'unknown'}
+- Public taste feedback: if a commenter could say this sounds like AI slop, generated, consultant-polished, or ChatGPT-ish, score voiceFit/novelty/overall harshly.
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
-- Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
+- Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
+- Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}
 ${learnings?.operatorVoiceReference?.bestPerformers?.length ? `- Manual/operator anchors are high-signal for voice, sentiment, tone, and topics: ${learnings.operatorVoiceReference.bestPerformers.slice(0, 3).map((entry) => `"${entry.content.slice(0, 120)}"`).join(' | ')}` : ''}
 ${memory?.neverDoThisAgain?.length ? `- Avoid: ${memory.neverDoThisAgain.slice(0, 3).join(' | ')}` : ''}
@@ -393,6 +398,8 @@ Rules:
 - Keep the same core thesis.
 - Increase clarity, specificity, or punch.
 - Remove weak throat-clearing.
+- Remove AI slop tells: generic advice voice, symmetrical abstraction stacks, "the real edge", "most people miss", "not X but Y", and tidy consultant cadence.
+- Add one concrete anchor if missing: mechanism, number, constraint, named technology, material/process detail, failure mode, or operator observation.
 - Do not turn every tweet into the same template.
 - Stay in voice: ${voiceProfile.tone}.
 ${memory?.operatorHiddenPreferences?.length ? `Operator preferences: ${memory.operatorHiddenPreferences.slice(0, 3).join(' | ')}` : ''}

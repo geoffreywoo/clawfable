@@ -238,6 +238,61 @@ describe('judgeCandidates fallback critic', () => {
     }));
   });
 
+  it('penalizes AI-slop cadence in the heuristic critic', async () => {
+    const judged = await judgeCandidates([
+      {
+        content: 'The real edge in AI is not better tools, but tighter feedback loops. Most people miss that leverage compounds when systems learn faster.',
+        format: 'hot_take',
+        targetTopic: 'AI infrastructure',
+        rationale: 'Formulaic abstraction stack.',
+        featureTags: {
+          hook: 'contrarian',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'argument',
+          thesis: 'ai feedback loops compound',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'Inference chips are turning into a power routing problem.\n\nThe weird bottleneck is not the model. It is how many amps you can move across one rack before the board turns into a space heater.',
+        format: 'observation',
+        targetTopic: 'inference asics',
+        rationale: 'Concrete technical constraint.',
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'concrete',
+          structure: 'stacked_lines',
+          thesis: 'inference chips power routing bottleneck',
+          riskFlags: [],
+        },
+      },
+    ], {
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['ai', 'inference asics'],
+        antiGoals: ['AI slop and generic abstraction stacks'],
+        communicationStyle: 'specific operator voice',
+        summary: 'Sharp AI infrastructure voice.',
+      },
+      analysis: analysis(),
+      learnings: null,
+      memory: memory({
+        neverDoThisAgain: ['Avoid AI slop, generic advice, and generated-sounding template cadence.'],
+        operatorHiddenPreferences: ['Use concrete mechanisms, constraints, numbers, materials, or failure modes.'],
+      }),
+    });
+
+    const slop = judged[0];
+    const concrete = judged[1];
+
+    expect(concrete.judgeScore).toBeGreaterThan(slop.judgeScore);
+    expect(concrete.judgeBreakdown.voiceFit).toBeGreaterThan(slop.judgeBreakdown.voiceFit);
+    expect(concrete.judgeBreakdown.novelty).toBeGreaterThan(slop.judgeBreakdown.novelty);
+    expect(slop.judgeNotes).toContain('Slop risk');
+  });
+
   it('uses a model critic when requested and a provider is available', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({

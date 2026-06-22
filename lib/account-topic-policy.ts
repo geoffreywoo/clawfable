@@ -57,6 +57,7 @@ export function applyAccountTopicPolicy(
     antiGoals: dedupeTopics([
       ...voiceProfile.antiGoals,
       'crypto-first content unless it is directly tied to AI infrastructure, energy, compute, industrial capacity, or frontier technology',
+      'AI slop: polished generic advice, consultant cadence, template hooks, symmetrical abstraction stacks, and posts that sound generated',
     ]),
     communicationStyle: `${voiceProfile.communicationStyle}
 
@@ -64,7 +65,15 @@ export function applyAccountTopicPolicy(
 - Crypto is no longer a core content pillar. Do not generate standalone crypto/Web3 takes by default.
 - Keep posting on AI, especially where AI touches real-world constraints: inference ASICs, datacenter power, robotics, automated manufacturing, energy, supply chains, and industrial capacity.
 - Actively prefer frontier/deep tech themes: inference ASICs, fusion, fission, rare earth minerals, robotics, automated manufacturing, re-industrialization, space, and adjacent hard-technology ideas.
-- A crypto angle is acceptable only when it is a supporting detail inside a stronger AI infrastructure, compute, energy, manufacturing, or frontier-tech thesis.`,
+- A crypto angle is acceptable only when it is a supporting detail inside a stronger AI infrastructure, compute, energy, manufacturing, or frontier-tech thesis.
+
+## ACCOUNT ANTI-SLOP POLICY FOR @geoffreywoo
+- Treat public feedback that the account sounds like "AI slop" as a standing rejection of the current voice pattern.
+- Do not write polished generic advice, engagement bait, founder-bro abstraction stacks, or posts that sound like a prompt output.
+- Avoid template openings like "the real edge", "most people miss", "not X but Y", "the winners will be", "here's the thing", and neat numbered frameworks unless a concrete observed detail makes the sentence impossible to genericize.
+- Prefer blunt, compressed, slightly uneven human phrasing. One hard observation beats a perfect paragraph.
+- Every draft needs at least one non-generic anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or lived operator observation.
+- If a commenter could plausibly say "this sounds like ChatGPT wrote it", reject the draft before it reaches the queue.`,
   };
 }
 
