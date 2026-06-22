@@ -75,7 +75,7 @@ describe('AI model routing', () => {
 
     expect(getModelChainForTask('tweet_generation')).toEqual([
       { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
   });
 
@@ -84,11 +84,11 @@ describe('AI model routing', () => {
 
     expect(getModelChainForTask('bulk_judgment')).toEqual([
       { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
     expect(getModelChainForTask('classification')).toEqual([
       { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
   });
 
@@ -97,7 +97,7 @@ describe('AI model routing', () => {
 
     expect(getModelChainForTask('exceptional')).toEqual([
       { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
   });
 
@@ -237,7 +237,7 @@ describe('AI model routing', () => {
 
     const result = await generateText({
       task: 'reply_generation',
-      modelChain: [{ provider: 'anthropic', model: 'claude-sonnet-4-20250514' }],
+      modelChain: [{ provider: 'anthropic', model: 'claude-sonnet-4-6' }],
       system: 'Return exactly: openai ok',
       prompt: 'probe',
       maxTokens: 64,
@@ -271,12 +271,12 @@ describe('AI model routing', () => {
 
     expect(openAiCreate).toHaveBeenCalledTimes(1);
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
     }));
     expect(result).toEqual(expect.objectContaining({
       text: 'anthropic ok',
       provider: 'anthropic',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
     }));
   });
 });

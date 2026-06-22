@@ -50,7 +50,7 @@ export interface GenerateTextResult {
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
 const OPENAI_LATEST_MODEL = 'gpt-5.5';
-const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-20250514';
+const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
 const OAI_LATEST: AiModelTarget = { provider: 'openai', model: OPENAI_LATEST_MODEL };
