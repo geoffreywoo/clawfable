@@ -122,7 +122,86 @@ export function assessFormulaicCadence(content: string): FormulaicCadenceAssessm
   return {
     score: Number(score.toFixed(3)),
     hits,
-    hasConcreteAnchor,
+  hasConcreteAnchor,
+  };
+}
+
+const BANAL_OPS_TEXTURE_TERMS = [
+  'slack',
+  'calendar invite',
+  'support queue',
+  'support ticket',
+  'dashboard',
+  'handoff',
+  'workflow',
+  'workaround',
+  'loom',
+  'zendesk',
+  'stripe dispute',
+  'renamed owner',
+  'owner got renamed',
+  'who owns',
+  'who changed',
+];
+
+const HARD_TECHNICAL_ANCHOR_TERMS = [
+  'asic',
+  'wafer',
+  'hbm',
+  'memory bandwidth',
+  'interconnect',
+  'nvlink',
+  'pcie',
+  'packaging yield',
+  'yield',
+  'reticle',
+  'lithography',
+  'power density',
+  'watts per token',
+  'thermal',
+  'cooling',
+  'substation',
+  'transformer capacity',
+  'grid interconnect',
+  'reactor',
+  'tritium',
+  'neutron',
+  'fuel cycle',
+  'magnet',
+  'separation chemistry',
+  'tailings',
+  'fixture',
+  'tolerance',
+  'metrology',
+  'servo',
+  'actuator',
+  'end effector',
+  'radiation',
+  'thermal cycling',
+  'ground station',
+  'vacuum',
+  'propellant',
+  'supply chain qualification',
+];
+
+export function assessTechnicalElevation(content: string): {
+  technicalScore: number;
+  banalOpsScore: number;
+  hasHardTechAnchor: boolean;
+  hasBanalOpsTexture: boolean;
+} {
+  const lower = content.toLowerCase();
+  const hardHits = HARD_TECHNICAL_ANCHOR_TERMS.filter((term) => lower.includes(term)).length;
+  const banalHits = BANAL_OPS_TEXTURE_TERMS.filter((term) => lower.includes(term)).length;
+  const hasNumberedTechnicalConstraint = /\b\d+([.,]\d+)?\s?(nm|kw|mw|gw|v|kv|amps?|w|kw\/?h|%|x|mm|cm|kg|tons?|hours?|minutes?)\b/i.test(content);
+  const hasHardTechAnchor = hardHits > 0 || hasNumberedTechnicalConstraint;
+  const hasBanalOpsTexture = banalHits > 0;
+
+  return {
+    technicalScore: clamp((hardHits * 0.14) + (hasNumberedTechnicalConstraint ? 0.12 : 0), 0, 0.42),
+    banalOpsScore: clamp((banalHits * 0.12) - (hasHardTechAnchor ? 0.08 : 0), 0, 0.42),
+    hasHardTechAnchor,
+    hasBanalOpsTexture,
   };
 }
 
@@ -130,6 +209,7 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   const lower = content.toLowerCase();
   let score = 0.08;
   const cadence = assessFormulaicCadence(content);
+  const technicalElevation = assessTechnicalElevation(content);
   const genericPhrases = [
     'game changer',
     'unlock',
@@ -169,10 +249,13 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
 
   if (featureTags.specificity === 'abstract') score += 0.18;
   if (featureTags.riskFlags.includes('thin')) score += 0.16;
+  if (technicalElevation.hasBanalOpsTexture && !technicalElevation.hasHardTechAnchor) score += 0.18;
+  score += technicalElevation.banalOpsScore * 0.5;
   if (content.length > 220 && !hasConcreteAnchor) score += 0.12;
   if (/^(i think|in my opinion|here'?s|the thing is)/i.test(content.trim())) score += 0.12;
   if ((content.match(/\b(people|things|stuff|value|content|insight)\b/gi) || []).length >= 4) score += 0.1;
   if (featureTags.specificity === 'data_driven' || featureTags.specificity === 'tactical' || featureTags.specificity === 'story_led') score -= 0.12;
+  if (technicalElevation.hasHardTechAnchor) score -= technicalElevation.technicalScore * 0.6;
   if (featureTags.structure === 'story_arc' || featureTags.structure === 'comparison') score -= 0.06;
   if (hasConcreteAnchor && cadence.hits.length <= 1 && genericHits <= 2) score -= 0.08;
   return clamp(score);

@@ -27,6 +27,7 @@ import { buildCoverageCluster, extractCandidateFeatureTags, ideaSimilarity } fro
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE } from './style-mode';
 import {
   assessFormulaicCadence,
+  assessTechnicalElevation,
   buildCriticScores,
   getAuthorityProofIssue,
   inferAudienceSegment,
@@ -1561,7 +1562,9 @@ function scoreViralTakePotential(
   const text = candidate.content;
   const normalizedFormat = normalizeFormat(candidate.format);
   let score = 0.38;
-  const hasConcreteAnchor = /\b\d+[%x]?\b|\$\d|\b(because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow|rollback|incident)\b/i.test(text);
+  const technicalElevation = assessTechnicalElevation(text);
+  const hasConcreteAnchor = /\b\d+[%x]?\b|\$\d|\b(because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow|rollback|incident)\b/i.test(text)
+    || technicalElevation.hasHardTechAnchor;
 
   if (['hot_take', 'short_punch', 'observation'].includes(normalizedFormat)) score += 0.13;
   if (['contrarian', 'bold_claim', 'callout', 'prediction', 'confession'].includes(featureTags.hook)) score += 0.16;
@@ -1570,6 +1573,8 @@ function scoreViralTakePotential(
   if (/\b(most people|everyone|nobody|founders|operators|investors)\b.+\b(wrong|misread|underestimate|overrate|miss)\b/i.test(text) && hasConcreteAnchor) score += 0.08;
   if ((/\b(not|isn't|aren't)\b.{0,80}\b(but|it's|it is|because)\b/i.test(text) || /\bvs\b| versus | compared to /i.test(text)) && hasConcreteAnchor) score += 0.04;
   if (/\b\d+[%x]?\b|\$\d/.test(text)) score += 0.05;
+  score += technicalElevation.technicalScore * 0.28;
+  score -= technicalElevation.banalOpsScore * 0.34;
   if (text.length >= 60 && text.length <= 360) score += 0.06;
   if (text.length > 1200) score -= 0.05;
   if (featureTags.riskFlags.includes('thin')) score -= 0.08;
@@ -1776,6 +1781,7 @@ export function rankGeneratedTweets(
     const repetitionRiskScore = scoreRepetitionRisk(candidate, featureTags, context);
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
     const formulaicCadenceScore = assessFormulaicCadence(candidate.content).score;
+    const technicalElevationScore = assessTechnicalElevation(candidate.content);
     const slopScore = scoreSlopRisk(candidate.content, featureTags);
     const replyBaitScore = scoreReplyPotential(candidate.content, featureTags);
     const conversationQualityScore = scoreConversationValue(candidate.content, featureTags);
@@ -1819,6 +1825,7 @@ export function rankGeneratedTweets(
       (creativeRiskScore * 0.18) +
       (slopScore * 0.24) +
       (formulaicCadenceScore * 0.18) +
+      (technicalElevationScore.banalOpsScore * 0.26) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
@@ -1844,6 +1851,8 @@ export function rankGeneratedTweets(
       creativity: Number((surpriseScore * 0.08).toFixed(3)),
       holdout: Number((holdoutScore * 0.05).toFixed(3)),
       antiSlop: Number(((1 - slopScore) * 0.1).toFixed(3)),
+      technicalElevation: Number((technicalElevationScore.technicalScore * 0.12).toFixed(3)),
+      banalOpsTexture: Number((-technicalElevationScore.banalOpsScore * 0.14).toFixed(3)),
       authorityProof: authorityProofIssue ? Number((authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
@@ -1886,6 +1895,7 @@ export function rankGeneratedTweets(
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08 +
       (1 - slopScore) * 0.12 +
+      technicalElevationScore.technicalScore * 0.12 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
       ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
@@ -1906,6 +1916,7 @@ export function rankGeneratedTweets(
       (creativeRiskScore * 0.08) -
       (slopScore * 0.18) -
       (formulaicCadenceScore * 0.1) -
+      (technicalElevationScore.banalOpsScore * 0.18) -
       (authorityProofPenalty * 0.16)
     );
 
@@ -1927,6 +1938,8 @@ export function rankGeneratedTweets(
       (scoreProvenance.creativity || 0) +
       (scoreProvenance.holdout || 0) +
       (scoreProvenance.antiSlop || 0) +
+      (scoreProvenance.technicalElevation || 0) +
+      (scoreProvenance.banalOpsTexture || 0) +
       (scoreProvenance.audienceSegment || 0) +
       (scoreProvenance.promptStrategy || 0) +
       (scoreProvenance.portfolio || 0) +

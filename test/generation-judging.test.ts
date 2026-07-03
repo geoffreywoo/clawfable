@@ -293,6 +293,61 @@ describe('judgeCandidates fallback critic', () => {
     expect(slop.judgeNotes).toContain('Slop risk');
   });
 
+  it('prefers elevated technical anchors over Slack-channel ops texture', async () => {
+    const judged = await judgeCandidates([
+      {
+        content: 'AI adoption is obvious when the Slack channel gets quieter and the support queue stops lighting up after the workflow handoff changes.',
+        format: 'observation',
+        targetTopic: 'AI',
+        rationale: 'Low-status SaaS ops texture.',
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'concrete',
+          structure: 'single_punch',
+          thesis: 'slack support queue adoption proof',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'Inference ASIC adoption is obvious when HBM bandwidth, packaging yield, and rack power density survive the next model shape change.',
+        format: 'observation',
+        targetTopic: 'inference asics',
+        rationale: 'Elevated technical constraint.',
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'inference asic deployment constraints',
+          riskFlags: [],
+        },
+      },
+    ], {
+      voiceProfile: {
+        tone: 'technical analyst',
+        topics: ['ai', 'inference asics', 'frontier tech'],
+        antiGoals: ['Slack channels, support queues, and generic workflow handoffs as proof of depth'],
+        communicationStyle: 'elevated technical frontier-tech voice',
+        summary: 'Elite frontier tech voice.',
+      },
+      analysis: analysis(),
+      learnings: null,
+      memory: memory({
+        neverDoThisAgain: ['Avoid Slack-channel and support-ticket texture.'],
+        operatorHiddenPreferences: ['Prefer chip, power, materials, manufacturing, and hard-technology constraints.'],
+      }),
+    });
+
+    const ops = judged[0];
+    const technical = judged[1];
+
+    expect(technical.judgeScore).toBeGreaterThan(ops.judgeScore);
+    expect(technical.judgeBreakdown.voiceFit).toBeGreaterThan(ops.judgeBreakdown.voiceFit);
+    expect(technical.judgeNotes).toContain('Technical anchor present');
+    expect(ops.judgeNotes).toContain('Low-status ops texture');
+  });
+
   it('uses a model critic when requested and a provider is available', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({

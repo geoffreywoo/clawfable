@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, assessTasteRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
+import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -135,6 +135,39 @@ describe('virality signals', () => {
 
     expect(generic).toBeGreaterThanOrEqual(0.55);
     expect(concrete).toBeLessThan(0.25);
+  });
+
+  it('treats banal SaaS ops texture as weaker than hard technical anchors', () => {
+    const ops = scoreSlopRisk(
+      'AI adoption gets real when a Slack channel gets quieter and the support queue stops lighting up after the workflow handoff changes.',
+      {
+        hook: 'observation',
+        tone: 'analytical',
+        specificity: 'concrete',
+        structure: 'single_punch',
+        thesis: 'slack support queue adoption proof',
+        riskFlags: [],
+      },
+    );
+    const technical = scoreSlopRisk(
+      'Inference ASIC adoption gets real when HBM bandwidth, packaging yield, and rack power density survive the next model shape change.',
+      {
+        hook: 'observation',
+        tone: 'analytical',
+        specificity: 'tactical',
+        structure: 'single_punch',
+        thesis: 'inference asic deployment constraints',
+        riskFlags: [],
+      },
+    );
+    const opsElevation = assessTechnicalElevation('Slack channel, support ticket, dashboard, workflow handoff.');
+    const technicalElevation = assessTechnicalElevation('HBM bandwidth, packaging yield, power density, thermal limits.');
+
+    expect(ops).toBeGreaterThan(technical);
+    expect(opsElevation.banalOpsScore).toBeGreaterThan(0);
+    expect(opsElevation.hasHardTechAnchor).toBe(false);
+    expect(technicalElevation.technicalScore).toBeGreaterThan(0);
+    expect(technicalElevation.hasHardTechAnchor).toBe(true);
   });
 
   it('separates formulaic cadence from concrete operator evidence', () => {

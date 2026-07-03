@@ -4,7 +4,7 @@ import type { VoiceProfile } from './soul-parser';
 import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, PersonalizationMemory } from './types';
 import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
-import { scoreSlopRisk } from './virality-signals';
+import { assessTechnicalElevation, scoreSlopRisk } from './virality-signals';
 
 type JudgeContext = {
   voiceProfile?: VoiceProfile;
@@ -178,18 +178,30 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
   });
   const memoryFit = scoreContextualMemoryFit(candidate, featureTags, context);
   const slopRisk = scoreSlopRisk(candidate.content, featureTags);
+  const technicalElevation = assessTechnicalElevation(candidate.content);
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
-  const novelty = clamp((featureTags.riskFlags.includes('thin') ? 0.48 : 0.68) - (slopRisk >= 0.45 ? 0.14 : 0));
+  const technicalBoost = technicalElevation.technicalScore * 0.5;
+  const banalPenalty = technicalElevation.banalOpsScore * 0.65;
+  const novelty = clamp((featureTags.riskFlags.includes('thin') ? 0.48 : 0.68) - (slopRisk >= 0.45 ? 0.14 : 0) + technicalBoost - banalPenalty);
   const audienceFit = clamp(
     (/\b(founder|operator|builder|market|product|ai|startup)\b/i.test(candidate.content) ? 0.72 : 0.58)
     + (memoryFit.notes.includes('memory-aligned conversation value') ? 0.04 : 0)
+    + technicalElevation.technicalScore * 0.35
+    - technicalElevation.banalOpsScore * 0.45
   );
   const policySafety = clamp(
     1 - (featureTags.riskFlags.length * 0.12) - (memoryFit.penalty * 0.5) - (slopRisk * 0.18) + (memoryFit.boost * 0.25),
     0.32,
     0.9,
   );
-  const voiceFit = clamp(scoreContextualVoiceFit(candidate, featureTags, context) - (slopRisk >= 0.5 ? 0.12 : slopRisk * 0.08), 0.34, 0.9);
+  const voiceFit = clamp(
+    scoreContextualVoiceFit(candidate, featureTags, context)
+    - (slopRisk >= 0.5 ? 0.12 : slopRisk * 0.08)
+    + technicalElevation.technicalScore * 0.25
+    - technicalElevation.banalOpsScore * 0.55,
+    0.34,
+    0.9,
+  );
   const overall = clamp(
     voiceFit * 0.28 +
     clamp(clarity + (memoryFit.notes.includes('memory-aligned structure') ? 0.04 : 0)) * 0.18 +
@@ -199,6 +211,11 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
   );
   const memoryNote = memoryFit.notes.length > 0 ? ` ${memoryFit.notes.slice(0, 2).join('; ')}.` : '';
   const slopNote = slopRisk >= 0.45 ? ` Slop risk ${slopRisk.toFixed(2)}: too generated/formulaic.` : '';
+  const elevationNote = technicalElevation.hasBanalOpsTexture && !technicalElevation.hasHardTechAnchor
+    ? ' Low-status ops texture: needs a harder technical/industrial anchor.'
+    : technicalElevation.hasHardTechAnchor
+      ? ' Technical anchor present.'
+      : '';
 
   return {
     ...candidate,
@@ -213,7 +230,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
       audienceFit: Number(audienceFit.toFixed(3)),
       policySafety: Number(policySafety.toFixed(3)),
     },
-    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}`,
+    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}${elevationNote}`,
   };
 }
 
@@ -310,6 +327,8 @@ Ground rules:
 - Top formats: ${analysis.engagementPatterns.topFormats.join(', ') || 'unknown'}
 - Top topics: ${analysis.engagementPatterns.topTopics.join(', ') || 'unknown'}
 - Public taste feedback: if a commenter could say this sounds like AI slop, generated, consultant-polished, or ChatGPT-ish, score voiceFit/novelty/overall harshly.
+- For @geoffreywoo / frontier-tech taste, "concrete" must be elevated and technical. Slack channels, support tickets, dashboards, calendar invites, generic workflows, handoffs, renamed owners, and support queues are weak SaaS-ops texture, not sufficient proof.
+- Reward elite technical anchors: inference ASIC constraints, chip packaging/yield, memory bandwidth, power delivery, grid interconnects, reactor/fuel-cycle details, separation chemistry, metrology, tolerances, robotics failure modes, launch/radiation/thermal constraints, and industrial supply-chain qualification.
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
@@ -399,7 +418,8 @@ Rules:
 - Increase clarity, specificity, or punch.
 - Remove weak throat-clearing.
 - Remove AI slop tells: generic advice voice, symmetrical abstraction stacks, "the real edge", "most people miss", "not X but Y", and tidy consultant cadence.
-- Add one concrete anchor if missing: mechanism, number, constraint, named technology, material/process detail, failure mode, or operator observation.
+- Add one elevated technical anchor if missing: mechanism, number, constraint, named technology, material/process detail, failure mode, or technical/industrial operating observation.
+- Do not use Slack, support tickets, dashboards, calendar invites, generic workflow handoffs, or "renamed owner" as the main proof. For frontier-tech drafts, replace that texture with compute, energy, materials, manufacturing, robotics, or space constraints.
 - Do not turn every tweet into the same template.
 - Stay in voice: ${voiceProfile.tone}.
 ${memory?.operatorHiddenPreferences?.length ? `Operator preferences: ${memory.operatorHiddenPreferences.slice(0, 3).join(' | ')}` : ''}

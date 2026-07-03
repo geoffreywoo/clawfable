@@ -58,6 +58,7 @@ export function applyAccountTopicPolicy(
       ...voiceProfile.antiGoals,
       'crypto-first content unless it is directly tied to AI infrastructure, energy, compute, industrial capacity, or frontier technology',
       'AI slop: polished generic advice, consultant cadence, template hooks, symmetrical abstraction stacks, and posts that sound generated',
+      'low-status SaaS operations texture: Slack channels, calendar invites, support tickets, dashboards, generic workflows, and "who owns the handoff" as proof of depth',
     ]),
     communicationStyle: `${voiceProfile.communicationStyle}
 
@@ -71,8 +72,11 @@ export function applyAccountTopicPolicy(
 - Treat public feedback that the account sounds like "AI slop" as a standing rejection of the current voice pattern.
 - Do not write polished generic advice, engagement bait, founder-bro abstraction stacks, or posts that sound like a prompt output.
 - Avoid template openings like "the real edge", "most people miss", "not X but Y", "the winners will be", "here's the thing", and neat numbered frameworks unless a concrete observed detail makes the sentence impossible to genericize.
+- Avoid low-status SaaS-ops texture as the main anchor: Slack channels, support queues/tickets, calendar invites, dashboards, generic workflow handoffs, Looms, Zendesk, "renamed owner", and "who changed the workflow" are now considered weak proof.
+- The account should sound more elevated, technical, and elite: write from the level of compute constraints, chip packaging, power delivery, grid interconnects, reactor/fuel-cycle bottlenecks, separation chemistry, metrology, factory tolerances, robotics exception handling, launch/radiation/thermal constraints, and industrial supply chains.
 - Prefer blunt, compressed, slightly uneven human phrasing. One hard observation beats a perfect paragraph.
-- Every draft needs at least one non-generic anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or lived operator observation.
+- Every draft needs at least one high-status technical anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or technical/industrial operating observation.
+- A generic "workflow changed" or "support queue got quieter" does not count as a sufficient anchor for @geoffreywoo.
 - If a commenter could plausibly say "this sounds like ChatGPT wrote it", reject the draft before it reaches the queue.`,
   };
 }

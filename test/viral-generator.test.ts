@@ -931,7 +931,7 @@ describe('generateViralBatch', () => {
     expect(batch).toHaveLength(3);
     expect(memoryAligned).toBeDefined();
     expect(memoryAligned!.targetTopic).toBe('AI agents');
-    expect(memoryAligned!.content).toContain('Changed behavior is harder to fake.');
+    expect(memoryAligned!.content).toContain('Technical proof is harder to fake.');
     expect(memoryAligned!.scoreProvenance?.memoryAlignment).toBeGreaterThan(0);
   });
 

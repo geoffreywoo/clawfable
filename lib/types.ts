@@ -222,6 +222,8 @@ export interface CandidateScoreProvenance {
   creativity?: number;
   holdout?: number;
   antiSlop?: number;
+  technicalElevation?: number;
+  banalOpsTexture?: number;
   authorityProof?: number;
   audienceSegment?: number;
   promptStrategy?: number;

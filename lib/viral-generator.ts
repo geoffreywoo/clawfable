@@ -373,7 +373,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
 
   if (preferences.includes('specificity')) {
     templates.push({
-      content: `The ${topic} take I trust names the behavior change.\n\nA buyer switches tools.\nA team rewrites the handoff.\nA user comes back without a reminder.\n\nVibes are cheap. Changed behavior is harder to fake.`,
+      content: `The ${topic} take I trust names the technical constraint.\n\nYield moved.\nPower got cheaper.\nA tolerance held at scale.\nA failure mode disappeared.\n\nVibes are cheap. Technical proof is harder to fake.`,
       format: 'analysis',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: operator preferences favor specificity, evidence, and concrete examples.',
@@ -382,7 +382,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
         tone: 'analytical',
         specificity: 'concrete',
         structure: 'list',
-        thesis: `${topic.toLowerCase()} trust comes from behavior evidence`,
+        thesis: `${topic.toLowerCase()} trust comes from technical evidence`,
         riskFlags: [],
       },
       judgeScore: 0.82,
@@ -394,13 +394,13 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
         audienceFit: 0.8,
         policySafety: 0.9,
       },
-      judgeNotes: 'Memory-aligned fallback: concrete behavior evidence with readable structure.',
+      judgeNotes: 'Memory-aligned fallback: concrete technical evidence with readable structure.',
     });
   }
 
   if (preferences.includes('structure')) {
     templates.push({
-      content: `${topic} gets clearer when the argument names:\n\n- what changed\n- who felt it first\n- which old habit broke\n- what artifact would prove it next week\n\nSkip the artifact and it turns into vibes.`,
+      content: `${topic} gets clearer when the argument names:\n\n- what constraint moved\n- which bottleneck broke\n- what test passed\n- what artifact would prove it next week\n\nSkip the artifact and it turns into vibes.`,
       format: 'long_form',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: operator edits favor line-break structure and scannable reasoning.',
@@ -409,7 +409,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
         tone: 'analytical',
         specificity: 'tactical',
         structure: 'list',
-        thesis: `${topic.toLowerCase()} arguments improve with structure`,
+        thesis: `${topic.toLowerCase()} arguments improve with technical structure`,
         riskFlags: [],
       },
       judgeScore: 0.8,
@@ -427,7 +427,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
 
   if (preferences.includes('conversation')) {
     templates.push({
-      content: `${topic} question I would actually want answered:\n\nwhat repeated behavior would prove the market moved, even if nobody posted a chart?`,
+      content: `${topic} question I would actually want answered:\n\nwhat technical artifact would prove the curve moved, even if nobody posted a chart?`,
       format: 'question',
       targetTopic: topic,
       rationale: 'Memory-aligned template fallback: conversation lessons favor substantive questions over cheap engagement bait.',
@@ -436,7 +436,7 @@ function buildMemoryFallbackTemplates(topic: string, memory: PersonalizationMemo
         tone: 'analytical',
         specificity: 'tactical',
         structure: 'question_led',
-        thesis: `${topic.toLowerCase()} movement should be tested through behavior`,
+        thesis: `${topic.toLowerCase()} movement should be tested through technical artifacts`,
         riskFlags: [],
       },
       judgeScore: 0.78,
@@ -544,34 +544,34 @@ function buildFallbackTemplates(
       switch (format) {
         case 'hot_take':
           addTemplate({
-            content: `${claim}\n\nWatch for the person who changes a calendar, budget, or handoff before they update the deck.`,
+            content: `${claim}\n\nWatch for the first constraint that shows up in physics, capex, permitting, throughput, yield, or power before it shows up in the deck.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: behavior-change claim with an operator proof check.',
+            rationale: 'Template fallback: behavior-change claim with a technical constraint proof check.',
           });
           break;
         case 'analysis':
           addTemplate({
-            content: `${claim}\n\nThe proof is usually unglamorous: a shorter review loop, a renamed owner, a deleted workaround, or a support queue that gets quieter.\n\n${angle}.`,
+            content: `${claim}\n\nThe proof is usually unglamorous: tighter tolerances, lower scrap, better yield, cheaper watts, shorter cycle time, or one bottleneck nobody can route around.\n\n${angle}.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: structured analysis anchored to operator evidence.',
+            rationale: 'Template fallback: structured analysis anchored to technical operating evidence.',
           });
           break;
         case 'observation':
           addTemplate({
-            content: `${topic} observation:\n\nwhen the work is real, the language gets less impressive.\n\nPeople stop saying "platform shift" and start asking who owns the next handoff.`,
+            content: `${topic} observation:\n\nwhen the work is real, the language gets less impressive.\n\nPeople stop saying "platform shift" and start asking what breaks at temperature, scale, voltage, latency, or yield.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: short observational frame built for reply and bookmark energy.',
+            rationale: 'Template fallback: short technical-observation frame built for reply and bookmark energy.',
           });
           break;
         case 'question':
           addTemplate({
-            content: `${topic} question:\n\nwhat is the smallest artifact that would make you believe the behavior changed?\n\nCalendar invite, budget line, support ticket, shipped diff, something else?`,
+            content: `${topic} question:\n\nwhat is the smallest technical artifact that would make you believe the curve is real?\n\nYield data, power budget, tolerance stack, failure log, qualification test, something else?`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: question-led prompt designed to trigger thoughtful replies.',
+            rationale: 'Template fallback: question-led prompt designed to trigger technical replies.',
           });
           break;
         case 'data_point':
@@ -592,10 +592,10 @@ function buildFallbackTemplates(
           break;
         case 'long_form':
           addTemplate({
-            content: `${topic} discourse gets too clean too fast.\n\nI would rather know:\n\n- who changed the workflow\n- what old habit broke\n- which owner got renamed\n- what support ticket stopped appearing\n\nThat is where the actual adoption usually leaks out first.`,
+            content: `${topic} discourse gets too clean too fast.\n\nI would rather know:\n\n- what constraint moved\n- what tolerance got tighter\n- what failure mode disappeared\n- what cost curve changed\n- what test got passed\n\nThat is where the actual adoption usually leaks out first.`,
             format,
             targetTopic: topic,
-            rationale: 'Template fallback: longer proof-seeking argument for depth-oriented readers.',
+            rationale: 'Template fallback: longer proof-seeking argument for technical readers.',
           });
           break;
         default:
