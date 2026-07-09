@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Clawfable — Autopilot an authentic X voice toward attention',
     description: 'Pilot an X account as an authentic extension of its owner’s voice.',
-    creator: '@geoffreywoo',
+    creator: '@geoffwoo',
   },
 };
 

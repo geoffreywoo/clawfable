@@ -3,8 +3,8 @@ import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopi
 import type { AgentLearnings } from '../lib/types';
 
 describe('account topic policy', () => {
-  it('shifts @geoffreywoo away from crypto and toward frontier tech', () => {
-    const profile = applyAccountTopicPolicy('@geoffreywoo', {
+  it('shifts @geoffwoo away from crypto and toward frontier tech', () => {
+    const profile = applyAccountTopicPolicy('@geoffwoo', {
       tone: 'analyst',
       topics: ['ai', 'crypto', 'startup'],
       antiGoals: [],
@@ -19,6 +19,11 @@ describe('account topic policy', () => {
       'fusion',
       'fission',
       'rare earth minerals',
+      'tungsten and critical minerals',
+      'antimony',
+      'gallium and germanium',
+      'graphite anodes',
+      'fluorspar and semiconductor chemicals',
       'robotics',
       'automated manufacturing',
       're-industrialization',
@@ -27,14 +32,15 @@ describe('account topic policy', () => {
       'deep tech',
     ]));
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
-    expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffreywoo');
+    expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffwoo');
     expect(profile.communicationStyle).toContain('low-status SaaS-ops texture');
     expect(profile.communicationStyle).toContain('compute constraints');
+    expect(profile.communicationStyle).toContain('tungsten carbide tooling');
     expect(profile.antiGoals.join(' ')).toContain('ai slop');
     expect(profile.antiGoals.join(' ')).toContain('slack channels');
   });
 
-  it('filters crypto-only learned priors for @geoffreywoo', () => {
+  it('filters crypto-only learned priors for @geoffwoo', () => {
     const learnings = {
       agentId: 'agent-1',
       updatedAt: new Date().toISOString(),
@@ -55,7 +61,7 @@ describe('account topic policy', () => {
       ],
     } satisfies AgentLearnings;
 
-    const filtered = applyAccountLearningPolicy('geoffreywoo', learnings);
+    const filtered = applyAccountLearningPolicy('geoffwoo', learnings);
 
     expect(filtered?.topicRankings.map((entry) => entry.topic)).toEqual(['robotics']);
     expect(filtered?.manualTopicProfile?.map((entry) => entry.topic)).toEqual(['space']);
@@ -74,9 +80,10 @@ describe('account topic policy', () => {
     expect(applyAccountTopicPolicy('@someoneelse', profile)).toBe(profile);
   });
 
-  it('suppresses crypto-only topics only for @geoffreywoo', () => {
+  it('suppresses crypto-only topics for both current and legacy Geoffrey handles', () => {
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'crypto')).toBe(true);
     expect(shouldSuppressTopicForAccount('@geoffreywoo', 'crypto')).toBe(true);
-    expect(shouldSuppressTopicForAccount('@geoffreywoo', 'robotics')).toBe(false);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'robotics')).toBe(false);
     expect(shouldSuppressTopicForAccount('@someoneelse', 'crypto')).toBe(false);
   });
 });

@@ -2074,7 +2074,7 @@ ${promptSoul}`);
 - Handle: @${agent.handle}
 - Name: ${agent.name}
 - Any references to "${agent.handle}", "${agent.name}", "@${agent.handle}", or $${agent.handle.replace(/ai$/i, '')} are about YOU.
-- Your human creator is Geoffrey Woo (@geoffreywoo). Show respect if he tweets at you.`);
+- Your human creator is Geoffrey Woo (@geoffwoo). Show respect if he tweets at you.`);
 
   systemParts.push(`\n## YOUR VOICE
 - Tone: ${voiceProfile.tone}
@@ -2572,7 +2572,7 @@ async function generateMarketingTweets(
       'Survivability guardrails: posting jitter, content diversity, duplicate detection, daily caps',
       'Prompt injection defense: blocks attempts to manipulate auto-replies into executing commands',
       'Open source SOULs at clawfable.com/souls — fork any agent\'s personality in one click',
-      'Built by @geoffreywoo',
+      'Built by @geoffwoo',
       'clawfable.com',
     ];
 

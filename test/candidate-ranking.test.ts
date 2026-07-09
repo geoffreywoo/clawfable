@@ -443,6 +443,78 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(concrete!.content);
   });
 
+  it('caps high-engagement-looking Geoffrey drafts when native voice and cringe fail', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'inference asics', 'fusion', 'fission', 'rare earth minerals', 'robotics', 'space'],
+      antiGoals: ['generic hype', 'low-status SaaS-ops texture'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffreywoo: compressed technical frontier-tech voice.',
+      summary: 'Geoffrey writes about industrial capacity, AI infrastructure, energy, and hard tech constraints.',
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'The real edge in AI infrastructure is not more models, but better feedback loops. Most people miss that the winners will compound learning faster.',
+        format: 'hot_take',
+        targetTopic: 'AI infrastructure',
+        rationale: 'Looks viral but is topic-swapped AI advice.',
+        judgeScore: 0.96,
+        judgeBreakdown: {
+          overall: 0.96,
+          voiceFit: 0.9,
+          clarity: 0.88,
+          novelty: 0.86,
+          audienceFit: 0.9,
+          policySafety: 0.96,
+        },
+        featureTags: {
+          hook: 'contrarian',
+          tone: 'analytical',
+          specificity: 'abstract',
+          structure: 'argument',
+          thesis: 'ai infrastructure feedback loops compound',
+          riskFlags: [],
+        },
+      },
+      {
+        content: 'Inference ASIC adoption is turning into a rack power problem. HBM bandwidth can look fine while packaging yield and thermal density decide whether tokens per watt moves.',
+        format: 'hot_take',
+        targetTopic: 'Inference ASICs',
+        rationale: 'Technical object, hidden constraint, non-obvious implication.',
+        judgeScore: 0.78,
+        judgeBreakdown: {
+          overall: 0.78,
+          voiceFit: 0.78,
+          clarity: 0.78,
+          novelty: 0.78,
+          audienceFit: 0.78,
+          policySafety: 0.92,
+        },
+        featureTags: {
+          hook: 'observation',
+          tone: 'analytical',
+          specificity: 'tactical',
+          structure: 'single_punch',
+          thesis: 'inference asics rack power packaging yield thermal density',
+          riskFlags: [],
+        },
+      },
+    ], context);
+
+    const generic = ranked.find((candidate) => candidate.content.includes('real edge'));
+    const technical = ranked.find((candidate) => candidate.content.includes('rack power problem'));
+
+    expect(generic).toBeDefined();
+    expect(technical).toBeDefined();
+    expect(generic!.confidenceScore).toBeLessThanOrEqual(0.39);
+    expect(generic!.scoreProvenance.nativeVoice).toBeLessThan(0);
+    expect(generic!.scoreProvenance.cringeRisk).toBeLessThan(0);
+    expect(technical!.scoreProvenance.technicalCredibility).toBeGreaterThan(generic!.scoreProvenance.technicalCredibility || 0);
+    expect(technical!.confidenceScore).toBeGreaterThan(generic!.confidenceScore);
+    expect(ranked[0].content).toBe(technical!.content);
+  });
+
   it('does not let a high headline judge score hide weak critic dimensions', () => {
     const ranked = rankGeneratedTweets([
       {

@@ -9,7 +9,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "audit:geoffrey": "tsx scripts/audit-geoffrey-generation.ts",
+    "seeds:geoffrey": "tsx scripts/list-frontier-seeds.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",

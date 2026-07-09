@@ -29,6 +29,10 @@ export function formatDecisionProvenanceSummary(provenance: CandidateScoreProven
   ];
 
   const learnedAdjustments = [
+    adjustmentLabel('native voice', provenance.nativeVoice),
+    adjustmentLabel('technical credibility', provenance.technicalCredibility),
+    adjustmentLabel('cringe risk', provenance.cringeRisk),
+    adjustmentLabel('status texture risk', provenance.statusTextureRisk),
     adjustmentLabel('operator-anchor fallback memory', provenance.operatorAnchorOutcome),
     adjustmentLabel('generic fallback-shape memory', provenance.fallbackShapeOutcome),
     adjustmentLabel('voice anchor', provenance.operatorAnchor),
@@ -44,6 +48,10 @@ export function summarizeDecisionLearningAdjustments(provenance: CandidateScoreP
   if (!provenance) return null;
 
   const learnedAdjustments = [
+    adjustmentLabel('native voice', provenance.nativeVoice),
+    adjustmentLabel('technical credibility', provenance.technicalCredibility),
+    adjustmentLabel('cringe risk', provenance.cringeRisk),
+    adjustmentLabel('status texture risk', provenance.statusTextureRisk),
     adjustmentLabel('operator-anchor fallback memory', provenance.operatorAnchorOutcome),
     adjustmentLabel('generic fallback-shape memory', provenance.fallbackShapeOutcome),
     adjustmentLabel('voice anchor', provenance.operatorAnchor),

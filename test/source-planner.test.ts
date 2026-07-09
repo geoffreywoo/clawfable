@@ -208,6 +208,33 @@ describe('source planner', () => {
     expect(plan.laneCounts.core_explore_fallback).toBeGreaterThanOrEqual(0);
   });
 
+  it('adds Geoffrey frontier-tech chokehold seeds to core exploration slots', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 8,
+      autonomyMode: 'balanced',
+      trendMixTarget: 45,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'tungsten and critical minerals', 'rare earth minerals', 'frontier tech'],
+        antiGoals: ['low-status SaaS-ops texture'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffreywoo: compressed hard-tech constraints.',
+        summary: 'Geoffrey writes about AI infrastructure, industrial capacity, and critical mineral chokeholds.',
+      },
+      learnings: null,
+      trending: [],
+      fallbackTopics: [],
+    });
+
+    const seededSlots = plan.slots.filter((slot) => slot.ideaSeed);
+
+    expect(seededSlots.length).toBeGreaterThan(0);
+    expect(seededSlots.some((slot) => slot.ideaSeed?.id === 'tungsten-hardmetal')).toBe(true);
+    expect(seededSlots[0]?.ideaSeedBrief).toContain('->');
+    expect(seededSlots.map((slot) => slot.ideaSeed?.technicalObject).join(' ')).toContain('tungsten');
+    expect(seededSlots.map((slot) => slot.plannerReason).join(' ')).toContain('Frontier seed');
+  });
+
   it('reserves a small lane for adjacent trend exploration in growth modes', () => {
     const plan = buildSourcePlannerPlan({
       count: 10,

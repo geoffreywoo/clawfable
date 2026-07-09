@@ -175,6 +175,9 @@ export interface CandidateFeatureTags {
   structure: TweetStructureType;
   thesis: string;
   riskFlags: string[];
+  domainTags?: string[];
+  technicalDepth?: number;
+  statusTextureRisk?: number;
 }
 
 export interface CandidateJudgeBreakdown {
@@ -224,6 +227,10 @@ export interface CandidateScoreProvenance {
   antiSlop?: number;
   technicalElevation?: number;
   banalOpsTexture?: number;
+  nativeVoice?: number;
+  technicalCredibility?: number;
+  cringeRisk?: number;
+  statusTextureRisk?: number;
   authorityProof?: number;
   audienceSegment?: number;
   promptStrategy?: number;
@@ -371,6 +378,8 @@ export interface Tweet {
   approvedAt?: string | null;
   postedAt?: string | null;
   rationale?: string | null;
+  generationProvider?: 'openai' | 'anthropic' | 'local' | null;
+  generationModel?: string | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;

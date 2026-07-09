@@ -18,6 +18,7 @@ import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 import { normalizeGeneratedTweetContent } from './tweet-text';
 import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt, hasPersonalizationMemoryPrompt } from './personalization-memory-prompt';
+import { buildGeoffreyNativeWritingBrief, isGeoffreyVoiceProfile } from './account-taste';
 import {
   buildMediaBrief,
   buildPostPortfolioPlan,
@@ -183,6 +184,8 @@ export interface ProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationProvider?: 'openai' | 'anthropic' | 'local' | null;
+  generationModel?: string | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   creativeLane?: CreativeLane | null;
@@ -692,6 +695,10 @@ Commenters should not be able to tell this was generated.
 - Imperfect human rhythm is better than symmetrical consultant prose. Vary sentence shape. Use fragments when the voice supports it.
 - If a draft could fit any AI/startup account after swapping the topic noun, throw it away.`);
 
+  if (isGeoffreyVoiceProfile(voiceProfile)) {
+    parts.push(`\n${buildGeoffreyNativeWritingBrief()}`);
+  }
+
   // Time-of-day awareness: match content tone to audience mood
   const hour = new Date().getUTCHours();
   const timeSlot =
@@ -722,7 +729,7 @@ ${soulMd}`);
 - Topics: ${voiceProfile.topics.join(', ')}
 - Communication style: ${voiceProfile.communicationStyle}
 - Anti-goals (never do these): ${voiceProfile.antiGoals.join('; ') || 'none specified'}
-- Creator: Geoffrey Woo (@geoffreywoo) — your human creator who built you`);
+- Creator: Geoffrey Woo (@geoffwoo) — your human creator who built you`);
 
   const ep = analysis.engagementPatterns;
   parts.push(`\n## ENGAGEMENT DATA
@@ -932,7 +939,7 @@ ${soulMd}`);
     parts.push(`\n## BANDIT SLOT PLAN (follow this exactly)
 This batch is allocated by a multi-armed bandit controller. Each slot is an actual traffic bet, not a suggestion.`);
     for (const plan of slotPlan) {
-      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | style=${plan.styleMode} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''} | ${plan.rationale}`);
+      parts.push(`- Slot ${plan.slot}: ${plan.mode.toUpperCase()} | lane=${plan.sourceLane} | style=${plan.styleMode} | format=${plan.format} | topic=${plan.topic} | length=${plan.length} | hook=${plan.hook} | tone=${plan.tone} | specificity=${plan.specificity} | structure=${plan.structure}${plan.trendHeadline ? ` | trend="${plan.trendHeadline.slice(0, 80)}"` : ''}${plan.ideaSeedBrief ? ` | seed="${plan.ideaSeedBrief.slice(0, 220)}"` : ''} | ${plan.rationale}`);
     }
   }
 
@@ -1090,6 +1097,8 @@ export async function generateViralBatch(
         });
         return {
           ...tweet,
+          generationProvider: 'local' as const,
+          generationModel: 'operator-anchor-fallback',
           sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
           styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
           creativeLane,
@@ -1141,10 +1150,21 @@ export async function generateViralBatch(
       slot,
       mediaExperimentRate: effectiveStyle.mediaExperimentRate ?? DEFAULT_STYLE.mediaExperimentRate,
     });
+    if (isGeoffreyVoiceProfile(voiceProfile)) {
+      const topic = plan?.topic || sourcePlan.slots[index]?.targetTopic || 'frontier tech';
+      const laneLabel = lane.replace(/_/g, ' ');
+      const roleLabel = portfolioRole.replace(/_/g, ' ');
+      const sourceLabel = sourcePlan.slots[index]?.sourceLane?.replace(/_/g, ' ') || 'core';
+      const trend = plan?.trendHeadline || sourcePlan.slots[index]?.trendHeadline;
+      const seedBrief = plan?.ideaSeedBrief || sourcePlan.slots[index]?.ideaSeedBrief;
+      return `${slot}|topic:${topic}|intent:${laneLabel}/${roleLabel}|source:${sourceLabel}|brief:${seedBrief || 'technical object -> hidden constraint -> non-consensus implication -> compressed human phrasing'}${trend ? `|live context:${trend.slice(0, 90)}` : ''}`;
+    }
+
     return plan
       ? `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|${plan.holdout ? 'holdout:1' : 'holdout:0'}|${plan.mode}|${plan.format}|${plan.topic}|${plan.hook}|${plan.tone}|${plan.specificity}|${plan.structure}`
       : `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|holdout:0|auto|any|any|any|any|any|any`;
   }).join('\n');
+  const geoffreyPromptMode = isGeoffreyVoiceProfile(voiceProfile);
   const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars; represent line breaks as standard JSON escaped newlines, never as visible literal backslash-n text)
@@ -1161,9 +1181,10 @@ export async function generateViralBatch(
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
-${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
+${slotPlan.length > 0 && !geoffreyPromptMode ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
+${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Each draft must have a real technical object, hidden constraint, and non-consensus implication.` : ''}
 
-Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure
+Slot guide schema: ${geoffreyPromptMode ? 'slot|topic|intent|source|brief' : 'slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure'}
 ${creativeSlotGuide}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;
@@ -1249,6 +1270,8 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             format,
             targetTopic,
             rationale: parsed.rationale || slotAssignment?.rationale || '',
+            generationProvider: response.provider,
+            generationModel: response.model,
             sourceLane: slotAssignment?.sourceLane || null,
             styleMode,
             creativeLane,

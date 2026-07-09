@@ -49,26 +49,28 @@ export interface GenerateTextResult {
 }
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
-const OPENAI_LATEST_MODEL = 'gpt-5.5';
+const OPENAI_COPY_MODEL = 'gpt-5.6';
+const OPENAI_QUALITY_MODEL = 'gpt-5.5';
 const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
-const OAI_LATEST: AiModelTarget = { provider: 'openai', model: OPENAI_LATEST_MODEL };
+const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL };
+const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
 const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_QUALITY_MODEL };
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
-  tweet_generation: [OAI_LATEST, CLAUDE_QUALITY],
-  creative_variant: [OAI_LATEST, CLAUDE_QUALITY],
-  bulk_judgment: [OAI_LATEST, CLAUDE_QUALITY],
-  final_judgment: [OAI_LATEST, CLAUDE_QUALITY],
-  reply_generation: [OAI_LATEST, CLAUDE_QUALITY],
-  reply_scoring: [OAI_LATEST, CLAUDE_QUALITY],
-  learning: [OAI_LATEST, CLAUDE_QUALITY],
-  classification: [OAI_LATEST, CLAUDE_QUALITY],
-  soul_generation: [OAI_LATEST, CLAUDE_QUALITY],
-  exceptional: [OAI_LATEST, CLAUDE_QUALITY],
-  default_quality: [OAI_LATEST, CLAUDE_QUALITY],
-  default_fast: [OAI_LATEST, CLAUDE_QUALITY],
+  tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+  creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+  bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+  final_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+  reply_generation: [OAI_QUALITY, CLAUDE_QUALITY],
+  reply_scoring: [OAI_QUALITY, CLAUDE_QUALITY],
+  learning: [OAI_QUALITY, CLAUDE_QUALITY],
+  classification: [OAI_QUALITY, CLAUDE_QUALITY],
+  soul_generation: [OAI_QUALITY, CLAUDE_QUALITY],
+  exceptional: [OAI_QUALITY, CLAUDE_QUALITY],
+  default_quality: [OAI_QUALITY, CLAUDE_QUALITY],
+  default_fast: [OAI_QUALITY, CLAUDE_QUALITY],
 };
 
 function getInputMessages({ prompt, messages }: Pick<GenerateTextOptions, 'prompt' | 'messages'>): AiMessage[] {
@@ -270,6 +272,9 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
       return result;
     } catch (error) {
       lastError = error;
+      if (!IS_TEST_ENV) {
+        console.warn(`[ai] ${target.provider}:${target.model} failed; trying the next configured model.`);
+      }
     }
   }
 

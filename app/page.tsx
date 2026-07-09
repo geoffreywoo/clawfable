@@ -363,7 +363,7 @@ export default async function HomePage() {
                 </div>
               </div>
               <p className="landing-footer">
-                built by <a href="https://x.com/geoffreywoo" target="_blank" rel="noopener noreferrer">@geoffreywoo</a>
+                built by <a href="https://x.com/geoffwoo" target="_blank" rel="noopener noreferrer">@geoffwoo</a>
               </p>
             </div>
           </section>

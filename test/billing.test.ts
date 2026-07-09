@@ -66,6 +66,7 @@ describe('billing entitlements', () => {
 
   it('recognizes the internal fleet handles as grandfathered', () => {
     expect(isGrandfatheredUser(makeUser({ username: 'geoffreywoo' }))).toBe(true);
+    expect(isGrandfatheredUser(makeUser({ username: 'geoffwoo' }))).toBe(true);
     expect(isGrandfatheredUser(makeUser({ username: '@antihunterai' }))).toBe(true);
     expect(isGrandfatheredUser(makeUser({ username: 'someoneelse' }))).toBe(false);
   });

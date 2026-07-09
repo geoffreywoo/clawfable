@@ -8,6 +8,7 @@ import type {
 } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { TrendingTopic } from './trending';
+import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 
 export interface TrendFitScores {
   freshness: number;
@@ -30,6 +31,8 @@ export interface SourcePlannerSlot {
   targetTopic: string;
   trendTopicId: string | null;
   trendHeadline: string | null;
+  ideaSeed: FrontierIdeaSeed | null;
+  ideaSeedBrief: string | null;
   plannerReason: string;
 }
 
@@ -298,6 +301,10 @@ function pickManualTopics(learnings: AgentLearnings | null, fallbackTopics: stri
   return [...new Set([...manualTopics, ...fallbackTopics.map((topic) => normalizeTopic(topic)).filter(Boolean)])].filter(Boolean);
 }
 
+function isBroadFrontierTopic(topic: string): boolean {
+  return /^(ai|frontier tech|deep tech|hard tech|re-industrialization|industrial capacity|critical minerals|rare earth minerals)$/i.test(topic.trim());
+}
+
 export function buildSourcePlannerPlan({
   count,
   autonomyMode,
@@ -354,6 +361,7 @@ export function buildSourcePlannerPlan({
   let adjacentIndex = 0;
   let manualIndex = 0;
   let fallbackIndex = 0;
+  const usedIdeaSeedIds = new Set<string>();
 
   for (let index = 0; index < orderedLanes.length; index++) {
     const lane = orderedLanes[index];
@@ -383,6 +391,21 @@ export function buildSourcePlannerPlan({
       manualIndex++;
     }
 
+    const shouldAttachIdeaSeed =
+      lane === 'core_explore_fallback'
+      || (lane === 'manual_core_exploit' && isBroadFrontierTopic(targetTopic))
+      || (!trendHeadline && isBroadFrontierTopic(targetTopic));
+    const ideaSeed = shouldAttachIdeaSeed
+      ? pickFrontierIdeaSeed({ voiceProfile, targetTopic, slot: index + 1, usedSeedIds: usedIdeaSeedIds })
+      : null;
+    if (ideaSeed) {
+      usedIdeaSeedIds.add(ideaSeed.id);
+      if (lane === 'core_explore_fallback' || isBroadFrontierTopic(targetTopic)) {
+        targetTopic = ideaSeed.topic;
+      }
+      plannerReason = `${plannerReason} Frontier seed: ${ideaSeed.technicalObject} / ${ideaSeed.hiddenConstraint}`;
+    }
+
     slots.push({
       slot: index + 1,
       sourceLane: lane,
@@ -390,6 +413,8 @@ export function buildSourcePlannerPlan({
       targetTopic,
       trendTopicId,
       trendHeadline,
+      ideaSeed,
+      ideaSeedBrief: ideaSeed ? formatFrontierIdeaSeedBrief(ideaSeed) : null,
       plannerReason,
     });
   }

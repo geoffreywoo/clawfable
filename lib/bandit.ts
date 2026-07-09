@@ -89,6 +89,7 @@ export interface BanditSlotPlan {
   coverageCluster: string;
   trendTopicId: string | null;
   trendHeadline: string | null;
+  ideaSeedBrief: string | null;
   rationale: string;
 }
 
@@ -852,6 +853,7 @@ export function buildBanditSlotPlan(
       coverageCluster: `${topic.arm.toLowerCase()}:${selectedHook.arm.toLowerCase()}:${selectedStructure.arm.toLowerCase()}`,
       trendTopicId: sourceSlot?.trendTopicId || null,
       trendHeadline: sourceSlot?.trendHeadline || null,
+      ideaSeedBrief: sourceSlot?.ideaSeedBrief || null,
       rationale: holdout
         ? `${styleRationale} Holdout: deliberately preserve this under-tested creative bet so the policy can learn instead of only exploiting today's winners.`
         : styleRationale,

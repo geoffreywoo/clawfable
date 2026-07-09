@@ -28,6 +28,7 @@ import {
   summarizeReplyMiningInsights,
   summarizeViralityPostmortemMemory,
 } from './growth-engine';
+import { classifyTasteFeedbackReason } from './account-taste';
 
 export { summarizeEditDelta };
 export type { EditDeltaSummary };
@@ -154,6 +155,32 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   }
 
   return sortCounts(counts).slice(0, 4);
+}
+
+function summarizeNativeTasteComplaints(signals: LearningSignal[], feedback: FeedbackEntry[]): string[] {
+  const counts: Record<string, number> = {};
+
+  for (const entry of feedback) {
+    const classified = classifyTasteFeedbackReason(entry.intentSummary || entry.reason, entry.tweetText);
+    for (const hint of classified.preferenceHints) {
+      counts[hint] = (counts[hint] || 0) + 1;
+    }
+  }
+
+  for (const signal of signals) {
+    const reason = signal.reason || '';
+    const classified = classifyTasteFeedbackReason(reason);
+    for (const hint of classified.preferenceHints) {
+      counts[hint] = (counts[hint] || 0) + 1;
+    }
+    for (const hint of readPreferenceHints(signal.metadata)) {
+      if (/native Geoffrey|technical depth|Slack\/support|generated-post cadence|interchangeable/i.test(hint)) {
+        counts[hint] = (counts[hint] || 0) + 1;
+      }
+    }
+  }
+
+  return sortCounts(counts).slice(0, 5);
 }
 
 function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[] {
@@ -554,6 +581,7 @@ export function buildPersonalizationMemory({
   const operatorHiddenPreferences = unique([
     ...summarizeFallbackOutcomePreferences(signals),
     ...summarizeOperatorPreferences(signals, remixPatterns),
+    ...summarizeNativeTasteComplaints(signals, feedback),
   ]).slice(0, 5);
   const fallbackShapeOutcomes = summarizeFallbackShapeOutcomes(signals);
   const editTransformations = summarizeEditTransformations(signals);

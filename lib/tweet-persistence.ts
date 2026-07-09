@@ -21,6 +21,8 @@ export async function createTweetFromGeneratedCandidate(
     format: item.format || null,
     topic: options.topic ?? item.targetTopic ?? 'general',
     rationale: item.rationale,
+    generationProvider: item.generationProvider ?? null,
+    generationModel: item.generationModel ?? null,
     generationMode: item.generationMode,
     candidateScore: item.candidateScore,
     confidenceScore: item.confidenceScore,

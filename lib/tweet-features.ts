@@ -13,6 +13,29 @@ const STOP_WORDS = new Set([
   'were', 'what', 'when', 'which', 'who', 'why', 'will', 'with', 'you', 'your',
 ]);
 
+const HARD_TECH_DOMAINS: Array<{ label: string; terms: string[] }> = [
+  { label: 'compute', terms: ['asic', 'hbm', 'memory bandwidth', 'interconnect', 'nvlink', 'pcie', 'reticle', 'lithography', 'wafer', 'inference chip', 'watts per token'] },
+  { label: 'energy', terms: ['power density', 'substation', 'transformer', 'grid interconnect', 'cooling', 'thermal', 'megawatt', 'gigawatt', 'permitting'] },
+  { label: 'nuclear', terms: ['reactor', 'fusion', 'fission', 'tritium', 'neutron', 'fuel cycle', 'tokamak', 'stellarator', 'plasma'] },
+  { label: 'materials', terms: ['rare earth', 'neodymium', 'dysprosium', 'terbium', 'tungsten', 'tungsten carbide', 'ammonium paratungstate', 'antimony', 'gallium', 'germanium', 'graphite', 'spherical graphite', 'fluorspar', 'hydrofluoric acid', 'rhenium', 'beryllium', 'magnet', 'separation chemistry', 'tailings', 'ore grade', 'refining'] },
+  { label: 'manufacturing', terms: ['yield', 'scrap', 'fixture', 'tolerance', 'metrology', 'cycle time', 'process window', 'qualification', 'factory'] },
+  { label: 'robotics', terms: ['robotics', 'servo', 'actuator', 'end effector', 'gripper', 'motion planning', 'force control'] },
+  { label: 'space', terms: ['launch', 'propellant', 'vacuum', 'radiation', 'thermal cycling', 'ground station', 'delta-v', 'payload'] },
+  { label: 'industrial_capacity', terms: ['supply chain qualification', 'industrial base', 'capex', 'lead time', 'commissioning', 'procurement'] },
+];
+
+const LOW_STATUS_TEXTURE = [
+  'slack',
+  'support queue',
+  'support ticket',
+  'dashboard',
+  'calendar invite',
+  'workflow',
+  'handoff',
+  'zendesk',
+  'loom',
+];
+
 function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
@@ -110,6 +133,30 @@ export function extractRiskFlags(content: string): string[] {
   return unique(flags);
 }
 
+export function extractDomainTags(content: string): string[] {
+  const lower = content.toLowerCase();
+  return HARD_TECH_DOMAINS
+    .filter((domain) => domain.terms.some((term) => lower.includes(term)))
+    .map((domain) => domain.label);
+}
+
+export function scoreTechnicalDepth(content: string): number {
+  const lower = content.toLowerCase();
+  const domainHits = HARD_TECH_DOMAINS.reduce((sum, domain) =>
+    sum + domain.terms.filter((term) => lower.includes(term)).length,
+  0);
+  const mechanismHits = (lower.match(/\b(constraint|bottleneck|failure mode|tradeoff|yield|thermal|latency|power|qualification|tolerance|throughput|cycle time)\b/g) || []).length;
+  const hasTechnicalUnit = /\b\d+([.,]\d+)?\s?(nm|kw|mw|gw|w|v|kv|amps?|%|x|mm|kg|tons?|tokens?|ms|ghz)\b/i.test(content);
+  return Math.max(0, Math.min(1, (domainHits * 0.1) + (mechanismHits * 0.08) + (hasTechnicalUnit ? 0.18 : 0)));
+}
+
+export function scoreStatusTextureRisk(content: string): number {
+  const lower = content.toLowerCase();
+  const hits = LOW_STATUS_TEXTURE.filter((term) => lower.includes(term)).length;
+  if (hits === 0) return 0;
+  return Math.max(0, Math.min(1, hits * 0.18 - scoreTechnicalDepth(content) * 0.12));
+}
+
 export function extractThesis(content: string, topic?: string | null): string {
   const normalized = normalizeWhitespace(content)
     .split(/[.!?]/)
@@ -145,6 +192,9 @@ export function extractCandidateFeatureTags(
     structure: extractStructureType(content),
     thesis,
     riskFlags: extractRiskFlags(content),
+    domainTags: extractDomainTags(content),
+    technicalDepth: Number(scoreTechnicalDepth(content).toFixed(3)),
+    statusTextureRisk: Number(scoreStatusTextureRisk(content).toFixed(3)),
   };
 }
 

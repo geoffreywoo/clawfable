@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { extractCandidateFeatureTags } from './tweet-features';
 import { computeActionRewards } from './virality-signals';
+import { assessAccountTaste, assessTechnicalCredibility } from './account-taste';
 
 export interface EditDeltaSummary {
   summary: string;
@@ -70,6 +71,10 @@ function classifyLengthDirection(original: string, edited: string): 'shorter' | 
 export function summarizeEditDelta(original: string, edited: string): EditDeltaSummary {
   const originalTags = extractCandidateFeatureTags(original);
   const editedTags = extractCandidateFeatureTags(edited);
+  const originalTaste = assessAccountTaste(original, { featureTags: originalTags });
+  const editedTaste = assessAccountTaste(edited, { featureTags: editedTags });
+  const originalTechnical = assessTechnicalCredibility(original);
+  const editedTechnical = assessTechnicalCredibility(edited);
   const preferenceHints: string[] = [];
   const changedFeatures: string[] = [];
   const metadata: Record<string, string | number | boolean | null> = {
@@ -83,6 +88,14 @@ export function summarizeEditDelta(original: string, edited: string): EditDeltaS
     editedSpecificity: editedTags.specificity,
     originalStructure: originalTags.structure,
     editedStructure: editedTags.structure,
+    originalNativeVoiceScore: originalTaste.nativeVoiceScore,
+    editedNativeVoiceScore: editedTaste.nativeVoiceScore,
+    originalTechnicalCredibilityScore: originalTechnical.score,
+    editedTechnicalCredibilityScore: editedTechnical.score,
+    originalCringeRisk: originalTaste.cringeRisk,
+    editedCringeRisk: editedTaste.cringeRisk,
+    originalStatusTextureRisk: originalTaste.statusTextureRisk,
+    editedStatusTextureRisk: editedTaste.statusTextureRisk,
   };
 
   const lengthDirection = classifyLengthDirection(original, edited);
@@ -132,6 +145,30 @@ export function summarizeEditDelta(original: string, edited: string): EditDeltaS
     metadata.claimSharpened = true;
     changedFeatures.push('thesis');
     preferenceHints.push('Operators sharpen the core claim when the original thesis feels fuzzy.');
+  }
+
+  if (editedTechnical.score > originalTechnical.score + 0.12) {
+    metadata.addedTechnicalCredibility = true;
+    changedFeatures.push('technical_credibility');
+    preferenceHints.push('Operators add harder technical anchors, mechanisms, constraints, or process details before approval.');
+  }
+
+  if (editedTaste.cringeRisk < originalTaste.cringeRisk - 0.1) {
+    metadata.reducedCringeRisk = true;
+    changedFeatures.push('cringe_risk');
+    preferenceHints.push('Operators remove generated-post cadence, generic hype, or socially unearned phrasing before approval.');
+  }
+
+  if (editedTaste.statusTextureRisk < originalTaste.statusTextureRisk - 0.08) {
+    metadata.removedLowStatusTexture = true;
+    changedFeatures.push('status_texture');
+    preferenceHints.push('Operators replace Slack/support/workflow texture with higher-status technical or industrial proof.');
+  }
+
+  if (editedTaste.nativeVoiceScore > originalTaste.nativeVoiceScore + 0.1) {
+    metadata.improvedNativeVoice = true;
+    changedFeatures.push('native_voice');
+    preferenceHints.push('Operators move drafts closer to native voice before approving them.');
   }
 
   const forbiddenPhrases = ['i think', 'in my opinion', 'here’s the thing', "here's the thing", 'the thing is'];

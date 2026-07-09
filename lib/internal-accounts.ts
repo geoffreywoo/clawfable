@@ -1,6 +1,7 @@
 import type { User } from './types';
 
 const DEFAULT_INTERNAL_USERNAMES = new Set([
+  'geoffwoo',
   'geoffreywoo',
   'antifund',
   'antihunterai',

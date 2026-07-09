@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFallbackLearningMetadata, buildPersonalizationMemory } from '@/lib/learning-loop';
+import { buildFallbackLearningMetadata, buildPersonalizationMemory, summarizeEditDelta } from '@/lib/learning-loop';
 import type { LearningSignal, Tweet } from '@/lib/types';
 
 function editSignal(metadata: LearningSignal['metadata']): LearningSignal {
@@ -33,6 +33,72 @@ function learningSignal(overrides: Partial<LearningSignal>): LearningSignal {
 }
 
 describe('buildPersonalizationMemory', () => {
+  it('captures before/after lessons when edits replace low-status texture with technical anchors', () => {
+    const summary = summarizeEditDelta(
+      'AI infrastructure is working when the Slack channel gets quieter and every support queue has a clean workflow handoff.',
+      'Inference ASIC deployment is real when HBM bandwidth, packaging yield, and rack power density survive thermal cycling.',
+    );
+
+    expect(summary.metadata.addedTechnicalCredibility).toBe(true);
+    expect(summary.metadata.removedLowStatusTexture).toBe(true);
+    expect(Number(summary.metadata.editedTechnicalCredibilityScore)).toBeGreaterThan(Number(summary.metadata.originalTechnicalCredibilityScore));
+    expect(Number(summary.metadata.editedStatusTextureRisk)).toBeLessThan(Number(summary.metadata.originalStatusTextureRisk));
+    expect(summary.preferenceHints).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('harder technical anchors'),
+        expect.stringContaining('Slack/support/workflow texture'),
+      ]),
+    );
+  });
+
+  it('turns deletion language like lame or too Slack into concrete future memory', () => {
+    const memory = buildPersonalizationMemory({
+      feedback: [
+        {
+          tweetId: 'tweet-1',
+          tweetText: 'The best AI teams know the product is working when the Slack channel gets quieter.',
+          rating: 'down',
+          generatedAt: '2026-06-07T12:00:00.000Z',
+          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop',
+          intentSummary: 'lame, too Slack, not elevated or technical enough',
+          source: 'queue_delete',
+          userProvidedReason: true,
+        },
+      ],
+      signals: [
+        learningSignal({
+          signalType: 'deleted_from_queue',
+          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop',
+          metadata: {
+            lowStatusTextureComplaint: true,
+            technicalElevationRequested: true,
+            aiSlopComplaint: true,
+          },
+        }),
+      ],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'inference asics', 'fusion', 'rare earth minerals'],
+        antiGoals: ['low-status SaaS-ops texture'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffreywoo: compressed technical frontier-tech voice.',
+        summary: 'Geoffrey writes about industrial capacity and hard technical constraints.',
+      },
+    });
+
+    expect(memory.operatorHiddenPreferences).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('generated, template-like'),
+        expect.stringContaining('Slack/support/workflow texture'),
+        expect.stringContaining('elevated technical depth'),
+      ]),
+    );
+  });
+
   it('retains multiple edit preference hints from a single operator rewrite', () => {
     const memory = buildPersonalizationMemory({
       feedback: [],

@@ -70,10 +70,16 @@ async function loadGeneratorWithAiMocks(
 }
 
 describe('AI model routing', () => {
-  it('uses GPT-5.5 first for main tweet generation with Anthropic fallback', async () => {
+  it('uses GPT-5.6 first for copy generation with GPT-5.5 and Anthropic fallbacks', async () => {
     const { getModelChainForTask } = await loadDefaultRouter();
 
     expect(getModelChainForTask('tweet_generation')).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('creative_variant')).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
@@ -182,7 +188,7 @@ describe('AI model routing', () => {
     });
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6',
       reasoning: { effort: 'high' },
     }));
   });
@@ -277,6 +283,33 @@ describe('AI model routing', () => {
       text: 'anthropic ok',
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',
+    }));
+  });
+
+  it('falls back from GPT-5.6 copy generation to GPT-5.5 before Anthropic', async () => {
+    const openAiCreate = vi.fn()
+      .mockRejectedValueOnce(new Error('GPT-5.6 preview unavailable'))
+      .mockResolvedValueOnce({
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: 'gpt-5.5 fallback ok' }] }],
+      });
+    const anthropicCreate = vi.fn();
+    const { generateText } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    const result = await generateText({
+      task: 'tweet_generation',
+      system: 'Return the requested copy.',
+      prompt: 'probe',
+      maxTokens: 64,
+    });
+
+    expect(openAiCreate).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: 'gpt-5.6' }));
+    expect(openAiCreate).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: 'gpt-5.5' }));
+    expect(anthropicCreate).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      text: 'gpt-5.5 fallback ok',
+      provider: 'openai',
+      model: 'gpt-5.5',
     }));
   });
 });

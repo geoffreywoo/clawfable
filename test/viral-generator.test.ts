@@ -1250,4 +1250,106 @@ describe('generateViralBatch', () => {
     expect(system).toContain('not X, Y');
     expect(system).toContain('If a draft could fit any AI/startup account after swapping the topic noun, throw it away.');
   });
+
+  it('uses compact Geoffrey-native creative briefs instead of spreadsheet-like slot pressure', async () => {
+    anthropicCreateMock.mockResolvedValue({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          slot: 1,
+          content: 'Inference ASIC adoption is turning into a rack power problem. HBM bandwidth can look fine while thermal density decides tokens per watt.',
+          format: 'hot_take',
+          targetTopic: 'Inference ASICs',
+          rationale: 'Technical object, hidden constraint, compressed implication.',
+        }),
+      }],
+    });
+
+    const batch = await generateViralBatch(
+      {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'inference asics', 'fusion', 'fission', 'rare earth minerals', 'robotics', 'space'],
+        antiGoals: ['generic hype', 'low-status SaaS-ops texture'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffreywoo: compressed technical frontier-tech voice.',
+        summary: 'Geoffrey writes about industrial capacity, AI infrastructure, energy, and hard technical constraints.',
+      },
+      {
+        agentId: 'agent-1',
+        analyzedAt: new Date().toISOString(),
+        tweetCount: 20,
+        viralTweets: [],
+        engagementPatterns: {
+          avgLikes: 10,
+          avgRetweets: 2,
+          avgReplies: 1,
+          avgImpressions: 500,
+          topHours: [14],
+          topFormats: ['hot_take'],
+          topTopics: ['AI infrastructure'],
+          viralThreshold: 30,
+        },
+        followingProfile: {
+          totalFollowing: 10,
+          topAccounts: [],
+          categories: [],
+        },
+        contentFingerprint: 'fingerprint',
+      } as any,
+      4,
+      trendingTopics(4),
+      evidenceLearnings(),
+      null,
+      {
+        lengthMix: { short: 35, medium: 45, long: 20 },
+        enabledFormats: [],
+        autonomyMode: 'balanced',
+        trendMixTarget: 35,
+        trendTolerance: 'moderate',
+        shitpoastEnabled: false,
+        exploration: { rate: 35, underusedFormats: [], underusedTopics: [] },
+        bias: { scheduledTopic: null, momentumTopic: null },
+        banditPolicy: null,
+        sourcePlan: {
+          slots: [{
+            slot: 1,
+            sourceLane: 'core_explore_fallback',
+            mode: 'explore',
+            targetTopic: 'tungsten critical minerals',
+            trendTopicId: null,
+            trendHeadline: null,
+            ideaSeed: null,
+            ideaSeedBrief: 'ammonium paratungstate -> tungsten carbide powder metallurgy and tool qualification -> machining throughput becomes the re-industrialization bottleneck',
+            plannerReason: 'Frontier seed: tungsten hardmetal supply chain.',
+          }],
+          laneCounts: {
+            manual_core_exploit: 0,
+            trend_aligned_exploit: 0,
+            trend_adjacent_explore: 0,
+            core_explore_fallback: 1,
+          },
+          acceptedTrends: [],
+          rejectedTrends: [],
+        },
+      },
+      [],
+      [],
+      memory(),
+    );
+
+    const createCall = anthropicCreateMock.mock.calls[0]?.[0];
+    const userPrompt = String(createCall.messages[0].content || '');
+
+    expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
+    expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
+    expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
+    expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');
+    expect(userPrompt).not.toContain('|hook:');
+    expect(userPrompt).not.toContain('|tone:');
+    expect(userPrompt).not.toContain('|specificity:');
+    expect(userPrompt).not.toContain('|structure:');
+    expect(batch[0]).toEqual(expect.objectContaining({
+      generationProvider: 'anthropic',
+      generationModel: 'claude-sonnet-4-6',
+    }));
+  });
 });

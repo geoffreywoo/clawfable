@@ -7,6 +7,7 @@ import { metadataWithStyleMode } from '@/lib/style-mode';
 import { validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { assessTasteRisk } from '@/lib/virality-signals';
+import { classifyTasteFeedbackReason } from '@/lib/account-taste';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -137,6 +138,7 @@ export async function PATCH(
     if (deletionReason !== undefined && tweet.status === 'deleted_from_x') {
       const trimmedReason = typeof deletionReason === 'string' ? deletionReason.trim() : '';
       if (trimmedReason && trimmedReason !== 'skipped') {
+        const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content);
         await saveFeedback(id, {
           tweetId: tweet.id,
           tweetText: tweet.content,
@@ -156,6 +158,7 @@ export async function PATCH(
           reason: trimmedReason,
           metadata: metadataWithStyleMode(tweet, {
             ...buildFallbackLearningMetadata(tweet),
+            ...tasteFeedback.metadata,
             userProvidedReason: true,
             draftExperimentId: tweet.draftExperimentId ?? null,
             creativeLane: tweet.creativeLane ?? null,
@@ -168,6 +171,7 @@ export async function PATCH(
           soulMd: agent.soulMd,
           tweetText: tweet.content,
         });
+        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content);
         await saveFeedback(id, {
           tweetId: tweet.id,
           tweetText: tweet.content,
@@ -187,6 +191,7 @@ export async function PATCH(
           inferred: true,
           metadata: metadataWithStyleMode(tweet, {
             ...buildFallbackLearningMetadata(tweet),
+            ...tasteFeedback.metadata,
             userProvidedReason: false,
             draftExperimentId: tweet.draftExperimentId ?? null,
             creativeLane: tweet.creativeLane ?? null,
@@ -224,6 +229,7 @@ export async function DELETE(
       soulMd: agent.soulMd,
       tweetText: tweet.content,
     });
+    const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content);
 
     await saveFeedback(id, {
       tweetId: tweet.id,
@@ -244,6 +250,7 @@ export async function DELETE(
       inferred: !userReason,
       metadata: metadataWithStyleMode(tweet, {
         ...buildFallbackLearningMetadata(tweet),
+        ...tasteFeedback.metadata,
         userProvidedReason: !!userReason,
         draftExperimentId: tweet.draftExperimentId ?? null,
         creativeLane: tweet.creativeLane ?? null,

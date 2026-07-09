@@ -36,6 +36,7 @@ import {
   scoreReplyPotential,
   scoreSlopRisk,
 } from './virality-signals';
+import { assessAccountTaste, isGeoffreyVoiceProfile } from './account-taste';
 import {
   buildMediaBrief,
   inferMediaExperimentType,
@@ -51,6 +52,8 @@ export interface RankableProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationProvider?: 'openai' | 'anthropic' | 'local' | null;
+  generationModel?: string | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;
@@ -1782,6 +1785,14 @@ export function rankGeneratedTweets(
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
     const formulaicCadenceScore = assessFormulaicCadence(candidate.content).score;
     const technicalElevationScore = assessTechnicalElevation(candidate.content);
+    const accountTasteScore = assessAccountTaste(candidate.content, {
+      voiceProfile: context.voiceProfile,
+      learnings: context.learnings,
+      memory: context.memory,
+      featureTags,
+    });
+    const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+    const accountTasteWeight = geoffreyStrict ? 1 : 0.15;
     const slopScore = scoreSlopRisk(candidate.content, featureTags);
     const replyBaitScore = scoreReplyPotential(candidate.content, featureTags);
     const conversationQualityScore = scoreConversationValue(candidate.content, featureTags);
@@ -1826,6 +1837,10 @@ export function rankGeneratedTweets(
       (slopScore * 0.24) +
       (formulaicCadenceScore * 0.18) +
       (technicalElevationScore.banalOpsScore * 0.26) +
+      (accountTasteScore.cringeRisk * 0.26 * accountTasteWeight) +
+      (accountTasteScore.statusTextureRisk * 0.22 * accountTasteWeight) +
+      (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.34 * accountTasteWeight) +
+      (Math.max(0, 0.34 - accountTasteScore.technicalCredibilityScore) * 0.2 * accountTasteWeight) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
@@ -1853,6 +1868,10 @@ export function rankGeneratedTweets(
       antiSlop: Number(((1 - slopScore) * 0.1).toFixed(3)),
       technicalElevation: Number((technicalElevationScore.technicalScore * 0.12).toFixed(3)),
       banalOpsTexture: Number((-technicalElevationScore.banalOpsScore * 0.14).toFixed(3)),
+      nativeVoice: Number(((accountTasteScore.nativeVoiceScore - 0.5) * 0.18 * accountTasteWeight).toFixed(3)),
+      technicalCredibility: Number((accountTasteScore.technicalCredibilityScore * 0.14 * accountTasteWeight).toFixed(3)),
+      cringeRisk: Number((-accountTasteScore.cringeRisk * 0.16 * accountTasteWeight).toFixed(3)),
+      statusTextureRisk: Number((-accountTasteScore.statusTextureRisk * 0.14 * accountTasteWeight).toFixed(3)),
       authorityProof: authorityProofIssue ? Number((authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
@@ -1890,6 +1909,8 @@ export function rankGeneratedTweets(
       relationshipScore * 0.025 +
       judgeScore * 0.2 +
       viralTakeScore * 0.1 +
+      accountTasteScore.nativeVoiceScore * 0.14 * accountTasteWeight +
+      accountTasteScore.technicalCredibilityScore * 0.1 * accountTasteWeight +
       (replyBaitScore * conversationQualityScore) * 0.06 +
       (conversationQualityScore - 0.5) * 0.06 +
       (1 - repetitionRiskScore) * 0.08 +
@@ -1917,8 +1938,22 @@ export function rankGeneratedTweets(
       (slopScore * 0.18) -
       (formulaicCadenceScore * 0.1) -
       (technicalElevationScore.banalOpsScore * 0.18) -
+      (accountTasteScore.cringeRisk * 0.18 * accountTasteWeight) -
+      (accountTasteScore.statusTextureRisk * 0.12 * accountTasteWeight) -
+      (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.24 * accountTasteWeight) -
       (authorityProofPenalty * 0.16)
     );
+
+    if (geoffreyStrict) {
+      if (accountTasteScore.action === 'block') {
+        confidenceScore = Math.min(confidenceScore, 0.39);
+      } else if (accountTasteScore.action === 'review') {
+        confidenceScore = Math.min(confidenceScore, 0.55);
+      }
+      if (accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42) {
+        confidenceScore = Math.min(confidenceScore, 0.48);
+      }
+    }
 
     if (context.style.autonomyMode === 'safe') {
       confidenceScore = clamp(confidenceScore + ((1 - policyRiskScore) * 0.08) - (repetitionRiskScore * 0.05));
@@ -1940,6 +1975,10 @@ export function rankGeneratedTweets(
       (scoreProvenance.antiSlop || 0) +
       (scoreProvenance.technicalElevation || 0) +
       (scoreProvenance.banalOpsTexture || 0) +
+      (scoreProvenance.nativeVoice || 0) +
+      (scoreProvenance.technicalCredibility || 0) +
+      (scoreProvenance.cringeRisk || 0) +
+      (scoreProvenance.statusTextureRisk || 0) +
       (scoreProvenance.audienceSegment || 0) +
       (scoreProvenance.promptStrategy || 0) +
       (scoreProvenance.portfolio || 0) +
