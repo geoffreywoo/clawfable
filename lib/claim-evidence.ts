@@ -57,7 +57,7 @@ function personalClaimIsSupported(content: string, supportTexts: string[]): bool
 
 function numericClaims(content: string): string[] {
   const claims: string[] = [];
-  const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)?/gi;
+  const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|samples?|models?|sensors?|chips?|racks?|boards?|incidents?|failures?|defects?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)?/gi;
 
   for (const match of content.matchAll(pattern)) {
     const raw = match[0].trim();
@@ -70,6 +70,25 @@ function numericClaims(content: string): string[] {
     const after = content.slice((match.index || 0) + raw.length);
     if (lineStart && /^\.?\s+/.test(after) && numeric >= 1 && numeric <= 20) continue;
     claims.push(raw.toLowerCase().replace(/[\s,]+/g, ''));
+  }
+
+  const wordValues: Record<string, string> = {
+    one: '1',
+    two: '2',
+    three: '3',
+    four: '4',
+    five: '5',
+    six: '6',
+    seven: '7',
+    eight: '8',
+    nine: '9',
+    ten: '10',
+  };
+  const wordPattern = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|parts?|samples?|models?|sensors?|chips?|racks?|boards?|minutes?|hours?|days?|weeks?|months?|years?|shifts?|incidents?|failures?|defects?)\b/gi;
+  for (const match of content.matchAll(wordPattern)) {
+    const value = wordValues[match[1].toLowerCase()];
+    const unit = match[2].toLowerCase().replace(/\s+/g, '');
+    claims.push(`${value}${unit}`);
   }
 
   return [...new Set(claims)];

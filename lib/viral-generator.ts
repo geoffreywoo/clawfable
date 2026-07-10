@@ -1290,14 +1290,14 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             rationale: parsed.rationale || slotAssignment?.rationale || '',
             generationProvider: response.provider,
             generationModel: response.model,
-            sourceBrief: [
+            sourceBrief: [...new Set([
               slotAssignment?.ideaSeedBrief,
               sourceSlot?.ideaSeedBrief,
               slotAssignment?.trendTopicId ? trendEvidenceById.get(String(slotAssignment.trendTopicId)) : null,
               sourceSlot?.trendTopicId ? trendEvidenceById.get(String(sourceSlot.trendTopicId)) : null,
               slotAssignment?.trendHeadline,
               sourceSlot?.trendHeadline,
-            ].filter(Boolean).join(' | ') || null,
+            ].filter((value): value is string => Boolean(value)))].join(' | ') || null,
             sourceLane: slotAssignment?.sourceLane || null,
             styleMode,
             creativeLane,

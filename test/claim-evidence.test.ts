@@ -29,6 +29,22 @@ describe('claim evidence', () => {
     expect(assessClaimEvidence('The line lost 9 days to bearing failure.', ['The incident report says the line lost 9 days.']).risk).toBe(0);
     expect(assessClaimEvidence('The meeting gets 10x more serious.', ['The portfolio was worth $10b.']).risk).toBeGreaterThan(0.4);
   });
+
+  it('catches unsupported operational precision written as number words', () => {
+    const invented = assessClaimEvidence(
+      'bro you have three API calls, two are wrappers, and the third returns null.',
+      [],
+    );
+    const supported = assessClaimEvidence(
+      'bro you have three API calls, two are wrappers, and the third returns null.',
+      ['The product currently exposes three API calls.'],
+    );
+
+    expect(invented.unsupportedNumbers).toContain('3apicalls');
+    expect(invented.risk).toBeGreaterThanOrEqual(0.5);
+    expect(supported.risk).toBe(0);
+    expect(assessClaimEvidence('fusion has four clocks: plasma, fuel, wall, inventory.', []).risk).toBe(0);
+  });
 });
 
 describe('generated writing patterns', () => {
@@ -42,5 +58,13 @@ describe('generated writing patterns', () => {
 
     expect(assessment.hits).toContain('anonymous-anecdote');
     expect(reuse).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('treats repeated how-to openings as one generated scaffold', () => {
+    expect(assessGeneratedWritingPatterns('how to diligence a magnet company: ask about coercivity.').primarySignature).toBe('how-to-open');
+    expect(scoreWritingPatternReuse(
+      'how to raise frontier capital: bring the failed sample.',
+      ['how to diligence a magnet company: ask about coercivity.'],
+    )).toBeGreaterThanOrEqual(0.4);
   });
 });

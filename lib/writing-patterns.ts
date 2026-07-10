@@ -20,7 +20,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'sounds-like-until', weight: 0.16, pattern: /\bsounds like\b[^.\n]{0,100}\buntil\b/i },
   { label: 'x-decides-closer', weight: 0.16, pattern: /\b(?:the|that) [a-z][^.\n]{1,70} decides\.?$/i },
   { label: 'that-number-is-company', weight: 0.2, pattern: /\bthat number is the company\b/i },
-  { label: 'how-to-tell', weight: 0.18, pattern: /^how to tell\b/i },
+  { label: 'how-to-open', weight: 0.16, pattern: /^how to\b/i },
 ];
 
 function clamp(value: number, min = 0, max = 1): number {

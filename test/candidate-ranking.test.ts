@@ -378,6 +378,17 @@ describe('selectTopRankedTweets', () => {
     expect(selected.filter((candidate) => /^(announcement|confession):/i.test(candidate.content))).toHaveLength(1);
     expect(selected.some((candidate) => candidate.content.startsWith('Grid interconnect'))).toBe(true);
   });
+
+  it('limits repeated bro register to one draft per selected batch', () => {
+    const selected = selectTopRankedTweets([
+      ranked({ content: 'bro inspect the datum surface.', candidateScore: 92, coverageCluster: 'manufacturing:datum surface', featureTags: { hook: 'callout', tone: 'provocative', specificity: 'concrete', structure: 'single_punch', thesis: 'inspect datum surface', riskFlags: [] } }),
+      ranked({ content: 'bro ask where the inference board goes.', candidateScore: 90, coverageCluster: 'compute:inference board', featureTags: { hook: 'callout', tone: 'provocative', specificity: 'concrete', structure: 'single_punch', thesis: 'inference board deployment', riskFlags: [] } }),
+      ranked({ content: 'Tritium inventory closes the fusion fuel cycle.', candidateScore: 84, coverageCluster: 'fusion:tritium inventory', featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'concrete', structure: 'single_punch', thesis: 'tritium inventory fuel cycle', riskFlags: [] } }),
+    ], 2);
+
+    expect(selected).toHaveLength(2);
+    expect(selected.filter((candidate) => /\bbro\b/i.test(candidate.content))).toHaveLength(1);
+  });
 });
 
 describe('rankGeneratedTweets', () => {
@@ -461,6 +472,7 @@ describe('rankGeneratedTweets', () => {
     expect(fabricated.scoreProvenance.truthfulnessRisk).toBeLessThan(0);
     expect(fabricated.confidenceScore).toBeLessThanOrEqual(0.24);
     expect(truthful.confidenceScore).toBeGreaterThan(fabricated.confidenceScore);
+    expect(truthful.confidenceScore).toBeGreaterThanOrEqual(0.58);
     expect(truthful.candidateScore).toBeGreaterThan(fabricated.candidateScore);
     expect(truthful.candidateScore).toBeLessThan(100);
   });

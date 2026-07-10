@@ -1953,7 +1953,9 @@ export function rankGeneratedTweets(
       tasteCalibrationScore * 0.18 +
       styleModeAdjustment;
 
-    let confidenceScore = clamp(0.08 + confidenceRaw * 0.38);
+    // Keep the additive model away from saturation while centering strong,
+    // source-backed candidates just above the balanced autopost threshold.
+    let confidenceScore = clamp(0.14 + confidenceRaw * 0.45, 0, 0.92);
 
     confidenceScore = clamp(
       confidenceScore -
@@ -2102,6 +2104,10 @@ export function selectTopRankedTweets(
   const maxSamePortfolioRole = Math.max(1, Math.ceil(count * 0.5));
   let shitpoastSelected = 0;
 
+  const selectionPatternSignature = (content: string) =>
+    assessGeneratedWritingPatterns(content).primarySignature
+    || (/\bbro\b/i.test(content) ? 'batch-register-bro' : null);
+
   const canSelect = (candidate: RankedProtocolTweet, enforcePortfolioDiversity = false) => {
     if (candidate.styleMode === SHITPOAST_STYLE_MODE && shitpoastSelected >= maxShitpoast) return false;
     if (
@@ -2121,7 +2127,7 @@ export function selectTopRankedTweets(
     );
     if (nearDuplicate) return false;
 
-    const patternSignature = assessGeneratedWritingPatterns(candidate.content).primarySignature;
+    const patternSignature = selectionPatternSignature(candidate.content);
     if (enforcePortfolioDiversity && patternSignature && usedPatternSignatures.has(patternSignature)) {
       return false;
     }
@@ -2137,7 +2143,7 @@ export function selectTopRankedTweets(
     selected.push(candidate);
     usedClusters.add(cluster);
     selectedRoles.set(candidate.portfolioRole, (selectedRoles.get(candidate.portfolioRole) || 0) + 1);
-    const patternSignature = assessGeneratedWritingPatterns(candidate.content).primarySignature;
+    const patternSignature = selectionPatternSignature(candidate.content);
     if (patternSignature) usedPatternSignatures.add(patternSignature);
     if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
   };
