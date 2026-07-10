@@ -63,6 +63,7 @@ import { resolveQueuedTweetFailure } from './queue-healing';
 import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
+import { assessClaimEvidence } from './claim-evidence';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 import { buildFallbackLearningMetadata } from './learning-loop';
@@ -313,6 +314,16 @@ function isTerminalAutoReplyPostError(error: unknown): boolean {
   return true;
 }
 
+function getQueuedClaimEvidenceIssue(tweet: Tweet): string | null {
+  const scoredRisk = tweet.scoreProvenance?.truthfulnessRisk;
+  if (typeof scoredRisk === 'number') {
+    return scoredRisk <= -0.1
+      ? 'Claim evidence gate: the generation-time evidence check found an unsupported personal or numeric claim.'
+      : null;
+  }
+  return assessClaimEvidence(tweet.content, [tweet.sourceBrief, tweet.trendHeadline]).issue;
+}
+
 function clearsQueuedPostPreflight(agent: Agent, tweet: Tweet, recentPostedContent: string[]): boolean {
   return (
     !getSanitizedTweetTextIssue(tweet.content, 'post')
@@ -320,6 +331,7 @@ function clearsQueuedPostPreflight(agent: Agent, tweet: Tweet, recentPostedConte
     && !getTweetCompletenessIssue(tweet.content)
     && !getQueuedAutopostPolicyIssue(agent, tweet)
     && !getAuthorityProofIssue(tweet.content)
+    && !getQueuedClaimEvidenceIssue(tweet)
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
   );
 }
@@ -470,6 +482,42 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         source: 'autopilot',
         action: 'skipped',
         reason: authorityIssue,
+      });
+      continue;
+    }
+
+    const claimEvidenceIssue = getQueuedClaimEvidenceIssue(queuedTweet);
+    if (claimEvidenceIssue) {
+      await updateTweet(queuedTweet.id, {
+        status: 'draft',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: claimEvidenceIssue,
+      });
+      await addLearningSignal(agent.id, {
+        tweetId: queuedTweet.id,
+        signalType: 'x_post_rejected',
+        surface: 'autopilot',
+        rewardDelta: -0.72,
+        reason: claimEvidenceIssue,
+        inferred: true,
+        metadata: {
+          qualityGate: 'claim_evidence',
+          generationProvider: queuedTweet.generationProvider ?? null,
+          generationModel: queuedTweet.generationModel ?? null,
+          sourceBrief: queuedTweet.sourceBrief?.slice(0, 500) ?? null,
+        },
+      });
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: queuedTweet.id,
+        xTweetId: queuedTweet.xTweetId || '',
+        content: queuedTweet.content,
+        format: 'claim_evidence_gate',
+        topic: queuedTweet.topic || 'general',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'skipped',
+        reason: claimEvidenceIssue,
       });
       continue;
     }
@@ -2363,6 +2411,10 @@ async function refillQueue(
 
     // Dedup: skip tweets that are too similar to recent posts or queued items
     const recentContent = allTweets.slice(0, 50).map((tweet) => tweet.content);
+    const operatorEvidence = [
+      ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+      ...(learnings?.operatorVoiceReference?.bestPerformers || []),
+    ].map((entry) => entry.content);
 
     let added = 0;
     const addBatchItems = async (items: typeof allBatch, duplicateThreshold: number): Promise<number> => {
@@ -2378,6 +2430,12 @@ async function refillQueue(
         if (policyIssue) continue;
         const authorityIssue = getAuthorityProofIssue(item.content);
         if (authorityIssue) continue;
+        const claimEvidenceIssue = assessClaimEvidence(item.content, [
+          item.sourceBrief,
+          item.trendHeadline,
+          ...operatorEvidence,
+        ]).issue;
+        if (claimEvidenceIssue) continue;
         if (isNearDuplicate(item.content, recentContent, duplicateThreshold).isDuplicate) continue;
         recentContent.unshift(item.content);
 
@@ -2389,6 +2447,9 @@ async function refillQueue(
           format: item.format || null,
           topic: item.targetTopic,
           rationale: item.rationale,
+          generationProvider: item.generationProvider ?? null,
+          generationModel: item.generationModel ?? null,
+          sourceBrief: item.sourceBrief ?? null,
           generationMode: item.generationMode,
           candidateScore: item.candidateScore,
           confidenceScore: item.confidenceScore,
@@ -2498,6 +2559,9 @@ interface MarketingTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationProvider?: 'openai' | 'anthropic' | 'local' | null;
+  generationModel?: string | null;
+  sourceBrief?: string | null;
   sourceLane?: import('./types').ContentSourceLane | null;
   styleMode?: import('./types').ContentStyleMode | null;
   trendTopicId?: string | null;
@@ -2636,6 +2700,9 @@ For each tweet, output a JSON object on its own line:
               format: parsed.format || 'announcement',
               targetTopic: 'clawfable_marketing',
               rationale: parsed.rationale || '',
+              generationProvider: response.provider,
+              generationModel: response.model,
+              sourceBrief: productFacts.join(' | '),
             });
           }
         }

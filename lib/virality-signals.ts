@@ -77,7 +77,7 @@ export function assessFormulaicCadence(content: string): FormulaicCadenceAssessm
   const text = content.trim();
   const lower = text.toLowerCase();
   const hits: string[] = [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|hr|hrs|hour|hours|day|days|week|weeks)?\b|\$\d|\b(for example|because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow|rollback|incident|support queue|exception log|churned|deleted|approval|handoff)\b/i.test(text);
+  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|hr|hrs|hour|hours|day|days|week|weeks|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|churned|deleted|approval|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(text);
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook|distribution)\b/g) || [];
 
   const patterns: Array<[RegExp, string]> = [
@@ -91,6 +91,9 @@ export function assessFormulaicCadence(content: string): FormulaicCadenceAssessm
     [/\bthat is the (shift|edge|moat|bottleneck|point)\b/i, 'that-is-the-x'],
     [/\bdefault playbook\b/i, 'default-playbook'],
     [/\blegacy assumption\b/i, 'legacy-assumption'],
+    [/^(?:a|an|one|this)\s+(?:[a-z][a-z-]*\s+){0,3}(?:founder|owner|engineer|operator|customer|buyer|manager|technician|scientist|investor|machinist)\b/im, 'anonymous-anecdote-open'],
+    [/\bsame\b[^.\n]{0,50}[.\n]+\s*\bsame\b[^.\n]{0,50}[.\n]+\s*\b(?:suddenly|then)\b/i, 'same-same-suddenly'],
+    [/\b(?:bottleneck|constraint) is no longer\b/i, 'no-longer-bottleneck'],
   ];
 
   for (const [pattern, label] of patterns) {
@@ -239,7 +242,7 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   score += Math.min(0.42, genericHits * 0.08);
 
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook)\b/g) || [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(for example|because|when|after|before|we saw|i saw|a founder|a team|a buyer|a user|the bug|the metric|the eval|screenshot|customer|workflow)\b/i.test(content);
+  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(content);
   score += Math.min(0.42, cadence.score * 0.72);
   if (abstractPowerWords.length >= 4 && !hasConcreteAnchor) score += 0.18;
   if (abstractPowerWords.length >= 6) score += 0.1;
@@ -425,7 +428,7 @@ export function getAuthorityProofIssue(content: string): string | null {
   const broadCertainty = /\b(guaranteed|always|never|everyone|everybody|nobody|no one)\b|\b(the market|founders|investors|operators|creators|builders)\b.{0,90}\b(wrong|miss(?:ing)?|misread|underestimate|overrate|obsolete|dead)\b/i.test(text);
   if (!broadCertainty) return null;
 
-  const hasSupport = /\b(because|for example|for instance|data|proof|benchmark|case study|we saw|i saw|i tried|after|when|since|the reason|mechanism|incentive|bottleneck|tradeoff|constraint|failure mode|recovery path|eval|metric)\b|\b\d+[%x]?\b|\$\d/i.test(text);
+  const hasSupport = /\b(because|for example|for instance|data|proof|benchmark|case study|after|when|since|the reason|mechanism|incentive|bottleneck|tradeoff|constraint|failure mode|recovery path|eval|metric)\b|\b\d+[%x]?\b|\$\d/i.test(text);
   if (hasSupport) return null;
 
   return 'Authority gate held this draft because broad certainty claims need proof, a mechanism, or a concrete example before autoposting.';

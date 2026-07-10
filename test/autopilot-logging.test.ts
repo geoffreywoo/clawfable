@@ -605,6 +605,53 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
+  it('quarantines generated drafts with unsupported personal or numeric claims', async () => {
+    const fabricatedTweet = {
+      ...validQueuedTweet,
+      id: 'fabricated-evidence',
+      content: 'A machine shop owner showed me two end mills. One ran 11 hours. One chipped after 47 minutes.',
+      confidenceScore: 0.91,
+      candidateScore: 92,
+      generationProvider: 'openai',
+      generationModel: 'gpt-5.6',
+      sourceBrief: 'Tungsten carbide depends on powder metallurgy and sintering control.',
+      scoreProvenance: {
+        localPrior: 0.1,
+        globalPrior: 0.05,
+        judge: 0.12,
+        predictedReward: 0.1,
+        noveltyCoverage: 0.08,
+        riskPenalty: 0.14,
+        truthfulnessRisk: -0.28,
+      },
+    };
+    mocks.getQueuedTweets.mockResolvedValue([fabricatedTweet]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith(
+      'fabricated-evidence',
+      expect.objectContaining({
+        status: 'draft',
+        quarantineReason: expect.stringContaining('Claim evidence gate'),
+      }),
+    );
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: 'fabricated-evidence',
+        signalType: 'x_post_rejected',
+        rewardDelta: -0.72,
+        metadata: expect.objectContaining({
+          qualityGate: 'claim_evidence',
+          generationModel: 'gpt-5.6',
+        }),
+      }),
+    );
+  });
+
   it('repairs queued drafts that duplicate recent live posts before autoposting', async () => {
     const duplicateQueuedTweet = {
       ...validQueuedTweet,
@@ -732,6 +779,9 @@ describe('autopilot remote debug logging', () => {
         format: freshQueuedTweet.format,
         targetTopic: freshQueuedTweet.topic,
         rationale: 'fresh replacement',
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+        sourceBrief: 'Verified source brief for the fresh draft.',
         candidateScore: freshQueuedTweet.candidateScore,
         confidenceScore: freshQueuedTweet.confidenceScore,
       },
@@ -759,6 +809,9 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.createTweet).toHaveBeenCalledWith(expect.objectContaining({
       status: 'queued',
       content: freshQueuedTweet.content,
+      generationProvider: 'openai',
+      generationModel: 'gpt-5.6',
+      sourceBrief: 'Verified source brief for the fresh draft.',
       confidenceScore: freshQueuedTweet.confidenceScore,
     }));
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(

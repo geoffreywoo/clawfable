@@ -2,6 +2,8 @@ import type { AgentLearnings, CandidateFeatureTags, PersonalizationMemory, Tweet
 import type { VoiceProfile } from './soul-parser';
 import { assessFormulaicCadence } from './virality-signals';
 import { extractCandidateFeatureTags, ideaSimilarity } from './tweet-features';
+import { assessClaimEvidence } from './claim-evidence';
+import { assessGeneratedWritingPatterns } from './writing-patterns';
 
 export interface TechnicalCredibilityAssessment {
   score: number;
@@ -21,6 +23,8 @@ export interface AccountTasteAssessment {
   statusTextureRisk: number;
   genericAccountFitRisk: number;
   formulaicCadenceScore: number;
+  truthfulnessRisk: number;
+  generatedPatternRisk: number;
   technical: TechnicalCredibilityAssessment;
   action: 'allow' | 'review' | 'block';
   notes: string[];
@@ -31,6 +35,7 @@ export interface AccountTasteContext {
   learnings?: AgentLearnings | null;
   memory?: PersonalizationMemory | null;
   featureTags?: CandidateFeatureTags | null;
+  sourceTexts?: Array<string | null | undefined>;
 }
 
 export interface TasteFeedbackClassification {
@@ -302,15 +307,21 @@ function genericAccountFitRisk(content: string, featureTags: CandidateFeatureTag
   let risk = 0.16;
   const abstractHits = countTerms(lower, ABSTRACT_POWER_WORDS);
   const genericActors = (lower.match(/\b(people|founders|builders|operators|companies|teams|startups|investors)\b/g) || []).length;
+  const consultantDictionHits = (lower.match(/\b(?:critical|strategic|priority|imperative|transformative|essential|increasingly|landscape)\b/g) || []).length;
+  const roughRegister = /\b(?:bro|cuz|ain'?t|lol|bullshit\w*)\b|\.\./i.test(content);
   const topicOnly = /\b(ai|robotics|fusion|space|manufacturing|compute|energy)\b/i.test(content) && technical.score < 0.28;
 
   if (featureTags.specificity === 'abstract') risk += 0.2;
   if (abstractHits >= 2) risk += Math.min(0.24, abstractHits * 0.06);
   if (genericActors >= 3 && technical.score < 0.4) risk += 0.12;
+  if (consultantDictionHits >= 2 && technical.mechanismScore < 0.12) {
+    risk += Math.min(0.22, 0.1 + consultantDictionHits * 0.04);
+  }
   if (topicOnly) risk += 0.2;
   if (/\bafter swapping the noun|any ai account\b/i.test(content)) risk += 0.18;
   if (technical.score >= 0.52) risk -= 0.16;
   if (featureTags.specificity === 'data_driven' || featureTags.specificity === 'tactical') risk -= 0.06;
+  if (roughRegister) risk -= 0.12;
 
   return clamp(risk);
 }
@@ -320,6 +331,41 @@ function statusTextureRisk(content: string, technical: TechnicalCredibilityAsses
   const hits = countTerms(lower, LOW_STATUS_TEXTURE_TERMS);
   if (hits === 0) return 0;
   return clamp((hits * 0.16) + (technical.score < 0.42 ? 0.16 : -0.08));
+}
+
+function nativeStyleVector(content: string): number[] {
+  const lines = nonEmptyLines(content);
+  const words = normalizeText(content).match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) || [];
+  const avgLineLength = lines.length > 0 ? lines.reduce((sum, line) => sum + line.length, 0) / lines.length : 0;
+  const shortLineRatio = lines.length > 0 ? lines.filter((line) => line.length <= 42).length / lines.length : 0;
+  const contractions = (content.match(/\b(?:ain'?t|can'?t|don'?t|doesn'?t|isn'?t|you'?re|we'?re|i'?m|i'?ve|won'?t|cuz|just cuz)\b/gi) || []).length;
+  const slang = (content.match(/\b(?:bro|lol|insane|savage|bullshit(?:ter)?|autists?|peons?|uncouth|ain'?t|cuz)\b/gi) || []).length;
+  const listLines = lines.filter((line) => /^[-*]\s+/.test(line)).length;
+
+  return [
+    clamp(avgLineLength / 180),
+    clamp(lines.length / 8),
+    shortLineRatio,
+    /^[a-z]/.test(firstLine(content)) ? 1 : 0,
+    clamp((content.match(/@\w+/g) || []).length / 3),
+    /https?:\/\//i.test(content) ? 1 : 0,
+    /[^\u0000-\u007f]/.test(content) ? 1 : 0,
+    clamp((contractions + slang) / 3),
+    clamp((words.filter((word) => ['i', 'we', 'my', 'our'].includes(word)).length) / 4),
+    clamp((words.filter((word) => ['you', 'your', 'youre'].includes(word)).length) / 4),
+    clamp(listLines / 4),
+    content.includes('?') ? 1 : 0,
+    content.includes('!') ? 1 : 0,
+    content.includes(':') ? 1 : 0,
+  ];
+}
+
+function nativeStyleSimilarity(content: string, anchor: string): number {
+  const candidate = nativeStyleVector(content);
+  const reference = nativeStyleVector(anchor);
+  const weights = [0.08, 0.06, 0.05, 0.06, 0.1, 0.03, 0.08, 0.14, 0.1, 0.08, 0.06, 0.05, 0.04, 0.07];
+  const distance = candidate.reduce((sum, value, index) => sum + Math.abs(value - reference[index]) * weights[index], 0);
+  return clamp(1 - distance);
 }
 
 function referenceVoiceFit(
@@ -344,18 +390,26 @@ function referenceVoiceFit(
   for (const anchor of anchors.slice(0, 8)) {
     const anchorTags = extractCandidateFeatureTags(anchor.content, { topic: anchor.topic, thesisHint: anchor.thesis });
     const lengthRatio = Math.min(length, anchor.content.length) / Math.max(length, anchor.content.length, 1);
-    const lineBreakMatch = usesLineBreaks === anchor.content.includes('\n') ? 0.12 : 0;
+    const lineBreakMatch = usesLineBreaks === anchor.content.includes('\n') ? 1 : 0;
     const shapeMatch = (
       (featureTags.hook === anchorTags.hook ? 0.18 : 0) +
       (featureTags.tone === anchorTags.tone ? 0.14 : 0) +
       (featureTags.structure === anchorTags.structure ? 0.14 : 0) +
       (featureTags.specificity === anchorTags.specificity ? 0.14 : 0)
-    );
+    ) / 0.56;
     const topicSimilarity = ideaSimilarity(
       { content, thesis: featureTags.thesis },
       { content: anchor.content, thesis: anchor.thesis, topic: anchor.topic },
-    ) * 0.16;
-    best = Math.max(best, clamp(0.28 + (lengthRatio * 0.18) + lineBreakMatch + shapeMatch + topicSimilarity));
+    );
+    const styleSimilarity = nativeStyleSimilarity(content, anchor.content);
+    best = Math.max(best, clamp(
+      0.12
+      + styleSimilarity * 0.46
+      + shapeMatch * 0.18
+      + lengthRatio * 0.1
+      + topicSimilarity * 0.08
+      + lineBreakMatch * 0.06,
+    ));
   }
 
   return clamp(best);
@@ -448,6 +502,14 @@ export function assessAccountTaste(
   const epistemic = epistemicScore(content, technical);
   const compression = compressionScore(content);
   const referenceFit = referenceVoiceFit(content, featureTags, context.learnings);
+  const reference = context.learnings?.operatorVoiceReference;
+  const sourceTexts = [
+    ...(context.sourceTexts || []),
+    ...(reference?.pinnedExamples || []).map((entry) => entry.content),
+    ...(reference?.bestPerformers || []).map((entry) => entry.content),
+  ];
+  const claimEvidence = assessClaimEvidence(content, sourceTexts);
+  const generatedPattern = assessGeneratedWritingPatterns(content);
   const memoryAvoid = [
     ...(context.memory?.neverDoThisAgain || []),
     ...(context.memory?.identityConstraints || []),
@@ -462,6 +524,8 @@ export function assessAccountTaste(
     statusRisk * 0.5 +
     genericRisk * 0.42 +
     technical.vagueHypeRisk * 0.38 +
+    claimEvidence.risk * 0.52 +
+    generatedPattern.score * 0.32 +
     Math.min(0.22, slopPhraseHits * 0.07) +
     Math.min(0.16, Math.max(0, abstractHits - 1) * 0.035) +
     (memoryWantsLessGeneric && technical.score < 0.42 ? 0.08 : 0)
@@ -470,21 +534,25 @@ export function assessAccountTaste(
   const nativeVoiceScore = clamp(
     0.08 +
     rhythm * 0.15 +
-    opening * 0.16 +
+    opening * 0.1 +
     epistemic * 0.14 +
     compression * 0.12 +
-    referenceFit * 0.16 +
-    technical.score * 0.22 -
+    referenceFit * 0.34 +
+    technical.score * 0.1 -
     genericRisk * 0.22 -
     statusRisk * 0.16 -
     formulaic.score * 0.14 -
-    cringeRisk * 0.12,
+    cringeRisk * 0.12 -
+    claimEvidence.risk * 0.34 -
+    generatedPattern.score * 0.16,
   );
 
   const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
-  const action: AccountTasteAssessment['action'] = geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || (technical.score < 0.32 && genericRisk >= 0.45))
+  const action: AccountTasteAssessment['action'] = claimEvidence.risk >= 0.5
     ? 'block'
-    : nativeVoiceScore < 0.52 || cringeRisk >= 0.44 || statusRisk >= 0.34
+    : geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || generatedPattern.score >= 0.72 || (technical.score < 0.32 && genericRisk >= 0.45))
+    ? 'block'
+    : nativeVoiceScore < 0.52 || cringeRisk >= 0.44 || statusRisk >= 0.34 || generatedPattern.score >= 0.46
       ? 'review'
       : 'allow';
 
@@ -494,6 +562,8 @@ export function assessAccountTaste(
   if (genericRisk >= 0.42) notes.push('too easy to genericize');
   if (statusRisk >= 0.24) notes.push('low-status SaaS ops texture');
   if (cringeRisk >= 0.44) notes.push('cringe/generated cadence risk');
+  if (claimEvidence.issue) notes.push(claimEvidence.issue);
+  if (generatedPattern.hits.length > 0) notes.push(`generated pattern: ${generatedPattern.hits.slice(0, 2).join(', ')}`);
   if (referenceFit >= 0.62) notes.push('resembles manual voice anchors without copying');
 
   return {
@@ -503,6 +573,8 @@ export function assessAccountTaste(
     statusTextureRisk: Number(statusRisk.toFixed(3)),
     genericAccountFitRisk: Number(genericRisk.toFixed(3)),
     formulaicCadenceScore: formulaic.score,
+    truthfulnessRisk: claimEvidence.risk,
+    generatedPatternRisk: generatedPattern.score,
     technical,
     action,
     notes: [...new Set(notes)].slice(0, 6),
@@ -515,6 +587,8 @@ For @geoffwoo, write like a technical operator/investor thinking in public, not 
 - Start from a technical object or constraint: chip package, memory bandwidth, power delivery, grid interconnect, reactor fuel cycle, separation chemistry, factory tolerance, robot failure mode, launch/radiation/thermal limit, supply-chain qualification.
 - Convert it into a non-obvious implication. "This is big" is not enough. Explain what bottleneck moves, what old assumption breaks, or what curve changes.
 - Use compressed human phrasing. One hard observation beats a polished framework.
+- Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
+- Anonymous anecdote openers ("a founder showed me", "an owner told me") are blocked unless the exact event appears in a manual source.
 - Slack channels, dashboards, support tickets, calendar invites, and workflow handoffs are low-status proof. Do not use them as the main anchor.
 - Avoid topic-swapped AI advice. If the same post could fit any AI/startup account by changing one noun, reject it.
 - Strong shape: technical object -> hidden constraint -> non-consensus implication -> sharp final line.`;

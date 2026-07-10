@@ -185,6 +185,12 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     learnings: context.learnings,
     memory: context.memory,
     featureTags,
+    sourceTexts: [
+      candidate.sourceBrief,
+      candidate.trendHeadline,
+      ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []).map((entry) => entry.content),
+      ...(context.learnings?.operatorVoiceReference?.bestPerformers || []).map((entry) => entry.content),
+    ],
   });
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
   const technicalBoost = technicalElevation.technicalScore * 0.5;
@@ -211,6 +217,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     - (memoryFit.penalty * 0.5)
     - (slopRisk * 0.18)
     - (accountTaste.cringeRisk * 0.18)
+    - (accountTaste.truthfulnessRisk * 0.6)
     + (memoryFit.boost * 0.25),
     0.32,
     0.9,
@@ -220,7 +227,9 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     - (slopRisk >= 0.5 ? 0.12 : slopRisk * 0.08)
     + accountTaste.nativeVoiceScore * 0.24
     + technicalElevation.technicalScore * 0.25
-    - technicalElevation.banalOpsScore * 0.55,
+    - technicalElevation.banalOpsScore * 0.55
+    - accountTaste.truthfulnessRisk * 0.45
+    - accountTaste.generatedPatternRisk * 0.18,
     0.34,
     0.9,
   );
@@ -324,7 +333,7 @@ export async function judgeCandidates(
   }
 
   const prompt = candidates.map((candidate, idx) =>
-    `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\n${formatCandidateContentForJudgePrompt(candidate.content)}`
+    `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}${candidate.sourceBrief ? ` source=${candidate.sourceBrief.slice(0, 280)}` : ''}\n${formatCandidateContentForJudgePrompt(candidate.content)}`
   ).join('\n\n');
 
   try {
@@ -362,6 +371,7 @@ Ground rules:
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
+- A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
 ${geoffreyBrief}
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}
 ${learnings?.operatorVoiceReference?.bestPerformers?.length ? `- Manual/operator anchors are high-signal for voice, sentiment, tone, and topics: ${learnings.operatorVoiceReference.bestPerformers.slice(0, 3).map((entry) => `"${entry.content.slice(0, 120)}"`).join(' | ')}` : ''}
@@ -454,6 +464,7 @@ Rules:
 - Remove AI slop tells: generic advice voice, symmetrical abstraction stacks, "the real edge", "most people miss", "not X but Y", and tidy consultant cadence.
 - Add one elevated technical anchor if missing: mechanism, number, constraint, named technology, material/process detail, failure mode, or technical/industrial operating observation.
 - Do not use Slack, support tickets, dashboards, calendar invites, generic workflow handoffs, or "renamed owner" as the main proof. For frontier-tech drafts, replace that texture with compute, energy, materials, manufacturing, robotics, or space constraints.
+- Never add a fake founder/customer conversation, first-person event, benchmark, quote, or number. Preserve only evidence supplied with the candidate; otherwise rewrite as analysis or an explicit hypothesis.
 - For @geoffwoo, prefer the shape: technical object -> hidden constraint -> non-consensus implication -> compressed human phrasing.
 - Do not turn every tweet into the same template.
 - Stay in voice: ${voiceProfile.tone}.

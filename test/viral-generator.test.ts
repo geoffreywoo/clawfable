@@ -1340,6 +1340,8 @@ describe('generateViralBatch', () => {
     const userPrompt = String(createCall.messages[0].content || '');
 
     expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
+    expect(createCall.system).toContain('Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number.');
+    expect(createCall.system).toContain('Geoffrey\'s social register matters');
     expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
     expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
     expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');
@@ -1350,6 +1352,7 @@ describe('generateViralBatch', () => {
     expect(batch[0]).toEqual(expect.objectContaining({
       generationProvider: 'anthropic',
       generationModel: 'claude-sonnet-4-6',
+      sourceBrief: expect.stringContaining('ammonium paratungstate'),
     }));
   });
 });

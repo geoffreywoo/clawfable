@@ -37,6 +37,7 @@ import {
   scoreSlopRisk,
 } from './virality-signals';
 import { assessAccountTaste, isGeoffreyVoiceProfile } from './account-taste';
+import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from './writing-patterns';
 import {
   buildMediaBrief,
   inferMediaExperimentType,
@@ -54,6 +55,7 @@ export interface RankableProtocolTweet {
   rationale: string;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  sourceBrief?: string | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;
@@ -1733,6 +1735,17 @@ export function rankGeneratedTweets(
   candidates: RankableProtocolTweet[],
   context: CandidateRankingContext,
 ): RankedProtocolTweet[] {
+  const operatorSourceTexts = [
+    ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.bestPerformers || []),
+  ].map((entry) => entry.content);
+  const priorWritingTexts = [
+    ...context.recentPosts,
+    ...context.allTweets
+      .filter((tweet) => ['draft', 'preview', 'queued', 'posted'].includes(tweet.status))
+      .slice(0, 60)
+      .map((tweet) => tweet.content),
+  ];
   const ranked = candidates.map((candidate) => {
     const featureTags = candidate.featureTags || extractCandidateFeatureTags(candidate.content, {
       topic: candidate.targetTopic,
@@ -1785,11 +1798,14 @@ export function rankGeneratedTweets(
     const policyRiskScore = scorePolicyRisk(candidate, featureTags);
     const formulaicCadenceScore = assessFormulaicCadence(candidate.content).score;
     const technicalElevationScore = assessTechnicalElevation(candidate.content);
+    const generatedPatternScore = assessGeneratedWritingPatterns(candidate.content);
+    const patternReuseRiskScore = scoreWritingPatternReuse(candidate.content, priorWritingTexts);
     const accountTasteScore = assessAccountTaste(candidate.content, {
       voiceProfile: context.voiceProfile,
       learnings: context.learnings,
       memory: context.memory,
       featureTags,
+      sourceTexts: [candidate.sourceBrief, candidate.trendHeadline, ...operatorSourceTexts],
     });
     const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
     const accountTasteWeight = geoffreyStrict ? 1 : 0.15;
@@ -1839,6 +1855,9 @@ export function rankGeneratedTweets(
       (technicalElevationScore.banalOpsScore * 0.26) +
       (accountTasteScore.cringeRisk * 0.26 * accountTasteWeight) +
       (accountTasteScore.statusTextureRisk * 0.22 * accountTasteWeight) +
+      (accountTasteScore.truthfulnessRisk * 0.9) +
+      (generatedPatternScore.score * 0.28 * accountTasteWeight) +
+      (patternReuseRiskScore * 0.32) +
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.34 * accountTasteWeight) +
       (Math.max(0, 0.34 - accountTasteScore.technicalCredibilityScore) * 0.2 * accountTasteWeight) +
       authorityProofPenalty +
@@ -1872,7 +1891,10 @@ export function rankGeneratedTweets(
       technicalCredibility: Number((accountTasteScore.technicalCredibilityScore * 0.14 * accountTasteWeight).toFixed(3)),
       cringeRisk: Number((-accountTasteScore.cringeRisk * 0.16 * accountTasteWeight).toFixed(3)),
       statusTextureRisk: Number((-accountTasteScore.statusTextureRisk * 0.14 * accountTasteWeight).toFixed(3)),
-      authorityProof: authorityProofIssue ? Number((authorityProofPenalty * 0.14).toFixed(3)) : 0,
+      truthfulnessRisk: Number((-accountTasteScore.truthfulnessRisk * 0.28).toFixed(3)),
+      generatedPatternRisk: Number((-generatedPatternScore.score * 0.16 * accountTasteWeight).toFixed(3)),
+      patternReuseRisk: Number((-patternReuseRiskScore * 0.14).toFixed(3)),
+      authorityProof: authorityProofIssue ? Number((-authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
       portfolio: Number((portfolioScore * 0.04).toFixed(3)),
@@ -1896,7 +1918,7 @@ export function rankGeneratedTweets(
       riskPenalty: Number((riskPenalty * 0.14).toFixed(3)),
     };
 
-    let confidenceScore = clamp(
+    const confidenceRaw =
       voiceScore * 0.2 +
       noveltyScore * 0.16 +
       rewardPrediction.reward * 0.2 +
@@ -1929,8 +1951,9 @@ export function rankGeneratedTweets(
       approvalFrictionScore * 0.16 +
       rejectionLessonScore * 0.18 +
       tasteCalibrationScore * 0.18 +
-      styleModeAdjustment
-    );
+      styleModeAdjustment;
+
+    let confidenceScore = clamp(0.08 + confidenceRaw * 0.38);
 
     confidenceScore = clamp(
       confidenceScore -
@@ -1940,6 +1963,9 @@ export function rankGeneratedTweets(
       (technicalElevationScore.banalOpsScore * 0.18) -
       (accountTasteScore.cringeRisk * 0.18 * accountTasteWeight) -
       (accountTasteScore.statusTextureRisk * 0.12 * accountTasteWeight) -
+      (accountTasteScore.truthfulnessRisk * 0.5) -
+      (generatedPatternScore.score * 0.16 * accountTasteWeight) -
+      (patternReuseRiskScore * 0.18) -
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.24 * accountTasteWeight) -
       (authorityProofPenalty * 0.16)
     );
@@ -1955,50 +1981,33 @@ export function rankGeneratedTweets(
       }
     }
 
+    if (accountTasteScore.truthfulnessRisk >= 0.5) {
+      confidenceScore = Math.min(confidenceScore, 0.24);
+    }
+    if (patternReuseRiskScore >= 0.66) {
+      confidenceScore = Math.min(confidenceScore, 0.46);
+    }
+
     if (context.style.autonomyMode === 'safe') {
       confidenceScore = clamp(confidenceScore + ((1 - policyRiskScore) * 0.08) - (repetitionRiskScore * 0.05));
     } else if (context.style.autonomyMode === 'explore') {
       confidenceScore = clamp(confidenceScore + (freshnessScore * 0.08) + (surpriseScore * 0.04) - (policyRiskScore * 0.02));
     }
+    if (accountTasteScore.truthfulnessRisk >= 0.5) confidenceScore = Math.min(confidenceScore, 0.24);
+    if (patternReuseRiskScore >= 0.66) confidenceScore = Math.min(confidenceScore, 0.46);
 
     const candidateScore = Math.round(clamp(
-      scoreProvenance.localPrior +
-      scoreProvenance.globalPrior +
-      voiceScore * 0.16 +
-      (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.08 : 0) +
-      viralTakeScore * 0.06 +
-      scoreProvenance.predictedReward +
-      scoreProvenance.judge +
-      scoreProvenance.noveltyCoverage +
-      (scoreProvenance.creativity || 0) +
-      (scoreProvenance.holdout || 0) +
-      (scoreProvenance.antiSlop || 0) +
-      (scoreProvenance.technicalElevation || 0) +
-      (scoreProvenance.banalOpsTexture || 0) +
-      (scoreProvenance.nativeVoice || 0) +
-      (scoreProvenance.technicalCredibility || 0) +
-      (scoreProvenance.cringeRisk || 0) +
-      (scoreProvenance.statusTextureRisk || 0) +
-      (scoreProvenance.audienceSegment || 0) +
-      (scoreProvenance.promptStrategy || 0) +
-      (scoreProvenance.portfolio || 0) +
-      (scoreProvenance.portfolioDiversity || 0) +
-      (scoreProvenance.mediaExperiment || 0) +
-      (scoreProvenance.relationship || 0) +
-      (scoreProvenance.ideaGraph || 0) +
-      (scoreProvenance.memoryAlignment || 0) +
-      (scoreProvenance.outcomeCalibration || 0) +
-      (scoreProvenance.conversationQuality || 0) +
-      (scoreProvenance.formulaicCadence || 0) +
-      (scoreProvenance.operatorAnchor || 0) +
-      (scoreProvenance.operatorAnchorOutcome || 0) +
-      (scoreProvenance.fallbackShapeOutcome || 0) +
-      (scoreProvenance.anchorCopyRisk || 0) +
-      (scoreProvenance.phraseReuseRisk || 0) +
-      (scoreProvenance.approvalFriction || 0) +
-      (scoreProvenance.rejectionLesson || 0) +
-      (scoreProvenance.tasteCalibration || 0) +
-      (1 - scoreProvenance.riskPenalty)
+      confidenceScore * 0.62
+      + voiceScore * 0.08
+      + judgeScore * 0.08
+      + rewardPrediction.reward * 0.07
+      + noveltyScore * 0.05
+      + surpriseScore * 0.04
+      + accountTasteScore.nativeVoiceScore * 0.05 * accountTasteWeight
+      + accountTasteScore.technicalCredibilityScore * 0.04 * accountTasteWeight
+      - riskPenalty * 0.18
+      - accountTasteScore.truthfulnessRisk * 0.12
+      - patternReuseRiskScore * 0.06,
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
     const experimentHoldout = candidate.experimentHoldout === true;
@@ -2086,6 +2095,7 @@ export function selectTopRankedTweets(
 ): RankedProtocolTweet[] {
   const selected: RankedProtocolTweet[] = [];
   const usedClusters = new Set<string>();
+  const usedPatternSignatures = new Set<string>();
   const selectedRoles = new Map<PostPortfolioRole, number>();
   const maxShitpoast = options.maxShitpoast ?? Number.POSITIVE_INFINITY;
   const minHoldouts = options.minHoldouts ?? (count >= 4 ? 1 : 0);
@@ -2111,6 +2121,11 @@ export function selectTopRankedTweets(
     );
     if (nearDuplicate) return false;
 
+    const patternSignature = assessGeneratedWritingPatterns(candidate.content).primarySignature;
+    if (enforcePortfolioDiversity && patternSignature && usedPatternSignatures.has(patternSignature)) {
+      return false;
+    }
+
     if (usedClusters.has(cluster) && selected.length < count - 1) {
       return false;
     }
@@ -2122,6 +2137,8 @@ export function selectTopRankedTweets(
     selected.push(candidate);
     usedClusters.add(cluster);
     selectedRoles.set(candidate.portfolioRole, (selectedRoles.get(candidate.portfolioRole) || 0) + 1);
+    const patternSignature = assessGeneratedWritingPatterns(candidate.content).primarySignature;
+    if (patternSignature) usedPatternSignatures.add(patternSignature);
     if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
   };
 

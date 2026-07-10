@@ -350,6 +350,34 @@ describe('selectTopRankedTweets', () => {
     expect(selected.map((candidate) => candidate.portfolioRole)).toEqual(['proof', 'proof', 'story', 'contrarian']);
     expect(selected.some((candidate) => candidate.content.includes('deleted handoffs'))).toBe(false);
   });
+
+  it('does not select the same generated opening scaffold twice when a fresh shape exists', () => {
+    const selected = selectTopRankedTweets([
+      ranked({
+        content: 'announcement:\n\ntungsten carbide qualification is the factory bottleneck.',
+        candidateScore: 92,
+        coverageCluster: 'materials:tungsten qualification',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'concrete', structure: 'argument', thesis: 'tungsten carbide qualification', riskFlags: [] },
+      }),
+      ranked({
+        content: 'confession:\n\ntritium logistics matters more than the plasma screenshot.',
+        candidateScore: 90,
+        coverageCluster: 'fusion:tritium logistics',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'concrete', structure: 'argument', thesis: 'tritium logistics plasma', riskFlags: [] },
+      }),
+      ranked({
+        content: 'Grid interconnect queues are now deciding which datacenter projects are real.',
+        candidateScore: 84,
+        targetTopic: 'energy infrastructure',
+        coverageCluster: 'energy:grid interconnect queue',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'concrete', structure: 'single_punch', thesis: 'grid interconnect datacenter projects', riskFlags: [] },
+      }),
+    ], 2);
+
+    expect(selected).toHaveLength(2);
+    expect(selected.filter((candidate) => /^(announcement|confession):/i.test(candidate.content))).toHaveLength(1);
+    expect(selected.some((candidate) => candidate.content.startsWith('Grid interconnect'))).toBe(true);
+  });
 });
 
 describe('rankGeneratedTweets', () => {
@@ -395,9 +423,46 @@ describe('rankGeneratedTweets', () => {
     expect(supported).toBeDefined();
     expect(unsupported).toBeDefined();
     expect(ranked[0].content).toBe(supported!.content);
-    expect(unsupported!.scoreProvenance.authorityProof).toBeGreaterThan(0);
+    expect(unsupported!.scoreProvenance.authorityProof).toBeLessThan(0);
     expect(supported!.scoreProvenance.authorityProof).toBe(0);
     expect(supported!.confidenceScore).toBeGreaterThan(unsupported!.confidenceScore);
+  });
+
+  it('blocks fabricated anecdotes and keeps scores calibrated below saturation', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'inference asics', 'critical minerals', 'manufacturing'],
+      antiGoals: ['fabricated facts', 'generic AI slop'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: blunt, technical, native voice.',
+      summary: 'Geoffrey writes about hard technical constraints.',
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'A machine shop owner showed me two carbide end mills. One ran 11 hours. One chipped after 47 minutes.',
+        format: 'story',
+        targetTopic: 'tungsten critical minerals',
+        rationale: 'Invented specificity.',
+        sourceBrief: 'Tungsten carbide depends on powder metallurgy, binder chemistry, sintering, and tool qualification.',
+      },
+      {
+        content: 'Tungsten supply matters downstream: carbide powder size, cobalt binder chemistry, sintering control, and tool qualification decide machining throughput.',
+        format: 'analysis',
+        targetTopic: 'tungsten critical minerals',
+        rationale: 'Mechanism without fake access.',
+        sourceBrief: 'Tungsten carbide depends on powder metallurgy, binder chemistry, sintering, and tool qualification.',
+      },
+    ], context);
+
+    const fabricated = ranked.find((candidate) => candidate.content.startsWith('A machine shop owner'))!;
+    const truthful = ranked.find((candidate) => candidate.content.startsWith('Tungsten supply'))!;
+
+    expect(fabricated.scoreProvenance.truthfulnessRisk).toBeLessThan(0);
+    expect(fabricated.confidenceScore).toBeLessThanOrEqual(0.24);
+    expect(truthful.confidenceScore).toBeGreaterThan(fabricated.confidenceScore);
+    expect(truthful.candidateScore).toBeGreaterThan(fabricated.candidateScore);
+    expect(truthful.candidateScore).toBeLessThan(100);
   });
 
   it('penalizes formulaic AI cadence even when the shape looks viral', () => {
@@ -604,6 +669,7 @@ describe('rankGeneratedTweets', () => {
         format: 'hot_take',
         targetTopic: 'AI agents',
         rationale: 'Specific operator lesson.',
+        sourceBrief: 'The operating note specifies a 30-minute eval review before new tools are added.',
         featureTags: {
           hook: 'bold_claim',
           tone: 'analytical',
@@ -1045,6 +1111,7 @@ describe('rankGeneratedTweets', () => {
         format: 'question',
         targetTopic: 'AI agents',
         rationale: 'Specific conversation prompt with a mechanism.',
+        sourceBrief: 'The safety protocol creates a 24-hour rollback rule after each failed eval.',
         featureTags: {
           hook: 'question',
           tone: 'analytical',

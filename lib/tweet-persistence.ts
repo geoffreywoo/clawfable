@@ -23,6 +23,7 @@ export async function createTweetFromGeneratedCandidate(
     rationale: item.rationale,
     generationProvider: item.generationProvider ?? null,
     generationModel: item.generationModel ?? null,
+    sourceBrief: item.sourceBrief ?? null,
     generationMode: item.generationMode,
     candidateScore: item.candidateScore,
     confidenceScore: item.confidenceScore,

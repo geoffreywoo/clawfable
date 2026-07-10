@@ -9,6 +9,7 @@ type QueueAuditItem = {
   topic: string | null;
   generationProvider: Tweet['generationProvider'];
   generationModel: string | null;
+  sourceBrief: string | null;
   confidenceScore: number | null;
   candidateScore: number | null;
   slopScore: number;
@@ -16,6 +17,8 @@ type QueueAuditItem = {
   technicalCredibilityScore: number;
   cringeRisk: number;
   statusTextureRisk: number;
+  truthfulnessRisk: number;
+  generatedPatternRisk: number;
   recommendation: 'post_candidate' | 'rewrite' | 'delete';
   reasons: string[];
   content: string;
@@ -48,6 +51,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     item.nativeVoiceScore < 0.42
     || item.cringeRisk >= 0.58
     || item.statusTextureRisk >= 0.4
+    || item.truthfulnessRisk >= 0.5
     || (item.technicalCredibilityScore < 0.3 && item.slopScore >= 0.45)
   ) {
     return 'delete';
@@ -56,6 +60,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     item.nativeVoiceScore < 0.55
     || item.technicalCredibilityScore < 0.42
     || item.cringeRisk >= 0.42
+    || item.generatedPatternRisk >= 0.46
     || item.slopScore >= 0.42
   ) {
     return 'rewrite';
@@ -69,6 +74,8 @@ function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   if (item.technicalCredibilityScore < 0.42) reasons.push(`technical credibility ${item.technicalCredibilityScore}`);
   if (item.cringeRisk >= 0.42) reasons.push(`cringe risk ${item.cringeRisk}`);
   if (item.statusTextureRisk >= 0.24) reasons.push(`status texture ${item.statusTextureRisk}`);
+  if (item.truthfulnessRisk >= 0.5) reasons.push(`claim evidence ${item.truthfulnessRisk}`);
+  if (item.generatedPatternRisk >= 0.46) reasons.push(`generated pattern ${item.generatedPatternRisk}`);
   if (item.slopScore >= 0.42) reasons.push(`slop ${item.slopScore}`);
   return reasons.length > 0 ? reasons : ['clears native/technical queue audit'];
 }
@@ -78,6 +85,12 @@ function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>
   const taste = assessAccountTaste(tweet.content, {
     ...context,
     featureTags,
+    sourceTexts: [
+      tweet.sourceBrief,
+      tweet.trendHeadline,
+      ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []).map((entry) => entry.content),
+      ...(context.learnings?.operatorVoiceReference?.bestPerformers || []).map((entry) => entry.content),
+    ],
   });
   const technical = assessTechnicalCredibility(tweet.content);
   const slopScore = readNumber(tweet.slopScore) ?? scoreSlopRisk(tweet.content, featureTags);
@@ -86,6 +99,7 @@ function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>
     topic: tweet.topic,
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
+    sourceBrief: tweet.sourceBrief ?? null,
     confidenceScore: readNumber(tweet.confidenceScore),
     candidateScore: readNumber(tweet.candidateScore),
     slopScore: Number(slopScore.toFixed(3)),
@@ -93,6 +107,8 @@ function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>
     technicalCredibilityScore: technical.score,
     cringeRisk: taste.cringeRisk,
     statusTextureRisk: taste.statusTextureRisk,
+    truthfulnessRisk: taste.truthfulnessRisk,
+    generatedPatternRisk: taste.generatedPatternRisk,
     reasons: [] as string[],
     content: tweet.content,
     scoreProvenance: tweet.scoreProvenance ?? null,
@@ -165,7 +181,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} pattern=${item.generatedPatternRisk} slop=${item.slopScore}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);
     console.log('');

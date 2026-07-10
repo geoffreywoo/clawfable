@@ -231,6 +231,9 @@ export interface CandidateScoreProvenance {
   technicalCredibility?: number;
   cringeRisk?: number;
   statusTextureRisk?: number;
+  truthfulnessRisk?: number;
+  generatedPatternRisk?: number;
+  patternReuseRisk?: number;
   authorityProof?: number;
   audienceSegment?: number;
   promptStrategy?: number;
@@ -380,6 +383,7 @@ export interface Tweet {
   rationale?: string | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  sourceBrief?: string | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;

@@ -186,6 +186,7 @@ export interface ProtocolTweet {
   rationale: string;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  sourceBrief?: string | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   creativeLane?: CreativeLane | null;
@@ -222,7 +223,7 @@ const CREATIVE_LANES: CreativeLane[] = [
 const CREATIVE_LANE_GUIDANCE: Record<CreativeLane, string> = {
   operator_take: 'Native account take. Sounds closest to the strongest manual posts and should clear review with minimal edits.',
   contrarian_angle: 'Specific disagreement with the default market narrative. Strong claim, but still credible.',
-  story_example: 'A concrete mini-story, example, or observed pattern that makes the idea feel lived-in.',
+  story_example: 'A sourced mini-story from supplied evidence, or a clearly framed hypothetical. Never invent a meeting, customer, founder, measurement, or quote.',
   teaching_threadlet: 'Compact educational breakdown. Useful without becoming generic advice content.',
   weird_memetic: 'Sharper, more surprising, more memorable phrasing. Strange-but-true, not random.',
   trend_riff: 'Riffs on a live topic through the account’s actual worldview instead of summarizing the trend.',
@@ -691,7 +692,9 @@ Every draft must preserve the account's authentic voice while increasing its odd
 Commenters should not be able to tell this was generated.
 - Avoid default AI cadence: "not X, Y", "the real edge/moat/question", "most people don't realize", "the winners will be", and over-clean "what changed / who felt it / what compounds" scaffolds.
 - Do not lean on abstract founder words unless anchored to something observed: leverage, moat, signal, optics, systems, velocity, feedback loop, playbook, narrative, compounding.
-- Prefer one weirdly specific observation, lived example, named failure mode, concrete metric, or uncomfortable tradeoff over polished advice.
+- Prefer one weirdly specific sourced observation, named failure mode, supplied metric, or uncomfortable tradeoff over polished advice.
+- Specificity is not permission to fabricate. Never invent a founder conversation, customer story, benchmark, measurement, investment, visit, quote, or number. If the evidence does not contain it, write analysis or a clearly labeled hypothesis.
+- Anonymous anecdote openings such as "a founder showed me" or "an owner told me" are forbidden unless that exact event appears in the supplied manual examples.
 - Imperfect human rhythm is better than symmetrical consultant prose. Vary sentence shape. Use fragments when the voice supports it.
 - If a draft could fit any AI/startup account after swapping the topic noun, throw it away.`);
 
@@ -853,8 +856,15 @@ ${soulMd}`);
       if (!fp.usesEmojis) parts.push(`- Strong human-written posts avoid emojis`);
       if (fp.topHooks.length > 0) parts.push(`- Human-preferred hooks: ${fp.topHooks.join(', ')}`);
       if (fp.topTones.length > 0) parts.push(`- Human-preferred tones: ${fp.topTones.join(', ')}`);
-      for (const t of humanRef.bestPerformers.slice(0, evidenceLimits.manualVoiceAnchors)) {
-        parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, 180)}"`);
+      if (isGeoffreyVoiceProfile(voiceProfile)) {
+        parts.push(`- Geoffrey's social register matters: blunt lowercase phrasing, named people or objects when sourced, status awareness, occasional slang, and sharp judgment. Do not translate these examples into a polished technical essay template.`);
+      }
+      const manualAnchorLimit = isGeoffreyVoiceProfile(voiceProfile)
+        ? Math.max(5, evidenceLimits.manualVoiceAnchors)
+        : evidenceLimits.manualVoiceAnchors;
+      const manualAnchorChars = isGeoffreyVoiceProfile(voiceProfile) ? 320 : 180;
+      for (const t of humanRef.bestPerformers.slice(0, manualAnchorLimit)) {
+        parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, manualAnchorChars)}"`);
       }
     }
 
@@ -1056,6 +1066,10 @@ export async function generateViralBatch(
     learnings,
   });
   const trendFitById = new Map(sourcePlan.acceptedTrends.map((trend) => [String(trend.id), trend.fitScores.total]));
+  const trendEvidenceById = new Map(sourcePlan.acceptedTrends.map((trend) => [
+    String(trend.id),
+    [trend.headline, trend.topTweet?.text].filter(Boolean).join(' | '),
+  ]));
   const rankingMemory = memory || {
     alwaysDoMoreOfThis: [],
     neverDoThisAgain: [],
@@ -1099,6 +1113,7 @@ export async function generateViralBatch(
           ...tweet,
           generationProvider: 'local' as const,
           generationModel: 'operator-anchor-fallback',
+          sourceBrief: sourcePlan.slots[index]?.ideaSeedBrief || sourcePlan.slots[index]?.trendHeadline || null,
           sourceLane: sourcePlan.slots[index]?.sourceLane || 'core_explore_fallback',
           styleMode: slotPlan[index]?.styleMode || STANDARD_STYLE_MODE,
           creativeLane,
@@ -1182,7 +1197,9 @@ export async function generateViralBatch(
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
 ${slotPlan.length > 0 && !geoffreyPromptMode ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
-${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Each draft must have a real technical object, hidden constraint, and non-consensus implication.` : ''}
+${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Each draft must have a real technical object, hidden constraint, and non-consensus implication. Do not manufacture first-person access or precise numbers to make the brief feel real.` : ''}
+
+Truth contract: use only facts, measurements, events, quotes, and personal experiences present in the supplied context. New analysis is welcome; invented evidence is not.
 
 Slot guide schema: ${geoffreyPromptMode ? 'slot|topic|intent|source|brief' : 'slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure'}
 ${creativeSlotGuide}
@@ -1220,6 +1237,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           const format = parsed.format || 'hot_take';
           const targetTopic = parsed.targetTopic || 'general';
           const slotAssignment = slotPlan.find((plan) => plan.slot === slot) || null;
+          const sourceSlot = sourcePlan.slots.find((plan) => plan.slot === slot) || null;
           const creativeLane = normalizeCreativeLane(parsed.creativeLane || creativeLanePlan.get(slot));
           const targetAudienceSegment = normalizeAudienceSegment(parsed.targetAudienceSegment, cleanContent, targetTopic);
           const parsedMediaType = normalizeMediaExperimentType(parsed.mediaExperimentType);
@@ -1272,6 +1290,14 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             rationale: parsed.rationale || slotAssignment?.rationale || '',
             generationProvider: response.provider,
             generationModel: response.model,
+            sourceBrief: [
+              slotAssignment?.ideaSeedBrief,
+              sourceSlot?.ideaSeedBrief,
+              slotAssignment?.trendTopicId ? trendEvidenceById.get(String(slotAssignment.trendTopicId)) : null,
+              sourceSlot?.trendTopicId ? trendEvidenceById.get(String(sourceSlot.trendTopicId)) : null,
+              slotAssignment?.trendHeadline,
+              sourceSlot?.trendHeadline,
+            ].filter(Boolean).join(' | ') || null,
             sourceLane: slotAssignment?.sourceLane || null,
             styleMode,
             creativeLane,
