@@ -477,6 +477,27 @@ describe('rankGeneratedTweets', () => {
     expect(truthful.candidateScore).toBeLessThan(100);
   });
 
+  it('keeps low-technical Geoffrey drafts below the balanced autopost gate', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'inference asics', 'critical minerals', 'manufacturing'],
+      antiGoals: ['generic AI slop'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: blunt, technical, native voice.',
+      summary: 'Geoffrey writes about hard technical constraints.',
+    };
+
+    const [candidate] = rankGeneratedTweets([{
+      content: 'startup strategy: call yourself a platform before one endpoint works. beautiful ritual. zero torque.',
+      format: 'hot_take',
+      targetTopic: 'startups',
+      rationale: 'Native joke without enough technical depth.',
+    }], context);
+
+    expect(candidate.scoreProvenance.technicalCredibility).toBeLessThan(0.06);
+    expect(candidate.confidenceScore).toBeLessThan(0.58);
+  });
+
   it('penalizes formulaic AI cadence even when the shape looks viral', () => {
     const ranked = rankGeneratedTweets([
       {

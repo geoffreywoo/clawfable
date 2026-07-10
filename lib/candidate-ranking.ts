@@ -1978,6 +1978,9 @@ export function rankGeneratedTweets(
       } else if (accountTasteScore.action === 'review') {
         confidenceScore = Math.min(confidenceScore, 0.55);
       }
+      if (accountTasteScore.technicalCredibilityScore < 0.42) {
+        confidenceScore = Math.min(confidenceScore, 0.55);
+      }
       if (accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42) {
         confidenceScore = Math.min(confidenceScore, 0.48);
       }
