@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   addRemixEntry,
+  addPerformanceEntry,
   addVoiceDirective,
   getVoiceDirectiveRules,
   createAgent,
@@ -91,6 +92,55 @@ describe('idea bank curation', () => {
 });
 
 describe('generation context', () => {
+  it('builds the live policy from unique posts and includes operator timeline evidence', async () => {
+    const agent = await createAgent({
+      handle: 'context-agent-performance-evidence',
+      name: 'Context Agent Performance Evidence',
+      soulMd: '# SOUL\n\nDirect.',
+    } as any);
+    const base = {
+      tweetId: 'auto-1',
+      xTweetId: 'x-auto-1',
+      content: 'autopilot infrastructure observation',
+      format: 'analysis',
+      topic: 'AI infrastructure',
+      postedAt: '2026-07-01T00:00:00.000Z',
+      likes: 4,
+      retweets: 0,
+      replies: 1,
+      impressions: 500,
+      engagementRate: 1,
+      wasViral: false,
+      source: 'autopilot',
+    } as const;
+    await addPerformanceEntry(agent.id, { ...base, checkedAt: '2026-07-01T00:15:00.000Z' } as any);
+    await addPerformanceEntry(agent.id, { ...base, likes: 8, checkedAt: '2026-07-01T02:00:00.000Z' } as any);
+    await addPerformanceEntry(agent.id, {
+      ...base,
+      tweetId: '',
+      xTweetId: 'x-manual-1',
+      content: 'manual killer opener\n\nsharp second line',
+      format: 'hot_take',
+      topic: 'AI',
+      likes: 90,
+      retweets: 8,
+      replies: 6,
+      source: 'timeline',
+      checkedAt: '2026-07-01T02:00:00.000Z',
+    } as any);
+
+    const context = await buildGenerationContext(agent);
+
+    expect(context.style.banditPolicy?.trainingSource).toBe('mixed');
+    expect(context.style.banditPolicy?.evidence).toMatchObject({
+      performanceRows: 3,
+      uniquePerformancePosts: 2,
+      collapsedSnapshots: 1,
+      operatorWrittenPosts: 1,
+      systemWrittenPosts: 1,
+    });
+  });
+
   it('includes operator learning signals and orders directives oldest to newest', async () => {
     const agent = await createAgent({
       handle: 'context-agent-1',

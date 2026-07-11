@@ -113,7 +113,7 @@ describe('performance learning smoke', () => {
     expect(getVelocityFollowupMaxTokens(1600)).toBe(512);
   });
 
-  it('builds autonomous policy learnings from autopilot history once enough data exists', async () => {
+  it('blends successful operator timeline posts into policy learning alongside autopilot history', async () => {
     const agent = await createAgent({
       handle: 'perf-agent-1',
       name: 'Perf Agent 1',
@@ -146,11 +146,11 @@ describe('performance learning smoke', () => {
 
     const learnings = await buildLearnings(agent);
 
-    expect(learnings.sourceBreakdown?.trainingSource).toBe('autopilot');
+    expect(learnings.sourceBreakdown?.trainingSource).toBe('mixed');
     expect(learnings.sourceBreakdown?.autopilot).toBe(10);
     expect(learnings.sourceBreakdown?.timeline).toBe(3);
-    expect(learnings.formatRankings.map((entry) => entry.format)).toEqual(['hot_take']);
-    expect(learnings.bestPerformers.every((entry) => entry.source === 'autopilot')).toBe(true);
+    expect(learnings.formatRankings.map((entry) => entry.format)).toEqual(expect.arrayContaining(['hot_take', 'question']));
+    expect(learnings.bestPerformers.some((entry) => entry.source === 'timeline')).toBe(true);
     expect(learnings.operatorVoiceReference?.sampleCount).toBe(3);
     expect(learnings.operatorVoiceReference?.bestPerformers[0]?.source).toBe('timeline');
     expect(learnings.operatorVoiceReference?.styleFingerprint.topHooks).toContain('bold_claim');

@@ -234,6 +234,7 @@ export interface CandidateScoreProvenance {
   truthfulnessRisk?: number;
   generatedPatternRisk?: number;
   patternReuseRisk?: number;
+  winnerMechanicFit?: number;
   authorityProof?: number;
   audienceSegment?: number;
   promptStrategy?: number;

@@ -23,6 +23,7 @@ import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt 
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
 import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopicForAccount } from './account-topic-policy';
+import { collapsePerformanceSnapshots } from './performance-history';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -314,7 +315,7 @@ export async function buildGenerationContext(
     getRemixPatterns(agent.id).catch(() => []),
     getVoiceDirectiveRules(agent.id).catch(() => []),
     getTweets(agent.id),
-    getPerformanceHistory(agent.id, 100),
+    getPerformanceHistory(agent.id, 400),
     getFeedback(agent.id),
     getLearningSignals(agent.id, 200),
     getBaseline(agent.id),
@@ -366,10 +367,11 @@ export async function buildGenerationContext(
     ...(effectiveLearnings?.topicRankings.map((entry) => entry.topic) || []),
     ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic) && accountTopicAllowed(topic)),
   ])];
-  const normalizedPerformanceHistory = normalizeManualPerformanceSources(performanceHistory, signals)
+  const normalizedPerformanceRows = normalizeManualPerformanceSources(performanceHistory, signals)
     .filter((entry) => accountTopicAllowed(entry.topic));
+  const normalizedPerformanceHistory = collapsePerformanceSnapshots(normalizedPerformanceRows).slice(0, 100);
   const banditPolicy = buildBanditPolicy({
-    performanceHistory: normalizedPerformanceHistory,
+    performanceHistory: normalizedPerformanceRows,
     feedback,
     signals,
     allTweets,

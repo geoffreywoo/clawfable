@@ -38,6 +38,7 @@ import {
 } from './virality-signals';
 import { assessAccountTaste, isGeoffreyVoiceProfile } from './account-taste';
 import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from './writing-patterns';
+import { assessHistoricalWinner, inferContentSpreadMechanics } from './winner-learning';
 import {
   buildMediaBrief,
   inferMediaExperimentType,
@@ -242,6 +243,44 @@ function getPositiveOperatorAnchors(context: CandidateRankingContext): TweetPerf
       ? (context.learnings?.bestPerformers || [])
       : []),
   ];
+}
+
+function scoreHistoricalWinnerMechanicFit(
+  candidate: RankableProtocolTweet,
+  context: CandidateRankingContext,
+): number {
+  const rawAnchors = [
+    ...(context.learnings?.bestPerformers || []),
+    ...getPositiveOperatorAnchors(context),
+  ];
+  const anchors = rawAnchors.filter((entry, index, all) =>
+    all.findIndex((candidateAnchor) =>
+      (entry.xTweetId && candidateAnchor.xTweetId === entry.xTweetId)
+      || (!entry.xTweetId && candidateAnchor.content === entry.content)
+    ) === index
+  ).slice(0, 16);
+  if (anchors.length === 0) return 0;
+
+  const candidateMechanics = new Set(inferContentSpreadMechanics(candidate.content, {
+    topic: candidate.targetTopic,
+  }));
+  if (candidateMechanics.size === 0) return 0;
+
+  let strongest = 0;
+  for (const anchor of anchors) {
+    const winner = assessHistoricalWinner(anchor);
+    const overlappingMechanics = winner.spreadMechanics.filter((mechanic) => candidateMechanics.has(mechanic));
+    const hasSubstantiveOverlap = overlappingMechanics.some((mechanic) =>
+      mechanic !== 'compressed punchline'
+      && !mechanic.includes(' hook with ')
+    );
+    if (!hasSubstantiveOverlap) continue;
+    const mechanicFit = overlappingMechanics.length / Math.max(1, candidateMechanics.size, winner.spreadMechanics.length);
+    const outcomeStrength = clamp(0.55 + weightedEngagement(anchor) / 500, 0.55, 1);
+    strongest = Math.max(strongest, mechanicFit * outcomeStrength * winner.evidenceWeight);
+  }
+
+  return clamp(strongest);
 }
 
 function scoreOperatorAnchorCopyRisk(
@@ -1824,6 +1863,7 @@ export function rankGeneratedTweets(
     const ideaGraphScore = scoreIdeaGraphFit(candidate, featureTags, context);
     const outcomeCalibrationScore = scoreOutcomeCalibration(candidate, featureTags, coverageCluster, context);
     const operatorAnchorScore = scoreOperatorAnchorFit(candidate, featureTags, context);
+    const winnerMechanicFitScore = scoreHistoricalWinnerMechanicFit(candidate, context);
     const operatorAnchorOutcomeScore = scoreOperatorAnchorFallbackOutcomeFit(candidate, featureTags, context);
     const fallbackShapeOutcomeScore = scoreGenericFallbackShapeOutcomeFit(candidate, featureTags, context);
     const anchorCopyRiskScore = scoreOperatorAnchorCopyRisk(candidate, featureTags, context);
@@ -1907,6 +1947,7 @@ export function rankGeneratedTweets(
       conversationQuality: Number(((conversationQualityScore - 0.5) * 0.08).toFixed(3)),
       formulaicCadence: Number((-formulaicCadenceScore * 0.1).toFixed(3)),
       operatorAnchor: Number((operatorAnchorScore * 0.14).toFixed(3)),
+      winnerMechanicFit: Number((winnerMechanicFitScore * 0.06).toFixed(3)),
       operatorAnchorOutcome: Number((operatorAnchorOutcomeScore * 0.16).toFixed(3)),
       fallbackShapeOutcome: Number((fallbackShapeOutcomeScore * 0.16).toFixed(3)),
       anchorCopyRisk: Number((-anchorCopyRiskScore * 0.12).toFixed(3)),
@@ -1944,6 +1985,7 @@ export function rankGeneratedTweets(
       memoryAlignmentScore * 0.16 +
       outcomeCalibrationScore * 0.18 +
       operatorAnchorScore * 0.16 +
+      winnerMechanicFitScore * 0.08 +
       operatorAnchorOutcomeScore * 0.18 +
       fallbackShapeOutcomeScore * 0.18 +
       (-anchorCopyRiskScore * 0.22) +
@@ -2010,6 +2052,7 @@ export function rankGeneratedTweets(
       + surpriseScore * 0.04
       + accountTasteScore.nativeVoiceScore * 0.05 * accountTasteWeight
       + accountTasteScore.technicalCredibilityScore * 0.04 * accountTasteWeight
+      + winnerMechanicFitScore * 0.04
       - riskPenalty * 0.18
       - accountTasteScore.truthfulnessRisk * 0.12
       - patternReuseRiskScore * 0.06,

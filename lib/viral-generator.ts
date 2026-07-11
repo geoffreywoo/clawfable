@@ -19,6 +19,7 @@ import { normalizeGeneratedTweetContent } from './tweet-text';
 import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt, hasPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { buildGeoffreyNativeWritingBrief, isGeoffreyVoiceProfile } from './account-taste';
+import { assessHistoricalWinner } from './winner-learning';
 import {
   buildMediaBrief,
   buildPostPortfolioPlan,
@@ -782,10 +783,11 @@ ${soulMd}`);
     parts.push(`\n## LEARNINGS FROM ACCOUNT PERFORMANCE (THIS IS CRITICAL — adapt based on what actually works)`);
     parts.push(`Tracked ${learnings.totalTracked} tweets total. Avg ${learnings.avgLikes} likes, ${learnings.avgRetweets} RTs.`);
     if (breakdown) {
-      if (breakdown.manual > 0) {
-        parts.push(`Manually posted tweets are HIGH-SIGNAL operator approvals. Prioritize those ${breakdown.manual} manual posts when matching voice, sentiment, tone, cadence, topic boundaries, and structure. Autopilot data should tune performance only when it agrees with the manual signal.`);
+      const operatorWrittenCount = breakdown.manual + breakdown.timeline;
+      if (operatorWrittenCount > 0) {
+        parts.push(`Operator-written timeline/manual posts are HIGH-SIGNAL evidence, not comparison-only examples. Learn voice, social posture, cadence, format, and topic judgment from those ${operatorWrittenCount} posts. System-written winners may teach spread mechanics, but only qualified system prose is safe to imitate.`);
       } else if (breakdown.trainingSource === 'autopilot') {
-        parts.push(`Autonomous policy should trust the ${breakdown.trainingCount} autopilot tweets below first. Human reference pool: ${breakdown.manual + breakdown.timeline} timeline/manual tweets for comparison only.`);
+        parts.push(`No operator-written performance history is available yet, so the autonomous policy must learn from qualified system outcomes and explicit edits/deletes.`);
       } else {
         parts.push(`Autopilot history is still sparse, so the current training set mixes autopilot and operator-written tweets. Treat strong operator examples as high-signal voice, sentiment, tone, and topic references.`);
       }
@@ -806,9 +808,15 @@ ${soulMd}`);
     }
 
     if (learnings.bestPerformers.length > 0) {
-      parts.push(`\nBEST ${trainingSourceLabel.toUpperCase()} tweets (do MORE like these):`);
+      parts.push(`\nCONTRASTIVE WINNER LEARNING:`);
       for (const t of learnings.bestPerformers.slice(0, evidenceLimits.bestWorstExamples)) {
-        parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
+        const winner = assessHistoricalWinner(t);
+        if (winner.disposition === 'engagement_mechanic_only') {
+          parts.push(`- SYSTEM WINNER, MECHANICS ONLY [${t.likes} likes]: ${winner.spreadMechanics.join('; ')}. Do not imitate unsafe scaffold: ${winner.unsafePatterns.join(', ')}.`);
+        } else {
+          const label = winner.disposition === 'native_voice_anchor' ? 'OPERATOR WINNER' : 'QUALIFIED SYSTEM WINNER';
+          parts.push(`- ${label} [${t.likes} likes; spread: ${winner.spreadMechanics.join(', ')}]: "${t.content.slice(0, 180)}"`);
+        }
       }
     }
 
@@ -863,6 +871,10 @@ ${soulMd}`);
         ? Math.max(5, evidenceLimits.manualVoiceAnchors)
         : evidenceLimits.manualVoiceAnchors;
       const manualAnchorChars = isGeoffreyVoiceProfile(voiceProfile) ? 320 : 180;
+      const situatedAnchors = humanRef.bestPerformers.slice(0, manualAnchorLimit).filter((entry) => /@\w+|https?:\/\//i.test(entry.content)).length;
+      if (situatedAnchors > 0) {
+        parts.push(`- ${situatedAnchors}/${Math.min(manualAnchorLimit, humanRef.bestPerformers.length)} top human anchors react to a real named person, company, event, or source. Preserve that social situatedness only when supplied context supports it; never invent access or a relationship.`);
+      }
       for (const t of humanRef.bestPerformers.slice(0, manualAnchorLimit)) {
         parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, manualAnchorChars)}"`);
       }

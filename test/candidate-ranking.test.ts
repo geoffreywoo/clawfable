@@ -477,6 +477,64 @@ describe('rankGeneratedTweets', () => {
     expect(truthful.candidateScore).toBeLessThan(100);
   });
 
+  it('rewards safe spread mechanics learned from successful operator and system posts', () => {
+    const context = rankingContext();
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      totalTracked: 12,
+      avgLikes: 20,
+      avgRetweets: 3,
+      bestPerformers: [performanceAnchor({
+        source: 'manual',
+        likes: 120,
+        retweets: 12,
+        replies: 10,
+        topic: 'manufacturing',
+        content: 'factory founders learn this fast: qualification delays revenue and a supplier can cap throughput.',
+      })],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint: {
+        avgLength: 150,
+        shortPct: 70,
+        mediumPct: 30,
+        longPct: 0,
+        questionRatio: 0,
+        usesLineBreaks: false,
+        usesEmojis: false,
+        usesNumbers: false,
+        topHooks: ['bold_claim'],
+        topTones: ['analytical'],
+        antiPatterns: [],
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+    } as AgentLearnings;
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'A factory can have demand and still miss the quarter because supplier qualification caps throughput.',
+        format: 'hot_take',
+        targetTopic: 'manufacturing',
+        rationale: 'Fresh claim using the winner\'s actor-and-stakes mechanic.',
+      },
+      {
+        content: 'Industrial strategy matters more than most people think.',
+        format: 'hot_take',
+        targetTopic: 'manufacturing',
+        rationale: 'Generic control candidate.',
+      },
+    ], context);
+
+    const mechanicCandidate = ranked.find((candidate) => candidate.content.startsWith('A factory'))!;
+    const genericCandidate = ranked.find((candidate) => candidate.content.startsWith('Industrial strategy'))!;
+    expect(mechanicCandidate.scoreProvenance.winnerMechanicFit).toBeGreaterThan(0);
+    expect(genericCandidate.scoreProvenance.winnerMechanicFit).toBe(0);
+    expect(mechanicCandidate.candidateScore).toBeGreaterThan(genericCandidate.candidateScore);
+  });
+
   it('keeps low-technical Geoffrey drafts below the balanced autopost gate', () => {
     const context = rankingContext();
     context.voiceProfile = {

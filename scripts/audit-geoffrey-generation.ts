@@ -3,6 +3,7 @@ import { assessAccountTaste, assessTechnicalCredibility } from '../lib/account-t
 import { extractCandidateFeatureTags } from '../lib/tweet-features';
 import { scoreSlopRisk } from '../lib/virality-signals';
 import type { Tweet } from '../lib/types';
+import { buildGenerationContext } from '../lib/generation-context';
 
 type QueueAuditItem = {
   id: string;
@@ -136,11 +137,12 @@ async function main() {
     throw new Error(`No agent found for @${handle}`);
   }
 
-  const [queue, learnings, allTweets, signals] = await Promise.all([
+  const [queue, learnings, allTweets, signals, generationContext] = await Promise.all([
     getQueuedTweets(agent.id),
     getLearnings(agent.id),
     getTweets(agent.id),
     getLearningSignals(agent.id, 100),
+    buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
   ]);
 
   const audited = queue.map((tweet) => auditTweet(tweet, {
@@ -165,6 +167,7 @@ async function main() {
     delete: audited.filter((item) => item.recommendation === 'delete').length,
     manualAnchorCount: learnings?.operatorVoiceReference?.bestPerformers.length || 0,
     recentSignalCount: signals.length,
+    learningEvidence: generationContext.style.banditPolicy?.evidence || null,
     generatedAt: new Date().toISOString(),
   };
 
@@ -176,6 +179,10 @@ async function main() {
   console.log(`Geoffrey generation audit (${summary.generatedAt})`);
   console.log(`${summary.handle} agent=${summary.agentId} queue=${summary.queueDepth} post=${summary.postCandidates} rewrite=${summary.rewrite} delete=${summary.delete}`);
   console.log(`manual anchors=${summary.manualAnchorCount} recent signals=${summary.recentSignalCount} tracked tweets=${allTweets.length}`);
+  if (summary.learningEvidence) {
+    const evidence = summary.learningEvidence;
+    console.log(`learning evidence=${evidence.uniquePerformancePosts} unique posts from ${evidence.performanceRows} checkpoints (${evidence.operatorWrittenPosts} operator, ${evidence.systemWrittenPosts} system, ${evidence.qualityDiscountedSystemPosts} system patterns discounted)`);
+  }
   console.log('');
 
   for (const item of audited) {

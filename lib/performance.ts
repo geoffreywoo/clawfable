@@ -35,6 +35,8 @@ import { generateText } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
+import { collapsePerformanceSnapshots } from './performance-history';
+import { historicalPerformanceEvidenceWeight } from './winner-learning';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 import {
@@ -65,10 +67,6 @@ function weightedEngagementScore(tweet: TweetPerformance): number {
 function parsePerformanceTimestamp(value: string | undefined): number {
   const timestamp = value ? Date.parse(value) : NaN;
   return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function performanceEntryKey(tweet: TweetPerformance): string {
-  return String(tweet.xTweetId || `${tweet.tweetId}:${tweet.postedAt}:${tweet.content}`);
 }
 
 export function getLearningInsightPromptLimits(historyLength: number): { rankingRows: number; examples: number; textChars: number } {
@@ -145,17 +143,6 @@ function shouldTrackPerformanceCheckpoint(existing: TweetPerformance | undefined
   return Date.parse(checkedAt) - lastChecked >= 10 * 60 * 1000;
 }
 
-function sourcePriority(source: TweetPerformance['source']): number {
-  switch (source) {
-    case 'manual':
-      return 3;
-    case 'autopilot':
-      return 2;
-    default:
-      return 1;
-  }
-}
-
 function manualPostSuccessSignals(signals: LearningSignal[]): { tweetIds: Set<string>; xTweetIds: Set<string> } {
   const tweetIds = new Set<string>();
   const xTweetIds = new Set<string>();
@@ -205,67 +192,11 @@ function weightedLearningScore(tweet: TweetPerformance): number {
     ?? tweet.actionRewards?.qualityAdjustedGrowthScore
     ?? computeActionRewards(tweet).qualityAdjustedGrowthScore
     ?? 50;
-  return ((qualityScore * 1.15) + (weightedEngagementScore(tweet) * 0.28)) * sourceSignalWeight(tweet.source);
-}
-
-function mergePerformanceEntries(primary: TweetPerformance, secondary: TweetPerformance): TweetPerformance {
-  const likes = Math.max(primary.likes, secondary.likes);
-  const retweets = Math.max(primary.retweets, secondary.retweets);
-  const replies = Math.max(primary.replies, secondary.replies);
-  const impressions = Math.max(primary.impressions, secondary.impressions);
-  const totalEngagement = likes + retweets + replies;
-
-  const earlierPostedAt = parsePerformanceTimestamp(primary.postedAt) <= parsePerformanceTimestamp(secondary.postedAt)
-    ? (primary.postedAt || secondary.postedAt)
-    : secondary.postedAt;
-
-  return {
-    ...secondary,
-    ...primary,
-    tweetId: primary.tweetId || secondary.tweetId,
-    xTweetId: primary.xTweetId || secondary.xTweetId,
-    content: primary.content || secondary.content,
-    format: primary.format !== 'unknown' ? primary.format : secondary.format,
-    topic: (primary.topic && primary.topic !== 'general' && primary.topic !== 'unknown') ? primary.topic : secondary.topic,
-    hook: primary.hook || secondary.hook,
-    tone: primary.tone || secondary.tone,
-    specificity: primary.specificity || secondary.specificity,
-    structure: primary.structure || secondary.structure,
-    thesis: primary.thesis || secondary.thesis,
-    styleMode: primary.styleMode || secondary.styleMode || STANDARD_STYLE_MODE,
-    postedAt: earlierPostedAt,
-    checkedAt: parsePerformanceTimestamp(primary.checkedAt) >= parsePerformanceTimestamp(secondary.checkedAt)
-      ? primary.checkedAt
-      : secondary.checkedAt,
-    likes,
-    retweets,
-    replies,
-    impressions,
-    engagementRate: impressions > 0
-      ? Math.round((totalEngagement / impressions) * 10000) / 100
-      : Math.max(primary.engagementRate, secondary.engagementRate),
-    wasViral: primary.wasViral || secondary.wasViral,
-    source: sourcePriority(primary.source) >= sourcePriority(secondary.source) ? primary.source : secondary.source,
-  };
-}
-
-function dedupePerformanceHistory(history: TweetPerformance[]): TweetPerformance[] {
-  const sorted = [...history].sort((a, b) => (
-    parsePerformanceTimestamp(b.checkedAt) - parsePerformanceTimestamp(a.checkedAt)
-    || weightedEngagementScore(b) - weightedEngagementScore(a)
-  ));
-
-  const deduped = new Map<string, TweetPerformance>();
-
-  for (const entry of sorted) {
-    const key = performanceEntryKey(entry);
-    const existing = deduped.get(key);
-    deduped.set(key, existing ? mergePerformanceEntries(existing, entry) : entry);
-  }
-
-  return Array.from(deduped.values()).sort((a, b) => (
-    parsePerformanceTimestamp(b.checkedAt) - parsePerformanceTimestamp(a.checkedAt)
-  ));
+  return (
+    ((qualityScore * 1.15) + (weightedEngagementScore(tweet) * 0.28))
+    * sourceSignalWeight(tweet.source)
+    * historicalPerformanceEvidenceWeight(tweet)
+  );
 }
 
 function buildSourceLanePerformance(
@@ -979,7 +910,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     getRecentMentions(agent.id, 500).catch(() => []),
     getPostLog(agent.id, 300).catch(() => []),
   ]);
-  const history = normalizeManualPerformanceSources(dedupePerformanceHistory(rawHistory), signals);
+  const history = normalizeManualPerformanceSources(collapsePerformanceSnapshots(rawHistory), signals);
 
   if (history.length === 0) {
     return {
@@ -1009,7 +940,8 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const manualHistory = history.filter((t) => t.source === 'manual');
   const timelineHistory = history.filter((t) => t.source === 'timeline');
   const operatorReferenceHistory = history.filter((t) => t.source !== 'autopilot');
-  const trainingHistory = manualHistory.length > 0
+  const operatorHistory = history.filter((t) => t.source !== 'autopilot');
+  const trainingHistory = operatorHistory.length > 0
     ? history
     : autopilotHistory.length >= 10
       ? autopilotHistory
@@ -1019,7 +951,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     manual: manualHistory.length,
     timeline: timelineHistory.length,
     trainingCount: trainingHistory.length,
-    trainingSource: manualHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
+    trainingSource: operatorHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
   };
 
   // Sort by weighted engagement

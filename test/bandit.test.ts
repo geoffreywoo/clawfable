@@ -157,6 +157,127 @@ describe('bandit policy', () => {
     expect(policy.toneArms.find((arm) => arm.arm === 'provocative')?.localPulls).toBeGreaterThan(0);
   });
 
+  it('treats timeline winners as operator evidence and collapses repeated checkpoints', () => {
+    const policy = buildBanditPolicy({
+      performanceHistory: [
+        performanceEntry({
+          tweetId: 'auto-1',
+          xTweetId: 'x-auto-1',
+          content: 'autopilot infrastructure miss',
+          format: 'analysis',
+          topic: 'Infra',
+          likes: 3,
+          source: 'autopilot',
+          checkedAt: '2026-07-01T00:15:00.000Z',
+        }),
+        performanceEntry({
+          tweetId: 'auto-1',
+          xTweetId: 'x-auto-1',
+          content: 'autopilot infrastructure miss',
+          format: 'analysis',
+          topic: 'Infra',
+          likes: 5,
+          source: 'autopilot',
+          checkedAt: '2026-07-01T02:00:00.000Z',
+        }),
+        performanceEntry({
+          tweetId: '',
+          xTweetId: 'x-timeline-1',
+          content: 'Biohacking got interesting when it became instrumentation, not supplement theater.',
+          format: 'hot_take',
+          topic: 'Biohacking',
+          likes: 90,
+          retweets: 10,
+          replies: 8,
+          source: 'timeline',
+          tone: 'provocative',
+        }),
+      ],
+      feedback: [],
+      signals: [],
+      allTweets: [],
+      allowedFormats: ['analysis', 'hot_take'],
+      candidateTopics: ['Infra', 'Biohacking'],
+      baseline: null,
+    });
+
+    expect(policy.trainingSource).toBe('mixed');
+    expect(policy.evidence).toMatchObject({
+      performanceRows: 3,
+      uniquePerformancePosts: 2,
+      collapsedSnapshots: 1,
+      operatorWrittenPosts: 1,
+      systemWrittenPosts: 1,
+    });
+    expect(policy.formatArms[0]?.arm).toBe('hot_take');
+    expect(policy.summary[0]).toContain('2 unique posts');
+  });
+
+  it('discounts obsolete generated scaffolds without throwing away their outcome', () => {
+    const policy = buildBanditPolicy({
+      performanceHistory: [
+        performanceEntry({
+          tweetId: 'patterned',
+          xTweetId: 'x-patterned',
+          content: 'a founder told me the old process took 42 minutes. the new one takes 6.',
+          format: 'story',
+          likes: 100,
+          source: 'autopilot',
+        }),
+        performanceEntry({
+          tweetId: 'qualified',
+          xTweetId: 'x-qualified',
+          content: 'substations and transformers determine when AI compute can come online.',
+          format: 'analysis',
+          likes: 100,
+          source: 'autopilot',
+        }),
+      ],
+      feedback: [],
+      signals: [],
+      allTweets: [],
+      allowedFormats: ['story', 'analysis'],
+      candidateTopics: ['AI'],
+      baseline: null,
+    });
+
+    expect(policy.evidence?.qualityDiscountedSystemPosts).toBe(1);
+    expect(policy.formatArms.find((arm) => arm.arm === 'story')?.localPulls)
+      .toBeLessThan(policy.formatArms.find((arm) => arm.arm === 'analysis')?.localPulls || 0);
+    expect(policy.formatArms.find((arm) => arm.arm === 'story')?.localPulls).toBeGreaterThan(0);
+
+    const failedPolicy = buildBanditPolicy({
+      performanceHistory: [
+        performanceEntry({
+          tweetId: 'patterned-miss',
+          xTweetId: 'x-patterned-miss',
+          content: 'a founder told me the workflow changed everything.',
+          format: 'story',
+          likes: 0,
+          retweets: 0,
+          replies: 0,
+        }),
+        performanceEntry({
+          tweetId: 'qualified-miss',
+          xTweetId: 'x-qualified-miss',
+          content: 'substations determine deployment.',
+          format: 'analysis',
+          likes: 0,
+          retweets: 0,
+          replies: 0,
+        }),
+      ],
+      feedback: [],
+      signals: [],
+      allTweets: [],
+      allowedFormats: ['story', 'analysis'],
+      candidateTopics: ['AI'],
+      baseline: { avgLikes: 20, avgRetweets: 2 },
+    });
+    expect(failedPolicy.formatArms.find((arm) => arm.arm === 'story')?.localPulls)
+      .toBe(failedPolicy.formatArms.find((arm) => arm.arm === 'analysis')?.localPulls);
+  });
+
   it('penalizes strategies that operators delete', () => {
     const questionTweet = tweetEntry({
       id: 'question-1',

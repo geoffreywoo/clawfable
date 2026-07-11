@@ -15,6 +15,8 @@ import type { SourcePlannerPlan } from './source-planner';
 import { buildOutcomeEpisodes, computePerformanceLiftReward } from './outcome-rewards';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildShitpoastSlotSet, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
+import { collapsePerformanceSnapshotsWithStats } from './performance-history';
+import { assessHistoricalWinner, historicalPerformanceEvidenceWeight } from './winner-learning';
 
 export type BanditLengthBucket = 'short' | 'medium' | 'long';
 export type BanditTrainingSource = 'autopilot' | 'mixed';
@@ -71,6 +73,14 @@ export interface BanditPolicy {
   specificityArms: BanditArmScore[];
   structureArms: BanditArmScore[];
   summary: string[];
+  evidence?: {
+    performanceRows: number;
+    uniquePerformancePosts: number;
+    collapsedSnapshots: number;
+    operatorWrittenPosts: number;
+    systemWrittenPosts: number;
+    qualityDiscountedSystemPosts: number;
+  };
 }
 
 export interface BanditSlotPlan {
@@ -204,14 +214,27 @@ function buildFamilyObservation(family: BanditArmFamily, arm: string | null | un
   return { family, arm: normalized, reward, weight };
 }
 
-function collectEpisodeObservations(episodes: OutcomeEpisode[], allTweets: Tweet[]): BanditObservation[] {
+function collectEpisodeObservations(
+  episodes: OutcomeEpisode[],
+  allTweets: Tweet[],
+  performanceHistory: TweetPerformance[] = [],
+): BanditObservation[] {
   const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  const performanceByTweetId = new Map(performanceHistory.filter((entry) => entry.tweetId).map((entry) => [String(entry.tweetId), entry]));
+  const performanceByXId = new Map(performanceHistory.filter((entry) => entry.xTweetId).map((entry) => [String(entry.xTweetId), entry]));
   const observations: BanditObservation[] = [];
 
   for (const episode of episodes) {
     const tweet = tweetById.get(String(episode.tweetId));
+    const historicalEntry = performanceByTweetId.get(String(episode.tweetId))
+      || (episode.xTweetId ? performanceByXId.get(String(episode.xTweetId)) : null);
     const reward = clamp((episode.reward.total + 1) / 2, 0.02, 0.98);
-    const weight = recencyWeight(episode.observedAt) * (episode.stage === 'final' ? 1.1 : 0.9);
+    const qualityEvidenceWeight = historicalEntry && reward >= 0.5
+      ? historicalPerformanceEvidenceWeight(historicalEntry)
+      : 1;
+    const weight = recencyWeight(episode.observedAt)
+      * (episode.stage === 'final' ? 1.1 : 0.9)
+      * qualityEvidenceWeight;
     const length = getLengthBucketFromText(tweet?.content || '');
     const tags = episode.featureTags;
 
@@ -239,7 +262,10 @@ function collectFallbackPerformanceObservations(
   for (const entry of performanceHistory) {
     if (entry.tweetId && coveredTweetIds.has(String(entry.tweetId))) continue;
     const reward = performanceReward(entry, baseline);
-    const weight = recencyWeight(entry.checkedAt) * sourceSignalWeight(entry.source);
+    const qualityEvidenceWeight = reward >= 0.5 ? historicalPerformanceEvidenceWeight(entry) : 1;
+    const weight = recencyWeight(entry.checkedAt)
+      * sourceSignalWeight(entry.source)
+      * qualityEvidenceWeight;
     const featureTags = extractCandidateFeatureTags(entry.content, {
       topic: entry.topic,
       thesisHint: entry.thesis,
@@ -395,7 +421,8 @@ export function buildBanditGlobalPrior({
   sourceAccounts?: number;
 }): BanditGlobalPrior {
   const prior = createDefaultGlobalPrior();
-  const observations = collectFallbackPerformanceObservations(performanceHistory, new Set(), null);
+  const uniqueHistory = collapsePerformanceSnapshotsWithStats(performanceHistory).entries;
+  const observations = collectFallbackPerformanceObservations(uniqueHistory, new Set(), null);
   const totals = new Map<string, { pulls: number; rewardSum: number; failures: number }>();
 
   for (const observation of observations) {
@@ -423,7 +450,7 @@ export function buildBanditGlobalPrior({
   }
 
   prior.sourceAccounts = sourceAccounts;
-  prior.totalSamples = performanceHistory.length;
+  prior.totalSamples = uniqueHistory.length;
   return prior;
 }
 
@@ -437,14 +464,20 @@ export function buildBanditPolicy({
   baseline,
   globalPrior,
 }: BuildBanditPolicyOptions): BanditPolicy {
-  const autopilotHistory = performanceHistory.filter((entry) => entry.source === 'autopilot');
-  const manualHistory = performanceHistory.filter((entry) => entry.source === 'manual');
-  const trainingHistory = manualHistory.length > 0
-    ? performanceHistory
+  const collapsed = collapsePerformanceSnapshotsWithStats(performanceHistory);
+  const uniqueHistory = collapsed.entries;
+  const autopilotHistory = uniqueHistory.filter((entry) => entry.source === 'autopilot');
+  const operatorHistory = uniqueHistory.filter((entry) => entry.source !== 'autopilot');
+  const trainingHistory = operatorHistory.length > 0
+    ? uniqueHistory
     : autopilotHistory.length >= 10
       ? autopilotHistory
-      : performanceHistory;
-  const trainingSource: BanditTrainingSource = manualHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
+      : uniqueHistory;
+  const trainingSource: BanditTrainingSource = operatorHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
+  const qualityDiscountedSystemHistory = autopilotHistory.filter((entry) =>
+    assessHistoricalWinner(entry).evidenceWeight < 1
+    && performanceReward(entry, baseline) >= 0.5
+  );
 
   const scoreThreshold = median(trainingHistory.map((entry) => entry.likes + (entry.retweets * 2) + (entry.replies * 1.5)));
   const baselineScore = baseline ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2)) : 0;
@@ -454,12 +487,12 @@ export function buildBanditPolicy({
     agentId: allTweets[0]?.agentId || 'agent',
     tweets: allTweets,
     signals,
-    performanceHistory,
+    performanceHistory: uniqueHistory,
     baseline,
   });
   const manualPerformanceTweetIds = new Set(
-    performanceHistory
-      .filter((entry) => entry.source === 'manual' && entry.tweetId)
+    uniqueHistory
+      .filter((entry) => entry.source !== 'autopilot' && entry.tweetId)
       .map((entry) => String(entry.tweetId)),
   );
   const coveredTweetIds = new Set(
@@ -468,8 +501,8 @@ export function buildBanditPolicy({
       .filter((tweetId) => !manualPerformanceTweetIds.has(tweetId)),
   );
   const observations = [
-    ...collectEpisodeObservations(episodes, allTweets),
-    ...collectFallbackPerformanceObservations(performanceHistory, coveredTweetIds, baseline),
+    ...collectEpisodeObservations(episodes, allTweets, uniqueHistory),
+    ...collectFallbackPerformanceObservations(uniqueHistory, coveredTweetIds, baseline),
     ...collectFeedbackObservations(feedback, allTweets),
   ];
 
@@ -504,6 +537,10 @@ export function buildBanditPolicy({
   const exploreHook = sortExplore(hookArms).find((arm) => arm.coldStart) || sortExplore(hookArms)[0];
 
   const summary = [
+    `Learning evidence: ${collapsed.uniquePosts} unique posts (${operatorHistory.length} operator, ${autopilotHistory.length} system); ${collapsed.collapsedSnapshots} repeated checkpoints collapsed`,
+    qualityDiscountedSystemHistory.length > 0
+      ? `Quality-adjusted ${qualityDiscountedSystemHistory.length} successful system post${qualityDiscountedSystemHistory.length === 1 ? '' : 's'} with obsolete generated patterns; failed patterns retain full negative weight`
+      : '',
     exploitFormat ? `Exploit format: ${exploitFormat.arm} (${Math.round(exploitFormat.meanReward * 100)}% reward)` : '',
     exploitTopic ? `Exploit topic: ${exploitTopic.arm} (${Math.round(exploitTopic.meanReward * 100)}% reward)` : '',
     exploreFormat ? `Explore format: ${exploreFormat.arm}` : '',
@@ -528,6 +565,14 @@ export function buildBanditPolicy({
     specificityArms,
     structureArms,
     summary,
+    evidence: {
+      performanceRows: collapsed.inputRows,
+      uniquePerformancePosts: collapsed.uniquePosts,
+      collapsedSnapshots: collapsed.collapsedSnapshots,
+      operatorWrittenPosts: operatorHistory.length,
+      systemWrittenPosts: autopilotHistory.length,
+      qualityDiscountedSystemPosts: qualityDiscountedSystemHistory.length,
+    },
   };
 }
 

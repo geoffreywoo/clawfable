@@ -1264,6 +1264,31 @@ describe('generateViralBatch', () => {
         }),
       }],
     });
+    const geoffreyLearnings = evidenceLearnings();
+    geoffreyLearnings.sourceBreakdown = {
+      autopilot: 10,
+      manual: 0,
+      timeline: 3,
+      trainingCount: 13,
+      trainingSource: 'mixed',
+    };
+    geoffreyLearnings.bestPerformers = [
+      performance({
+        source: 'autopilot',
+        likes: 460,
+        content: 'a founder told me their old process took 42 minutes. the new one takes 6.',
+      }),
+      performance({
+        source: 'timeline',
+        likes: 513,
+        content: 'we love @Etched. what this team is building is insane. https://t.co/source',
+      }),
+    ];
+    geoffreyLearnings.operatorVoiceReference.bestPerformers[0] = performance({
+      source: 'timeline',
+      likes: 513,
+      content: 'we love @Etched. what this team is building is insane. https://t.co/source',
+    });
 
     const batch = await generateViralBatch(
       {
@@ -1297,7 +1322,7 @@ describe('generateViralBatch', () => {
       } as any,
       4,
       trendingTopics(4),
-      evidenceLearnings(),
+      geoffreyLearnings,
       null,
       {
         lengthMix: { short: 35, medium: 45, long: 20 },
@@ -1342,6 +1367,11 @@ describe('generateViralBatch', () => {
     expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
     expect(createCall.system).toContain('Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number.');
     expect(createCall.system).toContain('Geoffrey\'s social register matters');
+    expect(createCall.system).toContain('Operator-written timeline/manual posts are HIGH-SIGNAL evidence, not comparison-only examples.');
+    expect(createCall.system).toContain('SYSTEM WINNER, MECHANICS ONLY');
+    expect(createCall.system).toContain('anonymous-anecdote');
+    expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
+    expect(createCall.system).toContain('top human anchors react to a real named person, company, event, or source');
     expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
     expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
     expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');
