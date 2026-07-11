@@ -43,6 +43,13 @@ export interface TasteFeedbackClassification {
   preferenceHints: string[];
 }
 
+export interface AutonomousQueueTasteOptions {
+  voiceProfile?: VoiceProfile | null;
+  assessment: AccountTasteAssessment;
+  anchorCopyRiskContribution?: number | null;
+  hasSourceContext?: boolean;
+}
+
 type DomainDictionary = {
   label: string;
   terms: string[];
@@ -258,6 +265,7 @@ function openingMoveScore(content: string, technicalScore: number): number {
   if (technicalScore >= 0.42) score += 0.12;
   if (/\b(is|are|turned|became|gets|starts|ends|breaks|moves)\b/i.test(opening)) score += 0.05;
   if (/^(observation|hot take|serious question|data point|prediction):/i.test(opening)) score -= 0.14;
+  if (/^[a-z][a-z0-9 &/-]{2,45}\s+(?:question|lesson|take):$/i.test(opening)) score -= 0.12;
   if (/^(i think|in my opinion|here'?s|the thing is)/i.test(opening)) score -= 0.12;
   if (AI_SLOP_PHRASES.some((phrase) => lower.includes(phrase))) score -= 0.2;
   if (/^\d+\.\s/.test(opening)) score -= 0.1;
@@ -548,11 +556,17 @@ export function assessAccountTaste(
   );
 
   const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+  const generatedPatternBlockThreshold = geoffreyStrict ? 0.5 : 0.72;
+  const generatedPatternReviewThreshold = geoffreyStrict ? 0.24 : 0.46;
   const action: AccountTasteAssessment['action'] = claimEvidence.risk >= 0.5
     ? 'block'
-    : geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || generatedPattern.score >= 0.72 || (technical.score < 0.32 && genericRisk >= 0.45))
+    : geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || generatedPattern.score >= generatedPatternBlockThreshold || (technical.score < 0.32 && genericRisk >= 0.45))
     ? 'block'
-    : nativeVoiceScore < 0.52 || cringeRisk >= 0.44 || statusRisk >= 0.34 || generatedPattern.score >= 0.46
+    : nativeVoiceScore < (geoffreyStrict ? 0.55 : 0.52)
+      || cringeRisk >= (geoffreyStrict ? 0.4 : 0.44)
+      || statusRisk >= (geoffreyStrict ? 0.24 : 0.34)
+      || generatedPattern.score >= generatedPatternReviewThreshold
+      || (geoffreyStrict && technical.score < 0.42 && genericRisk >= 0.28)
       ? 'review'
       : 'allow';
 
@@ -581,16 +595,37 @@ export function assessAccountTaste(
   };
 }
 
+export function getAutonomousQueueTasteIssue({
+  voiceProfile,
+  assessment,
+  anchorCopyRiskContribution = 0,
+  hasSourceContext = false,
+}: AutonomousQueueTasteOptions): string | null {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return null;
+  if (assessment.action !== 'allow') {
+    return `strict account taste verdict: ${assessment.action}`;
+  }
+  if ((anchorCopyRiskContribution || 0) <= -0.04) {
+    return 'draft reuses a distinctive manual-anchor phrase or structure';
+  }
+  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.42) {
+    return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} without current source context`;
+  }
+  return null;
+}
+
 export function buildGeoffreyNativeWritingBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 For @geoffwoo, write like a technical operator/investor thinking in public, not like a social media manager.
 - Start from a technical object or constraint: chip package, memory bandwidth, power delivery, grid interconnect, reactor fuel cycle, separation chemistry, factory tolerance, robot failure mode, launch/radiation/thermal limit, supply-chain qualification.
 - Convert it into a non-obvious implication. "This is big" is not enough. Explain what bottleneck moves, what old assumption breaks, or what curve changes.
 - Use compressed human phrasing. One hard observation beats a polished framework.
+- Manual examples are voice evidence, not content seeds. Never lift their named people, places, status objects, distinctive noun phrases, punchlines, list items, or opening-plus-structure into a new post. A new topic wrapped in a manual post's skeleton is still copying.
 - Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
 - Anonymous anecdote openers ("a founder showed me", "an owner told me") are blocked unless the exact event appears in a manual source.
 - Slack channels, dashboards, support tickets, calendar invites, and workflow handoffs are low-status proof. Do not use them as the main anchor.
 - Avoid topic-swapped AI advice. If the same post could fit any AI/startup account by changing one noun, reject it.
+- Also reject disguised template contrasts split across sentences ("does not have X. it has Y"), topic-label openings ("creator economy question:"), noun-versus-verb gimmicks, and slide/deck-versus-reality scaffolds.
 - Strong shape: technical object -> hidden constraint -> non-consensus implication -> sharp final line.`;
 }
 

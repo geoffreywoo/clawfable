@@ -64,6 +64,7 @@ import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
+import { assessAccountTaste, getAutonomousQueueTasteIssue } from './account-taste';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 import { buildFallbackLearningMetadata } from './learning-loop';
@@ -2436,6 +2437,20 @@ async function refillQueue(
           ...operatorEvidence,
         ]).issue;
         if (claimEvidenceIssue) continue;
+        const tasteAssessment = assessAccountTaste(item.content, {
+          voiceProfile,
+          learnings,
+          memory,
+          featureTags: item.featureTags,
+          sourceTexts: [item.sourceBrief, item.trendHeadline, ...operatorEvidence],
+        });
+        const queueTasteIssue = getAutonomousQueueTasteIssue({
+          voiceProfile,
+          assessment: tasteAssessment,
+          anchorCopyRiskContribution: item.scoreProvenance?.anchorCopyRisk,
+          hasSourceContext: Boolean(item.sourceBrief || item.trendHeadline),
+        });
+        if (queueTasteIssue) continue;
         if (isNearDuplicate(item.content, recentContent, duplicateThreshold).isDuplicate) continue;
         recentContent.unshift(item.content);
 

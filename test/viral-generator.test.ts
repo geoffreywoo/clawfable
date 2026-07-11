@@ -1372,6 +1372,8 @@ describe('generateViralBatch', () => {
     expect(createCall.system).toContain('anonymous-anecdote');
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
     expect(createCall.system).toContain('top human anchors react to a real named person, company, event, or source');
+    expect(createCall.system).toContain('MANUAL-ANCHOR FIREWALL');
+    expect(createCall.system).toContain('discard structural reskins');
     expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
     expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
     expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');

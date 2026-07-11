@@ -1561,6 +1561,89 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(reworked!.content);
   });
 
+  it('catches a structural reskin that reorders a distinctive manual-anchor phrase', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'manufacturing', 'energy'],
+      antiGoals: ['generic AI slop'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: blunt, technical, native voice.',
+      summary: 'Geoffrey writes about hard technical constraints.',
+    };
+    const styleFingerprint = {
+      avgLength: 180,
+      shortPct: 20,
+      mediumPct: 80,
+      longPct: 0,
+      questionRatio: 0,
+      usesLineBreaks: true,
+      usesEmojis: false,
+      usesNumbers: false,
+      topHooks: ['observation'],
+      topTones: ['provocative'],
+      antiPatterns: [],
+      updatedAt: '2026-07-04T00:00:00.000Z',
+    };
+    const anchor = performanceAnchor({
+      tweetId: 'sf-rich-anchor',
+      source: 'timeline',
+      topic: 'culture',
+      content: 'SF rich:\n- estate in woodside\n- host dinner parties with ai founders\n- play padel on your home court',
+      thesis: 'sf wealth status culture',
+      likes: 410,
+      retweets: 7,
+    });
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-07-04T00:00:00.000Z',
+      totalTracked: 20,
+      avgLikes: 40,
+      avgRetweets: 4,
+      bestPerformers: [anchor],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      styleFingerprint,
+      operatorVoiceReference: {
+        sampleCount: 1,
+        bestPerformers: [anchor],
+        pinnedExamples: [],
+        styleFingerprint,
+      },
+      sourceBreakdown: {
+        autopilot: 10,
+        manual: 0,
+        timeline: 10,
+        trainingCount: 20,
+        trainingSource: 'mixed',
+      },
+    } satisfies AgentLearnings;
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: 'personal wealth in the next decade:\n\n- enough power to run inference\n- a garage with three-phase service\n- a robot that recovers from a jam\n\nwoodside estate still acceptable.',
+        format: 'hot_take',
+        targetTopic: 'frontier technology',
+        rationale: 'Reskins a successful manual status list.',
+      },
+      {
+        content: 'three-phase service changes which hardware can leave the lab. transformer capacity and protection gear become part of the prototype budget.',
+        format: 'hot_take',
+        targetTopic: 'frontier technology',
+        rationale: 'Uses a fresh technical mechanism without borrowing the manual post.',
+      },
+    ], context);
+
+    const copied = ranked.find((candidate) => candidate.content.includes('woodside estate'))!;
+    const fresh = ranked.find((candidate) => candidate.content.startsWith('three-phase service'))!;
+
+    expect(copied.scoreProvenance.anchorCopyRisk).toBeLessThanOrEqual(-0.04);
+    expect(fresh.scoreProvenance.anchorCopyRisk).toBe(0);
+    expect(copied.confidenceScore).toBeLessThanOrEqual(0.39);
+    expect(fresh.confidenceScore).toBeGreaterThan(copied.confidenceScore);
+  });
+
   it('keeps learned-caution candidates out of safe generation mode even when the headline score is high', () => {
     const context = rankingContext();
     const anchor = performanceAnchor({

@@ -1,9 +1,10 @@
 import { getAgentByHandle, getLearningSignals, getLearnings, getQueuedTweets, getTweets } from '../lib/kv-storage';
-import { assessAccountTaste, assessTechnicalCredibility } from '../lib/account-taste';
+import { assessAccountTaste, assessTechnicalCredibility, getAutonomousQueueTasteIssue } from '../lib/account-taste';
 import { extractCandidateFeatureTags } from '../lib/tweet-features';
 import { scoreSlopRisk } from '../lib/virality-signals';
 import type { Tweet } from '../lib/types';
 import { buildGenerationContext } from '../lib/generation-context';
+import { scoreOperatorAnchorCopyRisk } from '../lib/candidate-ranking';
 
 type QueueAuditItem = {
   id: string;
@@ -20,6 +21,9 @@ type QueueAuditItem = {
   statusTextureRisk: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  tasteAction: 'allow' | 'review' | 'block';
+  anchorCopyRiskContribution: number;
+  queueTasteIssue: string | null;
   recommendation: 'post_candidate' | 'rewrite' | 'delete';
   reasons: string[];
   content: string;
@@ -48,6 +52,8 @@ function readNumber(value: unknown): number | null {
 }
 
 function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueAuditItem['recommendation'] {
+  if (item.tasteAction === 'block') return 'delete';
+  if (item.queueTasteIssue) return 'rewrite';
   if (
     item.nativeVoiceScore < 0.42
     || item.cringeRisk >= 0.58
@@ -77,11 +83,16 @@ function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   if (item.statusTextureRisk >= 0.24) reasons.push(`status texture ${item.statusTextureRisk}`);
   if (item.truthfulnessRisk >= 0.5) reasons.push(`claim evidence ${item.truthfulnessRisk}`);
   if (item.generatedPatternRisk >= 0.46) reasons.push(`generated pattern ${item.generatedPatternRisk}`);
+  if (item.queueTasteIssue) reasons.push(item.queueTasteIssue);
   if (item.slopScore >= 0.42) reasons.push(`slop ${item.slopScore}`);
   return reasons.length > 0 ? reasons : ['clears native/technical queue audit'];
 }
 
-function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>[1]): QueueAuditItem {
+function auditTweet(
+  tweet: Tweet,
+  context: Parameters<typeof assessAccountTaste>[1],
+  generationContext: Awaited<ReturnType<typeof buildGenerationContext>>,
+): QueueAuditItem {
   const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis });
   const taste = assessAccountTaste(tweet.content, {
     ...context,
@@ -95,6 +106,32 @@ function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>
   });
   const technical = assessTechnicalCredibility(tweet.content);
   const slopScore = readNumber(tweet.slopScore) ?? scoreSlopRisk(tweet.content, featureTags);
+  const recalculatedAnchorCopyRisk = scoreOperatorAnchorCopyRisk({
+    content: tweet.content,
+    format: tweet.format || 'unknown',
+    targetTopic: tweet.topic || 'general',
+    rationale: tweet.rationale || '',
+    sourceBrief: tweet.sourceBrief,
+    trendHeadline: tweet.trendHeadline,
+  }, featureTags, {
+    voiceProfile: generationContext.voiceProfile,
+    learnings: generationContext.learnings,
+    style: generationContext.style,
+    recentPosts: generationContext.recentPosts,
+    allTweets: generationContext.allTweets,
+    memory: generationContext.memory,
+  });
+  const storedAnchorCopyRiskContribution = readNumber(tweet.scoreProvenance?.anchorCopyRisk) || 0;
+  const anchorCopyRiskContribution = Math.min(
+    storedAnchorCopyRiskContribution,
+    Number((-recalculatedAnchorCopyRisk * 0.12).toFixed(3)),
+  );
+  const queueTasteIssue = getAutonomousQueueTasteIssue({
+    voiceProfile: context.voiceProfile,
+    assessment: taste,
+    anchorCopyRiskContribution,
+    hasSourceContext: Boolean(tweet.sourceBrief || tweet.trendHeadline),
+  });
   const base = {
     id: tweet.id,
     topic: tweet.topic,
@@ -110,6 +147,9 @@ function auditTweet(tweet: Tweet, context: Parameters<typeof assessAccountTaste>
     statusTextureRisk: taste.statusTextureRisk,
     truthfulnessRisk: taste.truthfulnessRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
+    tasteAction: taste.action,
+    anchorCopyRiskContribution,
+    queueTasteIssue,
     reasons: [] as string[],
     content: tweet.content,
     scoreProvenance: tweet.scoreProvenance ?? null,
@@ -155,7 +195,7 @@ async function main() {
     },
     learnings,
     memory: null,
-  }));
+  }, generationContext));
 
   const summary = {
     handle: `@${handle}`,

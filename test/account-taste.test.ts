@@ -3,6 +3,7 @@ import {
   assessAccountTaste,
   assessTechnicalCredibility,
   classifyTasteFeedbackReason,
+  getAutonomousQueueTasteIssue,
   isGeoffreyVoiceProfile,
 } from '@/lib/account-taste';
 
@@ -170,5 +171,26 @@ describe('account taste scoring', () => {
         expect.stringContaining('elevated technical depth'),
       ]),
     );
+  });
+
+  it('keeps review-grade generated patterns out of Geoffrey autopost queue', () => {
+    const templated = assessAccountTaste(
+      'creator economy question:\n\nwhen generation becomes unlimited, who owns review and provenance?',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+    const technical = assessAccountTaste(
+      'graphite qualification fails downstream of purification, particle morphology and coating yield. the mine cannot solve a cell-maker rejection.',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+
+    expect(templated.action).not.toBe('allow');
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: templated,
+    })).toContain('strict account taste verdict');
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: technical,
+    })).toBeNull();
   });
 });

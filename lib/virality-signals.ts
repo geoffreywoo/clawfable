@@ -83,6 +83,9 @@ export function assessFormulaicCadence(content: string): FormulaicCadenceAssessm
   const patterns: Array<[RegExp, string]> = [
     [/\bnot\s+[^.\n]{3,90}\bbut\b/i, 'not-x-but-y'],
     [/\bnot\s+[^.\n]{3,90}\bit'?s\b/i, 'not-x-its-y'],
+    [/\b(?:does not|doesn['’]?t|do not|don['’]?t|is not|isn['’]?t|are not|aren['’]?t|has no|have no)\b[^.!?\n]{0,100}[.!?]\s*(?:\n\s*)*(?:it|this|that|they|the [a-z][a-z -]{0,30})\s+(?:is|are|has|have)\b/i, 'split-not-x-y'],
+    [/\b(?:is|are)\s+the\s+(?:easy|hard)\s+noun\b[\s\S]{0,180}\b(?:is|are)\s+the\s+verbs?\b/i, 'noun-verb-gimmick'],
+    [/^(?:[a-z0-9][^:\n]{0,50}\s+)?(?:powerpoint|slide|deck):[\s\S]{0,220}\n+\s*(?:physical world|reality):/im, 'slide-reality-scaffold'],
     [/\bthe (real|actual) (edge|moat|bottleneck|question|shift|winner|winners)\b/i, 'the-real-x'],
     [/\bmost people (don'?t realize|miss|think|are still|keep|confuse|optimize for)\b/i, 'most-people-frame'],
     [/\bpeople (are still|keep|confuse|optimize for)\b/i, 'people-keep-frame'],

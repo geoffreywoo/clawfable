@@ -283,7 +283,7 @@ function scoreHistoricalWinnerMechanicFit(
   return clamp(strongest);
 }
 
-function scoreOperatorAnchorCopyRisk(
+export function scoreOperatorAnchorCopyRisk(
   candidate: RankableProtocolTweet,
   featureTags: CandidateFeatureTags,
   context: CandidateRankingContext,
@@ -294,20 +294,35 @@ function scoreOperatorAnchorCopyRisk(
   let strongestRisk = 0;
   for (const anchor of positiveAnchors.slice(0, 12)) {
     const duplicate = isNearDuplicate(candidate.content, [anchor.content], 0.82);
-    if (!duplicate.isDuplicate) continue;
+    const sameTopic = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic);
+    const distinctivePhraseRisk = sameTopic
+      ? 0
+      : scoreDistinctiveOperatorPhraseReuse(
+          candidate.content,
+          anchor.content,
+          [candidate.sourceBrief, candidate.trendHeadline],
+        );
+    if (!duplicate.isDuplicate && distinctivePhraseRisk === 0) continue;
 
     const thesisSimilarity = ideaSimilarity(
       { content: candidate.content, thesis: featureTags.thesis, topic: candidate.targetTopic },
       { content: anchor.content, thesis: anchor.thesis, topic: anchor.topic },
     );
-    const similarity = duplicate.similarity || 0.82;
-    const sameTopic = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic);
-    const risk = clamp(
-      0.46 +
-      ((similarity - 0.82) * 1.35) +
-      (thesisSimilarity >= 0.7 ? 0.14 : 0) +
-      (sameTopic ? 0.08 : 0),
-    );
+    let risk = distinctivePhraseRisk;
+    if (duplicate.isDuplicate) {
+      const similarity = duplicate.similarity || 0.82;
+      risk = Math.max(risk, clamp(
+        0.46 +
+        ((similarity - 0.82) * 1.35) +
+        (thesisSimilarity >= 0.7 ? 0.14 : 0) +
+        (sameTopic ? 0.08 : 0),
+      ));
+    }
+    const candidateListLines = candidate.content.split('\n').filter((line) => /^\s*[-*]\s+/.test(line)).length;
+    const anchorListLines = anchor.content.split('\n').filter((line) => /^\s*[-*]\s+/.test(line)).length;
+    if (distinctivePhraseRisk > 0 && candidateListLines >= 3 && anchorListLines >= 3) {
+      risk = clamp(risk + 0.12);
+    }
     strongestRisk = Math.max(strongestRisk, risk);
   }
 
@@ -535,12 +550,72 @@ function buildDistinctivePhrases(text: string): Map<string, number> {
   return phrases;
 }
 
+function buildShortDistinctivePhrases(text: string): Map<string, number> {
+  const words = normalizePhraseWords(text);
+  const phrases = new Map<string, number>();
+
+  for (const size of [4, 3, 2]) {
+    if (words.length < size) continue;
+    for (let index = 0; index <= words.length - size; index++) {
+      const window = words.slice(index, index + size);
+      const distinctive = window.filter((word) => word.length >= 5 && !PHRASE_REUSE_STOPWORDS.has(word));
+      if (distinctive.length < 2) continue;
+      if (size === 2 && (distinctive.length < 2 || distinctive.join('').length < 13)) continue;
+      phrases.set(window.join(' '), size);
+    }
+  }
+
+  return phrases;
+}
+
+function buildDistinctiveTokenPairs(text: string): Set<string> {
+  const words = normalizePhraseWords(text);
+  const pairs = new Set<string>();
+  for (let left = 0; left < words.length; left++) {
+    const leftWord = words[left];
+    if (leftWord.length < 5 || PHRASE_REUSE_STOPWORDS.has(leftWord)) continue;
+    for (let right = left + 1; right <= Math.min(words.length - 1, left + 3); right++) {
+      const rightWord = words[right];
+      if (rightWord.length < 5 || PHRASE_REUSE_STOPWORDS.has(rightWord)) continue;
+      if ((leftWord.length + rightWord.length) < 13) continue;
+      pairs.add([leftWord, rightWord].sort().join('|'));
+    }
+  }
+  return pairs;
+}
+
+function scoreDistinctiveOperatorPhraseReuse(
+  content: string,
+  anchorContent: string,
+  suppliedSources: Array<string | null | undefined>,
+): number {
+  const candidatePhrases = buildShortDistinctivePhrases(content);
+  const candidatePairs = buildDistinctiveTokenPairs(content);
+  if (candidatePhrases.size === 0 && candidatePairs.size === 0) return 0;
+  const anchorPhrases = buildShortDistinctivePhrases(anchorContent);
+  const anchorPairs = buildDistinctiveTokenPairs(anchorContent);
+  if (anchorPhrases.size === 0 && anchorPairs.size === 0) return 0;
+  const suppliedText = suppliedSources.filter(Boolean).join(' ').toLowerCase();
+  const suppliedPairs = buildDistinctiveTokenPairs(suppliedText);
+
+  let strongest = 0;
+  for (const [phrase, size] of candidatePhrases) {
+    if (!anchorPhrases.has(phrase) || suppliedText.includes(phrase)) continue;
+    strongest = Math.max(strongest, size >= 4 ? 0.72 : size === 3 ? 0.6 : 0.48);
+  }
+  for (const pair of candidatePairs) {
+    if (anchorPairs.has(pair) && !suppliedPairs.has(pair)) strongest = Math.max(strongest, 0.48);
+  }
+  return strongest;
+}
+
 function scorePhraseReuseRisk(candidate: RankableProtocolTweet, context: CandidateRankingContext): number {
   const candidatePhrases = buildDistinctivePhrases(candidate.content);
   if (candidatePhrases.size === 0) return 0;
 
   const sourceTexts = [
     ...context.recentPosts,
+    ...getPositiveOperatorAnchors(context).map((entry) => entry.content),
     ...context.allTweets
       .filter((tweet) => ['draft', 'preview', 'queued', 'posted'].includes(tweet.status))
       .slice(0, 40)
@@ -2018,8 +2093,9 @@ export function rankGeneratedTweets(
       if (accountTasteScore.action === 'block') {
         confidenceScore = Math.min(confidenceScore, 0.39);
       } else if (accountTasteScore.action === 'review') {
-        confidenceScore = Math.min(confidenceScore, 0.55);
+        confidenceScore = Math.min(confidenceScore, 0.49);
       }
+      if (anchorCopyRiskScore >= 0.4) confidenceScore = Math.min(confidenceScore, 0.39);
       if (accountTasteScore.technicalCredibilityScore < 0.42) {
         confidenceScore = Math.min(confidenceScore, 0.55);
       }

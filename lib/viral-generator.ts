@@ -878,6 +878,7 @@ ${soulMd}`);
       for (const t of humanRef.bestPerformers.slice(0, manualAnchorLimit)) {
         parts.push(`- HIGH-SIGNAL MANUAL VOICE EXAMPLE [${t.likes} likes, source:${t.source}]: "${t.content.slice(0, manualAnchorChars)}"`);
       }
+      parts.push(`- MANUAL-ANCHOR FIREWALL: these examples calibrate voice and social posture only. Do not reuse a named person, place, status object, distinctive two-plus-word phrase, punchline, list item, or opening-plus-structure from them unless that exact detail appears in today's supplied source context. Before returning a draft, compare it against every example above and discard structural reskins.`);
     }
 
     if (learnings.manualTopicProfile && learnings.manualTopicProfile.length > 0) {

@@ -67,4 +67,25 @@ describe('generated writing patterns', () => {
       ['how to diligence a magnet company: ask about coercivity.'],
     )).toBeGreaterThanOrEqual(0.4);
   });
+
+  it('detects generated contrasts and rhetorical reskins split across lines', () => {
+    const splitContrast = assessGeneratedWritingPatterns(
+      'your hardware startup does not have a prototype.\n\nit has one unusually cooperative specimen.',
+    );
+    const nounVerb = assessGeneratedWritingPatterns(
+      'ore is the easy noun. purification, morphology and qualification are the verbs.',
+    );
+    const slideReality = assessGeneratedWritingPatterns(
+      'datacenter powerpoint:\n\ncompute forever\n\nphysical world:\n\ntransformer lead time',
+    );
+    const topicLabel = assessGeneratedWritingPatterns(
+      'creator economy question:\n\nwho owns provenance?',
+    );
+
+    expect(splitContrast.hits).toContain('split-not-x-y');
+    expect(splitContrast.score).toBeGreaterThanOrEqual(0.5);
+    expect(nounVerb.hits).toContain('noun-verb-gimmick');
+    expect(slideReality.hits).toContain('slide-reality-scaffold');
+    expect(topicLabel.hits).toContain('topic-question-label');
+  });
 });
