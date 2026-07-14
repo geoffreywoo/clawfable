@@ -126,5 +126,20 @@ describe('generated writing patterns', () => {
     expect(assessGeneratedWritingPatterns(
       'when a robot jams:\n\nwho notices?\n\nwho can restart it?\n\nsame factory. radically different company.',
     ).score).toBeGreaterThanOrEqual(0.7);
+    expect(assessGeneratedWritingPatterns(
+      'future status object: a robot cell that ran the entire shift without an exception.',
+    ).hits).toContain('synthetic-status-test');
+    expect(assessGeneratedWritingPatterns(
+      'AI hardware marketing photo starter pack:\n\nwafer under purple light\nserver rack door open',
+    ).hits).toContain('starter-pack-list');
+    expect(assessGeneratedWritingPatterns(
+      'normal vc hears robotics and models labor TAM. the happy path is murdered by exception handling.',
+    ).score).toBeGreaterThanOrEqual(0.5);
+    expect(assessGeneratedWritingPatterns(
+      'investors ask whether power is cheap.\n\nwrong level of resolution.\n\ncan the site energize the interconnect?',
+    ).hits).toContain('wrong-resolution-scaffold');
+    expect(assessGeneratedWritingPatterns(
+      'when did reliability become less impressive than choreography?',
+    ).hits).toContain('when-did-contrast-question');
   });
 });

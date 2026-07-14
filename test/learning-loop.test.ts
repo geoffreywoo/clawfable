@@ -97,6 +97,9 @@ describe('buildPersonalizationMemory', () => {
         expect.stringContaining('elevated technical depth'),
       ]),
     );
+    expect(memory.rejectedDrafts).toContain(
+      'The best AI teams know the product is working when the Slack channel gets quieter.',
+    );
   });
 
   it('retains multiple edit preference hints from a single operator rewrite', () => {

@@ -10,7 +10,7 @@ vi.mock('@/lib/twitter-client', () => ({
   getUserTimeline: mocks.getUserTimeline,
 }));
 
-import { classifyTrendCategory, fetchCurrentTrends, fetchHackerNewsTopics, fetchTrendingFromFollowing } from '@/lib/trending';
+import { classifyTrendCategory, fetchCurrentTrends, fetchHackerNewsTopics, fetchTrendingFromFollowing, isLowSignalXCommentary, normalizeHackerNewsHeadline } from '@/lib/trending';
 import { getTwitterRateLimitResetAt, isRateLimitTwitterError, TwitterActionError } from '@/lib/twitter-debug';
 
 describe('fetchTrendingFromFollowing', () => {
@@ -85,6 +85,19 @@ describe('fetchTrendingFromFollowing', () => {
   it('matches YC as a token and never as the middle of NYCMayor', () => {
     expect(classifyTrendCategory('NYCMayor announces a new housing policy')).toBeNull();
     expect(classifyTrendCategory('YC startup founders released a robotics benchmark')).toBe('startups');
+  });
+
+  it('does not turn company names or reply banter into technology news', () => {
+    expect(classifyTrendCategory('Congrats on your use of a ruler and Microsoft Paint.')).toBeNull();
+    expect(isLowSignalXCommentary('Thanks, Choco. I have been called worse by better.')).toBe(true);
+    expect(isLowSignalXCommentary('Would not be surprised if OpenAI crumbles and never makes it to IPO.')).toBe(true);
+    expect(isLowSignalXCommentary('OpenAI published a new inference benchmark with measured latency.')).toBe(false);
+  });
+
+  it('normalizes headline price typography without inventing a negative cost', () => {
+    expect(normalizeHackerNewsHeadline(
+      'Show HN: I RL-trained an agent that trains models with RL (for –$1.3k)',
+    )).toBe('Show HN: I RL-trained an agent that trains models with RL (for about $1.3k)');
   });
 
   it('preserves date, publisher, and URL from fresh Hacker News stories', async () => {

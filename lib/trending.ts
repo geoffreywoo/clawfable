@@ -109,7 +109,7 @@ const TOPIC_CLUSTERS: Record<string, TopicCluster> = {
     keywords: [
       'software', 'open source', 'database', 'browser', 'compiler', 'programming language', 'developer',
       'developers', 'cloud computing', 'cybersecurity', 'security vulnerability', 'github', 'api', 'apis',
-      'linux', 'apple', 'microsoft', 'google', 'amazon', 'meta', 'technology',
+      'linux', 'technology',
     ],
   },
 };
@@ -219,6 +219,20 @@ function buildHeadline(text: string): string {
     clean = `${clean.slice(0, 180).replace(/\s\S*$/, '')}...`;
   }
   return clean;
+}
+
+export function isLowSignalXCommentary(text: string): boolean {
+  const normalized = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (/^(?:lol|lmao)\b/.test(normalized)) return true;
+  if (/\b(?:called worse by better|ruler and microsoft paint)\b/.test(normalized)) return true;
+  return /\bwould(?:n['’]?t|\s+not) be surprised\b/.test(normalized)
+    && /\b(?:crumbles?|never makes it|worth (?:a lot |much )?less)\b/.test(normalized);
+}
+
+export function normalizeHackerNewsHeadline(title: string): string {
+  return title
+    .trim()
+    .replace(/\bfor\s+[–—]\s*(?=\$\d)/gi, 'for about ');
 }
 
 function topicTokenSet(value: string): Set<string> {
@@ -392,6 +406,7 @@ export async function fetchTrendingFromFollowing(
   return allTweets
     .filter((tweet) => isCurrentTrendTimestamp(tweet.createdAt))
     .map((tweet): TrendingTopic | null => {
+      if (isLowSignalXCommentary(tweet.text)) return null;
       const category = classifyTrendCategory(tweet.text);
       const headline = buildHeadline(tweet.text);
       if (!category || headline.length < 15) return null;
@@ -476,7 +491,8 @@ export async function fetchHackerNewsTopics(
     .filter((item) => item && item.type === 'story' && !item.dead && !item.deleted && item.title && item.time)
     .map((item): TrendingTopic | null => {
       const timestamp = new Date((item.time || 0) * 1000).toISOString();
-      const category = classifyTrendCategory(item.title || '');
+      const headline = normalizeHackerNewsHeadline(item.title || '');
+      const category = classifyTrendCategory(headline);
       if (!category || !isCurrentTrendTimestamp(timestamp)) return null;
       const sourceAssessment = hackerNewsSourceAssessment(item.url);
       if (sourceAssessment.quality < 0.4) return null;
@@ -485,7 +501,7 @@ export async function fetchHackerNewsTopics(
       const engagementScore = (item.score || 0) + (item.descendants || 0) * 1.5;
       return {
         id: 0,
-        headline: (item.title || '').trim(),
+        headline,
         source: `Hacker News / ${publisher}`,
         relevanceScore: scoreHackerNewsTopic(item, category, sourceAssessment.quality),
         category,

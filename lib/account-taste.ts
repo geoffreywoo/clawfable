@@ -4,6 +4,7 @@ import { assessFormulaicCadence } from './virality-signals';
 import { extractCandidateFeatureTags, ideaSimilarity } from './tweet-features';
 import { assessClaimEvidence } from './claim-evidence';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { isNearDuplicate } from './survivability';
 
 export interface TechnicalCredibilityAssessment {
   score: number;
@@ -25,6 +26,7 @@ export interface AccountTasteAssessment {
   formulaicCadenceScore: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  rejectedDraftSimilarity: number;
   technical: TechnicalCredibilityAssessment;
   action: 'allow' | 'review' | 'block';
   notes: string[];
@@ -341,6 +343,26 @@ function statusTextureRisk(content: string, technical: TechnicalCredibilityAsses
   return clamp((hits * 0.16) + (technical.score < 0.42 ? 0.16 : -0.08));
 }
 
+function rejectedDraftSimilarity(
+  content: string,
+  featureTags: CandidateFeatureTags,
+  memory: PersonalizationMemory | null | undefined,
+): number {
+  const rejectedDrafts = memory?.rejectedDrafts || [];
+  if (rejectedDrafts.length === 0) return 0;
+
+  const nearDuplicate = isNearDuplicate(content, rejectedDrafts, 0.55);
+  const semanticSimilarity = rejectedDrafts.reduce((strongest, draft) => Math.max(
+    strongest,
+    ideaSimilarity(
+      { content, thesis: featureTags.thesis },
+      { content: draft },
+    ),
+  ), 0);
+
+  return clamp(Math.max(nearDuplicate.similarity || 0, semanticSimilarity));
+}
+
 function nativeStyleVector(content: string): number[] {
   const lines = nonEmptyLines(content);
   const words = normalizeText(content).match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) || [];
@@ -518,6 +540,7 @@ export function assessAccountTaste(
   ];
   const claimEvidence = assessClaimEvidence(content, sourceTexts);
   const generatedPattern = assessGeneratedWritingPatterns(content);
+  const rejectedSimilarity = rejectedDraftSimilarity(content, featureTags, context.memory);
   const memoryAvoid = [
     ...(context.memory?.neverDoThisAgain || []),
     ...(context.memory?.identityConstraints || []),
@@ -534,6 +557,7 @@ export function assessAccountTaste(
     technical.vagueHypeRisk * 0.38 +
     claimEvidence.risk * 0.52 +
     generatedPattern.score * 0.32 +
+    rejectedSimilarity * 0.45 +
     Math.min(0.22, slopPhraseHits * 0.07) +
     Math.min(0.16, Math.max(0, abstractHits - 1) * 0.035) +
     (memoryWantsLessGeneric && technical.score < 0.42 ? 0.08 : 0)
@@ -552,7 +576,8 @@ export function assessAccountTaste(
     formulaic.score * 0.14 -
     cringeRisk * 0.12 -
     claimEvidence.risk * 0.34 -
-    generatedPattern.score * 0.16,
+    generatedPattern.score * 0.16 -
+    rejectedSimilarity * 0.34,
   );
 
   const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
@@ -560,12 +585,13 @@ export function assessAccountTaste(
   const generatedPatternReviewThreshold = geoffreyStrict ? 0.24 : 0.46;
   const action: AccountTasteAssessment['action'] = claimEvidence.risk >= 0.5
     ? 'block'
-    : geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || generatedPattern.score >= generatedPatternBlockThreshold || (technical.score < 0.32 && genericRisk >= 0.45))
+    : geoffreyStrict && (nativeVoiceScore < 0.42 || cringeRisk >= 0.58 || generatedPattern.score >= generatedPatternBlockThreshold || rejectedSimilarity >= 0.55 || (technical.score < 0.32 && genericRisk >= 0.45))
     ? 'block'
     : nativeVoiceScore < (geoffreyStrict ? 0.55 : 0.52)
       || cringeRisk >= (geoffreyStrict ? 0.4 : 0.44)
       || statusRisk >= (geoffreyStrict ? 0.24 : 0.34)
       || generatedPattern.score >= generatedPatternReviewThreshold
+      || (geoffreyStrict && rejectedSimilarity >= 0.32)
       || (geoffreyStrict && technical.score < 0.42 && genericRisk >= 0.28)
       ? 'review'
       : 'allow';
@@ -578,6 +604,7 @@ export function assessAccountTaste(
   if (cringeRisk >= 0.44) notes.push('cringe/generated cadence risk');
   if (claimEvidence.issue) notes.push(claimEvidence.issue);
   if (generatedPattern.hits.length > 0) notes.push(`generated pattern: ${generatedPattern.hits.slice(0, 2).join(', ')}`);
+  if (rejectedSimilarity >= 0.32) notes.push(`resembles a recently rejected draft (${rejectedSimilarity.toFixed(2)})`);
   if (referenceFit >= 0.62) notes.push('resembles manual voice anchors without copying');
 
   return {
@@ -589,6 +616,7 @@ export function assessAccountTaste(
     formulaicCadenceScore: formulaic.score,
     truthfulnessRisk: claimEvidence.risk,
     generatedPatternRisk: generatedPattern.score,
+    rejectedDraftSimilarity: Number(rejectedSimilarity.toFixed(3)),
     technical,
     action,
     notes: [...new Set(notes)].slice(0, 6),
@@ -628,6 +656,7 @@ For @geoffwoo, write like a technical operator/investor thinking in public, not 
 - Slack channels, dashboards, support tickets, calendar invites, and workflow handoffs are low-status proof. Do not use them as the main anchor.
 - Avoid topic-swapped AI advice. If the same post could fit any AI/startup account by changing one noun, reject it.
 - Also reject disguised template contrasts split across sentences ("does not have X. it has Y"), old/new lists, horoscope gimmicks, topic-plus-advice labels, symmetrical question stacks, tidy "same X, radically different Y" closers, noun-versus-verb gimmicks, and slide/deck-versus-reality scaffolds.
+- Synthetic status tests/objects, starter-pack lists, "normal VC hears..." archetypes, isolated "wrong level of resolution" pivots, and closing contrast questions are generated voice, not native voice.
 - Strong shape: technical object -> hidden constraint -> non-consensus implication -> sharp final line.`;
 }
 

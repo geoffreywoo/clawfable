@@ -234,6 +234,7 @@ export interface CandidateScoreProvenance {
   truthfulnessRisk?: number;
   generatedPatternRisk?: number;
   patternReuseRisk?: number;
+  rejectedDraftSimilarity?: number;
   winnerMechanicFit?: number;
   authorityProof?: number;
   audienceSegment?: number;
@@ -1215,6 +1216,7 @@ export interface OutcomeEpisode {
 export interface PersonalizationMemory {
   alwaysDoMoreOfThis: string[];
   neverDoThisAgain: string[];
+  rejectedDrafts?: string[];
   topicsWithMomentum: string[];
   formatsUnderTested: string[];
   operatorHiddenPreferences: string[];

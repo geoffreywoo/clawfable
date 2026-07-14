@@ -27,6 +27,7 @@ type QueueAuditItem = {
   statusTextureRisk: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  rejectedDraftSimilarity: number;
   tasteAction: 'allow' | 'review' | 'block';
   anchorCopyRiskContribution: number;
   queueTasteIssue: string | null;
@@ -88,6 +89,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     || item.cringeRisk >= 0.58
     || item.statusTextureRisk >= 0.4
     || item.truthfulnessRisk >= 0.5
+    || item.rejectedDraftSimilarity >= 0.55
     || (item.technicalCredibilityScore < 0.3 && item.slopScore >= 0.45)
   ) {
     return 'delete';
@@ -97,6 +99,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     || item.technicalCredibilityScore < 0.42
     || item.cringeRisk >= 0.42
     || item.generatedPatternRisk >= 0.46
+    || item.rejectedDraftSimilarity >= 0.32
     || item.slopScore >= 0.42
   ) {
     return 'rewrite';
@@ -113,6 +116,7 @@ function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   if (item.statusTextureRisk >= 0.24) reasons.push(`status texture ${item.statusTextureRisk}`);
   if (item.truthfulnessRisk >= 0.5) reasons.push(`claim evidence ${item.truthfulnessRisk}`);
   if (item.generatedPatternRisk >= 0.46) reasons.push(`generated pattern ${item.generatedPatternRisk}`);
+  if (item.rejectedDraftSimilarity >= 0.32) reasons.push(`rejected draft similarity ${item.rejectedDraftSimilarity}`);
   if (item.queueTasteIssue) reasons.push(item.queueTasteIssue);
   if (item.slopScore >= 0.42) reasons.push(`slop ${item.slopScore}`);
   return reasons.length > 0 ? reasons : ['clears native/technical queue audit'];
@@ -181,6 +185,7 @@ function auditTweet(
     statusTextureRisk: taste.statusTextureRisk,
     truthfulnessRisk: taste.truthfulnessRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
+    rejectedDraftSimilarity: taste.rejectedDraftSimilarity,
     tasteAction: taste.action,
     anchorCopyRiskContribution,
     queueTasteIssue,
@@ -228,7 +233,7 @@ async function main() {
       summary: 'Elevated technical operator voice.',
     },
     learnings,
-    memory: null,
+    memory: generationContext.memory,
   }, generationContext));
 
   const summary = {
@@ -267,7 +272,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} pattern=${item.generatedPatternRisk} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} pattern=${item.generatedPatternRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);

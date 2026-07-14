@@ -82,6 +82,34 @@ describe('account taste scoring', () => {
     expect(sourced.nativeVoiceScore).toBeGreaterThan(fabricated.nativeVoiceScore);
   });
 
+  it('blocks close paraphrases of recently rejected drafts', () => {
+    const rejected = 'rare earth independence is downstream of a very annoying object: the high-temperature NdFeB magnet. dysprosium and terbium preserve coercivity while grain-boundary diffusion and sintering yield decide output.';
+    const assessment = assessAccountTaste(
+      'high-temperature NdFeB is where rare earth independence gets annoying. dysprosium and terbium preserve coercivity. grain-boundary diffusion and sintering yield decide usable output.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        memory: {
+          alwaysDoMoreOfThis: [],
+          neverDoThisAgain: [],
+          rejectedDrafts: [rejected],
+          topicsWithMomentum: [],
+          formatsUnderTested: [],
+          operatorHiddenPreferences: [],
+          editTransformations: [],
+          identityConstraints: [],
+          weeklyChanges: [],
+          updatedAt: '2026-07-14T00:00:00.000Z',
+        },
+      },
+    );
+
+    expect(assessment.rejectedDraftSimilarity).toBeGreaterThanOrEqual(0.55);
+    expect(assessment.action).toBe('block');
+    expect(assessment.notes).toEqual(expect.arrayContaining([
+      expect.stringContaining('recently rejected draft'),
+    ]));
+  });
+
   it('uses manual lexical rhythm as a positive voice model, not only topic depth', () => {
     const manualAnchor = {
       content: 'bro.. best bullshitter in the game in action\n\nyou can make up stories for a self-help crowd, but you cannot bullshit ai twitter autists',

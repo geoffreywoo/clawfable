@@ -571,6 +571,12 @@ export function buildPersonalizationMemory({
     ...feedback.map((entry) => entry.intentSummary || entry.reason || '').filter(Boolean),
     ...(learnings?.styleFingerprint?.antiPatterns || []),
   ]).slice(0, 5);
+  const rejectedDrafts = unique(
+    feedback
+      .filter((entry) => entry.rating === 'down' && entry.tweetText.trim())
+      .map((entry) => entry.tweetText.trim())
+      .reverse(),
+  ).slice(0, 20);
 
   const topicsWithMomentum = buildMomentumTopics(performanceHistory, baselineLikes);
   const formatsUnderTested = (banditPolicy?.formatArms || [])
@@ -607,6 +613,7 @@ export function buildPersonalizationMemory({
   return {
     alwaysDoMoreOfThis,
     neverDoThisAgain,
+    rejectedDrafts,
     topicsWithMomentum,
     formatsUnderTested,
     operatorHiddenPreferences,

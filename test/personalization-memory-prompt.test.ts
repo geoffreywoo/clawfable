@@ -76,6 +76,18 @@ describe('buildPersonalizationMemoryPrompt', () => {
     expect(lessonLine).toContain('...');
   });
 
+  it('shows recent rejected drafts as anti-paraphrase memory', () => {
+    const prompt = buildPersonalizationMemoryPrompt(memory({
+      rejectedDrafts: [
+        'future status object: a robot cell that ran the entire shift without an exception.',
+      ],
+    }));
+
+    expect(prompt).toContain('## RECENT REJECTED DRAFTS');
+    expect(prompt).toContain('Do not paraphrase, recycle the thesis, or reuse the construction');
+    expect(prompt).toContain('future status object');
+  });
+
   it('includes compact fallback shape outcome counters in the generation prompt', () => {
     const prompt = buildPersonalizationMemoryPrompt(memory({
       fallbackShapeOutcomes: [

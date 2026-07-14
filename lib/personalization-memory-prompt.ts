@@ -19,6 +19,12 @@ export const PERSONALIZATION_MEMORY_PROMPT_HEADER = '## PERSONALIZATION MEMORY';
 const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
   { key: 'alwaysDoMoreOfThis', title: 'ALWAYS DO MORE OF THIS', limit: 3 },
   { key: 'neverDoThisAgain', title: 'NEVER DO THIS AGAIN', limit: 3 },
+  {
+    key: 'rejectedDrafts',
+    title: 'RECENT REJECTED DRAFTS',
+    limit: 3,
+    intro: 'Do not paraphrase, recycle the thesis, or reuse the construction of these drafts.',
+  },
   { key: 'operatorHiddenPreferences', title: 'OPERATOR HIDDEN PREFERENCES', limit: 3 },
   {
     key: 'editTransformations',

@@ -1973,6 +1973,7 @@ export function rankGeneratedTweets(
       (accountTasteScore.truthfulnessRisk * 0.9) +
       (generatedPatternScore.score * 0.28 * accountTasteWeight) +
       (patternReuseRiskScore * 0.32) +
+      (accountTasteScore.rejectedDraftSimilarity * 0.55 * accountTasteWeight) +
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.34 * accountTasteWeight) +
       (Math.max(0, 0.34 - accountTasteScore.technicalCredibilityScore) * 0.2 * accountTasteWeight) +
       authorityProofPenalty +
@@ -2009,6 +2010,7 @@ export function rankGeneratedTweets(
       truthfulnessRisk: Number((-accountTasteScore.truthfulnessRisk * 0.28).toFixed(3)),
       generatedPatternRisk: Number((-generatedPatternScore.score * 0.16 * accountTasteWeight).toFixed(3)),
       patternReuseRisk: Number((-patternReuseRiskScore * 0.14).toFixed(3)),
+      rejectedDraftSimilarity: Number((-accountTasteScore.rejectedDraftSimilarity * 0.18 * accountTasteWeight).toFixed(3)),
       authorityProof: authorityProofIssue ? Number((-authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
       promptStrategy: Number((promptStrategyScore * 0.04).toFixed(3)),
@@ -2085,6 +2087,7 @@ export function rankGeneratedTweets(
       (accountTasteScore.truthfulnessRisk * 0.5) -
       (generatedPatternScore.score * 0.16 * accountTasteWeight) -
       (patternReuseRiskScore * 0.18) -
+      (accountTasteScore.rejectedDraftSimilarity * 0.34 * accountTasteWeight) -
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.24 * accountTasteWeight) -
       (authorityProofPenalty * 0.16)
     );
@@ -2131,7 +2134,8 @@ export function rankGeneratedTweets(
       + winnerMechanicFitScore * 0.04
       - riskPenalty * 0.18
       - accountTasteScore.truthfulnessRisk * 0.12
-      - patternReuseRiskScore * 0.06,
+      - patternReuseRiskScore * 0.06
+      - accountTasteScore.rejectedDraftSimilarity * 0.1 * accountTasteWeight,
     ) * 100);
     const draftExperimentId = candidate.draftExperimentId || stableExperimentId(candidate, coverageCluster);
     const experimentHoldout = candidate.experimentHoldout === true;
