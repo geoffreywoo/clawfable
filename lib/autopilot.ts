@@ -2318,7 +2318,7 @@ function isInjectedReply(reply: string, mentionText: string): boolean {
 
 // ─── Queue refill ────────────────────────────────────────────────────────────
 
-async function refillQueue(
+export async function refillQueue(
   agent: Agent,
   count: number,
   bias: { scheduledTopic?: string | null; momentumTopic?: string | null } = {},

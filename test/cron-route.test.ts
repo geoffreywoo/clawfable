@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getAccessibleAgentCount: vi.fn(),
@@ -90,6 +90,7 @@ import { TwitterActionError } from '@/lib/twitter-debug';
 describe('cron autopilot isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.CRON_SECRET = 'test-cron-secret';
     mocks.getAgents.mockResolvedValue([
       {
         id: 'agent-1',
@@ -154,8 +155,27 @@ describe('cron autopilot isolation', () => {
     mocks.getLatestTwitterTweetIdCursor.mockReturnValue(null);
   });
 
-  it('logs the failure and keeps cron alive when runAutopilot throws', async () => {
+  afterEach(() => {
+    delete process.env.CRON_SECRET;
+  });
+
+  function cronRequest(): Request {
+    return new Request('http://localhost/api/cron/post', {
+      headers: { authorization: 'Bearer test-cron-secret' },
+    });
+  }
+
+  it('fails closed when internal authentication is not configured', async () => {
+    delete process.env.CRON_SECRET;
+
     const response = await GET(new Request('http://localhost/api/cron/post') as any);
+
+    expect(response.status).toBe(503);
+    expect(mocks.getAgents).not.toHaveBeenCalled();
+  });
+
+  it('logs the failure and keeps cron alive when runAutopilot throws', async () => {
+    const response = await GET(cronRequest() as any);
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -235,7 +255,7 @@ describe('cron autopilot isolation', () => {
     });
     mocks.checkPerformance.mockRejectedValue(new Error('timeline lookup blocked'));
 
-    const response = await GET(new Request('http://localhost/api/cron/post') as any);
+    const response = await GET(cronRequest() as any);
 
     expect(response.status).toBe(200);
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
@@ -308,7 +328,7 @@ describe('cron autopilot isolation', () => {
       accessSecret: 'access-secret',
     });
 
-    const response = await GET(new Request('http://localhost/api/cron/post') as any);
+    const response = await GET(cronRequest() as any);
 
     expect(response.status).toBe(200);
     expect(mocks.getMentionsFromTwitter).toHaveBeenCalledWith(

@@ -10,14 +10,12 @@ import { discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { getBillingSummary } from '@/lib/billing';
+import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 
 export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authBearer = request.headers.get('authorization');
-    if (authBearer !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);
+  if (authError) {
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
   }
 
   // Fresh cache per cron tick — request-scoped memoization (cuts duplicate KV reads).
