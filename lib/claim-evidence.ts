@@ -3,13 +3,16 @@ export interface ClaimEvidenceAssessment {
   hasPersonalExperienceClaim: boolean;
   personalExperienceSupported: boolean;
   unsupportedNumbers: string[];
+  unsupportedQuotes: string[];
   issue: string | null;
 }
 
 const PERSONAL_EXPERIENCE_PATTERNS = [
   /\b(?:i|we)\s+(?:saw|watched|met|spoke|talked|visited|tested|measured|ran|built|bought|funded|invested|remember|learned|had a call|got a demo)\b/i,
+  /\b(?:i|we)\s+(?:always|usually|never)\s+(?:ask|check|photograph|look|visit|tour|measure|test|write|save)\b/i,
   /\b(?:showed|told|sent|walked)\s+(?:me|us)\b/i,
   /\b(?:a|an|one|this)\s+(?:[a-z][a-z-]*\s+){0,3}(?:founder|owner|engineer|operator|customer|buyer|manager|technician|scientist|investor|machinist)\s+(?:showed|told|sent|walked|said|asked|called|emailed|replaced|ran|built)\b/i,
+  /^(?:personal|my|house)\s+rule\s*:/im,
 ];
 
 const SUPPORT_STOPWORDS = new Set([
@@ -102,6 +105,31 @@ function numericClaimSupported(claim: string, supportTexts: string[]): boolean {
   ));
 }
 
+function quotedClaims(content: string): string[] {
+  const claims: string[] = [];
+  const pattern = /["“]([^"”\n]{4,220})["”]/g;
+  for (const match of content.matchAll(pattern)) {
+    const quote = match[1].replace(/\s+/g, ' ').trim();
+    const wordCount = (quote.match(/[a-z0-9]+(?:'[a-z0-9]+)?/gi) || []).length;
+    if (wordCount < 3) continue;
+
+    const index = match.index || 0;
+    const beforeLine = content.slice(content.lastIndexOf('\n', Math.max(0, index - 1)) + 1, index);
+    const afterIndex = index + match[0].length;
+    const nextNewline = content.indexOf('\n', afterIndex);
+    const afterLine = content.slice(afterIndex, nextNewline >= 0 ? nextNewline : content.length);
+    const standaloneLine = beforeLine.trim().length === 0 && afterLine.trim().length === 0;
+    const nearbyAttribution = /\b(?:said|says|asked|asks|called|calls|quote)\s*:?\s*$/i.test(content.slice(Math.max(0, index - 40), index));
+    if (standaloneLine || nearbyAttribution) claims.push(quote);
+  }
+  return [...new Set(claims)];
+}
+
+function quoteIsSupported(quote: string, supportTexts: string[]): boolean {
+  const normalizedQuote = normalizeText(quote);
+  return supportTexts.some((source) => normalizeText(source).includes(normalizedQuote));
+}
+
 export function assessClaimEvidence(
   content: string,
   supportTexts: Array<string | null | undefined> = [],
@@ -110,21 +138,25 @@ export function assessClaimEvidence(
   const hasPersonalExperienceClaim = PERSONAL_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(content));
   const personalExperienceSupported = !hasPersonalExperienceClaim || personalClaimIsSupported(content, cleanSupport);
   const unsupportedNumbers = numericClaims(content).filter((claim) => !numericClaimSupported(claim, cleanSupport));
+  const unsupportedQuotes = quotedClaims(content).filter((quote) => !quoteIsSupported(quote, cleanSupport));
 
   const risk = clamp(
     (!personalExperienceSupported ? 0.82 : 0)
-    + (unsupportedNumbers.length > 0 ? 0.48 + Math.min(0.42, unsupportedNumbers.length * 0.1) : 0),
+    + (unsupportedNumbers.length > 0 ? 0.48 + Math.min(0.42, unsupportedNumbers.length * 0.1) : 0)
+    + (unsupportedQuotes.length > 0 ? 0.64 : 0),
   );
 
   const reasons: string[] = [];
   if (!personalExperienceSupported) reasons.push('personal anecdote is not present in supplied source evidence');
   if (unsupportedNumbers.length > 0) reasons.push(`unsupported numeric claim${unsupportedNumbers.length === 1 ? '' : 's'}: ${unsupportedNumbers.slice(0, 4).join(', ')}`);
+  if (unsupportedQuotes.length > 0) reasons.push(`unsupported staged quote${unsupportedQuotes.length === 1 ? '' : 's'}: ${unsupportedQuotes.slice(0, 2).map((quote) => `"${quote}"`).join(', ')}`);
 
   return {
     risk: Number(risk.toFixed(3)),
     hasPersonalExperienceClaim,
     personalExperienceSupported,
     unsupportedNumbers,
+    unsupportedQuotes,
     issue: reasons.length > 0 ? `Claim evidence gate: ${reasons.join('; ')}.` : null,
   };
 }

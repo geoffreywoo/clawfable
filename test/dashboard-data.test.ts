@@ -81,7 +81,7 @@ vi.mock('@/lib/kv-storage', () => ({
 }));
 
 vi.mock('@/lib/trending', () => ({
-  fetchTrendingFromFollowing: mocks.fetchTrendingFromFollowing,
+  fetchCurrentTrends: mocks.fetchTrendingFromFollowing,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({

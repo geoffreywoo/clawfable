@@ -45,6 +45,27 @@ describe('claim evidence', () => {
     expect(supported.risk).toBe(0);
     expect(assessClaimEvidence('fusion has four clocks: plasma, fuel, wall, inventory.', []).risk).toBe(0);
   });
+
+  it('blocks synthetic personal rules without matching first-person evidence', () => {
+    const result = assessClaimEvidence(
+      'personal rule: when visiting a factory, photograph the rejected parts.',
+      ['Factory yield depends on understanding rejected parts.'],
+    );
+
+    expect(result.hasPersonalExperienceClaim).toBe(true);
+    expect(result.personalExperienceSupported).toBe(false);
+    expect(result.risk).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('blocks staged dialogue unless the quote appears in source evidence', () => {
+    const content = 'battery independence discourse:\n\n“we found graphite”\n\ncool. now qualify the anode material.';
+    const unsupported = assessClaimEvidence(content, ['A new graphite deposit was reported.']);
+    const supported = assessClaimEvidence(content, ['The source announcement says: “we found graphite”.']);
+
+    expect(unsupported.unsupportedQuotes).toEqual(['we found graphite']);
+    expect(unsupported.risk).toBeGreaterThanOrEqual(0.6);
+    expect(supported.unsupportedQuotes).toEqual([]);
+  });
 });
 
 describe('generated writing patterns', () => {
@@ -87,5 +108,23 @@ describe('generated writing patterns', () => {
     expect(nounVerb.hits).toContain('noun-verb-gimmick');
     expect(slideReality.hits).toContain('slide-reality-scaffold');
     expect(topicLabel.hits).toContain('topic-question-label');
+  });
+
+  it('detects explicit AI-voice constructions found in autonomous drafts', () => {
+    expect(assessGeneratedWritingPatterns(
+      'industrial status symbols:\n\nold: headcount\nnew: qualified production yield',
+    ).hits).toContain('old-new-scaffold');
+    expect(assessGeneratedWritingPatterns(
+      'personal rule: if i cannot explain the process window, i do not underwrite the factory.',
+    ).hits).toContain('synthetic-personal-rule');
+    expect(assessGeneratedWritingPatterns(
+      'hardware startup horoscope:\n\nsun in prototype\nmoon in qualification',
+    ).hits).toContain('horoscope-template');
+    expect(assessGeneratedWritingPatterns(
+      'startup advice for hard tech:\n\nname the first qualification gate.',
+    ).hits).toContain('topic-advice-label');
+    expect(assessGeneratedWritingPatterns(
+      'when a robot jams:\n\nwho notices?\n\nwho can restart it?\n\nsame factory. radically different company.',
+    ).score).toBeGreaterThanOrEqual(0.7);
   });
 });

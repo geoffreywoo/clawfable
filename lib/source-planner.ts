@@ -15,6 +15,7 @@ export interface TrendFitScores {
   velocity: number;
   soul: number;
   manual: number;
+  sourceQuality?: number;
   total: number;
 }
 
@@ -194,13 +195,40 @@ function manualFitScore(topic: TrendingTopic, clusters: ManualTopicCluster[]): n
 
 function freshnessScore(topic: TrendingTopic): number {
   const ageHours = Math.max(0.25, (Date.now() - parseDate(topic.timestamp)) / (1000 * 60 * 60));
-  return clamp(1 - (ageHours / 24));
+  return clamp(1 - (ageHours / 72));
 }
 
 function velocityScore(topic: TrendingTopic): number {
-  const likes = topic.topTweet?.likes || 0;
+  const engagement = topic.engagementScore ?? topic.topTweet?.likes ?? 0;
   const ageHours = Math.max(0.5, (Date.now() - parseDate(topic.timestamp)) / (1000 * 60 * 60));
-  return clamp((likes / ageHours) / 250);
+  const sourceScale = topic.sourceType === 'hacker_news' ? 12 : 250;
+  return clamp((engagement / ageHours) / sourceScale);
+}
+
+function sourceQualityScore(topic: TrendingTopic): number {
+  if (typeof topic.sourceQuality === 'number') return clamp(topic.sourceQuality);
+  let score = topic.sourceType === 'hacker_news' ? 0.62 : 0.58;
+  if (topic.sourceUrl) score += 0.12;
+  if (topic.publisher) score += 0.06;
+  if (topic.isPrimarySource) score += 0.12;
+  if ((topic.sourceCount || 1) > 1) score += 0.08;
+  return clamp(score);
+}
+
+export function formatTrendEvidence(topic: TrendingTopic): string {
+  const sourceType = topic.sourceType === 'hacker_news' ? 'Hacker News' : 'X';
+  const timestampLabel = topic.sourceType === 'hacker_news' ? 'discovered' : 'published';
+  const metadata = [
+    `source=${sourceType}`,
+    topic.publisher ? `publisher=${topic.publisher}` : null,
+    topic.timestamp ? `${timestampLabel}=${topic.timestamp}` : null,
+    topic.sourceUrl ? `url=${topic.sourceUrl}` : null,
+  ].filter(Boolean).join('; ');
+  const sourceText = topic.topTweet?.text?.trim();
+  const additionalEvidence = sourceText && sourceText !== topic.headline
+    ? ` Source text: ${sourceText.slice(0, 500)}`
+    : '';
+  return `Current event [${metadata}]: ${topic.headline}${additionalEvidence}`;
 }
 
 export function enrichTrendingTopics(
@@ -217,7 +245,14 @@ export function enrichTrendingTopics(
     const manual = manualFitScore(topic, manualClusters);
     const freshness = freshnessScore(topic);
     const velocity = velocityScore(topic);
-    const total = clamp((freshness * 0.28) + (velocity * 0.28) + (soul * 0.22) + (manual * 0.22));
+    const sourceQuality = sourceQualityScore(topic);
+    const total = clamp(
+      (freshness * 0.25)
+      + (velocity * 0.2)
+      + (soul * 0.2)
+      + (manual * 0.2)
+      + (sourceQuality * 0.15),
+    );
 
     let sourceLane: ContentSourceLane | 'reject' = 'reject';
     let plannerReason = 'Trend is too stale or too far from the account voice.';
@@ -243,6 +278,7 @@ export function enrichTrendingTopics(
         velocity: Number(velocity.toFixed(3)),
         soul: Number(soul.toFixed(3)),
         manual: Number(manual.toFixed(3)),
+        sourceQuality: Number(sourceQuality.toFixed(3)),
         total: Number(total.toFixed(3)),
       },
       sourceLane,

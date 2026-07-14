@@ -15,7 +15,7 @@ import {
   type PublicSoulSummary,
 } from './open-source-souls';
 import { normalizeSetupStep } from './setup-state';
-import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
+import { fetchCurrentTrends, type TrendingTopic } from './trending';
 import { decodeKeys } from './twitter-client';
 import { buildSourcePlannerPlan, enrichTrendingTopics } from './source-planner';
 import {
@@ -278,7 +278,7 @@ export async function refreshAgentTopics(agent: Agent): Promise<TrendingTopic[]>
   });
 
   try {
-    const topics = await fetchTrendingFromFollowing(keys, agent.xUserId);
+    const topics = await fetchCurrentTrends(keys, agent.xUserId);
     if (topics.length > 0) {
       await setTrendingCache(agent.id, topics);
     }

@@ -623,9 +623,11 @@ For @geoffwoo, write like a technical operator/investor thinking in public, not 
 - Manual examples are voice evidence, not content seeds. Never lift their named people, places, status objects, distinctive noun phrases, punchlines, list items, or opening-plus-structure into a new post. A new topic wrapped in a manual post's skeleton is still copying.
 - Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
 - Anonymous anecdote openers ("a founder showed me", "an owner told me") are blocked unless the exact event appears in a manual source.
+- Unsupported "personal rule" declarations and habitual factory/meeting behavior are fabricated persona, not voice. Block them.
+- Never stage a fake quote or dialogue line. A quote must appear verbatim in supplied source evidence.
 - Slack channels, dashboards, support tickets, calendar invites, and workflow handoffs are low-status proof. Do not use them as the main anchor.
 - Avoid topic-swapped AI advice. If the same post could fit any AI/startup account by changing one noun, reject it.
-- Also reject disguised template contrasts split across sentences ("does not have X. it has Y"), topic-label openings ("creator economy question:"), noun-versus-verb gimmicks, and slide/deck-versus-reality scaffolds.
+- Also reject disguised template contrasts split across sentences ("does not have X. it has Y"), old/new lists, horoscope gimmicks, topic-plus-advice labels, symmetrical question stacks, tidy "same X, radically different Y" closers, noun-versus-verb gimmicks, and slide/deck-versus-reality scaffolds.
 - Strong shape: technical object -> hidden constraint -> non-consensus implication -> sharp final line.`;
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBanditSlotPlan, type BanditPolicy, type BanditArmScore } from '@/lib/bandit';
-import { buildManualTopicProfile, buildSourcePlannerPlan, enrichTrendingTopics } from '@/lib/source-planner';
+import { buildManualTopicProfile, buildSourcePlannerPlan, enrichTrendingTopics, formatTrendEvidence } from '@/lib/source-planner';
 import type { AgentLearnings, ManualExampleCuration, TweetPerformance } from '@/lib/types';
 
 function perf(overrides: Partial<TweetPerformance> & { xTweetId: string; content: string; postedAt?: string; checkedAt?: string }): TweetPerformance {
@@ -70,6 +70,26 @@ function buildPolicy(): BanditPolicy {
 }
 
 describe('source planner', () => {
+  it('formats current-event evidence with provenance instead of a bare headline', () => {
+    const evidence = formatTrendEvidence({
+      id: 1,
+      headline: 'Inference ASIC company publishes a new memory-bandwidth benchmark',
+      source: 'Hacker News / example.com',
+      relevanceScore: 88,
+      category: 'compute',
+      timestamp: '2026-07-14T10:00:00.000Z',
+      tweetCount: 0,
+      sourceType: 'hacker_news',
+      sourceUrl: 'https://example.com/benchmark',
+      publisher: 'example.com',
+      engagementScore: 220,
+    });
+
+    expect(evidence).toContain('source=Hacker News');
+    expect(evidence).toContain('discovered=2026-07-14T10:00:00.000Z');
+    expect(evidence).toContain('url=https://example.com/benchmark');
+  });
+
   it('filters blocked manual examples but preserves pinned outliers in manual topic profile', () => {
     const curation: ManualExampleCuration = {
       pinnedXTweetIds: ['x-pinned'],

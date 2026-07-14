@@ -12,6 +12,12 @@ type QueueAuditItem = {
   generationProvider: Tweet['generationProvider'];
   generationModel: string | null;
   sourceBrief: string | null;
+  sourceLane: Tweet['sourceLane'];
+  trendTopicId: string | null;
+  sourceType: string | null;
+  sourceUrl: string | null;
+  sourceAgeHours: number | null;
+  timelyCurrentSource: boolean;
   confidenceScore: number | null;
   candidateScore: number | null;
   slopScore: number;
@@ -51,7 +57,30 @@ function readNumber(value: unknown): number | null {
   return null;
 }
 
+function parseCurrentSource(sourceBrief: string | null | undefined): {
+  sourceType: string | null;
+  sourceUrl: string | null;
+  sourceAgeHours: number | null;
+  timelyCurrentSource: boolean;
+} {
+  const brief = sourceBrief || '';
+  const sourceType = brief.match(/\bsource=([^;\]]+)/i)?.[1]?.trim() || null;
+  const sourceUrl = brief.match(/\burl=(https?:\/\/[^;\]\s]+)/i)?.[1] || null;
+  const published = brief.match(/\b(?:published|discovered)=([^;\]]+)/i)?.[1]?.trim() || null;
+  const timestamp = published ? Date.parse(published) : NaN;
+  const sourceAgeHours = Number.isFinite(timestamp)
+    ? Math.max(0, (Date.now() - timestamp) / (60 * 60 * 1000))
+    : null;
+  return {
+    sourceType,
+    sourceUrl,
+    sourceAgeHours: sourceAgeHours === null ? null : Number(sourceAgeHours.toFixed(2)),
+    timelyCurrentSource: sourceAgeHours !== null && sourceAgeHours <= 72 && Boolean(sourceUrl),
+  };
+}
+
 function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueAuditItem['recommendation'] {
+  if (item.trendTopicId && !item.timelyCurrentSource) return 'delete';
   if (item.tasteAction === 'block') return 'delete';
   if (item.queueTasteIssue) return 'rewrite';
   if (
@@ -77,6 +106,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
 
 function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   const reasons: string[] = [];
+  if (item.trendTopicId && !item.timelyCurrentSource) reasons.push('trend slot lacks a current dated source URL');
   if (item.nativeVoiceScore < 0.55) reasons.push(`native voice ${item.nativeVoiceScore}`);
   if (item.technicalCredibilityScore < 0.42) reasons.push(`technical credibility ${item.technicalCredibilityScore}`);
   if (item.cringeRisk >= 0.42) reasons.push(`cringe risk ${item.cringeRisk}`);
@@ -132,12 +162,16 @@ function auditTweet(
     anchorCopyRiskContribution,
     hasSourceContext: Boolean(tweet.sourceBrief || tweet.trendHeadline),
   });
+  const currentSource = parseCurrentSource(tweet.sourceBrief);
   const base = {
     id: tweet.id,
     topic: tweet.topic,
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
     sourceBrief: tweet.sourceBrief ?? null,
+    sourceLane: tweet.sourceLane ?? null,
+    trendTopicId: tweet.trendTopicId ?? null,
+    ...currentSource,
     confidenceScore: readNumber(tweet.confidenceScore),
     candidateScore: readNumber(tweet.candidateScore),
     slopScore: Number(slopScore.toFixed(3)),
@@ -205,6 +239,10 @@ async function main() {
     postCandidates: audited.filter((item) => item.recommendation === 'post_candidate').length,
     rewrite: audited.filter((item) => item.recommendation === 'rewrite').length,
     delete: audited.filter((item) => item.recommendation === 'delete').length,
+    trendQueued: audited.filter((item) => Boolean(item.trendTopicId)).length,
+    timelyTrendQueued: audited.filter((item) => item.trendTopicId && item.timelyCurrentSource).length,
+    staleOrUnprovenTrendQueued: audited.filter((item) => item.trendTopicId && !item.timelyCurrentSource).length,
+    generationModels: [...new Set(audited.map((item) => item.generationModel).filter(Boolean))],
     manualAnchorCount: learnings?.operatorVoiceReference?.bestPerformers.length || 0,
     recentSignalCount: signals.length,
     learningEvidence: generationContext.style.banditPolicy?.evidence || null,
@@ -218,6 +256,7 @@ async function main() {
 
   console.log(`Geoffrey generation audit (${summary.generatedAt})`);
   console.log(`${summary.handle} agent=${summary.agentId} queue=${summary.queueDepth} post=${summary.postCandidates} rewrite=${summary.rewrite} delete=${summary.delete}`);
+  console.log(`current-event queue=${summary.timelyTrendQueued}/${summary.trendQueued} stale-or-unproven=${summary.staleOrUnprovenTrendQueued} models=${summary.generationModels.join(', ') || 'none'}`);
   console.log(`manual anchors=${summary.manualAnchorCount} recent signals=${summary.recentSignalCount} tracked tweets=${allTweets.length}`);
   if (summary.learningEvidence) {
     const evidence = summary.learningEvidence;
@@ -229,6 +268,7 @@ async function main() {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
     console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} pattern=${item.generatedPatternRisk} slop=${item.slopScore}`);
+    console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);
     console.log('');

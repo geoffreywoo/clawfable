@@ -44,7 +44,7 @@ import {
   isTwitterActionError,
   isTransientTwitterError,
 } from './twitter-debug';
-import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
+import { fetchCurrentTrends, type TrendingTopic } from './trending';
 import {
   jitterInterval,
   isDailyCapReached,
@@ -64,7 +64,8 @@ import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
-import { assessAccountTaste, getAutonomousQueueTasteIssue } from './account-taste';
+import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
+import { assessGeneratedWritingPatterns } from './writing-patterns';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 import { buildFallbackLearningMetadata } from './learning-loop';
@@ -325,6 +326,13 @@ function getQueuedClaimEvidenceIssue(tweet: Tweet): string | null {
   return assessClaimEvidence(tweet.content, [tweet.sourceBrief, tweet.trendHeadline]).issue;
 }
 
+function getQueuedAiVoiceIssue(agent: Agent, tweet: Tweet): string | null {
+  if (!isGeoffreyAccount(agent.handle)) return null;
+  const assessment = assessGeneratedWritingPatterns(tweet.content);
+  if (assessment.score < 0.34) return null;
+  return `AI voice construction gate: ${assessment.hits.join(', ')} (risk ${assessment.score}).`;
+}
+
 function clearsQueuedPostPreflight(agent: Agent, tweet: Tweet, recentPostedContent: string[]): boolean {
   return (
     !getSanitizedTweetTextIssue(tweet.content, 'post')
@@ -333,6 +341,7 @@ function clearsQueuedPostPreflight(agent: Agent, tweet: Tweet, recentPostedConte
     && !getQueuedAutopostPolicyIssue(agent, tweet)
     && !getAuthorityProofIssue(tweet.content)
     && !getQueuedClaimEvidenceIssue(tweet)
+    && !getQueuedAiVoiceIssue(agent, tweet)
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
   );
 }
@@ -519,6 +528,42 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         source: 'autopilot',
         action: 'skipped',
         reason: claimEvidenceIssue,
+      });
+      continue;
+    }
+
+    const aiVoiceIssue = getQueuedAiVoiceIssue(agent, queuedTweet);
+    if (aiVoiceIssue) {
+      await updateTweet(queuedTweet.id, {
+        status: 'draft',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: aiVoiceIssue,
+      });
+      await addLearningSignal(agent.id, {
+        tweetId: queuedTweet.id,
+        signalType: 'x_post_rejected',
+        surface: 'autopilot',
+        rewardDelta: -0.68,
+        reason: aiVoiceIssue,
+        inferred: true,
+        metadata: {
+          qualityGate: 'ai_voice_construction',
+          generationProvider: queuedTweet.generationProvider ?? null,
+          generationModel: queuedTweet.generationModel ?? null,
+          generatedPatternRisk: assessGeneratedWritingPatterns(queuedTweet.content).score,
+        },
+      });
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: queuedTweet.id,
+        xTweetId: queuedTweet.xTweetId || '',
+        content: queuedTweet.content,
+        format: 'ai_voice_construction_gate',
+        topic: queuedTweet.topic || 'general',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'skipped',
+        reason: aiVoiceIssue,
       });
       continue;
     }
@@ -2301,7 +2346,7 @@ async function refillQueue(
             accessToken: agent.accessToken,
             accessSecret: agent.accessSecret,
           });
-          trending = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
+          trending = await fetchCurrentTrends(keys, String(agent.xUserId));
           if (trending && trending.length > 0) {
             await setTrendingCache(agent.id, trending);
           }

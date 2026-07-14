@@ -111,7 +111,7 @@ vi.mock('@/lib/soul-parser', () => ({
 }));
 
 vi.mock('@/lib/trending', () => ({
-  fetchTrendingFromFollowing: mocks.fetchTrendingFromFollowing,
+  fetchCurrentTrends: mocks.fetchTrendingFromFollowing,
 }));
 
 vi.mock('@/lib/survivability', () => ({
