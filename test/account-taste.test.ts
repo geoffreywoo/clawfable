@@ -110,6 +110,32 @@ describe('account taste scoring', () => {
     ]));
   });
 
+  it('requires technical substance even when a draft has current source context', () => {
+    const thin = assessAccountTaste(
+      'someone posted an agent that trains models. startup formation gets weird when experimentation becomes agent labor.',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+    const thinIssue = getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: { ...thin, action: 'allow' },
+      hasSourceContext: true,
+    });
+    const unsourcedJoke = assessAccountTaste(
+      'startup purgatory is a robot that works until the customer changes the lighting. congrats, you discovered photons.',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+    const jokeIssue = getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: { ...unsourcedJoke, action: 'allow' },
+      hasSourceContext: false,
+    });
+
+    expect(thin.technicalCredibilityScore).toBeLessThan(0.36);
+    expect(thinIssue).toContain('below the Geoffrey queue floor');
+    expect(unsourcedJoke.technicalCredibilityScore).toBeLessThan(0.5);
+    expect(jokeIssue).toContain('without current source context');
+  });
+
   it('uses manual lexical rhythm as a positive voice model, not only topic depth', () => {
     const manualAnchor = {
       content: 'bro.. best bullshitter in the game in action\n\nyou can make up stories for a self-help crowd, but you cannot bullshit ai twitter autists',

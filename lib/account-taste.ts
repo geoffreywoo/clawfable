@@ -636,7 +636,10 @@ export function getAutonomousQueueTasteIssue({
   if ((anchorCopyRiskContribution || 0) <= -0.04) {
     return 'draft reuses a distinctive manual-anchor phrase or structure';
   }
-  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.42) {
+  if (assessment.technicalCredibilityScore < 0.36) {
+    return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} is below the Geoffrey queue floor`;
+  }
+  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.5) {
     return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} without current source context`;
   }
   return null;
