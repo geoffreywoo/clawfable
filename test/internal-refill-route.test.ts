@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
   getQueuedTweets: vi.fn(),
   releaseAutopilotLock: vi.fn(),
+  resetReadCache: vi.fn(),
   refillQueue: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getAgent: mocks.getAgent,
   getQueuedTweets: mocks.getQueuedTweets,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
+  resetReadCache: mocks.resetReadCache,
 }));
 
 vi.mock('@/lib/autopilot', () => ({
@@ -73,6 +75,7 @@ describe('internal queue refill route', () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
+    expect(mocks.resetReadCache).toHaveBeenCalledOnce();
     expect(mocks.refillQueue).toHaveBeenCalledWith(expect.objectContaining({ id: '13' }), 3);
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'internal-refill:test');
     expect(data).toMatchObject({

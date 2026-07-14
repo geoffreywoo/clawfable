@@ -5,6 +5,7 @@ import {
   getAgent,
   getQueuedTweets,
   releaseAutopilotLock,
+  resetReadCache,
 } from '@/lib/kv-storage';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 
@@ -18,6 +19,8 @@ export async function POST(
   if (authError) {
     return NextResponse.json({ error: authError.message }, { status: authError.status });
   }
+
+  resetReadCache();
 
   const { id } = await params;
   const agent = await getAgent(id);
