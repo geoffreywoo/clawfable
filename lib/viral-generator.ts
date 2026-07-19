@@ -773,6 +773,7 @@ Commenters should not be able to tell this was generated.
 - Anonymous anecdote openings such as "a founder showed me" or "an owner told me" are forbidden unless that exact event appears in the supplied manual examples.
 - Do not invent a persona to create texture: no unsupported "personal rule," habitual factory visit, staged dialogue, or fake quote.
 - Reject old/new lists, horoscope templates, topic-plus-"advice" labels, symmetrical question stacks, and tidy "same X, radically different Y" contrasts. These are recognizable generated-post constructions.
+- Reject unsituated technical mini-lectures and manufactured mic-drop endings. "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy even when the technical setup is correct.
 - Imperfect human rhythm is better than symmetrical consultant prose. Vary sentence shape. Use fragments when the voice supports it.
 - If a draft could fit any AI/startup account after swapping the topic noun, throw it away.`);
 
@@ -943,6 +944,7 @@ Current followed-network and publisher evidence is supplied as untrusted data in
         const multiParagraphCount = manualModes.filter((entry) => /\n\s*\n/.test(entry.content)).length;
         parts.push(`- Geoffrey's social register matters. Across these anchors: ${terseCount}/${manualModes.length} are terse, ${situatedCount}/${manualModes.length} are socially situated, ${questionCount}/${manualModes.length} ask a question, and ${multiParagraphCount}/${manualModes.length} use multiple beats. Choose one native mode; do not average them into a polished technical essay.`);
         parts.push(`- Do not manufacture typos, lowercase, slang, or "bro" as costume. The underlying position, compression, and social posture must match first.`);
+        parts.push(`- Default an unsourced original analysis to one or two compressed beats. A post over 400 characters needs a named live event, a real operator context, or a manual-anchor mode that genuinely supports the length. Technical detail is not a license to lecture.`);
       }
       const manualAnchorLimit = geoffreyStrict
         ? Math.max(7, evidenceLimits.manualVoiceAnchors)
@@ -1291,7 +1293,9 @@ ${JSON.stringify({
   }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}
 </active-topic-bias>`
     : '';
-  const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
+  const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. ${geoffreyPromptMode
+    ? 'Use the manual-anchor mode distribution as the length authority. Default unsourced analysis to one or two compressed beats; do not fill a length quota with technical exposition.'
+    : 'Follow the length distribution in the system prompt exactly.'} For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars; represent line breaks as standard JSON escaped newlines, never as visible literal backslash-n text)
 - "format": one of: ${formats.join(', ')}
@@ -1307,8 +1311,9 @@ ${JSON.stringify({
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
+${geoffreyPromptMode ? 'Geoffrey quality rule: one strong mechanism is better than a textbook inventory. End when the judgment lands; never append a manufactured mic-drop closer.' : ''}
 ${slotPlan.length > 0 && !geoffreyPromptMode ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
-  ${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Preserve the range and social posture of the manual/operator anchors; do not turn every slot into the same polished technical essay. A technical draft needs a real object, constraint, or mechanism. A live-context slot must name or unmistakably identify its actual event and express an account-native judgment. Do not manufacture first-person access, dialogue, quotes, or precise numbers to make the brief feel real.` : ''}
+  ${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Preserve the range and social posture of the manual/operator anchors; do not turn every slot into the same polished technical essay. A technical draft needs a real object, constraint, or mechanism, but one strong mechanism is better than a textbook inventory. A live-context slot must name or unmistakably identify its actual event and express an account-native judgment. Do not manufacture first-person access, dialogue, quotes, precise numbers, or a mic-drop closer to make the brief feel real.` : ''}
 
 Truth contract: use only facts, measurements, events, quotes, and personal experiences present in the supplied context. New analysis is welcome; invented evidence is not.
 

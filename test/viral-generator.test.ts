@@ -1603,6 +1603,10 @@ describe('generateViralBatch', () => {
     expect(createCall.system).toContain('top human anchors react to a real named person, company, event, or source');
     expect(createCall.system).toContain('MANUAL-ANCHOR FIREWALL');
     expect(createCall.system).toContain('discard structural reskins');
+    expect(createCall.system).toContain('manufactured mic-drop endings');
+    expect(createCall.system).toContain('Technical detail is not a license to lecture.');
+    expect(userPrompt).toContain('Default unsourced analysis to one or two compressed beats');
+    expect(userPrompt).toContain('one strong mechanism is better than a textbook inventory');
     expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
     expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
     expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');

@@ -882,6 +882,41 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(technical!.content);
   });
 
+  it('does not let technical nouns rescue a manufactured Geoffrey closer', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['critical minerals', 'manufacturing', 'energy'],
+      antiGoals: ['generic hype', 'generated mic-drop endings'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+      summary: 'Geoffrey writes compressed technical and social observations.',
+    };
+
+    const [candidate] = rankGeneratedTweets([{
+      content: 'battery nationalism keeps pointing at the mine while spherical purified graphite is stuck doing purification, morphology control, coating and cell qualification.\n\ncongrats on owning dirt. the anode still has standards.',
+      format: 'hot_take',
+      targetTopic: 'graphite battery materials',
+      rationale: 'Technically specific setup with a generated social-copy closer.',
+      judgeScore: 0.96,
+      judgeBreakdown: {
+        overall: 0.96,
+        voiceFit: 0.92,
+        clarity: 0.9,
+        novelty: 0.88,
+        audienceFit: 0.9,
+        policySafety: 0.96,
+        nativeVoice: 0.9,
+        cringeRisk: 0.08,
+        technicalCredibility: 0.88,
+      },
+    }], context);
+
+    expect(candidate.scoreProvenance.technicalCredibility).toBeGreaterThan(0.08);
+    expect(candidate.scoreProvenance.generatedPatternRisk).toBeLessThanOrEqual(-0.08);
+    expect(candidate.scoreProvenance.nativeVoice).toBeLessThan(0);
+    expect(candidate.confidenceScore).toBeLessThanOrEqual(0.39);
+  });
+
   it('caps Geoffrey drafts when the model critic detects a manual-anchor reskin', () => {
     const context = rankingContext();
     context.voiceProfile = {

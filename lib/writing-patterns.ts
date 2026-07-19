@@ -40,6 +40,10 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'forced-a-b', weight: 0.28, pattern: /\n\s*a:\s[^\n]+\n+\s*b:\s/i },
   { label: 'same-same-suddenly', weight: 0.28, pattern: /\bsame\b[^.\n]{0,50}[.\n]+\s*\bsame\b[^.\n]{0,50}[.\n]+\s*\b(?:suddenly|then)\b/i },
   { label: 'show-me-receipt', weight: 0.16, pattern: /\bshow me\b/i },
+  { label: 'show-me-then-debate', weight: 0.42, pattern: /\bshow me\b[\s\S]{0,180}\bthen (?:we can|i(?:'|’)ll)\s+(?:argue|talk|believe|care|listen)\b/i },
+  { label: 'x-meets-y-y-wins', weight: 0.52, pattern: /\b[^.\n]{2,80}\bmeets?\s+([a-z][a-z0-9 -]{1,35})\.\s*\1\s+wins?\.?$/i },
+  { label: 'congrats-technical-micdrop', weight: 0.52, pattern: /\bcongrats(?:ulations)?(?:\s+on)?\b[^.!?\n]{2,100}[.!?]\s*(?:the|your|it|that)\b[^.!?\n]{2,100}(?:\bstill\b|\bstandards?\b|\bdoesn['’]?t care\b|\bwins?\b)/i },
+  { label: 'can-be-and-still', weight: 0.18, pattern: /\bcan be\b[^.!?\n]{2,100}\band still\b/i },
   { label: 'no-longer-bottleneck', weight: 0.24, pattern: /\b(?:bottleneck|constraint) is no longer\b/i },
   { label: 'sounds-like-until', weight: 0.16, pattern: /\bsounds like\b[^.\n]{0,100}\buntil\b/i },
   { label: 'x-decides-closer', weight: 0.16, pattern: /\b(?:the|that) [a-z][^.\n]{1,70} decides\.?$/i },
@@ -57,6 +61,7 @@ export function assessGeneratedWritingPatterns(content: string): GeneratedWritin
   if (questionLines >= 3) hits.push('question-stack');
   const paragraphs = content.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
   const hasSituatedVoice = /@\w+|https?:\/\/|\b(?:i|we|my|our)\b/i.test(content);
+  const hasConcreteSituation = /@\w+|https?:\/\/|\b(?:i|my|our)\b/i.test(content);
   if (
     paragraphs.length === 3
     && paragraphs.every((paragraph) => paragraph.length >= 18 && paragraph.length <= 260)
@@ -64,11 +69,21 @@ export function assessGeneratedWritingPatterns(content: string): GeneratedWritin
   ) {
     hits.push('tidy-three-part-explainer');
   }
+  const sentenceCount = (content.match(/[.!?](?:\s|$)/g) || []).length;
+  if (
+    paragraphs.length >= 3
+    && content.length >= 320
+    && sentenceCount >= 4
+    && !hasConcreteSituation
+  ) {
+    hits.push('unsituated-mini-lecture');
+  }
 
   const score = clamp(
     PATTERN_RULES.filter((rule) => hits.includes(rule.label)).reduce((sum, rule) => sum + rule.weight, 0)
     + (questionLines >= 3 ? 0.2 : 0)
-    + (hits.includes('tidy-three-part-explainer') ? 0.34 : 0),
+    + (hits.includes('tidy-three-part-explainer') ? 0.34 : 0)
+    + (hits.includes('unsituated-mini-lecture') ? 0.52 : 0),
   );
 
   return {

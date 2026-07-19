@@ -661,6 +661,8 @@ export function assessAccountTaste(
   const featureTags = context.featureTags || extractCandidateFeatureTags(content);
   const technical = assessTechnicalCredibility(content);
   const formulaic = assessFormulaicCadence(content);
+  const generatedPattern = assessGeneratedWritingPatterns(content);
+  const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
   const statusRisk = statusTextureRisk(content, technical);
   const genericRisk = genericAccountFitRisk(content, featureTags, technical);
   const rhythm = lineRhythmScore(content);
@@ -680,7 +682,6 @@ export function assessAccountTaste(
   ];
   const claimEvidence = assessClaimEvidence(content, sourceTexts);
   const sourceCopy = assessExternalSourceCopyRisk(content, context.untrustedSourceTexts);
-  const generatedPattern = assessGeneratedWritingPatterns(content);
   const rejectedSimilarity = rejectedDraftSimilarity(content, featureTags, context.memory);
   const memoryAvoid = [
     ...(context.memory?.neverDoThisAgain || []),
@@ -730,11 +731,13 @@ export function assessAccountTaste(
     : 0;
   // Native voice is an identity judgment, not a disguised truth or technical
   // score. Those risks remain independent hard gates below.
-  const nativeVoiceScore = nativeStyle.anchorCount > 0
+  const nativeVoiceBeforePatternPenalty = nativeStyle.anchorCount > 0
     ? Math.max(nativeVoiceComposite, manualStyleEvidence)
     : nativeVoiceComposite;
+  const nativeVoiceScore = geoffreyStrict
+    ? clamp(nativeVoiceBeforePatternPenalty - generatedPattern.score * 0.48)
+    : nativeVoiceBeforePatternPenalty;
 
-  const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
   const generatedPatternBlockThreshold = geoffreyStrict ? 0.5 : 0.72;
   const generatedPatternReviewThreshold = geoffreyStrict ? 0.24 : 0.46;
   const action: AccountTasteAssessment['action'] = claimEvidence.risk >= 0.5 || sourceCopy.score >= (geoffreyStrict ? 0.58 : 0.78)
@@ -817,6 +820,8 @@ For @geoffwoo, write like a technical operator/investor thinking in public, not 
 - Use compressed human phrasing. One hard observation beats a polished framework. Do not force every post into the same mechanism essay; native one-liners, reactions, jokes, or blunt questions are valid when manual anchors support that mode.
 - Geoffrey usually states a position, reacts to a named situation, or makes a socially situated judgment. He is not a content marketer teaching generic founders. Reject audience-label openings ("hardware founders:"), "start with" advice, and unsolicited how-to voice.
 - A list of technical nouns is not technical insight. Every mechanism must serve a disputed judgment, a surprising implication, or a concrete current event. Reject textbook definitions and tidy three-paragraph mini-essays even when every noun is accurate.
+- Do not write an unsituated mini-lecture to display expertise. Without a named live event or real personal context, default to one or two compressed beats and one disputed claim. Four polished paragraphs about a mechanism are a white paper, not a Geoffrey post.
+- Manufactured mic-drop endings are generated voice. Reject "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue." Stop when the observation lands; do not bolt on a social-copy punchline.
 - Preserve natural roughness and compression, but never manufacture misspellings or sprinkle slang to cosplay the voice.
 - Manual examples are voice evidence, not content seeds. Never lift their named people, places, status objects, distinctive noun phrases, punchlines, list items, or opening-plus-structure into a new post. A new topic wrapped in a manual post's skeleton is still copying.
 - Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
@@ -855,6 +860,18 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   if (/\b(my voice|not me|off voice|does not sound like me|doesn'?t sound like me|native)\b/.test(text)) {
     metadata.nativeVoiceComplaint = true;
     preferenceHints.push('Operator prioritizes native Geoffrey voice over generic viral-post optimization.');
+  }
+  if (/\b(lecture|lecturer|textbook|mini[- ]essay|explainer|white paper)\b/.test(text)) {
+    metadata.technicalLectureComplaint = true;
+    preferenceHints.push('Operator rejects polished technical lectures; compress to one disputed judgment or a reaction grounded in live context.');
+  }
+  if (/\b(mic[- ]drop|manufactured punchline|synthetic punchline|slogan|slogan-like|atoms win|still has standards)\b/.test(text)) {
+    metadata.syntheticPunchlineComplaint = true;
+    preferenceHints.push('Operator rejects manufactured mic-drop closers and slogan endings even when the setup is technically specific.');
+  }
+  if (/\b(reskins?|reuses? (?:the )?(?:existing|manual|old) premise|copies? (?:the )?(?:premise|skeleton|structure))\b/.test(text)) {
+    metadata.manualAnchorReskinComplaint = true;
+    preferenceHints.push('Operator rejects drafts that recycle a manual post premise or skeleton with new topic nouns.');
   }
   if (/\b(drift|drifting|too far|off topic|content drift|topic drift)\b/.test(reasonText)) {
     metadata.identityDriftComplaint = true;

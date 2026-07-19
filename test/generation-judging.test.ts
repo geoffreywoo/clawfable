@@ -481,6 +481,8 @@ describe('judgeCandidates fallback critic', () => {
     expect(judged[0].judgeScore).toBeLessThanOrEqual(0.45);
     expect(judged[0].judgeNotes).toContain('anchorReskin=0.88');
     expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || '')).toContain('manualAnchorReskinRisk');
+    expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || '')).toContain('unsituated technical mini-lecture');
+    expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || '')).toContain('X meets Y. Y wins');
   });
 
   it('sends trimmed long drafts to the model critic without truncating returned candidates', async () => {

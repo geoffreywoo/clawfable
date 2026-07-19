@@ -6,6 +6,7 @@ import type { Tweet } from '../lib/types';
 import { buildGenerationContext } from '../lib/generation-context';
 import { scoreOperatorAnchorCopyRisk } from '../lib/candidate-ranking';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from '../lib/source-trust';
+import { assessGeneratedWritingPatterns } from '../lib/writing-patterns';
 
 type QueueAuditItem = {
   id: string;
@@ -30,6 +31,7 @@ type QueueAuditItem = {
   statusTextureRisk: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  generatedPatternHits: string[];
   manualAnchorReskinRisk: number;
   sourceCopyRisk: number;
   rejectedDraftSimilarity: number;
@@ -153,6 +155,7 @@ function auditTweet(
     untrustedSourceTexts: getUntrustedSourceTexts(tweet),
   });
   const technical = assessTechnicalCredibility(tweet.content);
+  const generatedPatterns = assessGeneratedWritingPatterns(tweet.content);
   const slopScore = readNumber(tweet.slopScore) ?? scoreSlopRisk(tweet.content, featureTags);
   const recalculatedAnchorCopyRisk = scoreOperatorAnchorCopyRisk({
     content: tweet.content,
@@ -201,6 +204,7 @@ function auditTweet(
     statusTextureRisk: taste.statusTextureRisk,
     truthfulnessRisk: taste.truthfulnessRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
+    generatedPatternHits: generatedPatterns.hits,
     manualAnchorReskinRisk: readNumber(tweet.judgeBreakdown?.manualAnchorReskinRisk) ?? 0,
     sourceCopyRisk: taste.sourceCopyRisk,
     rejectedDraftSimilarity: taste.rejectedDraftSimilarity,
@@ -314,7 +318,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk}${item.generatedPatternHits.length ? ` (${item.generatedPatternHits.join(', ')})` : ''} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);

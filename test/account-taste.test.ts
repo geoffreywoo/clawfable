@@ -251,7 +251,7 @@ describe('account taste scoring', () => {
 
   it('turns taste complaints into structured reusable learning hints', () => {
     const feedback = classifyTasteFeedbackReason(
-      'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting too far',
+      'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting too far. it is a textbook lecture with a slogan mic-drop that reskins the old premise',
     );
 
     expect(feedback.metadata).toMatchObject({
@@ -261,6 +261,9 @@ describe('account taste scoring', () => {
       technicalElevationRequested: true,
       nativeVoiceComplaint: true,
       identityDriftComplaint: true,
+      technicalLectureComplaint: true,
+      syntheticPunchlineComplaint: true,
+      manualAnchorReskinComplaint: true,
       tasteComplaint: true,
     });
     expect(feedback.preferenceHints).toEqual(
@@ -317,6 +320,24 @@ describe('account taste scoring', () => {
       expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.34);
       expect(assessment.genericAccountFitRisk).toBeGreaterThanOrEqual(0.3);
       expect(assessment.action).not.toBe('allow');
+    }
+  });
+
+  it('rejects technical mini-lectures and manufactured mic-drop closers', () => {
+    const falsePositives = [
+      'a fusion plasma shot can be scientifically insane and still leave the commercial machine unresolved.\n\nThe plant must breed tritium, account for scarce fuel inventory, move heat through neutron-damaged materials and replace first-wall components without turning uptime into fiction.\n\nThat is why “net energy” cannot carry the whole timeline. The reactor has to close its own fuel cycle while surviving the thing that makes fusion useful: neutron flux.\n\nShow me tritium logistics and component life. Then we can argue about when fusion becomes a product.',
+      'private equity loves “operational improvement” until the machine needs a qualified replacement spindle and the vendor lead time does not care about the IRR model.\n\nspreadsheet finance meets atoms. atoms win.',
+      'battery nationalism keeps pointing at the mine while spherical purified graphite is stuck doing purification, morphology control, coating and cell qualification.\n\ncongrats on owning dirt. the anode still has standards.',
+    ];
+
+    for (const content of falsePositives) {
+      const assessment = assessAccountTaste(content, { voiceProfile: geoffreyVoiceProfile });
+      expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.5);
+      expect(assessment.nativeVoiceScore).toBeLessThan(0.6);
+      expect(assessment.action).toBe('block');
+      expect(assessment.notes).toEqual(expect.arrayContaining([
+        expect.stringContaining('generated pattern'),
+      ]));
     }
   });
 });

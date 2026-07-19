@@ -402,6 +402,7 @@ export async function judgeCandidates(
 - If it is polished, balanced, and plausibly generated, cap overall at 0.45 even when the topic is relevant.
 - Set nativeVoice below 0.55 whenever Geoffrey would be unlikely to post the wording himself.
 - Set cringeRisk at or above 0.50 for consultant cadence, topic-swapped advice, synthetic status posturing, or technical nouns pasted onto a generic thesis.
+- Set nativeVoice below 0.45 and cringeRisk at or above 0.55 for an unsituated technical mini-lecture or a manufactured closer such as "X meets Y. Y wins," "congrats on X; Y still has standards," or "show me X, then we can argue." Correct mechanisms do not rescue generated prose.
 
 NATIVE ANCHOR BANK:
 ${manualAnchorBank || '[no manual anchors available; be conservative]'}`
@@ -439,6 +440,7 @@ Ground rules:
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
+- Reject unsituated technical lectures and manufactured mic-drop endings. Long mechanism inventories, "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy, not Geoffrey voice.
 - A draft can sound native and still be a bad copy. Set manualAnchorReskinRisk at or above 0.50 when it recreates a native anchor's premise or structure, even if no exact phrase overlaps.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 - A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
@@ -553,6 +555,8 @@ Rules:
 - For @geoffwoo, prefer the shape: technical object -> hidden constraint -> non-consensus implication -> compressed human phrasing.
 - Do not turn every tweet into the same template.
 - Do not turn a position into advice. Reject audience-label openings, "start with", "you should", technical noun checklists, textbook definitions, and tidy three-paragraph explainers.
+- Do not turn technical accuracy into a mini-lecture. Without a real named context, compress to one or two beats and one disputed implication.
+- Delete manufactured closers rather than polishing them: "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue."
 - Preserve roughness already present in the draft, but do not add fake typos, slang, or lowercase as voice costume.
 - Stay in voice: ${voiceProfile.tone}.
 ${nativeAnchorBank ? `Native anchor bank (match a mode, never copy prose):\n${nativeAnchorBank}` : ''}
