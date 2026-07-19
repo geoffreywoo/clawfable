@@ -549,6 +549,12 @@ export interface BuildPersonalizationMemoryOptions {
   mentions?: Mention[];
 }
 
+function isDuplicateOnlyRejection(entry: FeedbackEntry): boolean {
+  const reason = `${entry.intentSummary || ''} ${entry.reason || ''}`.toLowerCase();
+  return /\bduplicate premise\b/.test(reason)
+    && /\bkeep (?:the )?(?:sharper |stronger )?(?:original|draft)\b/.test(reason);
+}
+
 export function buildPersonalizationMemory({
   feedback,
   signals,
@@ -573,7 +579,7 @@ export function buildPersonalizationMemory({
   ]).slice(0, 5);
   const rejectedDrafts = unique(
     feedback
-      .filter((entry) => entry.rating === 'down' && entry.tweetText.trim())
+      .filter((entry) => entry.rating === 'down' && entry.tweetText.trim() && !isDuplicateOnlyRejection(entry))
       .map((entry) => entry.tweetText.trim())
       .reverse(),
   ).slice(0, 20);

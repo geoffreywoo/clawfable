@@ -104,6 +104,39 @@ describe('buildPersonalizationMemory', () => {
     );
   });
 
+  it('does not let a deleted duplicate poison the draft it was meant to preserve', () => {
+    const duplicate = 'finance loves a clean comparable until qualification and maintenance determine what an industrial asset is worth.';
+    const reason = 'Duplicate premise: this is the same thesis already queued. Keep the sharper original; reject synonym-level reskins.';
+    const memory = buildPersonalizationMemory({
+      feedback: [{
+        tweetId: 'duplicate-1',
+        tweetText: duplicate,
+        rating: 'down',
+        generatedAt: '2026-07-19T12:00:00.000Z',
+        reason,
+        intentSummary: reason,
+        source: 'queue_delete',
+        userProvidedReason: true,
+      }],
+      signals: [],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['industrial assets'],
+        antiGoals: [],
+        communicationStyle: 'compressed native voice',
+        summary: 'Industrial and technical observations.',
+      },
+    });
+
+    expect(memory.neverDoThisAgain).toContain(reason);
+    expect(memory.rejectedDrafts).not.toContain(duplicate);
+  });
+
   it('retains multiple edit preference hints from a single operator rewrite', () => {
     const memory = buildPersonalizationMemory({
       feedback: [],
