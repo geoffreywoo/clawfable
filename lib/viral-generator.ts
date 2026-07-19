@@ -773,7 +773,7 @@ Commenters should not be able to tell this was generated.
 - Anonymous anecdote openings such as "a founder showed me" or "an owner told me" are forbidden unless that exact event appears in the supplied manual examples.
 - Do not invent a persona to create texture: no unsupported "personal rule," habitual factory visit, staged dialogue, or fake quote.
 - Reject old/new lists, horoscope templates, topic-plus-"advice" labels, symmetrical question stacks, and tidy "same X, radically different Y" contrasts. These are recognizable generated-post constructions.
-- Reject unsituated technical mini-lectures and manufactured mic-drop endings. "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy even when the technical setup is correct.
+- Reject unsituated technical mini-lectures, mirrored "can do X and still Y / extremely A and extremely B" contrasts, and manufactured mic-drop endings. "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy even when the technical setup is correct.
 - Imperfect human rhythm is better than symmetrical consultant prose. Vary sentence shape. Use fragments when the voice supports it.
 - If a draft could fit any AI/startup account after swapping the topic noun, throw it away.`);
 

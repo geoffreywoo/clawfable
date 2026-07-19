@@ -821,7 +821,7 @@ For @geoffwoo, write like a technical operator/investor thinking in public, not 
 - Geoffrey usually states a position, reacts to a named situation, or makes a socially situated judgment. He is not a content marketer teaching generic founders. Reject audience-label openings ("hardware founders:"), "start with" advice, and unsolicited how-to voice.
 - A list of technical nouns is not technical insight. Every mechanism must serve a disputed judgment, a surprising implication, or a concrete current event. Reject textbook definitions and tidy three-paragraph mini-essays even when every noun is accurate.
 - Do not write an unsituated mini-lecture to display expertise. Without a named live event or real personal context, default to one or two compressed beats and one disputed claim. Four polished paragraphs about a mechanism are a white paper, not a Geoffrey post.
-- Manufactured mic-drop endings are generated voice. Reject "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue." Stop when the observation lands; do not bolt on a social-copy punchline.
+- Manufactured mic-drop endings and mirrored contrasts are generated voice. Reject "X meets Y. Y wins," "congrats on X; Y still has standards," "show me X, then we can argue," and paired "can do X and still Y / extremely A and extremely B" constructions. Stop when the observation lands; do not bolt on a social-copy punchline.
 - Preserve natural roughness and compression, but never manufacture misspellings or sprinkle slang to cosplay the voice.
 - Manual examples are voice evidence, not content seeds. Never lift their named people, places, status objects, distinctive noun phrases, punchlines, list items, or opening-plus-structure into a new post. A new topic wrapped in a manual post's skeleton is still copying.
 - Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
@@ -865,7 +865,7 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
     metadata.technicalLectureComplaint = true;
     preferenceHints.push('Operator rejects polished technical lectures; compress to one disputed judgment or a reaction grounded in live context.');
   }
-  if (/\b(mic[- ]drop|manufactured punchline|synthetic punchline|slogan|slogan-like|atoms win|still has standards)\b/.test(text)) {
+  if (/\b(mic[- ]drop|manufactured (?:punchline|contrast)|synthetic (?:punchline|closer)|mirrored contrast|slogan|slogan-like|atoms win|still has standards)\b/.test(text)) {
     metadata.syntheticPunchlineComplaint = true;
     preferenceHints.push('Operator rejects manufactured mic-drop closers and slogan endings even when the setup is technically specific.');
   }

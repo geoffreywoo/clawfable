@@ -328,6 +328,7 @@ describe('account taste scoring', () => {
       'a fusion plasma shot can be scientifically insane and still leave the commercial machine unresolved.\n\nThe plant must breed tritium, account for scarce fuel inventory, move heat through neutron-damaged materials and replace first-wall components without turning uptime into fiction.\n\nThat is why “net energy” cannot carry the whole timeline. The reactor has to close its own fuel cycle while surviving the thing that makes fusion useful: neutron flux.\n\nShow me tritium logistics and component life. Then we can argue about when fusion becomes a product.',
       'private equity loves “operational improvement” until the machine needs a qualified replacement spindle and the vendor lead time does not care about the IRR model.\n\nspreadsheet finance meets atoms. atoms win.',
       'battery nationalism keeps pointing at the mine while spherical purified graphite is stuck doing purification, morphology control, coating and cell qualification.\n\ncongrats on owning dirt. the anode still has standards.',
+      'a fab can buy the famous machine and still wait on high-purity hydrofluoric acid.\n\nadvanced manufacturing policy loves glamorous capex. fluorine chemistry remains extremely unglamorous and extremely required.',
     ];
 
     for (const content of falsePositives) {
