@@ -2,15 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getFollowing: vi.fn(),
+  getHomeTimeline: vi.fn(),
   getUserTimeline: vi.fn(),
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
   getFollowing: mocks.getFollowing,
+  getHomeTimeline: mocks.getHomeTimeline,
   getUserTimeline: mocks.getUserTimeline,
 }));
 
-import { classifyTrendCategory, fetchCurrentTrends, fetchHackerNewsTopics, fetchTrendingFromFollowing, isLowSignalXCommentary, normalizeHackerNewsHeadline } from '@/lib/trending';
+import { classifyTrendCategory, fetchCurrentTrends, fetchHackerNewsTopics, fetchTrendingFromFollowing, isLowSignalXCommentary, mergeTrendingTopics, normalizeHackerNewsHeadline } from '@/lib/trending';
 import { getTwitterRateLimitResetAt, isRateLimitTwitterError, TwitterActionError } from '@/lib/twitter-debug';
 
 describe('fetchTrendingFromFollowing', () => {
@@ -29,6 +31,7 @@ describe('fetchTrendingFromFollowing', () => {
       { id: 'followed-1', name: 'Builder', username: 'builder', description: 'AI startup founder', followersCount: 10000, verified: true },
       { id: 'followed-2', name: 'Operator', username: 'operator', description: 'Venture investor and engineer', followersCount: 9000, verified: false },
     ]);
+    mocks.getHomeTimeline.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -173,5 +176,38 @@ describe('fetchTrendingFromFollowing', () => {
 
     expect(topics.length).toBeGreaterThan(0);
     expect(topics.every((topic) => topic.sourceType === 'x')).toBe(true);
+  });
+
+  it('keeps followed-network subjects ahead of a higher-scoring publisher feed', () => {
+    const network = Array.from({ length: 8 }, (_, index) => ({
+      id: index + 1,
+      headline: `Network subject ${index} exposes a distinct production constraint`,
+      source: `@source${index}`,
+      relevanceScore: 70 - index,
+      category: `learned subject ${index}`,
+      timestamp: '2026-07-14T10:00:00.000Z',
+      tweetCount: 2,
+      sourceType: 'x' as const,
+      sourceUrl: `https://x.com/source${index}/status/${index}`,
+      discoveryMethod: 'followed_network' as const,
+      networkTopicId: `network-${index}`,
+      topTweet: { id: `x-${index}`, text: `network evidence ${index}`, likes: 80, author: `source${index}` },
+    }));
+    const publisher = Array.from({ length: 8 }, (_, index) => ({
+      id: index + 20,
+      headline: `Publisher story ${index} about a different technology`,
+      source: 'Hacker News',
+      relevanceScore: 99 - index,
+      category: `publisher category ${index}`,
+      timestamp: '2026-07-14T10:00:00.000Z',
+      tweetCount: 0,
+      sourceType: 'hacker_news' as const,
+      sourceUrl: `https://example.com/story-${index}`,
+    }));
+
+    const merged = mergeTrendingTopics([network, publisher], 12);
+
+    expect(merged.filter((topic) => topic.discoveryMethod === 'followed_network')).toHaveLength(8);
+    expect(merged[0].discoveryMethod).toBe('followed_network');
   });
 });

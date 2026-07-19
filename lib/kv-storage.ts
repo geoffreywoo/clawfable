@@ -3,6 +3,7 @@ import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 import { computeActionRewards, computeEarlyVelocityScore } from './virality-signals';
 import { assessTasteRisk } from './virality-signals';
+import type { NetworkTopicIntelligenceState } from './network-topic-intelligence';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev). Next compiles API routes
@@ -170,6 +171,48 @@ async function kvDel(key: string): Promise<void> {
     await client.del(key);
   } catch {
     deleteMemKey(key);
+  }
+}
+
+const COMPARE_OBJECT_FIELD_AND_DELETE_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, value = pcall(cjson.decode, raw)
+if not ok or type(value) ~= 'table' or tostring(value[ARGV[1]]) ~= ARGV[2] then
+  return 0
+end
+return redis.call('DEL', KEYS[1])
+`;
+
+async function kvCompareObjectFieldAndDelete(
+  key: string,
+  field: string,
+  expectedValue: string,
+): Promise<boolean> {
+  invalidateAllNamespaces(key);
+  const client = await getKvClient();
+  if (!client) {
+    if (isMemExpired(key)) return false;
+    const current = memStore.get(key);
+    if (!current || typeof current !== 'object') return false;
+    if (String((current as Record<string, unknown>)[field] || '') !== expectedValue) return false;
+    deleteMemKey(key);
+    return true;
+  }
+
+  try {
+    const result = await client.eval(
+      COMPARE_OBJECT_FIELD_AND_DELETE_SCRIPT,
+      [key],
+      [field, expectedValue],
+    );
+    return Number(result) === 1;
+  } catch {
+    // A failed compare must leave the lock intact. Falling back to GET+DEL
+    // would let an expired owner delete a successor's lease.
+    return false;
   }
 }
 
@@ -506,6 +549,7 @@ const KEYS = {
   agentRelationshipOpportunities: (id: string) => `agent:${id}:relationship_opportunities`,
   agentViralityPostmortems: (id: string) => `agent:${id}:virality_postmortems`,
   agentTrendingCache: (id: string) => `agent:${id}:trending_cache`,
+  agentTopicIntelligence: (id: string) => `agent:${id}:topic_intelligence`,
   agentEngagementSessions: (id: string) => `agent:${id}:engage_sessions`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
   agentFollowerHistory: (id: string) => `agent:${id}:followers`,
@@ -521,6 +565,7 @@ const KEYS = {
   agentIdeaAtoms: (id: string) => `agent:${id}:idea_atoms`,
   agentCriticVerdicts: (id: string) => `agent:${id}:critic_verdicts`,
   agentAutopilotLock: (id: string) => `agent:${id}:autopilot_lock`,
+  agentTopicIntelligenceLock: (id: string) => `agent:${id}:topic_intelligence_lock`,
   agentAutopilotHealth: (id: string) => `agent:${id}:autopilot_health`,
   browserPairing: (id: string) => `browser:pairing:${id}`,
   browserPairingByToken: (token: string) => `browser:pairing:token:${token}`,
@@ -776,6 +821,9 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentTrendOpportunities(id));
   await kvDel(KEYS.agentRelationshipOpportunities(id));
   await kvDel(KEYS.agentViralityPostmortems(id));
+  await kvDel(KEYS.agentTrendingCache(id));
+  await kvDel(KEYS.agentTopicIntelligence(id));
+  await kvDel(KEYS.agentTopicIntelligenceLock(id));
   const experimentIds = await kvLrange(KEYS.agentExperiments(id), 0, -1);
   await Promise.all(experimentIds.map((experimentId) => kvDel(KEYS.draftExperiment(String(experimentId)))));
   await kvDel(KEYS.agentExperiments(id));
@@ -881,6 +929,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
     sourceBrief: tweet.sourceBrief ?? null,
+    sourceEvidenceTexts: coerceNullableJson<string[]>(tweet.sourceEvidenceTexts),
     generationMode: tweet.generationMode ?? null,
     candidateScore: coerceNullableNumber(tweet.candidateScore),
     confidenceScore: coerceNullableNumber(tweet.confidenceScore),
@@ -944,6 +993,7 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
     featureTags: tweet.featureTags ? JSON.stringify(tweet.featureTags) : null,
     judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
+    sourceEvidenceTexts: tweet.sourceEvidenceTexts ? JSON.stringify(tweet.sourceEvidenceTexts) : null,
     rewardBreakdown: tweet.rewardBreakdown ? JSON.stringify(tweet.rewardBreakdown) : null,
     criticScores: tweet.criticScores ? JSON.stringify(tweet.criticScores) : null,
     actionRewardPrediction: tweet.actionRewardPrediction ? JSON.stringify(tweet.actionRewardPrediction) : null,
@@ -1013,6 +1063,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     generationProvider: data.generationProvider ?? null,
     generationModel: data.generationModel ?? null,
     sourceBrief: data.sourceBrief ?? null,
+    sourceEvidenceTexts: data.sourceEvidenceTexts ?? null,
     generationMode: data.generationMode ?? null,
     candidateScore: data.candidateScore ?? null,
     confidenceScore: data.confidenceScore ?? null,
@@ -1437,9 +1488,12 @@ const DEFAULT_MANUAL_EXAMPLE_CURATION: ManualExampleCuration = {
 };
 
 function normalizeManualExampleCuration(value: ManualExampleCuration | null | undefined): ManualExampleCuration {
+  const blockedXTweetIds = [...new Set((value?.blockedXTweetIds || []).map((id) => String(id)))];
+  const blocked = new Set(blockedXTweetIds);
   return {
-    pinnedXTweetIds: [...new Set((value?.pinnedXTweetIds || []).map((id) => String(id)))],
-    blockedXTweetIds: [...new Set((value?.blockedXTweetIds || []).map((id) => String(id)))],
+    pinnedXTweetIds: [...new Set((value?.pinnedXTweetIds || []).map((id) => String(id)))]
+      .filter((id) => !blocked.has(id)),
+    blockedXTweetIds,
     updatedAt: value?.updatedAt || DEFAULT_MANUAL_EXAMPLE_CURATION.updatedAt,
   };
 }
@@ -2865,6 +2919,13 @@ interface TrendingCacheEntry {
   cachedAt: string;
 }
 
+export interface TrendingCacheSnapshot {
+  data: unknown;
+  cachedAt: string;
+  ageMs: number;
+  isFresh: boolean;
+}
+
 interface BrowserPairingChallenge {
   challenge: string;
   ownerUserId: string;
@@ -2874,16 +2935,74 @@ interface BrowserPairingChallenge {
 
 const TRENDING_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-export async function getTrendingCache(agentId: string): Promise<unknown | null> {
+export async function getTrendingCacheSnapshot(agentId: string): Promise<TrendingCacheSnapshot | null> {
   const entry = await kvGet<TrendingCacheEntry>(KEYS.agentTrendingCache(agentId));
   if (!entry) return null;
-  const age = Date.now() - new Date(entry.cachedAt).getTime();
-  if (age > TRENDING_CACHE_TTL_MS) return null; // expired
-  return entry.data;
+  const cachedAtMs = Date.parse(entry.cachedAt);
+  const ageMs = Number.isFinite(cachedAtMs) ? Math.max(0, Date.now() - cachedAtMs) : Number.POSITIVE_INFINITY;
+  return {
+    data: entry.data,
+    cachedAt: entry.cachedAt,
+    ageMs,
+    isFresh: ageMs <= TRENDING_CACHE_TTL_MS,
+  };
+}
+
+export async function getTrendingCache(agentId: string): Promise<unknown | null> {
+  const snapshot = await getTrendingCacheSnapshot(agentId);
+  return snapshot?.isFresh ? snapshot.data : null;
 }
 
 export async function setTrendingCache(agentId: string, data: unknown): Promise<void> {
   await kvSet(KEYS.agentTrendingCache(agentId), { data, cachedAt: new Date().toISOString() });
+}
+
+export async function getTopicIntelligenceState(agentId: string): Promise<NetworkTopicIntelligenceState | null> {
+  const state = await kvGet<NetworkTopicIntelligenceState>(KEYS.agentTopicIntelligence(agentId));
+  return state?.version === 1 ? state : null;
+}
+
+export async function saveTopicIntelligenceState(
+  agentId: string,
+  state: NetworkTopicIntelligenceState,
+): Promise<void> {
+  await kvSet(KEYS.agentTopicIntelligence(agentId), state);
+}
+
+export interface TopicIntelligenceLock {
+  agentId: string;
+  owner: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+export async function acquireTopicIntelligenceLock(
+  agentId: string,
+  owner = `topic-refresh:${crypto.randomUUID()}`,
+  ttlSeconds = 10 * 60,
+): Promise<{ acquired: boolean; owner: string; lock: TopicIntelligenceLock | null }> {
+  const now = Date.now();
+  const lock: TopicIntelligenceLock = {
+    agentId,
+    owner,
+    acquiredAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
+  };
+  const acquired = await kvSet(KEYS.agentTopicIntelligenceLock(agentId), lock, { nx: true, ex: ttlSeconds });
+  if (acquired) return { acquired: true, owner, lock };
+  return {
+    acquired: false,
+    owner,
+    lock: await kvGet<TopicIntelligenceLock>(KEYS.agentTopicIntelligenceLock(agentId)),
+  };
+}
+
+export async function releaseTopicIntelligenceLock(agentId: string, owner: string): Promise<boolean> {
+  return kvCompareObjectFieldAndDelete(
+    KEYS.agentTopicIntelligenceLock(agentId),
+    'owner',
+    owner,
+  );
 }
 
 // ─── Engagement sessions ────────────────────────────────────────────────────
@@ -3151,11 +3270,11 @@ export async function acquireAutopilotLock(
 }
 
 export async function releaseAutopilotLock(agentId: string, owner: string): Promise<boolean> {
-  const key = KEYS.agentAutopilotLock(agentId);
-  const existing = await kvGet<AutopilotLock>(key);
-  if (!existing || existing.owner !== owner) return false;
-  await kvDel(key);
-  return true;
+  return kvCompareObjectFieldAndDelete(
+    KEYS.agentAutopilotLock(agentId),
+    'owner',
+    owner,
+  );
 }
 
 export async function getAutopilotLock(agentId: string): Promise<AutopilotLock | null> {

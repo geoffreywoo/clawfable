@@ -1,5 +1,11 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { acquireAutopilotLock, checkRateLimit, releaseAutopilotLock } from '@/lib/kv-storage';
+import {
+  acquireAutopilotLock,
+  acquireTopicIntelligenceLock,
+  checkRateLimit,
+  releaseAutopilotLock,
+  releaseTopicIntelligenceLock,
+} from '@/lib/kv-storage';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -66,5 +72,31 @@ describe('Rate limiting', () => {
     expect(await releaseAutopilotLock(agentId, 'owner-2')).toBe(false);
     expect(await releaseAutopilotLock(agentId, 'owner-1')).toBe(true);
     expect((await acquireAutopilotLock(agentId, 'owner-3', 60, 'cron')).acquired).toBe(true);
+  });
+
+  it('serializes topic-intelligence refreshes independently from autopilot runs', async () => {
+    const agentId = `topic-lock-agent-${crypto.randomUUID()}`;
+    const first = await acquireTopicIntelligenceLock(agentId, 'topic-owner-1', 60);
+    const second = await acquireTopicIntelligenceLock(agentId, 'topic-owner-2', 60);
+
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(false);
+    expect(await releaseTopicIntelligenceLock(agentId, 'topic-owner-2')).toBe(false);
+    expect(await releaseTopicIntelligenceLock(agentId, 'topic-owner-1')).toBe(true);
+    expect((await acquireTopicIntelligenceLock(agentId, 'topic-owner-3', 60)).acquired).toBe(true);
+    expect(await releaseTopicIntelligenceLock(agentId, 'topic-owner-3')).toBe(true);
+  });
+
+  it('does not let an expired topic-lock owner delete its successor', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-18T00:00:00.000Z'));
+    const agentId = `topic-lock-race-${crypto.randomUUID()}`;
+
+    expect((await acquireTopicIntelligenceLock(agentId, 'old-owner', 1)).acquired).toBe(true);
+    vi.setSystemTime(new Date('2026-07-18T00:00:01.100Z'));
+    expect((await acquireTopicIntelligenceLock(agentId, 'new-owner', 60)).acquired).toBe(true);
+    expect(await releaseTopicIntelligenceLock(agentId, 'old-owner')).toBe(false);
+    expect((await acquireTopicIntelligenceLock(agentId, 'third-owner', 60)).acquired).toBe(false);
+    expect(await releaseTopicIntelligenceLock(agentId, 'new-owner')).toBe(true);
   });
 });

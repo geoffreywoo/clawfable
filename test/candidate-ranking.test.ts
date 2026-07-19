@@ -120,6 +120,10 @@ function ranked(overrides: Partial<RankedProtocolTweet> = {}): RankedProtocolTwe
     portfolioRole: overrides.portfolioRole || 'proof',
     relationshipTargetHandle: overrides.relationshipTargetHandle ?? null,
     trendFitScore: overrides.trendFitScore ?? null,
+    sourceBrief: overrides.sourceBrief ?? null,
+    sourceLane: overrides.sourceLane ?? null,
+    trendTopicId: overrides.trendTopicId ?? null,
+    trendHeadline: overrides.trendHeadline ?? null,
     criticScores: overrides.criticScores || {
       voice: 0.8,
       audience: 0.7,
@@ -389,6 +393,50 @@ describe('selectTopRankedTweets', () => {
     expect(selected).toHaveLength(2);
     expect(selected.filter((candidate) => /\bbro\b/i.test(candidate.content))).toHaveLength(1);
   });
+
+  it('enforces a final cap on current-network source lanes across every selection pass', () => {
+    const selected = selectTopRankedTweets([
+      ranked({
+        content: 'Hybrid bonding yield is moving the chiplet packaging bottleneck.',
+        candidateScore: 99,
+        targetTopic: 'hybrid bonding',
+        sourceLane: 'trend_aligned_exploit',
+        trendTopicId: 'network-hybrid-bonding',
+        coverageCluster: 'packaging:hybrid bonding',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'tactical', structure: 'single_punch', thesis: 'hybrid bonding packaging yield', riskFlags: [] },
+      }),
+      ranked({
+        content: 'Tritium inventory is the quiet constraint on fusion duty cycle.',
+        candidateScore: 98,
+        targetTopic: 'fusion fuel cycle',
+        sourceLane: 'trend_adjacent_explore',
+        trendTopicId: 'network-tritium-inventory',
+        coverageCluster: 'fusion:tritium inventory',
+        featureTags: { hook: 'observation', tone: 'analytical', specificity: 'tactical', structure: 'single_punch', thesis: 'tritium inventory fusion duty cycle', riskFlags: [] },
+      }),
+      ranked({
+        content: 'Carbide powder qualification decides whether tungsten ore becomes tooling.',
+        candidateScore: 90,
+        targetTopic: 'tungsten tooling',
+        sourceLane: 'manual_core_exploit',
+        trendTopicId: null,
+        coverageCluster: 'materials:carbide powder',
+        featureTags: { hook: 'bold_claim', tone: 'analytical', specificity: 'tactical', structure: 'argument', thesis: 'carbide powder qualification tooling', riskFlags: [] },
+      }),
+      ranked({
+        content: 'Robot demos end where exception recovery starts.',
+        candidateScore: 88,
+        targetTopic: 'robotics',
+        sourceLane: 'core_explore_fallback',
+        trendTopicId: null,
+        coverageCluster: 'robotics:exception recovery',
+        featureTags: { hook: 'contrarian', tone: 'provocative', specificity: 'concrete', structure: 'single_punch', thesis: 'robot demos exception recovery', riskFlags: [] },
+      }),
+    ], 3, { maxTrendSources: 1, minHoldouts: 0 });
+
+    expect(selected).toHaveLength(3);
+    expect(selected.filter((candidate) => Boolean(candidate.trendTopicId))).toHaveLength(1);
+  });
 });
 
 describe('rankGeneratedTweets', () => {
@@ -399,6 +447,132 @@ describe('rankGeneratedTweets', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('uses stable follow-graph topic IDs and exposes momentum in score provenance', () => {
+    const context = rankingContext();
+    context.style.sourcePlan = {
+      slots: [],
+      laneCounts: {
+        manual_core_exploit: 0,
+        trend_aligned_exploit: 1,
+        trend_adjacent_explore: 0,
+        core_explore_fallback: 0,
+      },
+      acceptedTrends: [{
+        id: 1,
+        networkTopicId: 'network-hybrid-bonding-abc123',
+        discoveryMethod: 'followed_network',
+        headline: 'Hybrid bonding yield is becoming the packaging bottleneck.',
+        source: '@processengineer, @fabwatcher',
+        relevanceScore: 92,
+        category: 'hybrid bonding yield',
+        timestamp: '2026-05-30T10:00:00.000Z',
+        tweetCount: 2,
+        networkMomentumScore: 0.9,
+        fitScores: {
+          freshness: 0.95,
+          velocity: 0.82,
+          soul: 0.2,
+          manual: 0.1,
+          identityFit: 0.82,
+          driftRisk: 0.18,
+          networkMomentum: 0.9,
+          sourceQuality: 0.84,
+          total: 0.86,
+        },
+        sourceLane: 'trend_aligned_exploit',
+        plannerReason: 'Followed-network breakout.',
+      }],
+      rejectedTrends: [],
+    };
+
+    const [candidate] = rankGeneratedTweets([{
+      content: 'Hybrid bonding is no longer a packaging footnote. Surface roughness and alignment yield now decide whether advanced chiplets ship at all.',
+      format: 'hot_take',
+      targetTopic: 'hybrid bonding yield',
+      sourceLane: 'trend_aligned_exploit',
+      trendTopicId: 'network-hybrid-bonding-abc123',
+      rationale: 'Names the mechanism behind a followed-network breakout.',
+    }], context);
+
+    expect(candidate.scoreProvenance.networkMomentum).toBe(0.036);
+    expect(candidate.scoreProvenance.topicIdentityFit).toBe(0.049);
+    expect(candidate.scoreProvenance.sourceLaneFit).toBeGreaterThan(0.05);
+  });
+
+  it('hard-caps a Geoffrey network draft that copies followed-account wording', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'inference ASICs', 'advanced packaging'],
+      antiGoals: ['generic hype', 'borrowed voice'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed technical analysis.',
+      summary: 'Geoffrey writes about compute, manufacturing, and hard technical constraints.',
+    };
+    context.style.sourcePlan = {
+      slots: [],
+      laneCounts: {
+        manual_core_exploit: 0,
+        trend_aligned_exploit: 1,
+        trend_adjacent_explore: 0,
+        core_explore_fallback: 0,
+      },
+      acceptedTrends: [{
+        id: 2,
+        networkTopicId: 'network-hybrid-bonding-copy-test',
+        discoveryMethod: 'followed_network',
+        headline: 'Hybrid bonding yield is becoming the packaging bottleneck.',
+        source: '@processengineer',
+        relevanceScore: 94,
+        category: 'advanced packaging',
+        timestamp: '2026-05-30T10:00:00.000Z',
+        tweetCount: 2,
+        networkMomentumScore: 0.88,
+        fitScores: {
+          freshness: 0.95,
+          velocity: 0.82,
+          soul: 0.82,
+          manual: 0,
+          identityFit: 0.82,
+          driftRisk: 0.18,
+          networkMomentum: 0.88,
+          sourceQuality: 0.84,
+          total: 0.86,
+        },
+        sourceLane: 'trend_aligned_exploit',
+        plannerReason: 'Followed-network subject with a native bridge.',
+      }],
+      rejectedTrends: [],
+    };
+    const sourceEvidence = 'Hybrid bonding surface roughness determines alignment yield across advanced chiplet packages.';
+
+    const ranked = rankGeneratedTweets([{
+      content: 'Hybrid bonding surface roughness determines alignment yield before advanced chiplet packages can ship.',
+      format: 'hot_take',
+      targetTopic: 'advanced packaging',
+      sourceLane: 'trend_aligned_exploit',
+      trendTopicId: 'network-hybrid-bonding-copy-test',
+      sourceBrief: 'Current subject provenance [source=X; followed-network=true]',
+      sourceEvidenceTexts: [sourceEvidence],
+      rationale: 'Copies the source wording.',
+    }, {
+      content: 'Advanced packaging gets ugly when wafer planarity and overlay tolerance miss the hybrid-bonding process window.',
+      format: 'hot_take',
+      targetTopic: 'advanced packaging',
+      sourceLane: 'trend_aligned_exploit',
+      trendTopicId: 'network-hybrid-bonding-copy-test',
+      sourceBrief: 'Current subject provenance [source=X; followed-network=true]',
+      sourceEvidenceTexts: [sourceEvidence],
+      rationale: 'Rewrites the subject through a distinct technical mechanism.',
+    }], context);
+
+    const copied = ranked.find((candidate) => candidate.content.startsWith('Hybrid bonding surface'))!;
+    const independent = ranked.find((candidate) => candidate.content.startsWith('Advanced packaging gets ugly'))!;
+    expect(copied.scoreProvenance.sourceCopyRisk).toBeLessThanOrEqual(-0.18);
+    expect(copied.confidenceScore).toBeLessThanOrEqual(0.24);
+    expect(independent.scoreProvenance.sourceCopyRisk).toBe(0);
+    expect(independent.confidenceScore).toBeGreaterThan(copied.confidenceScore);
   });
 
   it('downranks broad authority claims when they lack proof or mechanism', () => {
@@ -447,6 +621,43 @@ describe('rankGeneratedTweets', () => {
       antiGoals: ['fabricated facts', 'generic AI slop'],
       communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: blunt, technical, native voice.',
       summary: 'Geoffrey writes about hard technical constraints.',
+    };
+    const nativeAnchor = performanceAnchor({
+      xTweetId: 'x-native-tungsten-anchor',
+      content: 'the mine is not the product. carbide powder, sintering control and tool qualification are the product.',
+      topic: 'tungsten critical minerals',
+      source: 'manual',
+    });
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: new Date().toISOString(),
+      totalTracked: 1,
+      avgLikes: 40,
+      avgRetweets: 4,
+      bestPerformers: [nativeAnchor],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      operatorVoiceReference: {
+        sampleCount: 1,
+        bestPerformers: [nativeAnchor],
+        pinnedExamples: [],
+        styleFingerprint: {
+          avgLength: nativeAnchor.content.length,
+          shortPct: 0,
+          mediumPct: 100,
+          longPct: 0,
+          questionRatio: 0,
+          usesLineBreaks: false,
+          usesEmojis: false,
+          usesNumbers: false,
+          topHooks: ['bold_claim'],
+          topTones: ['analytical'],
+          antiPatterns: [],
+          updatedAt: new Date().toISOString(),
+        },
+      },
     };
 
     const ranked = rankGeneratedTweets([
@@ -932,7 +1143,7 @@ describe('rankGeneratedTweets', () => {
         },
       },
       {
-        content: 'The best AI agent teams start with one boring escalation rule before they add autonomy.',
+        content: 'HBM bandwidth looks great until rack power closes the deployment window.',
         format: 'hot_take',
         targetTopic: 'AI agents',
         rationale: 'Fresh adjacent operating lesson.',
@@ -941,14 +1152,14 @@ describe('rankGeneratedTweets', () => {
           tone: 'analytical',
           specificity: 'tactical',
           structure: 'single_punch',
-          thesis: 'agent teams start boring escalation rule',
+          thesis: 'hbm bandwidth rack power deployment window',
           riskFlags: [],
         },
       },
     ], context);
 
     const saturated = ranked.find((candidate) => candidate.content.includes('tool sprawl'));
-    const fresh = ranked.find((candidate) => candidate.content.includes('escalation rule'));
+    const fresh = ranked.find((candidate) => candidate.content.includes('rack power'));
 
     expect(saturated).toBeDefined();
     expect(fresh).toBeDefined();

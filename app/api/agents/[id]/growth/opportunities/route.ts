@@ -13,12 +13,11 @@ import {
   saveRelationshipOpportunities,
   saveTrendOpportunities,
 } from '@/lib/kv-storage';
-import { decodeKeys } from '@/lib/twitter-client';
-import { fetchTrendingFromFollowing } from '@/lib/trending';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { enrichTrendingTopics } from '@/lib/source-planner';
 import { buildRelationshipOpportunities, buildTrendOpportunities } from '@/lib/growth-engine';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
+import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
 
 // GET /api/agents/[id]/growth/opportunities
 export async function GET(
@@ -49,15 +48,9 @@ export async function GET(
       && agent.xUserId
     ) {
       try {
-        const keys = decodeKeys({
-          apiKey: agent.apiKey,
-          apiSecret: agent.apiSecret,
-          accessToken: agent.accessToken,
-          accessSecret: agent.accessSecret,
-        });
-        const trending = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
+        const topicRefresh = await refreshAgentTopicIntelligence(agent);
         const enriched = enrichTrendingTopics(
-          trending,
+          topicRefresh.topics,
           parseSoulMd(agent.name, agent.soulMd),
           learnings,
           settings.trendTolerance || 'moderate',
@@ -66,6 +59,7 @@ export async function GET(
         if (fresh.length > 0) {
           trendOpportunities = await saveTrendOpportunities(id, fresh);
         }
+        if (topicRefresh.error) throw topicRefresh.error;
       } catch (err) {
         const invalidCredentials = isInvalidTwitterCredentialError(err);
         const rateLimited = isRateLimitTwitterError(err);

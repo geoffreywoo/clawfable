@@ -110,6 +110,46 @@ describe('account taste scoring', () => {
     ]));
   });
 
+  it('blocks copied followed-account phrasing while allowing an independently written technical angle', () => {
+    const source = 'Hybrid bonding surface roughness determines alignment yield across advanced chiplet packages.';
+    const copied = assessAccountTaste(
+      'Hybrid bonding surface roughness determines alignment yield before advanced chiplet packages can ship.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        untrustedSourceTexts: [source],
+      },
+    );
+    const independent = assessAccountTaste(
+      'Advanced packaging fails when wafer planarity and overlay tolerance miss the process window.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        untrustedSourceTexts: [source],
+      },
+    );
+
+    expect(copied.sourceCopyRisk).toBeGreaterThanOrEqual(0.58);
+    expect(copied.action).toBe('block');
+    expect(copied.notes).toEqual(expect.arrayContaining([
+      expect.stringContaining('copies external source phrasing'),
+    ]));
+    expect(independent.sourceCopyRisk).toBe(0);
+  });
+
+  it('does not let an untrusted network source substantiate its numeric claim', () => {
+    const source = 'Hybrid bonding yield improved by 47% after a new surface treatment.';
+    const assessment = assessAccountTaste(
+      'Hybrid bonding yield improved by 47% after a new surface treatment.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        sourceTexts: [],
+        untrustedSourceTexts: [source],
+      },
+    );
+
+    expect(assessment.truthfulnessRisk).toBeGreaterThanOrEqual(0.5);
+    expect(assessment.action).toBe('block');
+  });
+
   it('requires technical substance even when a draft has current source context', () => {
     const thin = assessAccountTaste(
       'someone posted an agent that trains models. startup formation gets weird when experimentation becomes agent labor.',
@@ -190,6 +230,8 @@ describe('account taste scoring', () => {
     );
 
     expect(native.nativeVoiceScore).toBeGreaterThan(generic.nativeVoiceScore);
+    expect(native.nativeStyleScore).toBeGreaterThan(generic.nativeStyleScore);
+    expect(native.voiceDriftRisk).toBeLessThan(generic.voiceDriftRisk);
     expect(native.genericAccountFitRisk).toBeLessThan(generic.genericAccountFitRisk);
   });
 
@@ -209,7 +251,7 @@ describe('account taste scoring', () => {
 
   it('turns taste complaints into structured reusable learning hints', () => {
     const feedback = classifyTasteFeedbackReason(
-      'lame, too Slack, not elevated or technical enough, sounds like AI slop',
+      'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting too far',
     );
 
     expect(feedback.metadata).toMatchObject({
@@ -217,12 +259,15 @@ describe('account taste scoring', () => {
       cringeComplaint: true,
       lowStatusTextureComplaint: true,
       technicalElevationRequested: true,
+      nativeVoiceComplaint: true,
+      identityDriftComplaint: true,
       tasteComplaint: true,
     });
     expect(feedback.preferenceHints).toEqual(
       expect.arrayContaining([
         expect.stringContaining('Slack/support/workflow texture'),
         expect.stringContaining('elevated technical depth'),
+        expect.stringContaining('native content identity'),
       ]),
     );
   });
@@ -234,7 +279,19 @@ describe('account taste scoring', () => {
     );
     const technical = assessAccountTaste(
       'graphite qualification fails downstream of purification, particle morphology and coating yield. the mine cannot solve a cell-maker rejection.',
-      { voiceProfile: geoffreyVoiceProfile },
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        learnings: {
+          operatorVoiceReference: {
+            bestPerformers: [{
+              content: 'compute pricing is an actually good use case. the sports product is still obviously a sportsbook.',
+              topic: 'AI',
+              source: 'timeline',
+            }],
+            pinnedExamples: [],
+          },
+        } as any,
+      },
     );
 
     expect(templated.action).not.toBe('allow');
@@ -246,5 +303,20 @@ describe('account taste scoring', () => {
       voiceProfile: geoffreyVoiceProfile,
       assessment: technical,
     })).toBeNull();
+  });
+
+  it('rejects polished technical explainers that are still generic ghostwriting', () => {
+    const drafts = [
+      'hardware founders: put the ugly production constraint in the pitch.\n\nvacuum leak rate. coating uniformity. thermal drift. tool wear.\n\nif you cannot name what blocks shipment, the prototype is still a science project.',
+      'working physics is the beginning of a hardware product.\n\nshipment requires calibration, fixtures, test coverage, supplier controls, traceability and customer qualification.\n\nthe clever object becomes a product when another company can trust it repeatedly.',
+      'when underwriting a space company, start with the replacement cycle.\n\nradiation degrades electronics. thermal cycling fatigues hardware. launch replenishment costs money.\n\nan impressive payload can still produce ugly economics if the constellation must be replaced faster than expected.',
+    ];
+
+    for (const content of drafts) {
+      const assessment = assessAccountTaste(content, { voiceProfile: geoffreyVoiceProfile });
+      expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.34);
+      expect(assessment.genericAccountFitRisk).toBeGreaterThanOrEqual(0.3);
+      expect(assessment.action).not.toBe('allow');
+    }
   });
 });

@@ -221,6 +221,8 @@ export interface CandidateScoreProvenance {
   judge: number;
   predictedReward: number;
   noveltyCoverage: number;
+  sourceLaneFit?: number;
+  networkMomentum?: number;
   riskPenalty: number;
   creativity?: number;
   holdout?: number;
@@ -228,6 +230,9 @@ export interface CandidateScoreProvenance {
   technicalElevation?: number;
   banalOpsTexture?: number;
   nativeVoice?: number;
+  nativeStyle?: number;
+  voiceDrift?: number;
+  topicIdentityFit?: number;
   technicalCredibility?: number;
   cringeRisk?: number;
   statusTextureRisk?: number;
@@ -252,6 +257,7 @@ export interface CandidateScoreProvenance {
   operatorAnchorOutcome?: number;
   fallbackShapeOutcome?: number;
   anchorCopyRisk?: number;
+  sourceCopyRisk?: number;
   phraseReuseRisk?: number;
   approvalFriction?: number;
   rejectionLesson?: number;
@@ -386,6 +392,7 @@ export interface Tweet {
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   sourceBrief?: string | null;
+  sourceEvidenceTexts?: string[] | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;

@@ -10,6 +10,12 @@ function mergeIds(current: string[], add: string[] = [], remove: string[] = []):
   return [...next];
 }
 
+function requestIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((id) => String(id)).filter(Boolean))]
+    : [];
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -33,9 +39,16 @@ export async function PATCH(
     const { agent } = await requireAgentAccess(id);
     const body = await request.json().catch(() => ({}));
     const current = await getManualExampleCuration(id);
+    const pin = requestIds(body.pin);
+    const block = requestIds(body.block);
+    const blockedByRequest = new Set(block);
+    const pinnedXTweetIds = mergeIds(current.pinnedXTweetIds, pin, requestIds(body.unpin))
+      .filter((tweetId) => !blockedByRequest.has(tweetId));
+    const blockedXTweetIds = mergeIds(current.blockedXTweetIds, block, requestIds(body.unblock))
+      .filter((tweetId) => !pin.includes(tweetId) || blockedByRequest.has(tweetId));
     const next = await updateManualExampleCuration(id, {
-      pinnedXTweetIds: mergeIds(current.pinnedXTweetIds, body.pin, body.unpin),
-      blockedXTweetIds: mergeIds(current.blockedXTweetIds, body.block, body.unblock),
+      pinnedXTweetIds,
+      blockedXTweetIds,
     });
     const learnings = await buildLearnings(agent);
     return NextResponse.json({ curation: next, learnings });

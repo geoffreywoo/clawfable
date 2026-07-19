@@ -157,6 +157,77 @@ describe('performance learning smoke', () => {
     expect(learnings.operatorVoiceReference?.styleFingerprint.topTones).toContain('analytical');
   });
 
+  it('never lets generated winners define the native style fingerprint once manual evidence exists', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-native-fingerprint',
+      name: 'Perf Agent Native Fingerprint',
+      soulMd: '# soul',
+    } as any);
+
+    await addPerformanceEntry(agent.id, performanceEntry({
+      tweetId: 'auto-viral',
+      xTweetId: 'x-auto-viral',
+      content: 'Polished generated framework. '.repeat(20),
+      likes: 5000,
+      source: 'autopilot',
+      hook: 'question',
+      tone: 'hype',
+    }) as any);
+    const manualContent = 'bro.. packaging yield is where the chip roadmap meets the factory';
+    await addPerformanceEntry(agent.id, performanceEntry({
+      tweetId: 'manual-native',
+      xTweetId: 'x-manual-native',
+      content: manualContent,
+      likes: 80,
+      source: 'timeline',
+      hook: 'callout',
+      tone: 'provocative',
+    }) as any);
+
+    const learnings = await buildLearnings(agent);
+
+    expect(learnings.styleFingerprint?.avgLength).toBe(manualContent.length);
+    expect(learnings.styleFingerprint?.topHooks).toEqual(['callout']);
+    expect(learnings.styleFingerprint?.topTones).toEqual(['provocative']);
+  });
+
+  it('excludes blocked manual posts from every native anchor surface even if they were pinned', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-blocked-anchor',
+      name: 'Perf Agent Blocked Anchor',
+      soulMd: '# soul',
+    } as any);
+
+    await updateManualExampleCuration(agent.id, {
+      pinnedXTweetIds: ['x-blocked-anchor'],
+      blockedXTweetIds: ['x-blocked-anchor'],
+    });
+    await addPerformanceEntry(agent.id, performanceEntry({
+      tweetId: 'blocked-anchor',
+      xTweetId: 'x-blocked-anchor',
+      content: 'Generic AI launch advice that should never become a voice anchor.',
+      topic: 'AI launch advice',
+      likes: 1000,
+      source: 'timeline',
+    }) as any);
+    await addPerformanceEntry(agent.id, performanceEntry({
+      tweetId: 'native-anchor',
+      xTweetId: 'x-native-anchor',
+      content: 'HBM bandwidth is useless if rack power closes the deployment window.',
+      topic: 'inference infrastructure',
+      likes: 100,
+      source: 'timeline',
+    }) as any);
+
+    const learnings = await buildLearnings(agent);
+    const anchorIds = learnings.operatorVoiceReference?.bestPerformers.map((tweet) => tweet.xTweetId) || [];
+    const manualIds = learnings.manualTopicProfile?.flatMap((cluster) => cluster.topTweets.map((tweet) => tweet.xTweetId)) || [];
+
+    expect(learnings.manualExampleCuration?.pinnedXTweetIds).not.toContain('x-blocked-anchor');
+    expect(anchorIds).not.toContain('x-blocked-anchor');
+    expect(manualIds).not.toContain('x-blocked-anchor');
+  });
+
   it('treats manually posted Clawfable tweets as high-signal voice and topic training', async () => {
     const agent = await createAgent({
       handle: 'perf-agent-manual-signal',
@@ -368,6 +439,40 @@ describe('performance learning smoke', () => {
     expect(learnings.operatorVoiceReference?.sampleCount).toBe(3);
     expect(learnings.operatorVoiceReference?.bestPerformers[0]?.likes).toBe(140);
     expect(new Set(bestIds).size).toBe(bestIds.length);
+  });
+
+  it('does not let a high-engagement media stub displace substantive native voice anchors', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-substantive-anchors',
+      name: 'Perf Agent Substantive Anchors',
+      soulMd: '# soul',
+    } as any);
+
+    await addPerformanceEntry(agent.id, performanceEntry({
+      xTweetId: 'x-media-stub',
+      content: 'inevitable https://video.example/demo',
+      format: 'announcement',
+      likes: 50_000,
+      retweets: 5_000,
+      source: 'timeline',
+    }) as any);
+
+    for (let index = 0; index < 8; index++) {
+      await addPerformanceEntry(agent.id, performanceEntry({
+        xTweetId: `x-substantive-${index}`,
+        content: `The constraint in factory ${index} is not demand. It is qualifying one more process without breaking yield.`,
+        format: index % 2 === 0 ? 'observation' : 'hot_take',
+        likes: 20 - index,
+        source: 'timeline',
+      }) as any);
+    }
+
+    const learnings = await buildLearnings(agent);
+    const bestIds = learnings.operatorVoiceReference?.bestPerformers.map((entry) => entry.xTweetId) ?? [];
+
+    expect(bestIds).toHaveLength(8);
+    expect(bestIds).not.toContain('x-media-stub');
+    expect(bestIds.every((id) => id.startsWith('x-substantive-'))).toBe(true);
   });
 
   it('stores manual topic priors, curation metadata, and source-lane performance', async () => {

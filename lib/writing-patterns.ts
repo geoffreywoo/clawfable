@@ -18,6 +18,11 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'old-new-scaffold', weight: 0.58, pattern: /(?:^|\n)\s*old\s*:\s*[^\n]+[\s\S]{0,420}(?:^|\n)\s*new\s*:/im },
   { label: 'horoscope-template', weight: 0.54, pattern: /^(?:[a-z0-9 &/-]{0,45}\s+)?horoscope\s*:|\bsun in\b[\s\S]{0,180}\b(?:moon|rising) in\b/im },
   { label: 'topic-advice-label', weight: 0.36, pattern: /^[a-z][a-z0-9 &/-]{1,45}\s+(?:advice(?:\s+for\s+[a-z0-9 &/-]{1,35})?|discourse|status symbols?|playbook|checklist|framework)\s*:/im },
+  { label: 'audience-advice-open', weight: 0.46, pattern: /^(?:[a-z][a-z0-9+/-]*\s+){0,2}(?:founders|investors|builders|operators|engineers|teams)\s*:/i },
+  { label: 'start-with-advice', weight: 0.36, pattern: /^(?:when\s+)?(?:underwriting|building|evaluating|buying|funding|reviewing|pitching)?[^.\n]{0,70}\bstart with\b/i },
+  { label: 'requirements-checklist', weight: 0.34, pattern: /\b(?:shipment|deployment|production|scale|success|trust|commercialization)\s+requires?\s+[^.\n,]{2,45},\s*[^.\n,]{2,45},\s*[^.\n,]{2,45}(?:,|\s+and\b)/i },
+  { label: 'textbook-becomes-when', weight: 0.32, pattern: /\b(?:becomes?|turns into)\s+(?:a|the)\s+[a-z][^.\n]{0,55}\s+when\b/i },
+  { label: 'generic-if-status-closer', weight: 0.34, pattern: /\bif you (?:cannot|can['’]?t|do not|don['’]?t)\b[^.\n]{2,110},?\s+(?:the|your|it)\b[^.\n]{0,80}\b(?:still|not yet)\b/i },
   { label: 'synthetic-status-test', weight: 0.58, pattern: /^(?:future|next(?:-generation| gen)?|new|industrial)?\s*(?:elite\s+)?status\s+(?:object|test|symbol)s?\s*:/im },
   { label: 'starter-pack-list', weight: 0.54, pattern: /^[a-z0-9 &/-]{0,60}\bstarter pack\s*:/im },
   { label: 'typed-actor-setup', weight: 0.34, pattern: /^(?:normal|average|typical)\s+(?:vc|investor|founder|operator|engineer|team)\b[^.\n]{0,100}/i },
@@ -50,10 +55,20 @@ export function assessGeneratedWritingPatterns(content: string): GeneratedWritin
   const hits = PATTERN_RULES.filter((rule) => rule.pattern.test(content)).map((rule) => rule.label);
   const questionLines = content.split('\n').filter((line) => /\?\s*$/.test(line.trim())).length;
   if (questionLines >= 3) hits.push('question-stack');
+  const paragraphs = content.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const hasSituatedVoice = /@\w+|https?:\/\/|\b(?:i|we|my|our)\b/i.test(content);
+  if (
+    paragraphs.length === 3
+    && paragraphs.every((paragraph) => paragraph.length >= 18 && paragraph.length <= 260)
+    && !hasSituatedVoice
+  ) {
+    hits.push('tidy-three-part-explainer');
+  }
 
   const score = clamp(
     PATTERN_RULES.filter((rule) => hits.includes(rule.label)).reduce((sum, rule) => sum + rule.weight, 0)
-    + (questionLines >= 3 ? 0.2 : 0),
+    + (questionLines >= 3 ? 0.2 : 0)
+    + (hits.includes('tidy-three-part-explainer') ? 0.34 : 0),
   );
 
   return {

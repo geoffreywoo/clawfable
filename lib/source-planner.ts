@@ -7,7 +7,7 @@ import type {
   TweetPerformance,
 } from './types';
 import type { VoiceProfile } from './soul-parser';
-import type { TrendingTopic } from './trending';
+import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 
 export interface TrendFitScores {
@@ -15,6 +15,9 @@ export interface TrendFitScores {
   velocity: number;
   soul: number;
   manual: number;
+  identityFit?: number;
+  driftRisk?: number;
+  networkMomentum?: number;
   sourceQuality?: number;
   total: number;
 }
@@ -23,6 +26,13 @@ export interface EnrichedTrendingTopic extends TrendingTopic {
   fitScores: TrendFitScores;
   sourceLane: ContentSourceLane | 'reject';
   plannerReason: string;
+}
+
+export interface NativeTopicIdentityAssessment {
+  soul: number;
+  manual: number;
+  identityFit: number;
+  driftRisk: number;
 }
 
 export interface SourcePlannerSlot {
@@ -54,6 +64,33 @@ const PROMO_PATTERNS = [
   'book a demo',
   'try it here',
 ];
+
+const IDENTITY_STOP_WORDS = new Set([
+  'about', 'account', 'after', 'against', 'also', 'before', 'being', 'between', 'could', 'current',
+  'deep', 'from', 'frontier', 'hard', 'ideas', 'into', 'more', 'native', 'other', 'posts', 'should',
+  'technical', 'technology', 'their', 'these', 'they', 'this', 'topics', 'voice', 'where', 'which',
+  'with', 'write', 'writing', 'would',
+]);
+
+const GENERIC_IDENTITY_BRIDGE_TOKENS = new Set([
+  'account', 'business', 'capacity', 'company', 'founder', 'founders', 'future', 'industry',
+  'industrial', 'infrastructure', 'investor', 'investors', 'market', 'markets', 'operator',
+  'operators', 'software', 'startup', 'startups', 'system', 'systems', 'technical', 'technology',
+]);
+
+const BROAD_IDENTITY_TOPICS = new Set([
+  'ai',
+  'compute',
+  'energy',
+  'frontier tech',
+  'deep tech',
+  'hard tech',
+  'manufacturing',
+  're industrialization',
+  'robotics',
+  'space',
+  'technology',
+]);
 
 const BASE_LANE_BUDGETS: Record<'safe' | 'balanced' | 'explore', Record<ContentSourceLane, number>> = {
   safe: {
@@ -131,8 +168,8 @@ function isLowSignalPromo(tweet: TweetPerformance): boolean {
 
 function usableManualTweet(tweet: TweetPerformance, curation: ManualExampleCuration | null | undefined): boolean {
   if (!tweet.content || tweet.content.trim().length < 25) return false;
-  if (isPinned(curation, tweet.xTweetId)) return true;
   if (isBlocked(curation, tweet.xTweetId)) return false;
+  if (isPinned(curation, tweet.xTweetId)) return true;
   if (isLikelyReply(tweet)) return false;
   if (isLowSignalPromo(tweet)) return false;
   return true;
@@ -173,16 +210,69 @@ export function buildManualTopicProfile(
 
 function topicFitScore(label: string, topics: string[]): number {
   if (!label) return 0;
-  const lower = label.toLowerCase();
-  const normalizedTopics = topics.map((topic) => topic.toLowerCase());
-  if (normalizedTopics.some((topic) => lower.includes(topic) || topic.includes(lower))) return 1;
-  return normalizedTopics.some((topic) => {
-    const terms = topic.split(/[\s/_-]+/).filter((term) => term.length >= 4);
-    return terms.some((term) => lower.includes(term));
-  }) ? 0.58 : 0;
+  const lower = label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const labelTokens = new Set(lower.split(/\s+/).filter(Boolean));
+  const normalizedTopics = topics.map((topic) => topic.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).filter(Boolean);
+  let best = 0;
+  for (const topic of normalizedTopics) {
+    const topicTokens = topic.split(/\s+/).filter(Boolean);
+    const distinctive = topicTokens.filter((token) => !GENERIC_IDENTITY_BRIDGE_TOKENS.has(token));
+    const exactMatch = topicTokens.length === 1
+      ? labelTokens.has(topicTokens[0])
+      : ` ${lower} `.includes(` ${topic} `);
+    if (exactMatch) {
+      // A broad category says where a post lives, not whether it belongs to
+      // this particular person. Narrow phrases and mechanisms remain strong.
+      best = Math.max(
+        best,
+        BROAD_IDENTITY_TOPICS.has(topic) || distinctive.length === 0 ? 0.16 : 1,
+      );
+      continue;
+    }
+    if (distinctive.length === 0) continue;
+    const overlap = distinctive.filter((token) => labelTokens.has(token)).length;
+    if (overlap >= 2) {
+      best = Math.max(best, Math.min(0.86, 0.58 + (overlap / distinctive.length) * 0.28));
+    } else if (overlap === 1 && distinctive.length === 1) {
+      best = Math.max(best, 0.5);
+    } else if (overlap === 1) {
+      best = Math.max(best, 0.18);
+    }
+  }
+  return best;
 }
 
-function manualFitScore(topic: TrendingTopic, clusters: ManualTopicCluster[]): number {
+function identityTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter((token) => (
+        token.length >= 4
+        && !IDENTITY_STOP_WORDS.has(token)
+        && !GENERIC_IDENTITY_BRIDGE_TOKENS.has(token)
+        && !/^\d+$/.test(token)
+      )),
+  );
+}
+
+function profileContextFitScore(label: string, voiceProfile: VoiceProfile): number {
+  const candidate = identityTokens(label);
+  if (candidate.size === 0) return 0;
+  const nativeCommunicationStyle = voiceProfile.communicationStyle
+    .split(/\n## ACCOUNT (?:TOPIC|ANTI-SLOP) POLICY\b/i)[0];
+  const context = identityTokens(`${voiceProfile.summary} ${nativeCommunicationStyle}`);
+  const overlap = [...candidate].filter((token) => context.has(token)).length;
+  if (overlap >= 4) return 0.82;
+  if (overlap === 3) return 0.68;
+  if (overlap === 2) return 0.5;
+  if (overlap === 1) return 0.16;
+  return 0;
+}
+
+function manualFitScore(topic: Pick<TrendingTopic, 'category' | 'headline' | 'topTweet'>, clusters: ManualTopicCluster[]): number {
   const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`.toLowerCase();
   let best = 0;
   for (const cluster of clusters) {
@@ -215,6 +305,35 @@ function sourceQualityScore(topic: TrendingTopic): number {
   return clamp(score);
 }
 
+function followedNetworkMomentumScore(topic: TrendingTopic): number {
+  if (topic.discoveryMethod !== 'followed_network') return 0;
+  const momentum = typeof topic.networkMomentumScore === 'number' ? topic.networkMomentumScore : 0;
+  const breakout = typeof topic.networkBreakoutScore === 'number' ? topic.networkBreakoutScore : 0;
+  const confidence = typeof topic.topicConfidence === 'number' ? topic.topicConfidence : 0.5;
+  const diversity = clamp((topic.sourceCount || 1) / 4);
+  return clamp(momentum * 0.55 + breakout * 0.2 + confidence * 0.15 + diversity * 0.1);
+}
+
+export function assessNativeTopicIdentity(
+  topic: Pick<TrendingTopic, 'category' | 'headline' | 'topTweet'>,
+  voiceProfile: VoiceProfile,
+  learnings: AgentLearnings | null,
+): NativeTopicIdentityAssessment {
+  const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`;
+  const soul = Math.max(
+    topicFitScore(haystack, voiceProfile.topics),
+    profileContextFitScore(haystack, voiceProfile),
+  );
+  const manual = manualFitScore(topic, learnings?.manualTopicProfile || []);
+  const identityFit = Math.max(soul, manual);
+  return {
+    soul: Number(soul.toFixed(3)),
+    manual: Number(manual.toFixed(3)),
+    identityFit: Number(identityFit.toFixed(3)),
+    driftRisk: Number(clamp(1 - identityFit).toFixed(3)),
+  };
+}
+
 export function formatTrendEvidence(topic: TrendingTopic): string {
   const sourceType = topic.sourceType === 'hacker_news' ? 'Hacker News' : 'X';
   const timestampLabel = topic.sourceType === 'hacker_news' ? 'discovered' : 'published';
@@ -228,7 +347,46 @@ export function formatTrendEvidence(topic: TrendingTopic): string {
   const additionalEvidence = sourceText && sourceText !== topic.headline
     ? ` Source text: ${sourceText.slice(0, 500)}`
     : '';
-  return `Current event [${metadata}]: ${topic.headline}${additionalEvidence}`;
+  const networkMetadata = topic.discoveryMethod === 'followed_network'
+    ? ` Followed-network topicId=${topic.networkTopicId || topic.id}; topic=${topic.category}; momentum=${Number(topic.networkMomentumScore || 0).toFixed(3)}; momentumDelta=${Number(topic.networkMomentumDelta || 0).toFixed(3)}; sourceAuthors=${topic.sourceCount || 1}; whyNow=${topic.topicWhyNow || 'breakout posts in the followed network'}.`
+    : '';
+  const networkEvidence = topic.discoveryMethod === 'followed_network' && topic.evidence?.length
+    ? ` Evidence: ${topic.evidence.slice(0, 4).map((item) => (
+      `@${item.author} (${item.breakoutMultiple.toFixed(2)}x author baseline; score ${item.viralScore.toFixed(3)}; ${item.sourceUrl}): ${item.text.slice(0, 280)}`
+    )).join(' | ')}`
+    : '';
+  return `Current event [${metadata}]: ${topic.headline}${networkMetadata}${additionalEvidence}${networkEvidence}`;
+}
+
+export function getTrendSourceEvidenceTexts(topic: TrendingTopic): string[] {
+  const evidence = topic.discoveryMethod === 'followed_network'
+    ? (topic.evidence || []).map((item) => item.text)
+    : [topic.topTweet?.text];
+  return [...new Set(evidence.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean))]
+    .slice(0, 4)
+    .map((text) => text.slice(0, 420));
+}
+
+export function formatTrendProvenance(topic: TrendingTopic): string {
+  const sourceType = topic.sourceType === 'hacker_news' ? 'Hacker News' : 'X';
+  const stableId = getTrendingTopicStableId(topic);
+  const urls = [...new Set([
+    topic.sourceUrl,
+    ...(topic.evidence || []).map((item) => item.sourceUrl),
+  ].filter((value): value is string => Boolean(value)))].slice(0, 4);
+  const metadata = [
+    `source=${sourceType}`,
+    `topicId=${stableId}`,
+    `topic=${topic.category}`,
+    topic.timestamp ? `published=${topic.timestamp}` : null,
+    topic.observedAt ? `observed=${topic.observedAt}` : null,
+    topic.discoveryMethod === 'followed_network' ? `followed-network=true` : null,
+    topic.networkMomentumScore !== null && topic.networkMomentumScore !== undefined
+      ? `momentum=${Number(topic.networkMomentumScore).toFixed(3)}`
+      : null,
+    urls.length > 0 ? `urls=${urls.join(',')}` : null,
+  ].filter(Boolean).join('; ');
+  return `Current subject provenance [${metadata}]`;
 }
 
 export function enrichTrendingTopics(
@@ -237,38 +395,54 @@ export function enrichTrendingTopics(
   learnings: AgentLearnings | null,
   tolerance: TrendTolerance = 'moderate',
 ): EnrichedTrendingTopic[] {
-  const manualClusters = learnings?.manualTopicProfile || [];
-
   return trending.map((topic) => {
-    const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`;
-    const soul = topicFitScore(haystack, voiceProfile.topics);
-    const manual = manualFitScore(topic, manualClusters);
+    const identity = assessNativeTopicIdentity(topic, voiceProfile, learnings);
+    const { soul, manual, identityFit, driftRisk } = identity;
     const freshness = freshnessScore(topic);
     const velocity = velocityScore(topic);
     const sourceQuality = sourceQualityScore(topic);
-    const total = clamp(
-      (freshness * 0.25)
-      + (velocity * 0.2)
-      + (soul * 0.2)
-      + (manual * 0.2)
-      + (sourceQuality * 0.15),
-    );
+    const networkMomentum = followedNetworkMomentumScore(topic);
+    const isFollowedNetworkTopic = topic.discoveryMethod === 'followed_network';
+    const total = clamp(isFollowedNetworkTopic
+      ? (freshness * 0.12)
+        + (velocity * 0.1)
+        + (soul * 0.18)
+        + (manual * 0.14)
+        + (identityFit * 0.16)
+        + (sourceQuality * 0.1)
+        + (networkMomentum * 0.2)
+      : (freshness * 0.25)
+        + (velocity * 0.2)
+        + (soul * 0.2)
+        + (manual * 0.2)
+        + (sourceQuality * 0.15));
+    const networkQualified = isFollowedNetworkTopic
+      && networkMomentum >= 0.62
+      && (topic.topicConfidence || 0) >= 0.45
+      && ((topic.sourceCount || 1) >= 2 || (topic.networkBreakoutScore || 0) >= 0.78);
+    const adjacentIdentityFloor = tolerance === 'adjacent' ? 0.32 : tolerance === 'aggressive' ? 0.18 : 0.24;
+    const hasAlignedIdentityBridge = identityFit >= 0.45;
+    const hasAdjacentIdentityBridge = identityFit >= adjacentIdentityFloor;
 
     let sourceLane: ContentSourceLane | 'reject' = 'reject';
     let plannerReason = 'Trend is too stale or too far from the account voice.';
 
-    if (total >= 0.6 && (soul >= 0.45 || manual >= 0.45)) {
+    if (total >= 0.55 && hasAlignedIdentityBridge) {
       sourceLane = 'trend_aligned_exploit';
-      plannerReason = 'Hot trend with strong manual/core topic fit.';
+      plannerReason = networkQualified
+        ? 'Followed-network subject has strong momentum and a concrete bridge to native account topics.'
+        : 'Hot trend with strong manual/core topic fit.';
     } else if (
-      tolerance !== 'adjacent'
-      ? total >= 0.42 && (soul >= 0.18 || manual >= 0.22) && freshness >= 0.2
-      : total >= 0.5 && (soul >= 0.3 || manual >= 0.3)
+      hasAdjacentIdentityBridge
+      && freshness >= 0.2
+      && total >= (tolerance === 'adjacent' ? 0.46 : tolerance === 'aggressive' ? 0.38 : 0.42)
     ) {
       sourceLane = 'trend_adjacent_explore';
       plannerReason = tolerance === 'aggressive'
-        ? 'Trend is outside the core, but hot enough for a measured exploration slot.'
-        : 'Trend is adjacent to the core voice and acceptable for exploration.';
+        ? 'Trend has a defensible native bridge and enough momentum for one measured exploration slot.'
+        : 'Trend is adjacent to native account evidence and acceptable for limited exploration.';
+    } else if (identityFit < adjacentIdentityFloor) {
+      plannerReason = 'Rejected despite momentum: no concrete bridge to the account\'s native topics or manual writing history.';
     }
 
     return {
@@ -278,6 +452,9 @@ export function enrichTrendingTopics(
         velocity: Number(velocity.toFixed(3)),
         soul: Number(soul.toFixed(3)),
         manual: Number(manual.toFixed(3)),
+        identityFit: Number(identityFit.toFixed(3)),
+        driftRisk: Number(driftRisk.toFixed(3)),
+        networkMomentum: Number(networkMomentum.toFixed(3)),
         sourceQuality: Number(sourceQuality.toFixed(3)),
         total: Number(total.toFixed(3)),
       },
@@ -285,31 +462,6 @@ export function enrichTrendingTopics(
       plannerReason,
     } satisfies EnrichedTrendingTopic;
   });
-}
-
-function allocateCounts(
-  count: number,
-  budgets: Record<ContentSourceLane, number>,
-): Record<ContentSourceLane, number> {
-  const entries = Object.entries(budgets) as Array<[ContentSourceLane, number]>;
-  const counts = Object.fromEntries(entries.map(([lane]) => [lane, 0])) as Record<ContentSourceLane, number>;
-  if (count <= 0) return counts;
-
-  const weighted = entries.map(([lane, ratio]) => ({ lane, exact: ratio * count }));
-  let assigned = 0;
-  for (const item of weighted) {
-    const base = Math.floor(item.exact);
-    counts[item.lane] = base;
-    assigned += base;
-  }
-
-  const remainder = count - assigned;
-  weighted
-    .sort((a, b) => (b.exact - Math.floor(b.exact)) - (a.exact - Math.floor(a.exact)))
-    .slice(0, remainder)
-    .forEach((item) => { counts[item.lane] += 1; });
-
-  return counts;
 }
 
 function distributeLanes(counts: Record<ContentSourceLane, number>): ContentSourceLane[] {
@@ -367,26 +519,52 @@ export function buildSourcePlannerPlan({
   const rejectedTrends = accepted.filter((topic) => topic.sourceLane === 'reject');
 
   const baseBudgets = BASE_LANE_BUDGETS[autonomyMode];
-  const desiredTrendShare = clamp((trendMixTarget || 0) / 100);
-  const totalTrendCap = baseBudgets.trend_aligned_exploit + baseBudgets.trend_adjacent_explore + baseBudgets.core_explore_fallback;
-  const adjustedTrendShare = Math.min(totalTrendCap, Math.max(0.1, desiredTrendShare));
-  const adjustedBudgets: Record<ContentSourceLane, number> = {
-    manual_core_exploit: clamp(1 - adjustedTrendShare, 0.25, 0.8),
-    trend_aligned_exploit: Math.min(baseBudgets.trend_aligned_exploit, adjustedTrendShare),
-    trend_adjacent_explore: 0,
-    core_explore_fallback: 0,
-  };
-  const remainingTrendShare = adjustedTrendShare - adjustedBudgets.trend_aligned_exploit;
-  adjustedBudgets.trend_adjacent_explore = Math.min(baseBudgets.trend_adjacent_explore, Math.max(0, remainingTrendShare * 0.45));
-  adjustedBudgets.core_explore_fallback = Math.max(0, adjustedTrendShare - adjustedBudgets.trend_aligned_exploit - adjustedBudgets.trend_adjacent_explore);
+  const configuredTrendShare = clamp((trendMixTarget || 0) / 100);
+  const networkSignals = accepted
+    .filter((topic) => topic.discoveryMethod === 'followed_network' && topic.sourceLane !== 'reject')
+    .map((topic) => (topic.fitScores.networkMomentum || 0) * (topic.topicConfidence || 0.5))
+    .sort((a, b) => b - a)
+    .slice(0, 5);
+  const networkStrength = networkSignals.length > 0
+    ? networkSignals.reduce((sum, score) => sum + score, 0) / networkSignals.length
+    : 0;
+  const maximumTrendShare = autonomyMode === 'safe' ? 0.25 : autonomyMode === 'balanced' ? 0.35 : 0.45;
+  const adjustedTrendShare = Math.min(configuredTrendShare, maximumTrendShare);
+  const desiredTrendSlots = adjustedTrendShare <= 0 || count <= 0
+    ? 0
+    : Math.min(count, Math.max(1, Math.floor(count * adjustedTrendShare)));
+  const alignedPreference = clamp(
+    0.68 + networkStrength * 0.16,
+    0.62,
+    0.86,
+  );
+  let alignedQuota = Math.min(
+    acceptedAligned.length,
+    Math.min(desiredTrendSlots, Math.max(desiredTrendSlots > 0 ? 1 : 0, Math.round(desiredTrendSlots * alignedPreference))),
+  );
+  let adjacentQuota = Math.min(acceptedAdjacent.length, desiredTrendSlots - alignedQuota);
+  const unfilledTrendSlots = desiredTrendSlots - alignedQuota - adjacentQuota;
+  if (unfilledTrendSlots > 0) {
+    alignedQuota += Math.min(unfilledTrendSlots, Math.max(0, acceptedAligned.length - alignedQuota));
+  }
+  adjacentQuota += Math.min(
+    desiredTrendSlots - alignedQuota - adjacentQuota,
+    Math.max(0, acceptedAdjacent.length - adjacentQuota),
+  );
 
-  const laneCounts = allocateCounts(count, adjustedBudgets);
-  const alignedQuota = Math.min(laneCounts.trend_aligned_exploit, acceptedAligned.length);
-  const adjacentQuota = Math.min(laneCounts.trend_adjacent_explore, acceptedAdjacent.length);
-  const missingTrendSlots = (laneCounts.trend_aligned_exploit - alignedQuota) + (laneCounts.trend_adjacent_explore - adjacentQuota);
-  laneCounts.trend_aligned_exploit = alignedQuota;
-  laneCounts.trend_adjacent_explore = adjacentQuota;
-  laneCounts.core_explore_fallback += Math.max(0, missingTrendSlots);
+  const actualTrendSlots = alignedQuota + adjacentQuota;
+  const nativeSlots = Math.max(0, count - actualTrendSlots);
+  const nativeBudgetTotal = baseBudgets.manual_core_exploit + baseBudgets.core_explore_fallback;
+  const manualPreference = nativeBudgetTotal > 0
+    ? baseBudgets.manual_core_exploit / nativeBudgetTotal
+    : 0.75;
+  const manualCoreSlots = Math.min(nativeSlots, Math.round(nativeSlots * manualPreference));
+  const laneCounts: Record<ContentSourceLane, number> = {
+    manual_core_exploit: manualCoreSlots,
+    trend_aligned_exploit: alignedQuota,
+    trend_adjacent_explore: adjacentQuota,
+    core_explore_fallback: nativeSlots - manualCoreSlots,
+  };
 
   const orderedLanes = distributeLanes(laneCounts).slice(0, count);
   const manualTopics = pickManualTopics(learnings, [...voiceProfile.topics, ...fallbackTopics]);
@@ -410,13 +588,13 @@ export function buildSourcePlannerPlan({
     if (lane === 'trend_aligned_exploit' && acceptedAligned[alignedIndex]) {
       const trend = acceptedAligned[alignedIndex++];
       targetTopic = trend.category || targetTopic;
-      trendTopicId = String(trend.id);
+      trendTopicId = getTrendingTopicStableId(trend);
       trendHeadline = trend.headline;
       plannerReason = trend.plannerReason;
     } else if (lane === 'trend_adjacent_explore' && acceptedAdjacent[adjacentIndex]) {
       const trend = acceptedAdjacent[adjacentIndex++];
       targetTopic = trend.category || targetTopic;
-      trendTopicId = String(trend.id);
+      trendTopicId = getTrendingTopicStableId(trend);
       trendHeadline = trend.headline;
       plannerReason = trend.plannerReason;
     } else if (lane === 'core_explore_fallback') {

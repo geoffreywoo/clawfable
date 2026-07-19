@@ -14,8 +14,7 @@ const mocks = vi.hoisted(() => ({
   addPostLogEntry: vi.fn(),
   saveRelationshipOpportunities: vi.fn(),
   saveTrendOpportunities: vi.fn(),
-  decodeKeys: vi.fn(),
-  fetchTrendingFromFollowing: vi.fn(),
+  refreshAgentTopicIntelligence: vi.fn(),
   parseSoulMd: vi.fn(),
   enrichTrendingTopics: vi.fn(),
   buildRelationshipOpportunities: vi.fn(),
@@ -41,12 +40,8 @@ vi.mock('@/lib/kv-storage', () => ({
   saveTrendOpportunities: mocks.saveTrendOpportunities,
 }));
 
-vi.mock('@/lib/twitter-client', () => ({
-  decodeKeys: mocks.decodeKeys,
-}));
-
-vi.mock('@/lib/trending', () => ({
-  fetchTrendingFromFollowing: mocks.fetchTrendingFromFollowing,
+vi.mock('@/lib/topic-intelligence-refresh', () => ({
+  refreshAgentTopicIntelligence: mocks.refreshAgentTopicIntelligence,
 }));
 
 vi.mock('@/lib/soul-parser', () => ({
@@ -104,12 +99,7 @@ describe('growth opportunities route', () => {
     mocks.getRelationshipOpportunities.mockResolvedValue([]);
     mocks.getViralityPostmortems.mockResolvedValue([]);
     mocks.addPostLogEntry.mockResolvedValue(undefined);
-    mocks.decodeKeys.mockReturnValue({
-      appKey: 'key',
-      appSecret: 'secret',
-      accessToken: 'token',
-      accessSecret: 'access-secret',
-    });
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({ topics: [], error: null });
     mocks.parseSoulMd.mockReturnValue({ topics: ['AI'], tone: 'sharp', antiGoals: [] });
     mocks.enrichTrendingTopics.mockReturnValue([]);
     mocks.buildTrendOpportunities.mockReturnValue([]);
@@ -117,13 +107,13 @@ describe('growth opportunities route', () => {
   });
 
   it('returns cached trend opportunities and logs reset-aware X failures', async () => {
-    mocks.fetchTrendingFromFollowing.mockRejectedValue(new TwitterActionError({
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({ topics: [], error: new TwitterActionError({
       action: 'refresh_growth_opportunities',
       statusCode: 429,
       title: 'Too Many Requests',
       detail: 'Rate limit exceeded',
       rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
-    }));
+    }) });
 
     const response = await GET(
       new Request('http://localhost/api/agents/agent-growth-route/growth/opportunities') as any,

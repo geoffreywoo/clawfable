@@ -1,10 +1,11 @@
-import { getAgentByHandle, getLearningSignals, getLearnings, getQueuedTweets, getTweets } from '../lib/kv-storage';
+import { getAgent, getAgentByHandle, getLearningSignals, getLearnings, getQueuedTweets, getTopicIntelligenceState, getTweets } from '../lib/kv-storage';
 import { assessAccountTaste, assessTechnicalCredibility, getAutonomousQueueTasteIssue } from '../lib/account-taste';
 import { extractCandidateFeatureTags } from '../lib/tweet-features';
 import { scoreSlopRisk } from '../lib/virality-signals';
 import type { Tweet } from '../lib/types';
 import { buildGenerationContext } from '../lib/generation-context';
 import { scoreOperatorAnchorCopyRisk } from '../lib/candidate-ranking';
+import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from '../lib/source-trust';
 
 type QueueAuditItem = {
   id: string;
@@ -22,11 +23,14 @@ type QueueAuditItem = {
   candidateScore: number | null;
   slopScore: number;
   nativeVoiceScore: number;
+  nativeStyleScore: number;
+  voiceDriftRisk: number;
   technicalCredibilityScore: number;
   cringeRisk: number;
   statusTextureRisk: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  sourceCopyRisk: number;
   rejectedDraftSimilarity: number;
   tasteAction: 'allow' | 'review' | 'block';
   anchorCopyRiskContribution: number;
@@ -66,7 +70,7 @@ function parseCurrentSource(sourceBrief: string | null | undefined): {
 } {
   const brief = sourceBrief || '';
   const sourceType = brief.match(/\bsource=([^;\]]+)/i)?.[1]?.trim() || null;
-  const sourceUrl = brief.match(/\burl=(https?:\/\/[^;\]\s]+)/i)?.[1] || null;
+  const sourceUrl = brief.match(/\burls?=(https?:\/\/[^;,\]\s]+)/i)?.[1] || null;
   const published = brief.match(/\b(?:published|discovered)=([^;\]]+)/i)?.[1]?.trim() || null;
   const timestamp = published ? Date.parse(published) : NaN;
   const sourceAgeHours = Number.isFinite(timestamp)
@@ -86,19 +90,23 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
   if (item.queueTasteIssue) return 'rewrite';
   if (
     item.nativeVoiceScore < 0.42
+    || item.voiceDriftRisk >= 0.62
     || item.cringeRisk >= 0.58
     || item.statusTextureRisk >= 0.4
     || item.truthfulnessRisk >= 0.5
+    || item.sourceCopyRisk >= 0.58
     || item.rejectedDraftSimilarity >= 0.55
     || (item.technicalCredibilityScore < 0.3 && item.slopScore >= 0.45)
   ) {
     return 'delete';
   }
   if (
-    item.nativeVoiceScore < 0.55
+    item.nativeVoiceScore < 0.6
+    || item.voiceDriftRisk >= 0.25
     || item.technicalCredibilityScore < 0.42
     || item.cringeRisk >= 0.42
     || item.generatedPatternRisk >= 0.46
+    || item.sourceCopyRisk >= 0.38
     || item.rejectedDraftSimilarity >= 0.32
     || item.slopScore >= 0.42
   ) {
@@ -110,12 +118,14 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
 function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   const reasons: string[] = [];
   if (item.trendTopicId && !item.timelyCurrentSource) reasons.push('trend slot lacks a current dated source URL');
-  if (item.nativeVoiceScore < 0.55) reasons.push(`native voice ${item.nativeVoiceScore}`);
+  if (item.nativeVoiceScore < 0.6) reasons.push(`native voice ${item.nativeVoiceScore}`);
+  if (item.voiceDriftRisk >= 0.25) reasons.push(`voice drift ${item.voiceDriftRisk}`);
   if (item.technicalCredibilityScore < 0.42) reasons.push(`technical credibility ${item.technicalCredibilityScore}`);
   if (item.cringeRisk >= 0.42) reasons.push(`cringe risk ${item.cringeRisk}`);
   if (item.statusTextureRisk >= 0.24) reasons.push(`status texture ${item.statusTextureRisk}`);
   if (item.truthfulnessRisk >= 0.5) reasons.push(`claim evidence ${item.truthfulnessRisk}`);
   if (item.generatedPatternRisk >= 0.46) reasons.push(`generated pattern ${item.generatedPatternRisk}`);
+  if (item.sourceCopyRisk >= 0.38) reasons.push(`external source copy ${item.sourceCopyRisk}`);
   if (item.rejectedDraftSimilarity >= 0.32) reasons.push(`rejected draft similarity ${item.rejectedDraftSimilarity}`);
   if (item.queueTasteIssue) reasons.push(item.queueTasteIssue);
   if (item.slopScore >= 0.42) reasons.push(`slop ${item.slopScore}`);
@@ -128,15 +138,15 @@ function auditTweet(
   generationContext: Awaited<ReturnType<typeof buildGenerationContext>>,
 ): QueueAuditItem {
   const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis });
+  const operatorEvidence = [
+    ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.bestPerformers || []),
+  ].map((entry) => entry.content);
   const taste = assessAccountTaste(tweet.content, {
     ...context,
     featureTags,
-    sourceTexts: [
-      tweet.sourceBrief,
-      tweet.trendHeadline,
-      ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []).map((entry) => entry.content),
-      ...(context.learnings?.operatorVoiceReference?.bestPerformers || []).map((entry) => entry.content),
-    ],
+    sourceTexts: getTrustedClaimSourceTexts(tweet, operatorEvidence),
+    untrustedSourceTexts: getUntrustedSourceTexts(tweet),
   });
   const technical = assessTechnicalCredibility(tweet.content);
   const slopScore = readNumber(tweet.slopScore) ?? scoreSlopRisk(tweet.content, featureTags);
@@ -180,11 +190,14 @@ function auditTweet(
     candidateScore: readNumber(tweet.candidateScore),
     slopScore: Number(slopScore.toFixed(3)),
     nativeVoiceScore: taste.nativeVoiceScore,
+    nativeStyleScore: taste.nativeStyleScore,
+    voiceDriftRisk: taste.voiceDriftRisk,
     technicalCredibilityScore: technical.score,
     cringeRisk: taste.cringeRisk,
     statusTextureRisk: taste.statusTextureRisk,
     truthfulnessRisk: taste.truthfulnessRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
+    sourceCopyRisk: taste.sourceCopyRisk,
     rejectedDraftSimilarity: taste.rejectedDraftSimilarity,
     tasteAction: taste.action,
     anchorCopyRiskContribution,
@@ -203,35 +216,33 @@ function auditTweet(
 
 async function main() {
   const handle = (readArg('--handle') || 'geoffwoo').replace(/^@/, '');
+  const agentId = readArg('--agent-id');
   const normalizedHandle = handle.toLowerCase();
   const aliases = ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle)
     ? [normalizedHandle, ...['geoffwoo', 'geoffreywoo'].filter((alias) => alias !== normalizedHandle)]
     : [normalizedHandle];
-  let agent = null;
-  for (const alias of aliases) {
-    agent = await getAgentByHandle(alias);
-    if (agent) break;
+  let agent = agentId ? await getAgent(agentId) : null;
+  if (!agent) {
+    for (const alias of aliases) {
+      agent = await getAgentByHandle(alias);
+      if (agent) break;
+    }
   }
   if (!agent) {
     throw new Error(`No agent found for @${handle}`);
   }
 
-  const [queue, learnings, allTweets, signals, generationContext] = await Promise.all([
+  const [queue, learnings, allTweets, signals, generationContext, topicIntelligence] = await Promise.all([
     getQueuedTweets(agent.id),
     getLearnings(agent.id),
     getTweets(agent.id),
     getLearningSignals(agent.id, 100),
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
+    getTopicIntelligenceState(agent.id),
   ]);
 
   const audited = queue.map((tweet) => auditTweet(tweet, {
-    voiceProfile: {
-      tone: 'geoffrey native technical frontier-tech voice',
-      topics: ['ai', 'inference asics', 'fusion', 'fission', 'rare earth minerals', 'robotics', 'automated manufacturing', 'space'],
-      antiGoals: ['AI slop', 'low-status SaaS operations texture', 'generic crypto-first content'],
-      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo',
-      summary: 'Elevated technical operator voice.',
-    },
+    voiceProfile: generationContext.voiceProfile,
     learnings,
     memory: generationContext.memory,
   }, generationContext));
@@ -251,6 +262,26 @@ async function main() {
     manualAnchorCount: learnings?.operatorVoiceReference?.bestPerformers.length || 0,
     recentSignalCount: signals.length,
     learningEvidence: generationContext.style.banditPolicy?.evidence || null,
+    topicIntelligence: topicIntelligence ? {
+      observedAt: topicIntelligence.observedAt,
+      refreshSequence: topicIntelligence.refreshSequence,
+      followingCount: topicIntelligence.followingCount,
+      activeAuthorCount: topicIntelligence.activeAuthorCount || topicIntelligence.sampledAccountIds.length,
+      followGraphSource: topicIntelligence.followGraphSource || 'rotating_timelines',
+      sourceComplete: topicIntelligence.sourceComplete !== false,
+      partialFailureCount: topicIntelligence.partialFailureCount || 0,
+      sampledAccounts: topicIntelligence.sampledAccountIds.length,
+      trackedViralTweets: topicIntelligence.viralTweets.length,
+      topTopics: topicIntelligence.topics.slice(0, 8).map((topic) => ({
+        id: topic.id,
+        label: topic.label,
+        momentumScore: topic.momentumScore,
+        peakMomentumScore: topic.peakMomentumScore,
+        sourceAuthors: topic.sourceAuthors.slice(-6),
+        sourceTweetCount: topic.sourceTweetIds.length,
+        lastSeenAt: topic.lastSeenAt,
+      })),
+    } : null,
     generatedAt: new Date().toISOString(),
   };
 
@@ -263,6 +294,12 @@ async function main() {
   console.log(`${summary.handle} agent=${summary.agentId} queue=${summary.queueDepth} post=${summary.postCandidates} rewrite=${summary.rewrite} delete=${summary.delete}`);
   console.log(`current-event queue=${summary.timelyTrendQueued}/${summary.trendQueued} stale-or-unproven=${summary.staleOrUnprovenTrendQueued} models=${summary.generationModels.join(', ') || 'none'}`);
   console.log(`manual anchors=${summary.manualAnchorCount} recent signals=${summary.recentSignalCount} tracked tweets=${allTweets.length}`);
+  if (summary.topicIntelligence) {
+    console.log(`network topics observed=${summary.topicIntelligence.observedAt} refreshes=${summary.topicIntelligence.refreshSequence} source=${summary.topicIntelligence.followGraphSource} complete=${summary.topicIntelligence.sourceComplete} partialFailures=${summary.topicIntelligence.partialFailureCount} activeAuthors=${summary.topicIntelligence.activeAuthorCount} knownFollows=${summary.topicIntelligence.followingCount || 'n/a'} sampled=${summary.topicIntelligence.sampledAccounts} viral tweets=${summary.topicIntelligence.trackedViralTweets}`);
+    for (const topic of summary.topicIntelligence.topTopics) {
+      console.log(`- ${topic.label}: momentum=${topic.momentumScore} peak=${topic.peakMomentumScore} authors=${topic.sourceAuthors.map((author) => `@${author}`).join(', ')} sourceTweets=${topic.sourceTweetCount}`);
+    }
+  }
   if (summary.learningEvidence) {
     const evidence = summary.learningEvidence;
     console.log(`learning evidence=${evidence.uniquePerformancePosts} unique posts from ${evidence.performanceRows} checkpoints (${evidence.operatorWrittenPosts} operator, ${evidence.systemWrittenPosts} system, ${evidence.qualityDiscountedSystemPosts} system patterns discounted)`);
@@ -272,7 +309,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} pattern=${item.generatedPatternRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);

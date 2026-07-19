@@ -6,6 +6,7 @@ import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
 import { assessTechnicalElevation, scoreSlopRisk } from './virality-signals';
 import { assessAccountTaste, buildGeoffreyNativeWritingBrief, isGeoffreyVoiceProfile } from './account-taste';
+import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 
 type JudgeContext = {
   voiceProfile?: VoiceProfile;
@@ -185,12 +186,11 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     learnings: context.learnings,
     memory: context.memory,
     featureTags,
-    sourceTexts: [
-      candidate.sourceBrief,
-      candidate.trendHeadline,
+    sourceTexts: getTrustedClaimSourceTexts(candidate, [
       ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []).map((entry) => entry.content),
       ...(context.learnings?.operatorVoiceReference?.bestPerformers || []).map((entry) => entry.content),
-    ],
+    ]),
+    untrustedSourceTexts: getUntrustedSourceTexts(candidate),
   });
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
   const technicalBoost = technicalElevation.technicalScore * 0.5;
@@ -218,6 +218,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     - (slopRisk * 0.18)
     - (accountTaste.cringeRisk * 0.18)
     - (accountTaste.truthfulnessRisk * 0.6)
+    - (accountTaste.sourceCopyRisk * 0.7)
     + (memoryFit.boost * 0.25),
     0.32,
     0.9,
@@ -229,6 +230,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     + technicalElevation.technicalScore * 0.25
     - technicalElevation.banalOpsScore * 0.55
     - accountTaste.truthfulnessRisk * 0.45
+    - accountTaste.sourceCopyRisk * 0.55
     - accountTaste.generatedPatternRisk * 0.18,
     0.34,
     0.9,
@@ -287,9 +289,35 @@ function parseScoredLines(
         topic: candidate.targetTopic,
         thesisHint: typeof parsed.thesis === 'string' ? parsed.thesis : null,
       });
+      const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+      const rawVoiceFit = clamp(Number(parsed.voiceFit) || 0.5);
+      const modelNativeVoice = Number.isFinite(Number(parsed.nativeVoice))
+        ? clamp(Number(parsed.nativeVoice))
+        : rawVoiceFit;
+      const modelCringeRisk = Number.isFinite(Number(parsed.cringeRisk))
+        ? clamp(Number(parsed.cringeRisk))
+        : 0.5;
+      const modelTechnicalCredibility = Number.isFinite(Number(parsed.technicalCredibility))
+        ? clamp(Number(parsed.technicalCredibility))
+        : 0.5;
+      const voiceFit = geoffreyStrict
+        ? clamp(rawVoiceFit * 0.35 + modelNativeVoice * 0.65 - modelCringeRisk * 0.22)
+        : rawVoiceFit;
+      let overall = clamp(Number(parsed.overall) || 0.5);
+      if (geoffreyStrict) {
+        overall = clamp(
+          overall * 0.55
+          + voiceFit * 0.28
+          + modelTechnicalCredibility * 0.17
+          - modelCringeRisk * 0.2,
+        );
+        if (modelNativeVoice < 0.55 || modelCringeRisk >= 0.5) {
+          overall = Math.min(overall, 0.45);
+        }
+      }
       const judgeBreakdown: CandidateJudgeBreakdown = {
-        overall: clamp(Number(parsed.overall) || 0.5),
-        voiceFit: clamp(Number(parsed.voiceFit) || 0.5),
+        overall,
+        voiceFit,
         clarity: clamp(Number(parsed.clarity) || 0.5),
         novelty: clamp(Number(parsed.novelty) || 0.5),
         audienceFit: clamp(Number(parsed.audienceFit) || 0.5),
@@ -301,7 +329,9 @@ function parseScoredLines(
         coverageCluster: buildCoverageCluster(candidate.content, candidate.targetTopic, parsed.thesis || featureTags.thesis),
         judgeScore: Number(judgeBreakdown.overall.toFixed(3)),
         judgeBreakdown,
-        judgeNotes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
+        judgeNotes: typeof parsed.notes === 'string'
+          ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)}.` : ''}`
+          : '',
       });
     } catch {
       // Skip malformed lines.
@@ -337,10 +367,27 @@ export async function judgeCandidates(
   ).join('\n\n');
 
   try {
+    const manualAnchorBank = [
+      ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+      ...(learnings?.operatorVoiceReference?.bestPerformers || []),
+    ]
+      .filter((entry, index, items) => (
+        entry.content?.trim()
+        && items.findIndex((item) => item.content === entry.content) === index
+      ))
+      .slice(0, 6)
+      .map((entry, index) => `[NATIVE ${index + 1}] ${entry.content.slice(0, 260)}`)
+      .join('\n');
     const geoffreyBrief = isGeoffreyVoiceProfile(voiceProfile)
       ? `\n${buildGeoffreyNativeWritingBrief()}
 - Score native voice harshly: a draft must feel like Geoffrey thinking from technical constraints, not a generic account wearing frontier-tech nouns.
-- If it is polished, balanced, and plausibly generated, cap overall at 0.45 even when the topic is relevant.`
+- Compare each candidate against the native anchor bank as a distribution of modes, not as prose to copy. A candidate may match one legitimate mode without averaging every anchor into one voice.
+- If it is polished, balanced, and plausibly generated, cap overall at 0.45 even when the topic is relevant.
+- Set nativeVoice below 0.55 whenever Geoffrey would be unlikely to post the wording himself.
+- Set cringeRisk at or above 0.50 for consultant cadence, topic-swapped advice, synthetic status posturing, or technical nouns pasted onto a generic thesis.
+
+NATIVE ANCHOR BANK:
+${manualAnchorBank || '[no manual anchors available; be conservative]'}`
       : '';
     const response = await generateText({
       task: 'bulk_judgment',
@@ -357,6 +404,9 @@ Score each candidate from 0 to 1 on:
 Also return:
 - thesis: a short 4-10 word idea summary
 - notes: one short sentence on the main improvement opportunity
+- nativeVoice: likelihood from 0 to 1 that this person would plausibly post the exact wording
+- cringeRisk: likelihood from 0 to 1 that the draft feels generated, socially unearned, or interchangeable
+- technicalCredibility: mechanism/constraint/specificity quality from 0 to 1
 
 Ground rules:
 - Voice: ${voiceProfile.tone}
@@ -370,6 +420,7 @@ Ground rules:
 - Reward elite technical anchors: inference ASIC constraints, chip packaging/yield, memory bandwidth, power delivery, grid interconnects, reactor/fuel-cycle details, separation chemistry, metrology, tolerances, robotics failure modes, launch/radiation/thermal constraints, and industrial supply-chain qualification.
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
+- Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 - A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
 ${geoffreyBrief}
@@ -435,9 +486,11 @@ export async function mutateTopCandidates(
   {
     voiceProfile,
     memory,
+    learnings,
   }: {
     voiceProfile: VoiceProfile;
     memory: PersonalizationMemory | null;
+    learnings?: AgentLearnings | null;
   },
 ): Promise<RankableProtocolTweet[]> {
   const mutationTargets = [...candidates]
@@ -452,6 +505,19 @@ export async function mutateTopCandidates(
   const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
+    const nativeAnchorBank = isGeoffreyVoiceProfile(voiceProfile)
+      ? [
+          ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+          ...(learnings?.operatorVoiceReference?.bestPerformers || []),
+        ]
+          .filter((entry, index, items) => (
+            entry.content?.trim()
+            && items.findIndex((item) => item.content === entry.content) === index
+          ))
+          .slice(0, 5)
+          .map((entry, index) => `[NATIVE ${index + 1}] ${entry.content.slice(0, 240)}`)
+          .join('\n')
+      : '';
     const response = await generateText({
       task: 'creative_variant',
       tier: 'fast',
@@ -467,7 +533,10 @@ Rules:
 - Never add a fake founder/customer conversation, first-person event, benchmark, quote, or number. Preserve only evidence supplied with the candidate; otherwise rewrite as analysis or an explicit hypothesis.
 - For @geoffwoo, prefer the shape: technical object -> hidden constraint -> non-consensus implication -> compressed human phrasing.
 - Do not turn every tweet into the same template.
+- Do not turn a position into advice. Reject audience-label openings, "start with", "you should", technical noun checklists, textbook definitions, and tidy three-paragraph explainers.
+- Preserve roughness already present in the draft, but do not add fake typos, slang, or lowercase as voice costume.
 - Stay in voice: ${voiceProfile.tone}.
+${nativeAnchorBank ? `Native anchor bank (match a mode, never copy prose):\n${nativeAnchorBank}` : ''}
 ${memory?.operatorHiddenPreferences?.length ? `Operator preferences: ${memory.operatorHiddenPreferences.slice(0, 3).join(' | ')}` : ''}
 ${memory?.editTransformations?.length ? `Operator edit transformations: ${memory.editTransformations.slice(0, 3).join(' | ')}` : ''}
 ${memory?.conversationInsights?.length ? `Conversation lessons: ${memory.conversationInsights.slice(0, 2).join(' | ')}` : ''}

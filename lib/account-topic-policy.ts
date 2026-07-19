@@ -1,25 +1,6 @@
 import type { VoiceProfile } from './soul-parser';
 import type { AgentLearnings } from './types';
 
-const GEOFFREYWOO_FRONTIER_TOPICS = [
-  'ai',
-  'inference asics',
-  'fusion',
-  'fission',
-  'rare earth minerals',
-  'tungsten and critical minerals',
-  'antimony',
-  'gallium and germanium',
-  'graphite anodes',
-  'fluorspar and semiconductor chemicals',
-  'robotics',
-  'automated manufacturing',
-  're-industrialization',
-  'space',
-  'frontier tech',
-  'deep tech',
-];
-
 const GEOFFREY_HANDLES = new Set(['geoffwoo', 'geoffreywoo']);
 
 function normalizeHandle(handle?: string | null): string {
@@ -57,10 +38,11 @@ export function applyAccountTopicPolicy(
 ): VoiceProfile {
   if (!isGeoffreyHandle(handle)) return voiceProfile;
 
-  const topics = dedupeTopics([
-    ...voiceProfile.topics.filter((topic) => !isCryptoOnlyTopic(topic)),
-    ...GEOFFREYWOO_FRONTIER_TOPICS,
-  ]);
+  // Account policy may narrow an identity, but it must not manufacture one.
+  // Current subjects come from manual/SOUL evidence and live topic discovery.
+  const topics = dedupeTopics(
+    voiceProfile.topics.filter((topic) => !isCryptoOnlyTopic(topic)),
+  );
 
   return {
     ...voiceProfile,
@@ -75,9 +57,12 @@ export function applyAccountTopicPolicy(
 
 ## ACCOUNT TOPIC POLICY FOR @geoffwoo
 - Crypto is no longer a core content pillar. Do not generate standalone crypto/Web3 takes by default.
-- Keep posting on AI, especially where AI touches real-world constraints: inference ASICs, datacenter power, robotics, automated manufacturing, energy, supply chains, and industrial capacity.
-- Actively prefer frontier/deep tech themes: inference ASICs, fusion, fission, rare earth minerals, tungsten, antimony, gallium/germanium, graphite anodes, fluorspar/semiconductor chemicals, robotics, automated manufacturing, re-industrialization, space, and adjacent hard-technology ideas.
+- Discover current subjects dynamically from the followed network. Do not promote a fixed editorial topic menu into the account identity.
+- A discovered subject is eligible only when it has a concrete bridge to the original SOUL topics or Geoffrey's own manually written posts.
 - A crypto angle is acceptable only when it is a supporting detail inside a stronger AI infrastructure, compute, energy, manufacturing, or frontier-tech thesis.
+- Follow-graph virality is a discovery signal, not an identity override. A live subject must connect concretely to this SOUL, a manual topic, or an operator-written post before it can enter generation.
+- Never inherit a source author's ideology, thesis, certainty, jargon, cadence, or social posture. Learn what happened; Geoffrey supplies what it means and how it sounds.
+- Keep most output in proven native territory. At two original posts per day, use no more than one slot for a live followed-network subject unless the operator explicitly changes the mix.
 
 ## ACCOUNT ANTI-SLOP POLICY FOR @geoffwoo
 - Treat public feedback that the account sounds like "AI slop" as a standing rejection of the current voice pattern.
@@ -85,7 +70,7 @@ export function applyAccountTopicPolicy(
 - Avoid template openings like "the real edge", "most people miss", "not X but Y", "the winners will be", "here's the thing", and neat numbered frameworks unless a concrete observed detail makes the sentence impossible to genericize.
 - Avoid low-status SaaS-ops texture as the main anchor: Slack channels, support queues/tickets, calendar invites, dashboards, generic workflow handoffs, Looms, Zendesk, "renamed owner", and "who changed the workflow" are now considered weak proof.
 - The account should sound more elevated, technical, and elite: write from the level of compute constraints, chip packaging, power delivery, grid interconnects, reactor/fuel-cycle bottlenecks, separation chemistry, tungsten carbide tooling, antimony processing, gallium/germanium byproduct refining, graphite purification, fluorine chemistry, metrology, factory tolerances, robotics exception handling, launch/radiation/thermal constraints, and industrial supply chains.
-- Prefer blunt, compressed, slightly uneven human phrasing. One hard observation beats a perfect paragraph.
+- Prefer the actual rhythm distribution in Geoffrey's manual posts. Blunt, compressed, slightly uneven phrasing is often right, but do not flatten every post into one synthetic technical cadence.
 - Every draft needs at least one high-status technical anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or technical/industrial operating observation.
 - A generic "workflow changed" or "support queue got quieter" does not count as a sufficient anchor for @geoffwoo.
 - If a commenter could plausibly say "this sounds like ChatGPT wrote it", reject the draft before it reaches the queue.`,

@@ -235,4 +235,21 @@ describe('source planner routes', () => {
     expect(data.curation.pinnedXTweetIds).toEqual(['x-3', 'x-2']);
     expect(data.curation.blockedXTweetIds).toEqual(['x-4']);
   });
+
+  it('makes pin and block mutually exclusive, with an explicit block winning conflicts', async () => {
+    const response = await manualExamplesPATCH(new Request('http://localhost/api/manual-examples', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin: ['x-2', 'x-3'],
+        block: ['x-1', 'x-3'],
+      }),
+    }) as any, { params: Promise.resolve({ id: 'agent-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateManualExampleCuration).toHaveBeenCalledWith('agent-1', {
+      pinnedXTweetIds: ['x-2'],
+      blockedXTweetIds: ['x-1', 'x-3'],
+    });
+  });
 });

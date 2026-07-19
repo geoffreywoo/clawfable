@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Tweet } from '../lib/types';
 
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
@@ -15,7 +16,12 @@ const mocks = vi.hoisted(() => ({
   getPostLog: vi.fn(),
   logFunnelEvent: vi.fn(),
   getTrendingCache: vi.fn(),
+  getTrendingCacheSnapshot: vi.fn(),
   setTrendingCache: vi.fn(),
+  getTopicIntelligenceState: vi.fn(),
+  saveTopicIntelligenceState: vi.fn(),
+  acquireTopicIntelligenceLock: vi.fn(),
+  releaseTopicIntelligenceLock: vi.fn(),
   getConversationHistory: vi.fn(),
   getPerformanceHistory: vi.fn(),
   getRelationshipProfiles: vi.fn(),
@@ -54,7 +60,7 @@ const mocks = vi.hoisted(() => ({
   getReplyRepetitionIssue: vi.fn((_reply: string, _previousReplies: string[]) => null as string | null),
   extractMentionHandles: vi.fn((text: string) => (text.match(/@\w+/g) || []).map((handle) => handle.slice(1).toLowerCase())),
   resolveQueuedTweetFailure: vi.fn(),
-  fetchTrendingFromFollowing: vi.fn(),
+  discoverCurrentTrends: vi.fn(),
   generateText: vi.fn(),
 }));
 
@@ -73,7 +79,12 @@ vi.mock('@/lib/kv-storage', () => ({
   getPostLog: mocks.getPostLog,
   logFunnelEvent: mocks.logFunnelEvent,
   getTrendingCache: mocks.getTrendingCache,
+  getTrendingCacheSnapshot: mocks.getTrendingCacheSnapshot,
   setTrendingCache: mocks.setTrendingCache,
+  getTopicIntelligenceState: mocks.getTopicIntelligenceState,
+  saveTopicIntelligenceState: mocks.saveTopicIntelligenceState,
+  acquireTopicIntelligenceLock: mocks.acquireTopicIntelligenceLock,
+  releaseTopicIntelligenceLock: mocks.releaseTopicIntelligenceLock,
   getConversationHistory: mocks.getConversationHistory,
   getPerformanceHistory: mocks.getPerformanceHistory,
   getRelationshipProfiles: mocks.getRelationshipProfiles,
@@ -111,7 +122,9 @@ vi.mock('@/lib/soul-parser', () => ({
 }));
 
 vi.mock('@/lib/trending', () => ({
-  fetchCurrentTrends: mocks.fetchTrendingFromFollowing,
+  discoverCurrentTrends: mocks.discoverCurrentTrends,
+  getTrendingTopicStableId: (topic: { id: number; networkTopicId?: string | null }) =>
+    topic.networkTopicId || String(topic.id),
 }));
 
 vi.mock('@/lib/survivability', () => ({
@@ -137,7 +150,7 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { runAutopilot } from '@/lib/autopilot';
+import { archiveStaleNetworkTopicQueue, runAutopilot } from '@/lib/autopilot';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -184,7 +197,7 @@ const baseSettings = {
   contentCalendar: {},
 };
 
-const queuedTweet = {
+const queuedTweet: Tweet = {
   id: '522',
   agentId: baseAgent.id,
   content: 'Men, stop seeking validation from people who do not validate themselves.',
@@ -221,8 +234,30 @@ beforeEach(() => {
   mocks.getPerformanceHistory.mockResolvedValue([]);
   mocks.getRelationshipProfiles.mockResolvedValue([]);
   mocks.getTrendingCache.mockResolvedValue([]);
+  mocks.getTrendingCacheSnapshot.mockResolvedValue({
+    data: [],
+    cachedAt: '2026-04-07T00:00:00.000Z',
+    ageMs: 6 * 60 * 60 * 1000,
+    isFresh: false,
+  });
   mocks.setTrendingCache.mockResolvedValue(undefined);
-  mocks.fetchTrendingFromFollowing.mockResolvedValue([]);
+  mocks.getTopicIntelligenceState.mockResolvedValue(null);
+  mocks.saveTopicIntelligenceState.mockResolvedValue(undefined);
+  mocks.acquireTopicIntelligenceLock.mockResolvedValue({
+    acquired: true,
+    owner: 'topic-refresh:test',
+    lock: null,
+  });
+  mocks.releaseTopicIntelligenceLock.mockResolvedValue(true);
+  mocks.discoverCurrentTrends.mockResolvedValue({
+    topics: [],
+    networkState: null,
+    networkRefreshed: true,
+    networkError: null,
+    sampledNetworkAccounts: 0,
+    networkCandidateTweets: 0,
+    networkPartialFailures: 0,
+  });
   mocks.addPostLogEntry.mockResolvedValue(undefined);
   mocks.upsertRelationshipProfile.mockResolvedValue(null);
   mocks.invalidateAgentConnection.mockResolvedValue(undefined);
@@ -287,6 +322,197 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
+    const now = Date.parse('2026-07-14T12:00:00.000Z');
+    const archived = await archiveStaleNetworkTopicQueue(baseAgent.id, [
+      {
+        ...queuedTweet,
+        id: 'network-stale',
+        trendTopicId: 'network-old-subject-123',
+        createdAt: new Date(now - 20 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        ...queuedTweet,
+        id: 'network-current',
+        trendTopicId: 'network-live-subject-456',
+        createdAt: new Date(now - 20 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        ...queuedTweet,
+        id: 'manual-evergreen',
+        trendTopicId: null,
+        createdAt: new Date(now - 72 * 60 * 60 * 1000).toISOString(),
+      },
+    ], [{
+      id: 1,
+      networkTopicId: 'network-live-subject-456',
+      headline: 'Live subject',
+      source: '@source',
+      relevanceScore: 90,
+      category: 'live subject',
+      timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+      tweetCount: 2,
+      discoveryMethod: 'followed_network',
+    }], { currentReadComplete: true, now });
+
+    expect(archived).toBe(1);
+    expect(mocks.updateTweet).toHaveBeenCalledWith('network-stale', expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('lost current momentum support'),
+    }));
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith('network-current', expect.anything());
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith('manual-evergreen', expect.anything());
+  });
+
+  it('retires an 18-hour network draft when a complete refresh finds no current network topics', async () => {
+    const now = Date.parse('2026-07-14T12:00:00.000Z');
+
+    const archived = await archiveStaleNetworkTopicQueue(baseAgent.id, [{
+      ...queuedTweet,
+      id: 'network-gone',
+      trendTopicId: 'network-gone-subject-123',
+      createdAt: new Date(now - 20 * 60 * 60 * 1000).toISOString(),
+    }], [], { currentReadComplete: true, now });
+
+    expect(archived).toBe(1);
+    expect(mocks.updateTweet).toHaveBeenCalledWith('network-gone', expect.objectContaining({
+      status: 'draft',
+    }));
+  });
+
+  it('retires legacy numeric X trend drafts instead of letting old provenance bypass network expiry', async () => {
+    const now = Date.parse('2026-07-14T12:00:00.000Z');
+    const archived = await archiveStaleNetworkTopicQueue(baseAgent.id, [{
+      ...queuedTweet,
+      id: 'legacy-network-topic',
+      trendTopicId: '7',
+      sourceLane: 'trend_aligned_exploit',
+      sourceBrief: 'Current event [source=X; published=2026-07-13T12:00:00.000Z]: legacy source prose',
+      createdAt: new Date(now - 20 * 60 * 60 * 1000).toISOString(),
+    }], [], { currentReadComplete: true, now });
+
+    expect(archived).toBe(1);
+    expect(mocks.updateTweet).toHaveBeenCalledWith('legacy-network-topic', expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('lost current momentum support'),
+    }));
+  });
+
+  it('preserves an 18-hour network draft after an incomplete refresh but retires it after 48 hours', async () => {
+    const now = Date.parse('2026-07-14T12:00:00.000Z');
+    const draft = {
+      ...queuedTweet,
+      id: 'network-unproven',
+      trendTopicId: 'network-unproven-subject-123',
+    };
+
+    const retained = await archiveStaleNetworkTopicQueue(baseAgent.id, [{
+      ...draft,
+      createdAt: new Date(now - 20 * 60 * 60 * 1000).toISOString(),
+    }], [], { currentReadComplete: false, now });
+    const archived = await archiveStaleNetworkTopicQueue(baseAgent.id, [{
+      ...draft,
+      createdAt: new Date(now - 49 * 60 * 60 * 1000).toISOString(),
+    }], [], { currentReadComplete: false, now });
+
+    expect(retained).toBe(0);
+    expect(archived).toBe(1);
+  });
+
+  it('rechecks queued Geoffrey drafts against current manual voice anchors before posting', async () => {
+    const driftedDraft = {
+      ...validQueuedTweet,
+      id: 'voice-drifted',
+      content: 'Tungsten supply security is a critical strategic priority. Stakeholders must align around resilient conversion capacity and qualified tooling.',
+      topic: 'tungsten',
+      confidenceScore: 0.9,
+      candidateScore: 94,
+    };
+    const manualAnchors = [
+      'bro.. ore ain\'t the product\n\ncarbide powder is the product. the mine is where the paperwork starts.',
+      'everyone loves the robot demo until the lighting changes lol\n\nthen you learn what the product actually is',
+      'ai twitter can smell bullshit cuz the benchmark either clears or it doesn\'t',
+    ].map((content, index) => ({
+      content,
+      topic: index === 0 ? 'tungsten' : 'AI',
+      source: 'timeline',
+      likes: 100,
+    }));
+    mocks.getQueuedTweets.mockResolvedValue([driftedDraft]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'tungsten', 'robotics'],
+        antiGoals: ['generic consultant prose'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+        summary: 'Geoffrey writes from technical constraints.',
+      },
+      learnings: {
+        operatorVoiceReference: {
+          pinnedExamples: [],
+          bestPerformers: manualAnchors,
+        },
+      },
+      memory: null,
+    });
+
+    const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith('voice-drifted', expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('Native identity gate'),
+    }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      metadata: expect.objectContaining({ qualityGate: 'native_identity_drift' }),
+    }));
+  });
+
+  it('quarantines Geoffrey drafts that copy followed-account wording before posting', async () => {
+    const sourceEvidence = 'Hybrid bonding surface roughness determines alignment yield across advanced chiplet packages.';
+    const copiedDraft = {
+      ...validQueuedTweet,
+      id: 'source-copy-drift',
+      content: 'Hybrid bonding surface roughness determines alignment yield before advanced chiplet packages can ship.',
+      topic: 'advanced packaging',
+      confidenceScore: 0.94,
+      candidateScore: 96,
+      trendTopicId: 'network-hybrid-bonding-copy-test',
+      sourceLane: 'trend_aligned_exploit' as const,
+      sourceBrief: 'Current subject provenance [source=X; followed-network=true]',
+      sourceEvidenceTexts: [sourceEvidence],
+      createdAt: new Date().toISOString(),
+    };
+    mocks.getQueuedTweets.mockResolvedValue([copiedDraft]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['advanced packaging', 'AI infrastructure'],
+        antiGoals: ['borrowed voice'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+        summary: 'Geoffrey writes about compute and manufacturing constraints.',
+      },
+      learnings: null,
+      memory: null,
+    });
+
+    const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith('source-copy-drift', expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('Native identity gate'),
+    }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      metadata: expect.objectContaining({
+        qualityGate: 'native_identity_drift',
+        sourceCopyRisk: expect.any(Number),
+      }),
+    }));
+  });
+
   it('returns contextual post failure details for remote debugging', async () => {
     mocks.postTweet.mockRejectedValue(new TwitterActionError({
       action: 'post_tweet',
@@ -912,7 +1138,7 @@ describe('autopilot remote debug logging', () => {
         confidenceScore: freshQueuedTweet.confidenceScore,
       },
     ]);
-    mocks.fetchTrendingFromFollowing.mockRejectedValue(new TwitterActionError({
+    mocks.discoverCurrentTrends.mockRejectedValue(new TwitterActionError({
       action: 'refill_queue_trends',
       statusCode: 429,
       title: 'Too Many Requests',
@@ -925,7 +1151,7 @@ describe('autopilot remote debug logging', () => {
 
     expect(result.action).toBe('posted');
     expect(mocks.generateViralBatch).toHaveBeenCalled();
-    expect(mocks.generateViralBatch.mock.calls[0][3]).toBeNull();
+    expect(mocks.generateViralBatch.mock.calls[0][3]).toEqual([]);
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
@@ -934,7 +1160,7 @@ describe('autopilot remote debug logging', () => {
         source: 'autopilot',
         action: 'error',
         errorCode: 'x_rate_limit',
-        reason: expect.stringContaining('X queue-refill trend refresh rate limited until 2026-04-07T12:20:00.000Z'),
+        reason: expect.stringContaining('X queue-refill topic intelligence rate limited until 2026-04-07T12:20:00.000Z'),
       }),
     );
   });

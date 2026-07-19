@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   buildLearnings: vi.fn(),
   autoAdjustSettings: vi.fn(),
   maybeReanalyze: vi.fn(),
+  refreshAgentTopicIntelligence: vi.fn(),
 }));
 
 vi.mock('@/lib/account-access', () => ({
@@ -82,6 +83,10 @@ vi.mock('@/lib/performance', () => ({
   buildLearnings: mocks.buildLearnings,
   autoAdjustSettings: mocks.autoAdjustSettings,
   maybeReanalyze: mocks.maybeReanalyze,
+}));
+
+vi.mock('@/lib/topic-intelligence-refresh', () => ({
+  refreshAgentTopicIntelligence: mocks.refreshAgentTopicIntelligence,
 }));
 
 import { GET } from '@/app/api/cron/post/route';
@@ -153,6 +158,16 @@ describe('cron autopilot isolation', () => {
     mocks.invalidateAgentConnection.mockResolvedValue(undefined);
     mocks.setAutopilotHealth.mockResolvedValue({});
     mocks.getLatestTwitterTweetIdCursor.mockReturnValue(null);
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({
+      topics: [],
+      attempted: false,
+      refreshed: false,
+      busy: false,
+      sampledNetworkAccounts: 0,
+      networkCandidateTweets: 0,
+      networkPartialFailures: 0,
+      error: null,
+    });
   });
 
   afterEach(() => {

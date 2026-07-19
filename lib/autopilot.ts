@@ -23,7 +23,8 @@ import {
   getPostLog,
   logFunnelEvent,
   getTrendingCache,
-  setTrendingCache,
+  getTrendingCacheSnapshot,
+  getTopicIntelligenceState,
   getConversationHistory,
   getPerformanceHistory,
   getRelationshipProfiles,
@@ -44,7 +45,9 @@ import {
   isTwitterActionError,
   isTransientTwitterError,
 } from './twitter-debug';
-import { fetchCurrentTrends, type TrendingTopic } from './trending';
+import { getTrendingTopicStableId, type TrendingTopic } from './trending';
+import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
+import { assessNativeTopicIdentity } from './source-planner';
 import {
   jitterInterval,
   isDailyCapReached,
@@ -66,6 +69,11 @@ import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHig
 import { assessClaimEvidence } from './claim-evidence';
 import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import {
+  getTrustedClaimSourceTexts,
+  getUntrustedSourceTexts,
+  isFollowedNetworkSource,
+} from './source-trust';
 import { buildEmergencyQueueFallbacks } from './emergency-queue-fallback';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 import { buildFallbackLearningMetadata } from './learning-loop';
@@ -159,6 +167,9 @@ function coerceConfidenceValue(value: unknown): number | null {
 
 const CONFIDENCE_THRESHOLD_EPSILON = 0.005;
 const STALE_LOW_CONFIDENCE_QUEUE_MS = 24 * 60 * 60 * 1000;
+const STALE_NETWORK_TOPIC_QUEUE_MS = 18 * 60 * 60 * 1000;
+const MAX_NETWORK_TOPIC_QUEUE_MS = 48 * 60 * 60 * 1000;
+const CURRENT_NETWORK_TOPIC_READ_MS = 5 * 60 * 60 * 1000;
 
 function effectiveConfidence(tweet: { confidenceScore?: number | string | null; candidateScore?: number | string | null }): number {
   const confidenceScore = coerceConfidenceValue(tweet.confidenceScore);
@@ -316,14 +327,29 @@ function isTerminalAutoReplyPostError(error: unknown): boolean {
   return true;
 }
 
-function getQueuedClaimEvidenceIssue(tweet: Tweet): string | null {
+function queuedOperatorEvidence(context: QueuedNativeVoiceContext | null): string[] {
+  return [
+    ...(context?.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context?.learnings?.operatorVoiceReference?.bestPerformers || []),
+  ].map((entry) => entry.content);
+}
+
+function getQueuedClaimEvidenceIssue(
+  tweet: Tweet,
+  operatorEvidence: string[] = [],
+): string | null {
+  const currentIssue = assessClaimEvidence(
+    tweet.content,
+    getTrustedClaimSourceTexts(tweet, operatorEvidence),
+  ).issue;
+  if (currentIssue) return currentIssue;
   const scoredRisk = tweet.scoreProvenance?.truthfulnessRisk;
   if (typeof scoredRisk === 'number') {
     return scoredRisk <= -0.1
       ? 'Claim evidence gate: the generation-time evidence check found an unsupported personal or numeric claim.'
       : null;
   }
-  return assessClaimEvidence(tweet.content, [tweet.sourceBrief, tweet.trendHeadline]).issue;
+  return null;
 }
 
 function getQueuedAiVoiceIssue(agent: Agent, tweet: Tweet): string | null {
@@ -333,20 +359,74 @@ function getQueuedAiVoiceIssue(agent: Agent, tweet: Tweet): string | null {
   return `AI voice construction gate: ${assessment.hits.join(', ')} (risk ${assessment.score}).`;
 }
 
-function clearsQueuedPostPreflight(agent: Agent, tweet: Tweet, recentPostedContent: string[]): boolean {
+type QueuedNativeVoiceContext = Pick<
+  Awaited<ReturnType<typeof buildGenerationContext>>,
+  'voiceProfile' | 'learnings' | 'memory'
+>;
+
+function assessQueuedNativeVoice(
+  agent: Agent,
+  tweet: Tweet,
+  context: QueuedNativeVoiceContext | null,
+): {
+  issue: string | null;
+  assessment: ReturnType<typeof assessAccountTaste> | null;
+  topicIdentityFit: number | null;
+} {
+  if (!isGeoffreyAccount(agent.handle) || !context) return { issue: null, assessment: null, topicIdentityFit: null };
+  const operatorEvidence = queuedOperatorEvidence(context);
+  const assessment = assessAccountTaste(tweet.content, {
+    voiceProfile: context.voiceProfile,
+    learnings: context.learnings,
+    memory: context.memory,
+    featureTags: tweet.featureTags,
+    sourceTexts: getTrustedClaimSourceTexts(tweet, operatorEvidence),
+    untrustedSourceTexts: getUntrustedSourceTexts(tweet),
+  });
+  const topicIdentity = assessNativeTopicIdentity({
+    category: tweet.topic || 'general',
+    headline: tweet.content,
+    topTweet: undefined,
+  }, context.voiceProfile, context.learnings);
+  const networkIdentityIssue = isFollowedNetworkSource(tweet)
+    && topicIdentity.identityFit < 0.24
+    ? `followed-network topic identity fit ${topicIdentity.identityFit.toFixed(2)} has no defensible native bridge`
+    : null;
+  return {
+    assessment,
+    topicIdentityFit: topicIdentity.identityFit,
+    issue: networkIdentityIssue || getAutonomousQueueTasteIssue({
+      voiceProfile: context.voiceProfile,
+      assessment,
+      anchorCopyRiskContribution: tweet.scoreProvenance?.anchorCopyRisk,
+      hasSourceContext: Boolean(tweet.sourceBrief || tweet.trendHeadline),
+    }),
+  };
+}
+
+function clearsQueuedPostPreflight(
+  agent: Agent,
+  tweet: Tweet,
+  recentPostedContent: string[],
+  nativeContext: QueuedNativeVoiceContext | null = null,
+): boolean {
   return (
     !getSanitizedTweetTextIssue(tweet.content, 'post')
     && !getTweetLengthIssue(tweet.content, 'post')
     && !getTweetCompletenessIssue(tweet.content)
     && !getQueuedAutopostPolicyIssue(agent, tweet)
     && !getAuthorityProofIssue(tweet.content)
-    && !getQueuedClaimEvidenceIssue(tweet)
+    && !getQueuedClaimEvidenceIssue(tweet, queuedOperatorEvidence(nativeContext))
     && !getQueuedAiVoiceIssue(agent, tweet)
+    && !assessQueuedNativeVoice(agent, tweet, nativeContext).issue
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
   );
 }
 
 async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[], recentPostedContent: string[] = []): Promise<Tweet[]> {
+  const nativeContext = isGeoffreyAccount(agent.handle)
+    ? await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 })
+    : null;
   const validationPassedQueue: Tweet[] = [];
   for (const queuedTweet of queuedTweets) {
     const sanitizedIssue = getSanitizedTweetTextIssue(queuedTweet.content, 'post');
@@ -367,7 +447,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
 
       if (
         resolved.tweet
-        && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent)
+        && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)
       ) {
         validationPassedQueue.push(resolved.tweet);
       }
@@ -390,7 +470,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${lengthIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
@@ -412,7 +492,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${completenessIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
@@ -496,7 +576,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
       continue;
     }
 
-    const claimEvidenceIssue = getQueuedClaimEvidenceIssue(queuedTweet);
+    const claimEvidenceIssue = getQueuedClaimEvidenceIssue(queuedTweet, queuedOperatorEvidence(nativeContext));
     if (claimEvidenceIssue) {
       await updateTweet(queuedTweet.id, {
         status: 'draft',
@@ -568,6 +648,48 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
       continue;
     }
 
+    const nativeVoice = assessQueuedNativeVoice(agent, queuedTweet, nativeContext);
+    if (nativeVoice.issue) {
+      const reason = `Native identity gate: ${nativeVoice.issue}.`;
+      await updateTweet(queuedTweet.id, {
+        status: 'draft',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: reason,
+      });
+      await addLearningSignal(agent.id, {
+        tweetId: queuedTweet.id,
+        signalType: 'x_post_rejected',
+        surface: 'autopilot',
+        rewardDelta: -0.72,
+        reason,
+        inferred: true,
+        metadata: {
+          qualityGate: 'native_identity_drift',
+          nativeVoiceScore: nativeVoice.assessment?.nativeVoiceScore ?? null,
+          nativeStyleScore: nativeVoice.assessment?.nativeStyleScore ?? null,
+          voiceDriftRisk: nativeVoice.assessment?.voiceDriftRisk ?? null,
+          technicalCredibilityScore: nativeVoice.assessment?.technicalCredibilityScore ?? null,
+          sourceCopyRisk: nativeVoice.assessment?.sourceCopyRisk ?? null,
+          topicIdentityFit: nativeVoice.topicIdentityFit,
+          trendTopicId: queuedTweet.trendTopicId ?? null,
+          sourceLane: queuedTweet.sourceLane ?? null,
+        },
+      });
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: queuedTweet.id,
+        xTweetId: queuedTweet.xTweetId || '',
+        content: queuedTweet.content,
+        format: 'native_identity_gate',
+        topic: queuedTweet.topic || 'general',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'skipped',
+        reason,
+      });
+      continue;
+    }
+
     const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, recentPostedContent);
     if (duplicateIssue) {
       const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, duplicateIssue);
@@ -601,7 +723,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${duplicateIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
@@ -711,6 +833,52 @@ async function archiveStaleLowConfidenceQueue(
   });
 
   return staleLowConfidenceTweets.length;
+}
+
+export async function archiveStaleNetworkTopicQueue(
+  agentId: string,
+  tweets: Tweet[],
+  currentTopics: TrendingTopic[],
+  options: { currentReadComplete?: boolean; now?: number } = {},
+): Promise<number> {
+  const now = options.now ?? Date.now();
+  const currentNetworkTopicIds = new Set(
+    currentTopics
+      .filter((topic) => topic.discoveryMethod === 'followed_network')
+      .map(getTrendingTopicStableId),
+  );
+  const stale = tweets.filter((tweet) => {
+    const topicId = String(tweet.trendTopicId || '');
+    if (!isFollowedNetworkSource(tweet)) return false;
+    const createdAt = Date.parse(tweet.createdAt);
+    if (!Number.isFinite(createdAt)) return false;
+    const age = now - createdAt;
+    if (age >= MAX_NETWORK_TOPIC_QUEUE_MS) return true;
+    return options.currentReadComplete === true
+      && age >= STALE_NETWORK_TOPIC_QUEUE_MS
+      && !currentNetworkTopicIds.has(topicId);
+  });
+
+  if (stale.length === 0) return 0;
+
+  await Promise.all(stale.map((tweet) => updateTweet(tweet.id, {
+    status: 'draft',
+    quarantinedAt: new Date(now).toISOString(),
+    quarantineReason: 'Auto-archived from autopost queue: its followed-network topic lost current momentum support.',
+  })));
+  await addPostLogEntry(agentId, {
+    agentId,
+    tweetId: '',
+    xTweetId: '',
+    content: '',
+    format: 'queue_refresh',
+    topic: 'network_topics',
+    postedAt: new Date(now).toISOString(),
+    source: 'autopilot',
+    action: 'skipped',
+    reason: `Moved ${stale.length} stale network-topic draft${stale.length === 1 ? '' : 's'} out of the autopost queue after refreshed follow-graph evidence no longer supported the subject.`,
+  });
+  return stale.length;
 }
 
 export async function inspectAutopilotQueue(
@@ -919,6 +1087,28 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     });
   }
   queue = healedQueue;
+  if (queue.some(isFollowedNetworkSource)) {
+    const [topicSnapshot, topicState] = await Promise.all([
+      getTrendingCacheSnapshot(agentId),
+      getTopicIntelligenceState(agentId),
+    ]);
+    const observedAt = Date.parse(topicState?.observedAt || '');
+    const currentReadComplete = Boolean(
+      topicSnapshot?.isFresh
+      && topicState?.sourceComplete === true
+      && Number.isFinite(observedAt)
+      && Date.now() - observedAt <= CURRENT_NETWORK_TOPIC_READ_MS,
+    );
+    const archivedNetworkTopics = await archiveStaleNetworkTopicQueue(
+      agentId,
+      queue,
+      Array.isArray(topicSnapshot?.data) ? topicSnapshot.data as TrendingTopic[] : [],
+      { currentReadComplete },
+    );
+    if (archivedNetworkTopics > 0) {
+      queue = await getQueuedTweets(agentId);
+    }
+  }
   let activeQueue = queue.filter(isAutopostableQueuedTweet);
 
   const primaryProvider = getPrimaryAiProvider();
@@ -2340,15 +2530,35 @@ export async function refillQueue(
         if (cached) {
           trending = cached as TrendingTopic[];
         } else {
-          const keys = decodeKeys({
-            apiKey: agent.apiKey,
-            apiSecret: agent.apiSecret,
-            accessToken: agent.accessToken,
-            accessSecret: agent.accessSecret,
-          });
-          trending = await fetchCurrentTrends(keys, String(agent.xUserId));
-          if (trending && trending.length > 0) {
-            await setTrendingCache(agent.id, trending);
+          const refresh = await refreshAgentTopicIntelligence(agent);
+          trending = refresh.topics;
+          if (refresh.error) {
+            const invalidCredentials = isInvalidTwitterCredentialError(refresh.error);
+            const rateLimited = isRateLimitTwitterError(refresh.error);
+            const transient = !rateLimited && isTransientTwitterError(refresh.error);
+            const resetAt = rateLimited ? getTwitterRateLimitResetAt(refresh.error) : null;
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: '',
+              format: 'trend_refresh_error',
+              topic: 'network_growth',
+              postedAt: new Date().toISOString(),
+              source: 'autopilot',
+              action: 'error',
+              reason: `${resetAt ? `X queue-refill topic intelligence rate limited until ${resetAt}; cached network evidence remains available. ` : ''}${formatActionError(refresh.error, 'refill_queue_network_topics', {
+                handle: `@${agent.handle}`,
+                xUserId: agent.xUserId,
+              })}`,
+              errorCode: invalidCredentials
+                ? 'x_invalid_credentials'
+                : rateLimited
+                  ? 'x_rate_limit'
+                  : transient
+                    ? 'x_transient'
+                    : 'refill_queue_network_topics',
+            }).catch(() => null);
           }
         }
       } catch (err) {
@@ -2388,26 +2598,6 @@ export async function refillQueue(
         // Continue without trending
       }
     }
-
-    // Peer study: analyze what top accounts in the network are doing (cached 4h alongside trending)
-    try {
-      const { studyPeerStyles } = await import('./proactive-engagement');
-      // Try to get cached peer insights first, fall back to fresh analysis
-      const cacheKey = `peer_insights_${agent.id}`;
-      let peerInsights: string[] = [];
-      const cached = await getTrendingCache(agent.id + '_peer') as string[] | null;
-      if (cached && Array.isArray(cached)) {
-        peerInsights = cached;
-      } else {
-        peerInsights = await studyPeerStyles(agent);
-        if (peerInsights.length > 0) {
-          await setTrendingCache(agent.id + '_peer', peerInsights);
-        }
-      }
-      if (peerInsights.length > 0) {
-        voiceProfile.communicationStyle += `\n\n## PEER INSIGHTS (what's working for top accounts in your network RIGHT NOW)\n${peerInsights.map(i => `- ${i}`).join('\n')}`;
-      }
-    } catch { /* non-critical */ }
 
     // If momentum or calendar focus exists, pass those biases into generation
     // so the batch can explore timely angles instead of repeating evergreen takes.
@@ -2476,18 +2666,18 @@ export async function refillQueue(
         if (policyIssue) continue;
         const authorityIssue = getAuthorityProofIssue(item.content);
         if (authorityIssue) continue;
-        const claimEvidenceIssue = assessClaimEvidence(item.content, [
-          item.sourceBrief,
-          item.trendHeadline,
-          ...operatorEvidence,
-        ]).issue;
+        const claimEvidenceIssue = assessClaimEvidence(
+          item.content,
+          getTrustedClaimSourceTexts(item, operatorEvidence),
+        ).issue;
         if (claimEvidenceIssue) continue;
         const tasteAssessment = assessAccountTaste(item.content, {
           voiceProfile,
           learnings,
           memory,
           featureTags: item.featureTags,
-          sourceTexts: [item.sourceBrief, item.trendHeadline, ...operatorEvidence],
+          sourceTexts: getTrustedClaimSourceTexts(item, operatorEvidence),
+          untrustedSourceTexts: getUntrustedSourceTexts(item),
         });
         const queueTasteIssue = getAutonomousQueueTasteIssue({
           voiceProfile,
@@ -2510,6 +2700,7 @@ export async function refillQueue(
           generationProvider: item.generationProvider ?? null,
           generationModel: item.generationModel ?? null,
           sourceBrief: item.sourceBrief ?? null,
+          sourceEvidenceTexts: 'sourceEvidenceTexts' in item ? item.sourceEvidenceTexts ?? null : null,
           generationMode: item.generationMode,
           candidateScore: item.candidateScore,
           confidenceScore: item.confidenceScore,

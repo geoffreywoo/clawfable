@@ -427,6 +427,73 @@ export async function getUserTimeline(
   }
 }
 
+/**
+ * Fetch the authenticated user's reverse-chronological home feed. This is the
+ * most request-efficient official surface for reading recent original posts across the
+ * accounts they follow.
+ */
+export async function getHomeTimeline(
+  keys: TwitterKeys,
+  maxResults = 100,
+): Promise<
+  Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    likes: number;
+    retweets: number;
+    replies: number;
+    impressions: number;
+    quotes: number;
+    bookmarks: number;
+    authorId: string;
+    author: string;
+    authorName: string;
+    authorFollowersCount: number;
+    authorVerified: boolean;
+    authorProtected: boolean;
+  }>
+> {
+  const client = createClient(keys);
+  const totalLimit = Math.max(10, Math.min(maxResults, 300));
+  try {
+    const result = await client.v2.homeTimeline({
+      max_results: Math.min(totalLimit, 100),
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
+      expansions: ['author_id'],
+      'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
+      exclude: ['retweets', 'replies'],
+    });
+    if (result.tweets.length < totalLimit && !result.done) {
+      await result.fetchLast(totalLimit - result.tweets.length);
+    }
+    return result.tweets.slice(0, totalLimit).map((tweet) => {
+      const author = result.includes.author(tweet);
+      return {
+        id: tweet.id,
+        text: tweet.text,
+        createdAt: tweet.created_at || new Date().toISOString(),
+        likes: tweet.public_metrics?.like_count ?? 0,
+        retweets: tweet.public_metrics?.retweet_count ?? 0,
+        replies: tweet.public_metrics?.reply_count ?? 0,
+        impressions: tweet.public_metrics?.impression_count ?? 0,
+        quotes: tweet.public_metrics?.quote_count ?? 0,
+        bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+        authorId: tweet.author_id || author?.id || '',
+        author: author?.username || '',
+        authorName: author?.name || '',
+        authorFollowersCount: (author as any)?.public_metrics?.followers_count ?? 0,
+        authorVerified: (author as any)?.verified ?? false,
+        authorProtected: (author as any)?.protected ?? false,
+      };
+    }).filter((tweet) => Boolean(tweet.authorId && tweet.author));
+  } catch (error) {
+    return handleApiError(error, {
+      action: 'get_home_timeline',
+    });
+  }
+}
+
 type TimelineTweet = {
   id: string;
   text: string;
@@ -514,21 +581,28 @@ export async function getFollowing(
     description: string;
     followersCount: number;
     verified: boolean;
+    protected: boolean;
   }>
 > {
   const client = createClient(keys);
   try {
+    const totalLimit = Math.max(1, Math.min(maxResults, 5000));
     const result = await client.v2.following(userId, {
-      max_results: Math.min(maxResults, 1000),
-      'user.fields': ['description', 'public_metrics', 'verified'],
+      max_results: Math.min(totalLimit, 1000),
+      'user.fields': ['description', 'protected', 'public_metrics', 'verified'],
+      asPaginator: true,
     });
-    return (result.data || []).map((user) => ({
+    if (result.users.length < totalLimit && !result.done) {
+      await result.fetchLast(totalLimit - result.users.length);
+    }
+    return result.users.slice(0, totalLimit).map((user) => ({
       id: user.id,
       name: user.name,
       username: user.username,
       description: (user as any).description || '',
       followersCount: (user as any).public_metrics?.followers_count ?? 0,
       verified: (user as any).verified ?? false,
+      protected: (user as any).protected ?? false,
     }));
   } catch (error) {
     return handleApiError(error, {

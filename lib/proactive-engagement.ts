@@ -2,40 +2,56 @@
  * Network engagement support.
  * API replies and likes are disabled no-ops; the active paths:
  * 1. Follow relevant accounts to improve the trend graph
- * 2. Study peer styles from high-performing network posts
- * 3. Shout out other Clawfable agents for cross-promotion
+ * 2. Shout out other Clawfable agents for cross-promotion
  */
 
 import type { Agent, ProtocolSettings } from './types';
-import { fetchTrendingFromFollowing, type TrendingTopic } from './trending';
+import type { TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { followUser, getFollowing } from './twitter-client';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
-import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, setTrendingCache, getPerformanceHistory } from './kv-storage';
+import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
 import { generateText } from './ai';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 import { formatShoutoutSoulSummaryForPrompt, getShoutoutMaxTokens } from './promotion-prompt';
+import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
 
-const PEER_STYLE_TWEET_LIMIT = 6;
-const PEER_STYLE_TWEET_TEXT_LIMIT = 160;
-const PEER_STYLE_MAX_TOKENS = 384;
-
-type PeerStyleTweet = { text: string; likes: number; author: string };
-
-function compactPeerStyleTweetText(text: string): string {
-  const compacted = text.replace(/\s+/g, ' ').trim();
-  if (compacted.length <= PEER_STYLE_TWEET_TEXT_LIMIT) return compacted;
-  return `${compacted.slice(0, PEER_STYLE_TWEET_TEXT_LIMIT - 3).trimEnd()}...`;
+async function recordEngagementTrendRefreshError(agent: Agent, err: unknown): Promise<void> {
+  const invalidCredentials = isInvalidTwitterCredentialError(err);
+  const rateLimited = isRateLimitTwitterError(err);
+  const transient = !rateLimited && isTransientTwitterError(err);
+  const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+  const prefix = invalidCredentials
+    ? 'X rejected the trend refresh. Connection preserved so queue posting is not interrupted. '
+    : rateLimited
+      ? `X trend refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; network growth will retry on a later cron run. `
+      : transient
+        ? 'Transient X trend refresh failure; network growth will retry on a later cron run. '
+        : '';
+  await addPostLogEntry(agent.id, {
+    agentId: agent.id,
+    tweetId: '',
+    xTweetId: '',
+    content: '',
+    format: 'trend_refresh_error',
+    topic: 'network_growth',
+    postedAt: new Date().toISOString(),
+    source: 'cron',
+    action: 'error',
+    reason: `${prefix}${formatActionError(err, 'refresh_trending_for_engagement', {
+      handle: `@${agent.handle}`,
+    })}`,
+    errorCode: invalidCredentials
+      ? 'x_invalid_credentials'
+      : rateLimited
+        ? 'x_rate_limit'
+        : transient
+          ? 'x_transient'
+          : 'refresh_trending_for_engagement',
+  });
 }
 
-export function formatPeerStyleTweetList(tweets: PeerStyleTweet[]): string {
-  return tweets
-    .slice(0, PEER_STYLE_TWEET_LIMIT)
-    .map((tweet) => `@${tweet.author} (${tweet.likes} likes): "${compactPeerStyleTweetText(tweet.text)}"`)
-    .join('\n');
-}
-
-async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promise<TrendingTopic[]> {
+async function getTrendingForEngagement(agent: Agent): Promise<TrendingTopic[]> {
   const cached = await getTrendingCache(agent.id) as TrendingTopic[] | null;
   if (Array.isArray(cached) && cached.length > 0) return cached;
 
@@ -47,44 +63,11 @@ async function getTrendingForEngagement(agent: Agent, keys: TwitterKeys): Promis
   }
 
   try {
-    const fresh = await fetchTrendingFromFollowing(keys, String(agent.xUserId));
-    if (fresh.length > 0) {
-      await setTrendingCache(agent.id, fresh);
-    }
-    return fresh;
+    const refresh = await refreshAgentTopicIntelligence(agent);
+    if (refresh.error) await recordEngagementTrendRefreshError(agent, refresh.error);
+    return refresh.topics;
   } catch (err) {
-    const invalidCredentials = isInvalidTwitterCredentialError(err);
-    const rateLimited = isRateLimitTwitterError(err);
-    const transient = !rateLimited && isTransientTwitterError(err);
-    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
-    const prefix = invalidCredentials
-      ? 'X rejected the trend refresh. Connection preserved so queue posting is not interrupted. '
-      : rateLimited
-        ? `X trend refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; network growth will retry on a later cron run. `
-        : transient
-          ? 'Transient X trend refresh failure; network growth will retry on a later cron run. '
-          : '';
-    await addPostLogEntry(agent.id, {
-      agentId: agent.id,
-      tweetId: '',
-      xTweetId: '',
-      content: '',
-      format: 'trend_refresh_error',
-      topic: 'network_growth',
-      postedAt: new Date().toISOString(),
-      source: 'cron',
-      action: 'error',
-      reason: `${prefix}${formatActionError(err, 'refresh_trending_for_engagement', {
-        handle: `@${agent.handle}`,
-      })}`,
-      errorCode: invalidCredentials
-        ? 'x_invalid_credentials'
-        : rateLimited
-          ? 'x_rate_limit'
-          : transient
-            ? 'x_transient'
-            : 'refresh_trending_for_engagement',
-    });
+    await recordEngagementTrendRefreshError(agent, err);
     return [];
   }
 }
@@ -148,55 +131,6 @@ export async function generateAgentShoutout(
     return content.length > 0 ? { content, targetHandle: target.handle } : null;
   } catch {
     return null;
-  }
-}
-
-/**
- * Peer study: analyze what top accounts in the agent's network are doing
- * that gets high engagement, and extract style patterns the agent should learn from.
- * Returns insights that get injected into the generation prompt.
- */
-export async function studyPeerStyles(
-  agent: Agent,
-): Promise<string[]> {
-  const trending = await getTrendingCache(agent.id) as TrendingTopic[] | null;
-  if (!trending || trending.length === 0) return [];
-
-  // Collect the top tweets from different authors
-  const topTweetsByAuthor = new Map<string, { text: string; likes: number; author: string }>();
-  for (const topic of trending) {
-    if (!topic.topTweet || topic.topTweet.likes < 50) continue;
-    const existing = topTweetsByAuthor.get(topic.topTweet.author);
-    if (!existing || topic.topTweet.likes > existing.likes) {
-      topTweetsByAuthor.set(topic.topTweet.author, topic.topTweet);
-    }
-  }
-
-  const topTweets = [...topTweetsByAuthor.values()]
-    .sort((a, b) => b.likes - a.likes)
-    .slice(0, PEER_STYLE_TWEET_LIMIT);
-
-  if (topTweets.length < 3) return [];
-
-  try {
-    const tweetList = formatPeerStyleTweetList(topTweets);
-
-    const response = await generateText({
-      task: 'classification',
-      tier: 'fast',
-      maxTokens: PEER_STYLE_MAX_TOKENS,
-      system: `You analyze viral tweets from top accounts to extract style patterns. Output 3-5 bullet points, one per line. Each should be a specific, actionable pattern: "Tweets that [specific structure] get [N]x more engagement." Focus on: opening hooks, sentence structure, use of specifics vs abstractions, tone, length, question usage, contrarian framing. No generic advice.`,
-      prompt: `These are the top-performing tweets from accounts in this agent's network right now:\n\n${tweetList}\n\nWhat style patterns are working? Be specific and actionable.`,
-    });
-
-    const text = response.text;
-
-    return text.split('\n')
-      .map((l) => l.replace(/^[-•*]\s*/, '').trim())
-      .filter((l) => l.length > 15)
-      .slice(0, 5);
-  } catch {
-    return [];
   }
 }
 
@@ -275,7 +209,7 @@ export async function discoverAndFollow(
   const candidates = new Map<string, { id: string; username: string; reason: string; score: number }>();
 
   // Source 1: Authors of viral tweets in trending data
-  const trending = await getTrendingForEngagement(agent, keys);
+  const trending = await getTrendingForEngagement(agent);
   if (trending.length > 0) {
     for (const topic of trending) {
       if (!topic.topTweet || topic.topTweet.likes < 100) continue;

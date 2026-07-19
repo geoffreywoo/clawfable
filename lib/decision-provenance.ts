@@ -30,10 +30,16 @@ export function formatDecisionProvenanceSummary(provenance: CandidateScoreProven
 
   const learnedAdjustments = [
     adjustmentLabel('native voice', provenance.nativeVoice),
+    adjustmentLabel('native style', provenance.nativeStyle),
+    adjustmentLabel('voice drift risk', provenance.voiceDrift),
+    adjustmentLabel('topic identity fit', provenance.topicIdentityFit),
     adjustmentLabel('technical credibility', provenance.technicalCredibility),
+    adjustmentLabel('source fit', provenance.sourceLaneFit),
+    adjustmentLabel('follow-graph momentum', provenance.networkMomentum),
     adjustmentLabel('cringe risk', provenance.cringeRisk),
     adjustmentLabel('status texture risk', provenance.statusTextureRisk),
     adjustmentLabel('claim evidence risk', provenance.truthfulnessRisk),
+    adjustmentLabel('external source copy risk', provenance.sourceCopyRisk),
     adjustmentLabel('generated pattern risk', provenance.generatedPatternRisk),
     adjustmentLabel('pattern reuse risk', provenance.patternReuseRisk),
     adjustmentLabel('rejected draft similarity', provenance.rejectedDraftSimilarity),
@@ -54,10 +60,16 @@ export function summarizeDecisionLearningAdjustments(provenance: CandidateScoreP
 
   const learnedAdjustments = [
     adjustmentLabel('native voice', provenance.nativeVoice),
+    adjustmentLabel('native style', provenance.nativeStyle),
+    adjustmentLabel('voice drift risk', provenance.voiceDrift),
+    adjustmentLabel('topic identity fit', provenance.topicIdentityFit),
     adjustmentLabel('technical credibility', provenance.technicalCredibility),
+    adjustmentLabel('source fit', provenance.sourceLaneFit),
+    adjustmentLabel('follow-graph momentum', provenance.networkMomentum),
     adjustmentLabel('cringe risk', provenance.cringeRisk),
     adjustmentLabel('status texture risk', provenance.statusTextureRisk),
     adjustmentLabel('claim evidence risk', provenance.truthfulnessRisk),
+    adjustmentLabel('external source copy risk', provenance.sourceCopyRisk),
     adjustmentLabel('generated pattern risk', provenance.generatedPatternRisk),
     adjustmentLabel('pattern reuse risk', provenance.patternReuseRisk),
     adjustmentLabel('rejected draft similarity', provenance.rejectedDraftSimilarity),

@@ -15,6 +15,7 @@ import { buildOutcomeEpisodes } from './outcome-rewards';
 import { buildTasteCalibrationQueue, type TasteCalibrationSnapshot } from './taste-calibration';
 import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
 import { getShitpoastSlotCount, SHITPOAST_STYLE_MODE } from './style-mode';
+import { getTrendingTopicStableId } from './trending';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
 type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
@@ -1681,7 +1682,7 @@ function buildPlannerPreview(
   const acceptedTrends = (sourcePlan?.acceptedTrends || trending?.filter((item) => item.sourceLane !== 'reject') || [])
     .slice(0, 6)
     .map((trend) => ({
-      id: String(trend.id),
+      id: getTrendingTopicStableId(trend),
       category: trend.category,
       headline: trend.headline,
       lane: trend.sourceLane,
@@ -1692,7 +1693,7 @@ function buildPlannerPreview(
   const rejectedTrends = (sourcePlan?.rejectedTrends || trending?.filter((item) => item.sourceLane === 'reject') || [])
     .slice(0, 6)
     .map((trend) => ({
-      id: String(trend.id),
+      id: getTrendingTopicStableId(trend),
       category: trend.category,
       headline: trend.headline,
       lane: trend.sourceLane,

@@ -92,8 +92,8 @@ describe('source planner', () => {
 
   it('filters blocked manual examples but preserves pinned outliers in manual topic profile', () => {
     const curation: ManualExampleCuration = {
-      pinnedXTweetIds: ['x-pinned'],
-      blockedXTweetIds: ['x-blocked'],
+      pinnedXTweetIds: ['x-pinned', 'x-collision'],
+      blockedXTweetIds: ['x-blocked', 'x-collision'],
       updatedAt: new Date().toISOString(),
     };
 
@@ -101,12 +101,14 @@ describe('source planner', () => {
       perf({ xTweetId: 'x-1', topic: 'AI', likes: 120, content: 'AI builders should optimize for taste before scale' }),
       perf({ xTweetId: 'x-pinned', topic: 'AI', likes: 15, content: 'announcing a weird but important AI workflow' }),
       perf({ xTweetId: 'x-blocked', topic: 'AI', likes: 400, content: 'AI launch post with sign up here now' }),
+      perf({ xTweetId: 'x-collision', topic: 'AI', likes: 500, content: 'Pinned and blocked must resolve to blocked everywhere' }),
       perf({ xTweetId: 'x-2', topic: 'startups', likes: 90, content: 'startup distribution is getting reset by agents' }),
     ], curation);
 
     expect(profile.map((item) => item.topic)).toContain('ai');
     expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).toContain('x-pinned');
     expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).not.toContain('x-blocked');
+    expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).not.toContain('x-collision');
   });
 
   it('classifies trends into aligned, adjacent, and reject lanes', () => {
@@ -142,7 +144,7 @@ describe('source planner', () => {
         headline: 'SaaS pricing is being rebuilt around API usage',
         source: '@bob',
         relevanceScore: 80,
-        category: 'startups',
+        category: 'usage based pricing',
         timestamp: new Date().toISOString(),
         tweetCount: 6,
         topTweet: { id: 't2', text: 'SaaS pricing is being rebuilt around API usage', likes: 80, author: 'bob' },
@@ -159,7 +161,7 @@ describe('source planner', () => {
       },
     ], {
       tone: 'analytical',
-      topics: ['AI agents', 'startups'],
+      topics: ['AI agents', 'usage based pricing'],
       antiGoals: [],
       communicationStyle: 'sharp',
       summary: 'summary',
@@ -168,6 +170,368 @@ describe('source planner', () => {
     expect(classified.find((item) => item.id === 1)?.sourceLane).toBe('trend_aligned_exploit');
     expect(classified.find((item) => item.id === 2)?.sourceLane).not.toBe('reject');
     expect(classified.find((item) => item.id === 3)?.sourceLane).toBe('reject');
+  });
+
+  it('accepts a strong followed-network subject when manual writing supplies a native bridge', () => {
+    const networkTopic = {
+      id: 91,
+      networkTopicId: 'network-solid-state-transformer-abc123',
+      headline: 'Pilot lines are exposing medium-voltage packaging yield as the constraint.',
+      source: '@alice, @bob, @carol',
+      relevanceScore: 94,
+      category: 'solid-state transformer production',
+      timestamp: new Date().toISOString(),
+      tweetCount: 4,
+      sourceType: 'x',
+      sourceCount: 3,
+      engagementScore: 900,
+      sourceQuality: 0.9,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.9,
+      networkBreakoutScore: 0.88,
+      topicConfidence: 0.91,
+      topicWhyNow: 'Three followed accounts are breaking out on the same production constraint.',
+      topTweet: { id: 'sst-1', text: 'Packaging yield is the constraint.', likes: 300, author: 'alice' },
+    } as const;
+    const voiceProfile = {
+      tone: 'technical',
+      topics: ['energy systems'],
+      antiGoals: [],
+      communicationStyle: 'specific',
+      summary: 'technical investor',
+    };
+    const learnings = {
+      agentId: 'agent-1',
+      updatedAt: new Date().toISOString(),
+      totalTracked: 4,
+      avgLikes: 10,
+      avgRetweets: 2,
+      bestPerformers: [],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      manualTopicProfile: [{
+        topic: 'energy infrastructure',
+        angle: 'transformer packaging yield constrains medium-voltage power conversion',
+        weight: 20,
+        sampleCount: 3,
+        avgEngagement: 80,
+        topTweets: [],
+      }],
+    } satisfies AgentLearnings;
+    const [topic] = enrichTrendingTopics([networkTopic], voiceProfile, learnings, 'moderate');
+
+    expect(topic.fitScores.soul).toBe(0);
+    expect(topic.fitScores.identityFit).toBeGreaterThanOrEqual(0.45);
+    expect(topic.fitScores.networkMomentum).toBeGreaterThan(0.8);
+    expect(topic.sourceLane).toBe('trend_aligned_exploit');
+    expect(topic.plannerReason).toContain('concrete bridge');
+
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'balanced',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile,
+      learnings,
+      trending: [networkTopic],
+    });
+    expect(plan.slots.find((slot) => slot.trendHeadline)?.trendTopicId)
+      .toBe('network-solid-state-transformer-abc123');
+  });
+
+  it('rejects a viral followed-network subject with no bridge to native content', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 92,
+      networkTopicId: 'network-celebrity-divorce-abc123',
+      headline: 'A celebrity divorce filing is dominating entertainment commentary.',
+      source: '@alice, @bob, @carol',
+      relevanceScore: 99,
+      category: 'celebrity divorce filing',
+      timestamp: new Date().toISOString(),
+      tweetCount: 5,
+      sourceType: 'x',
+      sourceCount: 3,
+      engagementScore: 5000,
+      sourceQuality: 0.9,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.98,
+      networkBreakoutScore: 0.99,
+      topicConfidence: 0.96,
+    }], {
+      tone: 'technical',
+      topics: ['AI', 'inference ASICs', 'industrial capacity'],
+      antiGoals: [],
+      communicationStyle: 'compressed analysis of compute, manufacturing, and energy constraints',
+      summary: 'technical operator and investor',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.identityFit).toBe(0);
+    expect(topic.sourceLane).toBe('reject');
+    expect(topic.plannerReason).toContain('Rejected despite momentum');
+  });
+
+  it('does not mistake the letters ai inside supply for an AI identity bridge', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 93,
+      headline: 'Retail supply contracts are changing swimsuit inventory.',
+      source: 'Hacker News',
+      relevanceScore: 90,
+      category: 'retail supply contracts',
+      timestamp: new Date().toISOString(),
+      tweetCount: 0,
+      sourceType: 'hacker_news',
+      engagementScore: 300,
+    }], {
+      tone: 'technical',
+      topics: ['AI'],
+      antiGoals: [],
+      communicationStyle: 'short posts',
+      summary: 'AI investor',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.soul).toBe(0);
+    expect(topic.sourceLane).toBe('reject');
+  });
+
+  it('does not treat generic infrastructure overlap as a native topic bridge', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 94,
+      networkTopicId: 'network-municipal-stormwater-94',
+      headline: 'Municipal infrastructure spending is shifting toward stormwater drainage.',
+      source: '@citypolicy',
+      relevanceScore: 96,
+      category: 'municipal infrastructure spending',
+      timestamp: new Date().toISOString(),
+      tweetCount: 4,
+      sourceType: 'x',
+      sourceCount: 3,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.94,
+      networkBreakoutScore: 0.92,
+      topicConfidence: 0.9,
+    }], {
+      tone: 'technical',
+      topics: ['AI infrastructure'],
+      antiGoals: [],
+      communicationStyle: 'technical infrastructure investor',
+      summary: 'AI infrastructure investor and operator',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.identityFit).toBe(0);
+    expect(topic.sourceLane).toBe('reject');
+  });
+
+  it('does not treat generic investor language as a native topic bridge', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 95,
+      networkTopicId: 'network-real-estate-investor-95',
+      headline: 'A real-estate investor lawsuit is dominating local coverage.',
+      source: '@localnews',
+      relevanceScore: 97,
+      category: 'real estate investor lawsuit',
+      timestamp: new Date().toISOString(),
+      tweetCount: 5,
+      sourceType: 'x',
+      sourceCount: 3,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.95,
+      networkBreakoutScore: 0.95,
+      topicConfidence: 0.94,
+    }], {
+      tone: 'technical',
+      topics: ['robotics', 'inference ASICs'],
+      antiGoals: [],
+      communicationStyle: 'technical operator and investor',
+      summary: 'frontier technology investor',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.identityFit).toBe(0);
+    expect(topic.sourceLane).toBe('reject');
+  });
+
+  it('still accepts a narrow hard-tech anchor instead of suppressing all novel subjects', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 96,
+      networkTopicId: 'network-tungsten-carbide-96',
+      headline: 'Tungsten carbide powder morphology is becoming a tool qualification bottleneck.',
+      source: '@factorymaterials',
+      relevanceScore: 91,
+      category: 'tungsten carbide powder morphology',
+      timestamp: new Date().toISOString(),
+      tweetCount: 3,
+      sourceType: 'x',
+      sourceCount: 2,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.84,
+      networkBreakoutScore: 0.82,
+      topicConfidence: 0.88,
+    }], {
+      tone: 'technical',
+      topics: ['tungsten carbide', 'robotics'],
+      antiGoals: [],
+      communicationStyle: 'compressed materials and manufacturing analysis',
+      summary: 'technical investor',
+    }, null, 'moderate');
+
+    expect(topic.fitScores.identityFit).toBeGreaterThanOrEqual(0.8);
+    expect(topic.sourceLane).toBe('trend_aligned_exploit');
+  });
+
+  it('keeps a four-post balanced plan native-first even when many network topics are hot', () => {
+    const trending = Array.from({ length: 5 }, (_, index) => ({
+      id: index + 100,
+      networkTopicId: `network-ai-infrastructure-${index}`,
+      headline: `AI infrastructure constraint ${index + 1} is accelerating.`,
+      source: `@source${index + 1}`,
+      relevanceScore: 95 - index,
+      category: `AI infrastructure constraint ${index + 1}`,
+      timestamp: new Date().toISOString(),
+      tweetCount: 3,
+      sourceType: 'x' as const,
+      sourceCount: 3,
+      engagementScore: 1000,
+      sourceQuality: 0.9,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.95,
+      networkBreakoutScore: 0.95,
+      topicConfidence: 0.95,
+    }));
+
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'balanced',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'technical',
+        topics: ['AI infrastructure'],
+        antiGoals: [],
+        communicationStyle: 'compressed compute analysis',
+        summary: 'AI infrastructure investor',
+      },
+      learnings: null,
+      trending,
+    });
+
+    const liveSlots = plan.laneCounts.trend_aligned_exploit + plan.laneCounts.trend_adjacent_explore;
+    expect(liveSlots).toBeLessThanOrEqual(1);
+    expect(plan.laneCounts.manual_core_exploit + plan.laneCounts.core_explore_fallback).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not let rejected network momentum consume the trend allocation', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'balanced',
+      trendMixTarget: 35,
+      trendTolerance: 'aggressive',
+      voiceProfile: {
+        tone: 'technical',
+        topics: ['AI infrastructure'],
+        antiGoals: [],
+        communicationStyle: 'compute and manufacturing analysis',
+        summary: 'technical investor',
+      },
+      learnings: null,
+      trending: [{
+        id: 200,
+        networkTopicId: 'network-celebrity-awards-200',
+        headline: 'Celebrity awards red-carpet commentary is breaking out.',
+        source: '@entertainment',
+        relevanceScore: 99,
+        category: 'celebrity awards fashion',
+        timestamp: new Date().toISOString(),
+        tweetCount: 5,
+        sourceType: 'x',
+        sourceCount: 4,
+        engagementScore: 9000,
+        sourceQuality: 0.95,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.99,
+        networkBreakoutScore: 0.99,
+        topicConfidence: 0.99,
+      }],
+    });
+
+    expect(plan.acceptedTrends).toHaveLength(0);
+    expect(plan.rejectedTrends).toHaveLength(1);
+    expect(plan.laneCounts.trend_aligned_exploit).toBe(0);
+    expect(plan.laneCounts.trend_adjacent_explore).toBe(0);
+  });
+
+  it('does not treat broad AI, space, or robotics labels as native identity proof', () => {
+    const classified = enrichTrendingTopics(
+      ['AI', 'space', 'robotics'].map((category, index) => ({
+        id: 700 + index,
+        networkTopicId: `network-broad-${category}-${index}`,
+        headline: `${category} is having a huge breakout moment`,
+        source: '@viralaccount',
+        relevanceScore: 99,
+        category,
+        timestamp: new Date().toISOString(),
+        tweetCount: 20,
+        sourceType: 'x',
+        sourceCount: 5,
+        engagementScore: 10000,
+        sourceQuality: 0.98,
+        discoveryMethod: 'followed_network' as const,
+        networkMomentumScore: 0.99,
+        networkBreakoutScore: 0.99,
+        topicConfidence: 0.99,
+      })),
+      {
+        tone: 'analytical',
+        topics: ['AI', 'space', 'robotics'],
+        antiGoals: [],
+        communicationStyle: 'sharp\n\n## ACCOUNT TOPIC POLICY FOR @geoffwoo\nAI space robotics',
+        summary: 'technical investor',
+      },
+      null,
+      'moderate',
+    );
+
+    expect(classified.every((topic) => topic.sourceLane === 'reject')).toBe(true);
+    expect(classified.every((topic) => (topic.fitScores.identityFit || 0) <= 0.16)).toBe(true);
+  });
+
+  it('treats a zero trend target as a hard zero even with strong network momentum', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'explore',
+      trendMixTarget: 0,
+      trendTolerance: 'aggressive',
+      voiceProfile: {
+        tone: 'analytical',
+        topics: ['hybrid bonding yield'],
+        antiGoals: [],
+        communicationStyle: 'sharp',
+        summary: 'advanced packaging',
+      },
+      learnings: null,
+      trending: [{
+        id: 801,
+        networkTopicId: 'network-hybrid-bonding-801',
+        headline: 'Hybrid bonding yield is constraining chiplet packaging',
+        source: '@packagingengineer',
+        relevanceScore: 99,
+        category: 'hybrid bonding yield',
+        timestamp: new Date().toISOString(),
+        tweetCount: 10,
+        sourceType: 'x',
+        sourceCount: 4,
+        engagementScore: 5000,
+        sourceQuality: 0.98,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.99,
+        networkBreakoutScore: 0.99,
+        topicConfidence: 0.99,
+      }],
+    });
+
+    expect(plan.laneCounts.trend_aligned_exploit).toBe(0);
+    expect(plan.laneCounts.trend_adjacent_explore).toBe(0);
+    expect(plan.slots.every((slot) => !slot.trendTopicId)).toBe(true);
   });
 
   it('allocates balanced planner slots and falls back to core exploration when trends are sparse', () => {
@@ -315,7 +679,7 @@ describe('source planner', () => {
       trendTolerance: 'moderate',
       voiceProfile: {
         tone: 'analytical',
-        topics: ['AI'],
+        topics: ['inference chip packaging'],
         antiGoals: [],
         communicationStyle: 'sharp',
         summary: 'summary',
@@ -324,16 +688,16 @@ describe('source planner', () => {
       trending: [
         {
           id: 42,
-          headline: 'AI infrastructure momentum',
+          headline: 'Inference chip packaging yield is becoming the deployment bottleneck',
           source: '@alice',
           relevanceScore: 95,
-          category: 'AI',
+          category: 'inference chip packaging',
           timestamp: new Date().toISOString(),
           tweetCount: 8,
-          topTweet: { id: 't1', text: 'AI infrastructure momentum', likes: 240, author: 'alice' },
+          topTweet: { id: 't1', text: 'Inference chip packaging yield is becoming the deployment bottleneck', likes: 240, author: 'alice' },
         },
       ],
-      fallbackTopics: ['AI'],
+      fallbackTopics: ['inference chip packaging'],
     });
 
     const slots = buildBanditSlotPlan(buildPolicy(), {

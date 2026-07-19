@@ -11,6 +11,7 @@ import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } 
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { getBillingSummary } from '@/lib/billing';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
+import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
 
 export async function GET(request: NextRequest) {
   const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest) {
     const autopilotResults: AutopilotResult[] = [];
     let mentionsRefreshed = 0;
     let performanceTracked = 0;
+    let topicIntelligenceRefreshed = 0;
+    let networkTopicCandidates = 0;
 
     for (const agent of agents) {
       const isConnected = agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId;
@@ -305,6 +308,33 @@ export async function GET(request: NextRequest) {
 
       try {
         if (settings.enabled) {
+          const topicRefresh = await refreshAgentTopicIntelligence(agent);
+          if (topicRefresh.refreshed) {
+            topicIntelligenceRefreshed++;
+            networkTopicCandidates += topicRefresh.networkCandidateTweets;
+          }
+          if (topicRefresh.error) {
+            const resetAt = isRateLimitTwitterError(topicRefresh.error)
+              ? getTwitterRateLimitResetAt(topicRefresh.error)
+              : null;
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: '',
+              format: 'topic_intelligence_refresh_error',
+              topic: 'network_topics',
+              postedAt: new Date().toISOString(),
+              source: 'cron',
+              action: 'error',
+              reason: `${resetAt ? `X topic intelligence rate limited until ${resetAt}. ` : ''}${formatActionError(topicRefresh.error, 'refresh_topic_intelligence', {
+                handle: `@${agent.handle}`,
+              })}`,
+            });
+          }
+        }
+
+        if (settings.enabled) {
           await runAutopilotWatchdog(agent, settings);
         }
 
@@ -366,6 +396,8 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
       mentionsRefreshed,
       performanceTracked,
+      topicIntelligenceRefreshed,
+      networkTopicCandidates,
       autopilotProcessed: autopilotResults.length,
       results: autopilotResults,
     };

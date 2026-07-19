@@ -7,8 +7,12 @@
  */
 
 import type { TwitterKeys } from './twitter-client';
-import { getFollowing, getUserTimeline } from './twitter-client';
-import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
+import {
+  discoverNetworkTopicIntelligence,
+  type NetworkTopicDiscoveryOptions,
+  type NetworkTopicEvidence,
+  type NetworkTopicIntelligenceState,
+} from './network-topic-intelligence';
 
 export type TrendingSourceType = 'x' | 'hacker_news';
 
@@ -20,7 +24,16 @@ export interface TrendingTopic {
   category: string;
   timestamp: string;
   tweetCount: number;
-  topTweet?: { id: string; text: string; likes: number; author: string };
+  topTweet?: {
+    id: string;
+    text: string;
+    likes: number;
+    author: string;
+    retweets?: number;
+    replies?: number;
+    quotes?: number;
+    bookmarks?: number;
+  };
   sourceType?: TrendingSourceType;
   sourceUrl?: string | null;
   publisher?: string | null;
@@ -28,6 +41,20 @@ export interface TrendingTopic {
   sourceCount?: number;
   engagementScore?: number;
   sourceQuality?: number;
+  discoveryMethod?: 'followed_network' | 'publisher_feed' | 'manual';
+  networkTopicId?: string | null;
+  networkMomentumScore?: number | null;
+  networkMomentumDelta?: number | null;
+  networkBreakoutScore?: number | null;
+  networkVelocityScore?: number | null;
+  topicConfidence?: number | null;
+  topicWhyNow?: string | null;
+  observedAt?: string | null;
+  evidence?: NetworkTopicEvidence[];
+}
+
+export function getTrendingTopicStableId(topic: Pick<TrendingTopic, 'id' | 'networkTopicId'>): string {
+  return topic.networkTopicId || String(topic.id);
 }
 
 type TopicCluster = {
@@ -114,13 +141,6 @@ const TOPIC_CLUSTERS: Record<string, TopicCluster> = {
   },
 };
 
-const RELEVANT_ACCOUNT_TERMS = [
-  'startup', 'founder', 'venture', 'investor', 'investment', 'technology', 'software', 'hardware',
-  'artificial intelligence', 'machine learning', 'robotics', 'manufacturing', 'industrial', 'energy',
-  'nuclear', 'fusion', 'space', 'science', 'research', 'engineer', 'journalist', 'reporter', 'news',
-  'semiconductor', 'biotech', 'deep tech', 'frontier tech',
-];
-
 const TREND_MAX_AGE_HOURS = 72;
 const HN_TOP_STORY_LIMIT = 36;
 const HN_API_ROOT = 'https://hacker-news.firebaseio.com/v0';
@@ -137,16 +157,6 @@ const PRIMARY_TECHNICAL_DOMAINS = [
   'amd.com', 'tsmc.com', 'energy.gov', 'nasa.gov', 'sec.gov',
 ];
 
-interface RawTweet {
-  id: string;
-  text: string;
-  likes: number;
-  retweets: number;
-  author: string;
-  createdAt: string;
-  sourceQuality: number;
-}
-
 interface HackerNewsItem {
   id: number;
   by?: string;
@@ -159,8 +169,6 @@ interface HackerNewsItem {
   type?: string;
   url?: string;
 }
-
-type FollowingAccount = Awaited<ReturnType<typeof getFollowing>>[number];
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
@@ -288,151 +296,16 @@ function hackerNewsSourceAssessment(url: string | undefined): { quality: number;
   return { quality: 0.56, primary: false };
 }
 
-function accountRelevanceScore(account: FollowingAccount): number {
-  const profile = `${account.name || ''} ${account.username || ''} ${account.description || ''}`;
-  const hits = RELEVANT_ACCOUNT_TERMS.filter((term) => containsKeyword(profile, term)).length;
-  if (hits === 0) return 0;
-  return hits * 20 + Math.log10(Math.max(10, account.followersCount || 0)) * 4 + (account.verified ? 2 : 0);
-}
-
-function pickRelevantAccounts(accounts: FollowingAccount[], limit = 15): FollowingAccount[] {
-  const scored = accounts
-    .map((account) => ({
-      account,
-      score: accountRelevanceScore(account),
-      category: classifyTrendCategory(`${account.name || ''} ${account.description || ''}`) || 'general',
-    }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || (b.account.followersCount || 0) - (a.account.followersCount || 0));
-
-  if (scored.length === 0) {
-    return [...accounts]
-      .sort((a, b) => (b.followersCount || 0) - (a.followersCount || 0))
-      .slice(0, limit);
-  }
-
-  const selected: FollowingAccount[] = [];
-  const categoryCounts = new Map<string, number>();
-  for (const item of scored) {
-    if ((categoryCounts.get(item.category) || 0) >= 4) continue;
-    selected.push(item.account);
-    categoryCounts.set(item.category, (categoryCounts.get(item.category) || 0) + 1);
-    if (selected.length >= limit) break;
-  }
-  for (const item of scored) {
-    if (selected.includes(item.account)) continue;
-    selected.push(item.account);
-    if (selected.length >= limit) break;
-  }
-  return selected;
-}
-
-function pickRepresentativeTimelineFailure(errors: unknown[]): unknown | null {
-  return (
-    errors.find(isInvalidTwitterCredentialError)
-    || errors.find(isRateLimitTwitterError)
-    || errors.find(isTransientTwitterError)
-    || errors[0]
-    || null
-  );
-}
-
-function scoreXTopic(tweet: RawTweet, category: string, now = Date.now()): number {
-  const ageHours = Math.max(0.5, trendAgeHours(tweet.createdAt, now));
-  const engagement = tweet.likes + tweet.retweets * 2;
-  const velocity = engagement / ageHours;
-  const freshness = clamp(1 - ageHours / TREND_MAX_AGE_HOURS);
-  const categoryPriority = TOPIC_CLUSTERS[category]?.priority || 1;
-  return Math.min(99, Math.round(
-    34
-    + freshness * 24
-    + Math.min(22, Math.log2(engagement + 1) * 2.5)
-    + Math.min(12, Math.log2(velocity + 1) * 2)
-    + Math.min(7, categoryPriority * 0.55)
-    + tweet.sourceQuality * 4,
-  ));
-}
-
 /**
- * Fetch recent, relevant posts from the account's following graph.
- * Old pinned posts and unrelated high-engagement posts are deliberately dropped.
+ * Compatibility wrapper for callers that only need current topics. Production
+ * refresh paths should use discoverCurrentTrends so the momentum state persists.
  */
 export async function fetchTrendingFromFollowing(
   keys: TwitterKeys,
   userId: string,
+  options: NetworkTopicDiscoveryOptions = {},
 ): Promise<TrendingTopic[]> {
-  const following = await getFollowing(keys, userId, 500);
-  const topAccounts = pickRelevantAccounts(following, 15);
-  const allTweets: RawTweet[] = [];
-  const batchSize = 5;
-  let failedTimelineFetches = 0;
-  const timelineErrors: unknown[] = [];
-
-  for (let index = 0; index < topAccounts.length; index += batchSize) {
-    const batch = topAccounts.slice(index, index + batchSize);
-    const results = await Promise.allSettled(
-      batch.map((account) =>
-        getUserTimeline(keys, account.id, 10).then((tweets) =>
-          tweets.map((tweet) => ({
-            id: tweet.id,
-            text: tweet.text,
-            likes: tweet.likes,
-            retweets: tweet.retweets,
-            author: account.username,
-            createdAt: tweet.createdAt,
-            sourceQuality: account.verified ? 0.72 : 0.62,
-          })),
-        ),
-      ),
-    );
-    for (const result of results) {
-      if (result.status === 'fulfilled') allTweets.push(...result.value);
-      else {
-        failedTimelineFetches++;
-        timelineErrors.push(result.reason);
-      }
-    }
-  }
-
-  if (allTweets.length === 0) {
-    if (topAccounts.length > 0 && failedTimelineFetches > 0) {
-      const representativeError = pickRepresentativeTimelineFailure(timelineErrors);
-      if (representativeError) throw representativeError;
-      throw new Error(`Unable to fetch followed-account timelines from X (${failedTimelineFetches}/${topAccounts.length} failed).`);
-    }
-    return [];
-  }
-
-  return allTweets
-    .filter((tweet) => isCurrentTrendTimestamp(tweet.createdAt))
-    .map((tweet): TrendingTopic | null => {
-      if (isLowSignalXCommentary(tweet.text)) return null;
-      const category = classifyTrendCategory(tweet.text);
-      const headline = buildHeadline(tweet.text);
-      if (!category || headline.length < 15) return null;
-      const engagementScore = tweet.likes + tweet.retweets * 2;
-      return {
-        id: 0,
-        headline,
-        source: `@${tweet.author}`,
-        relevanceScore: scoreXTopic(tweet, category),
-        category,
-        timestamp: tweet.createdAt,
-        tweetCount: 1,
-        topTweet: { id: tweet.id, text: tweet.text, likes: tweet.likes, author: tweet.author },
-        sourceType: 'x',
-        sourceUrl: `https://x.com/${tweet.author}/status/${tweet.id}`,
-        publisher: `@${tweet.author}`,
-        isPrimarySource: false,
-        sourceCount: 1,
-        engagementScore,
-        sourceQuality: tweet.sourceQuality,
-      };
-    })
-    .filter((topic): topic is TrendingTopic => Boolean(topic))
-    .sort((a, b) => b.relevanceScore - a.relevanceScore || b.timestamp.localeCompare(a.timestamp))
-    .slice(0, 24)
-    .map((topic, index) => ({ ...topic, id: index + 1 }));
+  return (await discoverNetworkTopicIntelligence(keys, userId, options)).topics;
 }
 
 async function fetchJson<T>(url: string, fetchImpl: typeof fetch, timeoutMs = 4500): Promise<T> {
@@ -533,41 +406,49 @@ export function mergeTrendingTopics(topicGroups: TrendingTopic[][], limit = 12):
   const sourceCounts = new Map<string, number>();
   const authorCounts = new Map<string, number>();
 
-  for (const topic of candidates) {
-    const sourceType = topic.sourceType || 'x';
+  const addTopic = (topic: TrendingTopic): boolean => {
+    if (selected.includes(topic)) return false;
     const sourceUrl = normalizedSourceUrl(topic.sourceUrl);
     const duplicate = selected.some((item) => {
       const sameUrl = sourceUrl && sourceUrl === normalizedSourceUrl(item.sourceUrl);
       return sameUrl || (item.category === topic.category && topicSimilarity(item.headline, topic.headline) >= 0.72);
     });
-    if (duplicate) continue;
+    if (duplicate) return false;
 
+    const author = topic.topTweet?.author?.toLowerCase() || '';
+    const authorLimit = topic.discoveryMethod === 'followed_network' ? 4 : 2;
+    if (author && (authorCounts.get(author) || 0) >= authorLimit) return false;
+
+    selected.push(topic);
+    const sourceType = topic.sourceType || 'x';
+    sourceCounts.set(sourceType, (sourceCounts.get(sourceType) || 0) + 1);
+    if (author) authorCounts.set(author, (authorCounts.get(author) || 0) + 1);
+    return true;
+  };
+
+  // The followed graph is the primary discovery surface. Publisher feeds can
+  // corroborate or fill gaps, but should not crowd out the subjects learned
+  // from accounts the user intentionally follows.
+  const followedNetwork = candidates.filter((topic) => topic.discoveryMethod === 'followed_network');
+  const followedNetworkFloor = Math.min(followedNetwork.length, Math.ceil(limit * 0.67));
+  for (const topic of followedNetwork) {
+    addTopic(topic);
+    if (selected.filter((item) => item.discoveryMethod === 'followed_network').length >= followedNetworkFloor) break;
+  }
+
+  for (const topic of candidates) {
+    if (selected.length >= limit) break;
+    if (selected.includes(topic)) continue;
+    const sourceType = topic.sourceType || 'x';
     const sourceCount = sourceCounts.get(sourceType) || 0;
     const otherSourceAvailable = candidates.some((item) => (item.sourceType || 'x') !== sourceType);
     if (otherSourceAvailable && sourceCount >= Math.max(2, Math.ceil(limit * 0.67))) continue;
-
-    const author = topic.topTweet?.author?.toLowerCase() || '';
-    if (author && (authorCounts.get(author) || 0) >= 2) continue;
-
-    selected.push(topic);
-    sourceCounts.set(sourceType, sourceCount + 1);
-    if (author) authorCounts.set(author, (authorCounts.get(author) || 0) + 1);
-    if (selected.length >= limit) break;
+    addTopic(topic);
   }
 
   if (selected.length < limit) {
     for (const topic of candidates) {
-      if (selected.includes(topic)) continue;
-      const sourceUrl = normalizedSourceUrl(topic.sourceUrl);
-      const duplicate = selected.some((item) => {
-        const sameUrl = sourceUrl && sourceUrl === normalizedSourceUrl(item.sourceUrl);
-        return sameUrl || (item.category === topic.category && topicSimilarity(item.headline, topic.headline) >= 0.72);
-      });
-      if (duplicate) continue;
-      const author = topic.topTweet?.author?.toLowerCase() || '';
-      if (author && (authorCounts.get(author) || 0) >= 2) continue;
-      selected.push(topic);
-      if (author) authorCounts.set(author, (authorCounts.get(author) || 0) + 1);
+      addTopic(topic);
       if (selected.length >= limit) break;
     }
   }
@@ -575,24 +456,71 @@ export function mergeTrendingTopics(topicGroups: TrendingTopic[][], limit = 12):
   return selected.map((topic, index) => ({ ...topic, id: index + 1 }));
 }
 
+export interface CurrentTrendDiscoveryResult {
+  topics: TrendingTopic[];
+  networkState: NetworkTopicIntelligenceState | null;
+  networkRefreshed: boolean;
+  networkError: unknown | null;
+  sampledNetworkAccounts: number;
+  networkCandidateTweets: number;
+  networkPartialFailures: number;
+}
+
 /**
  * Production discovery path. A failure in one source does not erase current
  * data from the other source; if both fail, the X error remains authoritative.
+ * Callers persist networkState so later refreshes can measure acceleration.
  */
+export async function discoverCurrentTrends(
+  keys: TwitterKeys,
+  userId: string,
+  options: {
+    previousNetworkState?: NetworkTopicIntelligenceState | null;
+    fetchImpl?: typeof fetch;
+    network?: Omit<NetworkTopicDiscoveryOptions, 'previousState'>;
+  } = {},
+): Promise<CurrentTrendDiscoveryResult> {
+  const [xResult, hackerNewsResult] = await Promise.allSettled([
+    discoverNetworkTopicIntelligence(keys, userId, {
+      ...(options.network || {}),
+      previousState: options.previousNetworkState || null,
+    }),
+    fetchHackerNewsTopics(options.fetchImpl || fetch),
+  ]);
+  const xTopics = xResult.status === 'fulfilled' ? xResult.value.topics : [];
+  const hackerNewsTopics = hackerNewsResult.status === 'fulfilled' ? hackerNewsResult.value : [];
+  const merged = mergeTrendingTopics([xTopics, hackerNewsTopics]);
+  if (merged.length > 0) {
+    return {
+      topics: merged,
+      networkState: xResult.status === 'fulfilled'
+        ? xResult.value.state
+        : options.previousNetworkState || null,
+      networkRefreshed: xResult.status === 'fulfilled',
+      networkError: xResult.status === 'rejected' ? xResult.reason : xResult.value.sourceError,
+      sampledNetworkAccounts: xResult.status === 'fulfilled' ? xResult.value.sampledAccounts : 0,
+      networkCandidateTweets: xResult.status === 'fulfilled' ? xResult.value.candidateTweets : 0,
+      networkPartialFailures: xResult.status === 'fulfilled' ? xResult.value.partialFailureCount : 0,
+    };
+  }
+  if (xResult.status === 'rejected') throw xResult.reason;
+  if (hackerNewsResult.status === 'rejected') throw hackerNewsResult.reason;
+  return {
+    topics: [],
+    networkState: xResult.value.state,
+    networkRefreshed: true,
+    networkError: xResult.value.sourceError,
+    sampledNetworkAccounts: xResult.value.sampledAccounts,
+    networkCandidateTweets: xResult.value.candidateTweets,
+    networkPartialFailures: xResult.value.partialFailureCount,
+  };
+}
+
+/** Compatibility wrapper for callers that do not persist topic history. */
 export async function fetchCurrentTrends(
   keys: TwitterKeys,
   userId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TrendingTopic[]> {
-  const [xResult, hackerNewsResult] = await Promise.allSettled([
-    fetchTrendingFromFollowing(keys, userId),
-    fetchHackerNewsTopics(fetchImpl),
-  ]);
-  const xTopics = xResult.status === 'fulfilled' ? xResult.value : [];
-  const hackerNewsTopics = hackerNewsResult.status === 'fulfilled' ? hackerNewsResult.value : [];
-  const merged = mergeTrendingTopics([xTopics, hackerNewsTopics]);
-  if (merged.length > 0) return merged;
-  if (xResult.status === 'rejected') throw xResult.reason;
-  if (hackerNewsResult.status === 'rejected') throw hackerNewsResult.reason;
-  return [];
+  return (await discoverCurrentTrends(keys, userId, { fetchImpl })).topics;
 }

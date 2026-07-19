@@ -3,7 +3,7 @@ import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopi
 import type { AgentLearnings } from '../lib/types';
 
 describe('account topic policy', () => {
-  it('shifts @geoffwoo away from crypto and toward frontier tech', () => {
+  it('removes crypto without manufacturing a hard-coded replacement identity', () => {
     const profile = applyAccountTopicPolicy('@geoffwoo', {
       tone: 'analyst',
       topics: ['ai', 'crypto', 'startup'],
@@ -13,25 +13,11 @@ describe('account topic policy', () => {
     });
 
     expect(profile.topics).not.toContain('crypto');
-    expect(profile.topics).toEqual(expect.arrayContaining([
-      'ai',
-      'inference asics',
-      'fusion',
-      'fission',
-      'rare earth minerals',
-      'tungsten and critical minerals',
-      'antimony',
-      'gallium and germanium',
-      'graphite anodes',
-      'fluorspar and semiconductor chemicals',
-      'robotics',
-      'automated manufacturing',
-      're-industrialization',
-      'space',
-      'frontier tech',
-      'deep tech',
-    ]));
+    expect(profile.topics).toEqual(['ai', 'startup']);
+    expect(profile.topics).not.toContain('fusion');
+    expect(profile.topics).not.toContain('robotics');
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
+    expect(profile.communicationStyle).toContain('Discover current subjects dynamically');
     expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffwoo');
     expect(profile.communicationStyle).toContain('low-status SaaS-ops texture');
     expect(profile.communicationStyle).toContain('compute constraints');

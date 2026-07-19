@@ -959,6 +959,11 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     weightedLearningScore(b) - weightedLearningScore(a) ||
     weightedEngagementScore(b) - weightedEngagementScore(a)
   );
+  const identityHistory = operatorHistory.length > 0 ? operatorHistory : trainingHistory;
+  const identitySorted = [...identityHistory].sort((a, b) =>
+    weightedLearningScore(b) - weightedLearningScore(a) ||
+    weightedEngagementScore(b) - weightedEngagementScore(a)
+  );
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
@@ -999,8 +1004,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       return right - left || b.avgEngagement - a.avgEngagement;
     });
 
-  // Compute style fingerprint from top 30 tweets
-  const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
+  // Engagement can learn from every post. Identity cannot: once manual/operator
+  // evidence exists, generated posts are excluded from the style fingerprint.
+  const styleFingerprint = computeStyleFingerprint(identitySorted.slice(0, 30), identitySorted.slice(-10));
   const operatorVoiceReference = buildOperatorVoiceReference(operatorReferenceHistory, manualExampleCuration);
   const manualTopicProfile = buildManualTopicProfile(operatorReferenceHistory, manualExampleCuration);
   const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
@@ -1096,22 +1102,96 @@ function buildOperatorVoiceReference(
   history: TweetPerformance[],
   curation: ManualExampleCuration,
 ): OperatorVoiceReference | undefined {
-  const usableHistory = history.filter((tweet) => tweet.content && tweet.content.trim().length > 0);
+  const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
+  const usableHistory = history.filter((tweet) =>
+    tweet.content
+    && tweet.content.trim().length > 0
+    && !blocked.has(String(tweet.xTweetId))
+  );
   if (usableHistory.length === 0) return undefined;
 
   const pinnedExamples = usableHistory.filter((tweet) => curation.pinnedXTweetIds.includes(String(tweet.xTweetId)));
-  const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
   const sorted = [...usableHistory].sort((a, b) => weightedEngagementScore(b) - weightedEngagementScore(a));
-  const topPerformers = [
-    ...pinnedExamples,
-    ...sorted.filter((tweet) => !blocked.has(String(tweet.xTweetId)) && !curation.pinnedXTweetIds.includes(String(tweet.xTweetId))),
-  ].slice(0, 12);
+  const recent = [...usableHistory].sort((a, b) =>
+    Date.parse(b.postedAt || b.checkedAt) - Date.parse(a.postedAt || a.checkedAt)
+  );
+  const hasStandaloneSubstance = (tweet: TweetPerformance) => {
+    const prose = tweet.content
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/@\w+/g, ' ')
+      .replace(/#[a-z0-9_]+/gi, ' ')
+      .replace(/[^a-z0-9'&+.-]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const wordCount = prose.split(/\s+/).filter(Boolean).length;
+    const timestampLines = tweet.content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}\s*[-–]/.test(line)).length;
+    return wordCount >= 8 && timestampLines < 2;
+  };
+  const substantiveSorted = sorted.filter(hasStandaloneSubstance);
+  const substantiveRecent = recent.filter(hasStandaloneSubstance);
+  const secondary = sorted.filter((tweet) => !hasStandaloneSubstance(tweet));
+  const primaryCandidates = [...pinnedExamples];
+  const maxCandidateLength = Math.max(substantiveSorted.length, Math.min(6, substantiveRecent.length));
+  for (let index = 0; index < maxCandidateLength; index++) {
+    if (substantiveSorted[index]) primaryCandidates.push(substantiveSorted[index]);
+    if (index < 6 && substantiveRecent[index]) primaryCandidates.push(substantiveRecent[index]);
+  }
+  const topPerformers: TweetPerformance[] = [];
+  const seenIds = new Set<string>();
+  const modeCounts = new Map<string, number>();
+  for (const tweet of primaryCandidates) {
+    const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
+    if (seenIds.has(id)) continue;
+    const lengthMode = tweet.content.length < 120 ? 'short' : tweet.content.length < 360 ? 'medium' : 'long';
+    const socialMode = /^@\w+/.test(tweet.content.trim())
+      ? 'reply'
+      : tweet.content.includes('?')
+        ? 'question'
+        : tweet.content.includes('\n')
+          ? 'linebreak'
+          : 'statement';
+    const registerMode = /\b(?:bro|lol|cuz|ain'?t|bullshit\w*)\b|\.\./i.test(tweet.content)
+      ? 'rough'
+      : 'plain';
+    const signature = [
+      tweet.format || 'unknown',
+      tweet.hook || 'unknown',
+      tweet.tone || 'unknown',
+      lengthMode,
+      socialMode,
+      registerMode,
+    ].join(':');
+    const pinned = curation.pinnedXTweetIds.includes(String(tweet.xTweetId));
+    if (!pinned && (modeCounts.get(signature) || 0) >= 2) continue;
+    topPerformers.push(tweet);
+    seenIds.add(id);
+    modeCounts.set(signature, (modeCounts.get(signature) || 0) + 1);
+    if (topPerformers.length >= 12) break;
+  }
+  if (topPerformers.length < Math.min(12, primaryCandidates.length)) {
+    for (const tweet of primaryCandidates) {
+      const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
+      if (seenIds.has(id)) continue;
+      topPerformers.push(tweet);
+      seenIds.add(id);
+      if (topPerformers.length >= 12) break;
+    }
+  }
+  if (topPerformers.length < 8) {
+    for (const tweet of secondary) {
+      const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
+      if (seenIds.has(id)) continue;
+      topPerformers.push(tweet);
+      seenIds.add(id);
+      if (topPerformers.length >= 8) break;
+    }
+  }
   const worstPerformers = sorted.slice(-6);
   if (topPerformers.length === 0) return undefined;
 
   return {
     sampleCount: usableHistory.length,
-    bestPerformers: topPerformers.slice(0, 5),
+    bestPerformers: topPerformers.slice(0, 8),
     styleFingerprint: computeStyleFingerprint(topPerformers, worstPerformers),
     pinnedExamples: pinnedExamples.slice(0, 3),
     blockedXTweetIds: [...blocked],

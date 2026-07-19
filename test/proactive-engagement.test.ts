@@ -2,13 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getTrendingCache: vi.fn(),
-  setTrendingCache: vi.fn(),
   getPostLog: vi.fn(),
   getAnalysis: vi.fn(),
   addPostLogEntry: vi.fn(),
   getAgents: vi.fn(),
   getPerformanceHistory: vi.fn(),
-  fetchTrendingFromFollowing: vi.fn(),
+  refreshAgentTopicIntelligence: vi.fn(),
   replyToTweet: vi.fn(),
   likeTweet: vi.fn(),
   followUser: vi.fn(),
@@ -19,7 +18,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getTrendingCache: mocks.getTrendingCache,
-  setTrendingCache: mocks.setTrendingCache,
   getPostLog: mocks.getPostLog,
   getAnalysis: mocks.getAnalysis,
   addPostLogEntry: mocks.addPostLogEntry,
@@ -27,8 +25,8 @@ vi.mock('@/lib/kv-storage', () => ({
   getPerformanceHistory: mocks.getPerformanceHistory,
 }));
 
-vi.mock('@/lib/trending', () => ({
-  fetchTrendingFromFollowing: mocks.fetchTrendingFromFollowing,
+vi.mock('@/lib/topic-intelligence-refresh', () => ({
+  refreshAgentTopicIntelligence: mocks.refreshAgentTopicIntelligence,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
@@ -43,7 +41,7 @@ vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
 }));
 
-import { discoverAndFollow, formatPeerStyleTweetList, generateAgentShoutout, likeNetworkTweets, replyToViralTweets, studyPeerStyles } from '@/lib/proactive-engagement';
+import { discoverAndFollow, generateAgentShoutout, likeNetworkTweets, replyToViralTweets } from '@/lib/proactive-engagement';
 import { TwitterActionError } from '@/lib/twitter-debug';
 import type { Agent, ProtocolSettings } from '@/lib/types';
 
@@ -96,7 +94,7 @@ describe('proactive engagement', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.getTrendingCache.mockResolvedValue(null);
-    mocks.fetchTrendingFromFollowing.mockResolvedValue([trendingTopic]);
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({ topics: [trendingTopic], error: null });
     mocks.getPostLog.mockResolvedValue([]);
     mocks.getAnalysis.mockResolvedValue(null);
     mocks.generateText.mockResolvedValue({ text: 'The real shift is agents getting judged by throughput, not demos.' });
@@ -117,51 +115,8 @@ describe('proactive engagement', () => {
     const sent = await replyToViralTweets(agent, keys, settings);
 
     expect(sent).toBe(0);
-    expect(mocks.fetchTrendingFromFollowing).not.toHaveBeenCalled();
+    expect(mocks.refreshAgentTopicIntelligence).not.toHaveBeenCalled();
     expect(mocks.replyToTweet).not.toHaveBeenCalled();
-  });
-
-  it('compacts peer style tweets before classification prompts', () => {
-    const list = formatPeerStyleTweetList(Array.from({ length: 8 }, (_, index) => ({
-      author: `builder${index + 1}`,
-      likes: 200 - index,
-      text: `peer tweet ${index + 1} ${'with repeated style context '.repeat(20)}PEER_SENTINEL_${index + 1}`,
-    })));
-
-    expect(list).toContain('@builder1');
-    expect(list).toContain('@builder6');
-    expect(list).not.toContain('@builder7');
-    expect(list).not.toContain('PEER_SENTINEL_1');
-    expect(list).toContain('...');
-  });
-
-  it('uses compact peer style prompts and smaller output budget', async () => {
-    mocks.getTrendingCache.mockResolvedValue(Array.from({ length: 8 }, (_, index) => ({
-      ...trendingTopic,
-      id: index + 1,
-      topTweet: {
-        id: `peer-${index + 1}`,
-        text: `peer tweet ${index + 1} ${'with repeated style context '.repeat(20)}PEER_SENTINEL_${index + 1}`,
-        likes: 200 - index,
-        author: `builder${index + 1}`,
-      },
-    })));
-    mocks.generateText.mockResolvedValue({
-      text: '- Tweets that open with concrete mechanisms get more replies\n- Short proof beats abstract claims',
-    });
-
-    const insights = await studyPeerStyles(agent);
-
-    const call = mocks.generateText.mock.calls[0]?.[0];
-    expect(call).toEqual(expect.objectContaining({
-      task: 'classification',
-      tier: 'fast',
-      maxTokens: 384,
-    }));
-    expect(call.prompt).toContain('@builder6');
-    expect(call.prompt).not.toContain('@builder7');
-    expect(call.prompt).not.toContain('PEER_SENTINEL_1');
-    expect(insights).toContain('Tweets that open with concrete mechanisms get more replies');
   });
 
   it('uses compact shoutout summaries and smaller output budget', async () => {
@@ -210,7 +165,7 @@ describe('proactive engagement', () => {
     const sent = await replyToViralTweets(agent, keys, settings);
 
     expect(sent).toBe(0);
-    expect(mocks.fetchTrendingFromFollowing).not.toHaveBeenCalled();
+    expect(mocks.refreshAgentTopicIntelligence).not.toHaveBeenCalled();
     expect(mocks.replyToTweet).not.toHaveBeenCalled();
   });
 
@@ -242,18 +197,18 @@ describe('proactive engagement', () => {
     const liked = await likeNetworkTweets(agent, keys, settings);
 
     expect(liked).toBe(0);
-    expect(mocks.fetchTrendingFromFollowing).not.toHaveBeenCalled();
+    expect(mocks.refreshAgentTopicIntelligence).not.toHaveBeenCalled();
     expect(mocks.likeTweet).not.toHaveBeenCalled();
   });
 
   it('logs reset-aware trend refresh rate limits for network growth', async () => {
-    mocks.fetchTrendingFromFollowing.mockRejectedValue(new TwitterActionError({
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({ topics: [], error: new TwitterActionError({
       action: 'refresh_trending_for_engagement',
       statusCode: 429,
       title: 'Too Many Requests',
       detail: 'Rate limit exceeded',
       rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
-    }));
+    }) });
 
     const followed = await discoverAndFollow(agent, keys, { ...settings, autoFollow: true } as ProtocolSettings);
 
@@ -279,9 +234,9 @@ describe('proactive engagement', () => {
   });
 
   it('stops auto-follow candidate processing after an X rate limit', async () => {
-    mocks.fetchTrendingFromFollowing.mockResolvedValue([
-      trendingTopic,
-      {
+    mocks.refreshAgentTopicIntelligence.mockResolvedValue({
+      error: null,
+      topics: [trendingTopic, {
         ...trendingTopic,
         id: 2,
         topTweet: {
@@ -290,8 +245,8 @@ describe('proactive engagement', () => {
           likes: 160,
           author: 'operator',
         },
-      },
-    ]);
+      }],
+    });
     mocks.getUserByUsername.mockRejectedValue(new TwitterActionError({
       action: 'resolve_user',
       statusCode: 429,

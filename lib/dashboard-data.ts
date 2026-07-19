@@ -15,8 +15,8 @@ import {
   type PublicSoulSummary,
 } from './open-source-souls';
 import { normalizeSetupStep } from './setup-state';
-import { fetchCurrentTrends, type TrendingTopic } from './trending';
-import { decodeKeys } from './twitter-client';
+import type { TrendingTopic } from './trending';
+import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
 import { buildSourcePlannerPlan, enrichTrendingTopics } from './source-planner';
 import {
   getAgentByHandle,
@@ -40,7 +40,6 @@ import {
   getTrendingCache,
   getTweets,
   getTweetCount,
-  setTrendingCache,
   addPostLogEntry,
 } from './kv-storage';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -270,19 +269,41 @@ export async function refreshAgentTopics(agent: Agent): Promise<TrendingTopic[]>
     return [];
   }
 
-  const keys = decodeKeys({
-    apiKey: agent.apiKey,
-    apiSecret: agent.apiSecret,
-    accessToken: agent.accessToken,
-    accessSecret: agent.accessSecret,
-  });
-
   try {
-    const topics = await fetchCurrentTrends(keys, agent.xUserId);
-    if (topics.length > 0) {
-      await setTrendingCache(agent.id, topics);
+    const refresh = await refreshAgentTopicIntelligence(agent, { force: true });
+    if (refresh.error) {
+      const resetAt = isRateLimitTwitterError(refresh.error)
+        ? getTwitterRateLimitResetAt(refresh.error)
+        : null;
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'trend_refresh_error',
+        topic: 'network_growth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        action: 'error',
+        reason: `${resetAt ? `X topic refresh rate limited until ${resetAt}; cached network evidence remains available. ` : ''}${formatActionError(refresh.error, 'refresh_topics', {
+          handle: `@${agent.handle}`,
+          xUserId: agent.xUserId,
+        })}`,
+        errorCode: isInvalidTwitterCredentialError(refresh.error)
+          ? 'x_invalid_credentials'
+          : isRateLimitTwitterError(refresh.error)
+            ? 'x_rate_limit'
+            : isTransientTwitterError(refresh.error)
+              ? 'x_transient'
+              : 'refresh_topics',
+      }).catch(() => null);
+
+      // A manual dashboard refresh may still show the last known evidence.
+      // Generation reads through the freshness-aware topic refresh path instead.
+      const cached = await getTrendingCache(agent.id);
+      return Array.isArray(cached) ? cached as TrendingTopic[] : [];
     }
-    return topics;
+    return refresh.topics;
   } catch (err) {
     const invalidCredentials = isInvalidTwitterCredentialError(err);
     const rateLimited = isRateLimitTwitterError(err);

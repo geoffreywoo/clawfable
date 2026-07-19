@@ -59,8 +59,8 @@ describe('buildPersonalizationMemory', () => {
           tweetText: 'The best AI teams know the product is working when the Slack channel gets quieter.',
           rating: 'down',
           generatedAt: '2026-06-07T12:00:00.000Z',
-          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop',
-          intentSummary: 'lame, too Slack, not elevated or technical enough',
+          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting',
+          intentSummary: 'does not sound like me and the content is drifting too far',
           source: 'queue_delete',
           userProvidedReason: true,
         },
@@ -68,11 +68,12 @@ describe('buildPersonalizationMemory', () => {
       signals: [
         learningSignal({
           signalType: 'deleted_from_queue',
-          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop',
+          reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting',
           metadata: {
             lowStatusTextureComplaint: true,
             technicalElevationRequested: true,
             aiSlopComplaint: true,
+            identityDriftComplaint: true,
           },
         }),
       ],
@@ -95,6 +96,7 @@ describe('buildPersonalizationMemory', () => {
         expect.stringContaining('generated, template-like'),
         expect.stringContaining('Slack/support/workflow texture'),
         expect.stringContaining('elevated technical depth'),
+        expect.stringContaining('native content identity'),
       ]),
     );
     expect(memory.rejectedDrafts).toContain(

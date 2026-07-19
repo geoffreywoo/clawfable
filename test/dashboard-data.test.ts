@@ -3,8 +3,13 @@ import type { Agent } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   getTrendingCache: vi.fn(),
+  getTrendingCacheSnapshot: vi.fn(),
   setTrendingCache: vi.fn(),
-  fetchTrendingFromFollowing: vi.fn(),
+  getTopicIntelligenceState: vi.fn(),
+  saveTopicIntelligenceState: vi.fn(),
+  acquireTopicIntelligenceLock: vi.fn(),
+  releaseTopicIntelligenceLock: vi.fn(),
+  discoverCurrentTrends: vi.fn(),
   decodeKeys: vi.fn(),
   addPostLogEntry: vi.fn(),
 }));
@@ -73,15 +78,20 @@ vi.mock('@/lib/kv-storage', () => ({
   getProtocolSettings: vi.fn(),
   getQueuedTweets: vi.fn(),
   getTrendingCache: mocks.getTrendingCache,
+  getTrendingCacheSnapshot: mocks.getTrendingCacheSnapshot,
+  getTopicIntelligenceState: mocks.getTopicIntelligenceState,
+  acquireTopicIntelligenceLock: mocks.acquireTopicIntelligenceLock,
   getTweets: vi.fn(),
   getTweetCount: vi.fn(),
   listEngagementSessions: vi.fn(),
   setTrendingCache: mocks.setTrendingCache,
+  saveTopicIntelligenceState: mocks.saveTopicIntelligenceState,
+  releaseTopicIntelligenceLock: mocks.releaseTopicIntelligenceLock,
   addPostLogEntry: mocks.addPostLogEntry,
 }));
 
 vi.mock('@/lib/trending', () => ({
-  fetchCurrentTrends: mocks.fetchTrendingFromFollowing,
+  discoverCurrentTrends: mocks.discoverCurrentTrends,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
@@ -122,13 +132,30 @@ describe('dashboard data topic loading', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getTrendingCache.mockResolvedValue([cachedTopic]);
+    mocks.getTrendingCacheSnapshot.mockResolvedValue({
+      data: [cachedTopic],
+      cachedAt: '2026-05-24T00:00:00.000Z',
+      ageMs: 6 * 60 * 60 * 1000,
+      isFresh: false,
+    });
     mocks.decodeKeys.mockReturnValue({
       appKey: 'api-key',
       appSecret: 'api-secret',
       accessToken: 'access-token',
       accessSecret: 'access-secret',
     });
-    mocks.fetchTrendingFromFollowing.mockResolvedValue([{ ...cachedTopic, id: 2 }]);
+    mocks.getTopicIntelligenceState.mockResolvedValue(null);
+    mocks.acquireTopicIntelligenceLock.mockResolvedValue({ acquired: true, owner: 'topic-refresh:test', lock: null });
+    mocks.releaseTopicIntelligenceLock.mockResolvedValue(true);
+    mocks.discoverCurrentTrends.mockResolvedValue({
+      topics: [{ ...cachedTopic, id: 2 }],
+      networkState: null,
+      networkRefreshed: true,
+      networkError: null,
+      sampledNetworkAccounts: 12,
+      networkCandidateTweets: 8,
+      networkPartialFailures: 0,
+    });
     mocks.setTrendingCache.mockResolvedValue(undefined);
     mocks.addPostLogEntry.mockResolvedValue(undefined);
   });
@@ -138,7 +165,7 @@ describe('dashboard data topic loading', () => {
 
     expect(mocks.getTrendingCache).toHaveBeenCalledWith(agent.id);
     expect(mocks.decodeKeys).not.toHaveBeenCalled();
-    expect(mocks.fetchTrendingFromFollowing).not.toHaveBeenCalled();
+    expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
     expect(mocks.setTrendingCache).not.toHaveBeenCalled();
   });
 
@@ -152,7 +179,7 @@ describe('dashboard data topic loading', () => {
       accessToken: agent.accessToken,
       accessSecret: agent.accessSecret,
     });
-    expect(mocks.fetchTrendingFromFollowing).toHaveBeenCalledWith(
+    expect(mocks.discoverCurrentTrends).toHaveBeenCalledWith(
       {
         appKey: 'api-key',
         appSecret: 'api-secret',
@@ -160,12 +187,13 @@ describe('dashboard data topic loading', () => {
         accessSecret: 'access-secret',
       },
       agent.xUserId,
+      { previousNetworkState: null },
     );
     expect(mocks.setTrendingCache).toHaveBeenCalledWith(agent.id, [{ ...cachedTopic, id: 2 }]);
   });
 
   it('keeps cached topics and logs reset-aware X failures when refresh is rate limited', async () => {
-    mocks.fetchTrendingFromFollowing.mockRejectedValue(new TwitterActionError({
+    mocks.discoverCurrentTrends.mockRejectedValue(new TwitterActionError({
       action: 'refresh_topics',
       statusCode: 429,
       title: 'Too Many Requests',
@@ -177,7 +205,7 @@ describe('dashboard data topic loading', () => {
 
     expect(topics).toEqual([cachedTopic]);
     expect(mocks.setTrendingCache).not.toHaveBeenCalled();
-    expect(mocks.getTrendingCache).toHaveBeenCalledWith(agent.id);
+    expect(mocks.getTrendingCacheSnapshot).toHaveBeenCalledWith(agent.id);
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       agent.id,
       expect.objectContaining({
