@@ -300,8 +300,16 @@ function parseScoredLines(
       const modelTechnicalCredibility = Number.isFinite(Number(parsed.technicalCredibility))
         ? clamp(Number(parsed.technicalCredibility))
         : 0.5;
+      const modelManualAnchorReskinRisk = Number.isFinite(Number(parsed.manualAnchorReskinRisk))
+        ? clamp(Number(parsed.manualAnchorReskinRisk))
+        : 0;
       const voiceFit = geoffreyStrict
-        ? clamp(rawVoiceFit * 0.35 + modelNativeVoice * 0.65 - modelCringeRisk * 0.22)
+        ? clamp(
+            rawVoiceFit * 0.35
+            + modelNativeVoice * 0.65
+            - modelCringeRisk * 0.22
+            - modelManualAnchorReskinRisk * 0.28,
+          )
         : rawVoiceFit;
       let overall = clamp(Number(parsed.overall) || 0.5);
       if (geoffreyStrict) {
@@ -309,9 +317,14 @@ function parseScoredLines(
           overall * 0.55
           + voiceFit * 0.28
           + modelTechnicalCredibility * 0.17
-          - modelCringeRisk * 0.2,
+          - modelCringeRisk * 0.2
+          - modelManualAnchorReskinRisk * 0.24,
         );
-        if (modelNativeVoice < 0.55 || modelCringeRisk >= 0.5) {
+        if (
+          modelNativeVoice < 0.55
+          || modelCringeRisk >= 0.5
+          || modelManualAnchorReskinRisk >= 0.48
+        ) {
           overall = Math.min(overall, 0.45);
         }
       }
@@ -322,6 +335,10 @@ function parseScoredLines(
         novelty: clamp(Number(parsed.novelty) || 0.5),
         audienceFit: clamp(Number(parsed.audienceFit) || 0.5),
         policySafety: clamp(Number(parsed.policySafety) || 0.5),
+        nativeVoice: modelNativeVoice,
+        cringeRisk: modelCringeRisk,
+        technicalCredibility: modelTechnicalCredibility,
+        manualAnchorReskinRisk: modelManualAnchorReskinRisk,
       };
       judged.set(idx, {
         ...candidate,
@@ -330,7 +347,7 @@ function parseScoredLines(
         judgeScore: Number(judgeBreakdown.overall.toFixed(3)),
         judgeBreakdown,
         judgeNotes: typeof parsed.notes === 'string'
-          ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)}.` : ''}`
+          ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)} anchorReskin=${modelManualAnchorReskinRisk.toFixed(2)}.` : ''}`
           : '',
       });
     } catch {
@@ -407,6 +424,7 @@ Also return:
 - nativeVoice: likelihood from 0 to 1 that this person would plausibly post the exact wording
 - cringeRisk: likelihood from 0 to 1 that the draft feels generated, socially unearned, or interchangeable
 - technicalCredibility: mechanism/constraint/specificity quality from 0 to 1
+- manualAnchorReskinRisk: likelihood from 0 to 1 that the draft copies a manual anchor's premise, joke, list concept, opening move, social setup, or sentence skeleton while swapping in new nouns
 
 Ground rules:
 - Voice: ${voiceProfile.tone}
@@ -421,6 +439,7 @@ Ground rules:
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
+- A draft can sound native and still be a bad copy. Set manualAnchorReskinRisk at or above 0.50 when it recreates a native anchor's premise or structure, even if no exact phrase overlaps.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 - A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
 ${geoffreyBrief}

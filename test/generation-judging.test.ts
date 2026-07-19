@@ -394,6 +394,95 @@ describe('judgeCandidates fallback critic', () => {
     expect(judged[0].judgeNotes).toBe('Strong operator-specific mechanism.');
   });
 
+  it('blocks a high-scoring Geoffrey draft that reskins a manual anchor premise', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        idx: 0,
+        overall: 0.92,
+        voiceFit: 0.9,
+        clarity: 0.88,
+        novelty: 0.84,
+        audienceFit: 0.9,
+        policySafety: 0.94,
+        nativeVoice: 0.86,
+        cringeRisk: 0.12,
+        technicalCredibility: 0.7,
+        manualAnchorReskinRisk: 0.88,
+        thesis: 'transformer access as status',
+        notes: 'Native cadence, but it copies the status-list premise.',
+      }),
+    });
+
+    const judged = await judgeCandidates([
+      {
+        content: '2026 status is knowing which dinner guests can get a transformer delivered before your data center interconnect expires.',
+        format: 'short_punch',
+        targetTopic: 'culture',
+        rationale: 'A technical status joke.',
+      },
+    ], {
+      voiceProfile: {
+        tone: 'provocative',
+        topics: ['ai', 'hardware'],
+        antiGoals: ['generic hype'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: native operator voice.',
+        summary: 'Geoffrey writes compressed technical and social observations.',
+      },
+      analysis: analysis(),
+      learnings: {
+        operatorVoiceReference: {
+          sampleCount: 1,
+          bestPerformers: [
+            {
+              tweetId: '',
+              xTweetId: 'native-status-anchor',
+              content: 'SF rich:\n- estate in woodside\n- host dinner parties with ai founders\n- play padel on your home court',
+              format: 'short_punch',
+              topic: 'culture',
+              postedAt: '2026-06-01T00:00:00.000Z',
+              checkedAt: '2026-06-02T00:00:00.000Z',
+              likes: 410,
+              retweets: 7,
+              replies: 13,
+              impressions: 20_000,
+              engagementRate: 2.15,
+              wasViral: true,
+              source: 'timeline',
+              styleMode: 'standard',
+              hook: 'observation',
+              tone: 'sarcastic',
+              specificity: 'concrete',
+            } as any,
+          ],
+          styleFingerprint: {
+            avgLength: 180,
+            shortPct: 0,
+            mediumPct: 100,
+            longPct: 0,
+            questionRatio: 0,
+            usesLineBreaks: true,
+            usesEmojis: false,
+            usesNumbers: false,
+            topHooks: ['observation'],
+            topTones: ['sarcastic'],
+            antiPatterns: [],
+            updatedAt: '2026-06-06T00:00:00.000Z',
+          },
+          pinnedExamples: [],
+          blockedXTweetIds: [],
+        },
+      } as any,
+      memory: memory(),
+      mode: 'model',
+    });
+
+    expect(judged[0].judgeBreakdown.manualAnchorReskinRisk).toBe(0.88);
+    expect(judged[0].judgeScore).toBeLessThanOrEqual(0.45);
+    expect(judged[0].judgeNotes).toContain('anchorReskin=0.88');
+    expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || '')).toContain('manualAnchorReskinRisk');
+  });
+
   it('sends trimmed long drafts to the model critic without truncating returned candidates', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({

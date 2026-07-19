@@ -1726,7 +1726,8 @@ function scoreJudgeBreakdown(breakdown: CandidateJudgeBreakdown): number {
     Math.max(0, 0.56 - breakdown.clarity) * 0.24 +
     Math.max(0, 0.5 - breakdown.novelty) * 0.18 +
     Math.max(0, 0.56 - breakdown.audienceFit) * 0.22 +
-    Math.max(0, 0.72 - breakdown.policySafety) * 0.32
+    Math.max(0, 0.72 - breakdown.policySafety) * 0.32 +
+    (breakdown.manualAnchorReskinRisk || 0) * 0.32
   );
 
   return clamp(weighted - weakDimensionPenalty);
@@ -1759,6 +1760,9 @@ function scorePolicyRisk(candidate: RankableProtocolTweet, featureTags: Candidat
   if (/(sign up|buy now|subscribe|dm me|join now)/i.test(lowercase)) risk += 0.16;
   if (typeof candidate.judgeBreakdown?.policySafety === 'number') {
     risk += Math.max(0, 1 - candidate.judgeBreakdown.policySafety) * 0.18;
+  }
+  if (typeof candidate.judgeBreakdown?.manualAnchorReskinRisk === 'number') {
+    risk += candidate.judgeBreakdown.manualAnchorReskinRisk * 0.24;
   }
 
   return clamp(risk);
@@ -1940,6 +1944,9 @@ export function rankGeneratedTweets(
     });
     const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
     const accountTasteWeight = geoffreyStrict ? 1 : 0.15;
+    const manualAnchorReskinRiskScore = geoffreyStrict
+      ? clamp(candidate.judgeBreakdown?.manualAnchorReskinRisk || 0)
+      : 0;
     const slopScore = scoreSlopRisk(candidate.content, featureTags);
     const replyBaitScore = scoreReplyPotential(candidate.content, featureTags);
     const conversationQualityScore = scoreConversationValue(candidate.content, featureTags);
@@ -1992,6 +1999,7 @@ export function rankGeneratedTweets(
       (accountTasteScore.sourceCopyRisk * 0.95) +
       (generatedPatternScore.score * 0.28 * accountTasteWeight) +
       (patternReuseRiskScore * 0.32) +
+      (manualAnchorReskinRiskScore * 0.42) +
       (accountTasteScore.rejectedDraftSimilarity * 0.55 * accountTasteWeight) +
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.34 * accountTasteWeight) +
       (Math.max(0, 0.34 - accountTasteScore.technicalCredibilityScore) * 0.2 * accountTasteWeight) +
@@ -2035,6 +2043,7 @@ export function rankGeneratedTweets(
       sourceCopyRisk: Number((-accountTasteScore.sourceCopyRisk * 0.32).toFixed(3)),
       generatedPatternRisk: Number((-generatedPatternScore.score * 0.16 * accountTasteWeight).toFixed(3)),
       patternReuseRisk: Number((-patternReuseRiskScore * 0.14).toFixed(3)),
+      manualAnchorReskinRisk: Number((-manualAnchorReskinRiskScore * 0.2).toFixed(3)),
       rejectedDraftSimilarity: Number((-accountTasteScore.rejectedDraftSimilarity * 0.18 * accountTasteWeight).toFixed(3)),
       authorityProof: authorityProofIssue ? Number((-authorityProofPenalty * 0.14).toFixed(3)) : 0,
       audienceSegment: Number((audienceScore * 0.05).toFixed(3)),
@@ -2117,6 +2126,7 @@ export function rankGeneratedTweets(
       (accountTasteScore.sourceCopyRisk * 0.52) -
       (generatedPatternScore.score * 0.16 * accountTasteWeight) -
       (patternReuseRiskScore * 0.18) -
+      (manualAnchorReskinRiskScore * 0.34) -
       (accountTasteScore.rejectedDraftSimilarity * 0.34 * accountTasteWeight) -
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.24 * accountTasteWeight) -
       (authorityProofPenalty * 0.16)
@@ -2129,6 +2139,7 @@ export function rankGeneratedTweets(
         confidenceScore = Math.min(confidenceScore, 0.49);
       }
       if (anchorCopyRiskScore >= 0.4) confidenceScore = Math.min(confidenceScore, 0.39);
+      if (manualAnchorReskinRiskScore >= 0.48) confidenceScore = Math.min(confidenceScore, 0.39);
       if (accountTasteScore.sourceCopyRisk >= 0.58) confidenceScore = Math.min(confidenceScore, 0.24);
       if (unsupportedNetworkTopic) confidenceScore = Math.min(confidenceScore, 0.39);
       if (accountTasteScore.technicalCredibilityScore < 0.42) {

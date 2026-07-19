@@ -187,6 +187,10 @@ export interface CandidateJudgeBreakdown {
   novelty: number;
   audienceFit: number;
   policySafety: number;
+  nativeVoice?: number;
+  cringeRisk?: number;
+  technicalCredibility?: number;
+  manualAnchorReskinRisk?: number;
 }
 
 export interface CandidateCriticScores {
@@ -239,6 +243,7 @@ export interface CandidateScoreProvenance {
   truthfulnessRisk?: number;
   generatedPatternRisk?: number;
   patternReuseRisk?: number;
+  manualAnchorReskinRisk?: number;
   rejectedDraftSimilarity?: number;
   winnerMechanicFit?: number;
   authorityProof?: number;

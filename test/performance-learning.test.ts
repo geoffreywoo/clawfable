@@ -457,10 +457,20 @@ describe('performance learning smoke', () => {
       source: 'timeline',
     }) as any);
 
-    for (let index = 0; index < 8; index++) {
+    const substantiveExamples = [
+      'The constraint in this factory is not demand. It is qualifying one more process without breaking yield.',
+      'software is nepo plus codex. hardware is where the remaining alpha still looks mispriced.',
+      'is the AI stock trade melting because everyone decided to spend the summer in europe?',
+      'threshold to beat is QQQ. mid market private equity still looks like a building full of zombies.',
+      'compute pricing is an actually useful prediction market because the underlying capacity clears continuously.',
+      'the harness and context are at least half the product. model quality alone does not explain adoption.',
+      'buy more AI stocks or chill? the local fear looks temporary, but conviction gets expensive on red days.',
+      'factory qualification is a social technology disguised as paperwork. every supplier change reopens the argument.',
+    ];
+    for (let index = 0; index < substantiveExamples.length; index++) {
       await addPerformanceEntry(agent.id, performanceEntry({
         xTweetId: `x-substantive-${index}`,
-        content: `The constraint in factory ${index} is not demand. It is qualifying one more process without breaking yield.`,
+        content: substantiveExamples[index],
         format: index % 2 === 0 ? 'observation' : 'hot_take',
         likes: 20 - index,
         source: 'timeline',
@@ -473,6 +483,52 @@ describe('performance learning smoke', () => {
     expect(bestIds).toHaveLength(8);
     expect(bestIds).not.toContain('x-media-stub');
     expect(bestIds.every((id) => id.startsWith('x-substantive-'))).toBe(true);
+  });
+
+  it('collapses near-duplicate manual posts before building the native voice bank', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-anchor-dedupe',
+      name: 'Perf Agent Anchor Dedupe',
+      soulMd: '# soul',
+    } as any);
+
+    await addPerformanceEntry(agent.id, performanceEntry({
+      xTweetId: 'x-interview-primary',
+      content: 'New interview with the team about sports, investments, and venture capital. Six years ago none of our athlete friends had heard of venture capital.',
+      likes: 120,
+      source: 'timeline',
+    }) as any);
+    await addPerformanceEntry(agent.id, performanceEntry({
+      xTweetId: 'x-interview-duplicate',
+      content: 'New interview with the team about the intersection of sports, business, and venture capital. Six years ago none of our athlete friends knew anything about venture capital.',
+      likes: 90,
+      source: 'timeline',
+    }) as any);
+
+    const distinctExamples = [
+      'software is nepo plus codex. hardware is where the remaining alpha still looks mispriced.',
+      'is the AI stock trade melting because everyone decided to spend the summer in europe?',
+      'threshold to beat is QQQ. mid market private equity still looks like a building full of zombies.',
+      'compute pricing is an actually useful prediction market because the underlying capacity clears continuously.',
+      'the harness and context are at least half the product. model quality alone does not explain adoption.',
+      'buy more AI stocks or chill? the local fear looks temporary, but conviction gets expensive on red days.',
+      'factory qualification is a social technology disguised as paperwork. every supplier change reopens the argument.',
+    ];
+    for (let index = 0; index < distinctExamples.length; index++) {
+      await addPerformanceEntry(agent.id, performanceEntry({
+        xTweetId: `x-distinct-${index}`,
+        content: distinctExamples[index],
+        likes: 50 - index,
+        source: 'timeline',
+      }) as any);
+    }
+
+    const learnings = await buildLearnings(agent);
+    const bestIds = learnings.operatorVoiceReference?.bestPerformers.map((entry) => entry.xTweetId) ?? [];
+
+    expect(bestIds).toHaveLength(8);
+    expect(bestIds).toContain('x-interview-primary');
+    expect(bestIds).not.toContain('x-interview-duplicate');
   });
 
   it('stores manual topic priors, curation metadata, and source-lane performance', async () => {

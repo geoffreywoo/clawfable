@@ -55,6 +55,7 @@ import {
   inferPortfolioRole,
   shouldCreateVelocityFollowup,
 } from './growth-engine';
+import { isNearDuplicate } from './survivability';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -1125,23 +1126,28 @@ function buildOperatorVoiceReference(
       .trim();
     const wordCount = prose.split(/\s+/).filter(Boolean).length;
     const timestampLines = tweet.content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}\s*[-–]/.test(line)).length;
-    return wordCount >= 8 && timestampLines < 2;
+    const dependsOnAttachedMedia = /https?:\/\/\S+/i.test(tweet.content);
+    return wordCount >= (dependsOnAttachedMedia ? 14 : 8) && timestampLines < 2;
   };
   const substantiveSorted = sorted.filter(hasStandaloneSubstance);
   const substantiveRecent = recent.filter(hasStandaloneSubstance);
   const secondary = sorted.filter((tweet) => !hasStandaloneSubstance(tweet));
-  const primaryCandidates = [...pinnedExamples];
-  const maxCandidateLength = Math.max(substantiveSorted.length, Math.min(6, substantiveRecent.length));
-  for (let index = 0; index < maxCandidateLength; index++) {
-    if (substantiveSorted[index]) primaryCandidates.push(substantiveSorted[index]);
-    if (index < 6 && substantiveRecent[index]) primaryCandidates.push(substantiveRecent[index]);
-  }
   const topPerformers: TweetPerformance[] = [];
   const seenIds = new Set<string>();
   const modeCounts = new Map<string, number>();
-  for (const tweet of primaryCandidates) {
+  const addCandidate = (
+    tweet: TweetPerformance,
+    options: { pinned?: boolean; enforceModeDiversity?: boolean } = {},
+  ): boolean => {
     const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
-    if (seenIds.has(id)) continue;
+    if (seenIds.has(id)) return false;
+    const pinned = options.pinned === true || curation.pinnedXTweetIds.includes(String(tweet.xTweetId));
+    if (
+      !pinned
+      && isNearDuplicate(tweet.content, topPerformers.map((entry) => entry.content), 0.4).isDuplicate
+    ) {
+      return false;
+    }
     const lengthMode = tweet.content.length < 120 ? 'short' : tweet.content.length < 360 ? 'medium' : 'long';
     const socialMode = /^@\w+/.test(tweet.content.trim())
       ? 'reply'
@@ -1161,28 +1167,39 @@ function buildOperatorVoiceReference(
       socialMode,
       registerMode,
     ].join(':');
-    const pinned = curation.pinnedXTweetIds.includes(String(tweet.xTweetId));
-    if (!pinned && (modeCounts.get(signature) || 0) >= 2) continue;
+    if (!pinned && options.enforceModeDiversity !== false && (modeCounts.get(signature) || 0) >= 2) {
+      return false;
+    }
     topPerformers.push(tweet);
     seenIds.add(id);
     modeCounts.set(signature, (modeCounts.get(signature) || 0) + 1);
-    if (topPerformers.length >= 12) break;
+    return true;
+  };
+
+  for (const tweet of pinnedExamples) {
+    addCandidate(tweet, { pinned: true });
+    if (topPerformers.length >= 8) break;
   }
-  if (topPerformers.length < Math.min(12, primaryCandidates.length)) {
-    for (const tweet of primaryCandidates) {
-      const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
-      if (seenIds.has(id)) continue;
-      topPerformers.push(tweet);
-      seenIds.add(id);
-      if (topPerformers.length >= 12) break;
-    }
+
+  const engagementTarget = Math.max(5, topPerformers.length);
+  for (const tweet of substantiveSorted) {
+    addCandidate(tweet);
+    if (topPerformers.length >= engagementTarget) break;
   }
+
+  for (const tweet of substantiveRecent) {
+    addCandidate(tweet);
+    if (topPerformers.length >= 8) break;
+  }
+
+  for (const tweet of [...substantiveSorted, ...substantiveRecent]) {
+    if (topPerformers.length >= 8) break;
+    addCandidate(tweet, { enforceModeDiversity: false });
+  }
+
   if (topPerformers.length < 8) {
     for (const tweet of secondary) {
-      const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
-      if (seenIds.has(id)) continue;
-      topPerformers.push(tweet);
-      seenIds.add(id);
+      addCandidate(tweet, { enforceModeDiversity: false });
       if (topPerformers.length >= 8) break;
     }
   }

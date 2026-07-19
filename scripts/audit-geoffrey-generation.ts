@@ -30,6 +30,7 @@ type QueueAuditItem = {
   statusTextureRisk: number;
   truthfulnessRisk: number;
   generatedPatternRisk: number;
+  manualAnchorReskinRisk: number;
   sourceCopyRisk: number;
   rejectedDraftSimilarity: number;
   tasteAction: 'allow' | 'review' | 'block';
@@ -94,6 +95,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     || item.cringeRisk >= 0.58
     || item.statusTextureRisk >= 0.4
     || item.truthfulnessRisk >= 0.5
+    || item.manualAnchorReskinRisk >= 0.48
     || item.sourceCopyRisk >= 0.58
     || item.rejectedDraftSimilarity >= 0.55
     || (item.technicalCredibilityScore < 0.3 && item.slopScore >= 0.45)
@@ -106,6 +108,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
     || item.technicalCredibilityScore < 0.42
     || item.cringeRisk >= 0.42
     || item.generatedPatternRisk >= 0.46
+    || item.manualAnchorReskinRisk >= 0.3
     || item.sourceCopyRisk >= 0.38
     || item.rejectedDraftSimilarity >= 0.32
     || item.slopScore >= 0.42
@@ -125,6 +128,7 @@ function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   if (item.statusTextureRisk >= 0.24) reasons.push(`status texture ${item.statusTextureRisk}`);
   if (item.truthfulnessRisk >= 0.5) reasons.push(`claim evidence ${item.truthfulnessRisk}`);
   if (item.generatedPatternRisk >= 0.46) reasons.push(`generated pattern ${item.generatedPatternRisk}`);
+  if (item.manualAnchorReskinRisk >= 0.3) reasons.push(`manual anchor reskin ${item.manualAnchorReskinRisk}`);
   if (item.sourceCopyRisk >= 0.38) reasons.push(`external source copy ${item.sourceCopyRisk}`);
   if (item.rejectedDraftSimilarity >= 0.32) reasons.push(`rejected draft similarity ${item.rejectedDraftSimilarity}`);
   if (item.queueTasteIssue) reasons.push(item.queueTasteIssue);
@@ -197,6 +201,7 @@ function auditTweet(
     statusTextureRisk: taste.statusTextureRisk,
     truthfulnessRisk: taste.truthfulnessRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
+    manualAnchorReskinRisk: readNumber(tweet.judgeBreakdown?.manualAnchorReskinRisk) ?? 0,
     sourceCopyRisk: taste.sourceCopyRisk,
     rejectedDraftSimilarity: taste.rejectedDraftSimilarity,
     tasteAction: taste.action,
@@ -309,7 +314,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);

@@ -882,6 +882,67 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(technical!.content);
   });
 
+  it('caps Geoffrey drafts when the model critic detects a manual-anchor reskin', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'hardware', 'industrial capacity'],
+      antiGoals: ['generic hype', 'manual anchor reskins'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+      summary: 'Geoffrey writes compressed technical and social observations.',
+    };
+
+    const ranked = rankGeneratedTweets([
+      {
+        content: '2026 status is knowing which dinner guests can get a transformer delivered before your data center interconnect expires.',
+        format: 'short_punch',
+        targetTopic: 'culture',
+        rationale: 'A native-sounding status joke that copies a manual anchor premise.',
+        judgeScore: 0.9,
+        judgeBreakdown: {
+          overall: 0.9,
+          voiceFit: 0.86,
+          clarity: 0.88,
+          novelty: 0.84,
+          audienceFit: 0.88,
+          policySafety: 0.94,
+          nativeVoice: 0.86,
+          cringeRisk: 0.12,
+          technicalCredibility: 0.7,
+          manualAnchorReskinRisk: 0.88,
+        },
+      },
+      {
+        content: 'spherical purified graphite still has to survive morphology control, coating and cell qualification. owning the mine is not an anode strategy.',
+        format: 'hot_take',
+        targetTopic: 'graphite battery materials',
+        rationale: 'Independent technical thesis.',
+        judgeScore: 0.78,
+        judgeBreakdown: {
+          overall: 0.78,
+          voiceFit: 0.78,
+          clarity: 0.78,
+          novelty: 0.76,
+          audienceFit: 0.78,
+          policySafety: 0.92,
+          nativeVoice: 0.76,
+          cringeRisk: 0.14,
+          technicalCredibility: 0.82,
+          manualAnchorReskinRisk: 0.04,
+        },
+      },
+    ], context);
+
+    const reskin = ranked.find((candidate) => candidate.content.startsWith('2026 status'));
+    const independent = ranked.find((candidate) => candidate.content.startsWith('spherical'));
+
+    expect(reskin).toBeDefined();
+    expect(independent).toBeDefined();
+    expect(reskin!.scoreProvenance.manualAnchorReskinRisk).toBeLessThan(-0.1);
+    expect(reskin!.confidenceScore).toBeLessThanOrEqual(0.39);
+    expect(independent!.confidenceScore).toBeGreaterThan(reskin!.confidenceScore);
+  });
+
   it('does not let a high headline judge score hide weak critic dimensions', () => {
     const ranked = rankGeneratedTweets([
       {
