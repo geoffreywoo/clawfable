@@ -69,6 +69,7 @@ import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHig
 import { assessClaimEvidence } from './claim-evidence';
 import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { semanticIdeaSimilarity } from './tweet-features';
 import {
   getTrustedClaimSourceTexts,
   getUntrustedSourceTexts,
@@ -2687,6 +2688,15 @@ export async function refillQueue(
         });
         if (queueTasteIssue) continue;
         if (isNearDuplicate(item.content, recentContent, duplicateThreshold).isDuplicate) continue;
+        if (
+          isGeoffreyAccount(agent.handle)
+          && recentContent.some((content) => semanticIdeaSimilarity(
+            { content: item.content, topic: item.targetTopic },
+            { content },
+          ) >= 0.48)
+        ) {
+          continue;
+        }
         recentContent.unshift(item.content);
 
         await createTweet({

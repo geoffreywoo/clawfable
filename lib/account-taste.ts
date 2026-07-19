@@ -1,7 +1,7 @@
 import type { AgentLearnings, CandidateFeatureTags, PersonalizationMemory, TweetPerformance } from './types';
 import type { VoiceProfile } from './soul-parser';
 import { assessFormulaicCadence } from './virality-signals';
-import { extractCandidateFeatureTags, ideaSimilarity } from './tweet-features';
+import { extractCandidateFeatureTags, ideaSimilarity, semanticIdeaSimilarity } from './tweet-features';
 import { assessClaimEvidence } from './claim-evidence';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
 import { isNearDuplicate } from './survivability';
@@ -435,10 +435,8 @@ function rejectedDraftSimilarity(
   const nearDuplicate = isNearDuplicate(content, rejectedDrafts, 0.55);
   const semanticSimilarity = rejectedDrafts.reduce((strongest, draft) => Math.max(
     strongest,
-    ideaSimilarity(
-      { content, thesis: featureTags.thesis },
-      { content: draft },
-    ),
+    ideaSimilarity({ content, thesis: featureTags.thesis }, { content: draft }),
+    semanticIdeaSimilarity({ content, thesis: featureTags.thesis }, { content: draft }),
   ), 0);
 
   return clamp(Math.max(nearDuplicate.similarity || 0, semanticSimilarity));

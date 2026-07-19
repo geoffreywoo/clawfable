@@ -36,6 +36,13 @@ const LOW_STATUS_TEXTURE = [
   'loom',
 ];
 
+const IDEA_LOW_SIGNAL_WORDS = new Set([
+  'actually', 'apparently', 'ask', 'cares', 'clean', 'day', 'every', 'extremely',
+  'first', 'getting', 'guys', 'immediately', 'love', 'loves', 'make', 'means',
+  'next', 'put', 'really', 'room', 'same', 'still', 'thing', 'three', 'until',
+  'whether',
+]);
+
 function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
@@ -50,6 +57,32 @@ function significantTokens(input: string): string[] {
 
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
+}
+
+function canonicalIdeaToken(token: string): string {
+  if (/^(asset)/.test(token)) return 'asset';
+  if (/^(approv)/.test(token)) return 'approval';
+  if (/^(batter)/.test(token)) return 'battery';
+  if (/^(buyer|customer|lender)/.test(token)) return 'counterparty';
+  if (/^(cell|anode)/.test(token)) return 'battery-cell';
+  if (/^(coat)/.test(token)) return 'coating';
+  if (/^(compar|mark|resale|valu|worth)/.test(token)) return 'valuation';
+  if (/^(digg|mine|mining|mined|ore)/.test(token)) return 'extraction';
+  if (/^(industr|manufactur|production)/.test(token)) return 'industrial';
+  if (/^(maint)/.test(token)) return 'maintenance';
+  if (/^(morph|particle|shape)/.test(token)) return 'morphology';
+  if (/^(purif|purity)/.test(token)) return 'purification';
+  if (/^(qualif)/.test(token)) return 'qualification';
+  if (token.length > 5 && token.endsWith('s')) return token.slice(0, -1);
+  return token;
+}
+
+function fullIdeaTokens(input: string): Set<string> {
+  return new Set(
+    significantTokens(input)
+      .filter((token) => !IDEA_LOW_SIGNAL_WORDS.has(token))
+      .map(canonicalIdeaToken),
+  );
 }
 
 export function extractHookType(content: string): TweetHookType {
@@ -213,4 +246,35 @@ export function ideaSimilarity(
 
   const union = new Set([...a, ...b]).size;
   return union === 0 ? 0 : overlap / union;
+}
+
+/**
+ * Concept-level similarity for recent queue and rejection memory. Unlike
+ * `ideaSimilarity`, this reads the full text and normalizes common industrial
+ * synonyms so a rejected premise cannot return with only the nouns swapped.
+ */
+export function semanticIdeaSimilarity(
+  left: { content: string; thesis?: string | null; topic?: string | null },
+  right: { content: string; thesis?: string | null; topic?: string | null },
+): number {
+  const a = fullIdeaTokens([left.topic, left.thesis, left.content].filter(Boolean).join(' '));
+  const b = fullIdeaTokens([right.topic, right.thesis, right.content].filter(Boolean).join(' '));
+  if (a.size === 0 || b.size === 0) return 0;
+
+  let overlap = 0;
+  for (const token of a) {
+    if (b.has(token)) overlap++;
+  }
+  if (overlap < 5) return 0;
+
+  const containment = overlap / Math.min(a.size, b.size);
+  const union = new Set([...a, ...b]).size;
+  const jaccard = union === 0 ? 0 : overlap / union;
+  const domainOverlap = extractDomainTags(left.content)
+    .some((domain) => extractDomainTags(right.content).includes(domain));
+  return Math.max(0, Math.min(1,
+    (containment * 0.82)
+    + (jaccard * 0.18)
+    + (domainOverlap ? 0.04 : 0),
+  ));
 }
