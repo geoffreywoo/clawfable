@@ -61,6 +61,7 @@ export function applyAccountTopicPolicy(
 - A discovered subject is eligible only when it has a concrete bridge to the original SOUL topics or Geoffrey's own manually written posts.
 - A crypto angle is acceptable only when it is a supporting detail inside a stronger AI infrastructure, compute, energy, manufacturing, or frontier-tech thesis.
 - Follow-graph virality is a discovery signal, not an identity override. A live subject must connect concretely to this SOUL, a manual topic, or an operator-written post before it can enter generation.
+- Politics and geopolitics are not default content lanes. Do not lead with politicians, elections, or ideological news unless Geoffrey's manual writing establishes that mode; attaching an industrial paragraph does not cure topic drift.
 - Never inherit a source author's ideology, thesis, certainty, jargon, cadence, or social posture. Learn what happened; Geoffrey supplies what it means and how it sounds.
 - Keep most output in proven native territory. At two original posts per day, use no more than one slot for a live followed-network subject unless the operator explicitly changes the mix.
 

@@ -18,6 +18,7 @@ describe('account topic policy', () => {
     expect(profile.topics).not.toContain('robotics');
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
     expect(profile.communicationStyle).toContain('Discover current subjects dynamically');
+    expect(profile.communicationStyle).toContain('Politics and geopolitics are not default content lanes');
     expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffwoo');
     expect(profile.communicationStyle).toContain('low-status SaaS-ops texture');
     expect(profile.communicationStyle).toContain('compute constraints');

@@ -330,6 +330,7 @@ describe('account taste scoring', () => {
       'battery nationalism keeps pointing at the mine while spherical purified graphite is stuck doing purification, morphology control, coating and cell qualification.\n\ncongrats on owning dirt. the anode still has standards.',
       'a fab can buy the famous machine and still wait on high-purity hydrofluoric acid.\n\nadvanced manufacturing policy loves glamorous capex. fluorine chemistry remains extremely unglamorous and extremely required.',
       'battery independence apparently means digging up graphite and then discovering the cell maker cares about particle shape, purity, coating and qualification.\n\nmining guys meet process engineering and immediately ask for an extension.',
+      'beryllium supply is a worker-safety and qualification problem wearing a critical-mineral costume.\n\ntoxic dust makes machining capacity difficult to add. aerospace and semiconductor buyers then need the new process qualified.',
     ];
 
     for (const content of falsePositives) {

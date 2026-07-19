@@ -9,6 +9,7 @@ import type {
 import type { VoiceProfile } from './soul-parser';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
+import { isGeoffreyVoiceProfile } from './account-taste';
 
 export interface TrendFitScores {
   freshness: number;
@@ -91,6 +92,8 @@ const BROAD_IDENTITY_TOPICS = new Set([
   'space',
   'technology',
 ]);
+
+const POLITICS_LED_TOPIC_PATTERN = /\b(?:biden|campaign|democrat|election|geopolitic|putin|republican|trump|white house)\b/i;
 
 const BASE_LANE_BUDGETS: Record<'safe' | 'balanced' | 'explore', Record<ContentSourceLane, number>> = {
   safe: {
@@ -423,11 +426,16 @@ export function enrichTrendingTopics(
     const adjacentIdentityFloor = tolerance === 'adjacent' ? 0.32 : tolerance === 'aggressive' ? 0.18 : 0.24;
     const hasAlignedIdentityBridge = identityFit >= 0.45;
     const hasAdjacentIdentityBridge = identityFit >= adjacentIdentityFloor;
+    const politicsLedDrift = isGeoffreyVoiceProfile(voiceProfile)
+      && POLITICS_LED_TOPIC_PATTERN.test(`${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`)
+      && manual < 0.55;
 
     let sourceLane: ContentSourceLane | 'reject' = 'reject';
     let plannerReason = 'Trend is too stale or too far from the account voice.';
 
-    if (total >= 0.55 && hasAlignedIdentityBridge) {
+    if (politicsLedDrift) {
+      plannerReason = 'Rejected despite momentum: politics-led subject lacks manual evidence in Geoffrey\'s native writing.';
+    } else if (total >= 0.55 && hasAlignedIdentityBridge) {
       sourceLane = 'trend_aligned_exploit';
       plannerReason = networkQualified
         ? 'Followed-network subject has strong momentum and a concrete bridge to native account topics.'

@@ -272,6 +272,41 @@ describe('source planner', () => {
     expect(topic.plannerReason).toContain('Rejected despite momentum');
   });
 
+  it('rejects politics-led Geoffrey trends without manual political voice evidence', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 921,
+      networkTopicId: 'network-putin-europe-921',
+      headline: 'Putin benefits when the United States pulls away from Europe.',
+      source: '@foreignpolicy',
+      relevanceScore: 98,
+      category: 'US distancing from Europe',
+      timestamp: new Date().toISOString(),
+      tweetCount: 4,
+      sourceType: 'x',
+      sourceCount: 3,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.94,
+      networkBreakoutScore: 0.92,
+      topicConfidence: 0.91,
+      topTweet: {
+        id: 'putin-1',
+        text: 'Putin benefits as allied defense production, procurement standards, and demand signals fragment.',
+        likes: 800,
+        author: 'foreignpolicy',
+      },
+    }], {
+      tone: 'technical operator/investor',
+      topics: ['defense production', 'industrial capacity', 'manufacturing'],
+      antiGoals: ['content drift'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed technical frontier-tech voice.',
+      summary: 'Geoffrey writes about industrial capacity and hard technical constraints.',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.identityFit).toBeGreaterThan(0);
+    expect(topic.sourceLane).toBe('reject');
+    expect(topic.plannerReason).toContain('politics-led subject lacks manual evidence');
+  });
+
   it('does not mistake the letters ai inside supply for an AI identity bridge', () => {
     const [topic] = enrichTrendingTopics([{
       id: 93,

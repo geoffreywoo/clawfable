@@ -47,6 +47,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'can-do-and-still', weight: 0.26, pattern: /\b(?:can|could)\s+(?!be\b)[a-z][^.!?\n]{1,100}\band still\b/i },
   { label: 'mirrored-adverb-contrast', weight: 0.26, pattern: /\b(?:is|are|remains?|stays?)\s+([a-z]+ly)\s+[a-z-]+\s+and\s+\1\s+[a-z-]+/i },
   { label: 'typed-group-meets-physics', weight: 0.34, pattern: /\b(?:finance|mining|policy|software|capital|vc|pe)\s+(?:guys|people|teams)?[^.!?\n]{0,45}\bmeets?\s+(?:(?:process|mechanical|chemical)\s+)?(?:atoms|chemistry|engineering|manufacturing|physics|reality)\b/i },
+  { label: 'x-wearing-y-costume', weight: 0.52, pattern: /\b(?:is|are)\s+(?:a|an)\s+[^.!?\n]{2,100}\bwearing\s+(?:a|an)\s+[^.!?\n]{2,80}\b(?:costume|hat|mask|outfit)\b/i },
   { label: 'no-longer-bottleneck', weight: 0.24, pattern: /\b(?:bottleneck|constraint) is no longer\b/i },
   { label: 'sounds-like-until', weight: 0.16, pattern: /\bsounds like\b[^.\n]{0,100}\buntil\b/i },
   { label: 'x-decides-closer', weight: 0.16, pattern: /\b(?:the|that) [a-z][^.\n]{1,70} decides\.?$/i },
