@@ -485,6 +485,48 @@ describe('performance learning smoke', () => {
     expect(bestIds.every((id) => id.startsWith('x-substantive-'))).toBe(true);
   });
 
+  it('builds a casual startup register bank without stiff analyst prose', async () => {
+    const agent = await createAgent({
+      handle: 'perf-agent-startup-register',
+      name: 'Perf Agent Startup Register',
+      soulMd: '# soul',
+    } as any);
+
+    const casualExamples = [
+      'software is nepo + codex/claude\nhardware is where alpha is left',
+      'compute pricing is an actually good use case. the sports thing is still obviously a sportsbook.',
+      'x algo def better. more useful content. more friends. yall cooking.',
+      'mid market pe funds all seem like zombies. threshold to beat is QQQ.',
+    ];
+    for (let index = 0; index < casualExamples.length; index++) {
+      await addPerformanceEntry(agent.id, performanceEntry({
+        xTweetId: `x-casual-startup-${index}`,
+        content: casualExamples[index],
+        topic: index === 2 ? 'product' : 'startups',
+        likes: 30 - index,
+        source: 'timeline',
+      }) as any);
+    }
+    await addPerformanceEntry(agent.id, performanceEntry({
+      xTweetId: 'x-stiff-startup',
+      content: 'humanoid robot forecasts love unit counts. motor performance at temperature is less cooperative. NdFeB supply eventually runs into separation chemistry and sintering yield.',
+      topic: 'robotics startups',
+      likes: 400,
+      source: 'timeline',
+    }) as any);
+
+    const learnings = await buildLearnings(agent);
+    const register = learnings.operatorVoiceReference?.startupRegisterExamples || [];
+
+    expect(register.map((entry) => entry.xTweetId)).toEqual(expect.arrayContaining([
+      'x-casual-startup-0',
+      'x-casual-startup-1',
+      'x-casual-startup-2',
+      'x-casual-startup-3',
+    ]));
+    expect(register.map((entry) => entry.xTweetId)).not.toContain('x-stiff-startup');
+  });
+
   it('collapses near-duplicate manual posts before building the native voice bank', async () => {
     const agent = await createAgent({
       handle: 'perf-agent-anchor-dedupe',

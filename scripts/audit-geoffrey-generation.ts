@@ -25,6 +25,8 @@ type QueueAuditItem = {
   slopScore: number;
   nativeVoiceScore: number;
   nativeStyleScore: number;
+  casualStartupScore: number;
+  stiffnessRisk: number;
   voiceDriftRisk: number;
   technicalCredibilityScore: number;
   cringeRisk: number;
@@ -93,6 +95,8 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
   if (item.queueTasteIssue) return 'rewrite';
   if (
     item.nativeVoiceScore < 0.42
+    || item.casualStartupScore < 0.34
+    || item.stiffnessRisk >= 0.58
     || item.voiceDriftRisk >= 0.62
     || item.cringeRisk >= 0.58
     || item.statusTextureRisk >= 0.4
@@ -106,6 +110,8 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
   }
   if (
     item.nativeVoiceScore < 0.6
+    || item.casualStartupScore < 0.52
+    || item.stiffnessRisk >= 0.32
     || item.voiceDriftRisk >= 0.25
     || item.technicalCredibilityScore < 0.42
     || item.cringeRisk >= 0.42
@@ -124,6 +130,8 @@ function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
   const reasons: string[] = [];
   if (item.trendTopicId && !item.timelyCurrentSource) reasons.push('trend slot lacks a current dated source URL');
   if (item.nativeVoiceScore < 0.6) reasons.push(`native voice ${item.nativeVoiceScore}`);
+  if (item.casualStartupScore < 0.52) reasons.push(`casual startup fit ${item.casualStartupScore}`);
+  if (item.stiffnessRisk >= 0.32) reasons.push(`stiffness risk ${item.stiffnessRisk}`);
   if (item.voiceDriftRisk >= 0.25) reasons.push(`voice drift ${item.voiceDriftRisk}`);
   if (item.technicalCredibilityScore < 0.42) reasons.push(`technical credibility ${item.technicalCredibilityScore}`);
   if (item.cringeRisk >= 0.42) reasons.push(`cringe risk ${item.cringeRisk}`);
@@ -146,6 +154,7 @@ function auditTweet(
   const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, { topic: tweet.topic, thesisHint: tweet.thesis });
   const operatorEvidence = [
     ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.startupRegisterExamples || []),
     ...(context.learnings?.operatorVoiceReference?.bestPerformers || []),
   ].map((entry) => entry.content);
   const taste = assessAccountTaste(tweet.content, {
@@ -198,6 +207,8 @@ function auditTweet(
     slopScore: Number(slopScore.toFixed(3)),
     nativeVoiceScore: taste.nativeVoiceScore,
     nativeStyleScore: taste.nativeStyleScore,
+    casualStartupScore: taste.casualStartupScore,
+    stiffnessRisk: taste.stiffnessRisk,
     voiceDriftRisk: taste.voiceDriftRisk,
     technicalCredibilityScore: technical.score,
     cringeRisk: taste.cringeRisk,
@@ -318,7 +329,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
-    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk}${item.generatedPatternHits.length ? ` (${item.generatedPatternHits.join(', ')})` : ''} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
+    console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} casualStartup=${item.casualStartupScore} stiffness=${item.stiffnessRisk} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk}${item.generatedPatternHits.length ? ` (${item.generatedPatternHits.join(', ')})` : ''} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);
     console.log(`text: ${preview}`);

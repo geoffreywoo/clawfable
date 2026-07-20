@@ -188,6 +188,8 @@ export interface CandidateJudgeBreakdown {
   audienceFit: number;
   policySafety: number;
   nativeVoice?: number;
+  casualStartupFit?: number;
+  stiffnessRisk?: number;
   cringeRisk?: number;
   technicalCredibility?: number;
   manualAnchorReskinRisk?: number;
@@ -235,6 +237,8 @@ export interface CandidateScoreProvenance {
   banalOpsTexture?: number;
   nativeVoice?: number;
   nativeStyle?: number;
+  casualStartupFit?: number;
+  stiffnessRisk?: number;
   voiceDrift?: number;
   topicIdentityFit?: number;
   technicalCredibility?: number;
@@ -836,6 +840,7 @@ export interface OperatorVoiceReference {
   bestPerformers: TweetPerformance[];  // strongest operator-written tweets
   styleFingerprint: StyleFingerprint;  // how the best human-written tweets sound
   pinnedExamples?: TweetPerformance[];
+  startupRegisterExamples?: TweetPerformance[]; // topic-relevant human diction, not only broad engagement winners
   blockedXTweetIds?: string[];
 }
 

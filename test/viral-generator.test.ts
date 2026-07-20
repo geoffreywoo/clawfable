@@ -1518,6 +1518,13 @@ describe('generateViralBatch', () => {
       likes: 513,
       content: 'we love @Etched. what this team is building is insane. https://t.co/source',
     });
+    geoffreyLearnings.operatorVoiceReference.startupRegisterExamples = [
+      performance({
+        source: 'timeline',
+        likes: 33,
+        content: 'software is nepo + codex/claude\nhardware is where alpha is left',
+      }),
+    ];
 
     const batch = await generateViralBatch(
       {
@@ -1594,21 +1601,20 @@ describe('generateViralBatch', () => {
     const userPrompt = String(createCall.messages[0].content || '');
 
     expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
-    expect(createCall.system).toContain('Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number.');
-    expect(createCall.system).toContain('Geoffrey\'s social register matters');
-    expect(createCall.system).toContain('Operator-written timeline/manual posts are HIGH-SIGNAL evidence, not comparison-only examples.');
-    expect(createCall.system).toContain('SYSTEM WINNER, MECHANICS ONLY');
-    expect(createCall.system).toContain('anonymous-anecdote');
+    expect(createCall.system).toContain('## REAL MANUAL STARTUP POSTS');
+    expect(createCall.system).toContain('software is nepo + codex/claude');
+    expect(createCall.system).toContain('Put that judgment in the first 120 characters');
+    expect(createCall.system).toContain('invented evidence is blocked');
+    expect(createCall.system).toContain('Do not copy their premise, names, joke, list shape, opening, or sentence skeleton');
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
-    expect(createCall.system).toContain('top human anchors react to a real named person, company, event, or source');
-    expect(createCall.system).toContain('MANUAL-ANCHOR FIREWALL');
-    expect(createCall.system).toContain('discard structural reskins');
-    expect(createCall.system).toContain('manufactured mic-drop endings');
-    expect(createCall.system).toContain('Technical detail is not a license to lecture.');
-    expect(userPrompt).toContain('Default unsourced analysis to one or two compressed beats');
-    expect(userPrompt).toContain('one strong mechanism is better than a textbook inventory');
-    expect(userPrompt).toContain('Slot guide schema: slot|topic|intent|source|brief');
-    expect(userPrompt).toContain('ammonium paratungstate -> tungsten carbide powder metallurgy');
+    expect(createCall.system).not.toContain('## ENGAGEMENT DATA');
+    expect(createCall.system).not.toContain('SYSTEM WINNER');
+    expect(userPrompt).toContain('In the first 120 characters');
+    expect(userPrompt).toContain('one supplied fact:tungsten carbide powder metallurgy and tool qualification');
+    expect(userPrompt).not.toContain('ammonium paratungstate ->');
+    expect(userPrompt).not.toContain('Slot guide schema:');
+    expect(userPrompt).not.toContain('"creativeLane"');
+    expect(userPrompt).not.toContain('"portfolioRole"');
     expect(userPrompt).not.toContain('Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure');
     expect(userPrompt).not.toContain('|hook:');
     expect(userPrompt).not.toContain('|tone:');

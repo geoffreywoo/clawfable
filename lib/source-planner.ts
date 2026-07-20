@@ -76,7 +76,7 @@ const IDENTITY_STOP_WORDS = new Set([
 const GENERIC_IDENTITY_BRIDGE_TOKENS = new Set([
   'account', 'business', 'capacity', 'company', 'founder', 'founders', 'future', 'industry',
   'industrial', 'infrastructure', 'investor', 'investors', 'market', 'markets', 'operator',
-  'operators', 'software', 'startup', 'startups', 'system', 'systems', 'technical', 'technology',
+  'operators', 'software', 'startup', 'startups', 'system', 'systems', 'tech', 'technical', 'technology',
 ]);
 
 const BROAD_IDENTITY_TOPICS = new Set([
@@ -90,6 +90,7 @@ const BROAD_IDENTITY_TOPICS = new Set([
   're industrialization',
   'robotics',
   'space',
+  'tech',
   'technology',
 ]);
 

@@ -738,6 +738,93 @@ function getFinalTrendSourceCap(
   return Math.min(count, Math.max(1, Math.floor(count * effectiveShare)));
 }
 
+function cleanGeoffreyVoiceAnchor(value: string): string {
+  return value
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/&amp;/gi, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function buildGeoffreySystemPrompt({
+  voiceProfile,
+  finalCount,
+  candidateCount,
+  learnings,
+  recentPosts,
+  memory,
+}: {
+  voiceProfile: VoiceProfile;
+  finalCount: number;
+  candidateCount: number;
+  learnings: AgentLearnings | null;
+  recentPosts: string[];
+  memory: PersonalizationMemory | null;
+}): string {
+  const reference = learnings?.operatorVoiceReference;
+  const anchors = [
+    ...(reference?.startupRegisterExamples || []),
+    ...(reference?.pinnedExamples || []),
+    ...(reference?.bestPerformers || []),
+  ]
+    .map((entry) => cleanGeoffreyVoiceAnchor(entry.content))
+    .filter((content, index, items) => content.length >= 20 && items.indexOf(content) === index)
+    .slice(0, 8);
+  const memoryLessons = [
+    ...(memory?.neverDoThisAgain || []),
+    ...(memory?.operatorHiddenPreferences || []),
+    ...(memory?.identityConstraints || []),
+    ...(memory?.editTransformations || []),
+  ]
+    .map((item) => compactExampleTweet(item, 180))
+    .filter((item, index, items) => item && items.indexOf(item) === index)
+    .slice(0, 7);
+  const recent = recentPosts
+    .map((item) => compactExampleTweet(item, 180))
+    .filter(Boolean)
+    .slice(0, getRecentPostsPromptLimit(finalCount));
+
+  return [
+    `You write original standalone X posts for @geoffwoo. The pass/fail question is whether Geoffrey would plausibly type the exact wording himself.`,
+    '',
+    buildGeoffreyNativeWritingBrief(),
+    '',
+    `## AUTHOR POSITION`,
+    `Geoffrey is a startup investor/operator and capital allocator. He cares about AI and models, startups, compute and hardware, energy, robotics, manufacturing, industrial capacity, space, and the companies enabled or constrained by them. Crypto and broad politics are not default lanes.`,
+    `His diction is casual, direct, high-context, lowercase-friendly, shorthand-friendly, and socially aware. The post should feel typed because the startup implication looked obvious, not assembled to demonstrate research.`,
+    `Core topics from current account context: ${voiceProfile.topics.slice(0, 12).join(', ') || 'AI, startups, hardware, energy, robotics, manufacturing, and space'}.`,
+    '',
+    `## WRITING PROCESS`,
+    `1. Read the source privately. Do not summarize it.`,
+    `2. Decide the immediate startup consequence: which company, product, market, cost, margin, capital need, talent pool, supplier, or timing assumption changes. Put that judgment in the first 120 characters.`,
+    `3. Keep only the single factual detail needed to support that judgment.`,
+    `4. Write the take in a native manual-post mode. Most drafts should be under 280 characters and one to three sentences. A draft over 420 characters needs a named live event and real evidence.`,
+    `5. Delete the explanation after the point lands. Never add a lesson or social-copy closer.`,
+    '',
+    `## TRUTH AND ORIGINALITY`,
+    `Use only supplied facts. Analysis and opinion are welcome; invented evidence is blocked. Do not invent a relationship, conversation, visit, demo, customer, quote, number, or first-person event.`,
+    `The manual posts below are diction evidence, not idea seeds. Do not copy their premise, names, joke, list shape, opening, or sentence skeleton.`,
+    `A downstream ranker will select ${finalCount} from ${candidateCount} candidates. Vary genuine native modes instead of producing ${candidateCount} versions of one polished structure.`,
+    ...(memoryLessons.length > 0 ? [
+      '',
+      `## CURRENT OPERATOR CORRECTIONS`,
+      ...memoryLessons.map((item) => `- ${item}`),
+    ] : []),
+    ...(anchors.length > 0 ? [
+      '',
+      `## REAL MANUAL STARTUP POSTS`,
+      `Study the diction, compression, confidence, and startup relevance. Do not reuse content or structure.`,
+      ...anchors.map((item, index) => `[${index + 1}] "${item.slice(0, 320)}"`),
+    ] : []),
+    ...(recent.length > 0 ? [
+      '',
+      `## RECENT POSTS TO AVOID REPEATING`,
+      ...recent.map((item) => `- "${item}"`),
+    ] : []),
+  ].join('\n');
+}
+
 /**
  * Build the system prompt for the configured AI provider.
  */
@@ -756,8 +843,19 @@ function buildSystemPrompt(
   const parts: string[] = [];
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
 
+  if (geoffreyStrict) {
+    return buildGeoffreySystemPrompt({
+      voiceProfile,
+      finalCount,
+      candidateCount,
+      learnings,
+      recentPosts,
+      memory,
+    });
+  }
+
   parts.push(geoffreyStrict
-    ? `You are writing original posts for @geoffwoo. Native voice and technical truth are hard gates; reach is earned only after both clear.`
+    ? `You are writing original posts for @geoffwoo. Native startup voice and factual truth are hard gates. Use technical depth when the thesis needs it; never manufacture a research note to prove expertise.`
     : `You are a tweet ghostwriter for a Twitter account. Write original tweets that sound exactly like this person and drive maximum engagement (likes, replies, retweets).`);
   parts.push(`\n## CLAWFABLE PLATFORM GOAL (NON-NEGOTIABLE)
 ${CLAWFABLE_PLATFORM_GOAL}
@@ -799,6 +897,9 @@ Commenters should not be able to tell this was generated.
   };
 
   parts.push(`\n## TIME CONTEXT: ${timeGuidance[timeSlot] || timeGuidance['midday-US']}`);
+  if (geoffreyStrict) {
+    parts.push(`For @geoffwoo, time context changes energy only. It never authorizes a longer analyst memo, a formal explainer, or a generic professional-observation voice.`);
+  }
 
   // Include the full SOUL.md — this is the most important context for voice
   if (soulMd) {
@@ -945,6 +1046,15 @@ Current followed-network and publisher evidence is supplied as untrusted data in
         parts.push(`- Geoffrey's social register matters. Across these anchors: ${terseCount}/${manualModes.length} are terse, ${situatedCount}/${manualModes.length} are socially situated, ${questionCount}/${manualModes.length} ask a question, and ${multiParagraphCount}/${manualModes.length} use multiple beats. Choose one native mode; do not average them into a polished technical essay.`);
         parts.push(`- Do not manufacture typos, lowercase, slang, or "bro" as costume. The underlying position, compression, and social posture must match first.`);
         parts.push(`- Default an unsourced original analysis to one or two compressed beats. A post over 400 characters needs a named live event, a real operator context, or a manual-anchor mode that genuinely supports the length. Technical detail is not a license to lecture.`);
+        const startupRegisterExamples = humanRef.startupRegisterExamples || [];
+        if (startupRegisterExamples.length > 0) {
+          parts.push(`\n## GEOFFREY STARTUP REGISTER (closest diction anchors for startup, AI, hardware, market, and investing posts)`);
+          parts.push(`- Learn the casual high-context diction, direct company/market relevance, shorthand, and uneven sentence rhythm. Do not copy the claim, joke, names, or sentence skeleton.`);
+          parts.push(`- A strong draft should feel native before any slang is added. Never turn these examples into a bag of catchphrases.`);
+          for (const t of startupRegisterExamples.slice(0, 7)) {
+            parts.push(`- STARTUP REGISTER EXAMPLE [${t.likes} likes]: "${t.content.slice(0, 280)}"`);
+          }
+        }
       }
       const manualAnchorLimit = geoffreyStrict
         ? Math.max(7, evidenceLimits.manualVoiceAnchors)
@@ -1269,13 +1379,22 @@ export async function generateViralBatch(
     });
     if (isGeoffreyVoiceProfile(voiceProfile)) {
       const topic = plan?.topic || sourcePlan.slots[index]?.targetTopic || 'frontier tech';
-      const laneLabel = lane.replace(/_/g, ' ');
-      const roleLabel = portfolioRole.replace(/_/g, ' ');
       const sourceLabel = sourcePlan.slots[index]?.sourceLane?.replace(/_/g, ' ') || 'core';
       const trend = plan?.trendHeadline || sourcePlan.slots[index]?.trendHeadline;
-      const seedBrief = plan?.ideaSeedBrief || sourcePlan.slots[index]?.ideaSeedBrief;
+      const sourceSeed = sourcePlan.slots[index]?.ideaSeed;
+      const seedBrief = plan?.ideaSeedBrief || sourcePlan.slots[index]?.ideaSeedBrief || '';
+      const suppliedFact = sourceSeed?.startupBackingFact
+        || seedBrief.split('->').map((item) => item.trim()).filter(Boolean)[1]
+        || null;
       const sourcedEvent = plan?.trendTopicId ? trendEvidenceById.get(String(plan.trendTopicId)) : null;
-      return `${slot}|topic:${topic}|intent:${laneLabel}/${roleLabel}|source:${sourceLabel}|brief:${seedBrief || 'account-native observation, judgment, reaction, or technical implication in a manual-post rhythm'}${trend ? `|live context:${(sourcedEvent || trend).slice(0, 300)}` : ''}`;
+      return [
+        `${slot}|subject:${topic}`,
+        `source:${sourceLabel}`,
+        suppliedFact
+          ? `one supplied fact:${compactExampleTweet(suppliedFact, 220)}`
+          : `one supplied fact:none; do not invent one`,
+        trend ? `current event:${compactExampleTweet(sourcedEvent || trend, 320)}` : null,
+      ].filter(Boolean).join('|');
     }
 
     return plan
@@ -1293,9 +1412,31 @@ ${JSON.stringify({
   }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}
 </active-topic-bias>`
     : '';
-  const userPrompt = `Generate exactly ${candidateCount} original standalone tweets. ${geoffreyPromptMode
-    ? 'Use the manual-anchor mode distribution as the length authority. Default unsourced analysis to one or two compressed beats; do not fill a length quota with technical exposition.'
-    : 'Follow the length distribution in the system prompt exactly.'} For each tweet, output a JSON object on its own line with these fields:
+  const userPrompt = geoffreyPromptMode
+    ? `Write exactly ${candidateCount} original standalone posts, one for every numbered brief.
+
+Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
+
+Across the batch, vary native modes: terse thesis, two-beat market take, named reaction when a name is supplied, blunt question, compact technical-backed startup take, or public conviction. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
+
+For each post, output one JSON object on its own line with only:
+- "slot": the numbered brief
+- "content": exact post text, with line breaks escaped as standard JSON
+- "format": one of ${formats.join(', ')}
+- "targetTopic": the subject
+- "rationale": one short sentence naming the startup consequence
+
+Truth contract: use only supplied facts and current-event evidence. Do not invent access, relationships, conversations, quotes, measurements, benchmarks, numbers, or events. First-person opinion is allowed; fabricated first-person evidence is not.
+
+${topicIntelligenceContext}
+
+${activeTopicBiasContext}
+
+BRIEFS
+${creativeSlotGuide}
+
+Output only JSON objects, one per line.`
+    : `Generate exactly ${candidateCount} original standalone tweets. Follow the length distribution in the system prompt exactly. For each tweet, output a JSON object on its own line with these fields:
 - "slot": the slot number you are fulfilling
 - "content": the tweet text (any length up to 4000 chars; represent line breaks as standard JSON escaped newlines, never as visible literal backslash-n text)
 - "format": one of: ${formats.join(', ')}
@@ -1311,9 +1452,7 @@ ${JSON.stringify({
 - "rationale": 1 sentence on why this should perform well
 
 ${explorationCount > 0 ? `At least ${explorationCount} tweets in this batch must be true exploration plays: fresher format, fresher topic, or a more surprising angle that still fits the account.` : ''}
-${geoffreyPromptMode ? 'Geoffrey quality rule: one strong mechanism is better than a textbook inventory. End when the judgment lands; never append a manufactured mic-drop closer.' : ''}
-${slotPlan.length > 0 && !geoffreyPromptMode ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
-  ${slotPlan.length > 0 && geoffreyPromptMode ? `Use every slot exactly once, but treat the slot guide as a private writing brief, not a checklist. The text should not feel optimized for labels. Preserve the range and social posture of the manual/operator anchors; do not turn every slot into the same polished technical essay. A technical draft needs a real object, constraint, or mechanism, but one strong mechanism is better than a textbook inventory. A live-context slot must name or unmistakably identify its actual event and express an account-native judgment. Do not manufacture first-person access, dialogue, quotes, precise numbers, or a mic-drop closer to make the brief feel real.` : ''}
+${slotPlan.length > 0 ? `You must satisfy every bandit slot exactly once. Match the assigned source lane, styleMode, format, targetTopic, length, hook, tone, specificity, structure, and mode for each slot.` : ''}
 
 Truth contract: use only facts, measurements, events, quotes, and personal experiences present in the supplied context. New analysis is welcome; invented evidence is not.
 
@@ -1321,7 +1460,7 @@ ${topicIntelligenceContext}
 
 ${activeTopicBiasContext}
 
-Slot guide schema: ${geoffreyPromptMode ? 'slot|topic|intent|source|brief' : 'slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure'}
+Slot guide schema: slot|lane|role|media|holdout|mode|format|topic|hook|tone|specificity|structure
 ${creativeSlotGuide}
 
 Output ONLY JSON objects, one per line, no markdown fencing.`;

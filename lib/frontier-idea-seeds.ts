@@ -7,6 +7,7 @@ export interface FrontierIdeaSeed {
   technicalObject: string;
   hiddenConstraint: string;
   nonConsensusImplication: string;
+  startupBackingFact: string;
   domains: string[];
   sourceQueries: string[];
 }
@@ -102,6 +103,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'ammonium paratungstate -> tungsten carbide powder -> hardmetal cutting tools',
     hiddenConstraint: 'the choke point is powder metallurgy, binder chemistry, and qualified tool supply, not just ore in the ground',
     nonConsensusImplication: 're-industrialization bottlenecks show up first in wear parts, dies, drill bits, and machining throughput',
+    startupBackingFact: 'qualified tungsten-carbide powder and tool supply can cap machining throughput even when ore is available',
     domains: ['materials', 'manufacturing', 'industrial capacity'],
     sourceQueries: ['USGS tungsten mineral commodity summary', 'tungsten carbide cutting tool supply chain', 'ammonium paratungstate China export controls'],
   },
@@ -111,6 +113,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'antimony trioxide, ammunition primers, flame retardants, and solar glass clarifiers',
     hiddenConstraint: 'processing and refining capacity is more concentrated than the end products make obvious',
     nonConsensusImplication: 'defense, grid hardware, and solar deployment can share the same tiny mineral bottleneck',
+    startupBackingFact: 'antimony refining capacity is much more concentrated than mining headlines imply',
     domains: ['materials', 'energy', 'industrial capacity'],
     sourceQueries: ['USGS antimony mineral commodity summary', 'antimony export controls defense supply chain', 'antimony solar glass clarifier'],
   },
@@ -120,6 +123,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'gallium arsenide, gallium nitride, germanium substrates, and infrared optics',
     hiddenConstraint: 'these are mostly byproducts of aluminum and zinc refining, so demand cannot scale like a normal mining project',
     nonConsensusImplication: 'RF, power electronics, photonics, and defense sensors depend on refinery side-streams most AI investors never model',
+    startupBackingFact: 'gallium is mostly a byproduct of aluminum refining, so chip demand cannot pull new supply online like a normal mine',
     domains: ['compute', 'materials', 'space'],
     sourceQueries: ['gallium germanium export controls semiconductor supply chain', 'GaN RF power electronics gallium supply', 'germanium infrared optics supply chain'],
   },
@@ -129,6 +133,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'spherical purified graphite and coated anode material',
     hiddenConstraint: 'the difficult step is purification, morphology control, coating, and qualification with cell makers',
     nonConsensusImplication: 'battery independence is a process-engineering problem before it is a mining problem',
+    startupBackingFact: 'cell-maker qualification can take longer to expand than graphite mining',
     domains: ['materials', 'manufacturing', 'energy'],
     sourceQueries: ['spherical purified graphite anode processing', 'graphite anode qualification cell makers', 'battery graphite supply chain China'],
   },
@@ -138,6 +143,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'acid-grade fluorspar -> hydrofluoric acid -> fluoropolymers and chip etch chemistry',
     hiddenConstraint: 'high-purity chemical conversion is the bottleneck, and substitution is ugly because fluorine chemistry is everywhere',
     nonConsensusImplication: 'advanced manufacturing resilience can fail inside boring chemical intermediates, not just fabs or GPUs',
+    startupBackingFact: 'semiconductor-grade hydrofluoric acid conversion, not fluorspar ore, is the hard capacity',
     domains: ['compute', 'materials', 'manufacturing'],
     sourceQueries: ['acid grade fluorspar hydrofluoric acid semiconductor etch', 'fluorspar supply chain fluoropolymers', 'high purity HF semiconductor chemicals'],
   },
@@ -147,6 +153,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'rhenium-bearing single-crystal superalloys in turbine blades and rocket engines',
     hiddenConstraint: 'rhenium is a tiny molybdenum/copper byproduct stream with long qualification cycles',
     nonConsensusImplication: 'space and defense scale can be capped by grams-per-blade metallurgy, not launch demand',
+    startupBackingFact: 'rhenium arrives as a tiny copper and molybdenum byproduct stream, so aerospace demand cannot directly create more supply',
     domains: ['space', 'materials', 'manufacturing'],
     sourceQueries: ['rhenium superalloy turbine blade supply chain', 'single crystal superalloy rhenium content', 'rhenium rocket engine material constraint'],
   },
@@ -156,6 +163,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'beryllium mirrors, X-ray windows, inertial guidance parts, and thermal management components',
     hiddenConstraint: 'toxicity, machining controls, and qualification make supply expansion slow even when demand is obvious',
     nonConsensusImplication: 'some frontier-tech bottlenecks are safety/process bottlenecks pretending to be material bottlenecks',
+    startupBackingFact: 'worker-safety controls make new beryllium machining capacity expensive and slow to add',
     domains: ['space', 'compute', 'manufacturing'],
     sourceQueries: ['beryllium aerospace mirror supply chain', 'beryllium machining toxicity qualification', 'beryllium semiconductor thermal management'],
   },
@@ -165,6 +173,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'NdFeB magnets doped with dysprosium and terbium for high-temperature coercivity',
     hiddenConstraint: 'magnet performance depends on separation chemistry, alloying, grain-boundary diffusion, and sintering yield',
     nonConsensusImplication: 'robots, drones, EVs, and wind turbines are all quietly competing for the same high-temperature magnet physics',
+    startupBackingFact: 'grain-boundary diffusion and sintering yield determine whether NdFeB magnets hold performance at temperature',
     domains: ['materials', 'robotics', 'energy'],
     sourceQueries: ['dysprosium terbium NdFeB high temperature magnets', 'rare earth magnet grain boundary diffusion supply chain', 'robotics rare earth magnet bottleneck'],
   },
@@ -174,6 +183,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'tritium breeding blankets, neutron flux, lithium enrichment, and inventory accounting',
     hiddenConstraint: 'a net-energy fusion machine is not a product until the fuel cycle closes under real materials damage',
     nonConsensusImplication: 'fusion timelines should be judged by tritium logistics and first-wall survival, not only plasma shots',
+    startupBackingFact: 'a fusion plant is not commercial until it breeds and accounts for its own tritium under neutron damage',
     domains: ['nuclear', 'energy', 'materials'],
     sourceQueries: ['fusion tritium breeding blanket fuel cycle', 'first wall neutron damage fusion materials', 'lithium enrichment tritium breeding'],
   },
@@ -183,6 +193,7 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
     technicalObject: 'high-purity neon for excimer lithography lasers',
     hiddenConstraint: 'noble gas purification is tied to industrial gas infrastructure and geopolitical plant geography',
     nonConsensusImplication: 'chip supply chains have invisible gas dependencies that do not look strategic until a shock hits',
+    startupBackingFact: 'high-purity neon supply depends on industrial-gas purification plants, not just semiconductor demand',
     domains: ['compute', 'manufacturing', 'industrial capacity'],
     sourceQueries: ['high purity neon lithography laser supply chain', 'excimer laser neon semiconductor manufacturing', 'noble gas purification chip fabs'],
   },

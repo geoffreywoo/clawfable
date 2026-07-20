@@ -3,17 +3,17 @@ import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopi
 import type { AgentLearnings } from '../lib/types';
 
 describe('account topic policy', () => {
-  it('removes crypto without manufacturing a hard-coded replacement identity', () => {
+  it('removes crypto and generic drift lanes without manufacturing replacement topics', () => {
     const profile = applyAccountTopicPolicy('@geoffwoo', {
       tone: 'analyst',
-      topics: ['ai', 'crypto', 'startup'],
+      topics: ['ai', 'crypto', 'startup', 'sports', 'culture', 'tech', 'startup culture'],
       antiGoals: [],
       communicationStyle: 'direct',
       summary: 'test',
     });
 
     expect(profile.topics).not.toContain('crypto');
-    expect(profile.topics).toEqual(['ai', 'startup']);
+    expect(profile.topics).toEqual(['ai', 'startup', 'startup culture']);
     expect(profile.topics).not.toContain('fusion');
     expect(profile.topics).not.toContain('robotics');
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
@@ -39,11 +39,13 @@ describe('account topic policy', () => {
       formatRankings: [],
       topicRankings: [
         { topic: 'crypto', avgEngagement: 100, count: 4 },
+        { topic: 'sports', avgEngagement: 90, count: 4 },
         { topic: 'robotics', avgEngagement: 20, count: 2 },
       ],
       insights: ['Post more crypto takes', 'Post more AI infrastructure takes'],
       manualTopicProfile: [
         { topic: 'crypto', angle: 'bitcoin markets', weight: 10, sampleCount: 3, avgEngagement: 100, topTweets: [] },
+        { topic: 'personal', angle: 'recovery habits', weight: 8, sampleCount: 2, avgEngagement: 80, topTweets: [] },
         { topic: 'space', angle: 'launch costs', weight: 5, sampleCount: 2, avgEngagement: 50, topTweets: [] },
       ],
     } satisfies AgentLearnings;
@@ -70,6 +72,9 @@ describe('account topic policy', () => {
   it('suppresses crypto-only topics for both current and legacy Geoffrey handles', () => {
     expect(shouldSuppressTopicForAccount('@geoffwoo', 'crypto')).toBe(true);
     expect(shouldSuppressTopicForAccount('@geoffreywoo', 'crypto')).toBe(true);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'sports')).toBe(true);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'personal')).toBe(true);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'startup culture')).toBe(false);
     expect(shouldSuppressTopicForAccount('@geoffwoo', 'robotics')).toBe(false);
     expect(shouldSuppressTopicForAccount('@someoneelse', 'crypto')).toBe(false);
   });

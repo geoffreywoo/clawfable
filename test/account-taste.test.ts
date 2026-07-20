@@ -176,6 +176,49 @@ describe('account taste scoring', () => {
     expect(jokeIssue).toContain('without current source context');
   });
 
+  it('allows a source-backed native startup one-liner without forcing a mechanism inventory', () => {
+    const startupAnchors = [
+      {
+        content: 'compute pricing is an actually good use case. the sports product is still obviously a sportsbook.',
+        topic: 'AI',
+        source: 'timeline',
+      },
+      {
+        content: 'x algo def way better. more useful content. more friends. yall cooking.',
+        topic: 'product',
+        source: 'timeline',
+      },
+      {
+        content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.',
+        topic: 'finance',
+        source: 'timeline',
+      },
+    ];
+    const assessment = assessAccountTaste(
+      'openai bundling codex into every work surface makes a lot of vertical software look kinda cooked. model quality was never the whole product.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        learnings: {
+          operatorVoiceReference: {
+            bestPerformers: startupAnchors,
+            startupRegisterExamples: startupAnchors,
+            pinnedExamples: [],
+          },
+        } as any,
+      },
+    );
+
+    expect(assessment.technicalCredibilityScore).toBeLessThan(0.36);
+    expect(assessment.casualStartupScore).toBeGreaterThanOrEqual(0.64);
+    expect(assessment.stiffnessRisk).toBeLessThan(0.28);
+    expect(assessment.action).toBe('allow');
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment,
+      hasSourceContext: true,
+    })).toBeNull();
+  });
+
   it('uses manual lexical rhythm as a positive voice model, not only topic depth', () => {
     const manualAnchor = {
       content: 'bro.. best bullshitter in the game in action\n\nyou can make up stories for a self-help crowd, but you cannot bullshit ai twitter autists',
@@ -251,7 +294,7 @@ describe('account taste scoring', () => {
 
   it('turns taste complaints into structured reusable learning hints', () => {
     const feedback = classifyTasteFeedbackReason(
-      'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting too far. it is a textbook lecture with a slogan mic-drop that reskins the old premise',
+      'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting too far. it is a stiff analyst memo, not casual startup-native diction. it is a textbook lecture with a slogan mic-drop that reskins the old premise',
     );
 
     expect(feedback.metadata).toMatchObject({
@@ -260,6 +303,8 @@ describe('account taste scoring', () => {
       lowStatusTextureComplaint: true,
       technicalElevationRequested: true,
       nativeVoiceComplaint: true,
+      stiffDictionComplaint: true,
+      casualStartupVoiceRequested: true,
       identityDriftComplaint: true,
       technicalLectureComplaint: true,
       syntheticPunchlineComplaint: true,
@@ -271,6 +316,7 @@ describe('account taste scoring', () => {
         expect.stringContaining('Slack/support/workflow texture'),
         expect.stringContaining('elevated technical depth'),
         expect.stringContaining('native content identity'),
+        expect.stringContaining('casual startup-native diction'),
       ]),
     );
   });
@@ -280,13 +326,34 @@ describe('account taste scoring', () => {
       'creator economy question:\n\nwhen generation becomes unlimited, who owns review and provenance?',
       { voiceProfile: geoffreyVoiceProfile },
     );
-    const technical = assessAccountTaste(
+    const stiffTechnical = assessAccountTaste(
       'graphite qualification fails downstream of purification, particle morphology and coating yield. the mine cannot solve a cell-maker rejection.',
       {
         voiceProfile: geoffreyVoiceProfile,
         learnings: {
           operatorVoiceReference: {
             bestPerformers: [{
+              content: 'compute pricing is an actually good use case. the sports product is still obviously a sportsbook.',
+              topic: 'AI',
+              source: 'timeline',
+            }],
+            pinnedExamples: [],
+          },
+        } as any,
+      },
+    );
+    const nativeStartup = assessAccountTaste(
+      'graphite mine decks are way too early in the stack. purification + coating yield decide what a cell maker will actually buy.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        learnings: {
+          operatorVoiceReference: {
+            bestPerformers: [{
+              content: 'compute pricing is an actually good use case. the sports product is still obviously a sportsbook.',
+              topic: 'AI',
+              source: 'timeline',
+            }],
+            startupRegisterExamples: [{
               content: 'compute pricing is an actually good use case. the sports product is still obviously a sportsbook.',
               topic: 'AI',
               source: 'timeline',
@@ -304,8 +371,15 @@ describe('account taste scoring', () => {
     })).toContain('strict account taste verdict');
     expect(getAutonomousQueueTasteIssue({
       voiceProfile: geoffreyVoiceProfile,
-      assessment: technical,
+      assessment: stiffTechnical,
+    })).toContain('strict account taste verdict');
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: nativeStartup,
+      hasSourceContext: true,
     })).toBeNull();
+    expect(nativeStartup.casualStartupScore).toBeGreaterThan(stiffTechnical.casualStartupScore);
+    expect(nativeStartup.stiffnessRisk).toBeLessThan(stiffTechnical.stiffnessRisk);
   });
 
   it('rejects polished technical explainers that are still generic ghostwriting', () => {
@@ -320,6 +394,19 @@ describe('account taste scoring', () => {
       expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.34);
       expect(assessment.genericAccountFitRisk).toBeGreaterThanOrEqual(0.3);
       expect(assessment.action).not.toBe('allow');
+    }
+  });
+
+  it('rejects research-summary phrasing even when the facts are technical', () => {
+    const drafts = [
+      'rare earth magnets look like a mining story. they are actually a chemistry and manufacturing story. separation, alloying, grain-boundary diffusion, sintering yield.',
+      "everyone's building battery companies. fewer are solving graphite qualification. purification, morphology control, coating, cell-maker sign-off.",
+    ];
+
+    for (const content of drafts) {
+      const assessment = assessAccountTaste(content, { voiceProfile: geoffreyVoiceProfile });
+      expect(assessment.action).not.toBe('allow');
+      expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.36);
     }
   });
 

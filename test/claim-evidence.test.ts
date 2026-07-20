@@ -142,4 +142,28 @@ describe('generated writing patterns', () => {
       'when did reliability become less impressive than choreography?',
     ).hits).toContain('when-did-contrast-question');
   });
+
+  it('detects stiff analyst constructions that escaped earlier Geoffrey gates', () => {
+    expect(assessGeneratedWritingPatterns(
+      'startup founders love speed until the product has to survive vibration and thermal cycling. then suddenly the calendar has physics in it.',
+    ).hits).toEqual(expect.arrayContaining([
+      'typed-actor-loves-until',
+      'calendar-has-physics',
+    ]));
+    expect(assessGeneratedWritingPatterns(
+      'humanoid robot forecasts love unit counts. motor performance at temperature is less cooperative.',
+    ).hits).toContain('forecast-less-cooperative');
+    expect(assessGeneratedWritingPatterns(
+      'finance guys love assets they can mark every day. industrial assets make them emotionally unstable.',
+    ).hits).toContain('typed-actor-emotional-punchline');
+    expect(assessGeneratedWritingPatterns(
+      'how do you model gallium supply like a normal mine when most output is a refinery side-stream?',
+    ).hits).toContain('polished-model-question');
+    expect(assessGeneratedWritingPatterns(
+      'rare earth magnets look like a mining story. they are actually a chemistry and manufacturing story.',
+    ).hits).toContain('looks-like-actually');
+    expect(assessGeneratedWritingPatterns(
+      "everyone's building battery companies. fewer are solving cell qualification.",
+    ).hits).toContain('everyone-building-fewer');
+  });
 });

@@ -344,7 +344,13 @@ export async function buildGenerationContext(
 
   if (effectiveLearnings?.operatorVoiceReference && effectiveLearnings.operatorVoiceReference.bestPerformers.length > 0) {
     const reference = effectiveLearnings.operatorVoiceReference;
-    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)\nDerived from ${reference.sampleCount} manually posted or operator-written tweets.\n${describeStyleFingerprint(reference.styleFingerprint).join('\n')}\nVoice anchors:\n${reference.bestPerformers.map((entry) => `- "${entry.content.slice(0, 180)}"`).join('\n')}\nUse these as VOICE calibration examples. Reuse the energy, sentiment, and phrasing discipline, not the exact claim.`;
+    const voiceAnchors = [
+      ...(reference.startupRegisterExamples || []),
+      ...reference.bestPerformers,
+    ].filter((entry, index, entries) => (
+      entry.content?.trim() && entries.findIndex((candidate) => candidate.content === entry.content) === index
+    )).slice(0, 10);
+    voiceProfile.communicationStyle += `\n\n## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)\nDerived from ${reference.sampleCount} manually posted or operator-written tweets.\n${describeStyleFingerprint(reference.styleFingerprint).join('\n')}\nVoice anchors:\n${voiceAnchors.map((entry) => `- "${entry.content.slice(0, 180)}"`).join('\n')}\nUse these as VOICE calibration examples. Reuse the energy, sentiment, and phrasing discipline, not the exact claim.`;
   }
 
   if (effectiveLearnings?.manualTopicProfile && effectiveLearnings.manualTopicProfile.length > 0) {

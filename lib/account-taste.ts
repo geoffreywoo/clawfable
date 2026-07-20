@@ -20,6 +20,8 @@ export interface TechnicalCredibilityAssessment {
 export interface AccountTasteAssessment {
   nativeVoiceScore: number;
   nativeStyleScore: number;
+  casualStartupScore: number;
+  stiffnessRisk: number;
   voiceDriftRisk: number;
   technicalCredibilityScore: number;
   cringeRisk: number;
@@ -215,6 +217,34 @@ const VAGUE_FRONTIER_HYPE = [
   'energy abundance',
   'american dynamism',
   'hard tech',
+];
+
+const STARTUP_NATIVE_TERMS = [
+  'startup', 'founder', 'company', 'product', 'customer', 'market', 'software', 'hardware',
+  'ai', 'model', 'codex', 'compute', 'venture', 'vc', 'capital', 'fund', 'investor', 'pe',
+  'valuation', 'round', 'sales', 'talent', 'margin', 'price', 'cost', 'alpha', 'deck', 'decks',
+  'funding', 'underwrite', 'underwriting', 'factory',
+  'manufacturing', 'robot', 'energy', 'space', 'industrial',
+];
+
+const STARTUP_CONSEQUENCE_TERMS = [
+  'company', 'product', 'customer', 'market', 'price', 'pricing', 'cost', 'margin', 'capex',
+  'valuation', 'fund', 'round', 'returns', 'alpha', 'adoption', 'sales', 'ship', 'scale',
+  'ships', 'capacity', 'talent', 'supplier', 'demand', 'supply', 'build', 'buy', 'invest',
+  'funding', 'underwrite', 'underwriting',
+];
+
+const CASUAL_NATIVE_TERMS = [
+  'actually', 'super', 'jus', 'just', 'def', 'obv', 'gonna', 'gotta', 'wanna', 'kinda',
+  'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
+  'do damage', 'go hard', 'balls', 'chump change', 'gamechanger',
+];
+
+const STIFF_ANALYST_TERMS = [
+  'less cooperative', 'production response', 'depends on whether', 'eventually runs into',
+  'must account for', 'critical strategic', 'therefore', 'moreover', 'increasingly',
+  'commercialization requires', 'the implication is', 'this highlights', 'arrives as a side-stream',
+  'unit counts', 'customer qualification process',
 ];
 
 const SOURCE_COPY_STOP_WORDS = new Set([
@@ -493,6 +523,30 @@ function consultantRegisterScore(content: string): number {
   ]) / 4);
 }
 
+function operatorVoiceAnchors(learnings?: AgentLearnings | null): TweetPerformance[] {
+  const reference = learnings?.operatorVoiceReference;
+  return [
+    ...(reference?.pinnedExamples || []),
+    ...(reference?.startupRegisterExamples || []),
+    ...(reference?.bestPerformers || []),
+  ].filter((entry, index, items) => (
+    entry.content?.trim() && items.findIndex((item) => item.content === entry.content) === index
+  ));
+}
+
+function exactTermHits(content: string, terms: string[]): number {
+  const tokens = new Set(normalizeText(content)
+    .replace(/[^a-z0-9+&'-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean));
+  const normalized = normalizeText(content);
+  return terms.filter((term) => (
+    term.includes(' ')
+      ? normalized.includes(term)
+      : tokens.has(term)
+  )).length;
+}
+
 function nativeStyleSimilarity(content: string, anchor: string): number {
   const candidate = nativeStyleVector(content);
   const reference = nativeStyleVector(anchor);
@@ -510,13 +564,7 @@ function referenceStyleFit(
   content: string,
   learnings?: AgentLearnings | null,
 ): { score: number; anchorCount: number } {
-  const reference = learnings?.operatorVoiceReference;
-  const anchors = [
-    ...(reference?.pinnedExamples || []),
-    ...(reference?.bestPerformers || []),
-  ].filter((entry, index, items) => (
-    entry.content?.trim() && items.findIndex((item) => item.content === entry.content) === index
-  ));
+  const anchors = operatorVoiceAnchors(learnings);
   if (anchors.length === 0) return { score: 0.5, anchorCount: 0 };
 
   const strongest = anchors
@@ -537,13 +585,7 @@ function referenceVoiceFit(
   featureTags: CandidateFeatureTags,
   learnings?: AgentLearnings | null,
 ): number {
-  const reference = learnings?.operatorVoiceReference;
-  const anchors = [
-    ...(reference?.pinnedExamples || []),
-    ...(reference?.bestPerformers || []),
-  ].filter((entry, index, arr) =>
-    entry.content?.trim() && arr.findIndex((item) => item.content === entry.content) === index
-  );
+  const anchors = operatorVoiceAnchors(learnings);
 
   if (anchors.length === 0) return 0.5;
 
@@ -577,6 +619,94 @@ function referenceVoiceFit(
   }
 
   return clamp(best);
+}
+
+function assessCasualStartupRegister(
+  content: string,
+  technical: TechnicalCredibilityAssessment,
+  learnings?: AgentLearnings | null,
+): { score: number; stiffnessRisk: number } {
+  const lower = normalizeText(content);
+  const words: string[] = lower.match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) || [];
+  const startupHits = exactTermHits(content, STARTUP_NATIVE_TERMS);
+  const consequenceHits = exactTermHits(content, STARTUP_CONSEQUENCE_TERMS);
+  const casualHits = exactTermHits(content, CASUAL_NATIVE_TERMS);
+  const stiffHits = countTerms(lower, STIFF_ANALYST_TERMS);
+  const generatedPattern = assessGeneratedWritingPatterns(content);
+  const startupAnchors = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
+  const referenceScores = startupAnchors
+    .slice(0, 10)
+    .map((anchor) => nativeStyleSimilarity(content, anchor.content))
+    .sort((a, b) => b - a)
+    .slice(0, 3);
+  const anchorFit = referenceScores.length > 0
+    ? referenceScores.reduce((sum, score) => sum + score, 0) / referenceScores.length
+    : 0.5;
+  const lowerOpening = /^[a-z0-9]/.test(firstLine(content));
+  const firstOrSecondPerson = /\b(?:i|we|my|our|you|your)\b/i.test(content);
+  const situated = /@\w+|https?:\/\//i.test(content);
+  const contraction = /\b(?:ain'?t|can'?t|don'?t|doesn'?t|isn'?t|you'?re|we'?re|i'?m|won'?t)\b/i.test(content);
+  const commaCount = (content.match(/,/g) || []).length;
+  const sentences = Math.max(1, (content.match(/[.!?](?:\s|$)/g) || []).length);
+  const avgWordLength = words.length > 0
+    ? words.reduce((sum, word) => sum + word.length, 0) / words.length
+    : 0;
+  const polishedModelQuestion = /^how do you\s+(?:model|price|underwrite|value|forecast)\b/i.test(content);
+  const mechanismInventory = commaCount >= 3 && technical.mechanismScore >= 0.08 && !situated;
+  const completeAnalystParagraphs = content.split(/\n\s*\n/).filter(Boolean).length >= 2
+    && sentences >= 3
+    && casualHits === 0
+    && !situated
+    && !firstOrSecondPerson;
+
+  const stiffnessRisk = clamp(
+    0.05
+    + Math.min(0.42, stiffHits * 0.14)
+    + generatedPattern.score * 0.36
+    + (polishedModelQuestion ? 0.24 : 0)
+    + (mechanismInventory ? 0.14 : 0)
+    + (completeAnalystParagraphs ? 0.1 : 0)
+    + (avgWordLength >= 6 ? 0.1 : 0)
+    + (content.length > 430 && !situated ? 0.08 : 0)
+    - Math.min(0.18, casualHits * 0.05)
+    - (firstOrSecondPerson ? 0.04 : 0)
+  );
+  const relevance = clamp(
+    0.1
+    + Math.min(0.4, startupHits * 0.07)
+    + Math.min(0.28, consequenceHits * 0.055)
+    + technical.domainScore * 0.18
+  );
+  const casualness = clamp(
+    0.16
+    + (lowerOpening ? 0.16 : 0)
+    + Math.min(0.28, casualHits * 0.07)
+    + (firstOrSecondPerson ? 0.08 : 0)
+    + (situated ? 0.06 : 0)
+    + (contraction ? 0.06 : 0)
+    + (content.length <= 280 ? 0.08 : 0)
+    - (avgWordLength >= 6 ? 0.08 : 0)
+  );
+  const directness = clamp(
+    0.32
+    + (sentences <= 3 ? 0.16 : 0)
+    + (content.length <= 320 ? 0.12 : 0)
+    + (firstLine(content).length <= 130 ? 0.08 : 0)
+    - (mechanismInventory ? 0.16 : 0)
+    - (polishedModelQuestion ? 0.12 : 0)
+  );
+  const score = clamp(
+    anchorFit * 0.34
+    + relevance * 0.26
+    + casualness * 0.24
+    + directness * 0.16
+    - stiffnessRisk * 0.3
+  );
+
+  return {
+    score: Number(score.toFixed(3)),
+    stiffnessRisk: Number(stiffnessRisk.toFixed(3)),
+  };
 }
 
 export function isGeoffreyAccount(handle?: string | null): boolean {
@@ -669,6 +799,7 @@ export function assessAccountTaste(
   const compression = compressionScore(content);
   const referenceFit = referenceVoiceFit(content, featureTags, context.learnings);
   const nativeStyle = referenceStyleFit(content, context.learnings);
+  const startupRegister = assessCasualStartupRegister(content, technical, context.learnings);
   const voiceDriftRisk = nativeStyle.anchorCount > 0
     ? clamp((0.78 - nativeStyle.score) / 0.35)
     : 0;
@@ -676,6 +807,7 @@ export function assessAccountTaste(
   const sourceTexts = [
     ...(context.sourceTexts || []),
     ...(reference?.pinnedExamples || []).map((entry) => entry.content),
+    ...(reference?.startupRegisterExamples || []).map((entry) => entry.content),
     ...(reference?.bestPerformers || []).map((entry) => entry.content),
   ];
   const claimEvidence = assessClaimEvidence(content, sourceTexts);
@@ -696,6 +828,7 @@ export function assessAccountTaste(
     genericRisk * 0.42 +
     technical.vagueHypeRisk * 0.38 +
     generatedPattern.score * 0.32 +
+    startupRegister.stiffnessRisk * 0.38 +
     voiceDriftRisk * 0.22 +
     Math.min(0.22, slopPhraseHits * 0.07) +
     Math.min(0.16, Math.max(0, abstractHits - 1) * 0.035) +
@@ -709,22 +842,26 @@ export function assessAccountTaste(
     epistemic * 0.08 +
     compression * 0.1 +
     referenceFit * 0.3 +
-    nativeStyle.score * 0.22 -
+    nativeStyle.score * 0.14 +
+    startupRegister.score * 0.16 -
     genericRisk * 0.16 -
     statusRisk * 0.12 -
     formulaic.score * 0.12 -
     cringeRisk * 0.1 -
     generatedPattern.score * 0.14 -
+    startupRegister.stiffnessRisk * 0.16 -
     voiceDriftRisk * 0.12,
   );
   const manualStyleEvidence = nativeStyle.anchorCount > 0
     ? clamp(
-        referenceFit * 0.46
-        + nativeStyle.score * 0.54
+        referenceFit * 0.38
+        + nativeStyle.score * 0.44
+        + startupRegister.score * 0.18
         - genericRisk * 0.08
         - statusRisk * 0.08
         - formulaic.score * 0.08
-        - generatedPattern.score * 0.1,
+        - generatedPattern.score * 0.1
+        - startupRegister.stiffnessRisk * 0.14,
       )
     : 0;
   // Native voice is an identity judgment, not a disguised truth or technical
@@ -740,21 +877,25 @@ export function assessAccountTaste(
   const generatedPatternReviewThreshold = geoffreyStrict ? 0.24 : 0.46;
   const action: AccountTasteAssessment['action'] = claimEvidence.risk >= 0.5 || sourceCopy.score >= (geoffreyStrict ? 0.58 : 0.78)
     ? 'block'
-    : geoffreyStrict && (nativeVoiceScore < 0.46 || voiceDriftRisk >= 0.62 || cringeRisk >= 0.58 || generatedPattern.score >= generatedPatternBlockThreshold || rejectedSimilarity >= 0.55 || (technical.score < 0.32 && genericRisk >= 0.45))
+    : geoffreyStrict && (nativeVoiceScore < 0.46 || startupRegister.score < 0.5 || startupRegister.stiffnessRisk >= 0.5 || voiceDriftRisk >= 0.62 || cringeRisk >= 0.58 || generatedPattern.score >= generatedPatternBlockThreshold || rejectedSimilarity >= 0.55 || (technical.score < 0.32 && genericRisk >= 0.45))
     ? 'block'
     : nativeVoiceScore < (geoffreyStrict ? 0.6 : 0.52)
       || (geoffreyStrict && voiceDriftRisk >= 0.25)
+      || (geoffreyStrict && startupRegister.score < 0.6)
+      || (geoffreyStrict && startupRegister.stiffnessRisk >= 0.32)
       || cringeRisk >= (geoffreyStrict ? 0.4 : 0.44)
       || statusRisk >= (geoffreyStrict ? 0.24 : 0.34)
       || generatedPattern.score >= generatedPatternReviewThreshold
       || sourceCopy.score >= (geoffreyStrict ? 0.38 : 0.52)
       || (geoffreyStrict && rejectedSimilarity >= 0.32)
-      || (geoffreyStrict && technical.score < 0.42 && genericRisk >= 0.28)
+      || (geoffreyStrict && technical.score < 0.42 && genericRisk >= 0.28 && startupRegister.score < 0.6)
       ? 'review'
       : 'allow';
 
   const notes: string[] = [];
   if (nativeVoiceScore >= 0.62) notes.push('native voice fit');
+  if (startupRegister.score >= 0.62) notes.push('casual startup register fit');
+  if (startupRegister.stiffnessRisk >= 0.32) notes.push(`stiff analyst diction (${startupRegister.stiffnessRisk.toFixed(2)})`);
   if (technical.score >= 0.46) notes.push(...technical.notes.slice(0, 2));
   if (genericRisk >= 0.42) notes.push('too easy to genericize');
   if (statusRisk >= 0.24) notes.push('low-status SaaS ops texture');
@@ -769,6 +910,8 @@ export function assessAccountTaste(
   return {
     nativeVoiceScore: Number(nativeVoiceScore.toFixed(3)),
     nativeStyleScore: Number(nativeStyle.score.toFixed(3)),
+    casualStartupScore: startupRegister.score,
+    stiffnessRisk: startupRegister.stiffnessRisk,
     voiceDriftRisk: Number(voiceDriftRisk.toFixed(3)),
     technicalCredibilityScore: technical.score,
     cringeRisk: Number(cringeRisk.toFixed(3)),
@@ -798,10 +941,13 @@ export function getAutonomousQueueTasteIssue({
   if ((anchorCopyRiskContribution || 0) <= -0.04) {
     return 'draft reuses a distinctive manual-anchor phrase or structure';
   }
-  if (assessment.technicalCredibilityScore < 0.36) {
+  const nativeStartupException = assessment.casualStartupScore >= 0.6
+    && assessment.nativeVoiceScore >= 0.6
+    && assessment.stiffnessRisk < 0.28;
+  if (assessment.technicalCredibilityScore < 0.36 && !(nativeStartupException && hasSourceContext)) {
     return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} is below the Geoffrey queue floor`;
   }
-  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.5) {
+  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.5 && !nativeStartupException) {
     return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} without current source context`;
   }
   return null;
@@ -809,28 +955,20 @@ export function getAutonomousQueueTasteIssue({
 
 export function buildGeoffreyNativeWritingBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
-For @geoffwoo, write like a technical operator/investor thinking in public, not like a social media manager.
-- Geoffrey's manual/operator posts are the highest-authority style evidence. Match their distribution of social posture, sentence shape, roughness, humor, directness, and compression. Generic ghostwriting rules never override those anchors.
-- Follow-graph posts are subject radar only. They may change what Geoffrey looks at, but never his cadence, worldview, status posture, jargon, or level of certainty.
-- A live subject needs a native bridge to Geoffrey's SOUL, manual topics, or operator posts. Virality alone is not permission to make him into a different kind of account.
-- For technical analysis, start from a real object or constraint: chip package, memory bandwidth, power delivery, grid interconnect, reactor fuel cycle, separation chemistry, factory tolerance, robot failure mode, launch/radiation/thermal limit, supply-chain qualification.
-- Convert it into a non-obvious implication. "This is big" is not enough. Explain what bottleneck moves, what old assumption breaks, or what curve changes.
-- Use compressed human phrasing. One hard observation beats a polished framework. Do not force every post into the same mechanism essay; native one-liners, reactions, jokes, or blunt questions are valid when manual anchors support that mode.
-- Geoffrey usually states a position, reacts to a named situation, or makes a socially situated judgment. He is not a content marketer teaching generic founders. Reject audience-label openings ("hardware founders:"), "start with" advice, and unsolicited how-to voice.
-- A list of technical nouns is not technical insight. Every mechanism must serve a disputed judgment, a surprising implication, or a concrete current event. Reject textbook definitions and tidy three-paragraph mini-essays even when every noun is accurate.
-- Do not write an unsituated mini-lecture to display expertise. Without a named live event or real personal context, default to one or two compressed beats and one disputed claim. Four polished paragraphs about a mechanism are a white paper, not a Geoffrey post.
-- Manufactured mic-drop endings and mirrored metaphors are generated voice. Reject "X meets Y. Y wins," "X is Y wearing a Z costume," "congrats on X; Y still has standards," "show me X, then we can argue," and paired "can do X and still Y / extremely A and extremely B" constructions. Stop when the observation lands; do not bolt on a social-copy punchline.
-- Preserve natural roughness and compression, but never manufacture misspellings or sprinkle slang to cosplay the voice.
-- Manual examples are voice evidence, not content seeds. Never lift their named people, places, status objects, distinctive noun phrases, punchlines, list items, or opening-plus-structure into a new post. A new topic wrapped in a manual post's skeleton is still copying.
-- Never invent a meeting, founder conversation, customer story, measurement, benchmark, or number. If it is not present in supplied evidence, write the mechanism as analysis rather than pretending it happened to Geoffrey.
-- Anonymous anecdote openers ("a founder showed me", "an owner told me") are blocked unless the exact event appears in a manual source.
-- Unsupported "personal rule" declarations and habitual factory/meeting behavior are fabricated persona, not voice. Block them.
-- Never stage a fake quote or dialogue line. A quote must appear verbatim in supplied source evidence.
-- Slack channels, dashboards, support tickets, calendar invites, and workflow handoffs are low-status proof. Do not use them as the main anchor.
-- Avoid topic-swapped AI advice. If the same post could fit any AI/startup account by changing one noun, reject it.
-- Also reject disguised template contrasts split across sentences ("does not have X. it has Y"), old/new lists, horoscope gimmicks, topic-plus-advice labels, symmetrical question stacks, tidy "same X, radically different Y" closers, noun-versus-verb gimmicks, and slide/deck-versus-reality scaffolds.
-- Synthetic status tests/objects, starter-pack lists, "normal VC hears..." archetypes, isolated "wrong level of resolution" pivots, and closing contrast questions are generated voice, not native voice.
-- Useful analytical shape, not a mandatory template: technical object -> hidden constraint -> non-consensus implication. Vary the opening and ending according to Geoffrey's actual manual-post rhythms.`;
+For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.
+- Manual/operator posts are the author model. Match their casual high-context diction, compression, uneven rhythm, directness, and social posture. Do not average them into polished prose.
+- Lead with a judgment about a company, product, market, capital, talent, cost, or timing. A technical fact may support that judgment; it is not the post.
+- Use at most one mechanism unless a named live event genuinely needs more. Lists of materials, process steps, and qualification nouns sound researched rather than lived-in.
+- Valid native modes include a blunt one-liner, a two-beat market take, a named reaction, a direct question, or a compact technical-backed startup judgment.
+- Stop when the point lands. Do not add a slogan, balanced closer, cute metaphor, lesson, or advice section.
+- Casualness must exist in the thought, not as slang pasted onto formal exposition. Never manufacture typos or catchphrases.
+- Geoffrey states positions; he does not teach generic founders. Reject audience-label openings, "start with," "you should," diligence worksheets, and topic-swapped advice.
+- Reject analyst setups such as "how do you model," "the implication is," "depends on whether," "forecasts love," and "founders love X until." Reject tidy three-part explainers and mechanism inventories.
+- Manual examples calibrate voice only. Never reuse their premise, joke, named scene, list concept, distinctive phrase, opening move, or sentence skeleton.
+- Never invent access, a meeting, founder/customer story, quote, measurement, benchmark, or number. First-person opinion is fine; fabricated first-person evidence is not.
+- Follow-graph material is subject evidence only. It cannot change Geoffrey's diction, worldview, certainty, or social posture.
+- Slack, support queues, dashboards, calendar invites, and generic workflow handoffs are weak texture for this account.
+- If the wording could plausibly come from any AI/startup account after swapping one noun, reject it.`;
 }
 
 export function classifyTasteFeedbackReason(reason: string | null | undefined, content = ''): TasteFeedbackClassification {
@@ -858,6 +996,14 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   if (/\b(my voice|not me|off voice|does not sound like me|doesn'?t sound like me|native)\b/.test(text)) {
     metadata.nativeVoiceComplaint = true;
     preferenceHints.push('Operator prioritizes native Geoffrey voice over generic viral-post optimization.');
+  }
+  if (/\b(stiff|formal|analyst(?: note| memo| voice)?|research summary|industry report|corporate diction)\b/.test(text)) {
+    metadata.stiffDictionComplaint = true;
+    preferenceHints.push('Operator rejects stiff analyst diction; use casual, direct, high-context startup language with technical detail only as backing.');
+  }
+  if (/\b(casual|startup[- ]native|startup diction|hyper[- ]relevant|founder group chat)\b/.test(text)) {
+    metadata.casualStartupVoiceRequested = true;
+    preferenceHints.push('Operator wants casual startup-native diction that makes the company, product, market, capital, talent, cost, or timing consequence immediate.');
   }
   if (/\b(lecture|lecturer|textbook|mini[- ]essay|explainer|white paper)\b/.test(text)) {
     metadata.technicalLectureComplaint = true;

@@ -307,6 +307,29 @@ describe('source planner', () => {
     expect(topic.plannerReason).toContain('politics-led subject lacks manual evidence');
   });
 
+  it('does not let a generic tech label bridge an unrelated Geoffrey trend', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 922,
+      headline: 'Hacker wipes a national land registry database',
+      source: 'Hacker News',
+      relevanceScore: 98,
+      category: 'tech',
+      timestamp: new Date().toISOString(),
+      tweetCount: 0,
+      sourceType: 'hacker_news',
+      engagementScore: 500,
+    }], {
+      tone: 'startup investor',
+      topics: ['AI', 'tech', 'startups'],
+      antiGoals: ['content drift'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about AI companies and startup markets.',
+    }, null, 'aggressive');
+
+    expect(topic.fitScores.identityFit).toBeLessThan(0.24);
+    expect(topic.sourceLane).toBe('reject');
+  });
+
   it('does not mistake the letters ai inside supply for an AI identity bridge', () => {
     const [topic] = enrichTrendingTopics([{
       id: 93,

@@ -331,6 +331,7 @@ function isTerminalAutoReplyPostError(error: unknown): boolean {
 function queuedOperatorEvidence(context: QueuedNativeVoiceContext | null): string[] {
   return [
     ...(context?.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context?.learnings?.operatorVoiceReference?.startupRegisterExamples || []),
     ...(context?.learnings?.operatorVoiceReference?.bestPerformers || []),
   ].map((entry) => entry.content);
 }
@@ -668,6 +669,8 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
           qualityGate: 'native_identity_drift',
           nativeVoiceScore: nativeVoice.assessment?.nativeVoiceScore ?? null,
           nativeStyleScore: nativeVoice.assessment?.nativeStyleScore ?? null,
+          casualStartupScore: nativeVoice.assessment?.casualStartupScore ?? null,
+          stiffnessRisk: nativeVoice.assessment?.stiffnessRisk ?? null,
           voiceDriftRisk: nativeVoice.assessment?.voiceDriftRisk ?? null,
           technicalCredibilityScore: nativeVoice.assessment?.technicalCredibilityScore ?? null,
           sourceCopyRisk: nativeVoice.assessment?.sourceCopyRisk ?? null,
@@ -2650,6 +2653,7 @@ export async function refillQueue(
     const recentContent = allTweets.slice(0, 50).map((tweet) => tweet.content);
     const operatorEvidence = [
       ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+      ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
       ...(learnings?.operatorVoiceReference?.bestPerformers || []),
     ].map((entry) => entry.content);
 

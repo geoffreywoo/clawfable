@@ -56,6 +56,7 @@ import {
   shouldCreateVelocityFollowup,
 } from './growth-engine';
 import { isNearDuplicate } from './survivability';
+import { assessGeneratedWritingPatterns } from './writing-patterns';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -1099,6 +1100,108 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   return learnings;
 }
 
+const STARTUP_REGISTER_TERMS = [
+  'startup', 'founder', 'venture', 'vc', 'invest', 'capital', 'fund', 'company', 'product',
+  'software', 'hardware', 'ai', 'model', 'codex', 'compute', 'market', 'customer', 'sales',
+  'engineering', 'r&d', 'm&a', 'ebitda', 'pe ', 'qqq', 'valuation', 'round', 'talent',
+  'factory', 'manufacturing', 'robot', 'energy', 'space', 'industrial',
+];
+
+const CASUAL_REGISTER_TERMS = [
+  'actually', 'super', 'jus ', 'just ', 'def ', 'obv', 'gonna', 'gotta', 'wanna', 'kinda',
+  'cuz', 'y\'all', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombies', 'badass',
+  'do damage', 'go hard', 'balls', 'chump change', 'gamechanger',
+];
+
+const STARTUP_JUDGMENT_TERMS = [
+  'startup', 'founder', 'company', 'product', 'customer', 'market', 'pricing', 'software',
+  'hardware', 'compute', 'capital', 'invest', 'investing', 'fund', 'vc', 'pe', 'qqq',
+  'valuation', 'round', 'sales', 'talent', 'factory', 'manufacturing', 'robot', 'industrial',
+];
+
+const STIFF_REGISTER_TERMS = [
+  'less cooperative', 'production response', 'depends on whether', 'eventually runs into',
+  'must account for', 'critical strategic', 'therefore', 'moreover', 'increasingly',
+  'commercialization requires', 'the implication is', 'this highlights',
+];
+
+function registerTermHits(value: string, terms: string[]): number {
+  const normalized = value.toLowerCase();
+  return terms.filter((term) => {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (/^[a-z0-9]+$/.test(normalizedTerm) && normalizedTerm.length <= 3) {
+      return new RegExp(`\\b${normalizedTerm}\\b`, 'i').test(normalized);
+    }
+    return normalized.includes(normalizedTerm);
+  }).length;
+}
+
+function buildStartupRegisterExamples(
+  history: TweetPerformance[],
+  pinnedXTweetIds: Set<string>,
+): TweetPerformance[] {
+  const now = Date.now();
+  const scored = history
+    .map((tweet) => {
+      const haystack = `${tweet.topic || ''} ${tweet.content}`.toLowerCase();
+      const topicHits = registerTermHits(haystack, STARTUP_REGISTER_TERMS);
+      const startupJudgmentHits = registerTermHits(haystack, STARTUP_JUDGMENT_TERMS);
+      if (topicHits === 0 || startupJudgmentHits === 0) return null;
+
+      const content = tweet.content.trim();
+      const prose = content
+        .replace(/https?:\/\/\S+/gi, ' ')
+        .replace(/@\w+/g, ' ')
+        .replace(/#[a-z0-9_]+/gi, ' ')
+        .replace(/[^a-z0-9'&+.-]+/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const proseWordCount = prose.split(/\s+/).filter(Boolean).length;
+      const timestampLines = content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}\s*[-–]/.test(line)).length;
+      const mediaDependent = /https?:\/\/\S+/i.test(content) && proseWordCount < 16;
+      const promotionalCaption = /\b(?:follow me|new interview|day \d+ with|powered by)\b/i.test(content);
+      if (mediaDependent || timestampLines >= 2 || promotionalCaption) return null;
+      const lowerOpening = /^[a-z0-9]/.test(content);
+      const casualHits = registerTermHits(` ${content.toLowerCase()} `, CASUAL_REGISTER_TERMS);
+      const situated = /@\w+|https?:\/\//i.test(content);
+      const directQuestion = content.includes('?');
+      const firstPerson = /\b(?:i|we|my|our)\b/i.test(content);
+      const stiffHits = registerTermHits(content, STIFF_REGISTER_TERMS);
+      const generatedRisk = assessGeneratedWritingPatterns(content).score;
+      const incompleteLongPost = content.length > 180 && /(?:,|&|\b(?:and|or|the|a))\s*$/i.test(content);
+      if (stiffHits >= 2 || generatedRisk >= 0.32 || incompleteLongPost) return null;
+      const ageDays = Math.max(0, (now - Date.parse(tweet.postedAt || tweet.checkedAt)) / (24 * 60 * 60 * 1000));
+      const recency = Math.max(0, 1 - (ageDays / 60));
+      const engagement = Math.min(1, Math.log1p(weightedEngagementScore(tweet)) / Math.log(180));
+      const pinned = pinnedXTweetIds.has(String(tweet.xTweetId));
+      const score =
+        Math.min(0.32, topicHits * 0.08)
+        + Math.min(0.18, startupJudgmentHits * 0.06)
+        + Math.min(0.2, casualHits * 0.07)
+        + (lowerOpening ? 0.08 : 0)
+        + (situated ? 0.08 : 0)
+        + (directQuestion ? 0.04 : 0)
+        + (firstPerson ? 0.05 : 0)
+        + (recency * 0.12)
+        + (engagement * 0.16)
+        + (pinned ? 0.35 : 0)
+        - (stiffHits * 0.18)
+        - (generatedRisk * 0.2);
+
+      return { tweet, score };
+    })
+    .filter((entry): entry is { tweet: TweetPerformance; score: number } => Boolean(entry))
+    .sort((a, b) => b.score - a.score || weightedEngagementScore(b.tweet) - weightedEngagementScore(a.tweet));
+
+  const selected: TweetPerformance[] = [];
+  for (const { tweet } of scored) {
+    if (isNearDuplicate(tweet.content, selected.map((entry) => entry.content), 0.4).isDuplicate) continue;
+    selected.push(tweet);
+    if (selected.length >= 8) break;
+  }
+  return selected;
+}
+
 function buildOperatorVoiceReference(
   history: TweetPerformance[],
   curation: ManualExampleCuration,
@@ -1205,12 +1308,17 @@ function buildOperatorVoiceReference(
   }
   const worstPerformers = sorted.slice(-6);
   if (topPerformers.length === 0) return undefined;
+  const startupRegisterExamples = buildStartupRegisterExamples(
+    usableHistory,
+    new Set(curation.pinnedXTweetIds.map((id) => String(id))),
+  );
 
   return {
     sampleCount: usableHistory.length,
     bestPerformers: topPerformers.slice(0, 8),
     styleFingerprint: computeStyleFingerprint(topPerformers, worstPerformers),
     pinnedExamples: pinnedExamples.slice(0, 3),
+    startupRegisterExamples,
     blockedXTweetIds: [...blocked],
   };
 }

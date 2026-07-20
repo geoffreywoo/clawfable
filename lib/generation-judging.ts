@@ -188,6 +188,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     featureTags,
     sourceTexts: getTrustedClaimSourceTexts(candidate, [
       ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []).map((entry) => entry.content),
+      ...(context.learnings?.operatorVoiceReference?.startupRegisterExamples || []).map((entry) => entry.content),
       ...(context.learnings?.operatorVoiceReference?.bestPerformers || []).map((entry) => entry.content),
     ]),
     untrustedSourceTexts: getUntrustedSourceTexts(candidate),
@@ -265,6 +266,11 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
       novelty: Number(novelty.toFixed(3)),
       audienceFit: Number(audienceFit.toFixed(3)),
       policySafety: Number(policySafety.toFixed(3)),
+      nativeVoice: accountTaste.nativeVoiceScore,
+      casualStartupFit: accountTaste.casualStartupScore,
+      stiffnessRisk: accountTaste.stiffnessRisk,
+      cringeRisk: accountTaste.cringeRisk,
+      technicalCredibility: accountTaste.technicalCredibilityScore,
     },
     judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}${elevationNote}${tasteNote}`,
   };
@@ -297,6 +303,12 @@ function parseScoredLines(
       const modelCringeRisk = Number.isFinite(Number(parsed.cringeRisk))
         ? clamp(Number(parsed.cringeRisk))
         : 0.5;
+      const modelCasualStartupFit = Number.isFinite(Number(parsed.casualStartupFit))
+        ? clamp(Number(parsed.casualStartupFit))
+        : modelNativeVoice;
+      const modelStiffnessRisk = Number.isFinite(Number(parsed.stiffnessRisk))
+        ? clamp(Number(parsed.stiffnessRisk))
+        : clamp(modelCringeRisk * 0.5);
       const modelTechnicalCredibility = Number.isFinite(Number(parsed.technicalCredibility))
         ? clamp(Number(parsed.technicalCredibility))
         : 0.5;
@@ -306,8 +318,10 @@ function parseScoredLines(
       const voiceFit = geoffreyStrict
         ? clamp(
             rawVoiceFit * 0.35
-            + modelNativeVoice * 0.65
+            + modelNativeVoice * 0.48
+            + modelCasualStartupFit * 0.17
             - modelCringeRisk * 0.22
+            - modelStiffnessRisk * 0.24
             - modelManualAnchorReskinRisk * 0.28,
           )
         : rawVoiceFit;
@@ -315,13 +329,17 @@ function parseScoredLines(
       if (geoffreyStrict) {
         overall = clamp(
           overall * 0.55
-          + voiceFit * 0.28
-          + modelTechnicalCredibility * 0.17
+          + voiceFit * 0.24
+          + modelTechnicalCredibility * 0.13
+          + modelCasualStartupFit * 0.08
           - modelCringeRisk * 0.2
+          - modelStiffnessRisk * 0.22
           - modelManualAnchorReskinRisk * 0.24,
         );
         if (
           modelNativeVoice < 0.55
+          || modelCasualStartupFit < 0.5
+          || modelStiffnessRisk >= 0.5
           || modelCringeRisk >= 0.5
           || modelManualAnchorReskinRisk >= 0.48
         ) {
@@ -336,6 +354,8 @@ function parseScoredLines(
         audienceFit: clamp(Number(parsed.audienceFit) || 0.5),
         policySafety: clamp(Number(parsed.policySafety) || 0.5),
         nativeVoice: modelNativeVoice,
+        casualStartupFit: modelCasualStartupFit,
+        stiffnessRisk: modelStiffnessRisk,
         cringeRisk: modelCringeRisk,
         technicalCredibility: modelTechnicalCredibility,
         manualAnchorReskinRisk: modelManualAnchorReskinRisk,
@@ -347,7 +367,7 @@ function parseScoredLines(
         judgeScore: Number(judgeBreakdown.overall.toFixed(3)),
         judgeBreakdown,
         judgeNotes: typeof parsed.notes === 'string'
-          ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)} anchorReskin=${modelManualAnchorReskinRisk.toFixed(2)}.` : ''}`
+          ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} casualStartup=${modelCasualStartupFit.toFixed(2)} stiffness=${modelStiffnessRisk.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)} anchorReskin=${modelManualAnchorReskinRisk.toFixed(2)}.` : ''}`
           : '',
       });
     } catch {
@@ -386,13 +406,14 @@ export async function judgeCandidates(
   try {
     const manualAnchorBank = [
       ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+      ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
       ...(learnings?.operatorVoiceReference?.bestPerformers || []),
     ]
       .filter((entry, index, items) => (
         entry.content?.trim()
         && items.findIndex((item) => item.content === entry.content) === index
       ))
-      .slice(0, 6)
+      .slice(0, 8)
       .map((entry, index) => `[NATIVE ${index + 1}] ${entry.content.slice(0, 260)}`)
       .join('\n');
     const geoffreyBrief = isGeoffreyVoiceProfile(voiceProfile)
@@ -401,6 +422,8 @@ export async function judgeCandidates(
 - Compare each candidate against the native anchor bank as a distribution of modes, not as prose to copy. A candidate may match one legitimate mode without averaging every anchor into one voice.
 - If it is polished, balanced, and plausibly generated, cap overall at 0.45 even when the topic is relevant.
 - Set nativeVoice below 0.55 whenever Geoffrey would be unlikely to post the wording himself.
+- Set casualStartupFit below 0.50 when the draft reads like an analyst note instead of a casual, high-context startup take.
+- Set stiffnessRisk at or above 0.50 for formal exposition, mechanism inventories, polished rhetorical questions, or an analyst setup followed by a cute metaphor.
 - Set cringeRisk at or above 0.50 for consultant cadence, topic-swapped advice, synthetic status posturing, or technical nouns pasted onto a generic thesis.
 - Set nativeVoice below 0.45 and cringeRisk at or above 0.55 for an unsituated technical mini-lecture, a mirrored "can do X and still Y / extremely A and extremely B" contrast, or a manufactured closer such as "X meets Y. Y wins," "congrats on X; Y still has standards," or "show me X, then we can argue." Correct mechanisms do not rescue generated prose.
 
@@ -423,6 +446,8 @@ Also return:
 - thesis: a short 4-10 word idea summary
 - notes: one short sentence on the main improvement opportunity
 - nativeVoice: likelihood from 0 to 1 that this person would plausibly post the exact wording
+- casualStartupFit: likelihood from 0 to 1 that the diction is casual, high-context, and immediately relevant to companies, products, markets, capital, talent, or startup timing
+- stiffnessRisk: likelihood from 0 to 1 that the draft sounds like an analyst memo, industry explainer, mechanism inventory, or polished research summary
 - cringeRisk: likelihood from 0 to 1 that the draft feels generated, socially unearned, or interchangeable
 - technicalCredibility: mechanism/constraint/specificity quality from 0 to 1
 - manualAnchorReskinRisk: likelihood from 0 to 1 that the draft copies a manual anchor's premise, joke, list concept, opening move, social setup, or sentence skeleton while swapping in new nouns
@@ -441,6 +466,8 @@ Ground rules:
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
 - Reject unsituated technical lectures, mirrored adjective/adverb contrasts, and manufactured mic-drop endings. Long mechanism inventories, "can do X and still Y / extremely A and extremely B," "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy, not Geoffrey voice.
+- For Geoffrey, technical credibility and casual startup relevance are separate. Reward one useful mechanism attached to a sharp company, product, market, capital, talent, cost, or timing judgment. Penalize technical detail that never becomes a startup take.
+- Reject "forecasts love X; reality is less cooperative," "founders love speed until...," "finance guys love...," "the calendar has physics," and polished "how do you model X when Y?" constructions as stiff generated analyst voice.
 - A draft can sound native and still be a bad copy. Set manualAnchorReskinRisk at or above 0.50 when it recreates a native anchor's premise or structure, even if no exact phrase overlaps.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
 - A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
@@ -529,6 +556,7 @@ export async function mutateTopCandidates(
     const nativeAnchorBank = isGeoffreyVoiceProfile(voiceProfile)
       ? [
           ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+          ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
           ...(learnings?.operatorVoiceReference?.bestPerformers || []),
         ]
           .filter((entry, index, items) => (
@@ -549,14 +577,17 @@ Rules:
 - Increase clarity, specificity, or punch.
 - Remove weak throat-clearing.
 - Remove AI slop tells: generic advice voice, symmetrical abstraction stacks, "the real edge", "most people miss", "not X but Y", and tidy consultant cadence.
-- Add one elevated technical anchor if missing: mechanism, number, constraint, named technology, material/process detail, failure mode, or technical/industrial operating observation.
+- For a frontier-tech thesis, use one elevated technical anchor if it sharpens the claim: mechanism, number, constraint, named technology, material/process detail, failure mode, or technical/industrial operating observation.
+- Make the startup consequence immediate: company, product, market, capital, talent, cost, margin, adoption, or timing. Technical detail is backing, not the whole post.
 - Do not use Slack, support tickets, dashboards, calendar invites, generic workflow handoffs, or "renamed owner" as the main proof. For frontier-tech drafts, replace that texture with compute, energy, materials, manufacturing, robotics, or space constraints.
 - Never add a fake founder/customer conversation, first-person event, benchmark, quote, or number. Preserve only evidence supplied with the candidate; otherwise rewrite as analysis or an explicit hypothesis.
-- For @geoffwoo, prefer the shape: technical object -> hidden constraint -> non-consensus implication -> compressed human phrasing.
+- For @geoffwoo, rewrite from the startup judgment outward: company, product, market, capital, talent, cost, margin, adoption, or timing first; keep at most one supporting mechanism.
+- Do not preserve technical detail merely because it is correct. If it does not sharpen the startup judgment, delete it.
 - Do not turn every tweet into the same template.
 - Do not turn a position into advice. Reject audience-label openings, "start with", "you should", technical noun checklists, textbook definitions, and tidy three-paragraph explainers.
 - Do not turn technical accuracy into a mini-lecture. Without a real named context, compress to one or two beats and one disputed implication.
 - Delete mirrored contrasts and manufactured closers rather than polishing them: "can do X and still Y / extremely A and extremely B," "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue."
+- Delete stiff analyst setups rather than making them cuter: "forecasts love X; reality is less cooperative," "founders love speed until...," "finance guys love...," "the calendar has physics," and polished "how do you model X when Y?" questions.
 - Preserve roughness already present in the draft, but do not add fake typos, slang, or lowercase as voice costume.
 - Stay in voice: ${voiceProfile.tone}.
 ${nativeAnchorBank ? `Native anchor bank (match a mode, never copy prose):\n${nativeAnchorBank}` : ''}

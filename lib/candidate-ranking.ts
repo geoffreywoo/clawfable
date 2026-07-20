@@ -246,6 +246,7 @@ function getPositiveOperatorAnchors(context: CandidateRankingContext): TweetPerf
   const operatorReference = context.learnings?.operatorVoiceReference;
   return [
     ...(operatorReference?.pinnedExamples || []),
+    ...(operatorReference?.startupRegisterExamples || []),
     ...(operatorReference?.bestPerformers || []),
     ...(!operatorReference?.bestPerformers?.length && !operatorReference?.pinnedExamples?.length
       ? (context.learnings?.bestPerformers || [])
@@ -298,12 +299,13 @@ export function scoreOperatorAnchorCopyRisk(
 ): number {
   const positiveAnchors = getPositiveOperatorAnchors(context);
   if (positiveAnchors.length === 0) return 0;
+  const strictAnchorFirewall = isGeoffreyVoiceProfile(context.voiceProfile);
 
   let strongestRisk = 0;
   for (const anchor of positiveAnchors.slice(0, 12)) {
     const duplicate = isNearDuplicate(candidate.content, [anchor.content], 0.82);
     const sameTopic = normalizeTopic(anchor.topic) === normalizeTopic(candidate.targetTopic);
-    const distinctivePhraseRisk = sameTopic
+    const distinctivePhraseRisk = sameTopic && !strictAnchorFirewall
       ? 0
       : scoreDistinctiveOperatorPhraseReuse(
           candidate.content,
@@ -1863,6 +1865,7 @@ export function rankGeneratedTweets(
 ): RankedProtocolTweet[] {
   const operatorSourceTexts = [
     ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.startupRegisterExamples || []),
     ...(context.learnings?.operatorVoiceReference?.bestPerformers || []),
   ].map((entry) => entry.content);
   const priorWritingTexts = [
@@ -1944,6 +1947,22 @@ export function rankGeneratedTweets(
     });
     const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
     const accountTasteWeight = geoffreyStrict ? 1 : 0.15;
+    const casualStartupFitScore = geoffreyStrict
+      ? Math.min(
+          accountTasteScore.casualStartupScore,
+          candidate.judgeBreakdown?.casualStartupFit ?? accountTasteScore.casualStartupScore,
+        )
+      : accountTasteScore.casualStartupScore;
+    const stiffnessRiskScore = geoffreyStrict
+      ? Math.max(
+          accountTasteScore.stiffnessRisk,
+          candidate.judgeBreakdown?.stiffnessRisk ?? accountTasteScore.stiffnessRisk,
+        )
+      : accountTasteScore.stiffnessRisk;
+    const sourceBackedCasualStartupException = Boolean(candidate.sourceBrief || candidate.trendHeadline)
+      && casualStartupFitScore >= 0.6
+      && accountTasteScore.nativeVoiceScore >= 0.6
+      && stiffnessRiskScore < 0.28;
     const manualAnchorReskinRiskScore = geoffreyStrict
       ? clamp(candidate.judgeBreakdown?.manualAnchorReskinRisk || 0)
       : 0;
@@ -1994,6 +2013,8 @@ export function rankGeneratedTweets(
       (technicalElevationScore.banalOpsScore * 0.26) +
       (accountTasteScore.cringeRisk * 0.26 * accountTasteWeight) +
       (accountTasteScore.statusTextureRisk * 0.22 * accountTasteWeight) +
+      (stiffnessRiskScore * 0.38 * accountTasteWeight) +
+      (Math.max(0, 0.52 - casualStartupFitScore) * 0.3 * accountTasteWeight) +
       (accountTasteScore.voiceDriftRisk * 0.24 * accountTasteWeight) +
       (accountTasteScore.truthfulnessRisk * 0.9) +
       (accountTasteScore.sourceCopyRisk * 0.95) +
@@ -2034,6 +2055,8 @@ export function rankGeneratedTweets(
       banalOpsTexture: Number((-technicalElevationScore.banalOpsScore * 0.14).toFixed(3)),
       nativeVoice: Number(((accountTasteScore.nativeVoiceScore - 0.5) * 0.18 * accountTasteWeight).toFixed(3)),
       nativeStyle: Number(((accountTasteScore.nativeStyleScore - 0.5) * 0.08 * accountTasteWeight).toFixed(3)),
+      casualStartupFit: Number(((casualStartupFitScore - 0.5) * 0.18 * accountTasteWeight).toFixed(3)),
+      stiffnessRisk: Number((-stiffnessRiskScore * 0.18 * accountTasteWeight).toFixed(3)),
       voiceDrift: Number((-accountTasteScore.voiceDriftRisk * 0.16 * accountTasteWeight).toFixed(3)),
       topicIdentityFit: Number((topicIdentityScore * 0.06).toFixed(3)),
       technicalCredibility: Number((accountTasteScore.technicalCredibilityScore * 0.14 * accountTasteWeight).toFixed(3)),
@@ -2087,6 +2110,7 @@ export function rankGeneratedTweets(
       viralTakeScore * 0.1 +
       accountTasteScore.nativeVoiceScore * 0.14 * accountTasteWeight +
       accountTasteScore.nativeStyleScore * 0.06 * accountTasteWeight +
+      casualStartupFitScore * 0.1 * accountTasteWeight +
       accountTasteScore.technicalCredibilityScore * 0.1 * accountTasteWeight +
       (replyBaitScore * conversationQualityScore) * 0.06 +
       (conversationQualityScore - 0.5) * 0.06 +
@@ -2121,6 +2145,7 @@ export function rankGeneratedTweets(
       (technicalElevationScore.banalOpsScore * 0.18) -
       (accountTasteScore.cringeRisk * 0.18 * accountTasteWeight) -
       (accountTasteScore.statusTextureRisk * 0.12 * accountTasteWeight) -
+      (stiffnessRiskScore * 0.2 * accountTasteWeight) -
       (accountTasteScore.voiceDriftRisk * 0.14 * accountTasteWeight) -
       (accountTasteScore.truthfulnessRisk * 0.5) -
       (accountTasteScore.sourceCopyRisk * 0.52) -
@@ -2142,10 +2167,12 @@ export function rankGeneratedTweets(
       if (manualAnchorReskinRiskScore >= 0.48) confidenceScore = Math.min(confidenceScore, 0.39);
       if (accountTasteScore.sourceCopyRisk >= 0.58) confidenceScore = Math.min(confidenceScore, 0.24);
       if (unsupportedNetworkTopic) confidenceScore = Math.min(confidenceScore, 0.39);
-      if (accountTasteScore.technicalCredibilityScore < 0.42) {
+      if (casualStartupFitScore < 0.5) confidenceScore = Math.min(confidenceScore, 0.42);
+      if (stiffnessRiskScore >= 0.5) confidenceScore = Math.min(confidenceScore, 0.39);
+      if (accountTasteScore.technicalCredibilityScore < 0.42 && !sourceBackedCasualStartupException) {
         confidenceScore = Math.min(confidenceScore, 0.55);
       }
-      if (accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42) {
+      if (accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42 && !sourceBackedCasualStartupException) {
         confidenceScore = Math.min(confidenceScore, 0.48);
       }
     }
@@ -2162,6 +2189,22 @@ export function rankGeneratedTweets(
     } else if (context.style.autonomyMode === 'explore') {
       confidenceScore = clamp(confidenceScore + (freshnessScore * 0.08) + (surpriseScore * 0.04) - (policyRiskScore * 0.02));
     }
+    if (geoffreyStrict) {
+      if (accountTasteScore.action === 'block') {
+        confidenceScore = Math.min(confidenceScore, 0.39);
+      } else if (accountTasteScore.action === 'review') {
+        confidenceScore = Math.min(confidenceScore, 0.49);
+      }
+      if (anchorCopyRiskScore >= 0.4 || manualAnchorReskinRiskScore >= 0.48) {
+        confidenceScore = Math.min(confidenceScore, 0.39);
+      }
+      if (unsupportedNetworkTopic || stiffnessRiskScore >= 0.5) {
+        confidenceScore = Math.min(confidenceScore, 0.39);
+      }
+      if (casualStartupFitScore < 0.5) {
+        confidenceScore = Math.min(confidenceScore, 0.42);
+      }
+    }
     if (accountTasteScore.sourceCopyRisk >= (geoffreyStrict ? 0.58 : 0.78)) {
       confidenceScore = Math.min(confidenceScore, 0.24);
     }
@@ -2176,11 +2219,13 @@ export function rankGeneratedTweets(
       + noveltyScore * 0.05
       + surpriseScore * 0.04
       + accountTasteScore.nativeVoiceScore * 0.05 * accountTasteWeight
+      + casualStartupFitScore * 0.04 * accountTasteWeight
       + accountTasteScore.technicalCredibilityScore * 0.04 * accountTasteWeight
       + winnerMechanicFitScore * 0.04
       - riskPenalty * 0.18
       - accountTasteScore.truthfulnessRisk * 0.12
       - accountTasteScore.sourceCopyRisk * 0.12
+      - stiffnessRiskScore * 0.08 * accountTasteWeight
       - patternReuseRiskScore * 0.06
       - accountTasteScore.rejectedDraftSimilarity * 0.1 * accountTasteWeight,
     ) * 100);

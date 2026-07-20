@@ -27,9 +27,33 @@ function isCryptoOnlyTopic(topic: string): boolean {
   return /\b(crypto|web3|defi|nft|token|blockchain|bitcoin|ethereum)\b/i.test(topic);
 }
 
+const GEOFFREY_GENERIC_DRIFT_TOPICS = new Set([
+  'career',
+  'culture',
+  'general',
+  'health',
+  'humor',
+  'jobs',
+  'lifestyle',
+  'personal',
+  'policy',
+  'politics',
+  'sports',
+  'tech',
+]);
+
+function isGenericDriftTopic(topic: string): boolean {
+  const normalized = topic
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  return GEOFFREY_GENERIC_DRIFT_TOPICS.has(normalized);
+}
+
 export function shouldSuppressTopicForAccount(handle: string | null | undefined, topic: string | null | undefined): boolean {
   if (!isGeoffreyHandle(handle)) return false;
-  return isCryptoOnlyTopic(topic || '');
+  return isCryptoOnlyTopic(topic || '') || isGenericDriftTopic(topic || '');
 }
 
 export function applyAccountTopicPolicy(
@@ -41,7 +65,7 @@ export function applyAccountTopicPolicy(
   // Account policy may narrow an identity, but it must not manufacture one.
   // Current subjects come from manual/SOUL evidence and live topic discovery.
   const topics = dedupeTopics(
-    voiceProfile.topics.filter((topic) => !isCryptoOnlyTopic(topic)),
+    voiceProfile.topics.filter((topic) => !shouldSuppressTopicForAccount(handle, topic)),
   );
 
   return {
@@ -71,8 +95,9 @@ export function applyAccountTopicPolicy(
 - Avoid template openings like "the real edge", "most people miss", "not X but Y", "the winners will be", "here's the thing", and neat numbered frameworks unless a concrete observed detail makes the sentence impossible to genericize.
 - Avoid low-status SaaS-ops texture as the main anchor: Slack channels, support queues/tickets, calendar invites, dashboards, generic workflow handoffs, Looms, Zendesk, "renamed owner", and "who changed the workflow" are now considered weak proof.
 - The account should sound more elevated, technical, and elite: write from the level of compute constraints, chip packaging, power delivery, grid interconnects, reactor/fuel-cycle bottlenecks, separation chemistry, tungsten carbide tooling, antimony processing, gallium/germanium byproduct refining, graphite purification, fluorine chemistry, metrology, factory tolerances, robotics exception handling, launch/radiation/thermal constraints, and industrial supply chains.
+- Elevated does not mean formal. Geoffrey's native startup diction is casual, lowercase, direct, socially situated, and comfortable with shorthand. Technical detail should support a judgment about a company, product, market, capital, talent, cost, or timing; it should not become an analyst memo.
 - Prefer the actual rhythm distribution in Geoffrey's manual posts. Blunt, compressed, slightly uneven phrasing is often right, but do not flatten every post into one synthetic technical cadence.
-- Every draft needs at least one high-status technical anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or technical/industrial operating observation.
+- Most frontier-tech drafts need a high-status technical anchor: a mechanism, constraint, bottleneck, number, material, factory/process detail, named technology, concrete failure mode, or technical/industrial operating observation. A short, source-backed startup reaction may clear without a mechanism inventory when its company/market judgment is unmistakably native.
 - A generic "workflow changed" or "support queue got quieter" does not count as a sufficient anchor for @geoffwoo.
 - If a commenter could plausibly say "this sounds like ChatGPT wrote it", reject the draft before it reaches the queue.`,
   };
@@ -86,8 +111,8 @@ export function applyAccountLearningPolicy(
 
   return {
     ...learnings,
-    topicRankings: learnings.topicRankings.filter((entry) => !isCryptoOnlyTopic(entry.topic)),
-    manualTopicProfile: learnings.manualTopicProfile?.filter((entry) => !isCryptoOnlyTopic(entry.topic)),
-    insights: learnings.insights.filter((insight) => !isCryptoOnlyTopic(insight)),
+    topicRankings: learnings.topicRankings.filter((entry) => !shouldSuppressTopicForAccount(handle, entry.topic)),
+    manualTopicProfile: learnings.manualTopicProfile?.filter((entry) => !shouldSuppressTopicForAccount(handle, entry.topic)),
+    insights: learnings.insights.filter((insight) => !isCryptoOnlyTopic(insight) && !isGenericDriftTopic(insight)),
   };
 }

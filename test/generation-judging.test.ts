@@ -394,6 +394,56 @@ describe('judgeCandidates fallback critic', () => {
     expect(judged[0].judgeNotes).toBe('Strong operator-specific mechanism.');
   });
 
+  it('caps Geoffrey analyst prose when the critic finds weak casual startup fit', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        idx: 0,
+        overall: 0.92,
+        voiceFit: 0.86,
+        clarity: 0.9,
+        novelty: 0.82,
+        audienceFit: 0.88,
+        policySafety: 0.96,
+        nativeVoice: 0.78,
+        casualStartupFit: 0.28,
+        stiffnessRisk: 0.82,
+        cringeRisk: 0.22,
+        technicalCredibility: 0.9,
+        manualAnchorReskinRisk: 0.02,
+        thesis: 'robot magnets constrain scale',
+        notes: 'Technically correct but written like an analyst memo.',
+      }),
+    });
+
+    const judged = await judgeCandidates([{
+      content: 'Humanoid robot forecasts love unit counts. Motor performance at temperature is less cooperative. NdFeB supply eventually runs into separation chemistry and sintering yield.',
+      format: 'analysis',
+      targetTopic: 'robotics startups',
+      rationale: 'Mechanism-heavy analyst summary.',
+    }], {
+      voiceProfile: {
+        tone: 'startup investor',
+        topics: ['AI', 'robotics', 'startups'],
+        antiGoals: ['stiff analyst prose'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes casual, high-context startup takes.',
+      },
+      analysis: analysis(),
+      learnings: null,
+      memory: memory(),
+      mode: 'model',
+    });
+
+    expect(judged[0].judgeScore).toBeLessThanOrEqual(0.45);
+    expect(judged[0].judgeBreakdown.casualStartupFit).toBe(0.28);
+    expect(judged[0].judgeBreakdown.stiffnessRisk).toBe(0.82);
+    const system = String(mocks.generateText.mock.calls[0]?.[0]?.system || '');
+    expect(system).toContain('casualStartupFit');
+    expect(system).toContain('stiffnessRisk');
+    expect(system).toContain('technical credibility and casual startup relevance are separate');
+  });
+
   it('blocks a high-scoring Geoffrey draft that reskins a manual anchor premise', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({

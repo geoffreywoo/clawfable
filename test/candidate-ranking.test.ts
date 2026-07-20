@@ -624,8 +624,8 @@ describe('rankGeneratedTweets', () => {
     };
     const nativeAnchor = performanceAnchor({
       xTweetId: 'x-native-tungsten-anchor',
-      content: 'the mine is not the product. carbide powder, sintering control and tool qualification are the product.',
-      topic: 'tungsten critical minerals',
+      content: 'software is nepo + codex/claude\nhardware is where alpha is left',
+      topic: 'AI',
       source: 'manual',
     });
     context.learnings = {
@@ -642,6 +642,7 @@ describe('rankGeneratedTweets', () => {
       operatorVoiceReference: {
         sampleCount: 1,
         bestPerformers: [nativeAnchor],
+        startupRegisterExamples: [nativeAnchor],
         pinnedExamples: [],
         styleFingerprint: {
           avgLength: nativeAnchor.content.length,
@@ -669,7 +670,7 @@ describe('rankGeneratedTweets', () => {
         sourceBrief: 'Tungsten carbide depends on powder metallurgy, binder chemistry, sintering, and tool qualification.',
       },
       {
-        content: 'Tungsten supply matters downstream: carbide powder size, cobalt binder chemistry, sintering control, and tool qualification decide machining throughput.',
+        content: 'tungsten mine decks are way too early in the stack. carbide powder size + sintering yield decide how much machining capacity actually ships.',
         format: 'analysis',
         targetTopic: 'tungsten critical minerals',
         rationale: 'Mechanism without fake access.',
@@ -678,7 +679,7 @@ describe('rankGeneratedTweets', () => {
     ], context);
 
     const fabricated = ranked.find((candidate) => candidate.content.startsWith('A machine shop owner'))!;
-    const truthful = ranked.find((candidate) => candidate.content.startsWith('Tungsten supply'))!;
+    const truthful = ranked.find((candidate) => candidate.content.startsWith('tungsten mine'))!;
 
     expect(fabricated.scoreProvenance.truthfulnessRisk).toBeLessThan(0);
     expect(fabricated.confidenceScore).toBeLessThanOrEqual(0.24);
@@ -812,6 +813,7 @@ describe('rankGeneratedTweets', () => {
 
   it('caps high-engagement-looking Geoffrey drafts when native voice and cringe fail', () => {
     const context = rankingContext();
+    context.style.autonomyMode = 'safe';
     context.voiceProfile = {
       tone: 'technical operator/investor',
       topics: ['AI', 'inference asics', 'fusion', 'fission', 'rare earth minerals', 'robotics', 'space'],
@@ -1931,7 +1933,7 @@ describe('rankGeneratedTweets', () => {
       {
         content: 'personal wealth in the next decade:\n\n- enough power to run inference\n- a garage with three-phase service\n- a robot that recovers from a jam\n\nwoodside estate still acceptable.',
         format: 'hot_take',
-        targetTopic: 'frontier technology',
+        targetTopic: 'culture',
         rationale: 'Reskins a successful manual status list.',
       },
       {
