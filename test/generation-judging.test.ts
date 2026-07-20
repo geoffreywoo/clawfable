@@ -686,6 +686,8 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('First-person opinion or reaction is allowed');
     expect(system).toContain('Neutral cause-and-effect is still a research note');
     expect(system).toContain('Put the position in the first line');
+    expect(system).toContain('A factual explanation with no disputable judgment is not a post');
+    expect(system).toContain('Do not hide the judgment inside institutional language');
     expect(system.indexOf('software is nepo + codex/claude'))
       .toBeLessThan(system.indexOf('x algo def way better'));
     expect(prompt).toContain('source=Customer-specific packaging qualifications');

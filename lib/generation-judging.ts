@@ -638,11 +638,13 @@ Write like a high-context message to a smart founder or investor:
 - Treat the supplied draft as disposable scaffolding. Keep its defensible idea, but discard its sentence structure, framing, and analyst vocabulary.
 - Find the human stake: which company, founder, investor, buyer, supplier, or market actor must pay, build, compete, fund, or absorb the constraint. Neutral cause-and-effect is still a research note.
 - Lead with one judgment about the company, product, market, capital, cost, talent, or timing. For technical seeds, use one mechanism as support and move quickly to what it changes for startups or investors.
+- Make a clear bet that a smart peer could disagree with. A factual explanation with no disputable judgment is not a post.
+- Prefer active verbs and plain evaluative words: pay, build, buy, ship, win, lose, good, bad, cheap, expensive, big, small, hard, easy, weird. Do not hide the judgment inside institutional language such as "absorb," "underwrite against," "market structure," or "capacity trade."
 - Put the position in the first line. Skip polished setup frames such as "X is the reminder," "the upside is no longer just," "there is no straightforward," and "one of those markets."
 - Use plain speech, compression, and uneven rhythm. Geoffrey often sounds like he is continuing an existing conversation instead of introducing a topic. Fragments and line breaks are fine. Stop when the point lands.
 - Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
 - Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
-- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. Version one must be a single-sentence blunt market take under 180 characters. Version two may use two asymmetric beats. Version three is a looser high-context reaction. Do not make all three a setup followed by an explanation.
+- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. Version one must be a single-sentence blunt market take under 180 characters. Version two may use two asymmetric beats. Version three is a looser high-context reaction. At least one must say plainly who is better or worse off. Do not make all three a setup followed by an explanation.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}
