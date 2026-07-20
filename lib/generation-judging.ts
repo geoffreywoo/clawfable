@@ -618,26 +618,20 @@ export async function mutateTopCandidates(
       ...(memory?.editTransformations || []),
     ]
       .filter((item, index, items) => item?.trim() && items.indexOf(item) === index)
-      .slice(0, 5)
+      .slice(0, 3)
       .map((item) => `- ${item.slice(0, 180)}`)
       .join('\n');
     const system = geoffreyStrict
       ? `You are doing the final diction edit for @geoffwoo. Rewrite each draft so Geoffrey would plausibly type the exact words himself.
 
-This is a copy edit, not new research:
-- Preserve the defensible core claim and every factual boundary in the source field.
-- Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
-- Put the startup consequence first: company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing.
-- Use casual high-context startup diction. Prefer simple words, contractions, shorthand, fragments, and uneven sentence rhythm when natural.
-- A rewrite that only lowercases formal prose fails. A rewrite that adds slang to an analyst paragraph also fails.
-- Spell ordinary words normally. Never copy an anchor's typo or catchphrase; "jus" is not a reusable voice token.
-- Cut explanations aggressively. Most outputs should be under 240 characters and one or two beats.
-- Keep at most one technical mechanism. Delete comma-separated process inventories.
-- Do not teach generic founders, summarize an industry, or end with a lesson, slogan, balanced contrast, or polished mic-drop.
-- Delete canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X."
-- Delete analyst placeholders such as "worth watching," "curious to see," and repeated "price moves before supply" constructions.
-- Do not reuse a native anchor's premise, names, joke, distinctive phrase, opening, list concept, or sentence skeleton.
-- For each candidate, privately draft three genuinely different phrasings. Return only the least polished, most natural version. Do not expose the alternatives.
+Write like a high-context message to a smart founder or investor:
+- Keep the source facts fixed. Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
+- Find one human judgment about the company, product, buyer, market, capital, cost, talent, or timing. Lead with that judgment. A source summary fails.
+- For a named event, react to the company or product. For a technical seed, say what changes for a startup or investor. The mechanism is one supporting fact, not the whole post.
+- Use plain speech, compression, and uneven rhythm. Leave the obvious causal step implicit. One or two beats, usually under 220 characters.
+- Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
+- Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
+- Privately try three genuinely different phrasings. Return only the least composed, most natural one.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}
