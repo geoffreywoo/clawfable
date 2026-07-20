@@ -331,17 +331,26 @@ describe('source planner', () => {
   });
 
   it('does not mistake the letters ai inside supply for an AI identity bridge', () => {
-    const [topic] = enrichTrendingTopics([{
-      id: 93,
-      headline: 'Retail supply contracts are changing swimsuit inventory.',
+    const topics = enrichTrendingTopics([
+      {
+        id: 93,
+        headline: 'Retail supply contracts are changing swimsuit inventory.',
+        category: 'retail supply contracts',
+      },
+      {
+        id: 94,
+        headline: 'Coast guard boats approach Ren’ai Jiao after a warning.',
+        category: 'Ren’ai Jiao confrontation',
+      },
+    ].map((topic) => ({
+      ...topic,
       source: 'Hacker News',
       relevanceScore: 90,
-      category: 'retail supply contracts',
       timestamp: new Date().toISOString(),
       tweetCount: 0,
-      sourceType: 'hacker_news',
+      sourceType: 'hacker_news' as const,
       engagementScore: 300,
-    }], {
+    })), {
       tone: 'technical',
       topics: ['AI'],
       antiGoals: [],
@@ -349,8 +358,9 @@ describe('source planner', () => {
       summary: 'AI investor',
     }, null, 'aggressive');
 
-    expect(topic.fitScores.soul).toBe(0);
-    expect(topic.sourceLane).toBe('reject');
+    expect(topics[0].fitScores.soul).toBe(0);
+    expect(topics[1].fitScores.soul).toBeLessThanOrEqual(0.16);
+    expect(topics.every((topic) => topic.sourceLane === 'reject')).toBe(true);
   });
 
   it('does not treat generic infrastructure overlap as a native topic bridge', () => {
@@ -551,6 +561,60 @@ describe('source planner', () => {
 
     expect(classified.every((topic) => topic.sourceLane === 'reject')).toBe(true);
     expect(classified.every((topic) => (topic.fitScores.identityFit || 0) <= 0.16)).toBe(true);
+  });
+
+  it('recognizes concrete named startup and frontier-tech events for Geoffrey', () => {
+    const classified = enrichTrendingTopics(
+      [
+        {
+          id: 710,
+          headline: 'Anthropic throttling changes how teams evaluate Claude as production infrastructure',
+          category: 'Anthropic throttling',
+        },
+        {
+          id: 711,
+          headline: 'Anduril introduces Thunder as a new autonomous battlefield aircraft',
+          category: 'Anduril Thunder battlefield aircraft',
+        },
+        {
+          id: 712,
+          headline: 'E2B absorbs prompt-to-app workloads serving more than one million users',
+          category: 'Prompt-to-app scaling infrastructure',
+        },
+        {
+          id: 713,
+          headline: 'Xiaomi-Robotics-1',
+          category: 'robotics',
+        },
+      ].map((topic) => ({
+        ...topic,
+        networkTopicId: `network-${topic.id}`,
+        source: '@source1, @source2, @source3',
+        relevanceScore: 95,
+        timestamp: new Date().toISOString(),
+        tweetCount: 4,
+        sourceType: 'x' as const,
+        sourceCount: 3,
+        engagementScore: 3000,
+        sourceQuality: 0.9,
+        discoveryMethod: 'followed_network' as const,
+        networkMomentumScore: 0.84,
+        networkBreakoutScore: 0.86,
+        topicConfidence: 0.9,
+      })),
+      {
+        tone: 'casual startup investor',
+        topics: ['AI', 'startups', 'robotics', 'frontier tech'],
+        antiGoals: ['generic trend bait'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes about AI companies, startups, and frontier technology.',
+      },
+      null,
+      'moderate',
+    );
+
+    expect(classified.every((topic) => (topic.fitScores.identityFit || 0) >= 0.54)).toBe(true);
+    expect(classified.every((topic) => topic.sourceLane !== 'reject')).toBe(true);
   });
 
   it('treats a zero trend target as a hard zero even with strong network momentum', () => {

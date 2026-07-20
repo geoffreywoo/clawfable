@@ -592,6 +592,7 @@ This is a copy edit, not new research:
 - Cut explanations aggressively. Most outputs should be under 240 characters and one or two beats.
 - Keep at most one technical mechanism. Delete comma-separated process inventories.
 - Do not teach generic founders, summarize an industry, or end with a lesson, slogan, balanced contrast, or polished mic-drop.
+- Delete canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X."
 - Do not reuse a native anchor's premise, names, joke, distinctive phrase, opening, list concept, or sentence skeleton.
 
 NATIVE MANUAL POSTS (diction evidence only):

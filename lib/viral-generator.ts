@@ -1247,11 +1247,13 @@ export async function generateViralBatch(
     shitpoastEnabled: effectiveStyle.shitpoastEnabled,
   });
   const maxShitpoast = getShitpoastSlotCount(count, effectiveStyle.shitpoastEnabled);
-  const maxTrendSources = getFinalTrendSourceCap(
-    count,
-    effectiveStyle.trendMixTarget,
-    effectiveStyle.autonomyMode,
-  );
+  const maxTrendSources = isGeoffreyVoiceProfile(voiceProfile)
+    ? Math.min(count, Math.max(1, Math.ceil(count * 0.5)))
+    : getFinalTrendSourceCap(
+        count,
+        effectiveStyle.trendMixTarget,
+        effectiveStyle.autonomyMode,
+      );
   const inferredShitpoastSlots = buildShitpoastSlotSet(count, effectiveStyle.shitpoastEnabled);
   const creativeLanePlan = buildCreativeLanePlan(candidateCount, sourcePlan, effectiveStyle.shitpoastEnabled);
   const portfolioPlan = buildPostPortfolioPlan({

@@ -95,6 +95,11 @@ const BROAD_IDENTITY_TOPICS = new Set([
 ]);
 
 const POLITICS_LED_TOPIC_PATTERN = /\b(?:biden|campaign|democrat|election|geopolitic|putin|republican|trump|white house)\b/i;
+const GEOFFREY_RELEVANT_EVENT_PATTERN = /\b(?:accelerators?|agents?|aircraft|anduril|anthropic|apps?|archer|automation|autonomous|batter(?:y|ies)|chatgpt|chips?|claude|compute|data centers?|defense|drones?|e2b|energy|factor(?:y|ies)|fission|fusion|grids?|hugging face|inference|manufactur(?:e|ing)|minerals?|models?|nuclear|openai|power|prompts?|rare earth|reactors?|robots?|robotics|rockets?|semiconductors?|space|startups?|user scale|vertical lift|xiaomi)\b/i;
+const GEOFFREY_AI_TOKEN_PATTERN = /(?:^|[\s/(])ai(?:$|[\s/),.:-])/i;
+const GEOFFREY_NAMED_TECH_PATTERN = /\b(?:anduril|anthropic|archer|chatgpt|claude|e2b|hugging face|nvidia|openai|spacex|tsmc|xiaomi)\b/i;
+const GEOFFREY_CONCRETE_EVENT_PATTERN = /\b(?:battlefield|benchmarks?|capacity|customers?|deployments?|factor(?:y|ies)|infrastructure|land|latency|payload|pricing|process|rate limits?|scale|supply|throttl(?:e|ed|ing)|throughput|training|vertical lift|yield)\b/i;
+const GENERIC_BREAKOUT_EVENT_PATTERN = /\b(?:big|breakout|future|huge|moment|taking off|the next big thing)\b/i;
 
 const BASE_LANE_BUDGETS: Record<'safe' | 'balanced' | 'explore', Record<ContentSourceLane, number>> = {
   safe: {
@@ -324,9 +329,32 @@ export function assessNativeTopicIdentity(
   learnings: AgentLearnings | null,
 ): NativeTopicIdentityAssessment {
   const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`;
+  const geoffreyConcreteBridge = (() => {
+    const relevantEvent = GEOFFREY_RELEVANT_EVENT_PATTERN.test(haystack)
+      || GEOFFREY_AI_TOKEN_PATTERN.test(haystack);
+    if (!isGeoffreyVoiceProfile(voiceProfile) || !relevantEvent) return 0;
+    const headline = topic.headline.trim();
+    const category = normalizeTopic(topic.category);
+    const broadCategory = BROAD_IDENTITY_TOPICS.has(category);
+    const namedTech = GEOFFREY_NAMED_TECH_PATTERN.test(haystack);
+    const concreteEvent = GEOFFREY_CONCRETE_EVENT_PATTERN.test(haystack);
+    const genericBreakout = GENERIC_BREAKOUT_EVENT_PATTERN.test(headline)
+      && !namedTech
+      && !concreteEvent;
+    const specificHeadline = headline.split(/\s+/).filter(Boolean).length >= 4
+      && normalizeTopic(headline) !== category
+      && !genericBreakout;
+    const namedProductLabel = namedTech && /[a-z]+[-/][a-z0-9-]+|\d/i.test(headline);
+
+    if (namedTech && (concreteEvent || specificHeadline || namedProductLabel)) return 0.72;
+    if (concreteEvent && specificHeadline) return 0.64;
+    if (!broadCategory && specificHeadline) return 0.54;
+    return 0;
+  })();
   const soul = Math.max(
     topicFitScore(haystack, voiceProfile.topics),
     profileContextFitScore(haystack, voiceProfile),
+    geoffreyConcreteBridge,
   );
   const manual = manualFitScore(topic, learnings?.manualTopicProfile || []);
   const identityFit = Math.max(soul, manual);
