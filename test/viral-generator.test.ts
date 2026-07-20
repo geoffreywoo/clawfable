@@ -38,6 +38,34 @@ describe('generateViralBatch', () => {
       communicationStyle: 'general founder voice',
       summary: 'A general technical founder.',
     })).toEqual(ranked);
+
+    const stiff = {
+      content: 'there is no straightforward rhenium capacity trade. aerospace buyers need more, but supply comes out in tiny amounts.',
+      draftExperimentId: 'stiff',
+      sourceBrief: 'rhenium is a tiny copper and molybdenum byproduct stream',
+    };
+    const native = {
+      content: 'rhenium could rip and copper miners still wont care. tiny byproduct in a massive market. aerospace guys just have to eat the price.',
+      draftExperimentId: 'native',
+      sourceBrief: 'rhenium is a tiny copper and molybdenum byproduct stream',
+    };
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: [],
+        pinnedExamples: [],
+        startupRegisterExamples: [
+          { content: 'software is nepo + codex/claude\nhardware is where alpha is left', topic: 'AI' },
+          { content: 'yes, threshold to beat is QQQ. those guys all seem like zombies', topic: 'finance' },
+        ],
+      },
+    } as any;
+
+    expect(preferGeoffreyGroundedCandidates(
+      [stiff, native] as any,
+      2,
+      geoffreyVoice,
+      { learnings },
+    ).map((candidate) => candidate.draftExperimentId)).toEqual(['native', 'stiff']);
   });
 
   function memory(overrides: Partial<PersonalizationMemory> = {}): PersonalizationMemory {

@@ -24,8 +24,14 @@ import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 import { normalizeGeneratedTweetContent } from './tweet-text';
 import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt, hasPersonalizationMemoryPrompt } from './personalization-memory-prompt';
-import { buildGeoffreyNativeWritingBrief, isGeoffreyVoiceProfile } from './account-taste';
+import {
+  assessAccountTaste,
+  buildGeoffreyNativeWritingBrief,
+  getAutonomousQueueTasteIssue,
+  isGeoffreyVoiceProfile,
+} from './account-taste';
 import { assessHistoricalWinner } from './winner-learning';
+import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import {
   buildMediaBrief,
   buildPostPortfolioPlan,
@@ -742,11 +748,40 @@ export function preferGeoffreyGroundedCandidates(
   ranked: RankedProtocolTweet[],
   count: number,
   voiceProfile: VoiceProfile,
+  context: {
+    learnings?: AgentLearnings | null;
+    memory?: PersonalizationMemory | null;
+  } = {},
 ): RankedProtocolTweet[] {
   if (!isGeoffreyVoiceProfile(voiceProfile)) return ranked;
+  const operatorEvidence = [
+    ...(context.learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.startupRegisterExamples || []),
+    ...(context.learnings?.operatorVoiceReference?.bestPerformers || []),
+  ].map((entry) => entry.content);
+  const preferenceRank = (candidate: RankedProtocolTweet): number => {
+    const assessment = assessAccountTaste(candidate.content, {
+      voiceProfile,
+      learnings: context.learnings,
+      memory: context.memory,
+      featureTags: candidate.featureTags,
+      sourceTexts: getTrustedClaimSourceTexts(candidate, operatorEvidence),
+      untrustedSourceTexts: getUntrustedSourceTexts(candidate),
+    });
+    const queueIssue = getAutonomousQueueTasteIssue({
+      voiceProfile,
+      assessment,
+      anchorCopyRiskContribution: candidate.scoreProvenance?.anchorCopyRisk,
+      hasSourceContext: Boolean(candidate.sourceBrief || candidate.trendHeadline),
+    });
+    if (!queueIssue) return 0;
+    return assessment.action === 'review' ? 1 : 2;
+  };
   const grounded = ranked.filter((candidate) => (
     Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
-  ));
+  )).map((candidate, index) => ({ candidate, index, preference: preferenceRank(candidate) }))
+    .sort((a, b) => a.preference - b.preference || a.index - b.index)
+    .map(({ candidate }) => candidate);
   if (grounded.length >= count) return grounded;
   const groundedIds = new Set(
     grounded.map((candidate) => candidate.draftExperimentId).filter(Boolean),
@@ -1386,7 +1421,7 @@ export async function generateViralBatch(
     };
     const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
     return selectTopRankedTweets(
-      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile),
+      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
       count,
       { maxShitpoast, maxTrendSources },
     );
@@ -1675,7 +1710,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     );
 
     return selectTopRankedTweets(
-      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile),
+      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
       count,
       { maxShitpoast, maxTrendSources },
     );

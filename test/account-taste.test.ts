@@ -462,6 +462,21 @@ describe('account taste scoring', () => {
     }
   });
 
+  it('rejects polished setup sentences that delay the actual position', () => {
+    const drafts = [
+      'Xiaomi-Robotics-1 is the reminder.\n\nconsumer hardware companies already have the ugly parts figured out.',
+      'the Archer upside is no longer just urban passenger flight.\n\nautonomy + payload + range opens a much larger company.',
+      'there is no straightforward rhenium capacity trade.\n\naerospace buyers need more, but suppliers recover tiny amounts.',
+      'beryllium is one of those markets where owning material is not enough.',
+    ];
+
+    for (const content of drafts) {
+      const assessment = assessAccountTaste(content, { voiceProfile: geoffreyVoiceProfile });
+      expect(assessment.generatedPatternRisk).toBeGreaterThanOrEqual(0.32);
+      expect(assessment.action).not.toBe('allow');
+    }
+  });
+
   it('rejects technical mini-lectures and manufactured mic-drop closers', () => {
     const falsePositives = [
       'a fusion plasma shot can be scientifically insane and still leave the commercial machine unresolved.\n\nThe plant must breed tritium, account for scarce fuel inventory, move heat through neutron-damaged materials and replace first-wall components without turning uptime into fiction.\n\nThat is why “net energy” cannot carry the whole timeline. The reactor has to close its own fuel cycle while surviving the thing that makes fusion useful: neutron flux.\n\nShow me tritium logistics and component life. Then we can argue about when fusion becomes a product.',
