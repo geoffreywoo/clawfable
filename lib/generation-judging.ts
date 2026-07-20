@@ -82,6 +82,25 @@ export function mergeCandidateVersionsForRanking(
   ];
 }
 
+export function selectMutationTargets(
+  candidates: JudgedCandidate[],
+  voiceProfile: VoiceProfile,
+): JudgedCandidate[] {
+  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+  const mutationLimit = geoffreyStrict ? 10 : 4;
+  return [...candidates]
+    .filter((candidate) => (candidate.judgeScore || 0) >= 0.48)
+    .sort((a, b) => {
+      if (geoffreyStrict) {
+        const aGrounded = Number(Boolean(a.sourceBrief || a.trendHeadline || a.trendTopicId));
+        const bGrounded = Number(Boolean(b.sourceBrief || b.trendHeadline || b.trendTopicId));
+        if (aGrounded !== bGrounded) return bGrounded - aGrounded;
+      }
+      return (b.judgeScore || 0) - (a.judgeScore || 0);
+    })
+    .slice(0, Math.min(mutationLimit, candidates.length));
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -568,11 +587,7 @@ export async function mutateTopCandidates(
   },
 ): Promise<RankableProtocolTweet[]> {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
-  const mutationLimit = geoffreyStrict ? 8 : 4;
-  const mutationTargets = [...candidates]
-    .sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))
-    .slice(0, Math.min(mutationLimit, candidates.length))
-    .filter((candidate) => (candidate.judgeScore || 0) >= 0.48);
+  const mutationTargets = selectMutationTargets(candidates, voiceProfile);
 
   if (mutationTargets.length === 0 || !hasTextGenerationProvider()) {
     return [];
@@ -581,10 +596,12 @@ export async function mutateTopCandidates(
   const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
+    const startupRegisterReferences = [...(learnings?.operatorVoiceReference?.startupRegisterExamples || [])]
+      .sort((a, b) => a.content.length - b.content.length);
     const nativeAnchorBank = geoffreyStrict
       ? [
+          ...startupRegisterReferences,
           ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
-          ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
           ...(learnings?.operatorVoiceReference?.bestPerformers || []),
         ]
           .filter((entry, index, items) => (

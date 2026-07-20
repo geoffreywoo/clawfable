@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates } from '@/lib/generation-judging';
+import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -671,6 +671,8 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('software is nepo + codex/claude');
     expect(system).toContain('Avoid analyst-memo exposition');
     expect(system).toContain('Never add a name, number, benchmark');
+    expect(system.indexOf('x algo def way better'))
+      .toBeLessThan(system.indexOf('software is nepo + codex/claude'));
     expect(prompt).toContain('source=Customer-specific packaging qualifications');
     expect(mutations[0]).toMatchObject({
       content: 'chip startups dont get to software margins if every new customer means another packaging flow',
@@ -703,5 +705,37 @@ describe('judgeCandidates fallback critic', () => {
       communicationStyle: 'technical founder voice',
       summary: 'A general technical founder.',
     })).toEqual([base, edited]);
+  });
+
+  it('prioritizes grounded Geoffrey drafts for the diction pass', () => {
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups', 'robotics'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups and frontier tech.',
+    };
+    const candidates = [
+      ...Array.from({ length: 10 }, (_, index) => judgedCandidate({
+        content: `unsourced candidate ${index}`,
+        draftExperimentId: `unsourced-${index}`,
+        judgeScore: 0.95 - (index * 0.01),
+      })),
+      judgedCandidate({
+        content: 'grounded candidate',
+        draftExperimentId: 'grounded',
+        judgeScore: 0.5,
+        sourceBrief: 'Current Xiaomi robotics product source.',
+      }),
+    ];
+
+    const targets = selectMutationTargets(candidates, geoffreyVoice);
+    expect(targets).toHaveLength(10);
+    expect(targets.map((candidate) => candidate.draftExperimentId)).toContain('grounded');
+    expect(selectMutationTargets(candidates, {
+      ...geoffreyVoice,
+      communicationStyle: 'general founder voice',
+      summary: 'A general technical founder.',
+    }).map((candidate) => candidate.draftExperimentId)).not.toContain('grounded');
   });
 });
