@@ -618,7 +618,9 @@ This is a copy edit, not new research:
 - Keep at most one technical mechanism. Delete comma-separated process inventories.
 - Do not teach generic founders, summarize an industry, or end with a lesson, slogan, balanced contrast, or polished mic-drop.
 - Delete canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X."
+- Delete analyst placeholders such as "worth watching," "curious to see," and repeated "price moves before supply" constructions.
 - Do not reuse a native anchor's premise, names, joke, distinctive phrase, opening, list concept, or sentence skeleton.
+- For each candidate, privately draft three genuinely different phrasings. Return only the least polished, most natural version. Do not expose the alternatives.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}

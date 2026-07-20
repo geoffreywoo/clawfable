@@ -1341,7 +1341,12 @@ export async function generateViralBatch(
           ...tweet,
           generationProvider: 'local' as const,
           generationModel: 'operator-anchor-fallback',
-          sourceBrief: sourcePlan.slots[index]?.ideaSeedBrief
+          sourceBrief: (
+            isGeoffreyVoiceProfile(voiceProfile)
+              ? sourcePlan.slots[index]?.ideaSeed?.startupBackingFact
+                || sourcePlan.slots[index]?.ideaSeedBrief
+              : sourcePlan.slots[index]?.ideaSeedBrief
+          )
             || (sourcePlan.slots[index]?.trendTopicId
               ? trendProvenanceById.get(String(sourcePlan.slots[index]?.trendTopicId)) || sourcePlan.slots[index]?.trendHeadline
               : sourcePlan.slots[index]?.trendHeadline)
@@ -1578,8 +1583,12 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             generationProvider: response.provider,
             generationModel: response.model,
             sourceBrief: [...new Set([
-              slotAssignment?.ideaSeedBrief,
-              sourceSlot?.ideaSeedBrief,
+              geoffreyPromptMode
+                ? sourceSlot?.ideaSeed?.startupBackingFact
+                  || sourceSlot?.ideaSeedBrief
+                  || slotAssignment?.ideaSeedBrief
+                : slotAssignment?.ideaSeedBrief,
+              geoffreyPromptMode ? null : sourceSlot?.ideaSeedBrief,
               slotAssignment?.trendTopicId ? trendProvenanceById.get(String(slotAssignment.trendTopicId)) : null,
               sourceSlot?.trendTopicId ? trendProvenanceById.get(String(sourceSlot.trendTopicId)) : null,
               slotAssignment?.trendHeadline,

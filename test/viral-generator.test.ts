@@ -1600,7 +1600,16 @@ describe('generateViralBatch', () => {
             targetTopic: 'tungsten critical minerals',
             trendTopicId: null,
             trendHeadline: null,
-            ideaSeed: null,
+            ideaSeed: {
+              id: 'tungsten-hardmetal',
+              topic: 'tungsten critical minerals',
+              technicalObject: 'ammonium paratungstate and tungsten carbide powder',
+              hiddenConstraint: 'qualified powder and tool supply',
+              nonConsensusImplication: 'machining throughput becomes the re-industrialization bottleneck',
+              startupBackingFact: 'qualified tungsten-carbide powder and tool supply can cap machining throughput even when ore is available',
+              domains: ['materials', 'manufacturing'],
+              sourceQueries: [],
+            },
             ideaSeedBrief: 'ammonium paratungstate -> tungsten carbide powder metallurgy and tool qualification -> machining throughput becomes the re-industrialization bottleneck',
             plannerReason: 'Frontier seed: tungsten hardmetal supply chain.',
           }],
@@ -1632,7 +1641,7 @@ describe('generateViralBatch', () => {
     expect(createCall.system).not.toContain('## ENGAGEMENT DATA');
     expect(createCall.system).not.toContain('SYSTEM WINNER');
     expect(userPrompt).toContain('In the first 120 characters');
-    expect(userPrompt).toContain('one supplied fact:tungsten carbide powder metallurgy and tool qualification');
+    expect(userPrompt).toContain('one supplied fact:qualified tungsten-carbide powder and tool supply can cap machining throughput');
     expect(userPrompt).not.toContain('ammonium paratungstate ->');
     expect(userPrompt).not.toContain('Slot guide schema:');
     expect(userPrompt).not.toContain('"creativeLane"');
@@ -1645,7 +1654,8 @@ describe('generateViralBatch', () => {
     expect(batch[0]).toEqual(expect.objectContaining({
       generationProvider: 'anthropic',
       generationModel: 'claude-sonnet-4-6',
-      sourceBrief: expect.stringContaining('ammonium paratungstate'),
+      sourceBrief: expect.stringContaining('qualified tungsten-carbide powder and tool supply'),
     }));
+    expect(batch[0]?.sourceBrief).not.toContain('->');
   });
 });

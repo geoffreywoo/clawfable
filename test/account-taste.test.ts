@@ -416,6 +416,8 @@ describe('account taste scoring', () => {
       'rare earth magnet startups live or die on process yield.',
       'fintech margins get interesting when the product owns the customer.',
       'Xiaomi can make robotics a real product category, not jus a science project.',
+      'Xiaomi-Robotics-1 is worth watching.',
+      'rhenium price can move way before supply responds.',
     ];
 
     for (const content of drafts) {
