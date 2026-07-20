@@ -627,11 +627,23 @@ describe('judgeCandidates fallback critic', () => {
   it('uses Geoffrey manual startup diction for the final rewrite without inventing evidence', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({
-      text: JSON.stringify({
-        idx: 0,
-        content: 'chip startups dont get to software margins if every new customer means another packaging flow',
-        rationale: 'Startup consequence first, one mechanism, casual diction.',
-      }),
+      text: [
+        {
+          idx: 0,
+          content: 'chip startups dont get to software margins if every new customer means another packaging flow',
+          rationale: 'Startup consequence first, one mechanism, casual diction.',
+        },
+        {
+          idx: 0,
+          content: 'custom packaging for every buyer is a rough business. chip startup slowly turns into a services company',
+          rationale: 'Different company-economics judgment.',
+        },
+        {
+          idx: 0,
+          content: 'every new chip customer wants their own packaging flow. hard to scale that company like software',
+          rationale: 'Looser operator reaction.',
+        },
+      ].map((entry) => JSON.stringify(entry)).join('\n'),
     });
 
     const mutations = await mutateTopCandidates([
@@ -667,13 +679,21 @@ describe('judgeCandidates fallback critic', () => {
     const call = mocks.generateText.mock.calls[0]?.[0];
     const system = String(call?.system || '');
     const prompt = String(call?.prompt || '');
-    expect(system).toContain('final diction edit for @geoffwoo');
+    expect(system).toContain('final versions for @geoffwoo');
     expect(system).toContain('software is nepo + codex/claude');
     expect(system).toContain('Avoid analyst-memo exposition');
     expect(system).toContain('Never add a name, number, benchmark');
-    expect(system.indexOf('x algo def way better'))
-      .toBeLessThan(system.indexOf('software is nepo + codex/claude'));
+    expect(system).toContain('First-person opinion or reaction is allowed');
+    expect(system).toContain('Neutral cause-and-effect is still a research note');
+    expect(system.indexOf('software is nepo + codex/claude'))
+      .toBeLessThan(system.indexOf('x algo def way better'));
     expect(prompt).toContain('source=Customer-specific packaging qualifications');
+    expect(prompt).toContain('Write three fresh final versions');
+    expect(call).toEqual(expect.objectContaining({
+      maxTokens: 2048,
+      openAiReasoningEffort: 'medium',
+    }));
+    expect(mutations).toHaveLength(3);
     expect(mutations[0]).toMatchObject({
       content: 'chip startups dont get to software margins if every new customer means another packaging flow',
       mutationRound: 1,
@@ -730,7 +750,7 @@ describe('judgeCandidates fallback critic', () => {
     ];
 
     const targets = selectMutationTargets(candidates, geoffreyVoice);
-    expect(targets).toHaveLength(10);
+    expect(targets).toHaveLength(8);
     expect(targets.map((candidate) => candidate.draftExperimentId)).toContain('grounded');
     expect(selectMutationTargets(candidates, {
       ...geoffreyVoice,

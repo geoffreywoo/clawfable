@@ -237,7 +237,14 @@ const STARTUP_CONSEQUENCE_TERMS = [
 const CASUAL_NATIVE_TERMS = [
   'actually', 'super', 'jus', 'just', 'def', 'obv', 'gonna', 'gotta', 'wanna', 'kinda',
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
-  'do damage', 'go hard', 'balls', 'chump change', 'gamechanger',
+  'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
+  'those guys', 'all seem',
+];
+
+const MARKET_STAKE_TERMS = [
+  'pay', 'pays', 'paying', 'eat', 'compete', 'competes', 'fund', 'funding', 'underwrite',
+  'care', 'cares', 'worry', 'win', 'wins', 'lose', 'loses', 'rip', 'scale', 'ship', 'ships',
+  'buy', 'buys', 'sell', 'sells', 'margin', 'price', 'capital', 'returns', 'alpha',
 ];
 
 const STIFF_ANALYST_TERMS = [
@@ -245,6 +252,17 @@ const STIFF_ANALYST_TERMS = [
   'must account for', 'critical strategic', 'therefore', 'moreover', 'increasingly',
   'commercialization requires', 'the implication is', 'this highlights', 'arrives as a side-stream',
   'unit counts', 'customer qualification process',
+];
+
+const NEUTRAL_RESEARCH_SUMMARY_PATTERNS = [
+  /\braises? the bar\b/i,
+  /\bmeans (?:startups?|companies|buyers|suppliers|investors) (?:now )?(?:need|have) to\b/i,
+  /\bbecoming (?:its own|a separate|a new) layer\b/i,
+  /\bis (?:hard|difficult) for [^.!?\n]{2,70} to (?:fix|solve|change)\b/i,
+  /\bsupply (?:comes|arrives|is produced) (?:out |in )?(?:as |from )?\b/i,
+  /\bdemand has (?:little|limited|no) leverage\b/i,
+  /\bis (?:weirdly )?disconnected from\b/i,
+  /\bhigher prices? (?:do not|don['’]?t) just\b/i,
 ];
 
 const SOURCE_COPY_STOP_WORDS = new Set([
@@ -631,6 +649,7 @@ function assessCasualStartupRegister(
   const startupHits = exactTermHits(content, STARTUP_NATIVE_TERMS);
   const consequenceHits = exactTermHits(content, STARTUP_CONSEQUENCE_TERMS);
   const casualHits = exactTermHits(content, CASUAL_NATIVE_TERMS);
+  const marketStakeHits = exactTermHits(content, MARKET_STAKE_TERMS);
   const stiffHits = countTerms(lower, STIFF_ANALYST_TERMS);
   const generatedPattern = assessGeneratedWritingPatterns(content);
   const startupAnchors = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
@@ -653,6 +672,7 @@ function assessCasualStartupRegister(
     : 0;
   const polishedModelQuestion = /^how do you\s+(?:model|price|underwrite|value|forecast)\b/i.test(content);
   const mechanismInventory = commaCount >= 3 && technical.mechanismScore >= 0.08 && !situated;
+  const neutralResearchSummary = NEUTRAL_RESEARCH_SUMMARY_PATTERNS.some((pattern) => pattern.test(content));
   const completeAnalystParagraphs = content.split(/\n\s*\n/).filter(Boolean).length >= 2
     && sentences >= 3
     && casualHits === 0
@@ -665,6 +685,7 @@ function assessCasualStartupRegister(
     + generatedPattern.score * 0.36
     + (polishedModelQuestion ? 0.24 : 0)
     + (mechanismInventory ? 0.14 : 0)
+    + (neutralResearchSummary ? 0.18 : 0)
     + (completeAnalystParagraphs ? 0.1 : 0)
     + (avgWordLength >= 6 ? 0.1 : 0)
     + (content.length > 430 && !situated ? 0.08 : 0)
@@ -675,6 +696,7 @@ function assessCasualStartupRegister(
     0.1
     + Math.min(0.4, startupHits * 0.07)
     + Math.min(0.28, consequenceHits * 0.055)
+    + Math.min(0.16, marketStakeHits * 0.03)
     + technical.domainScore * 0.18
   );
   const casualness = clamp(
@@ -692,7 +714,9 @@ function assessCasualStartupRegister(
     + (sentences <= 3 ? 0.16 : 0)
     + (content.length <= 320 ? 0.12 : 0)
     + (firstLine(content).length <= 130 ? 0.08 : 0)
+    + Math.min(0.08, marketStakeHits * 0.02)
     - (mechanismInventory ? 0.16 : 0)
+    - (neutralResearchSummary ? 0.12 : 0)
     - (polishedModelQuestion ? 0.12 : 0)
   );
   const score = clamp(

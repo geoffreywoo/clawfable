@@ -45,6 +45,15 @@ export function getMutationMaxTokens(targetCount: number): number {
   return 3072;
 }
 
+function formatNativeAnchorForPrompt(content: string): string {
+  return content
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+$/gm, '')
+    .trim()
+    .slice(0, 320);
+}
+
 export function getBulkJudgeMaxTokens(candidateCount: number): number {
   if (candidateCount <= 4) return 768;
   if (candidateCount <= 8) return 1280;
@@ -87,7 +96,7 @@ export function selectMutationTargets(
   voiceProfile: VoiceProfile,
 ): JudgedCandidate[] {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
-  const mutationLimit = geoffreyStrict ? 10 : 4;
+  const mutationLimit = geoffreyStrict ? 8 : 4;
   return [...candidates]
     .filter((candidate) => (candidate.judgeScore || 0) >= 0.48)
     .sort((a, b) => {
@@ -596,8 +605,7 @@ export async function mutateTopCandidates(
   const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
-    const startupRegisterReferences = [...(learnings?.operatorVoiceReference?.startupRegisterExamples || [])]
-      .sort((a, b) => a.content.length - b.content.length);
+    const startupRegisterReferences = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
     const nativeAnchorBank = geoffreyStrict
       ? [
           ...startupRegisterReferences,
@@ -608,8 +616,8 @@ export async function mutateTopCandidates(
             entry.content?.trim()
             && items.findIndex((item) => item.content === entry.content) === index
           ))
-          .slice(0, 5)
-          .map((entry, index) => `[NATIVE ${index + 1}] ${entry.content.slice(0, 240)}`)
+          .slice(0, 8)
+          .map((entry, index) => `[NATIVE ${index + 1}] ${formatNativeAnchorForPrompt(entry.content)}`)
           .join('\n')
       : '';
     const operatorCorrections = [
@@ -622,22 +630,24 @@ export async function mutateTopCandidates(
       .map((item) => `- ${item.slice(0, 180)}`)
       .join('\n');
     const system = geoffreyStrict
-      ? `You are doing the final diction edit for @geoffwoo. Rewrite each draft so Geoffrey would plausibly type the exact words himself.
+      ? `You are writing the final versions for @geoffwoo. Produce posts Geoffrey would plausibly type himself.
 
 Write like a high-context message to a smart founder or investor:
 - Keep the source facts fixed. Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
-- Find one human judgment about the company, product, buyer, market, capital, cost, talent, or timing. Lead with that judgment. A source summary fails.
-- For a named event, react to the company or product. For a technical seed, say what changes for a startup or investor. The mechanism is one supporting fact, not the whole post.
-- Use plain speech, compression, and uneven rhythm. Leave the obvious causal step implicit. One or two beats, usually under 220 characters.
+- First-person opinion or reaction is allowed when natural. First-person access, evidence, or experience is not.
+- Treat the supplied draft as disposable scaffolding. Keep its defensible idea, but discard its sentence structure, framing, and analyst vocabulary.
+- Find the human stake: which company, founder, investor, buyer, supplier, or market actor must pay, build, compete, fund, or absorb the constraint. Neutral cause-and-effect is still a research note.
+- Lead with one judgment about the company, product, market, capital, cost, talent, or timing. For technical seeds, use one mechanism as support and move quickly to what it changes for startups or investors.
+- Use plain speech, compression, and uneven rhythm. Geoffrey often sounds like he is continuing an existing conversation instead of introducing a topic. Fragments and line breaks are fine. Stop when the point lands.
 - Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
 - Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
-- Privately try three genuinely different phrasings. Return only the least composed, most natural one.
+- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. At least one should be a blunt market take and at least one should be a looser high-context reaction.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}
 ${operatorCorrections ? `\nCURRENT OPERATOR CORRECTIONS:\n${operatorCorrections}` : ''}
 
-Output one JSON object per line with:
+Output exactly three JSON objects per input idx, one object per line, with:
 - idx
 - content
 - rationale`
@@ -672,9 +682,14 @@ Output one JSON object per line with:
     const response = await generateText({
       task: 'creative_variant',
       tier: 'fast',
-      maxTokens: getMutationMaxTokens(mutationTargets.length),
+      maxTokens: geoffreyStrict
+        ? getMutationMaxTokens(mutationTargets.length) * 2
+        : getMutationMaxTokens(mutationTargets.length),
+      openAiReasoningEffort: geoffreyStrict ? 'medium' : undefined,
       system,
-      prompt: `Rewrite these candidates once:\n\n${prompt}`,
+      prompt: geoffreyStrict
+        ? `Write three fresh final versions for each candidate:\n\n${prompt}`
+        : `Rewrite these candidates once:\n\n${prompt}`,
     });
 
     return parseMutationLines(response.text, mutationTargets, {

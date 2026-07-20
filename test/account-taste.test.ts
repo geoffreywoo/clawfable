@@ -382,6 +382,41 @@ describe('account taste scoring', () => {
     expect(nativeStartup.stiffnessRisk).toBeLessThan(stiffTechnical.stiffnessRisk);
   });
 
+  it('prefers actor-and-stakes market judgment over neutral research summaries', () => {
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: [],
+        pinnedExamples: [],
+        startupRegisterExamples: [
+          {
+            content: 'software is nepo + codex/claude\nhardware is where alpha is left',
+            topic: 'AI',
+            source: 'timeline',
+          },
+          {
+            content: 'yes, threshold to beat is QQQ. those guys all seem like zombies',
+            topic: 'finance',
+            source: 'timeline',
+          },
+        ],
+      },
+    } as any;
+    const stiff = assessAccountTaste(
+      'rhenium scarcity is hard for aerospace buyers to fix. supply comes out in tiny amounts from copper and molybdenum production, so demand has little leverage.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    const native = assessAccountTaste(
+      'rhenium could rip and copper miners still wont care. tiny byproduct in a massive market. aerospace guys just have to eat the price.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+
+    expect(native.casualStartupScore).toBeGreaterThan(stiff.casualStartupScore);
+    expect(native.stiffnessRisk).toBeLessThan(stiff.stiffnessRisk);
+    expect(native.nativeVoiceScore).toBeGreaterThan(stiff.nativeVoiceScore);
+    expect(stiff.action).not.toBe('allow');
+    expect(native.action).toBe('allow');
+  });
+
   it('rejects polished technical explainers that are still generic ghostwriting', () => {
     const drafts = [
       'hardware founders: put the ugly production constraint in the pitch.\n\nvacuum leak rate. coating uniformity. thermal drift. tool wear.\n\nif you cannot name what blocks shipment, the prototype is still a science project.',
