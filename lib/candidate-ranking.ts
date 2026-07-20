@@ -2316,6 +2316,7 @@ export function selectTopRankedTweets(
   const selected: RankedProtocolTweet[] = [];
   const usedClusters = new Set<string>();
   const usedPatternSignatures = new Set<string>();
+  const usedSourceKeys = new Set<string>();
   const selectedRoles = new Map<PostPortfolioRole, number>();
   const maxShitpoast = options.maxShitpoast ?? Number.POSITIVE_INFINITY;
   const maxTrendSources = options.maxTrendSources === undefined
@@ -2329,6 +2330,11 @@ export function selectTopRankedTweets(
   const selectionPatternSignature = (content: string) =>
     assessGeneratedWritingPatterns(content).primarySignature
     || (/\bbro\b/i.test(content) ? 'batch-register-bro' : null);
+  const selectionSourceKey = (candidate: RankedProtocolTweet) => {
+    if (candidate.trendTopicId) return `trend:${candidate.trendTopicId}`;
+    if (candidate.sourceBrief) return `brief:${candidate.sourceBrief.replace(/\s+/g, ' ').trim().toLowerCase()}`;
+    return null;
+  };
 
   const canSelect = (candidate: RankedProtocolTweet, enforcePortfolioDiversity = false) => {
     if (candidate.styleMode === SHITPOAST_STYLE_MODE && shitpoastSelected >= maxShitpoast) return false;
@@ -2340,6 +2346,8 @@ export function selectTopRankedTweets(
     ) {
       return false;
     }
+    const sourceKey = selectionSourceKey(candidate);
+    if (enforcePortfolioDiversity && sourceKey && usedSourceKeys.has(sourceKey)) return false;
     const cluster = candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, candidate.featureTags?.thesis);
     const nearDuplicate = selected.some((item) =>
       isNearDuplicate(item.content, [candidate.content]).isDuplicate
@@ -2368,6 +2376,8 @@ export function selectTopRankedTweets(
     selectedRoles.set(candidate.portfolioRole, (selectedRoles.get(candidate.portfolioRole) || 0) + 1);
     const patternSignature = selectionPatternSignature(candidate.content);
     if (patternSignature) usedPatternSignatures.add(patternSignature);
+    const sourceKey = selectionSourceKey(candidate);
+    if (sourceKey) usedSourceKeys.add(sourceKey);
     if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
     if (isExternalTrendSource(candidate)) trendSourcesSelected++;
   };

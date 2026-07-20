@@ -642,7 +642,7 @@ Write like a high-context message to a smart founder or investor:
 - Use plain speech, compression, and uneven rhythm. Geoffrey often sounds like he is continuing an existing conversation instead of introducing a topic. Fragments and line breaks are fine. Stop when the point lands.
 - Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
 - Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
-- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. At least one should be a blunt market take and at least one should be a looser high-context reaction.
+- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. Version one must be a single-sentence blunt market take under 180 characters. Version two may use two asymmetric beats. Version three is a looser high-context reaction. Do not make all three a setup followed by an explanation.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}

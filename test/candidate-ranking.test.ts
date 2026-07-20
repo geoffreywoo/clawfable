@@ -437,6 +437,39 @@ describe('selectTopRankedTweets', () => {
     expect(selected).toHaveLength(3);
     expect(selected.filter((candidate) => Boolean(candidate.trendTopicId))).toHaveLength(1);
   });
+
+  it('selects one final post per source when distinct alternatives exist', () => {
+    const selected = selectTopRankedTweets([
+      ranked({
+        content: 'xiaomi now makes robotics startups compete with a real consumer hardware machine.',
+        candidateScore: 96,
+        trendTopicId: 'network-xiaomi-robotics',
+        sourceBrief: 'Xiaomi-Robotics-1',
+        coverageCluster: 'robotics:xiaomi hardware scale',
+        featureTags: { hook: 'bold_claim', tone: 'provocative', specificity: 'concrete', structure: 'single_punch', thesis: 'xiaomi hardware scale robotics', riskFlags: [] },
+      }),
+      ranked({
+        content: 'robotics needs more companies that can actually ship hardware. xiaomi fits.',
+        candidateScore: 95,
+        trendTopicId: 'network-xiaomi-robotics',
+        sourceBrief: 'Xiaomi-Robotics-1',
+        coverageCluster: 'robotics:xiaomi ships hardware',
+        featureTags: { hook: 'observation', tone: 'casual', specificity: 'concrete', structure: 'argument', thesis: 'xiaomi ships robotics hardware', riskFlags: [] },
+      }),
+      ranked({
+        content: 'the air taxi may be the wedge. autonomous high-payload lift is a much bigger archer company.',
+        candidateScore: 89,
+        trendTopicId: 'network-archer-lift',
+        sourceBrief: 'Archer autonomous vertical lift',
+        coverageCluster: 'aviation:archer autonomous lift',
+        featureTags: { hook: 'bold_claim', tone: 'provocative', specificity: 'concrete', structure: 'single_punch', thesis: 'archer autonomous lift wedge', riskFlags: [] },
+      }),
+    ], 2, { minHoldouts: 0 });
+
+    expect(selected).toHaveLength(2);
+    expect(selected.map((candidate) => candidate.trendTopicId))
+      .toEqual(['network-xiaomi-robotics', 'network-archer-lift']);
+  });
 });
 
 describe('rankGeneratedTweets', () => {

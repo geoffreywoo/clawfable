@@ -1304,7 +1304,7 @@ export async function generateViralBatch(
   });
   const maxShitpoast = getShitpoastSlotCount(count, effectiveStyle.shitpoastEnabled);
   const maxTrendSources = isGeoffreyVoiceProfile(voiceProfile)
-    ? Math.min(count, Math.max(1, Math.ceil(count * 0.5)))
+    ? Math.min(count, Math.max(1, Math.ceil(count * 0.75)))
     : getFinalTrendSourceCap(
         count,
         effectiveStyle.trendMixTarget,
@@ -1485,6 +1485,7 @@ ${JSON.stringify({
 Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
 
 Across the batch, vary native modes: terse thesis, two-beat market take, named reaction when a name is supplied, blunt question, compact technical-backed startup take, or public conviction. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
+At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.
 
 For each post, output one JSON object on its own line with only:
 - "slot": the numbered brief
