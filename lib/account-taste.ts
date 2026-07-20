@@ -963,6 +963,7 @@ For @geoffwoo, write like a startup investor/operator reacting in public, not an
 - Stop when the point lands. Do not add a slogan, balanced closer, cute metaphor, lesson, or advice section.
 - Reject canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X." Concision does not make a generic construction native.
 - Casualness must exist in the thought, not as slang pasted onto formal exposition. Never manufacture typos or catchphrases.
+- Spell ordinary words normally. A misspelling found in a manual anchor, including "jus," is evidence of rhythm in that one post, not a reusable voice token.
 - Geoffrey states positions; he does not teach generic founders. Reject audience-label openings, "start with," "you should," diligence worksheets, and topic-swapped advice.
 - Reject analyst setups such as "how do you model," "the implication is," "depends on whether," "forecasts love," and "founders love X until." Reject tidy three-part explainers and mechanism inventories.
 - Manual examples calibrate voice only. Never reuse their premise, joke, named scene, list concept, distinctive phrase, opening move, or sentence skeleton.

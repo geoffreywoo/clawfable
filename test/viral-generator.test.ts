@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens } from '@/lib/viral-generator';
+import { extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
@@ -16,6 +16,28 @@ vi.mock('@anthropic-ai/sdk', () => ({
 describe('generateViralBatch', () => {
   beforeEach(() => {
     anthropicCreateMock.mockReset();
+  });
+
+  it('keeps Geoffrey final selection grounded when enough sourced candidates exist', () => {
+    const generic = { content: 'generic vc take', draftExperimentId: 'generic', sourceBrief: null };
+    const current = { content: 'current company take', draftExperimentId: 'current', trendTopicId: 'trend-1' };
+    const technical = { content: 'technical seed take', draftExperimentId: 'technical', sourceBrief: 'qualified process yield' };
+    const ranked = [generic, current, technical] as any;
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups and frontier tech.',
+    };
+
+    expect(preferGeoffreyGroundedCandidates(ranked, 2, geoffreyVoice))
+      .toEqual([current, technical]);
+    expect(preferGeoffreyGroundedCandidates(ranked, 2, {
+      ...geoffreyVoice,
+      communicationStyle: 'general founder voice',
+      summary: 'A general technical founder.',
+    })).toEqual(ranked);
   });
 
   function memory(overrides: Partial<PersonalizationMemory> = {}): PersonalizationMemory {

@@ -738,6 +738,27 @@ function getFinalTrendSourceCap(
   return Math.min(count, Math.max(1, Math.floor(count * effectiveShare)));
 }
 
+export function preferGeoffreyGroundedCandidates(
+  ranked: RankedProtocolTweet[],
+  count: number,
+  voiceProfile: VoiceProfile,
+): RankedProtocolTweet[] {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return ranked;
+  const grounded = ranked.filter((candidate) => (
+    Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
+  ));
+  if (grounded.length >= count) return grounded;
+  const groundedIds = new Set(
+    grounded.map((candidate) => candidate.draftExperimentId).filter(Boolean),
+  );
+  return [
+    ...grounded,
+    ...ranked.filter((candidate) => (
+      !candidate.draftExperimentId || !groundedIds.has(candidate.draftExperimentId)
+    )),
+  ];
+}
+
 function cleanGeoffreyVoiceAnchor(value: string): string {
   return value
     .replace(/https?:\/\/\S+/gi, '')
@@ -1359,7 +1380,11 @@ export async function generateViralBatch(
       signals,
     };
     const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
-    return selectTopRankedTweets(ranked, count, { maxShitpoast, maxTrendSources });
+    return selectTopRankedTweets(
+      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile),
+      count,
+      { maxShitpoast, maxTrendSources },
+    );
   };
 
   if (!hasTextGenerationProvider()) {
@@ -1640,7 +1665,11 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       rankingContext,
     );
 
-    return selectTopRankedTweets(ranked, count, { maxShitpoast, maxTrendSources });
+    return selectTopRankedTweets(
+      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile),
+      count,
+      { maxShitpoast, maxTrendSources },
+    );
   } catch (err) {
     console.error('AI generation error:', err);
     if (!shouldUseFallbackGeneration(err)) {

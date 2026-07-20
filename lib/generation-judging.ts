@@ -613,6 +613,7 @@ This is a copy edit, not new research:
 - Put the startup consequence first: company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing.
 - Use casual high-context startup diction. Prefer simple words, contractions, shorthand, fragments, and uneven sentence rhythm when natural.
 - A rewrite that only lowercases formal prose fails. A rewrite that adds slang to an analyst paragraph also fails.
+- Spell ordinary words normally. Never copy an anchor's typo or catchphrase; "jus" is not a reusable voice token.
 - Cut explanations aggressively. Most outputs should be under 240 characters and one or two beats.
 - Keep at most one technical mechanism. Delete comma-separated process inventories.
 - Do not teach generic founders, summarize an industry, or end with a lesson, slogan, balanced contrast, or polished mic-drop.

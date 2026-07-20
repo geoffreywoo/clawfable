@@ -415,6 +415,7 @@ describe('account taste scoring', () => {
       'vc gets much harder when every firm has the same model outputs and founder intros. judgment is the product again.',
       'rare earth magnet startups live or die on process yield.',
       'fintech margins get interesting when the product owns the customer.',
+      'Xiaomi can make robotics a real product category, not jus a science project.',
     ];
 
     for (const content of drafts) {
