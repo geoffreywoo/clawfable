@@ -63,6 +63,10 @@ function numericClaims(content: string): string[] {
   const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|samples?|models?|sensors?|chips?|racks?|boards?|incidents?|failures?|defects?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)?/gi;
 
   for (const match of content.matchAll(pattern)) {
+    const matchIndex = match.index || 0;
+    const before = content.slice(Math.max(0, matchIndex - 2), matchIndex);
+    if (/[a-z0-9]-$/i.test(before) || /[a-z]$/i.test(before)) continue;
+
     const raw = match[0].trim();
     if (!raw) continue;
     const digits = raw.replace(/[^0-9.]/g, '');

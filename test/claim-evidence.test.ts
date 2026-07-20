@@ -30,6 +30,11 @@ describe('claim evidence', () => {
     expect(assessClaimEvidence('The meeting gets 10x more serious.', ['The portfolio was worth $10b.']).risk).toBeGreaterThan(0.4);
   });
 
+  it('does not mistake model and product identifiers for unsupported quantities', () => {
+    expect(assessClaimEvidence('Xiaomi-Robotics-1 matters because Xiaomi can ship it.', []).risk).toBe(0);
+    expect(assessClaimEvidence('GPT-5.6 is a model release.', []).risk).toBe(0);
+  });
+
   it('catches unsupported operational precision written as number words', () => {
     const invented = assessClaimEvidence(
       'bro you have three API calls, two are wrappers, and the third returns null.',

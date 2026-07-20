@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mutateTopCandidates } from '@/lib/generation-judging';
+import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -124,6 +124,7 @@ describe('judgeCandidates fallback critic', () => {
     expect(getMutationMaxTokens(2)).toBe(1024);
     expect(getMutationMaxTokens(3)).toBe(1536);
     expect(getMutationMaxTokens(4)).toBe(2048);
+    expect(getMutationMaxTokens(8)).toBe(3072);
   });
 
   it('trims long mutation prompt content and critic notes', () => {
@@ -675,5 +676,32 @@ describe('judgeCandidates fallback critic', () => {
       content: 'chip startups dont get to software margins if every new customer means another packaging flow',
       mutationRound: 1,
     });
+  });
+
+  it('uses Geoffrey diction edits as the final copy instead of ranking pre-edit prose', () => {
+    const base = judgedCandidate({
+      content: 'Xiaomi Robotics represents a company-scale platform opportunity rather than a laboratory demonstration.',
+      draftExperimentId: 'exp-geoffrey-1',
+    });
+    const edited = judgedCandidate({
+      content: 'xiaomi can ship robots through an actual consumer hardware machine. that matters way more than another lab demo',
+      draftExperimentId: 'exp-geoffrey-1',
+      mutationRound: 1,
+    });
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups', 'robotics'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups and frontier tech.',
+    };
+
+    expect(mergeCandidateVersionsForRanking([base], [edited], geoffreyVoice))
+      .toEqual([edited]);
+    expect(mergeCandidateVersionsForRanking([base], [edited], {
+      ...geoffreyVoice,
+      communicationStyle: 'technical founder voice',
+      summary: 'A general technical founder.',
+    })).toEqual([base, edited]);
   });
 });

@@ -41,7 +41,8 @@ export function formatMutationCandidateForPrompt(candidate: JudgedCandidate, idx
 export function getMutationMaxTokens(targetCount: number): number {
   if (targetCount <= 2) return 1024;
   if (targetCount === 3) return 1536;
-  return 2048;
+  if (targetCount <= 4) return 2048;
+  return 3072;
 }
 
 export function getBulkJudgeMaxTokens(candidateCount: number): number {
@@ -57,6 +58,28 @@ export interface JudgedCandidate extends RankableProtocolTweet {
   judgeScore: number;
   judgeBreakdown: CandidateJudgeBreakdown;
   judgeNotes: string;
+}
+
+export function mergeCandidateVersionsForRanking(
+  baseCandidates: JudgedCandidate[],
+  dictionEdits: JudgedCandidate[],
+  voiceProfile: VoiceProfile,
+): JudgedCandidate[] {
+  if (!isGeoffreyVoiceProfile(voiceProfile) || dictionEdits.length === 0) {
+    return [...baseCandidates, ...dictionEdits];
+  }
+
+  const editedExperimentIds = new Set(
+    dictionEdits
+      .map((candidate) => candidate.draftExperimentId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  return [
+    ...baseCandidates.filter((candidate) => (
+      !candidate.draftExperimentId || !editedExperimentIds.has(candidate.draftExperimentId)
+    )),
+    ...dictionEdits,
+  ];
 }
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -544,9 +567,11 @@ export async function mutateTopCandidates(
     learnings?: AgentLearnings | null;
   },
 ): Promise<RankableProtocolTweet[]> {
+  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+  const mutationLimit = geoffreyStrict ? 8 : 4;
   const mutationTargets = [...candidates]
     .sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))
-    .slice(0, Math.min(4, candidates.length))
+    .slice(0, Math.min(mutationLimit, candidates.length))
     .filter((candidate) => (candidate.judgeScore || 0) >= 0.48);
 
   if (mutationTargets.length === 0 || !hasTextGenerationProvider()) {
@@ -556,7 +581,6 @@ export async function mutateTopCandidates(
   const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
-    const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
     const nativeAnchorBank = geoffreyStrict
       ? [
           ...(learnings?.operatorVoiceReference?.pinnedExamples || []),

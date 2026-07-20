@@ -9,7 +9,7 @@ import type { VoiceProfile } from './soul-parser';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
-import { judgeCandidates, mutateTopCandidates } from './generation-judging';
+import { judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates } from './generation-judging';
 import { inferAudienceSegment } from './virality-signals';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import {
@@ -1636,7 +1636,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         )
       : [];
     const ranked = rankGeneratedTweets(
-      [...judged, ...judgedMutations],
+      mergeCandidateVersionsForRanking(judged, judgedMutations, voiceProfile),
       rankingContext,
     );
 
