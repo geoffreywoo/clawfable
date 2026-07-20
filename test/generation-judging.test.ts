@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectMutationTargets } from '@/lib/generation-judging';
+import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -760,5 +760,85 @@ describe('judgeCandidates fallback critic', () => {
       communicationStyle: 'general founder voice',
       summary: 'A general technical founder.',
     }).map((candidate) => candidate.draftExperimentId)).not.toContain('grounded');
+  });
+
+  it('rescues at most one close voice failure per Geoffrey source', () => {
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups', 'robotics'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups and frontier tech.',
+    };
+    const closeFailure = (experiment: string, casualStartupFit: number, content: string) => judgedCandidate({
+      content,
+      draftExperimentId: experiment,
+      sourceBrief: `source for ${experiment}`,
+      mutationRound: 1,
+      judgeBreakdown: {
+        overall: 0.72,
+        voiceFit: 0.75,
+        clarity: 0.75,
+        novelty: 0.68,
+        audienceFit: 0.72,
+        policySafety: 0.82,
+        nativeVoice: 0.72,
+        casualStartupFit,
+        stiffnessRisk: 0.05,
+        cringeRisk: 0.2,
+        technicalCredibility: 0.42,
+      },
+    });
+    const candidates = [
+      closeFailure('xiaomi', 0.58, 'formal xiaomi version'),
+      closeFailure('xiaomi', 0.56, 'another formal xiaomi version'),
+      closeFailure('archer', 0.59, 'formal archer version'),
+      closeFailure('e2b', 0.61, 'already native e2b version'),
+      closeFailure('gallium', 0.55, 'formal gallium version'),
+      closeFailure('neon', 0.54, 'formal neon version'),
+      closeFailure('beryllium', 0.53, 'formal beryllium version'),
+    ];
+
+    const selected = selectGeoffreyVoiceRescueTargets(candidates, geoffreyVoice);
+
+    expect(selected).toHaveLength(4);
+    expect(selected.filter((candidate) => candidate.draftExperimentId === 'xiaomi')).toHaveLength(1);
+    expect(selected.map((candidate) => candidate.draftExperimentId)).not.toContain('e2b');
+    expect(selectGeoffreyVoiceRescueTargets(candidates, {
+      ...geoffreyVoice,
+      communicationStyle: 'general founder voice',
+      summary: 'A general technical founder.',
+    })).toEqual([]);
+  });
+
+  it('tells the final writer to abandon wording on the bounded rescue pass', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        idx: 0,
+        content: 'xiaomi robotics is bad news for model-only startups. shipping hardware at scale is the hard part',
+        rationale: 'Plain company judgment.',
+      }),
+    });
+    const candidate = judgedCandidate({
+      content: 'Xiaomi-Robotics-1 makes the robotics startup pitch harder because startups compete with scaled hardware manufacturing.',
+      sourceBrief: 'Xiaomi-Robotics-1',
+      mutationRound: 1,
+    });
+
+    const mutations = await mutateTopCandidates([candidate], {
+      voiceProfile: {
+        tone: 'casual startup investor',
+        topics: ['AI', 'startups', 'robotics'],
+        antiGoals: [],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes about startups and frontier tech.',
+      },
+      memory: memory(),
+    });
+
+    expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || ''))
+      .toContain('already failed one native-voice pass');
+    expect(mutations[0].mutationRound).toBe(2);
   });
 });

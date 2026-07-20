@@ -9,7 +9,12 @@ import type { VoiceProfile } from './soul-parser';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
 import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
-import { judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates } from './generation-judging';
+import {
+  judgeCandidates,
+  mergeCandidateVersionsForRanking,
+  mutateTopCandidates,
+  selectGeoffreyVoiceRescueTargets,
+} from './generation-judging';
 import { inferAudienceSegment } from './virality-signals';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import {
@@ -1705,8 +1710,31 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           },
         )
       : [];
+    const rescueTargets = selectGeoffreyVoiceRescueTargets(judgedMutations, voiceProfile);
+    const rescuedCandidates = rescueTargets.length > 0
+      ? await mutateTopCandidates(rescueTargets, {
+          voiceProfile,
+          memory,
+          learnings,
+        })
+      : [];
+    const judgedRescues = rescuedCandidates.length > 0
+      ? await judgeCandidates(
+          rescuedCandidates.filter((candidate) => (
+            !baseCandidates.some((item) => item.content.trim() === candidate.content.trim())
+            && !judgedMutations.some((item) => item.content.trim() === candidate.content.trim())
+          )),
+          {
+            voiceProfile,
+            analysis,
+            learnings,
+            memory,
+            mode: 'heuristic',
+          },
+        )
+      : [];
     const ranked = rankGeneratedTweets(
-      mergeCandidateVersionsForRanking(judged, judgedMutations, voiceProfile),
+      mergeCandidateVersionsForRanking(judged, [...judgedMutations, ...judgedRescues], voiceProfile),
       rankingContext,
     );
 

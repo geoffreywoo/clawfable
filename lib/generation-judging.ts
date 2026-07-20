@@ -110,6 +110,45 @@ export function selectMutationTargets(
     .slice(0, Math.min(mutationLimit, candidates.length));
 }
 
+export function selectGeoffreyVoiceRescueTargets(
+  candidates: JudgedCandidate[],
+  voiceProfile: VoiceProfile,
+): JudgedCandidate[] {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return [];
+
+  const eligible = [...candidates]
+    .filter((candidate) => {
+      const breakdown = candidate.judgeBreakdown;
+      const needsRescue = (breakdown.casualStartupFit ?? 0.5) < 0.6
+        || (breakdown.stiffnessRisk ?? 0) >= 0.28
+        || (breakdown.cringeRisk ?? 0) >= 0.4;
+      return (candidate.mutationRound ?? 0) >= 1
+        && Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
+        && candidate.judgeScore >= 0.48
+        && breakdown.policySafety >= 0.55
+        && (breakdown.nativeVoice ?? breakdown.voiceFit) >= 0.55
+        && needsRescue;
+    })
+    .sort((a, b) => (
+      (b.judgeBreakdown.casualStartupFit ?? 0) - (a.judgeBreakdown.casualStartupFit ?? 0)
+      || (a.judgeBreakdown.stiffnessRisk ?? 0) - (b.judgeBreakdown.stiffnessRisk ?? 0)
+      || (a.judgeBreakdown.cringeRisk ?? 0) - (b.judgeBreakdown.cringeRisk ?? 0)
+      || b.judgeScore - a.judgeScore
+    ));
+  const seenExperiments = new Set<string>();
+  const selected: JudgedCandidate[] = [];
+
+  for (const candidate of eligible) {
+    const experimentKey = candidate.draftExperimentId || candidate.sourceBrief || candidate.content;
+    if (seenExperiments.has(experimentKey)) continue;
+    seenExperiments.add(experimentKey);
+    selected.push(candidate);
+    if (selected.length === 4) break;
+  }
+
+  return selected;
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -302,6 +341,10 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
   const tasteNote = accountTaste.notes.length > 0
     ? ` Native taste: ${accountTaste.notes.slice(0, 2).join('; ')}.`
     : '';
+  const registerNote = isGeoffreyVoiceProfile(context.voiceProfile)
+    && accountTaste.casualStartupScore < 0.6
+    ? ` Casual startup diction ${accountTaste.casualStartupScore.toFixed(2)}: still too neutral or formal for Geoffrey.`
+    : '';
   const elevationNote = technicalElevation.hasBanalOpsTexture && !technicalElevation.hasHardTechAnchor
     ? ' Low-status ops texture: needs a harder technical/industrial anchor.'
     : technicalElevation.hasHardTechAnchor
@@ -326,7 +369,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
       cringeRisk: accountTaste.cringeRisk,
       technicalCredibility: accountTaste.technicalCredibilityScore,
     },
-    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}${elevationNote}${tasteNote}`,
+    judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}${elevationNote}${tasteNote}${registerNote}`,
   };
 }
 
@@ -597,6 +640,8 @@ export async function mutateTopCandidates(
 ): Promise<RankableProtocolTweet[]> {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
   const mutationTargets = selectMutationTargets(candidates, voiceProfile);
+  const voiceRescuePass = geoffreyStrict
+    && mutationTargets.some((candidate) => (candidate.mutationRound ?? 0) >= 1);
 
   if (mutationTargets.length === 0 || !hasTextGenerationProvider()) {
     return [];
@@ -631,6 +676,7 @@ export async function mutateTopCandidates(
       .join('\n');
     const system = geoffreyStrict
       ? `You are writing the final versions for @geoffwoo. Produce posts Geoffrey would plausibly type himself.
+${voiceRescuePass ? '\nThese drafts already failed one native-voice pass. Make a radical new phrasing; preserving their wording or sentence shape fails.' : ''}
 
 Write like a high-context message to a smart founder or investor:
 - Keep the source facts fixed. Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
