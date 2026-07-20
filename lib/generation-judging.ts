@@ -32,7 +32,10 @@ export function formatMutationCandidateForPrompt(candidate: JudgedCandidate, idx
   const notes = candidate.judgeNotes.length <= MUTATION_CRITIC_NOTE_LIMIT
     ? candidate.judgeNotes
     : `${candidate.judgeNotes.slice(0, MUTATION_CRITIC_NOTE_LIMIT).trimEnd()}...`;
-  return `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}\ncontent=${content}\ncritic=${notes}`;
+  const source = candidate.sourceBrief
+    ? `\nsource=${candidate.sourceBrief.slice(0, 320)}`
+    : '';
+  return `[${idx}] format=${candidate.format} topic=${candidate.targetTopic}${source}\ncontent=${content}\ncritic=${notes}`;
 }
 
 export function getMutationMaxTokens(targetCount: number): number {
@@ -553,7 +556,8 @@ export async function mutateTopCandidates(
   const prompt = mutationTargets.map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx)).join('\n\n');
 
   try {
-    const nativeAnchorBank = isGeoffreyVoiceProfile(voiceProfile)
+    const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+    const nativeAnchorBank = geoffreyStrict
       ? [
           ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
           ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
@@ -567,11 +571,38 @@ export async function mutateTopCandidates(
           .map((entry, index) => `[NATIVE ${index + 1}] ${entry.content.slice(0, 240)}`)
           .join('\n')
       : '';
-    const response = await generateText({
-      task: 'creative_variant',
-      tier: 'fast',
-      maxTokens: getMutationMaxTokens(mutationTargets.length),
-      system: `You improve tweet drafts without changing the author's identity.
+    const operatorCorrections = [
+      ...(memory?.neverDoThisAgain || []),
+      ...(memory?.operatorHiddenPreferences || []),
+      ...(memory?.editTransformations || []),
+    ]
+      .filter((item, index, items) => item?.trim() && items.indexOf(item) === index)
+      .slice(0, 5)
+      .map((item) => `- ${item.slice(0, 180)}`)
+      .join('\n');
+    const system = geoffreyStrict
+      ? `You are doing the final diction edit for @geoffwoo. Rewrite each draft so Geoffrey would plausibly type the exact words himself.
+
+This is a copy edit, not new research:
+- Preserve the defensible core claim and every factual boundary in the source field.
+- Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
+- Put the startup consequence first: company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing.
+- Use casual high-context startup diction. Prefer simple words, contractions, shorthand, fragments, and uneven sentence rhythm when natural.
+- A rewrite that only lowercases formal prose fails. A rewrite that adds slang to an analyst paragraph also fails.
+- Cut explanations aggressively. Most outputs should be under 240 characters and one or two beats.
+- Keep at most one technical mechanism. Delete comma-separated process inventories.
+- Do not teach generic founders, summarize an industry, or end with a lesson, slogan, balanced contrast, or polished mic-drop.
+- Do not reuse a native anchor's premise, names, joke, distinctive phrase, opening, list concept, or sentence skeleton.
+
+NATIVE MANUAL POSTS (diction evidence only):
+${nativeAnchorBank || '[no manual anchors available; be conservative]'}
+${operatorCorrections ? `\nCURRENT OPERATOR CORRECTIONS:\n${operatorCorrections}` : ''}
+
+Output one JSON object per line with:
+- idx
+- content
+- rationale`
+      : `You improve tweet drafts without changing the author's identity.
 Rules:
 - Keep the same core thesis.
 - Increase clarity, specificity, or punch.
@@ -581,7 +612,6 @@ Rules:
 - Make the startup consequence immediate: company, product, market, capital, talent, cost, margin, adoption, or timing. Technical detail is backing, not the whole post.
 - Do not use Slack, support tickets, dashboards, calendar invites, generic workflow handoffs, or "renamed owner" as the main proof. For frontier-tech drafts, replace that texture with compute, energy, materials, manufacturing, robotics, or space constraints.
 - Never add a fake founder/customer conversation, first-person event, benchmark, quote, or number. Preserve only evidence supplied with the candidate; otherwise rewrite as analysis or an explicit hypothesis.
-- For @geoffwoo, rewrite from the startup judgment outward: company, product, market, capital, talent, cost, margin, adoption, or timing first; keep at most one supporting mechanism.
 - Do not preserve technical detail merely because it is correct. If it does not sharpen the startup judgment, delete it.
 - Do not turn every tweet into the same template.
 - Do not turn a position into advice. Reject audience-label openings, "start with", "you should", technical noun checklists, textbook definitions, and tidy three-paragraph explainers.
@@ -590,7 +620,6 @@ Rules:
 - Delete stiff analyst setups rather than making them cuter: "forecasts love X; reality is less cooperative," "founders love speed until...," "finance guys love...," "the calendar has physics," and polished "how do you model X when Y?" questions.
 - Preserve roughness already present in the draft, but do not add fake typos, slang, or lowercase as voice costume.
 - Stay in voice: ${voiceProfile.tone}.
-${nativeAnchorBank ? `Native anchor bank (match a mode, never copy prose):\n${nativeAnchorBank}` : ''}
 ${memory?.operatorHiddenPreferences?.length ? `Operator preferences: ${memory.operatorHiddenPreferences.slice(0, 3).join(' | ')}` : ''}
 ${memory?.editTransformations?.length ? `Operator edit transformations: ${memory.editTransformations.slice(0, 3).join(' | ')}` : ''}
 ${memory?.conversationInsights?.length ? `Conversation lessons: ${memory.conversationInsights.slice(0, 2).join(' | ')}` : ''}
@@ -600,7 +629,12 @@ ${memory?.outcomeFatigueLessons?.length ? `Outcome fatigue: ${memory.outcomeFati
 Output one JSON object per line with:
 - idx
 - content
-- rationale`,
+- rationale`;
+    const response = await generateText({
+      task: 'creative_variant',
+      tier: 'fast',
+      maxTokens: getMutationMaxTokens(mutationTargets.length),
+      system,
       prompt: `Rewrite these candidates once:\n\n${prompt}`,
     });
 

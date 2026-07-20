@@ -622,4 +622,58 @@ describe('judgeCandidates fallback critic', () => {
     expect(prompt).not.toContain('FINAL_NOTE_SENTINEL');
     expect(mutations[0].content).toBe('AI agent teams earn trust when every failed eval creates a visible rollback rule.');
   });
+
+  it('uses Geoffrey manual startup diction for the final rewrite without inventing evidence', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        idx: 0,
+        content: 'chip startups dont get to software margins if every new customer means another packaging flow',
+        rationale: 'Startup consequence first, one mechanism, casual diction.',
+      }),
+    });
+
+    const mutations = await mutateTopCandidates([
+      judgedCandidate({
+        content: 'Advanced packaging complexity creates a structural services burden for semiconductor startups because each customer qualification requires a distinct process flow.',
+        targetTopic: 'semiconductor startups',
+        sourceBrief: 'Customer-specific packaging qualifications increase engineering work and delay revenue.',
+        judgeNotes: 'Accurate, but stiff and written like an analyst memo.',
+      }),
+    ], {
+      voiceProfile: {
+        tone: 'casual, direct, high-context',
+        topics: ['startups', 'AI', 'hardware'],
+        antiGoals: ['generic advice'],
+        communicationStyle: '@geoffwoo startup shorthand',
+        summary: 'Geoffrey Woo writes about startups, investing, AI, and hard tech.',
+      },
+      memory: memory({
+        neverDoThisAgain: ['Avoid analyst-memo exposition and research-summary cadence.'],
+      }),
+      learnings: {
+        operatorVoiceReference: {
+          pinnedExamples: [],
+          bestPerformers: [],
+          startupRegisterExamples: [
+            { content: 'software is nepo + codex/claude / hardware is where alpha is left' },
+            { content: 'x algo def way better. yall cooking.' },
+          ],
+        },
+      } as any,
+    });
+
+    const call = mocks.generateText.mock.calls[0]?.[0];
+    const system = String(call?.system || '');
+    const prompt = String(call?.prompt || '');
+    expect(system).toContain('final diction edit for @geoffwoo');
+    expect(system).toContain('software is nepo + codex/claude');
+    expect(system).toContain('Avoid analyst-memo exposition');
+    expect(system).toContain('Never add a name, number, benchmark');
+    expect(prompt).toContain('source=Customer-specific packaging qualifications');
+    expect(mutations[0]).toMatchObject({
+      content: 'chip startups dont get to software margins if every new customer means another packaging flow',
+      mutationRound: 1,
+    });
+  });
 });

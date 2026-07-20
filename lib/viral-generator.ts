@@ -1623,7 +1623,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       : [];
     const judgedMutations = mutatedCandidates.length > 0
       ? await judgeCandidates(
-          mutatedCandidates.filter((candidate) => !isNearDuplicate(candidate.content, baseCandidates.map((item) => item.content), 0.58).isDuplicate),
+          mutatedCandidates.filter((candidate) => !baseCandidates.some((item) => item.content.trim() === candidate.content.trim())),
           {
             voiceProfile,
             analysis,
