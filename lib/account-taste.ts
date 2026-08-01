@@ -98,7 +98,8 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'spherical graphite', 'fluorspar', 'hydrofluoric acid', 'rhenium', 'beryllium',
       'copper', 'molybdenum', 'superalloy', 'single crystal', 'turbine blade', 'ndfeb',
       'magnet', 'coercivity', 'grain-boundary diffusion', 'separation chemistry',
-      'solvent extraction', 'tailings', 'ore grade', 'byproduct stream', 'refining', 'sintering',
+      'solvent extraction', 'tailings', 'ore grade', 'byproduct', 'byproduct stream',
+      'side stream', 'refining', 'sintering',
     ],
   },
   {
@@ -204,6 +205,18 @@ const MECHANISM_TERMS = [
   'coercivity',
   'alloying',
   'doping',
+  'decide',
+  'decides',
+  'determine',
+  'determines',
+  'limit',
+  'limits',
+  'cap',
+  'caps',
+  'depends',
+  'comes from',
+  'tied to',
+  'answers to',
   'breaks',
   'holds',
   'moves',
@@ -232,7 +245,8 @@ const STARTUP_NATIVE_TERMS = [
   'ai', 'model', 'codex', 'compute', 'venture', 'vc', 'capital', 'fund', 'investor', 'pe',
   'valuation', 'round', 'sales', 'talent', 'margin', 'price', 'cost', 'alpha', 'deck', 'decks',
   'business', 'buyer', 'supplier', 'processor', 'producer', 'miner', 'operator', 'economics',
-  'revenue', 'pricing power', 'cost of capital',
+  'revenue', 'pricing power', 'cost of capital', 'aerospace', 'rocket', 'drone', 'ev', 'wind',
+  'roadmap', 'checkbook',
   'funding', 'underwrite', 'underwriting', 'factory',
   'manufacturing', 'robot', 'energy', 'space', 'industrial',
 ];
@@ -242,7 +256,8 @@ const STARTUP_CONSEQUENCE_TERMS = [
   'valuation', 'fund', 'round', 'returns', 'alpha', 'adoption', 'sales', 'ship', 'scale',
   'ships', 'capacity', 'talent', 'supplier', 'demand', 'supply', 'build', 'buy', 'invest',
   'funding', 'underwrite', 'underwriting', 'buyer', 'processor', 'producer', 'miner', 'operator',
-  'economics', 'revenue', 'pricing power', 'own', 'control',
+  'economics', 'revenue', 'pricing power', 'own', 'control', 'need', 'want', 'bid', 'bidding',
+  'negotiate', 'roadmap', 'checkbook',
 ];
 
 const CASUAL_NATIVE_TERMS = [
@@ -250,7 +265,7 @@ const CASUAL_NATIVE_TERMS = [
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
   'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
   'those guys', 'all seem', 'i think', "i'd rather", 'pretty', 'wild', 'insane', 'massive',
-  'weird', 'rough', 'cooked', 'locked in', 'sounds about right',
+  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'good', 'bad', 'smart', 'dumb',
 ];
 
 const MARKET_STAKE_TERMS = [
@@ -258,6 +273,7 @@ const MARKET_STAKE_TERMS = [
   'care', 'cares', 'worry', 'win', 'wins', 'lose', 'loses', 'rip', 'scale', 'ship', 'ships',
   'buy', 'buys', 'sell', 'sells', 'margin', 'price', 'capital', 'returns', 'alpha',
   'better', 'worse', 'hard', 'easy', 'cheap', 'expensive', 'own', 'control', 'matter', 'works',
+  'need', 'want', 'bid', 'bidding', 'negotiate', 'checkbook',
 ];
 
 const STIFF_ANALYST_TERMS = [
@@ -572,11 +588,14 @@ function exactTermHits(content: string, terms: string[]): number {
     .split(/\s+/)
     .filter(Boolean));
   const normalized = normalizeText(content);
-  return terms.filter((term) => (
-    term.includes(' ')
-      ? normalized.includes(term)
-      : tokens.has(term)
-  )).length;
+  return terms.filter((term) => {
+    if (term.includes(' ')) return normalized.includes(term);
+    if (tokens.has(term)) return true;
+    if (term.length <= 3) return false;
+    if (term.endsWith('y')) return tokens.has(`${term.slice(0, -1)}ies`);
+    if (/(?:s|x|z|ch|sh)$/.test(term)) return tokens.has(`${term}es`);
+    return tokens.has(`${term}s`);
+  }).length;
 }
 
 function nativeStyleSimilarity(content: string, anchor: string): number {
@@ -783,7 +802,11 @@ export function assessTechnicalCredibility(content: string): TechnicalCredibilit
   const hasUnit = hasNumericTechnicalUnit(content);
   const hasProperNoun = /\b[A-Z][A-Za-z0-9+.-]{2,}\b/.test(content);
   const hasArtifact = /\b(chart|benchmark|spec|wafer|board|rack|line|test|failure log|qualification|yield data|power budget|tolerance stack)\b/i.test(content);
-  const implicationHits = countTerms(lower, ['means', 'so ', 'until', 'before', 'after', 'that turns', 'the weird', 'hidden', 'bottleneck', 'constraint']);
+  const implicationHits = countTerms(lower, [
+    'means', 'so ', 'until', 'before', 'after', 'that turns', 'the weird', 'hidden',
+    'bottleneck', 'constraint', 'decides', 'determines', 'caps', 'limits', 'worse off',
+    'better off', 'cannot', "can't",
+  ]);
   const vagueHypeHits = countTerms(lower, VAGUE_FRONTIER_HYPE);
 
   const domainScore = clamp((domains.length * 0.12) + Math.min(0.18, domainHits * 0.035));

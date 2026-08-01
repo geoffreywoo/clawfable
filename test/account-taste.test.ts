@@ -427,6 +427,34 @@ describe('account taste scoring', () => {
     expect(assessment.score).toBeGreaterThanOrEqual(0.45);
   });
 
+  it('recognizes casual hard-tech market actors without requiring memo keywords', () => {
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: [],
+        pinnedExamples: [],
+        startupRegisterExamples: [
+          { content: 'software is nepo + codex/claude\nhardware is where alpha is left', topic: 'AI', source: 'timeline' },
+          { content: 'x algo def way better. more useful content. more friends. yall cooking.', topic: 'AI', source: 'timeline' },
+        ],
+      },
+    } as any;
+    const rhenium = assessAccountTaste(
+      'rhenium is exactly the kind of tiny input that can make a giant space thesis look dumb. aerospace wants more; copper and molybdenum production decides what shows up.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    const magnets = assessAccountTaste(
+      'pretty bad setup for robot and drone companies. they need the same high-temperature NdFeB performance as EVs and wind, then get to negotiate with a much smaller checkbook.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+
+    for (const assessment of [rhenium, magnets]) {
+      expect(assessment.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+      expect(assessment.technicalCredibilityScore).toBeGreaterThanOrEqual(0.45);
+      expect(assessment.cringeRisk).toBeLessThan(0.32);
+      expect(assessment.action).toBe('allow');
+    }
+  });
+
   it('rejects polished technical explainers that are still generic ghostwriting', () => {
     const drafts = [
       'hardware founders: put the ugly production constraint in the pitch.\n\nvacuum leak rate. coating uniformity. thermal drift. tool wear.\n\nif you cannot name what blocks shipment, the prototype is still a science project.',
