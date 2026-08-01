@@ -30,6 +30,7 @@ const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching
 const MEDIA_CAPTION_PATTERN = /\b(?:watch|listen|interview|podcast|episode|video|timestamps?|full (?:conversation|breakdown)|link (?:in|below))\b/i;
 const QUOTATION_PATTERN = /^(?:["'\u201c\u2018].{20,}["'\u201d\u2019](?:\s*[-\u2014].*)?|(?:quote|from)[:\s])/i;
 const TRAILING_FRAGMENT_PATTERN = /(?:,|&|:|;|\b(?:and|or|the|a|an|to|of|for|with|is|are|was|were|has|have|that|which|because|when|if|into|more|mega))\s*$/i;
+const CONTEXT_DEPENDENT_LINK_OPENING = /^(?:sounds about right|beasts\b|the names\b|this\b|that\b|these\b|those\b|it\b|they\b|them\b|he\b|she\b|pomp is right\b)/i;
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
@@ -112,6 +113,7 @@ function exclusionReasons(
   const timestampLines = content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}(?:\s*[-\u2013\u2014]|\s+)/.test(line)).length;
   const hasLink = /https?:\/\/\S+/i.test(content);
   const strippedEnding = content.replace(/https?:\/\/\S+/gi, ' ').trim();
+  const firstProseLine = strippedEnding.split('\n').map((line) => line.trim()).find(Boolean) || '';
   const reasons: string[] = [];
 
   if (provenance === 'known_clawfable_generated') reasons.push('known Clawfable-generated post');
@@ -124,6 +126,9 @@ function exclusionReasons(
   if (PROMO_PATTERN.test(content)) reasons.push('promotional post');
   if (QUOTATION_PATTERN.test(content)) reasons.push('quotation rather than native prose');
   if (timestampLines >= 2 || (hasLink && MEDIA_CAPTION_PATTERN.test(content))) {
+    reasons.push('media-dependent caption');
+  }
+  if (performance.hasMedia || (hasLink && CONTEXT_DEPENDENT_LINK_OPENING.test(firstProseLine))) {
     reasons.push('media-dependent caption');
   }
   if (hasLink && wordCount < 16) reasons.push('media or link dependent caption');

@@ -1819,8 +1819,8 @@ describe('generateViralBatch', () => {
     expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
     expect(createCall.system).toContain('## REAL MANUAL STARTUP POSTS');
     expect(createCall.system).toContain('software is nepo + codex/claude');
-    expect(createCall.system).toContain('Put that judgment in the first 120 characters');
-    expect(createCall.system).toContain('Silently phrase the reaction you would text another investor');
+    expect(createCall.system).toContain('Start with the reaction, bet, or question');
+    expect(createCall.system).toContain('Phrase that view as if the reader already knows the topic');
     expect(createCall.system).toContain('invented evidence is blocked');
     expect(createCall.system).toContain('Do not copy their premise, names, joke, list shape, opening, or sentence skeleton');
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');

@@ -837,6 +837,29 @@ describe('source planner', () => {
     expect(seededSlots.map((slot) => slot.plannerReason).join(' ')).toContain('Frontier seed');
   });
 
+  it('gives every unsourced Geoffrey brief a distinct concrete object and mechanism', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'explore',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'casual startup investor',
+        topics: ['AI', 'startups', 'robotics', 'energy'],
+        antiGoals: ['generic startup aphorisms'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes about startups and frontier tech.',
+      },
+      learnings: null,
+      trending: [],
+      fallbackTopics: [],
+    });
+
+    expect(plan.slots).toHaveLength(4);
+    expect(plan.slots.every((slot) => Boolean(slot.ideaSeed?.technicalObject && slot.ideaSeed?.hiddenConstraint))).toBe(true);
+    expect(new Set(plan.slots.map((slot) => slot.ideaSeed?.id)).size).toBe(4);
+  });
+
   it('reserves a small lane for adjacent trend exploration in growth modes', () => {
     const plan = buildSourcePlannerPlan({
       count: 10,

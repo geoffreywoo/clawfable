@@ -192,6 +192,15 @@ describe('versioned voice corpus', () => {
         xTweetId: 'x-clipped-long-post',
         content: 'openai and claude will dominate applications, but a startup can still win with distribution, mindshare, proprietary data, and the mega https://t.co/clipped',
       }),
+      performance(94, {
+        xTweetId: 'x-context-dependent-link',
+        content: 'the names are fine. only a few twitter nerds see the old association. everyone else gets the sci fi vibe https://t.co/context',
+      }),
+      performance(95, {
+        xTweetId: 'x-media-attachment',
+        content: 'robot field service gets expensive once actuator replacement starts eating the margin.',
+        hasMedia: true,
+      }),
     ];
     const snapshot = build([...history, ...questionable]);
 
@@ -199,12 +208,16 @@ describe('versioned voice corpus', () => {
     const media = snapshot.entries.find((entry) => entry.xTweetId === 'x-media');
     const truncated = snapshot.entries.find((entry) => entry.xTweetId === 'x-truncated');
     const clipped = snapshot.entries.find((entry) => entry.xTweetId === 'x-clipped-long-post');
+    const contextual = snapshot.entries.find((entry) => entry.xTweetId === 'x-context-dependent-link');
+    const attachment = snapshot.entries.find((entry) => entry.xTweetId === 'x-media-attachment');
 
     expect(promo?.exclusionReasons).toContain('promotional post');
     expect(media?.exclusionReasons).toContain('media-dependent caption');
     expect(truncated?.exclusionReasons).toContain('possibly truncated or incomplete text');
     expect(clipped?.exclusionReasons).toContain('possibly truncated or incomplete text');
-    for (const entry of [promo, media, truncated, clipped]) {
+    expect(contextual?.exclusionReasons).toContain('media-dependent caption');
+    expect(attachment?.exclusionReasons).toContain('media-dependent caption');
+    for (const entry of [promo, media, truncated, clipped, contextual, attachment]) {
       expect(entry?.dispositions).not.toContain('diction_anchor');
     }
   });

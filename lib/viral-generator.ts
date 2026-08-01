@@ -40,6 +40,7 @@ import { buildOperatorAnchorFallbackTemplates } from './operator-anchor-fallback
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt, hasPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import {
   assessAccountTaste,
+  buildGeoffreyNativeGenerationBrief,
   buildGeoffreyNativeWritingBrief,
   getAutonomousQueueTasteIssue,
   isGeoffreyVoiceProfile,
@@ -105,15 +106,24 @@ export interface GeoffreyIdeaBrief {
 }
 
 function geoffreyAffectedActor(value: string): string {
+  if (/rhenium|superalloy|turbine blade/i.test(value)) return 'a rocket or turbine company buying qualified blades';
+  if (/dysprosium|terbium|ndfeb|magnet/i.test(value)) return 'a robotics or drone company buying high-temperature motors';
+  if (/graphite|anode|cell maker/i.test(value)) return 'a battery-material startup trying to qualify with a cell maker';
+  if (/tungsten|carbide|hardmetal|cutting tool/i.test(value)) return 'an industrial startup or machine shop that needs qualified cutting tools';
+  if (/beryllium/i.test(value)) return 'an aerospace supplier adding qualified machining capacity';
+  if (/tritium|fusion|first.wall|breeding blanket/i.test(value)) return 'a fusion company trying to close its fuel cycle';
+  if (/transformer|switchgear|interconnect/i.test(value)) return 'an AI data-center developer waiting to energize capacity';
+  if (/hybrid bonding|chiplet|substrate|packag/i.test(value)) return 'an inference-chip startup trying to ship working packages';
+  if (/actuator|reducer|field.service|robot/i.test(value)) return 'a robotics founder who has to own uptime and repair cost';
   const domain = classifyGeoffreyTopicDomain(value);
-  if (domain === 'ai_compute') return 'inference startups, chip suppliers, and data-center buyers';
-  if (domain === 'energy_nuclear') return 'energy developers, industrial power buyers, and project investors';
-  if (domain === 'materials_minerals') return 'materials processors, qualified suppliers, and hard-tech founders';
-  if (domain === 'robotics_automation') return 'robotics founders, factory buyers, and field-service teams';
-  if (domain === 'manufacturing_industrial') return 'industrial startups, manufacturers, and capacity investors';
-  if (domain === 'space_defense') return 'space or defense companies, suppliers, and program buyers';
-  if (domain === 'browser_infrastructure') return 'browser, developer-tool, and application startups';
-  return 'startups, product builders, and investors exposed to this subject';
+  if (domain === 'ai_compute') return 'an inference startup or data-center buyer';
+  if (domain === 'energy_nuclear') return 'an energy developer or industrial power buyer';
+  if (domain === 'materials_minerals') return 'a hard-tech founder buying qualified material';
+  if (domain === 'robotics_automation') return 'a robotics founder or factory buyer';
+  if (domain === 'manufacturing_industrial') return 'an industrial startup adding production capacity';
+  if (domain === 'space_defense') return 'a space or defense company buying qualified hardware';
+  if (domain === 'browser_infrastructure') return 'a browser or developer-tool startup';
+  return 'one startup or investor directly exposed to the subject';
 }
 
 export function buildGeoffreyIdeaBriefs(plan: SourcePlannerPlan): GeoffreyIdeaBrief[] {
@@ -874,8 +884,17 @@ export function preferGeoffreyGroundedCandidates(
       anchorCopyRiskContribution: candidate.scoreProvenance?.anchorCopyRisk,
       hasSourceContext: Boolean(candidate.sourceBrief || candidate.trendHeadline),
     });
-    if (!queueIssue) return 0;
-    return assessment.action === 'review' ? 1 : 2;
+    if (queueIssue || assessment.action === 'block') return 2;
+    if (
+      assessment.nativeVoiceScore < 0.65
+      || assessment.casualStartupScore < 0.58
+      || assessment.stiffnessRisk >= 0.3
+      || assessment.cringeRisk >= 0.32
+      || assessment.generatedPatternRisk >= 0.28
+      || assessment.voiceDriftRisk >= 0.2
+      || assessment.sourceCopyRisk >= 0.3
+    ) return 1;
+    return 0;
   };
   const grounded = ranked.filter((candidate) => (
     Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
@@ -944,7 +963,7 @@ function buildGeoffreySystemPrompt({
   return [
     `You write original standalone X posts for @geoffwoo. The pass/fail question is whether Geoffrey would plausibly type the exact wording himself.`,
     '',
-    buildGeoffreyNativeWritingBrief(),
+    buildGeoffreyNativeGenerationBrief(),
     '',
     `## AUTHOR POSITION`,
     `Geoffrey is a startup investor/operator and capital allocator. He cares about AI and models, startups, compute and hardware, energy, robotics, manufacturing, industrial capacity, space, and the companies enabled or constrained by them. Crypto and broad politics are not default lanes.`,
@@ -952,11 +971,8 @@ function buildGeoffreySystemPrompt({
     `Core topics from current account context: ${voiceProfile.topics.slice(0, 12).join(', ') || 'AI, startups, hardware, energy, robotics, manufacturing, and space'}.`,
     '',
     `## WRITING PROCESS`,
-    `1. Read the source privately. Do not summarize it.`,
-    `2. Decide the immediate startup consequence: which company, product, market, cost, margin, capital need, talent pool, supplier, or timing assumption changes. Silently phrase the reaction you would text another investor. Put that judgment in the first 120 characters.`,
-    `3. Keep only the single factual detail needed to support that judgment.`,
-    `4. Write the take in a native manual-post mode. Start at the reaction, bet, or question, not at the technical object. Most drafts should be under 280 characters and one to three sentences. A draft over 420 characters needs a named live event and real evidence.`,
-    `5. Delete the explanation after the point lands. Never add a lesson or social-copy closer.`,
+    `Read the source privately. Decide the one company, market, capital, cost, or timing consequence you actually have a view on.`,
+    `Phrase that view as if the reader already knows the topic. Keep one fact only when it earns the judgment, then stop.`,
     '',
     `## TRUTH AND ORIGINALITY`,
     `Use only supplied facts. Analysis and opinion are welcome; invented evidence is blocked. Do not invent a relationship, conversation, visit, demo, customer, quote, number, or first-person event.`,
@@ -1616,7 +1632,7 @@ export async function generateViralBatch(
         `subject:${brief.targetTopic}`,
         `event/object:${compactExampleTweet(brief.eventOrObject, 220)}`,
         `mechanism:${compactExampleTweet(brief.mechanism, 240)}`,
-        `affected actor:${brief.affectedActor}`,
+        `pick one affected actor:${brief.affectedActor}`,
         `stakes:${compactExampleTweet(brief.stakes, 220)}`,
         `non-consensus judgment:${compactExampleTweet(brief.nonConsensusJudgment, 220)}`,
         `compression:${brief.compressionTarget}`,
@@ -1675,6 +1691,8 @@ ${JSON.stringify({
     ? `Write exactly ${candidateCount} original standalone posts.${geoffreyIdeaBriefs.length === 4 ? ' Use all four idea briefs and write exactly three materially different drafts for each brief. Draft one is a blunt reaction or verdict. Draft two is a first-person bet or direct causal question. Draft three is a high-context company or market consequence. The three drafts must change the judgment or social posture, not merely swap synonyms.' : ' Write one post for every numbered assignment.'}
 
 Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. Silently decide what Geoffrey actually thinks before drafting. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
+
+Choose one affected actor from each brief. Do not list every company, buyer, supplier, and investor touched by the mechanism.
 
 Across the batch, vary native modes: terse reaction, first-person market bet, named-company judgment, blunt causal question, two-beat startup take, or public conviction. The final wording should sound like the middle of an ongoing conversation among smart founders and investors. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
 At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.

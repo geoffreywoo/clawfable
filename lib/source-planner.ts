@@ -731,7 +731,8 @@ export function buildSourcePlannerPlan({
     }
 
     const shouldAttachIdeaSeed =
-      lane === 'core_explore_fallback'
+      (geoffreyStrict && !trendHeadline)
+      || lane === 'core_explore_fallback'
       || (lane === 'manual_core_exploit' && isBroadFrontierTopic(targetTopic))
       || (!trendHeadline && isBroadFrontierTopic(targetTopic));
     const ideaSeed = shouldAttachIdeaSeed

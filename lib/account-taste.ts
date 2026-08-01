@@ -1015,6 +1015,19 @@ export function getAutonomousQueueTasteIssue({
   return null;
 }
 
+export function buildGeoffreyNativeGenerationBrief(): string {
+  return `## GEOFFREY-NATIVE WRITING BRIEF
+Write the thought Geoffrey would send to one smart founder or investor, then stop.
+- Start with the reaction, bet, or question. Do not introduce the industry or teach the reader the topic.
+- Pick one affected company, founder, investor, buyer, or supplier and one consequence they have to absorb.
+- Use at most one technical fact. It should make the judgment defensible, not turn the post into research notes.
+- Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
+- Native modes include a blunt one-line take, "i think" plus one reason, a real causal question, or two uneven beats where the second gets simpler.
+- Stop before the lesson, slogan, balanced closer, or advice. If there is no sharp thought, do not inflate a fact into one.
+- Manual posts are diction evidence only. Never copy an anchor's premise, joke, named scene, opening, list, or sentence skeleton.
+- Never invent access, conversations, customers, quotes, measurements, benchmarks, names, numbers, or events.`;
+}
+
 export function buildGeoffreyNativeWritingBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.

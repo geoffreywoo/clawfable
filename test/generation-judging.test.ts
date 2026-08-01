@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractModelJsonRecords, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
+import { extractModelJsonRecords, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getGeoffreyMutationMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -125,6 +125,9 @@ describe('judgeCandidates fallback critic', () => {
     expect(getMutationMaxTokens(3)).toBe(1536);
     expect(getMutationMaxTokens(4)).toBe(2048);
     expect(getMutationMaxTokens(8)).toBe(3072);
+    expect(getGeoffreyMutationMaxTokens(1)).toBe(4096);
+    expect(getGeoffreyMutationMaxTokens(4)).toBe(6144);
+    expect(getGeoffreyMutationMaxTokens(8)).toBe(8192);
   });
 
   it('parses fenced arrays and wrapped model judgments', () => {
@@ -853,20 +856,18 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('final versions for @geoffwoo');
     expect(system).toContain('software is nepo + codex/claude');
     expect(system).toContain('Avoid analyst-memo exposition');
-    expect(system).toContain('Never add a name, number, benchmark');
-    expect(system).toContain('First-person opinion or reaction is allowed');
-    expect(system).toContain('Neutral cause-and-effect is still a research note');
-    expect(system).toContain('Silently reduce the draft to two things');
-    expect(system).toContain('Put the position in the first line');
-    expect(system).toContain('A factual explanation with no disputable judgment is not a post');
-    expect(system).toContain('Do not hide the judgment inside institutional language');
-    expect(system).toContain('gets the headlines');
+    expect(system).toContain('Never invent access, conversations, customers');
+    expect(system).toContain('First-person opinion is allowed');
+    expect(system).toContain('Use at most one technical fact');
+    expect(system).toContain('disposable scaffolding');
+    expect(system).toContain('three independent posts');
+    expect(system).not.toContain('gets the headlines');
     expect(system.indexOf('software is nepo + codex/claude'))
       .toBeLessThan(system.indexOf('x algo def way better'));
     expect(prompt).toContain('source=Customer-specific packaging qualifications');
     expect(prompt).toContain('Write three fresh final versions');
     expect(call).toEqual(expect.objectContaining({
-      maxTokens: 2048,
+      maxTokens: 4096,
       openAiReasoningEffort: 'medium',
     }));
     expect(mutations).toHaveLength(3);
@@ -914,27 +915,30 @@ describe('judgeCandidates fallback critic', () => {
       summary: 'Geoffrey writes about startups and frontier tech.',
     };
     const candidates = [
-      ...Array.from({ length: 10 }, (_, index) => judgedCandidate({
+      ...Array.from({ length: 6 }, (_, index) => judgedCandidate({
         content: `unsourced candidate ${index}`,
+        targetTopic: 'generic startups',
         draftExperimentId: `unsourced-${index}`,
         judgeScore: 0.95 - (index * 0.01),
       })),
-      judgedCandidate({
-        content: 'grounded candidate',
-        draftExperimentId: 'grounded',
-        judgeScore: 0.5,
-        sourceBrief: 'Current Xiaomi robotics product source.',
-      }),
+      ...['xiaomi robotics', 'rhenium supply', 'inference power', 'fusion tritium'].map((brief, index) => judgedCandidate({
+        content: `grounded candidate ${index}`,
+        targetTopic: brief,
+        draftExperimentId: `grounded-${index}`,
+        judgeScore: 0.62 - (index * 0.02),
+        sourceBrief: brief,
+      })),
     ];
 
     const targets = selectMutationTargets(candidates, geoffreyVoice);
-    expect(targets).toHaveLength(8);
-    expect(targets.map((candidate) => candidate.draftExperimentId)).toContain('grounded');
+    expect(targets).toHaveLength(4);
+    expect(targets.every((candidate) => candidate.sourceBrief)).toBe(true);
+    expect(new Set(targets.map((candidate) => candidate.sourceBrief)).size).toBe(4);
     expect(selectMutationTargets(candidates, {
       ...geoffreyVoice,
       communicationStyle: 'general founder voice',
       summary: 'A general technical founder.',
-    }).map((candidate) => candidate.draftExperimentId)).not.toContain('grounded');
+    })).toHaveLength(4);
   });
 
   it('rescues at most one close voice failure per Geoffrey source', () => {
@@ -950,6 +954,7 @@ describe('judgeCandidates fallback critic', () => {
       draftExperimentId: experiment,
       sourceBrief: `source for ${experiment}`,
       mutationRound: 1,
+      finalCriticVerdict: experiment === 'e2b' ? 'allow' : 'review',
       judgeBreakdown: {
         overall: 0.72,
         voiceFit: 0.75,
@@ -1013,7 +1018,7 @@ describe('judgeCandidates fallback critic', () => {
     });
 
     expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || ''))
-      .toContain('already failed one native-voice pass');
+      .toContain('already failed one voice pass');
     expect(mutations[0].mutationRound).toBe(2);
   });
 });

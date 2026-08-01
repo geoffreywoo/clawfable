@@ -5,7 +5,12 @@ import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, Per
 import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
 import { assessTechnicalElevation, scoreSlopRisk } from './virality-signals';
-import { assessAccountTaste, buildGeoffreyNativeWritingBrief, isGeoffreyVoiceProfile } from './account-taste';
+import {
+  assessAccountTaste,
+  buildGeoffreyNativeGenerationBrief,
+  buildGeoffreyNativeWritingBrief,
+  isGeoffreyVoiceProfile,
+} from './account-taste';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 
 type JudgeContext = {
@@ -44,6 +49,10 @@ export function getMutationMaxTokens(targetCount: number): number {
   if (targetCount === 3) return 1536;
   if (targetCount <= 4) return 2048;
   return 3072;
+}
+
+export function getGeoffreyMutationMaxTokens(targetCount: number): number {
+  return Math.min(8192, Math.max(4096, getMutationMaxTokens(targetCount) * 3));
 }
 
 function formatNativeAnchorForPrompt(content: string): string {
@@ -163,18 +172,45 @@ export function selectMutationTargets(
   voiceProfile: VoiceProfile,
 ): JudgedCandidate[] {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
-  const mutationLimit = geoffreyStrict ? 8 : 4;
-  return [...candidates]
+  const mutationLimit = geoffreyStrict ? 4 : 4;
+  const ranked = [...candidates]
     .filter((candidate) => (candidate.judgeScore || 0) >= 0.48)
     .sort((a, b) => {
       if (geoffreyStrict) {
         const aGrounded = Number(Boolean(a.sourceBrief || a.trendHeadline || a.trendTopicId));
         const bGrounded = Number(Boolean(b.sourceBrief || b.trendHeadline || b.trendTopicId));
         if (aGrounded !== bGrounded) return bGrounded - aGrounded;
+        const aVoice = (a.judgeBreakdown.nativeVoice ?? a.judgeBreakdown.voiceFit)
+          + (a.judgeBreakdown.casualStartupFit ?? 0.5) * 0.35
+          - (a.judgeBreakdown.stiffnessRisk ?? 0) * 0.3
+          - (a.judgeBreakdown.cringeRisk ?? 0) * 0.25;
+        const bVoice = (b.judgeBreakdown.nativeVoice ?? b.judgeBreakdown.voiceFit)
+          + (b.judgeBreakdown.casualStartupFit ?? 0.5) * 0.35
+          - (b.judgeBreakdown.stiffnessRisk ?? 0) * 0.3
+          - (b.judgeBreakdown.cringeRisk ?? 0) * 0.25;
+        if (aVoice !== bVoice) return bVoice - aVoice;
       }
       return (b.judgeScore || 0) - (a.judgeScore || 0);
-    })
-    .slice(0, Math.min(mutationLimit, candidates.length));
+    });
+  if (!geoffreyStrict) return ranked.slice(0, Math.min(mutationLimit, candidates.length));
+
+  const selected: JudgedCandidate[] = [];
+  const seenBriefs = new Set<string>();
+  for (const candidate of ranked) {
+    const brief = String(
+      candidate.trendTopicId
+      || candidate.sourceBrief
+      || candidate.trendHeadline
+      || candidate.targetTopic
+      || candidate.draftExperimentId
+      || candidate.content,
+    ).trim().toLowerCase();
+    if (seenBriefs.has(brief)) continue;
+    seenBriefs.add(brief);
+    selected.push(candidate);
+    if (selected.length >= mutationLimit) break;
+  }
+  return selected;
 }
 
 export function selectGeoffreyVoiceRescueTargets(
@@ -186,9 +222,12 @@ export function selectGeoffreyVoiceRescueTargets(
   const eligible = [...candidates]
     .filter((candidate) => {
       const breakdown = candidate.judgeBreakdown;
-      const needsRescue = (breakdown.casualStartupFit ?? 0.5) < 0.6
-        || (breakdown.stiffnessRisk ?? 0) >= 0.28
-        || (breakdown.cringeRisk ?? 0) >= 0.4;
+      const needsRescue = candidate.finalCriticVerdict !== 'allow'
+        || (breakdown.nativeVoice ?? breakdown.voiceFit) < 0.65
+        || (breakdown.casualStartupFit ?? 0.5) < 0.58
+        || (breakdown.stiffnessRisk ?? 0) >= 0.3
+        || (breakdown.cringeRisk ?? 0) >= 0.32
+        || (breakdown.manualAnchorReskinRisk ?? 0) >= 0.25;
       return (candidate.mutationRound ?? 0) >= 1
         && Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
         && candidate.judgeScore >= 0.48
@@ -851,26 +890,18 @@ export async function mutateTopCandidates(
       .map((item) => `- ${item.slice(0, 180)}`)
       .join('\n');
     const system = geoffreyStrict
-      ? `You are writing the final versions for @geoffwoo. Produce posts Geoffrey would plausibly type himself.
-${voiceRescuePass ? '\nThese drafts already failed one native-voice pass. Make a radical new phrasing; preserving their wording or sentence shape fails.' : ''}
+      ? `You are writing final versions for @geoffwoo. The rejected draft is disposable scaffolding, not prose to polish.
+${voiceRescuePass ? '\nThis idea already failed one voice pass. Keep only the sourced fact and write from a genuinely different human thought.' : ''}
 
-Write like a high-context message to a smart founder or investor:
-- Keep the source facts fixed. Never add a name, number, benchmark, relationship, meeting, conversation, visit, demo, customer, quote, or first-person event.
-- First-person opinion or reaction is allowed when natural. First-person access, evidence, or experience is not.
-- Treat the supplied draft as disposable scaffolding. Keep its defensible idea, but discard its sentence structure, framing, and analyst vocabulary.
-- Silently reduce the draft to two things before writing: the opinion Geoffrey has and the one fact that makes it defensible. The output must contain the opinion; it may omit the fact when the opinion still stands.
-- Find the human stake: which company, founder, investor, buyer, supplier, or market actor must pay, build, compete, fund, or absorb the constraint. Neutral cause-and-effect is still a research note.
-- Lead with one judgment about the company, product, market, capital, cost, talent, or timing. For technical seeds, use one mechanism as support and move quickly to what it changes for startups or investors.
-- Make a clear bet that a smart peer could disagree with. A factual explanation with no disputable judgment is not a post.
-- Prefer active verbs and plain evaluative words: pay, build, buy, ship, win, lose, good, bad, cheap, expensive, big, small, hard, easy, weird. Do not hide the judgment inside institutional language such as "absorb," "underwrite against," "market structure," or "capacity trade."
-- Put the position in the first line. Skip polished setup frames such as "X is the reminder," "the upside is no longer just," "there is no straightforward," and "one of those markets."
-- Use plain speech, compression, and uneven rhythm. Geoffrey often sounds like he is continuing an existing conversation instead of introducing a topic. Fragments and line breaks are fine. Stop when the point lands.
-- A native post can simply be "i think [bet]" plus one reason, a blunt reaction to a named company, or a question a peer would actually answer. It does not need a grand thesis shape.
-- Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
-- Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
-- Do not use "gets the headlines," "the better business," "sits upstream," "processors win," "sets the pace," "holds the cards," or "the money is in X." These are generated hard-tech post templates, not Geoffrey's voice.
-- Delete institutional phrases such as "procurement detail," "substitution fantasy," "qualification takes X off the table," and "build plan." One casual opener does not make a noun-heavy memo human.
-- Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. Version one must be a single-sentence blunt market take under 180 characters. Version two may use two asymmetric beats. Version three is a looser high-context reaction. At least one must say plainly who is better or worse off. Do not make all three a setup followed by an explanation.
+${buildGeoffreyNativeGenerationBrief()}
+
+For each input, return three independent posts:
+1. one blunt market or company take under 180 characters
+2. one first-person bet or direct question
+3. one loose two-beat reaction with a simpler second beat
+
+Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. At least one version must plainly name who wins, loses, pays, or becomes harder to fund.
+Keep every supplied fact fixed. First-person opinion is allowed; first-person access or evidence is not.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}
@@ -912,7 +943,7 @@ Output one JSON object per line with:
       task: 'creative_variant',
       tier: 'fast',
       maxTokens: geoffreyStrict
-        ? getMutationMaxTokens(mutationTargets.length) * 2
+        ? getGeoffreyMutationMaxTokens(mutationTargets.length)
         : getMutationMaxTokens(mutationTargets.length),
       openAiReasoningEffort: geoffreyStrict ? 'medium' : undefined,
       system,
