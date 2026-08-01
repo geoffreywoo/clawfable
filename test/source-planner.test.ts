@@ -7,6 +7,8 @@ import {
   enrichTrendingTopics,
   formatTrendEvidence,
   isCoreGeoffreyTopicDomain,
+  isGeoffreyDeepTechnicalTopic,
+  isGeoffreyManufacturingMaterialsTopic,
 } from '@/lib/source-planner';
 import type { AgentLearnings, ManualExampleCuration, TweetPerformance } from '@/lib/types';
 
@@ -64,6 +66,13 @@ describe('Geoffrey semantic topic identity', () => {
       'June in Servo: real world compat, media queries, SharedWorker, and more',
       'robotics_automation',
     )).toBe('browser_infrastructure');
+  });
+
+  it('recognizes the broad native finance, culture, health, and sports lanes', () => {
+    expect(classifyGeoffreyTopicDomain('QQQ and public market investing')).toBe('finance_investing');
+    expect(classifyGeoffreyTopicDomain('Burning Man status and city culture')).toBe('culture_status');
+    expect(classifyGeoffreyTopicDomain('longevity, sleep, and human performance')).toBe('health_performance');
+    expect(classifyGeoffreyTopicDomain('Jake Paul boxing an NFL athlete')).toBe('sports_competition');
   });
 });
 
@@ -355,7 +364,48 @@ describe('source planner', () => {
     expect(primary.sourceLane).not.toBe('reject');
   });
 
-  it('keeps at least 70% of Geoffrey briefs in core startup and frontier domains', () => {
+  it('lets an operator like bridge topic identity without making a singleton story sourced', () => {
+    const [topic] = enrichTrendingTopics([{
+      id: 939,
+      networkTopicId: 'network-liked-boxing',
+      headline: 'Jake Paul challenges NFL players to box',
+      source: '@sportswriter',
+      relevanceScore: 90,
+      category: 'boxing challenge',
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.86,
+      networkBreakoutScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'sports_competition' as const,
+      isPrimarySource: false,
+      topTweet: {
+        id: 'liked-boxing-1',
+        text: 'Jake Paul challenges NFL players to box.',
+        likes: 800,
+        author: 'sportswriter',
+      },
+    }], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups'],
+      antiGoals: ['unsupported claims'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups and technology.',
+    }, null, 'moderate');
+
+    expect(topic.fitScores.identityFit).toBeGreaterThanOrEqual(0.6);
+    expect(topic.fitScores.operatorEngagement).toBe(0.9);
+    expect(topic.sourceLane).toBe('reject');
+    expect(topic.plannerReason).toContain('two independent authors or primary-source support');
+  });
+
+  it('keeps at least 70% of Geoffrey briefs in the demonstrated broad core', () => {
     const trending = Array.from({ length: 5 }, (_, index) => ({
       id: 940 + index,
       networkTopicId: `network-stablecoin-${index}`,
@@ -400,7 +450,38 @@ describe('source planner', () => {
     )).length;
 
     expect(coreCount / plan.slots.length).toBeGreaterThanOrEqual(0.7);
-    expect(plan.slots.filter((slot) => slot.sourceLane === 'trend_adjacent_explore')).toHaveLength(2);
+    expect(plan.slots.filter((slot) => slot.sourceLane === 'trend_adjacent_explore').length).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps deep technical and manufacturing briefs as minority lanes', () => {
+    const plan = buildSourcePlannerPlan({
+      count: 5,
+      autonomyMode: 'balanced',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'casual investor/operator',
+        topics: ['AI', 'startups', 'culture', 'finance', 'sports', 'manufacturing', 'rare earth minerals'],
+        antiGoals: ['AI slop', 'over-specialized industrial feed'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: 'Geoffrey writes about AI, startups, markets, culture, sports, and frontier technology.',
+      },
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'culture', angle: 'status and ambition', weight: 9, sampleCount: 8, avgEngagement: 90, topTweets: [] },
+          { topic: 'AI', angle: 'products and research', weight: 8, sampleCount: 8, avgEngagement: 80, topTweets: [] },
+          { topic: 'finance', angle: 'capital and risk', weight: 7, sampleCount: 8, avgEngagement: 70, topTweets: [] },
+          { topic: 'sports', angle: 'competition', weight: 6, sampleCount: 8, avgEngagement: 60, topTweets: [] },
+          { topic: 'automated manufacturing', angle: 'industrial constraints', weight: 5, sampleCount: 8, avgEngagement: 50, topTweets: [] },
+        ],
+      } as AgentLearnings,
+      trending: [],
+    });
+    const subjects = plan.slots.map((slot) => `${slot.targetTopic} ${slot.trendHeadline || ''}`);
+
+    expect(subjects.filter(isGeoffreyDeepTechnicalTopic).length).toBeLessThanOrEqual(1);
+    expect(subjects.filter(isGeoffreyManufacturingMaterialsTopic).length).toBeLessThanOrEqual(1);
+    expect(plan.slots.filter((slot) => slot.ideaSeed?.kind && slot.ideaSeed.kind !== 'frontier').length).toBeGreaterThanOrEqual(3);
   });
 
   it('does not let a generic tech label bridge an unrelated Geoffrey trend', () => {
@@ -837,7 +918,7 @@ describe('source planner', () => {
     expect(seededSlots.map((slot) => slot.plannerReason).join(' ')).toContain('Frontier seed');
   });
 
-  it('gives every unsourced Geoffrey brief a distinct concrete object and mechanism', () => {
+  it('gives every unsourced Geoffrey brief a distinct concrete object or tension', () => {
     const plan = buildSourcePlannerPlan({
       count: 4,
       autonomyMode: 'explore',

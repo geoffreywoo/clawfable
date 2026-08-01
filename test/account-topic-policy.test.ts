@@ -3,7 +3,7 @@ import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopi
 import type { AgentLearnings } from '../lib/types';
 
 describe('account topic policy', () => {
-  it('removes crypto and generic drift lanes without manufacturing replacement topics', () => {
+  it('removes crypto and generic labels while preserving Geoffrey\'s demonstrated broad lanes', () => {
     const profile = applyAccountTopicPolicy('@geoffwoo', {
       tone: 'analyst',
       topics: ['ai', 'crypto', 'startup', 'sports', 'culture', 'tech', 'startup culture'],
@@ -13,16 +13,16 @@ describe('account topic policy', () => {
     });
 
     expect(profile.topics).not.toContain('crypto');
-    expect(profile.topics).toEqual(['ai', 'startup', 'startup culture']);
+    expect(profile.topics).toEqual(['ai', 'startup', 'sports', 'culture', 'startup culture']);
     expect(profile.topics).not.toContain('fusion');
     expect(profile.topics).not.toContain('robotics');
     expect(profile.communicationStyle).toContain('Crypto is no longer a core content pillar');
-    expect(profile.communicationStyle).toContain('Discover current subjects dynamically');
+    expect(profile.communicationStyle).toContain('demonstrated range includes startups and venture');
     expect(profile.communicationStyle).toContain('Politics and geopolitics are not default content lanes');
     expect(profile.communicationStyle).toContain('ACCOUNT ANTI-SLOP POLICY FOR @geoffwoo');
     expect(profile.communicationStyle).toContain('low-status SaaS-ops texture');
-    expect(profile.communicationStyle).toContain('compute constraints');
-    expect(profile.communicationStyle).toContain('tungsten carbide tooling');
+    expect(profile.communicationStyle).toContain('Elevated means sharp taste and high-context judgment');
+    expect(profile.communicationStyle).toContain('Cap deep industrial topics at one of five originals');
     expect(profile.antiGoals.join(' ')).toContain('ai slop');
     expect(profile.antiGoals.join(' ')).toContain('slack channels');
   });
@@ -52,8 +52,8 @@ describe('account topic policy', () => {
 
     const filtered = applyAccountLearningPolicy('geoffwoo', learnings);
 
-    expect(filtered?.topicRankings.map((entry) => entry.topic)).toEqual(['robotics']);
-    expect(filtered?.manualTopicProfile?.map((entry) => entry.topic)).toEqual(['space']);
+    expect(filtered?.topicRankings.map((entry) => entry.topic)).toEqual(['sports', 'robotics']);
+    expect(filtered?.manualTopicProfile?.map((entry) => entry.topic)).toEqual(['personal', 'space']);
     expect(filtered?.insights).toEqual(['Post more AI infrastructure takes']);
   });
 
@@ -72,8 +72,8 @@ describe('account topic policy', () => {
   it('suppresses crypto-only topics for both current and legacy Geoffrey handles', () => {
     expect(shouldSuppressTopicForAccount('@geoffwoo', 'crypto')).toBe(true);
     expect(shouldSuppressTopicForAccount('@geoffreywoo', 'crypto')).toBe(true);
-    expect(shouldSuppressTopicForAccount('@geoffwoo', 'sports')).toBe(true);
-    expect(shouldSuppressTopicForAccount('@geoffwoo', 'personal')).toBe(true);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'sports')).toBe(false);
+    expect(shouldSuppressTopicForAccount('@geoffwoo', 'personal')).toBe(false);
     expect(shouldSuppressTopicForAccount('@geoffwoo', 'startup culture')).toBe(false);
     expect(shouldSuppressTopicForAccount('@geoffwoo', 'robotics')).toBe(false);
     expect(shouldSuppressTopicForAccount('@someoneelse', 'crypto')).toBe(false);

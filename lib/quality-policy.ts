@@ -11,8 +11,9 @@ import { extractCandidateFeatureTags } from './tweet-features';
 import { scoreSlopRisk } from './virality-signals';
 import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
+import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v9';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v10';
 
 export interface GeoffreyQualityPolicyActivation {
   activated: boolean;
@@ -74,13 +75,6 @@ export interface GeoffreyQualityAssessment {
     anchorReskin: number;
     technicalCredibility: number;
   };
-}
-
-function technicalLane(candidate: GeoffreyQualityCandidate, featureTags: CandidateFeatureTags): boolean {
-  if ((featureTags.technicalDepth || 0) >= 0.25 || (featureTags.domainTags || []).length > 0) return true;
-  return /\b(?:asic|accelerator|chip|compute|data center|fusion|fission|reactor|nuclear|rare earth|mineral|robot|factory|manufactur|space|rocket|grid|power|battery|semiconductor|materials?)\b/i.test(
-    `${candidate.targetTopic || candidate.topic || ''} ${candidate.trendHeadline || ''}`,
-  );
 }
 
 function confidenceFloor(mode: GeoffreyQualityCandidate['generationMode']): number {
@@ -176,7 +170,9 @@ export function assessGeoffreyQualityPolicy(
   if (voiceDrift >= 0.2) issues.push(`voice drift ${voiceDrift.toFixed(2)} at or above 0.20`);
   if (sourceCopy >= 0.3) issues.push(`source copy ${sourceCopy.toFixed(2)} at or above 0.30`);
   if (anchorReskin >= 0.25) issues.push(`anchor reskin ${anchorReskin.toFixed(2)} at or above 0.25`);
-  if (technicalLane(candidate, featureTags) && technicalCredibility < 0.45) {
+  if (isGeoffreyDeepTechnicalTopic(
+    `${candidate.targetTopic || candidate.topic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`,
+  ) && technicalCredibility < 0.45) {
     issues.push(`technical credibility ${technicalCredibility.toFixed(2)} below 0.45`);
   }
 

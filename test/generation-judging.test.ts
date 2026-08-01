@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractModelJsonRecords, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getGeoffreyMutationMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
+import { extractModelJsonRecords, FINAL_CRITIC_VERSION, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getGeoffreyMutationMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -407,7 +407,7 @@ describe('judgeCandidates fallback critic', () => {
       finalCriticProvider: 'anthropic',
       finalCriticModel: 'claude-sonnet-4-6',
       finalCriticVerdict: 'allow',
-      finalCriticVersion: 'geoffwoo-final-critic-v1',
+      finalCriticVersion: FINAL_CRITIC_VERSION,
     });
     expect(final[0].judgeBreakdown.overall).toBe(initial[0].judgeBreakdown.overall);
     expect(final[0].finalCriticScores?.overall).toBeGreaterThan(0.8);
@@ -617,7 +617,8 @@ describe('judgeCandidates fallback critic', () => {
     const system = String(mocks.generateText.mock.calls[0]?.[0]?.system || '');
     expect(system).toContain('casualStartupFit');
     expect(system).toContain('stiffnessRisk');
-    expect(system).toContain('technical credibility and casual startup relevance are separate');
+    expect(system).toContain('specificity and casual startup relevance are separate');
+    expect(system).toContain('Do not force those lanes into industrial analogies');
   });
 
   it('blocks a high-scoring Geoffrey draft that reskins a manual anchor premise', async () => {
@@ -858,7 +859,7 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('Avoid analyst-memo exposition');
     expect(system).toContain('Never invent access, conversations, customers');
     expect(system).toContain('First-person opinion is allowed');
-    expect(system).toContain('Use at most one technical fact');
+    expect(system).toContain('For a technical subject, use at most one technical fact');
     expect(system).toContain('disposable scaffolding');
     expect(system).toContain('three independent posts');
     expect(system).toContain('Do not force a win/lose/pay frame');

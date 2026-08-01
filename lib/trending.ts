@@ -24,6 +24,10 @@ export type TopicSemanticDomain =
   | 'space_defense'
   | 'browser_infrastructure'
   | 'startups_markets'
+  | 'finance_investing'
+  | 'culture_status'
+  | 'health_performance'
+  | 'sports_competition'
   | 'crypto'
   | 'politics_geopolitics'
   | 'general_technology'
@@ -60,6 +64,8 @@ export interface TrendingTopic {
   networkMomentumDelta?: number | null;
   networkBreakoutScore?: number | null;
   networkVelocityScore?: number | null;
+  operatorEngagementScore?: number | null;
+  operatorEngagedSourceCount?: number | null;
   topicConfidence?: number | null;
   topicWhyNow?: string | null;
   observedAt?: string | null;

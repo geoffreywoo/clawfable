@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   me: vi.fn(),
   tweet: vi.fn(),
+  userLikedTweets: vi.fn(),
   userTimeline: vi.fn(),
   userMentionTimeline: vi.fn(),
 }));
@@ -11,6 +12,7 @@ vi.mock('twitter-api-v2', () => ({
   default: class TwitterApiMock {
     v2 = {
       me: mocks.me,
+      userLikedTweets: mocks.userLikedTweets,
       userTimeline: mocks.userTimeline,
       userMentionTimeline: mocks.userMentionTimeline,
     };
@@ -27,7 +29,7 @@ vi.mock('twitter-api-v2', () => ({
   },
 }));
 
-import { decodeKeys, getDeepTimeline, getLatestTwitterTweetIdCursor, getMentionsFromTwitter, getSanitizedTweetTextIssue, getUserTimeline, postTweet, replyToTweet, sanitizeTweetText } from '@/lib/twitter-client';
+import { decodeKeys, getDeepTimeline, getLatestTwitterTweetIdCursor, getLikedTweets, getMentionsFromTwitter, getSanitizedTweetTextIssue, getUserTimeline, postTweet, replyToTweet, sanitizeTweetText } from '@/lib/twitter-client';
 
 const keys = {
   appKey: 'consumer-key',
@@ -64,6 +66,10 @@ beforeEach(() => {
       data: [],
       meta: {},
     },
+  });
+  mocks.userLikedTweets.mockResolvedValue({
+    tweets: [],
+    includes: { author: vi.fn() },
   });
 });
 
@@ -198,6 +204,45 @@ describe('timeline source metadata', () => {
     });
     expect(mocks.userTimeline).toHaveBeenCalledWith('user-1', expect.objectContaining({
       'tweet.fields': expect.arrayContaining(['referenced_tweets', 'attachments', 'note_tweet', 'lang']),
+    }));
+  });
+
+  it('reads recent likes with complete text and author provenance', async () => {
+    const author = {
+      id: 'author-1',
+      username: 'builder',
+      name: 'Builder',
+      protected: false,
+      verified: true,
+      public_metrics: { followers_count: 42_000 },
+    };
+    mocks.userLikedTweets.mockResolvedValue({
+      tweets: [{
+        id: 'liked-1',
+        text: 'Short preview...',
+        note_tweet: { text: 'Complete post about an AI research result and what founders do next.' },
+        author_id: 'author-1',
+        created_at: '2026-07-31T12:00:00.000Z',
+        lang: 'en',
+        public_metrics: { like_count: 10, retweet_count: 2, reply_count: 1, quote_count: 3, bookmark_count: 4 },
+      }],
+      includes: { author: vi.fn(() => author) },
+    });
+
+    const liked = await getLikedTweets(keys, 'user-1', 20);
+
+    expect(liked[0]).toMatchObject({
+      id: 'liked-1',
+      text: 'Complete post about an AI research result and what founders do next.',
+      authorId: 'author-1',
+      author: 'builder',
+      authorFollowersCount: 42_000,
+      authorVerified: true,
+      isTextComplete: true,
+    });
+    expect(mocks.userLikedTweets).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      'tweet.fields': expect.arrayContaining(['note_tweet', 'referenced_tweets']),
+      expansions: ['author_id'],
     }));
   });
 });

@@ -223,12 +223,12 @@ const validQueuedTweet = {
 };
 
 const currentGeoffreyCertification = {
-  qualityPolicyVersion: 'geoffwoo-quality-v9',
+  qualityPolicyVersion: 'geoffwoo-quality-v10',
   voiceCorpusVersion: 'voice-corpus-v1-current',
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
   finalCriticVerdict: 'allow' as const,
-  finalCriticVersion: 'geoffwoo-final-critic-v1',
+  finalCriticVersion: 'geoffwoo-final-critic-v2',
 };
 
 const activeGeoffreyCorpus = {
@@ -358,7 +358,7 @@ describe('autopilot remote debug logging', () => {
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
 
     expect(result.action).toBe('skipped');
-    expect(result.reason).toContain('geoffwoo-quality-v9 remains in shadow');
+    expect(result.reason).toContain('geoffwoo-quality-v10 remains in shadow');
     expect(mocks.getQueuedTweets).not.toHaveBeenCalled();
     expect(mocks.postTweet).not.toHaveBeenCalled();
   });
@@ -397,6 +397,48 @@ describe('autopilot remote debug logging', () => {
     }]);
 
     expect(issue).toContain('one of twenty');
+  });
+
+  it('caps deep technical originals at one in five even when the domain is core', () => {
+    const issue = getGeoffreyTopicPortfolioIssue({
+      ...queuedTweet,
+      content: 'tritium breeding remains the fusion reactor bottleneck',
+      topic: 'fusion energy',
+    }, [{
+      id: 'log-prior-chip',
+      agentId: baseAgent.id,
+      tweetId: 'prior-chip',
+      xTweetId: 'x-prior-chip',
+      content: 'HBM and package yield set the ceiling for this inference chip',
+      format: 'hot_take',
+      topic: 'inference ASICs',
+      postedAt: '2026-07-31T00:00:00.000Z',
+      source: 'autopilot',
+      action: 'posted',
+    }]);
+
+    expect(issue).toContain('one of five');
+  });
+
+  it('caps manufacturing and materials originals at one in eight', () => {
+    const issue = getGeoffreyTopicPortfolioIssue({
+      ...queuedTweet,
+      content: 'metrology still decides whether this factory can hold tolerance',
+      topic: 'automated manufacturing',
+    }, [{
+      id: 'log-prior-materials',
+      agentId: baseAgent.id,
+      tweetId: 'prior-materials',
+      xTweetId: 'x-prior-materials',
+      content: 'grain-boundary diffusion changes high-temperature magnet coercivity',
+      format: 'hot_take',
+      topic: 'rare earth materials',
+      postedAt: '2026-07-30T00:00:00.000Z',
+      source: 'autopilot',
+      action: 'posted',
+    }]);
+
+    expect(issue).toContain('one of eight');
   });
 
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {

@@ -58,6 +58,7 @@ export interface AutonomousQueueTasteOptions {
   assessment: AccountTasteAssessment;
   anchorCopyRiskContribution?: number | null;
   hasSourceContext?: boolean;
+  technicalLane?: boolean;
 }
 
 type DomainDictionary = {
@@ -259,6 +260,14 @@ const STARTUP_CONSEQUENCE_TERMS = [
   'funding', 'underwrite', 'underwriting', 'buyer', 'processor', 'producer', 'miner', 'operator',
   'economics', 'revenue', 'pricing power', 'own', 'control', 'need', 'want', 'bid', 'bidding',
   'negotiate', 'roadmap', 'checkbook',
+];
+
+const BROAD_NATIVE_SUBJECT_TERMS = [
+  'culture', 'status', 'merit', 'ambition', 'nepotism', 'college', 'education', 'school',
+  'city', 'san francisco', 'burning man', 'health', 'longevity', 'healthspan', 'fitness',
+  'workout', 'sleep', 'boxing', 'fight', 'fighter', 'athlete', 'nfl', 'nba', 'football',
+  'basketball', 'soccer', 'tennis', 'padel', 'sport', 'competition', 'competitive',
+  'person', 'people', 'guy', 'guys', 'women', 'men', 'kids', 'friends', 'reputation',
 ];
 
 const CASUAL_NATIVE_TERMS = [
@@ -683,6 +692,7 @@ function assessCasualStartupRegister(
   const words: string[] = lower.match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) || [];
   const startupHits = exactTermHits(content, STARTUP_NATIVE_TERMS);
   const consequenceHits = exactTermHits(content, STARTUP_CONSEQUENCE_TERMS);
+  const broadSubjectHits = exactTermHits(content, BROAD_NATIVE_SUBJECT_TERMS);
   const casualHits = exactTermHits(content, CASUAL_NATIVE_TERMS);
   const marketStakeHits = exactTermHits(content, MARKET_STAKE_TERMS);
   const stiffHits = countTerms(lower, STIFF_ANALYST_TERMS);
@@ -730,6 +740,7 @@ function assessCasualStartupRegister(
   const relevance = clamp(
     0.1
     + Math.min(0.4, startupHits * 0.07)
+    + Math.min(0.42, broadSubjectHits * 0.12)
     + Math.min(0.28, consequenceHits * 0.055)
     + Math.min(0.16, marketStakeHits * 0.03)
     + technical.domainScore * 0.18
@@ -895,7 +906,7 @@ export function assessAccountTaste(
     voiceDriftRisk * 0.22 +
     Math.min(0.22, slopPhraseHits * 0.07) +
     Math.min(0.16, Math.max(0, abstractHits - 1) * 0.035) +
-    (memoryWantsLessGeneric && technical.score < 0.42 ? 0.08 : 0)
+    (memoryWantsLessGeneric && technical.domains.length > 0 && technical.score < 0.42 ? 0.08 : 0)
   );
 
   const nativeVoiceComposite = clamp(
@@ -996,6 +1007,7 @@ export function getAutonomousQueueTasteIssue({
   assessment,
   anchorCopyRiskContribution = 0,
   hasSourceContext = false,
+  technicalLane = true,
 }: AutonomousQueueTasteOptions): string | null {
   if (!isGeoffreyVoiceProfile(voiceProfile)) return null;
   if (assessment.action === 'block') {
@@ -1007,10 +1019,10 @@ export function getAutonomousQueueTasteIssue({
   const nativeStartupException = assessment.casualStartupScore >= 0.6
     && assessment.nativeVoiceScore >= 0.6
     && assessment.stiffnessRisk < 0.28;
-  if (assessment.technicalCredibilityScore < 0.36 && !(nativeStartupException && hasSourceContext)) {
+  if (technicalLane && assessment.technicalCredibilityScore < 0.36 && !(nativeStartupException && hasSourceContext)) {
     return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} is below the Geoffrey queue floor`;
   }
-  if (!hasSourceContext && assessment.technicalCredibilityScore < 0.5 && !nativeStartupException) {
+  if (technicalLane && !hasSourceContext && assessment.technicalCredibilityScore < 0.5 && !nativeStartupException) {
     return `technical credibility ${assessment.technicalCredibilityScore.toFixed(2)} without current source context`;
   }
   return null;
@@ -1020,8 +1032,9 @@ export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 Write the thought Geoffrey would send to one smart founder or investor, then stop.
 - Start with the reaction, bet, or question. Do not introduce the industry or teach the reader the topic.
-- Privately identify the affected company, founder, investor, buyer, or supplier. The final post may leave that actor or consequence implicit when a smart reader will get it.
-- Use at most one technical fact. It should make the judgment defensible, not turn the post into research notes.
+- The subject can be a company, product, founder, market, person, institution, cultural behavior, competition, or frontier technology. Do not force every subject into manufacturing or supply-chain language.
+- Privately identify the concrete object and tension: who is doing what, what changed, or what revealed preference matters. The final post may leave the consequence implicit when a smart reader will get it.
+- For a technical subject, use at most one technical fact. For culture, markets, sports, or founder behavior, use one specific event, incentive, behavior, or contradiction instead.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.
 - Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
@@ -1039,10 +1052,11 @@ export function buildGeoffreyNativeWritingBrief(): string {
 For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.
 - Manual/operator posts are the author model. Match their casual high-context diction, compression, uneven rhythm, directness, and social posture. Do not average them into polished prose.
 - Begin where a text to another smart founder or investor would begin: the verdict, reaction, bet, or question. Do not introduce the industry first.
-- Lead with a judgment about a company, product, market, capital, talent, cost, or timing. Put the mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
+- Preserve Geoffrey's demonstrated range across AI, startups, investing, products, culture, health, sports, status, and occasional frontier technology. Technical subjects should be a minority, not the default setting.
+- Lead with a judgment about a company, product, market, person, incentive, capital, talent, culture, competition, cost, or timing. Put a mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
 - Make a human attitude legible through what the post notices and concludes. A neutral constraint plus a declared winner still reads like generated market copy, but a prefixed "i think," "i care," "i'd bet," or "i would not underwrite" does not create personality either.
 - The subject may come before the actor when that is the natural thought. Do not contort every opening into a company-outcome sentence.
-- Use at most one mechanism unless a named live event genuinely needs more. Lists of materials, process steps, and qualification nouns sound researched rather than lived-in.
+- Use at most one mechanism unless a named live event genuinely needs more. Social and market observations need a concrete behavior, incentive, or contradiction, not an industrial analogy. Lists of materials, process steps, and qualification nouns sound researched rather than lived-in.
 - Valid native modes include: a blunt reaction plus one reason; a first-person market bet; a direct causal question; a named-company judgment; or a two-beat take where the second beat gets more casual, not more polished.
 - Prefer a socially legible subject: the specific company, buyers, founders, investors, miners, processors, suppliers, or whoever has to pay. "The industry" and passive market abstractions usually hide the take.
 - Stop when the point lands. Do not add a slogan, balanced closer, cute metaphor, lesson, or advice section.
@@ -1079,7 +1093,7 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(slack|support queue|support ticket|dashboard|calendar|workflow|handoff|zendesk|loom)\b/.test(text)) {
     metadata.lowStatusTextureComplaint = true;
-    preferenceHints.push('Operator rejects Slack/support/workflow texture as insufficient proof for Geoffrey; use harder technical or industrial anchors.');
+    preferenceHints.push('Operator rejects Slack/support/workflow texture as insufficient proof for Geoffrey; use a concrete high-context object, behavior, incentive, or mechanism appropriate to the subject.');
   }
   if (/\b(elevated|elite|technical|hard tech|frontier|asic|fusion|fission|rare earth|robotics|manufacturing|space|industrial)\b/.test(text)) {
     metadata.technicalElevationRequested = true;
@@ -1112,6 +1126,10 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   if (/\b(drift|drifting|too far|off topic|content drift|topic drift)\b/.test(reasonText)) {
     metadata.identityDriftComplaint = true;
     preferenceHints.push('Network virality may suggest subjects only when they have a clear bridge to the operator\'s native content identity; momentum alone must never qualify a topic.');
+  }
+  if (/\b(too technical|overly technical|too specialized|overly specialized|too much manufacturing|manufacturing heavy|broaden(?: the)? topics?)\b/.test(reasonText)) {
+    metadata.overSpecializedTopicComplaint = true;
+    preferenceHints.push('Operator wants the demonstrated broad mix of AI, startups, investing, products, culture, health, sports, and occasional frontier technology; do not equate specificity with manufacturing detail.');
   }
 
   if (preferenceHints.length > 0) {

@@ -35,6 +35,8 @@ import {
   formatTrendEvidence,
   formatTrendProvenance,
   getTrendSourceEvidenceTexts,
+  isGeoffreyDeepTechnicalTopic,
+  isGeoffreyManufacturingMaterialsTopic,
   type SourcePlannerPlan,
 } from './source-planner';
 import { buildShitpoastSlotSet, getShitpoastSlotCount, normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
@@ -127,7 +129,22 @@ function geoffreyAffectedActor(value: string): string {
   if (domain === 'manufacturing_industrial') return 'an industrial startup adding production capacity';
   if (domain === 'space_defense') return 'a space or defense company buying qualified hardware';
   if (domain === 'browser_infrastructure') return 'a browser or developer-tool startup';
+  if (domain === 'finance_investing') return 'an investor, company, or market participant exposed to the decision';
+  if (domain === 'culture_status') return 'the person, institution, city, or social group revealing the preference';
+  if (domain === 'health_performance') return 'a person, founder, customer, or product exposed to the tradeoff';
+  if (domain === 'sports_competition') return 'the athlete, team, promoter, or audience making the contest matter';
+  if (domain === 'general_technology') return 'a builder, user, or software company affected by the shift';
   return 'one startup or investor directly exposed to the subject';
+}
+
+function geoffreyDefaultStakes(value: string): string {
+  const domain = classifyGeoffreyTopicDomain(value);
+  if (domain === 'culture_status') return 'status, trust, merit, ambition, or who gets rewarded changes';
+  if (domain === 'finance_investing') return 'risk, leverage, timing, incentives, or capital allocation changes';
+  if (domain === 'health_performance') return 'agency, adherence, performance, or opportunity cost changes';
+  if (domain === 'sports_competition') return 'the competitive reality, incentives, or public judgment changes';
+  if (domain === 'startups_markets' || domain === 'general_technology') return 'company formation, product behavior, talent, distribution, or market timing changes';
+  return 'cost, margin, capital, supplier qualification, or startup timing changes';
 }
 
 export function buildGeoffreyIdeaBriefs(plan: SourcePlannerPlan): GeoffreyIdeaBrief[] {
@@ -155,7 +172,7 @@ export function buildGeoffreyIdeaBriefs(plan: SourcePlannerPlan): GeoffreyIdeaBr
         affectedActor: geoffreyAffectedActor(subject),
         stakes: seed?.startupBackingFact
           || trend?.topicWhyNow
-          || 'cost, margin, capital, supplier qualification, or startup timing changes',
+          || geoffreyDefaultStakes(subject),
         nonConsensusJudgment: seed?.nonConsensusImplication
           || 'state the narrow startup or investing consequence that the broad narrative misses',
         compressionTarget: 'one arguable startup judgment plus at most one supporting fact; usually under 280 characters',
@@ -888,6 +905,7 @@ export function preferGeoffreyGroundedCandidates(
       assessment,
       anchorCopyRiskContribution: candidate.scoreProvenance?.anchorCopyRisk,
       hasSourceContext: Boolean(candidate.sourceBrief || candidate.trendHeadline),
+      technicalLane: isGeoffreyDeepTechnicalTopic(`${candidate.targetTopic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`),
     });
     if (queueIssue || assessment.action === 'block') return 2;
     if (
@@ -916,6 +934,42 @@ export function preferGeoffreyGroundedCandidates(
       !candidate.draftExperimentId || !groundedIds.has(candidate.draftExperimentId)
     )),
   ];
+}
+
+export function capGeoffreyTopicPortfolioCandidates(
+  ranked: RankedProtocolTweet[],
+  count: number,
+  voiceProfile: VoiceProfile,
+  context: { recentPosts?: string[]; allTweets?: Tweet[] } = {},
+): RankedProtocolTweet[] {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return ranked;
+  const recentPosts = context.recentPosts || [];
+  const queuedContent = (context.allTweets || [])
+    .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt)
+    .map((tweet) => `${tweet.topic || ''} ${tweet.content}`);
+  const deepAlreadyRepresented = [
+    ...recentPosts.slice(0, 4),
+    ...queuedContent,
+  ].some(isGeoffreyDeepTechnicalTopic);
+  const manufacturingAlreadyRepresented = [
+    ...recentPosts.slice(0, 7),
+    ...queuedContent,
+  ].some(isGeoffreyManufacturingMaterialsTopic);
+  const maxDeepTechnical = deepAlreadyRepresented ? 0 : Math.max(1, Math.ceil(count / 5));
+  const maxManufacturingMaterials = manufacturingAlreadyRepresented ? 0 : Math.max(1, Math.ceil(count / 8));
+  let deepTechnical = 0;
+  let manufacturingMaterials = 0;
+
+  return ranked.filter((candidate) => {
+    const topicContext = `${candidate.targetTopic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`;
+    const deep = isGeoffreyDeepTechnicalTopic(topicContext);
+    const manufacturing = isGeoffreyManufacturingMaterialsTopic(topicContext);
+    if (deep && deepTechnical >= maxDeepTechnical) return false;
+    if (manufacturing && manufacturingMaterials >= maxManufacturingMaterials) return false;
+    if (deep) deepTechnical++;
+    if (manufacturing) manufacturingMaterials++;
+    return true;
+  });
 }
 
 function cleanGeoffreyVoiceAnchor(value: string): string {
@@ -1583,7 +1637,9 @@ export async function generateViralBatch(
           sourceBrief: (
             isGeoffreyVoiceProfile(voiceProfile)
               ? sourcePlan.slots[index]?.ideaSeed?.startupBackingFact
-                || sourcePlan.slots[index]?.ideaSeedBrief
+                || (sourcePlan.slots[index]?.ideaSeed?.kind === 'frontier'
+                  ? sourcePlan.slots[index]?.ideaSeedBrief
+                  : null)
               : sourcePlan.slots[index]?.ideaSeedBrief
           )
             || (sourcePlan.slots[index]?.trendTopicId
@@ -1625,7 +1681,12 @@ export async function generateViralBatch(
     };
     const ranked = rankGeneratedTweets(fallbackTweets, rankingContext);
     return selectTopRankedTweets(
-      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
+      capGeoffreyTopicPortfolioCandidates(
+        preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
+        count,
+        voiceProfile,
+        { recentPosts, allTweets },
+      ),
       count,
       { maxShitpoast, maxTrendSources },
     );
@@ -1646,7 +1707,7 @@ export async function generateViralBatch(
         `BRIEF ${brief.brief} (slots ${brief.slots.join(', ')})`,
         `subject:${brief.targetTopic}`,
         `event/object:${compactExampleTweet(brief.eventOrObject, 220)}`,
-        `mechanism:${compactExampleTweet(brief.mechanism, 240)}`,
+        `causal mechanism or social/market tension:${compactExampleTweet(brief.mechanism, 240)}`,
         `pick one affected actor:${brief.affectedActor}`,
         `stakes:${compactExampleTweet(brief.stakes, 220)}`,
         `non-consensus judgment:${compactExampleTweet(brief.nonConsensusJudgment, 220)}`,
@@ -1705,11 +1766,11 @@ ${JSON.stringify({
   const userPrompt = geoffreyPromptMode
     ? `Write exactly ${candidateCount} original standalone posts.${geoffreyIdeaBriefs.length === 4 ? ' Use all four idea briefs and write exactly three materially different thoughts for each brief. Across each trio, vary what Geoffrey actually finds surprising, mispriced, exciting, annoying, funny, or doubtful. The drafts must change the judgment or social posture, not merely swap synonyms or fill three fixed formats.' : ' Write one post for every numbered assignment.'}
 
-Each brief must support a specific startup/company/market judgment, but the final post does not need to spell it out when a smart reader will get it. Across each trio, make at least one startup consequence explicit; let the others be high-context reactions, questions, or bets. Silently decide what Geoffrey actually thinks and feels before drafting. The first sentence should sound like a thought, not an analyst thesis. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
+Each brief must support a specific judgment about a company, founder, product, market, investor, person, institution, cultural behavior, competition, or frontier technology. Do not force culture, finance, health, or sports into a manufacturing or supply-chain analogy. Across the full batch, keep startups, AI, software, or investing legible in at least half the drafts, but let the other native lanes stay genuinely social, personal-value, or competitive. Silently decide what Geoffrey actually thinks and feels before drafting. The first sentence should sound like a thought, not an analyst thesis. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
 
 Privately choose one affected actor from each brief. Do not force that actor into the text merely to satisfy the brief, and do not list every company, buyer, supplier, and investor touched by the mechanism.
 
-Across the batch, vary native modes: terse reaction, first-person market bet, named-company judgment, blunt causal question, two-beat startup take, or public conviction. The final wording should sound like the middle of an ongoing conversation among smart founders and investors. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
+Across the batch, vary native modes: terse reaction, first-person market bet, named-company judgment, culture/status observation, competitive call, blunt causal question, two-beat startup take, or public conviction. The final wording should sound like the middle of Geoffrey's real feed, not one narrow industry conversation. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
 Make a human attitude legible without inventing experience, but let it live in what the post notices and concludes. Across each brief's three drafts, at most one may begin with first-person language. Do not paste "i think," "i care," "i'd bet," "i would not underwrite," or "i start/stop trusting" onto an analyst sentence. Never write "i'd worry/care less about X than Y," "i'd worry less about X and more about Y," or "funny that X should be underwritten as Y." Do not force every draft into who wins, loses, pays, or cannot ship.
 Keep each mechanism causally coherent and the syntax grammatical. Never coin an abstraction-as-verb such as "autonomy-software its way around," and do not merge separate technical constraints merely because they share a topic.
 At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.
@@ -1881,8 +1942,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             sourceBrief: [...new Set([
               geoffreyPromptMode
                 ? sourceSlot?.ideaSeed?.startupBackingFact
-                  || sourceSlot?.ideaSeedBrief
-                  || slotAssignment?.ideaSeedBrief
+                  || (sourceSlot?.ideaSeed?.kind === 'frontier' ? sourceSlot?.ideaSeedBrief : null)
                 : slotAssignment?.ideaSeedBrief,
               geoffreyPromptMode ? null : sourceSlot?.ideaSeedBrief,
               slotAssignment?.trendTopicId ? trendProvenanceById.get(String(slotAssignment.trendTopicId)) : null,
@@ -2122,7 +2182,12 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     }
 
     const selected = selectTopRankedTweets(
-      preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
+      capGeoffreyTopicPortfolioCandidates(
+        preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
+        count,
+        voiceProfile,
+        { recentPosts, allTweets },
+      ),
       count,
       { maxShitpoast, maxTrendSources },
     );

@@ -219,6 +219,49 @@ describe('account taste scoring', () => {
     })).toBeNull();
   });
 
+  it('allows a concrete broad native take without forcing technical nouns into it', () => {
+    const broadAnchors = [
+      {
+        content: 'padel is actually a good rich guy sport. easy enough to start, jus competitive enough to get obsessed.',
+        topic: 'sports',
+        source: 'timeline',
+      },
+      {
+        content: 'x algo def way better. more useful content. more friends. yall cooking.',
+        topic: 'product',
+        source: 'timeline',
+      },
+      {
+        content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.',
+        topic: 'finance',
+        source: 'timeline',
+      },
+    ];
+    const assessment = assessAccountTaste(
+      'jake paul calling out nfl guys is way more interesting than another influencer fight. those guys actually have money and something to lose.',
+      {
+        voiceProfile: geoffreyVoiceProfile,
+        learnings: {
+          operatorVoiceReference: {
+            bestPerformers: broadAnchors,
+            startupRegisterExamples: broadAnchors,
+            pinnedExamples: [],
+          },
+        } as any,
+      },
+    );
+
+    expect(assessment.technicalCredibilityScore).toBeLessThan(0.36);
+    expect(assessment.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(assessment.action).toBe('allow');
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment,
+      hasSourceContext: true,
+      technicalLane: false,
+    })).toBeNull();
+  });
+
   it('uses manual lexical rhythm as a positive voice model, not only topic depth', () => {
     const manualAnchor = {
       content: 'bro.. best bullshitter in the game in action\n\nyou can make up stories for a self-help crowd, but you cannot bullshit ai twitter autists',
@@ -319,6 +362,18 @@ describe('account taste scoring', () => {
         expect.stringContaining('casual startup-native diction'),
       ]),
     );
+  });
+
+  it('stores over-specialization feedback as a broadening instruction', () => {
+    const feedback = classifyTasteFeedbackReason(
+      'the candidates are too technical and too specialized. broaden the topics and stop making everything manufacturing heavy.',
+    );
+
+    expect(feedback.metadata).toMatchObject({
+      overSpecializedTopicComplaint: true,
+      tasteComplaint: true,
+    });
+    expect(feedback.preferenceHints.join(' ')).toContain('do not equate specificity with manufacturing detail');
   });
 
   it('keeps review-grade generated patterns out of Geoffrey autopost queue', () => {

@@ -533,6 +533,76 @@ export async function getHomeTimeline(
   }
 }
 
+/**
+ * Fetch recent posts the authenticated operator liked. These are topic-taste
+ * signals only; downstream code must never use their prose as voice evidence.
+ */
+export async function getLikedTweets(
+  keys: TwitterKeys,
+  userId: string,
+  maxResults = 100,
+): Promise<
+  Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    likes: number;
+    retweets: number;
+    replies: number;
+    impressions: number;
+    quotes: number;
+    bookmarks: number;
+    authorId: string;
+    author: string;
+    authorName: string;
+    authorFollowersCount: number;
+    authorVerified: boolean;
+    authorProtected: boolean;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
+  }>
+> {
+  const client = createClient(keys);
+  const totalLimit = Math.max(5, Math.min(maxResults, 100));
+  try {
+    const result = await client.v2.userLikedTweets(userId, {
+      max_results: totalLimit,
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
+      expansions: ['author_id'],
+      'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
+    });
+    return result.tweets.slice(0, totalLimit).map((tweet) => {
+      const author = result.includes.author(tweet);
+      return {
+        id: tweet.id,
+        text: completeTweetText(tweet),
+        createdAt: tweet.created_at || new Date().toISOString(),
+        likes: tweet.public_metrics?.like_count ?? 0,
+        retweets: tweet.public_metrics?.retweet_count ?? 0,
+        replies: tweet.public_metrics?.reply_count ?? 0,
+        impressions: tweet.public_metrics?.impression_count ?? 0,
+        quotes: tweet.public_metrics?.quote_count ?? 0,
+        bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+        authorId: tweet.author_id || author?.id || '',
+        author: author?.username || '',
+        authorName: author?.name || '',
+        authorFollowersCount: (author as any)?.public_metrics?.followers_count ?? 0,
+        authorVerified: (author as any)?.verified ?? false,
+        authorProtected: (author as any)?.protected ?? false,
+        ...timelineSourceMetadata(tweet),
+      };
+    }).filter((tweet) => Boolean(tweet.authorId && tweet.author));
+  } catch (error) {
+    return handleApiError(error, {
+      action: 'get_liked_tweets',
+      targetUserId: userId,
+    });
+  }
+}
+
 type TimelineTweet = {
   id: string;
   text: string;

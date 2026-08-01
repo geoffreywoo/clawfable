@@ -3,6 +3,7 @@ import { isGeoffreyVoiceProfile } from './account-taste';
 
 export interface FrontierIdeaSeed {
   id: string;
+  kind?: 'frontier' | 'startup' | 'ai_product' | 'markets' | 'culture' | 'health' | 'sports';
   topic: string;
   technicalObject: string;
   hiddenConstraint: string;
@@ -239,6 +240,75 @@ const FRONTIER_CHOKEPOINT_SEEDS: FrontierIdeaSeed[] = [
   },
 ];
 
+const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
+  {
+    id: 'startup-revealed-incentives',
+    kind: 'startup',
+    topic: 'founders, venture, and company building',
+    technicalObject: 'a current founder, funding, hiring, product, or company decision',
+    hiddenConstraint: 'stated conviction and revealed behavior diverge when status, downside, or social proof enters',
+    nonConsensusImplication: 'take the founder or investor side that Geoffrey would actually defend instead of teaching a generic lesson',
+    startupBackingFact: '',
+    domains: ['startups', 'venture', 'funding', 'companies'],
+    sourceQueries: [],
+  },
+  {
+    id: 'ai-behavior-and-ambition',
+    kind: 'ai_product',
+    topic: 'AI products, research, and how ambitious people use them',
+    technicalObject: 'a current model, product, research result, or change in how people build and compete',
+    hiddenConstraint: 'capability matters when it changes behavior, speed, ambition, or company formation, not when it only wins a benchmark',
+    nonConsensusImplication: 'react to what people or startups will do differently without writing another AI industry recap',
+    startupBackingFact: '',
+    domains: ['ai', 'software', 'research', 'startups'],
+    sourceQueries: [],
+  },
+  {
+    id: 'markets-thesis-versus-execution',
+    kind: 'markets',
+    topic: 'investing, capital markets, and risk',
+    technicalObject: 'a current market move, investor posture, capital allocation, or risk decision',
+    hiddenConstraint: 'a directionally correct thesis can still lose through sizing, leverage, timing, incentives, or forced selling',
+    nonConsensusImplication: 'make one arguable market judgment and separate the idea from its execution',
+    startupBackingFact: '',
+    domains: ['investing', 'finance', 'capital markets'],
+    sourceQueries: [],
+  },
+  {
+    id: 'culture-status-revealed-preference',
+    kind: 'culture',
+    topic: 'culture, status, merit, ambition, and power',
+    technicalObject: 'a current status signal, institution, city norm, or piece of public behavior',
+    hiddenConstraint: 'people reveal what they value through who they trust, reward, envy, copy, or exclude',
+    nonConsensusImplication: 'take a side in casual social language without turning the observation into generic life advice',
+    startupBackingFact: '',
+    domains: ['culture', 'status', 'merit', 'ambition'],
+    sourceQueries: [],
+  },
+  {
+    id: 'health-performance-agency',
+    kind: 'health',
+    topic: 'health, longevity, and human performance',
+    technicalObject: 'a current behavior, product, experiment, or tradeoff in health and performance',
+    hiddenConstraint: 'personal agency, adherence, and opportunity cost matter more than another abstract optimization claim',
+    nonConsensusImplication: 'state a personal-value judgment without inventing medical evidence or giving universal health advice',
+    startupBackingFact: '',
+    domains: ['health', 'longevity', 'performance'],
+    sourceQueries: [],
+  },
+  {
+    id: 'sports-competitive-reality',
+    kind: 'sports',
+    topic: 'sports, fighting, and competitive behavior',
+    technicalObject: 'a current athlete, contest, challenge, result, or competitive decision',
+    hiddenConstraint: 'the official narrative and the observable competitive behavior may point in different directions',
+    nonConsensusImplication: 'make the narrow competitive judgment; do not manufacture sports news or a motivational lesson',
+    startupBackingFact: '',
+    domains: ['sports', 'boxing', 'competition'],
+    sourceQueries: [],
+  },
+];
+
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -333,5 +403,47 @@ export function pickFrontierIdeaSeed({
     }))
     .sort((a, b) => Number(a.used) - Number(b.used) || b.score - a.score || a.index - b.index);
 
+  return ranked[0]?.seed || null;
+}
+
+function preferredGeoffreySeedKinds(targetTopic: string): Array<NonNullable<FrontierIdeaSeed['kind']>> {
+  const target = normalize(targetTopic);
+  if (/\b(?:manufactur|factory|industrial|material|mineral|rare earth|tungsten|rhenium|beryllium|magnet|fusion|fission|nuclear|reactor|robot|space|rocket|defense|asic|semiconductor|chip|hbm|data center|grid|energy)\b/.test(target)) {
+    return ['frontier'];
+  }
+  if (/\b(?:boxing|mma|ufc|fight|nfl|nba|football|basketball|soccer|tennis|padel|sport|athlete)\b/.test(target)) return ['sports'];
+  if (/\b(?:health|longevity|lifespan|healthspan|ketone|fitness|exercise|sleep|biohack|human performance|athletic performance)\b/.test(target)) return ['health'];
+  if (/\b(?:culture|status|merit|nepotis|social|ambition|aura|college|education|elite|power|taste)\b/.test(target)) return ['culture'];
+  if (/\b(?:finance|investing|capital market|stock|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(target)) return ['markets'];
+  if (/\b(?:ai|model|openai|anthropic|claude|codex|software|developer|research|math|science)\b/.test(target)) return ['ai_product'];
+  if (/\b(?:startup|founder|venture|vc|funding|company|product|customer|talent|career|job)\b/.test(target)) return ['startup'];
+  return ['startup', 'ai_product', 'culture', 'markets'];
+}
+
+export function pickGeoffreyIdeaSeed({
+  voiceProfile,
+  targetTopic,
+  slot,
+  usedSeedIds = new Set<string>(),
+}: {
+  voiceProfile?: VoiceProfile | null;
+  targetTopic: string;
+  slot: number;
+  usedSeedIds?: Set<string>;
+}): FrontierIdeaSeed | null {
+  if (!voiceProfile || !isGeoffreyVoiceProfile(voiceProfile)) return null;
+  const preferredKinds = preferredGeoffreySeedKinds(targetTopic);
+  const frontier = FRONTIER_CHOKEPOINT_SEEDS.map((seed) => ({ ...seed, kind: 'frontier' as const }));
+  const allSeeds = [...GEOFFREY_BROAD_SEEDS, ...frontier];
+  const preferred = allSeeds.filter((seed) => preferredKinds.includes(seed.kind || 'frontier'));
+  const pool = preferred.length > 0 ? preferred : allSeeds;
+  const ranked = pool
+    .map((seed, index) => ({
+      seed,
+      score: seedScore(seed, targetTopic) + ((slot + index) % pool.length) / 100,
+      used: usedSeedIds.has(seed.id),
+      index,
+    }))
+    .sort((a, b) => Number(a.used) - Number(b.used) || b.score - a.score || a.index - b.index);
   return ranked[0]?.seed || null;
 }

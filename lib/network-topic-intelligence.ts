@@ -9,7 +9,7 @@
 import { generateText } from './ai';
 import type { TopicSemanticDomain, TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
-import { getFollowing, getHomeTimeline, getUserTimeline } from './twitter-client';
+import { getFollowing, getHomeTimeline, getLikedTweets, getUserTimeline } from './twitter-client';
 import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 
 const NETWORK_MAX_AGE_HOURS = 72;
@@ -38,6 +38,7 @@ const GENERIC_STOP_WORDS = new Set([
 type FollowingAccount = Awaited<ReturnType<typeof getFollowing>>[number];
 type TimelineTweet = Awaited<ReturnType<typeof getUserTimeline>>[number];
 type HomeTimelineTweet = Awaited<ReturnType<typeof getHomeTimeline>>[number];
+type LikedTimelineTweet = Awaited<ReturnType<typeof getLikedTweets>>[number];
 
 export interface NetworkMetricSnapshot {
   observedAt: string;
@@ -64,6 +65,7 @@ export interface NetworkViralTweetRecord {
   viralScore: number;
   topicIds: string[];
   observations: NetworkMetricSnapshot[];
+  operatorEngaged?: boolean;
 }
 
 export interface NetworkTopicObservation {
@@ -114,6 +116,8 @@ export interface NetworkTopicIntelligenceState {
   partialFailureCount?: number;
   sampledAccountIds: string[];
   sourceTweetCount: number;
+  operatorEngagedTweetCount?: number;
+  operatorEngagementReadAvailable?: boolean;
   viralTweets: NetworkViralTweetRecord[];
   topics: NetworkTopicHistoryEntry[];
   authorSignals: NetworkAuthorSignal[];
@@ -135,6 +139,7 @@ export interface NetworkTopicEvidence {
   breakoutMultiple: number;
   engagementVelocity: number;
   viralScore: number;
+  operatorEngaged?: boolean;
 }
 
 export interface NetworkTweetObservation extends NetworkTopicEvidence {
@@ -180,6 +185,7 @@ interface RawNetworkTweet extends TimelineTweet {
   authorId: string;
   author: string;
   followersCount: number;
+  operatorEngaged?: boolean;
 }
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -420,7 +426,7 @@ async function collectNetworkTweets(
   return { tweets, errors, successfulAccountIds };
 }
 
-function homeTimelineAccount(tweet: HomeTimelineTweet): FollowingAccount {
+function homeTimelineAccount(tweet: HomeTimelineTweet | LikedTimelineTweet): FollowingAccount {
   return {
     id: tweet.authorId,
     name: tweet.authorName,
@@ -429,6 +435,59 @@ function homeTimelineAccount(tweet: HomeTimelineTweet): FollowingAccount {
     followersCount: finite(tweet.authorFollowersCount),
     verified: Boolean(tweet.authorVerified),
     protected: Boolean(tweet.authorProtected),
+  };
+}
+
+function normalizeLikedTimeline(
+  tweets: LikedTimelineTweet[],
+  userId: string,
+): { tweets: RawNetworkTweet[]; accounts: FollowingAccount[] } {
+  const filtered = tweets.filter((tweet) => (
+    tweet.authorId
+    && tweet.authorId !== userId
+    && tweet.author
+    && !tweet.authorProtected
+  ));
+  const accounts = uniqueById(filtered.map(homeTimelineAccount));
+  return {
+    accounts,
+    tweets: filtered.map((tweet) => ({
+      id: tweet.id,
+      text: tweet.text,
+      createdAt: tweet.createdAt,
+      likes: tweet.likes,
+      retweets: tweet.retweets,
+      replies: tweet.replies,
+      impressions: tweet.impressions,
+      quotes: tweet.quotes,
+      bookmarks: tweet.bookmarks,
+      authorId: tweet.authorId,
+      author: tweet.author,
+      followersCount: finite(tweet.authorFollowersCount),
+      referenceType: tweet.referenceType,
+      referencedTweetId: tweet.referencedTweetId,
+      hasMedia: tweet.hasMedia,
+      isTextComplete: tweet.isTextComplete,
+      lang: tweet.lang,
+      operatorEngaged: true,
+    })),
+  };
+}
+
+function mergeNetworkSources(
+  primary: { tweets: RawNetworkTweet[]; accounts: FollowingAccount[] },
+  engaged: { tweets: RawNetworkTweet[]; accounts: FollowingAccount[] },
+): { tweets: RawNetworkTweet[]; accounts: FollowingAccount[] } {
+  const tweets = new Map(primary.tweets.map((tweet) => [String(tweet.id), tweet]));
+  for (const tweet of engaged.tweets) {
+    const existing = tweets.get(String(tweet.id));
+    tweets.set(String(tweet.id), existing
+      ? { ...existing, operatorEngaged: true }
+      : tweet);
+  }
+  return {
+    tweets: [...tweets.values()],
+    accounts: uniqueById([...primary.accounts, ...engaged.accounts]),
   };
 }
 
@@ -523,7 +582,8 @@ export function scoreNetworkTweets(
       + percentile(item.engagementVelocity, velocities) * 0.2
       + percentile(item.engagementRatePerThousand, rates) * 0.15
       + item.accelerationScore * 0.1
-      + item.freshness * 0.1,
+      + item.freshness * 0.1
+      + (item.tweet.operatorEngaged ? 0.12 : 0),
     );
     const tweet = item.tweet;
     return {
@@ -547,6 +607,7 @@ export function scoreNetworkTweets(
       withinAuthorPercentile: Number(item.withinAuthorPercentile.toFixed(3)),
       accelerationScore: Number(item.accelerationScore.toFixed(3)),
       viralScore: Number(viralScore.toFixed(3)),
+      operatorEngaged: item.tweet.operatorEngaged === true,
     };
   });
 }
@@ -561,7 +622,7 @@ function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetO
   const authorCounts = new Map<string, number>();
 
   for (const tweet of ranked) {
-    if (tweet.viralScore < 0.5) continue;
+    if (tweet.viralScore < (tweet.operatorEngaged ? 0.38 : 0.5)) continue;
     if ((authorCounts.get(tweet.authorId) || 0) >= 2) continue;
     selected.push(tweet);
     authorCounts.set(tweet.authorId, (authorCounts.get(tweet.authorId) || 0) + 1);
@@ -572,6 +633,7 @@ function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetO
     tweet.viralScore >= 0.38
     || tweet.breakoutMultiple >= 1.6
     || tweet.engagementRatePerThousand >= 3
+    || tweet.operatorEngaged
   ));
   if (selected.length < Math.min(8, fallbackPool.length)) {
     for (const tweet of fallbackPool) {
@@ -638,6 +700,10 @@ export function inferNetworkSemanticDomain(value: string): TopicSemanticDomain {
   if (isServoWebPlatform || /\b(?:servo browser|servo web|mozilla servo|browser engine|rendering engine|web engine)\b/.test(text)) return 'browser_infrastructure';
   if (/\b(?:bitcoin|ethereum|crypto|defi|token|stablecoin|blockchain)\b/.test(text)) return 'crypto';
   if (/\b(?:election|president|congress|white house|democrat|republican|putin|russia|iran|israel|ukraine|geopolitic|military intelligence)\b/.test(text)) return 'politics_geopolitics';
+  if (/\b(?:boxing|boxer|mma|ufc|fight(?:er|ing)?|nfl|nba|football|basketball|soccer|tennis|padel|world cup|athlete|sports?)\b/.test(text)) return 'sports_competition';
+  if (/\b(?:longevity|lifespan|healthspan|ketone|metabolic|fitness|workout|exercise|sleep|biohacking|human performance)\b/.test(text)) return 'health_performance';
+  if (/\b(?:capital markets?|stock market|public markets?|investing|investor returns?|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(text)) return 'finance_investing';
+  if (/\b(?:status|culture|merit|nepotis|social climb|ambition|aura|college|education|elite|will to power|taste|city life|san francisco|burning man)\b/.test(text)) return 'culture_status';
   if (/\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|stellarator|grid|transformer|power plant)\b/.test(text)) return 'energy_nuclear';
   if (/\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|separation chemistry|metallurgy)\b/.test(text)) return 'materials_minerals';
   if (/\b(?:robot|robotics|humanoid|actuator|servo motor|machine vision|autonomous manipulation)\b/.test(text)) return 'robotics_automation';
@@ -726,7 +792,8 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
       : [
           'ai_compute', 'energy_nuclear', 'materials_minerals', 'robotics_automation',
           'manufacturing_industrial', 'space_defense', 'browser_infrastructure',
-          'startups_markets', 'crypto', 'politics_geopolitics', 'general_technology', 'other',
+          'startups_markets', 'finance_investing', 'culture_status', 'health_performance',
+          'sports_competition', 'crypto', 'politics_geopolitics', 'general_technology', 'other',
         ].includes(requestedDomain)
         ? requestedDomain
         : 'other';
@@ -755,7 +822,7 @@ export async function extractNetworkTopicsWithAi(
 ): Promise<ExtractedNetworkTopic[]> {
   if (candidates.length === 0) return [];
   const sourceRows = candidates.map((tweet) => (
-    `[tweetId=${tweet.tweetId}; author=@${tweet.author}; viralScore=${tweet.viralScore}; breakout=${tweet.breakoutMultiple}x; weightedEngagement=${tweet.weightedEngagement}]\n${compact(tweet.text, 420)}`
+    `[tweetId=${tweet.tweetId}; author=@${tweet.author}; viralScore=${tweet.viralScore}; breakout=${tweet.breakoutMultiple}x; weightedEngagement=${tweet.weightedEngagement}; operatorLiked=${tweet.operatorEngaged ? 1 : 0}]\n${compact(tweet.text, 420)}`
   )).join('\n\n');
 
   const response = await generateText({
@@ -771,7 +838,7 @@ Rules:
 - Merge posts only when they concern substantially the same subject. Do not merge merely because they share tone or industry.
 - Summaries must stay inside the evidence. Do not invent facts, numbers, causality, or consensus.
 - Ignore engagement-bait phrasing and extract the underlying subject, not the source author's writing style or opinion.
-- Classify semanticDomain as one of ai_compute, energy_nuclear, materials_minerals, robotics_automation, manufacturing_industrial, space_defense, browser_infrastructure, startups_markets, crypto, politics_geopolitics, general_technology, or other. Servo the browser engine is browser_infrastructure, never robotics.
+- Classify semanticDomain as one of ai_compute, energy_nuclear, materials_minerals, robotics_automation, manufacturing_industrial, space_defense, browser_infrastructure, startups_markets, finance_investing, culture_status, health_performance, sports_competition, crypto, politics_geopolitics, general_technology, or other. Servo the browser engine is browser_infrastructure, never robotics.
 - Set uncertainty to low, medium, or high based on whether the evidence supports the exact subject and claimed event.
 - Return JSON only: {"topics":[{"label":"...","summary":"...","tweetIds":["..."],"entities":["..."],"whyNow":"...","confidence":0.0,"semanticDomain":"...","uncertainty":"..."}]}.
 - Use only tweetId values supplied in the input. Assign a tweet to at most one topic. Omit noise rather than forcing it into a cluster.`,
@@ -848,12 +915,17 @@ function mergeTopicHistory(
     const peakViral = Math.max(...evidence.map((tweet) => tweet.viralScore));
     const sourceDiversity = clamp(authors.length / 4);
     const evidenceSupport = clamp(evidence.length / 5);
+    const operatorEngagedSourceCount = evidence.filter((tweet) => tweet.operatorEngaged).length;
+    const operatorEngagementScore = operatorEngagedSourceCount > 0
+      ? clamp(0.72 + Math.min(0.28, (operatorEngagedSourceCount - 1) * 0.14))
+      : 0;
     const momentumScore = clamp(
       averageViral * 0.45
       + peakViral * 0.2
       + sourceDiversity * 0.14
       + evidenceSupport * 0.08
-      + cluster.confidence * 0.13,
+      + cluster.confidence * 0.13
+      + operatorEngagementScore * 0.12,
     );
     const previousMomentum = historical?.momentumScore ?? momentumScore;
     const momentumDelta = momentumScore - previousMomentum;
@@ -926,6 +998,8 @@ function mergeTopicHistory(
       networkMomentumDelta: Number(momentumDelta.toFixed(3)),
       networkBreakoutScore: Number(peakViral.toFixed(3)),
       networkVelocityScore: Number((evidence.reduce((sum, tweet) => sum + tweet.engagementVelocity, 0) / evidence.length).toFixed(3)),
+      operatorEngagementScore: Number(operatorEngagementScore.toFixed(3)),
+      operatorEngagedSourceCount,
       topicConfidence: cluster.confidence,
       topicWhyNow: cluster.whyNow,
       observedAt,
@@ -947,6 +1021,7 @@ function mergeTopicHistory(
         breakoutMultiple: tweet.breakoutMultiple,
         engagementVelocity: tweet.engagementVelocity,
         viralScore: tweet.viralScore,
+        operatorEngaged: tweet.operatorEngaged === true,
       })),
     });
   }
@@ -1000,6 +1075,7 @@ function mergeViralTweetHistory(
       authorBaseline: candidate.authorBaseline,
       breakoutMultiple: candidate.breakoutMultiple,
       viralScore: candidate.viralScore,
+      operatorEngaged: candidate.operatorEngaged === true || old?.operatorEngaged === true,
       topicIds: [...new Set([...(old?.topicIds || []), ...(topicIdsByTweet.get(candidate.tweetId) || [])])].slice(-8),
       observations: [...(old?.observations || []), snapshot].slice(-MAX_METRIC_OBSERVATIONS),
     };
@@ -1061,6 +1137,8 @@ function emptyState(now: number): NetworkTopicIntelligenceState {
     partialFailureCount: 0,
     sampledAccountIds: [],
     sourceTweetCount: 0,
+    operatorEngagedTweetCount: 0,
+    operatorEngagementReadAvailable: false,
     viralTweets: [],
     topics: [],
     authorSignals: [],
@@ -1076,6 +1154,8 @@ export async function discoverNetworkTopicIntelligence(
   const previousState = options.previousState || null;
   let homeTimelineError: unknown | null = null;
   let homeTimeline = { tweets: [] as RawNetworkTweet[], accounts: [] as FollowingAccount[] };
+  let likedTimeline = { tweets: [] as RawNetworkTweet[], accounts: [] as FollowingAccount[] };
+  let operatorEngagementReadAvailable = false;
   try {
     homeTimeline = normalizeHomeTimeline(
       await getHomeTimeline(keys, HOME_TIMELINE_SAMPLE_SIZE),
@@ -1083,6 +1163,16 @@ export async function discoverNetworkTopicIntelligence(
     );
   } catch (error) {
     homeTimelineError = error;
+  }
+  try {
+    likedTimeline = normalizeLikedTimeline(
+      await getLikedTweets(keys, userId, HOME_TIMELINE_SAMPLE_SIZE),
+      userId,
+    );
+    operatorEngagementReadAvailable = true;
+  } catch {
+    // Likes are an optional taste signal. A failed read must not poison the
+    // independently valid followed-network refresh.
   }
 
   let followingError: unknown | null = null;
@@ -1113,6 +1203,20 @@ export async function discoverNetworkTopicIntelligence(
     }
   }
 
+  const mergedSources = mergeNetworkSources(
+    { tweets: collected.tweets, accounts: sampled },
+    likedTimeline,
+  );
+  sampled = mergedSources.accounts;
+  collected = {
+    ...collected,
+    tweets: mergedSources.tweets,
+    successfulAccountIds: [...new Set([
+      ...collected.successfulAccountIds,
+      ...likedTimeline.accounts.map((account) => String(account.id)),
+    ])],
+  };
+
   if (sampled.length === 0) {
     const sourceErrors = [homeTimelineError, followingError].filter(Boolean);
     const representative = pickRepresentativeTimelineFailure(sourceErrors);
@@ -1131,6 +1235,8 @@ export async function discoverNetworkTopicIntelligence(
         partialFailureCount: 0,
         sampledAccountIds: [],
         sourceTweetCount: 0,
+        operatorEngagedTweetCount: 0,
+        operatorEngagementReadAvailable,
       },
       sampledAccounts: 0,
       candidateTweets: 0,
@@ -1179,6 +1285,8 @@ export async function discoverNetworkTopicIntelligence(
     partialFailureCount: partialErrors.length,
     sampledAccountIds: successfullySampled.map((account) => String(account.id)),
     sourceTweetCount: collected.tweets.length,
+    operatorEngagedTweetCount: collected.tweets.filter((tweet) => tweet.operatorEngaged).length,
+    operatorEngagementReadAvailable,
     viralTweets: mergeViralTweetHistory(candidates, previousState, mergedTopics.topicIdsByTweet, observedAt),
     topics: mergedTopics.history,
     authorSignals: mergeAuthorSignals(successfullySampled, scored, previousState, observedAt),

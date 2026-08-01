@@ -20,6 +20,7 @@ const anchors = [
   { content: 'software is nepo + codex/claude\nhardware is where alpha is left', topic: 'AI', source: 'timeline' },
   { content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.', topic: 'finance', source: 'timeline' },
   { content: 'x algo def way better. more useful content. more friends. yall cooking.', topic: 'product', source: 'timeline' },
+  { content: 'padel is actually a good rich guy sport. easy enough to start, jus competitive enough to get obsessed.', topic: 'sports', source: 'timeline' },
 ];
 
 const learnings = {
@@ -144,6 +145,31 @@ describe('Geoffrey hard quality policy', () => {
     expect(result.eligible, result.issues.join('; ')).toBe(true);
     expect(result.scores.nativeVoice).toBeGreaterThanOrEqual(0.65);
     expect(result.scores.casualStartupFit).toBeGreaterThanOrEqual(0.58);
+  });
+
+  it('does not apply the technical credibility floor to a concrete sports take', () => {
+    const result = assess(candidate({
+      content: 'jake paul calling out nfl guys is way more interesting than another influencer fight. those guys actually have money and something to lose.',
+      targetTopic: 'sports and competitive behavior',
+      sourceBrief: 'A current sourced boxing challenge involving Jake Paul and NFL players.',
+      sourceEvidenceTexts: ['Jake Paul challenged NFL players to a boxing match.'],
+      judgeBreakdown: {
+        ...candidate().judgeBreakdown!,
+        nativeVoice: 0.86,
+        casualStartupFit: 0.84,
+        technicalCredibility: 0.08,
+      },
+      finalCriticScores: {
+        ...candidate().finalCriticScores!,
+        nativeVoice: 0.88,
+        casualStartupFit: 0.86,
+        technicalCredibility: 0.08,
+      },
+    }));
+
+    expect(result.scores.technicalCredibility).toBeLessThan(0.45);
+    expect(result.issues.some((issue) => issue.startsWith('technical credibility'))).toBe(false);
+    expect(result.eligible, result.issues.join('; ')).toBe(true);
   });
 
   it('uses the documented numeric gates instead of a stricter coarse review verdict', () => {

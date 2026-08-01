@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildGeoffreyIdeaBriefs, expandGeoffreyIdeaBriefs, extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
+import { buildGeoffreyIdeaBriefs, capGeoffreyTopicPortfolioCandidates, expandGeoffreyIdeaBriefs, extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
@@ -71,6 +71,33 @@ describe('generateViralBatch', () => {
     expect(expanded.slots[0].plannerReason).toContain('materially distinct variant 1 of 3');
     expect(expanded.slots[1].plannerReason).toContain('materially distinct variant 2 of 3');
     expect(expanded.slots[2].plannerReason).toContain('materially distinct variant 3 of 3');
+  });
+
+  it('caps deep technical candidates before engagement ranking can dominate the batch', () => {
+    const voiceProfile = {
+      tone: 'casual investor/operator',
+      topics: ['AI', 'startups', 'culture', 'sports', 'frontier tech'],
+      antiGoals: ['over-specialized feed'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes across startups, AI, culture, sports, and frontier technology.',
+    };
+    const ranked = [
+      { content: 'grain-boundary diffusion changes magnet coercivity', targetTopic: 'rare earth magnet manufacturing' },
+      { content: 'tritium supply constrains the reactor', targetTopic: 'fusion energy' },
+      { content: 'openai changed how ambitious founders build', targetTopic: 'AI products and research' },
+      { content: 'venture incentives changed founder behavior', targetTopic: 'founders and venture' },
+      { content: 'burning man status is revealed preference', targetTopic: 'culture and status' },
+      { content: 'the fight makes the incentive obvious', targetTopic: 'sports and competition' },
+    ] as any;
+
+    const selected = capGeoffreyTopicPortfolioCandidates(ranked, 5, voiceProfile);
+    const withRecentTechnical = capGeoffreyTopicPortfolioCandidates(ranked, 5, voiceProfile, {
+      recentPosts: ['a recent chip packaging and HBM constraint post'],
+    });
+
+    expect(selected).toHaveLength(5);
+    expect(selected.filter((candidate) => /magnet|tritium/.test(candidate.content))).toHaveLength(1);
+    expect(withRecentTechnical.some((candidate) => /magnet|tritium/.test(candidate.content))).toBe(false);
   });
 
   it('uses structured network facts without putting raw network prose into Geoffrey briefs', () => {
@@ -1826,7 +1853,8 @@ describe('generateViralBatch', () => {
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
     expect(createCall.system).not.toContain('## ENGAGEMENT DATA');
     expect(createCall.system).not.toContain('SYSTEM WINNER');
-    expect(userPrompt).toContain('the final post does not need to spell it out when a smart reader will get it');
+    expect(userPrompt).toContain('specific judgment about a company, founder, product, market, investor, person, institution, cultural behavior, competition, or frontier technology');
+    expect(userPrompt).toContain('Do not force culture, finance, health, or sports into a manufacturing or supply-chain analogy');
     expect(userPrompt).toContain('Do not force that actor into the text merely to satisfy the brief');
     expect(userPrompt).toContain('Make a human attitude legible');
     expect(userPrompt).toContain('at most one may begin with first-person language');

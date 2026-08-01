@@ -9,6 +9,7 @@ import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from '../lib/sour
 import { assessGeneratedWritingPatterns } from '../lib/writing-patterns';
 import { assessGeoffreyQualityPolicy } from '../lib/quality-policy';
 import { buildGenerationQualityAudit } from '../lib/generation-quality-audit';
+import { isGeoffreyDeepTechnicalTopic } from '../lib/source-planner';
 
 type QueueAuditItem = {
   id: string;
@@ -213,6 +214,7 @@ function auditTweet(
     assessment: taste,
     anchorCopyRiskContribution,
     hasSourceContext: Boolean(tweet.sourceBrief || tweet.trendHeadline),
+    technicalLane: isGeoffreyDeepTechnicalTopic(`${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`),
   });
   const currentSource = parseCurrentSource(tweet.sourceBrief);
   const base = {

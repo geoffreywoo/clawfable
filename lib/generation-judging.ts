@@ -12,6 +12,7 @@ import {
   isGeoffreyVoiceProfile,
 } from './account-taste';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
+import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
 type JudgeContext = {
   voiceProfile?: VoiceProfile;
@@ -21,7 +22,7 @@ type JudgeContext = {
 };
 
 export type CandidateJudgeMode = 'model' | 'heuristic';
-export const FINAL_CRITIC_VERSION = 'geoffwoo-final-critic-v1';
+export const FINAL_CRITIC_VERSION = 'geoffwoo-final-critic-v2';
 const JUDGE_CANDIDATE_CONTENT_LIMIT = 1200;
 const MUTATION_CANDIDATE_CONTENT_LIMIT = 1000;
 const MUTATION_CRITIC_NOTE_LIMIT = 220;
@@ -381,6 +382,10 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
   const memoryFit = scoreContextualMemoryFit(candidate, featureTags, context);
   const slopRisk = scoreSlopRisk(candidate.content, featureTags);
   const technicalElevation = assessTechnicalElevation(candidate.content);
+  const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+  const technicalLane = !geoffreyStrict || isGeoffreyDeepTechnicalTopic(
+    `${candidate.targetTopic || ''} ${candidate.content}`,
+  );
   const accountTaste = assessAccountTaste(candidate.content, {
     voiceProfile: context.voiceProfile,
     learnings: context.learnings,
@@ -394,21 +399,22 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     untrustedSourceTexts: getUntrustedSourceTexts(candidate),
   });
   const clarity = clamp(candidate.content.length >= 60 && candidate.content.length <= 900 ? 0.72 : 0.55);
-  const technicalBoost = technicalElevation.technicalScore * 0.5;
+  const technicalBoost = technicalLane ? technicalElevation.technicalScore * 0.5 : 0;
+  const technicalCredibilityBoost = technicalLane ? accountTaste.technicalCredibilityScore * 0.22 : 0;
   const banalPenalty = technicalElevation.banalOpsScore * 0.65;
   const novelty = clamp(
     (featureTags.riskFlags.includes('thin') ? 0.48 : 0.68)
     - (slopRisk >= 0.45 ? 0.14 : 0)
     + technicalBoost
-    + accountTaste.technicalCredibilityScore * 0.22
+    + technicalCredibilityBoost
     - banalPenalty
     - accountTaste.genericAccountFitRisk * 0.22
   );
   const audienceFit = clamp(
-    (/\b(founder|operator|builder|market|product|ai|startup)\b/i.test(candidate.content) ? 0.72 : 0.58)
+    (/\b(founder|operator|builder|market|product|ai|startup|investor|capital|culture|status|health|athlete|sport|competition)\b/i.test(candidate.content) ? 0.72 : 0.58)
     + (memoryFit.notes.includes('memory-aligned conversation value') ? 0.04 : 0)
-    + technicalElevation.technicalScore * 0.35
-    + accountTaste.technicalCredibilityScore * 0.22
+    + (technicalLane ? technicalElevation.technicalScore * 0.35 : 0)
+    + technicalCredibilityBoost
     - technicalElevation.banalOpsScore * 0.45
     - accountTaste.statusTextureRisk * 0.3
   );
@@ -428,7 +434,7 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     scoreContextualVoiceFit(candidate, featureTags, context)
     - (slopRisk >= 0.5 ? 0.12 : slopRisk * 0.08)
     + accountTaste.nativeVoiceScore * 0.24
-    + technicalElevation.technicalScore * 0.25
+    + (technicalLane ? technicalElevation.technicalScore * 0.25 : 0)
     - technicalElevation.banalOpsScore * 0.55
     - accountTaste.truthfulnessRisk * 0.45
     - accountTaste.sourceCopyRisk * 0.55
@@ -453,8 +459,8 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
     ? ` Casual startup diction ${accountTaste.casualStartupScore.toFixed(2)}: still too neutral or formal for Geoffrey.`
     : '';
   const elevationNote = technicalElevation.hasBanalOpsTexture && !technicalElevation.hasHardTechAnchor
-    ? ' Low-status ops texture: needs a harder technical/industrial anchor.'
-    : technicalElevation.hasHardTechAnchor
+    ? ' Low-status ops texture: needs a more specific high-context object or tension.'
+    : technicalLane && technicalElevation.hasHardTechAnchor
       ? ' Technical anchor present.'
       : '';
 
@@ -537,6 +543,9 @@ function parseScoredLines(
         thesisHint: parsedThesis,
       });
       const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+      const technicalLane = !geoffreyStrict || isGeoffreyDeepTechnicalTopic(
+        `${candidate.targetTopic || ''} ${candidate.content}`,
+      );
       const rawVoiceFit = clamp(Number(parsed.voiceFit) || 0.5);
       const modelNativeVoice = Number.isFinite(Number(parsed.nativeVoice))
         ? clamp(Number(parsed.nativeVoice))
@@ -568,10 +577,11 @@ function parseScoredLines(
         : rawVoiceFit;
       let overall = clamp(Number(parsed.overall) || 0.5);
       if (geoffreyStrict) {
+        const technicalContribution = technicalLane ? modelTechnicalCredibility : 0.65;
         overall = clamp(
           overall * 0.55
           + voiceFit * 0.24
-          + modelTechnicalCredibility * 0.13
+          + technicalContribution * 0.13
           + modelCasualStartupFit * 0.08
           - modelCringeRisk * 0.2
           - modelStiffnessRisk * 0.22
@@ -703,11 +713,11 @@ export async function judgeCandidates(
       .join('\n');
     const geoffreyBrief = isGeoffreyVoiceProfile(voiceProfile)
       ? `\n${buildGeoffreyNativeWritingBrief()}
-- Score native voice harshly: a draft must feel like Geoffrey thinking from technical constraints, not a generic account wearing frontier-tech nouns.
+- Score native voice harshly: a draft must feel like Geoffrey reacting from his actual broad interests, not a generic account wearing startup or frontier-tech nouns.
 - Compare each candidate against the native anchor bank as a distribution of modes, not as prose to copy. A candidate may match one legitimate mode without averaging every anchor into one voice.
 - If it is polished, balanced, and plausibly generated, cap overall at 0.45 even when the topic is relevant.
 - Set nativeVoice below 0.55 whenever Geoffrey would be unlikely to post the wording himself.
-- Set casualStartupFit below 0.50 when the draft reads like an analyst note instead of a casual, high-context startup take.
+- Set casualStartupFit below 0.50 when the draft reads like an analyst note instead of a casual, high-context take that belongs in Geoffrey's actual feed. Culture, markets, health, and sports do not need startup nouns to qualify.
 - Set stiffnessRisk at or above 0.50 for formal exposition, mechanism inventories, polished rhetorical questions, or an analyst setup followed by a cute metaphor.
 - Set cringeRisk at or above 0.50 for consultant cadence, topic-swapped advice, synthetic status posturing, or technical nouns pasted onto a generic thesis.
 - Set nativeVoice below 0.45 and cringeRisk at or above 0.55 for an unsituated technical mini-lecture, a mirrored "can do X and still Y / extremely A and extremely B" contrast, or a manufactured closer such as "X meets Y. Y wins," "congrats on X; Y still has standards," or "show me X, then we can argue." Correct mechanisms do not rescue generated prose.
@@ -732,10 +742,10 @@ Also return:
 - thesis: a short 4-10 word idea summary
 - notes: one short sentence on the main improvement opportunity
 - nativeVoice: likelihood from 0 to 1 that this person would plausibly post the exact wording
-- casualStartupFit: likelihood from 0 to 1 that the diction is casual, high-context, and immediately relevant to companies, products, markets, capital, talent, or startup timing
+- casualStartupFit: likelihood from 0 to 1 that the diction is casual, high-context, and native to Geoffrey's demonstrated range across companies, products, markets, capital, culture, health, sports, people, and competition
 - stiffnessRisk: likelihood from 0 to 1 that the draft sounds like an analyst memo, industry explainer, mechanism inventory, or polished research summary
 - cringeRisk: likelihood from 0 to 1 that the draft feels generated, socially unearned, or interchangeable
-- technicalCredibility: mechanism/constraint/specificity quality from 0 to 1
+- technicalCredibility: mechanism/constraint/specificity quality from 0 to 1 for technical subjects; do not penalize nontechnical subjects for lacking engineering detail
 - manualAnchorReskinRisk: likelihood from 0 to 1 that the draft copies a manual anchor's premise, joke, list concept, opening move, social setup, or sentence skeleton while swapping in new nouns
 
 Ground rules:
@@ -746,16 +756,16 @@ Ground rules:
 - Top formats: ${analysis.engagementPatterns.topFormats.join(', ') || 'unknown'}
 - Top topics: ${analysis.engagementPatterns.topTopics.join(', ') || 'unknown'}
 - Public taste feedback: if a commenter could say this sounds like AI slop, generated, consultant-polished, or ChatGPT-ish, score voiceFit/novelty/overall harshly.
-- For @geoffwoo / frontier-tech taste, "concrete" must be elevated and technical. Slack channels, support tickets, dashboards, calendar invites, generic workflows, handoffs, renamed owners, and support queues are weak SaaS-ops texture, not sufficient proof.
-- Reward elite technical anchors: inference ASIC constraints, chip packaging/yield, memory bandwidth, power delivery, grid interconnects, reactor/fuel-cycle details, separation chemistry, metrology, tolerances, robotics failure modes, launch/radiation/thermal constraints, and industrial supply-chain qualification.
+- For @geoffwoo, concrete evidence depends on the lane. Technical subjects need a real mechanism or constraint. Startup, market, culture, health, and sports subjects need a specific company, person, event, behavior, incentive, contradiction, or revealed preference. Do not force those lanes into industrial analogies.
+- Reward technical anchors only on genuinely technical subjects. Penalize unnecessary materials, manufacturing, supply-chain, or process detail that makes a broader observation read like a research memo.
 - Penalize obvious generated-post cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", abstract leverage/moat/feedback-loop language without a concrete observed example, and overly neat numbered scaffolds.
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
 - Reject unsituated technical lectures, mirrored adjective/adverb contrasts, and manufactured mic-drop endings. Long mechanism inventories, "can do X and still Y / extremely A and extremely B," "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy, not Geoffrey voice.
-- For Geoffrey, technical credibility and casual startup relevance are separate. Reward one useful mechanism attached to a sharp company, product, market, capital, talent, cost, or timing judgment. The implication may be obvious rather than explicitly explained. Penalize technical detail that never becomes a startup take, but do not force an analyst-style consequence sentence.
+- For Geoffrey, specificity and casual startup relevance are separate. On technical subjects, reward one useful mechanism attached to a sharp judgment. On nontechnical subjects, reward a concrete social or market object and a non-obvious reaction. Penalize detail that never becomes a take, but do not force an analyst-style consequence sentence.
 - Reject "forecasts love X; reality is less cooperative," "founders love speed until...," "finance guys love...," "the calendar has physics," and polished "how do you model X when Y?" constructions as stiff generated analyst voice.
 - A draft can sound native and still be a bad copy. Set manualAnchorReskinRisk at or above 0.50 when it recreates a native anchor's premise or structure, even if no exact phrase overlaps.
-- Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
+- Reward drafts that feel lived-in: asymmetric phrasing, a named company/person/event, a concrete behavior or failure mode, or one surprising detail that would be hard for a generic AI account to invent.
 - A draft is not allowed to invent lived experience. Block anonymous anecdotes, first-person access, quotes, measurements, and precise numbers that are absent from the candidate's source field or manual anchors.
 ${geoffreyBrief}
 ${learnings?.insights?.length ? `- Learned rules: ${learnings.insights.slice(0, 3).join(' | ')}` : ''}

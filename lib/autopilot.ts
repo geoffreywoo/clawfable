@@ -47,7 +47,13 @@ import {
 } from './twitter-debug';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
-import { assessNativeTopicIdentity, classifyGeoffreyTopicDomain, isCoreGeoffreyTopicDomain } from './source-planner';
+import {
+  assessNativeTopicIdentity,
+  classifyGeoffreyTopicDomain,
+  isCoreGeoffreyTopicDomain,
+  isGeoffreyDeepTechnicalTopic,
+  isGeoffreyManufacturingMaterialsTopic,
+} from './source-planner';
 import {
   jitterInterval,
   isDailyCapReached,
@@ -214,7 +220,22 @@ function isAutopostableQueuedTweet(tweet: Tweet): boolean {
 }
 
 export function getGeoffreyTopicPortfolioIssue(tweet: Tweet, recentPosts: PostLogEntry[]): string | null {
-  const domain = classifyGeoffreyTopicDomain(`${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`);
+  const topicText = `${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`;
+  const domain = classifyGeoffreyTopicDomain(topicText);
+  const recentOriginals = recentPosts.filter(isSuccessfulOriginalPostLogEntry);
+  const recentTopicTexts = recentOriginals.map((entry) => `${entry.topic} ${entry.content}`);
+  if (
+    isGeoffreyManufacturingMaterialsTopic(topicText)
+    && recentTopicTexts.slice(0, 7).some(isGeoffreyManufacturingMaterialsTopic)
+  ) {
+    return 'manufacturing and materials topics are capped at one of eight original posts';
+  }
+  if (
+    isGeoffreyDeepTechnicalTopic(topicText)
+    && recentTopicTexts.slice(0, 4).some(isGeoffreyDeepTechnicalTopic)
+  ) {
+    return 'deep technical topics are capped at one of five original posts';
+  }
   if (isCoreGeoffreyTopicDomain(domain)) return null;
   if (tweet.sourceLane !== 'trend_adjacent_explore' || !tweet.trendTopicId || !tweet.sourceBrief) {
     return `off-core ${domain} draft lacks an exceptional sourced exploration lane`;
@@ -222,7 +243,6 @@ export function getGeoffreyTopicPortfolioIssue(tweet: Tweet, recentPosts: PostLo
   if (!/\b(?:startups?|founders?|compan(?:y|ies)|products?|customers?|markets?|capital|investors?|costs?|margins?|talent|buyers?|suppliers?)\b/i.test(tweet.content)) {
     return `off-core ${domain} draft lacks a concrete startup or investing implication`;
   }
-  const recentOriginals = recentPosts.filter(isSuccessfulOriginalPostLogEntry);
   const recentDomains = recentOriginals.map((entry) => classifyGeoffreyTopicDomain(`${entry.topic} ${entry.content}`));
   if (
     ['crypto', 'politics_geopolitics'].includes(domain)
@@ -445,6 +465,7 @@ function assessQueuedNativeVoice(
       assessment,
       anchorCopyRiskContribution: tweet.scoreProvenance?.anchorCopyRisk,
       hasSourceContext: Boolean(tweet.sourceBrief || tweet.trendHeadline),
+      technicalLane: isGeoffreyDeepTechnicalTopic(`${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`),
     }),
   };
 }
@@ -689,7 +710,25 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
       .slice(0, 50)
       .map((tweet) => tweet.content),
   ])];
-  const topicPortfolioHistory = nativeContext ? await getPostLog(agent.id, 80) : [];
+  const loggedTopicPortfolioHistory = nativeContext ? await getPostLog(agent.id, 80) : [];
+  const syntheticTopicPortfolioHistory: PostLogEntry[] = (nativeContext?.allTweets || [])
+    .filter((tweet) => Boolean(tweet.xTweetId) && ['posted', 'deleted_from_x'].includes(tweet.status))
+    .map((tweet) => ({
+      id: `tweet-history:${tweet.id}`,
+      agentId: agent.id,
+      tweetId: tweet.id,
+      xTweetId: tweet.xTweetId || '',
+      content: tweet.content,
+      format: tweet.format || 'unknown',
+      topic: tweet.topic || 'general',
+      postedAt: tweet.postedAt || tweet.createdAt,
+      source: 'autopilot' as const,
+      action: 'posted' as const,
+    }));
+  const topicPortfolioHistory = [...new Map(
+    [...syntheticTopicPortfolioHistory, ...loggedTopicPortfolioHistory]
+      .map((entry) => [entry.xTweetId || entry.id, entry]),
+  ).values()].sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime());
   const policyCurrentQueue = await rescoreQueuedTweetsForCurrentPolicy(agent, queuedTweets, nativeContext);
   const validationPassedQueue: Tweet[] = [];
   for (const queuedTweet of policyCurrentQueue) {
@@ -1004,28 +1043,6 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         });
         continue;
       }
-      const topicPortfolioIssue = getGeoffreyTopicPortfolioIssue(queuedTweet, topicPortfolioHistory);
-      if (topicPortfolioIssue) {
-        const reason = `Geoffrey topic portfolio gate: ${topicPortfolioIssue}.`;
-        await updateTweet(queuedTweet.id, {
-          status: 'draft',
-          quarantinedAt: new Date().toISOString(),
-          quarantineReason: reason,
-        });
-        await addPostLogEntry(agent.id, {
-          agentId: agent.id,
-          tweetId: queuedTweet.id,
-          xTweetId: queuedTweet.xTweetId || '',
-          content: queuedTweet.content,
-          format: 'topic_portfolio_gate',
-          topic: queuedTweet.topic || 'general',
-          postedAt: new Date().toISOString(),
-          source: 'autopilot',
-          action: 'skipped',
-          reason,
-        });
-        continue;
-      }
     }
 
     const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, semanticHistoryContent)
@@ -1066,6 +1083,31 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
+    }
+
+    if (nativeContext) {
+      const topicPortfolioIssue = getGeoffreyTopicPortfolioIssue(queuedTweet, topicPortfolioHistory);
+      if (topicPortfolioIssue) {
+        const reason = `Geoffrey topic portfolio gate: ${topicPortfolioIssue}.`;
+        await updateTweet(queuedTweet.id, {
+          status: 'draft',
+          quarantinedAt: new Date().toISOString(),
+          quarantineReason: reason,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: queuedTweet.id,
+          xTweetId: queuedTweet.xTweetId || '',
+          content: queuedTweet.content,
+          format: 'topic_portfolio_gate',
+          topic: queuedTweet.topic || 'general',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason,
+        });
+        continue;
+      }
     }
 
     validationPassedQueue.push(queuedTweet);
@@ -3043,6 +3085,7 @@ export async function refillQueue(
           assessment: tasteAssessment,
           anchorCopyRiskContribution: item.scoreProvenance?.anchorCopyRisk,
           hasSourceContext: Boolean(item.sourceBrief || item.trendHeadline),
+          technicalLane: isGeoffreyDeepTechnicalTopic(`${item.targetTopic || ''} ${item.trendHeadline || ''} ${item.content}`),
         });
         if (queueTasteIssue) continue;
         const qualityAssessment = assessGeoffreyQualityPolicy(item, {

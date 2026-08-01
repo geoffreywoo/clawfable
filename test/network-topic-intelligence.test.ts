@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getFollowing: vi.fn(),
   getHomeTimeline: vi.fn(),
+  getLikedTweets: vi.fn(),
   getUserTimeline: vi.fn(),
   generateText: vi.fn(),
 }));
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/twitter-client', () => ({
   getFollowing: mocks.getFollowing,
   getHomeTimeline: mocks.getHomeTimeline,
+  getLikedTweets: mocks.getLikedTweets,
   getUserTimeline: mocks.getUserTimeline,
 }));
 
@@ -78,6 +80,7 @@ describe('followed-network topic intelligence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getHomeTimeline.mockResolvedValue([]);
+    mocks.getLikedTweets.mockResolvedValue([]);
   });
 
   it('learns a specific subject from breakout posts without a predefined topic category', async () => {
@@ -175,6 +178,49 @@ describe('followed-network topic intelligence', () => {
     expect(result.state.followGraphSource).toBe('home_timeline');
     expect(result.state.activeAuthorCount).toBe(2);
     expect(result.topics[0].category).toBe('co-packaged optics yield');
+  });
+
+  it('uses recent likes as topic-taste evidence without treating one liked post as factual corroboration', async () => {
+    mocks.getHomeTimeline.mockResolvedValue([]);
+    mocks.getFollowing.mockResolvedValue([]);
+    mocks.getLikedTweets.mockResolvedValue([{
+      ...timelineTweet('liked-sport', 'Jake Paul challenged NFL players to a boxing match.', 140),
+      authorId: 'sports-author',
+      author: 'sportswriter',
+      authorName: 'Sports Writer',
+      authorFollowersCount: 50_000,
+      authorVerified: false,
+      authorProtected: false,
+      referenceType: null,
+      hasMedia: false,
+      isTextComplete: true,
+      lang: 'en',
+    }]);
+
+    const result = await discoverNetworkTopicIntelligence(keys, 'geoff-user-id', {
+      now: Date.parse('2026-07-14T12:00:00.000Z'),
+      extractor: async () => [{
+        label: 'Jake Paul NFL boxing challenge',
+        summary: 'Jake Paul challenged NFL players to box.',
+        tweetIds: ['liked-sport'],
+        entities: ['Jake Paul', 'NFL'],
+        whyNow: 'The operator liked the current subject.',
+        confidence: 0.84,
+        semanticDomain: 'sports_competition',
+        uncertainty: 'low',
+      }],
+    });
+
+    expect(mocks.getLikedTweets).toHaveBeenCalledWith(keys, 'geoff-user-id', 100);
+    expect(result.state.operatorEngagementReadAvailable).toBe(true);
+    expect(result.state.operatorEngagedTweetCount).toBe(1);
+    expect(result.state.viralTweets[0]).toMatchObject({ operatorEngaged: true });
+    expect(result.topics[0]).toMatchObject({
+      semanticDomain: 'sports_competition',
+      operatorEngagedSourceCount: 1,
+      isPrimarySource: false,
+    });
+    expect(result.topics[0].operatorEngagementScore).toBeGreaterThanOrEqual(0.7);
   });
 
   it('never sends protected-account posts to the classifier or stores them as evidence', async () => {

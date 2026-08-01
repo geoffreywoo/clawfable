@@ -56,6 +56,7 @@ import {
   isExternalTrendSource,
   isFollowedNetworkSource,
 } from './source-trust';
+import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
 export interface RankableProtocolTweet {
   content: string;
@@ -1957,6 +1958,15 @@ export function scoreGeneratedTweets(
       untrustedSourceTexts: getUntrustedSourceTexts(candidate),
     });
     const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
+    const geoffreyTechnicalLane = geoffreyStrict && isGeoffreyDeepTechnicalTopic(
+      `${candidate.targetTopic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`,
+    );
+    const effectiveTechnicalCredibility = geoffreyStrict && !geoffreyTechnicalLane
+      ? 0.55
+      : accountTasteScore.technicalCredibilityScore;
+    const effectiveTechnicalElevation = geoffreyStrict && !geoffreyTechnicalLane
+      ? 0
+      : technicalElevationScore.technicalScore;
     const accountTasteWeight = geoffreyStrict ? 1 : 0.15;
     const casualStartupFitScore = geoffreyStrict
       ? Math.min(
@@ -2034,7 +2044,7 @@ export function scoreGeneratedTweets(
       (manualAnchorReskinRiskScore * 0.42) +
       (accountTasteScore.rejectedDraftSimilarity * 0.55 * accountTasteWeight) +
       (Math.max(0, 0.5 - accountTasteScore.nativeVoiceScore) * 0.34 * accountTasteWeight) +
-      (Math.max(0, 0.34 - accountTasteScore.technicalCredibilityScore) * 0.2 * accountTasteWeight) +
+      (Math.max(0, 0.34 - effectiveTechnicalCredibility) * 0.2 * accountTasteWeight) +
       authorityProofPenalty +
       (memoryAlignmentScore < 0 ? Math.abs(memoryAlignmentScore) * 0.28 : 0) +
       (ideaGraphScore < 0 ? Math.abs(ideaGraphScore) * 0.2 : 0) +
@@ -2122,13 +2132,13 @@ export function scoreGeneratedTweets(
       accountTasteScore.nativeVoiceScore * 0.14 * accountTasteWeight +
       accountTasteScore.nativeStyleScore * 0.06 * accountTasteWeight +
       casualStartupFitScore * 0.1 * accountTasteWeight +
-      accountTasteScore.technicalCredibilityScore * 0.1 * accountTasteWeight +
+      effectiveTechnicalCredibility * 0.1 * accountTasteWeight +
       (replyBaitScore * conversationQualityScore) * 0.06 +
       (conversationQualityScore - 0.5) * 0.06 +
       (1 - repetitionRiskScore) * 0.08 +
       (1 - policyRiskScore) * 0.08 +
       (1 - slopScore) * 0.12 +
-      technicalElevationScore.technicalScore * 0.12 +
+      effectiveTechnicalElevation * 0.12 +
       (styleMode === SHITPOAST_STYLE_MODE ? styleModeScore * 0.05 : 0) +
       ideaGraphScore * 0.1 +
       memoryAlignmentScore * 0.16 +
@@ -2178,10 +2188,10 @@ export function scoreGeneratedTweets(
       if (unsupportedNetworkTopic) confidenceScore = Math.min(confidenceScore, 0.39);
       if (casualStartupFitScore < 0.5) confidenceScore = Math.min(confidenceScore, 0.42);
       if (stiffnessRiskScore >= 0.5) confidenceScore = Math.min(confidenceScore, 0.39);
-      if (accountTasteScore.technicalCredibilityScore < 0.42 && !sourceBackedCasualStartupException) {
+      if (geoffreyTechnicalLane && accountTasteScore.technicalCredibilityScore < 0.42 && !sourceBackedCasualStartupException) {
         confidenceScore = Math.min(confidenceScore, 0.55);
       }
-      if (accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42 && !sourceBackedCasualStartupException) {
+      if (geoffreyTechnicalLane && accountTasteScore.technicalCredibilityScore < 0.28 && accountTasteScore.genericAccountFitRisk >= 0.42 && !sourceBackedCasualStartupException) {
         confidenceScore = Math.min(confidenceScore, 0.48);
       }
     }
@@ -2204,10 +2214,10 @@ export function scoreGeneratedTweets(
         accountTasteScore.nativeVoiceScore,
         finalCritic.nativeVoice ?? finalCritic.voiceFit,
       );
-      const strictTechnicalCredibility = Math.min(
+      const strictTechnicalCredibility = geoffreyTechnicalLane ? Math.min(
         accountTasteScore.technicalCredibilityScore,
         finalCritic.technicalCredibility ?? accountTasteScore.technicalCredibilityScore,
-      );
+      ) : 0.55;
       const strictCringeRisk = Math.max(accountTasteScore.cringeRisk, finalCritic.cringeRisk ?? 0);
       const strictStiffnessRisk = Math.max(stiffnessRiskScore, finalCritic.stiffnessRisk ?? 0);
       confidenceScore = clamp(

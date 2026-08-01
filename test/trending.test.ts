@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getFollowing: vi.fn(),
   getHomeTimeline: vi.fn(),
+  getLikedTweets: vi.fn(),
   getUserTimeline: vi.fn(),
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
   getFollowing: mocks.getFollowing,
   getHomeTimeline: mocks.getHomeTimeline,
+  getLikedTweets: mocks.getLikedTweets,
   getUserTimeline: mocks.getUserTimeline,
 }));
 
@@ -32,6 +34,7 @@ describe('fetchTrendingFromFollowing', () => {
       { id: 'followed-2', name: 'Operator', username: 'operator', description: 'Venture investor and engineer', followersCount: 9000, verified: false },
     ]);
     mocks.getHomeTimeline.mockResolvedValue([]);
+    mocks.getLikedTweets.mockResolvedValue([]);
   });
 
   afterEach(() => {

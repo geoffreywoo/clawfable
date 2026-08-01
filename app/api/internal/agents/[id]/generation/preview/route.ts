@@ -18,6 +18,7 @@ import {
 import { generateViralBatch, type ViralGenerationDiagnostics } from '@/lib/viral-generator';
 import type { TrendingTopic } from '@/lib/trending';
 import type { GenerationModelStackId } from '@/lib/types';
+import { isGeoffreyDeepTechnicalTopic } from '@/lib/source-planner';
 
 const MAX_PREVIEW_COUNT = 8;
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
@@ -115,6 +116,7 @@ export async function POST(
           assessment: taste,
           anchorCopyRiskContribution: draft.scoreProvenance?.anchorCopyRisk,
           hasSourceContext: Boolean(draft.sourceBrief || draft.trendHeadline),
+          technicalLane: isGeoffreyDeepTechnicalTopic(`${draft.targetTopic || ''} ${draft.trendHeadline || ''} ${draft.content}`),
         });
 
         return {
