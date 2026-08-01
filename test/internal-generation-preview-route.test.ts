@@ -134,13 +134,14 @@ describe('internal generation preview route', () => {
   });
 
   it('returns model provenance and taste reasons without changing the queue', async () => {
-    const response = await POST(request({ count: 2 }) as any, {
+    const response = await POST(request({ count: 2, includeDiagnostics: true }) as any, {
       params: Promise.resolve({ id: '13' }),
     });
     const data = await response.json();
 
     expect(response.status).toBe(200);
     expect(mocks.generateViralBatch).toHaveBeenCalledOnce();
+    expect(mocks.generateViralBatch.mock.calls[0].at(-1)).toEqual({});
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'internal-generation-preview:test');
     expect(data.drafts[0]).toMatchObject({
       generationProvider: 'openai',
@@ -162,5 +163,6 @@ describe('internal generation preview route', () => {
       tasteAction: 'allow',
       queueIssue: null,
     });
+    expect(data.diagnostics).toEqual({});
   });
 });

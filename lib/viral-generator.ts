@@ -1371,6 +1371,43 @@ ${formats.join(', ')}
 /**
  * Generate a batch of tweets using the configured AI provider, optimized for QTs.
  */
+export interface ViralGenerationDiagnostics {
+  geoffreyStrict?: boolean;
+  corpusActive?: boolean;
+  corpusVersion?: string | null;
+  candidateCount?: number;
+  generationProvider?: string | null;
+  generationModel?: string | null;
+  parse?: {
+    jsonLines: number;
+    parsed: number;
+    malformed: number;
+    missingContent: number;
+    emptyAfterNormalization: number;
+    generatedTweetIssue: number;
+    nearDuplicate: number;
+    duplicateFormatTopic: number;
+    staged: number;
+  };
+  stages?: Record<string, number>;
+  qualityIssueCounts?: Record<string, number>;
+  qualitySamples?: Array<{
+    content: string;
+    eligible: boolean;
+    issues: string[];
+    scores: Record<string, number>;
+    generationProvider: string | null;
+    generationModel: string | null;
+    judgeProvider: string | null;
+    judgeModel: string | null;
+    finalCriticProvider: string | null;
+    finalCriticModel: string | null;
+    finalCriticVerdict: string | null;
+  }>;
+  exitReason?: string;
+  error?: string;
+}
+
 export async function generateViralBatch(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
@@ -1384,10 +1421,20 @@ export async function generateViralBatch(
   memory: PersonalizationMemory | null = null,
   ideaAtoms: IdeaAtom[] = [],
   signals: LearningSignal[] = [],
+  diagnostics?: ViralGenerationDiagnostics,
 ): Promise<RankedProtocolTweet[]> {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
-  if (geoffreyStrict && !learnings?.voiceCorpus?.active) return [];
+  if (diagnostics) {
+    diagnostics.geoffreyStrict = geoffreyStrict;
+    diagnostics.corpusActive = learnings?.voiceCorpus?.active === true;
+    diagnostics.corpusVersion = learnings?.voiceCorpus?.snapshotId || null;
+  }
+  if (geoffreyStrict && !learnings?.voiceCorpus?.active) {
+    if (diagnostics) diagnostics.exitReason = 'inactive_voice_corpus';
+    return [];
+  }
   const candidateCount = count <= 2 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
+  if (diagnostics) diagnostics.candidateCount = candidateCount;
   const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const generatedSourcePlan = buildSourcePlannerPlan({
     count: geoffreyStrict && count === 2 ? 4 : candidateCount,
@@ -1680,23 +1727,46 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     });
 
     const text = response.text;
+    if (diagnostics) {
+      diagnostics.generationProvider = response.provider;
+      diagnostics.generationModel = response.model;
+    }
 
     const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];
     const acceptedContents: string[] = [];
     const usedFormatTopicCombos = new Set<string>();
+    const parseDiagnostics = {
+      jsonLines: 0,
+      parsed: 0,
+      malformed: 0,
+      missingContent: 0,
+      emptyAfterNormalization: 0,
+      generatedTweetIssue: 0,
+      nearDuplicate: 0,
+      duplicateFormatTopic: 0,
+      staged: 0,
+    };
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || !trimmed.startsWith('{')) continue;
+      parseDiagnostics.jsonLines += 1;
       try {
         const parsed = JSON.parse(trimmed);
+        parseDiagnostics.parsed += 1;
         if (parsed.content && parsed.content.length > 0) {
           // Strip hallucinated x.com/twitter.com status URLs from content.
           // Standalone posts should not carry status links or quote-tweet URLs.
           const cleanContent = normalizeGeneratedTweetContent(parsed.content)
             .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
             .trim();
-          if (!cleanContent) continue;
-          if (getGeneratedTweetIssue(cleanContent)) continue;
+          if (!cleanContent) {
+            parseDiagnostics.emptyAfterNormalization += 1;
+            continue;
+          }
+          if (getGeneratedTweetIssue(cleanContent)) {
+            parseDiagnostics.generatedTweetIssue += 1;
+            continue;
+          }
           const slot = Number(parsed.slot || 0);
           const format = parsed.format || 'hot_take';
           const slotAssignment = slotPlan.find((plan) => plan.slot === slot) || null;
@@ -1742,9 +1812,15 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
                   ? SHITPOAST_STYLE_MODE
                   : STANDARD_STYLE_MODE
               );
-          if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) continue;
+          if (isNearDuplicate(cleanContent, acceptedContents, 0.55).isDuplicate) {
+            parseDiagnostics.nearDuplicate += 1;
+            continue;
+          }
           const combo = `${String(format).toLowerCase()}::${String(targetTopic).toLowerCase()}`;
-          if (usedFormatTopicCombos.has(combo)) continue;
+          if (usedFormatTopicCombos.has(combo)) {
+            parseDiagnostics.duplicateFormatTopic += 1;
+            continue;
+          }
           acceptedContents.push(cleanContent);
           usedFormatTopicCombos.add(combo);
           stagedTweets.push({
@@ -1792,11 +1868,16 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             trendTopicId: assignedTrendTopicId,
             trendHeadline: slotAssignment?.trendHeadline || sourceSlot?.trendHeadline || null,
           });
+          parseDiagnostics.staged += 1;
+        } else {
+          parseDiagnostics.missingContent += 1;
         }
       } catch {
+        parseDiagnostics.malformed += 1;
         // Skip malformed lines
       }
     }
+    if (diagnostics) diagnostics.parse = parseDiagnostics;
 
     stagedTweets.sort((a, b) => {
       if (a.slot > 0 && b.slot > 0) return a.slot - b.slot;
@@ -1886,7 +1967,23 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           task: 'final_judgment',
         })
       : mergedCandidates;
-    if (geoffreyStrict && finalCandidates.length === 0) return [];
+    if (diagnostics) {
+      diagnostics.stages = {
+        baseCandidates: baseCandidates.length,
+        judged: judged.length,
+        mutated: mutatedCandidates.length,
+        judgedMutations: judgedMutations.length,
+        rescueTargets: rescueTargets.length,
+        rescued: rescuedCandidates.length,
+        judgedRescues: judgedRescues.length,
+        merged: mergedCandidates.length,
+        finalCriticJudged: finalCandidates.length,
+      };
+    }
+    if (geoffreyStrict && finalCandidates.length === 0) {
+      if (diagnostics) diagnostics.exitReason = 'no_final_critic_candidates';
+      return [];
+    }
     const policyStampedCandidates = finalCandidates.map((candidate) => ({
       ...candidate,
       qualityPolicyVersion: geoffreyStrict ? GEOFFREY_QUALITY_POLICY_VERSION : candidate.qualityPolicyVersion ?? null,
@@ -1895,25 +1992,67 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     let ranked: RankedProtocolTweet[];
     if (geoffreyStrict) {
       const scoredCandidates = scoreGeneratedTweets(policyStampedCandidates, rankingContext);
-      const qualityEligibleCandidates = scoredCandidates.filter((candidate) => assessGeoffreyQualityPolicy(candidate, {
+      const qualityAssessments = scoredCandidates.map((candidate) => ({
+        candidate,
+        assessment: assessGeoffreyQualityPolicy(candidate, {
           voiceProfile,
           learnings,
           memory,
           stage: 'queue',
-        }).eligible);
-      if (qualityEligibleCandidates.length === 0) return [];
+        }),
+      }));
+      const qualityEligibleCandidates = qualityAssessments
+        .filter(({ assessment }) => assessment.eligible)
+        .map(({ candidate }) => candidate);
+      if (diagnostics) {
+        diagnostics.stages = {
+          ...diagnostics.stages,
+          scored: scoredCandidates.length,
+          qualityEligible: qualityEligibleCandidates.length,
+        };
+        diagnostics.qualityIssueCounts = qualityAssessments.reduce<Record<string, number>>((counts, { assessment }) => {
+          for (const issue of assessment.issues) counts[issue] = (counts[issue] || 0) + 1;
+          return counts;
+        }, {});
+        diagnostics.qualitySamples = qualityAssessments.slice(0, 12).map(({ candidate, assessment }) => ({
+          content: candidate.content,
+          eligible: assessment.eligible,
+          issues: assessment.issues,
+          scores: assessment.scores,
+          generationProvider: candidate.generationProvider || null,
+          generationModel: candidate.generationModel || null,
+          judgeProvider: candidate.judgeProvider || null,
+          judgeModel: candidate.judgeModel || null,
+          finalCriticProvider: candidate.finalCriticProvider || null,
+          finalCriticModel: candidate.finalCriticModel || null,
+          finalCriticVerdict: candidate.finalCriticVerdict || null,
+        }));
+      }
+      if (qualityEligibleCandidates.length === 0) {
+        if (diagnostics) diagnostics.exitReason = 'no_quality_eligible_candidates';
+        return [];
+      }
       ranked = sortRankedTweets(qualityEligibleCandidates);
     } else {
       ranked = rankGeneratedTweets(policyStampedCandidates, rankingContext);
     }
 
-    return selectTopRankedTweets(
+    const selected = selectTopRankedTweets(
       preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
       count,
       { maxShitpoast, maxTrendSources },
     );
+    if (diagnostics) {
+      diagnostics.stages = { ...diagnostics.stages, selected: selected.length };
+      diagnostics.exitReason = selected.length > 0 ? 'selected' : 'selection_empty';
+    }
+    return selected;
   } catch (err) {
     console.error('AI generation error:', err);
+    if (diagnostics) {
+      diagnostics.exitReason = 'generation_error';
+      diagnostics.error = err instanceof Error ? err.message : String(err);
+    }
     if (!shouldUseFallbackGeneration(err)) {
       throw err; // Real code bug or malformed request — surface it.
     }

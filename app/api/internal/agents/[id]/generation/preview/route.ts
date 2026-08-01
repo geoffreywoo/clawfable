@@ -11,7 +11,7 @@ import {
   releaseAutopilotLock,
   resetReadCache,
 } from '@/lib/kv-storage';
-import { generateViralBatch } from '@/lib/viral-generator';
+import { generateViralBatch, type ViralGenerationDiagnostics } from '@/lib/viral-generator';
 import type { TrendingTopic } from '@/lib/trending';
 
 const MAX_PREVIEW_COUNT = 8;
@@ -55,6 +55,7 @@ export async function POST(
     });
     const cachedTrending = await getTrendingCache(id);
     const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : [];
+    const diagnostics: ViralGenerationDiagnostics | undefined = body?.includeDiagnostics === true ? {} : undefined;
     const drafts = await generateViralBatch(
       context.voiceProfile,
       analysis,
@@ -68,12 +69,14 @@ export async function POST(
       context.memory,
       context.ideaAtoms,
       context.signals,
+      diagnostics,
     );
 
     return NextResponse.json({
       agentId: id,
       requested: requestedCount,
       generated: drafts.length,
+      diagnostics: diagnostics || null,
       drafts: drafts.map((draft) => {
         const taste = assessAccountTaste(draft.content, {
           voiceProfile: context.voiceProfile,
