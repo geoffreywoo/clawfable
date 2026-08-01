@@ -505,6 +505,8 @@ describe('account taste scoring', () => {
       'i would not underwrite a beryllium machining startup like normal contract manufacturing. safety makes the capacity slower and more expensive before demand matters.',
       'i stop trusting the chiplet pitch when package yield is missing. that number decides how much compute the startup can actually ship.',
       "i'd worry less about the robot demo and more about whether its motor supplier can make high-temperature magnets consistently.",
+      'i care less about the magnet spec than whether the supplier can hit it after sintering, over and over.',
+      'funny that the chiplet startup may deserve to be underwritten as a packaging company. alignment and package yield set how much compute ships.',
     ];
 
     for (const content of drafts) {

@@ -1019,12 +1019,13 @@ export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 Write the thought Geoffrey would send to one smart founder or investor, then stop.
 - Start with the reaction, bet, or question. Do not introduce the industry or teach the reader the topic.
-- Pick one affected company, founder, investor, buyer, or supplier and one consequence they have to absorb.
+- Privately identify the affected company, founder, investor, buyer, or supplier. The final post may leave that actor or consequence implicit when a smart reader will get it.
 - Use at most one technical fact. It should make the judgment defensible, not turn the post into research notes.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.
 - Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
-- Native modes include a blunt one-line take, "i think" plus one reason, a real causal question, or two uneven beats where the second gets simpler.
+- Native modes include a blunt one-line take, a direct question, a named-company reaction, public conviction, or two uneven beats where the second gets simpler.
+- First write the plain thought with no technical vocabulary. Add one technical noun or mechanism only if the thought becomes sharper; never write an analyst sentence and decorate it afterward.
 - Do not force a win/lose/pay frame. Avoid generic futures such as "buyers will learn," "suppliers win," and "cannot ship" when they merely restate the setup.
 - Keep the causal chain grammatical and technically coherent. Do not coin abstractions such as "autonomy-software its way around" or fuse separate mechanisms into one clever-sounding phrase.
 - Stop before the lesson, slogan, balanced closer, or advice. If there is no sharp thought, do not inflate a fact into one.

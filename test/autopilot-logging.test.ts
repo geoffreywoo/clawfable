@@ -223,7 +223,7 @@ const validQueuedTweet = {
 };
 
 const currentGeoffreyCertification = {
-  qualityPolicyVersion: 'geoffwoo-quality-v8',
+  qualityPolicyVersion: 'geoffwoo-quality-v9',
   voiceCorpusVersion: 'voice-corpus-v1-current',
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
@@ -342,6 +342,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.VERCEL_ENV;
+  delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
 });
 
 afterEach(() => {
@@ -349,6 +351,18 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('keeps Geoffrey originals in shadow until the production policy version is explicitly activated', async () => {
+    process.env.VERCEL_ENV = 'production';
+    delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
+
+    const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('geoffwoo-quality-v9 remains in shadow');
+    expect(mocks.getQueuedTweets).not.toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
   it('enforces a two-original rolling daily cap for @geoffwoo', async () => {
     mocks.countPostsInLast24h.mockReturnValue(2);
     mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);

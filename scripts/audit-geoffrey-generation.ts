@@ -316,6 +316,7 @@ async function main() {
     learningEvidence: generationContext.style.banditPolicy?.evidence || null,
     qualityPolicyVersion: qualityAudit.policy.qualityPolicyVersion,
     finalCriticVersion: qualityAudit.policy.finalCriticVersion,
+    autopostActivation: qualityAudit.policy.autopostActivation,
     voiceCorpus: qualityAudit.corpus,
     queueEligibility: {
       eligible: qualityAudit.queue.qualityEligibleCount,
@@ -360,6 +361,7 @@ async function main() {
   console.log(`current-event queue=${summary.timelyTrendQueued}/${summary.trendQueued} stale-or-unproven=${summary.staleOrUnprovenTrendQueued} models=${summary.generationModels.join(', ') || 'none'}`);
   console.log(`manual anchors=${summary.manualAnchorCount} recent signals=${summary.recentSignalCount} tracked tweets=${allTweets.length}`);
   console.log(`policy=${summary.qualityPolicyVersion} critic=${summary.finalCriticVersion} corpus=${summary.voiceCorpus?.snapshotId || 'none'} active=${summary.voiceCorpus?.active || false} purity=${summary.voiceCorpus?.corpusPurity ?? 'n/a'}`);
+  console.log(`policy autopost activated=${summary.autopostActivation.activated} configured=${summary.autopostActivation.configuredVersion || 'none'} explicitProductionActivation=${summary.autopostActivation.requiresExplicitProductionActivation}`);
   console.log(`strict queue eligible=${summary.queueEligibility.eligible}/${summary.queueDepth} skipped=${summary.queueEligibility.skipped} generationFallbacks=${summary.modelFallbacks.generationFallbackCount} judgeFallbacks=${summary.modelFallbacks.judgeFallbackCount} finalCriticFallbacks=${summary.modelFallbacks.finalCriticFallbackCount}`);
   console.log(`voice complaints=${summary.complaints.total} affectedPosts=${summary.complaints.affectedParentCount} rate=${summary.complaints.affectedPostRate ?? 'n/a'} metricsOnly=${summary.complaints.metricsOnly}`);
   console.log(`source decisions accepted=${summary.sourceDecisions.accepted.length} rejected=${summary.sourceDecisions.rejected.length}`);

@@ -70,7 +70,11 @@ import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHig
 import { assessClaimEvidence } from './claim-evidence';
 import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
-import { assessGeoffreyQualityPolicy, GEOFFREY_QUALITY_POLICY_VERSION } from './quality-policy';
+import {
+  assessGeoffreyQualityPolicy,
+  GEOFFREY_QUALITY_POLICY_VERSION,
+  getGeoffreyQualityPolicyActivation,
+} from './quality-policy';
 import { FINAL_CRITIC_VERSION, judgeCandidates } from './generation-judging';
 import { semanticIdeaSimilarity } from './tweet-features';
 import {
@@ -1323,6 +1327,17 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0 ? `Sent ${repliesSent} replies (auto-post disabled)` : 'Auto-post disabled',
+      repliesSent,
+    };
+  }
+
+  if (isGeoffreyAccount(agent.handle) && !getGeoffreyQualityPolicyActivation().activated) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. Original posting skipped while ${GEOFFREY_QUALITY_POLICY_VERSION} remains in shadow.`
+        : `Original posting skipped while ${GEOFFREY_QUALITY_POLICY_VERSION} remains in shadow.`,
       repliesSent,
     };
   }
@@ -2821,6 +2836,7 @@ export async function refillQueue(
 ): Promise<number> {
   try {
     const geoffreyStrict = isGeoffreyAccount(agent.handle);
+    if (geoffreyStrict && !getGeoffreyQualityPolicyActivation().activated) return 0;
     const refillCount = geoffreyStrict ? Math.min(2, Math.max(0, count)) : count;
     if (refillCount <= 0) return 0;
     const analysis = await getAnalysis(agent.id);

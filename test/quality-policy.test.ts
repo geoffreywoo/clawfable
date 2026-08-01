@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { FINAL_CRITIC_VERSION } from '@/lib/generation-judging';
 import {
   assessGeoffreyQualityPolicy,
   GEOFFREY_QUALITY_POLICY_VERSION,
+  getGeoffreyQualityPolicyActivation,
   type GeoffreyQualityCandidate,
 } from '@/lib/quality-policy';
 import type { AgentLearnings, PersonalizationMemory } from '@/lib/types';
@@ -115,6 +116,28 @@ function assess(value: GeoffreyQualityCandidate) {
 }
 
 describe('Geoffrey hard quality policy', () => {
+  afterEach(() => {
+    delete process.env.VERCEL_ENV;
+    delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
+  });
+
+  it('requires the exact policy version to activate production autoposting', () => {
+    process.env.VERCEL_ENV = 'production';
+
+    expect(getGeoffreyQualityPolicyActivation()).toMatchObject({
+      activated: false,
+      configuredVersion: null,
+      currentVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+      requiresExplicitProductionActivation: true,
+    });
+
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = 'geoffwoo-quality-old';
+    expect(getGeoffreyQualityPolicyActivation().activated).toBe(false);
+
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
+    expect(getGeoffreyQualityPolicyActivation().activated).toBe(true);
+  });
+
   it('allows a native source-backed startup take that clears every hard gate', () => {
     const result = assess(candidate());
 

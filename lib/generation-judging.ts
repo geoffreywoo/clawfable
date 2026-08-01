@@ -747,7 +747,7 @@ Ground rules:
 - Penalize clean abstraction stacks that sound like advice for any AI/startup account after swapping the nouns.
 - Reject generic instructional voice: audience-label openings, "start with", "you should", technical checklists, textbook definitions, and tidy three-paragraph explainers. Correct nouns do not make a native post.
 - Reject unsituated technical lectures, mirrored adjective/adverb contrasts, and manufactured mic-drop endings. Long mechanism inventories, "can do X and still Y / extremely A and extremely B," "X meets Y. Y wins," "congrats on X; Y still has standards," and "show me X, then we can argue" are generated social copy, not Geoffrey voice.
-- For Geoffrey, technical credibility and casual startup relevance are separate. Reward one useful mechanism attached to a sharp company, product, market, capital, talent, cost, or timing judgment. Penalize technical detail that never becomes a startup take.
+- For Geoffrey, technical credibility and casual startup relevance are separate. Reward one useful mechanism attached to a sharp company, product, market, capital, talent, cost, or timing judgment. The implication may be obvious rather than explicitly explained. Penalize technical detail that never becomes a startup take, but do not force an analyst-style consequence sentence.
 - Reject "forecasts love X; reality is less cooperative," "founders love speed until...," "finance guys love...," "the calendar has physics," and polished "how do you model X when Y?" constructions as stiff generated analyst voice.
 - A draft can sound native and still be a bad copy. Set manualAnchorReskinRisk at or above 0.50 when it recreates a native anchor's premise or structure, even if no exact phrase overlaps.
 - Reward drafts that feel lived-in: asymmetric phrasing, concrete failure modes, named materials/technologies, specific operator observations, or one surprising detail that would be hard for a generic AI account to invent.
@@ -898,7 +898,7 @@ ${buildGeoffreyNativeGenerationBrief()}
 For each input, return three independent posts built from three independent thoughts, not three formatted versions of one thesis. Change what Geoffrey finds surprising, mispriced, exciting, annoying, funny, or doubtful across versions. Use the posture that is natural to the evidence; do not assign a fixed format to each version.
 
 Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. Do not force a win/lose/pay frame. Generic endings such as "buyers will learn," "suppliers win," "cannot ship," and "the catalog won't save them" are not implications.
-At most one version per input may begin with first-person language. "i think," "i care," "i'd bet," "i would not underwrite," "i start/stop trusting," and "i'd worry less about X and more about Y" cannot be used as personality wrappers around analyst prose. Keep syntax grammatical and mechanisms causally distinct; never coin phrases such as "autonomy-software its way around."
+At most one version per input may begin with first-person language. "i think," "i care," "i'd bet," "i would not underwrite," "i start/stop trusting," "i'd worry/care less about X than Y," and "funny that X should be underwritten as Y" cannot be used as personality wrappers around analyst prose. Keep syntax grammatical and mechanisms causally distinct; never coin phrases such as "autonomy-software its way around."
 Keep every supplied fact fixed. First-person opinion is allowed; first-person access or evidence is not.
 
 NATIVE MANUAL POSTS (diction evidence only):
@@ -916,7 +916,7 @@ Rules:
 - Remove weak throat-clearing.
 - Remove AI slop tells: generic advice voice, symmetrical abstraction stacks, "the real edge", "most people miss", "not X but Y", and tidy consultant cadence.
 - For a frontier-tech thesis, use one elevated technical anchor if it sharpens the claim: mechanism, number, constraint, named technology, material/process detail, failure mode, or technical/industrial operating observation.
-- Make the startup consequence immediate: company, product, market, capital, talent, cost, margin, adoption, or timing. Technical detail is backing, not the whole post.
+- Make the startup relevance legible through company, product, market, capital, talent, cost, margin, adoption, or timing. It may stay implicit when a smart reader will get it. Technical detail is backing, not the whole post.
 - Do not use Slack, support tickets, dashboards, calendar invites, generic workflow handoffs, or "renamed owner" as the main proof. For frontier-tech drafts, replace that texture with compute, energy, materials, manufacturing, robotics, or space constraints.
 - Never add a fake founder/customer conversation, first-person event, benchmark, quote, or number. Preserve only evidence supplied with the candidate; otherwise rewrite as analysis or an explicit hypothesis.
 - Do not preserve technical detail merely because it is correct. If it does not sharpen the startup judgment, delete it.

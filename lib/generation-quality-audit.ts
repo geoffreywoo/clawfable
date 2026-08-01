@@ -10,7 +10,11 @@ import {
   getTweets,
   getVoiceCorpusSnapshot,
 } from './kv-storage';
-import { assessGeoffreyQualityPolicy, GEOFFREY_QUALITY_POLICY_VERSION } from './quality-policy';
+import {
+  assessGeoffreyQualityPolicy,
+  GEOFFREY_QUALITY_POLICY_VERSION,
+  getGeoffreyQualityPolicyActivation,
+} from './quality-policy';
 import {
   buildSourcePlannerPlan,
   classifyGeoffreyTopicDomain,
@@ -184,6 +188,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
       finalCriticVersion: FINAL_CRITIC_VERSION,
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
+      autopostActivation: getGeoffreyQualityPolicyActivation(),
     },
     corpus: corpus ? {
       snapshotId: corpus.snapshotId,

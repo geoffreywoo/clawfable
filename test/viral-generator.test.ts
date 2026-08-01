@@ -1826,7 +1826,8 @@ describe('generateViralBatch', () => {
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
     expect(createCall.system).not.toContain('## ENGAGEMENT DATA');
     expect(createCall.system).not.toContain('SYSTEM WINNER');
-    expect(userPrompt).toContain('it does not have to lead with the affected actor');
+    expect(userPrompt).toContain('the final post does not need to spell it out when a smart reader will get it');
+    expect(userPrompt).toContain('Do not force that actor into the text merely to satisfy the brief');
     expect(userPrompt).toContain('Make a human attitude legible');
     expect(userPrompt).toContain('at most one may begin with first-person language');
     expect(userPrompt).toContain('Keep each mechanism causally coherent');

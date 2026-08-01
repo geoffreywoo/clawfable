@@ -12,7 +12,27 @@ import { scoreSlopRisk } from './virality-signals';
 import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v8';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v9';
+
+export interface GeoffreyQualityPolicyActivation {
+  activated: boolean;
+  configuredVersion: string | null;
+  currentVersion: string;
+  requiresExplicitProductionActivation: boolean;
+}
+
+export function getGeoffreyQualityPolicyActivation(): GeoffreyQualityPolicyActivation {
+  const configuredVersion = process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION?.trim() || null;
+  const requiresExplicitProductionActivation = process.env.VERCEL_ENV === 'production';
+  return {
+    activated: configuredVersion
+      ? configuredVersion === GEOFFREY_QUALITY_POLICY_VERSION
+      : !requiresExplicitProductionActivation,
+    configuredVersion,
+    currentVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+    requiresExplicitProductionActivation,
+  };
+}
 
 export interface GeoffreyQualityCandidate {
   content: string;
