@@ -633,7 +633,9 @@ function buildFallbackLabel(tweets: NetworkTweetObservation[]): string {
 
 export function inferNetworkSemanticDomain(value: string): TopicSemanticDomain {
   const text = value.toLowerCase();
-  if (/\b(?:servo browser|servo web|mozilla servo|browser engine|rendering engine|web engine)\b/.test(text)) return 'browser_infrastructure';
+  const isServoWebPlatform = /\bservo\b/.test(text)
+    && /\b(?:acid ?3|browser|rendering|web compat|media quer(?:y|ies)|sharedworker|web platform|css|dom)\b/.test(text);
+  if (isServoWebPlatform || /\b(?:servo browser|servo web|mozilla servo|browser engine|rendering engine|web engine)\b/.test(text)) return 'browser_infrastructure';
   if (/\b(?:bitcoin|ethereum|crypto|defi|token|stablecoin|blockchain)\b/.test(text)) return 'crypto';
   if (/\b(?:election|president|congress|white house|democrat|republican|putin|russia|iran|israel|ukraine|geopolitic|military intelligence)\b/.test(text)) return 'politics_geopolitics';
   if (/\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|stellarator|grid|transformer|power plant)\b/.test(text)) return 'energy_nuclear';

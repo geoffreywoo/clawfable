@@ -58,6 +58,15 @@ function arm(overrides: Partial<BanditArmScore> & { arm: string; family: BanditA
   };
 }
 
+describe('Geoffrey semantic topic identity', () => {
+  it('overrides a stale robotics label for the observed Servo browser headline', () => {
+    expect(classifyGeoffreyTopicDomain(
+      'June in Servo: real world compat, media queries, SharedWorker, and more',
+      'robotics_automation',
+    )).toBe('browser_infrastructure');
+  });
+});
+
 function buildPolicy(): BanditPolicy {
   return {
     trainingSource: 'autopilot',

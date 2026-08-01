@@ -447,6 +447,7 @@ describe('followed-network topic intelligence', () => {
 
   it('keeps Servo in browser infrastructure and filters unusable X source shapes', () => {
     expect(inferNetworkSemanticDomain('Mozilla Servo browser engine adds a new rendering backend')).toBe('browser_infrastructure');
+    expect(inferNetworkSemanticDomain('June in Servo: real world compat, media queries, SharedWorker, and more')).toBe('browser_infrastructure');
     expect(inferNetworkSemanticDomain('A servo motor actuator failed during a humanoid duty cycle')).toBe('robotics_automation');
 
     expect(isUsableNetworkSourcePost({
