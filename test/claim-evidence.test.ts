@@ -183,4 +183,10 @@ describe('generated writing patterns', () => {
       'buyers can complain about qualification. processors hold the cards.',
     ).hits).toContain('packaged-industrial-closer');
   });
+
+  it('detects polished prediction cards that should not teach diction', () => {
+    expect(assessGeneratedWritingPatterns(
+      'Spain has the best midfield. Argentina has the better transition game.\n\nFinal call:\nSpain 58%\nArgentina 42%',
+    ).hits).toContain('prediction-percentage-card');
+  });
 });
