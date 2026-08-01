@@ -82,6 +82,8 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'prediction-percentage-card', weight: 0.52, pattern: /(?:^|\n)\s*final (?:call|prediction|pick)\s*:\s*(?:\n|$)[\s\S]{0,180}(?:^|\n)[^\n%]{1,50}\b\d{1,3}%\s*(?:\n|$)[\s\S]{0,80}(?:^|\n)[^\n%]{1,50}\b\d{1,3}%\s*$/im },
   { label: 'qualification-off-table', weight: 0.42, pattern: /\bqualification\b[^.!?\n]{0,120}\b(?:takes?|puts?|removes?)\b[^.!?\n]{0,90}\boff the table\b/i },
   { label: 'tautological-deployment-closer', weight: 0.42, pattern: /\b(?:(?:buyers?|customers?|companies|teams?)\s+(?:cannot|can['’]?t)\s+(?:deploy|use|sell|buy|run)\s+(?:parts?|products?|chips?|hardware|systems?)\s+that\s+(?:do|does)\s+not\s+(?:ship|work|run|exist)|(?:cannot|can['’]?t)\s+deploy\s+what\s+(?:does\s+not|doesn['’]?t)\s+ship)\b/i },
+  { label: 'paired-market-winners-losers', weight: 0.42, pattern: /\b(?:suppliers?|startups?|companies|founders?|buyers?|processors?|operators?|manufacturers?|resellers?)\b[^.!?\n]{0,100}\bwins?\b[.!?]\s*[^.!?\n]{0,100}\b(?:loses?|pays?|gets?\s+squeezed)\b/i },
+  { label: 'still-company-cannot-ship', weight: 0.42, pattern: /\bis still (?:a|the) (?:company|startup|business|vendor) that (?:cannot|can['’]?t) ship\b/i },
 ];
 
 function clamp(value: number, min = 0, max = 1): number {

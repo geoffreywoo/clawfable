@@ -12,7 +12,7 @@ import { scoreSlopRisk } from './virality-signals';
 import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v4';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v5';
 
 export interface GeoffreyQualityCandidate {
   content: string;

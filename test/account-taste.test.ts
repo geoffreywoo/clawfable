@@ -497,6 +497,8 @@ describe('account taste scoring', () => {
       'Xiaomi-Robotics-1 is worth watching.',
       'rhenium price can move way before supply responds.',
       'inference chip startups with bad package yield lose, even with great silicon. buyers cannot deploy parts that do not ship.',
+      'the robotics magnet supplier that controls high-temperature performance wins. catalog resellers lose.',
+      'an inference-chip startup with a great die and weak packaging is still a company that cannot ship enough working systems.',
     ];
 
     for (const content of drafts) {

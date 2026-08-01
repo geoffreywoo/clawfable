@@ -895,12 +895,9 @@ ${voiceRescuePass ? '\nThis idea already failed one voice pass. Keep only the so
 
 ${buildGeoffreyNativeGenerationBrief()}
 
-For each input, return three independent posts:
-1. one blunt market or company take under 180 characters
-2. one first-person bet or direct question
-3. one loose two-beat reaction with a simpler second beat
+For each input, return three independent posts built from three independent thoughts, not three formatted versions of one thesis. Change what Geoffrey finds surprising, mispriced, exciting, annoying, funny, or doubtful across versions. Use the posture that is natural to the evidence; do not assign a fixed format to each version.
 
-Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. At least one version must plainly name who wins, loses, pays, or becomes harder to fund.
+Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. Do not force a win/lose/pay frame. Generic endings such as "buyers will learn," "suppliers win," "cannot ship," and "the catalog won't save them" are not implications.
 Keep every supplied fact fixed. First-person opinion is allowed; first-person access or evidence is not.
 
 NATIVE MANUAL POSTS (diction evidence only):

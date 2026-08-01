@@ -1826,7 +1826,9 @@ describe('generateViralBatch', () => {
     expect(createCall.system).not.toContain('a founder told me their old process took 42 minutes');
     expect(createCall.system).not.toContain('## ENGAGEMENT DATA');
     expect(createCall.system).not.toContain('SYSTEM WINNER');
-    expect(userPrompt).toContain('In the first 120 characters');
+    expect(userPrompt).toContain('it does not have to lead with the affected actor');
+    expect(userPrompt).toContain('Make a human attitude legible');
+    expect(userPrompt).not.toContain('In the first 120 characters');
     expect(userPrompt).toContain('gets the headlines');
     expect(userPrompt).toContain('one supplied fact:qualified tungsten-carbide powder and tool supply can cap machining throughput');
     expect(userPrompt).not.toContain('ammonium paratungstate ->');
