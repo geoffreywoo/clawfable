@@ -471,7 +471,26 @@ function clearsQueuedPostPreflight(
       stage: 'queue',
     }).eligible)
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
+    && !getGeoffreySemanticHistoryIssue(agent, tweet, recentPostedContent)
   );
+}
+
+function getGeoffreySemanticHistoryIssue(
+  agent: Agent,
+  tweet: Pick<Tweet, 'content' | 'topic'>,
+  recentPostedContent: string[],
+): string | null {
+  if (!isGeoffreyAccount(agent.handle)) return null;
+  const maxSimilarity = recentPostedContent.reduce((highest, content) => Math.max(
+    highest,
+    semanticIdeaSimilarity(
+      { content: tweet.content, topic: tweet.topic },
+      { content },
+    ),
+  ), 0);
+  return maxSimilarity >= 0.48
+    ? `Semantic idea repeats a recent Geoffrey post (${maxSimilarity.toFixed(2)} similarity).`
+    : null;
 }
 
 function queuedTweetAsCandidate(tweet: Tweet): RankableProtocolTweet {
@@ -663,6 +682,13 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
   const nativeContext = isGeoffreyAccount(agent.handle)
     ? await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 })
     : null;
+  const semanticHistoryContent = [...new Set([
+    ...recentPostedContent,
+    ...(nativeContext?.allTweets || [])
+      .filter((tweet) => Boolean(tweet.xTweetId) && ['posted', 'deleted_from_x'].includes(tweet.status))
+      .slice(0, 50)
+      .map((tweet) => tweet.content),
+  ])];
   const topicPortfolioHistory = nativeContext ? await getPostLog(agent.id, 80) : [];
   const policyCurrentQueue = await rescoreQueuedTweetsForCurrentPolicy(agent, queuedTweets, nativeContext);
   const validationPassedQueue: Tweet[] = [];
@@ -685,7 +711,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
 
       if (
         resolved.tweet
-        && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)
+        && clearsQueuedPostPreflight(agent, resolved.tweet, semanticHistoryContent, nativeContext)
       ) {
         validationPassedQueue.push(resolved.tweet);
       }
@@ -708,7 +734,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${lengthIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, semanticHistoryContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
@@ -730,7 +756,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${completenessIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, semanticHistoryContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;
@@ -1002,7 +1028,8 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
       }
     }
 
-    const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, recentPostedContent);
+    const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, semanticHistoryContent)
+      || getGeoffreySemanticHistoryIssue(agent, queuedTweet, semanticHistoryContent);
     if (duplicateIssue) {
       const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, duplicateIssue);
       await addLearningSignal(agent.id, {
@@ -1035,7 +1062,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason: `${duplicateIssue} ${resolved.detail}`,
       });
 
-      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, recentPostedContent, nativeContext)) {
+      if (resolved.tweet && clearsQueuedPostPreflight(agent, resolved.tweet, semanticHistoryContent, nativeContext)) {
         validationPassedQueue.push(resolved.tweet);
       }
       continue;

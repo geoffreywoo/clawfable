@@ -43,6 +43,12 @@ const IDEA_LOW_SIGNAL_WORDS = new Set([
   'whether',
 ]);
 
+const IDEA_ENTITY_TERMS = [
+  'asic', 'beryllium', 'dysprosium', 'gallium', 'germanium', 'graphite', 'hbm',
+  'hydrofluoric acid', 'neodymium', 'nvlink', 'rhenium', 'stellarator', 'terbium',
+  'tokamak', 'tritium', 'tungsten', 'tungsten carbide',
+];
+
 function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
@@ -60,16 +66,21 @@ function unique<T>(values: T[]): T[] {
 }
 
 function canonicalIdeaToken(token: string): string {
+  if (/^(aerospace|blade|engine|rocket|superalloy|turbine)/.test(token)) return 'aerospace-chain';
   if (/^(asset)/.test(token)) return 'asset';
   if (/^(approv)/.test(token)) return 'approval';
   if (/^(batter)/.test(token)) return 'battery';
+  if (/^(backlog|demand|forecast|order)/.test(token)) return 'demand';
+  if (/^(byproduct|recover|stream)/.test(token)) return 'byproduct-supply';
   if (/^(buyer|customer|lender)/.test(token)) return 'counterparty';
+  if (/^(capacity|output|supply|availab)/.test(token)) return 'supply';
   if (/^(cell|anode)/.test(token)) return 'battery-cell';
   if (/^(coat)/.test(token)) return 'coating';
   if (/^(compar|mark|resale|valu|worth)/.test(token)) return 'valuation';
   if (/^(digg|mine|mining|mined|ore)/.test(token)) return 'extraction';
   if (/^(industr|manufactur|production)/.test(token)) return 'industrial';
   if (/^(maint)/.test(token)) return 'maintenance';
+  if (/^(moly)/.test(token)) return 'molybdenum';
   if (/^(morph|particle|shape)/.test(token)) return 'morphology';
   if (/^(purif|purity)/.test(token)) return 'purification';
   if (/^(qualif)/.test(token)) return 'qualification';
@@ -83,6 +94,11 @@ function fullIdeaTokens(input: string): Set<string> {
       .filter((token) => !IDEA_LOW_SIGNAL_WORDS.has(token))
       .map(canonicalIdeaToken),
   );
+}
+
+function ideaEntityTerms(input: string): Set<string> {
+  const normalized = ` ${input.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  return new Set(IDEA_ENTITY_TERMS.filter((term) => normalized.includes(` ${term} `)));
 }
 
 export function extractHookType(content: string): TweetHookType {
@@ -272,9 +288,13 @@ export function semanticIdeaSimilarity(
   const jaccard = union === 0 ? 0 : overlap / union;
   const domainOverlap = extractDomainTags(left.content)
     .some((domain) => extractDomainTags(right.content).includes(domain));
+  const leftEntities = ideaEntityTerms([left.topic, left.thesis, left.content].filter(Boolean).join(' '));
+  const rightEntities = ideaEntityTerms([right.topic, right.thesis, right.content].filter(Boolean).join(' '));
+  const entityOverlap = [...leftEntities].some((entity) => rightEntities.has(entity));
   return Math.max(0, Math.min(1,
     (containment * 0.82)
     + (jaccard * 0.18)
-    + (domainOverlap ? 0.04 : 0),
+    + (domainOverlap ? 0.04 : 0)
+    + (entityOverlap ? 0.24 : 0),
   ));
 }

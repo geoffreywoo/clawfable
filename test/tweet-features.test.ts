@@ -28,4 +28,19 @@ describe('semantic idea similarity', () => {
 
     expect(semanticIdeaSimilarity({ content: graphite }, { content: fusion })).toBe(0);
   });
+
+  it('detects the same rhenium byproduct thesis after the posture and nouns change', () => {
+    const posted = 'space demand can rip while rhenium supply barely notices. rhenium used in single-crystal superalloys arrives through tiny molybdenum and copper byproduct streams, then the blade metallurgy needs qualification. how are aerospace forecasts pricing that lag?';
+    const reskins = [
+      "i'd rather fund rhenium recovery than pretend another aerospace order creates primary supply. it's a byproduct of copper and moly mines. the mine plan doesn't read engine backlogs.",
+      "i'd rather own whoever engineers rhenium out of qualified blades than hope copper miners dig faster because a jet engine asked nicely. byproduct metals don't answer to their buyers.",
+    ];
+
+    for (const reskin of reskins) {
+      expect(semanticIdeaSimilarity(
+        { content: reskin, topic: 'rhenium aerospace superalloys' },
+        { content: posted },
+      )).toBeGreaterThanOrEqual(0.48);
+    }
+  });
 });

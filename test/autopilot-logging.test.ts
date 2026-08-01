@@ -548,6 +548,88 @@ describe('autopilot remote debug logging', () => {
     }));
   });
 
+  it('blocks a Geoffrey thesis reskin using stored posts when the post log is empty', async () => {
+    const repeatedDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'rhenium-reskin',
+      content: "i'd rather fund rhenium recovery than pretend another aerospace order creates primary supply. it's a byproduct of copper and moly mines. the mine plan doesn't read engine backlogs.",
+      topic: 'rhenium aerospace superalloys',
+      confidenceScore: 0.738,
+      candidateScore: 81,
+      slopScore: 0.2,
+      finalCriticScores: {
+        voiceFit: 0.82,
+        nativeVoice: 0.78,
+        casualStartupFit: 0.7,
+        technicalCredibility: 0.78,
+        cringeRisk: 0.08,
+        stiffnessRisk: 0.1,
+        policySafety: 0.98,
+        overall: 0.84,
+      },
+    };
+    const priorPost = {
+      ...validQueuedTweet,
+      id: 'prior-rhenium-post',
+      status: 'posted',
+      xTweetId: 'x-prior-rhenium',
+      postedAt: '2026-07-20T11:50:37.894Z',
+      content: 'space demand can rip while rhenium supply barely notices. rhenium used in single-crystal superalloys arrives through tiny molybdenum and copper byproduct streams, then the blade metallurgy needs qualification. how are aerospace forecasts pricing that lag?',
+      topic: 'rhenium aerospace superalloys',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([repeatedDraft]);
+    mocks.getPostLog.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'rhenium', 'aerospace'],
+        antiGoals: ['repeated theses'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+        summary: 'Geoffrey writes from technical constraints.',
+      },
+      learnings: {
+        voiceCorpus: activeGeoffreyCorpus,
+        operatorVoiceReference: {
+          pinnedExamples: [],
+          bestPerformers: [
+            'software is nepo + codex/claude\nhardware is where alpha is left',
+            'we love @Etched. what this team is building is insane.',
+            'yes, threshold to beat is QQQ. those guys all seem like zombies',
+            'x algo def way better. more useful content. more friends. yall cooking.',
+          ].map((content) => ({ content, topic: 'AI', source: 'timeline' })),
+          startupRegisterExamples: [
+            'software is nepo + codex/claude\nhardware is where alpha is left',
+            'we love @Etched. what this team is building is insane.',
+            'yes, threshold to beat is QQQ. those guys all seem like zombies',
+            'x algo def way better. more useful content. more friends. yall cooking.',
+          ].map((content) => ({ content, topic: 'AI', source: 'timeline' })),
+        },
+      },
+      memory: null,
+      allTweets: [repeatedDraft, priorPost],
+    });
+    mocks.resolveQueuedTweetFailure.mockResolvedValue({
+      action: 'deleted',
+      tweet: null,
+      detail: 'Removed the repeated thesis from the queue.',
+    });
+
+    const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ handle: 'geoffwoo' }),
+      expect.objectContaining({ id: 'rhenium-reskin' }),
+      expect.stringContaining('Semantic idea repeats a recent Geoffrey post'),
+    );
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      tweetId: 'rhenium-reskin',
+      metadata: expect.objectContaining({ qualityGate: 'recent_duplicate' }),
+    }));
+  });
+
   it('quarantines Geoffrey drafts that copy followed-account wording before posting', async () => {
     const sourceEvidence = 'Hybrid bonding surface roughness determines alignment yield across advanced chiplet packages.';
     const copiedDraft = {
