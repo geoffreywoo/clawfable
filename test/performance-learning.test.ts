@@ -30,6 +30,7 @@ import {
   getLearningInsightPromptLimits,
   getTweetClassificationMaxTokens,
   getVelocityFollowupMaxTokens,
+  selectTweetClassificationBacklog,
 } from '@/lib/performance';
 
 function performanceEntry(overrides: Record<string, unknown>) {
@@ -97,6 +98,28 @@ describe('performance learning smoke', () => {
     expect(list).toContain('[0] "AI agent evals');
     expect(list).toContain('...');
     expect(list).not.toContain('FINAL_CLASSIFICATION_SENTINEL');
+  });
+
+  it('drains the full classification backlog in bounded batches', () => {
+    const timeline = Array.from({ length: 45 }, (_, index) => ({ id: `timeline-${index}`, text: `timeline post ${index}` }));
+    const latest = new Map<string, any>();
+    const first = selectTweetClassificationBacklog(timeline, latest, new Set(), 20);
+    first.forEach((tweet) => latest.set(tweet.id, performanceEntry({
+      xTweetId: tweet.id,
+      format: 'observation',
+      topic: 'manufacturing',
+    })));
+    const second = selectTweetClassificationBacklog(timeline, latest, new Set(), 20);
+    second.forEach((tweet) => latest.set(tweet.id, performanceEntry({
+      xTweetId: tweet.id,
+      format: 'hot_take',
+      topic: 'inference',
+    })));
+    const third = selectTweetClassificationBacklog(timeline, latest, new Set(), 20);
+
+    expect(first.map((tweet) => tweet.id)).toEqual(timeline.slice(0, 20).map((tweet) => tweet.id));
+    expect(second.map((tweet) => tweet.id)).toEqual(timeline.slice(20, 40).map((tweet) => tweet.id));
+    expect(third.map((tweet) => tweet.id)).toEqual(timeline.slice(40).map((tweet) => tweet.id));
   });
 
   it('budgets velocity follow-up prompt context and completion size', () => {

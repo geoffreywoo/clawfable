@@ -1,0 +1,48 @@
+export const GEOFFREY_NATIVE_EVAL = [
+  'software is nepo + codex/claude\nhardware is where alpha is left',
+  'x algo def way better. more useful content. more friends. yall cooking.',
+  'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.',
+  'everyone talks tungsten ore. qualified carbide powder + tool life still cap machining throughput. this is an actually good startup market.',
+  'inference pricing keeps falling while hbm and rack power get harder. pretty good setup for weird new silicon.',
+  'robot demos are getting insane. actuator life at production duty cycles still decides if this is a company or a science fair.',
+  'there are a lot of gpu substitutes and not enough transformer substitutes.',
+  'manufacturing startups should brag about first-pass yield more and robot count less.',
+  'rare earth mining gets the headlines. separation chemistry is where a new supplier spends five years becoming real.',
+  'a fast model on a slow interconnect is a very expensive way to discover queueing theory.',
+] as const;
+
+export const GEOFFREY_KNOWN_BAD_EVAL = [
+  'The real edge in AI is not more models, but better feedback loops. The winners will compound faster.',
+  'Most people do not realize the real moat in robotics is the system, not the hardware.',
+  'The best AI teams know the rollout is working when the Slack channel gets quieter and every support ticket has a clean handoff.',
+  'A founder showed me two inference chips yesterday. One was 47% faster. The lesson was obvious: distribution wins.',
+  'Inference meets manufacturing. Manufacturing wins.',
+  'Congrats on the robot demo; production still has standards.',
+  'Show me the actuator lifetime, then we can argue about the future.',
+  'The winners in rare earths will build a feedback loop, create leverage, and compound their moat.',
+  'Three rules for fusion founders: start with customers, build a playbook, and move with velocity.',
+  'AI infrastructure can be extremely capital intensive and still extremely capital efficient.',
+] as const;
+
+export const GEOFFREY_NEAR_MISS_EVAL = [
+  'The constraint is not inference demand. It is rack-level power delivery.',
+  'The real question in fusion is whether the supply chain can keep up.',
+  'Founders love speed until thermal density sends them the invoice.',
+  'Forecasts love smooth curves; reactor qualification is less cooperative.',
+  'How do you model robotics margins when every actuator has a different field life?',
+  'Finance guys love rare earth charts. Separation chemistry still has standards.',
+  'AI meets the factory floor. The factory floor wins.',
+  'Congrats on the benchmark; HBM bandwidth still has standards.',
+  'Show me first-pass yield, then we can argue about re-industrialization.',
+  'A humanoid can be extremely dexterous and still extremely uneconomic.',
+  'Tritium breeding, neutron damage, remote maintenance, blanket materials, and heat extraction. Fusion is a systems problem.',
+  'Most people miss that machine-tool lead times are the real industrial moat.',
+  'The winners will own the power, the compute, and the feedback loop.',
+  'Everyone wants more chips. Nobody wants to wait for transformers.',
+  'This is less a robotics problem and more a field-service problem.',
+  'The calendar has physics when qualified nuclear forgings take three years.',
+  'There are three things every inference founder should measure: utilization, latency, and power.',
+  'Startup advice for hard tech: start with the bottleneck, validate the market, then build the moat.',
+  'The future of manufacturing belongs to teams that turn every failure into a learning loop.',
+  'Rare earth independence is not a mining story. It is a process-control story.',
+] as const;

@@ -3,7 +3,7 @@ import { extractCandidateFeatureTags } from './tweet-features';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
 
 export interface HistoricalWinnerAssessment {
-  disposition: 'native_voice_anchor' | 'qualified_system_anchor' | 'engagement_mechanic_only';
+  disposition: 'native_voice_anchor' | 'engagement_mechanic_only';
   evidenceWeight: number;
   unsafePatterns: string[];
   spreadMechanics: string[];
@@ -50,7 +50,15 @@ export function assessHistoricalWinner(entry: TweetPerformance): HistoricalWinne
     replies: entry.replies,
     retweets: entry.retweets,
   });
-  if (entry.source !== 'autopilot') {
+  if (entry.voiceCorpusDispositions?.includes('diction_anchor')) {
+    return {
+      disposition: 'native_voice_anchor',
+      evidenceWeight: entry.authorshipConfidence ?? (entry.source === 'manual' ? 1 : 0.9),
+      unsafePatterns: [],
+      spreadMechanics,
+    };
+  }
+  if (!entry.voiceCorpusDispositions && entry.source !== 'autopilot') {
     return {
       disposition: 'native_voice_anchor',
       evidenceWeight: entry.source === 'manual' ? 1 : 0.9,
@@ -72,7 +80,7 @@ export function assessHistoricalWinner(entry: TweetPerformance): HistoricalWinne
           : 1;
 
   return {
-    disposition: patterns.hits.length > 0 ? 'engagement_mechanic_only' : 'qualified_system_anchor',
+    disposition: 'engagement_mechanic_only',
     evidenceWeight,
     unsafePatterns: patterns.hits,
     spreadMechanics,

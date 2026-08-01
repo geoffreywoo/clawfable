@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildBanditSlotPlan, type BanditPolicy, type BanditArmScore } from '@/lib/bandit';
-import { buildManualTopicProfile, buildSourcePlannerPlan, enrichTrendingTopics, formatTrendEvidence } from '@/lib/source-planner';
+import {
+  buildManualTopicProfile,
+  buildSourcePlannerPlan,
+  classifyGeoffreyTopicDomain,
+  enrichTrendingTopics,
+  formatTrendEvidence,
+  isCoreGeoffreyTopicDomain,
+} from '@/lib/source-planner';
 import type { AgentLearnings, ManualExampleCuration, TweetPerformance } from '@/lib/types';
 
 function perf(overrides: Partial<TweetPerformance> & { xTweetId: string; content: string; postedAt?: string; checkedAt?: string }): TweetPerformance {
@@ -304,7 +311,87 @@ describe('source planner', () => {
 
     expect(topic.fitScores.identityFit).toBeGreaterThan(0);
     expect(topic.sourceLane).toBe('reject');
-    expect(topic.plannerReason).toContain('politics-led subject lacks manual evidence');
+    expect(topic.plannerReason).toContain('politics-led subject lacks exceptional evidence');
+  });
+
+  it('requires primary evidence or two independent authors for Geoffrey factual stories', () => {
+    const baseStory = {
+      id: 922,
+      headline: 'A new inference ASIC claims lower serving cost at production scale.',
+      source: 'Hacker News / example.com',
+      relevanceScore: 95,
+      category: 'inference ASIC startups',
+      timestamp: new Date().toISOString(),
+      tweetCount: 0,
+      sourceType: 'hacker_news' as const,
+      sourceUrl: 'https://example.com/inference-asic',
+      publisher: 'example.com',
+      sourceCount: 1,
+      engagementScore: 500,
+      sourceQuality: 0.8,
+      isPrimarySource: false,
+    };
+    const voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['AI', 'inference ASICs', 'startups'],
+      antiGoals: ['unsupported claims'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about AI companies, compute, and startup markets.',
+    };
+    const [unqualified] = enrichTrendingTopics([baseStory], voiceProfile, null, 'moderate');
+    const [primary] = enrichTrendingTopics([{ ...baseStory, id: 923, isPrimarySource: true }], voiceProfile, null, 'moderate');
+
+    expect(unqualified.sourceLane).toBe('reject');
+    expect(unqualified.plannerReason).toContain('two independent authors or primary-source support');
+    expect(primary.sourceLane).not.toBe('reject');
+  });
+
+  it('keeps at least 70% of Geoffrey briefs in core startup and frontier domains', () => {
+    const trending = Array.from({ length: 5 }, (_, index) => ({
+      id: 940 + index,
+      networkTopicId: `network-stablecoin-${index}`,
+      headline: `Stablecoin network ${index} is breaking out with startup customers and a concrete margin implication.`,
+      source: '@author1, @author2, @author3',
+      relevanceScore: 98 - index,
+      category: 'crypto stablecoin adoption',
+      timestamp: new Date().toISOString(),
+      tweetCount: 4,
+      sourceType: 'x' as const,
+      sourceCount: 3,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.95,
+      networkBreakoutScore: 0.94,
+      topicConfidence: 0.92,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'crypto' as const,
+      topTweet: {
+        id: `stablecoin-${index}`,
+        text: 'A named startup customer is shifting settlement volume and supplier margins.',
+        likes: 900,
+        author: 'author1',
+      },
+    }));
+    const plan = buildSourcePlannerPlan({
+      count: 8,
+      autonomyMode: 'explore',
+      trendMixTarget: 100,
+      trendTolerance: 'aggressive',
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI startups', 'inference ASICs', 'fusion', 'robotics', 'manufacturing', 'space'],
+        antiGoals: ['crypto-first drift'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes about AI companies and frontier technology.',
+      },
+      learnings: null,
+      trending,
+    });
+    const coreCount = plan.slots.filter((slot) => isCoreGeoffreyTopicDomain(
+      classifyGeoffreyTopicDomain(`${slot.targetTopic} ${slot.trendHeadline || ''}`),
+    )).length;
+
+    expect(coreCount / plan.slots.length).toBeGreaterThanOrEqual(0.7);
+    expect(plan.slots.filter((slot) => slot.sourceLane === 'trend_adjacent_explore')).toHaveLength(2);
   });
 
   it('does not let a generic tech label bridge an unrelated Geoffrey trend', () => {

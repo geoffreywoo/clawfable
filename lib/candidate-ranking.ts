@@ -63,6 +63,15 @@ export interface RankableProtocolTweet {
   rationale: string;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  judgeProvider?: 'openai' | 'anthropic' | null;
+  judgeModel?: string | null;
+  qualityPolicyVersion?: string | null;
+  voiceCorpusVersion?: string | null;
+  finalCriticProvider?: 'openai' | 'anthropic' | null;
+  finalCriticModel?: string | null;
+  finalCriticVerdict?: 'allow' | 'review' | 'block' | null;
+  finalCriticScores?: CandidateJudgeBreakdown | null;
+  finalCriticVersion?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
   sourceLane?: ContentSourceLane | null;
@@ -1859,7 +1868,7 @@ export function getAutonomyConfidenceThreshold(mode: AutonomyMode): number {
   return 0.58;
 }
 
-export function rankGeneratedTweets(
+export function scoreGeneratedTweets(
   candidates: RankableProtocolTweet[],
   context: CandidateRankingContext,
 ): RankedProtocolTweet[] {
@@ -2189,6 +2198,32 @@ export function rankGeneratedTweets(
     } else if (context.style.autonomyMode === 'explore') {
       confidenceScore = clamp(confidenceScore + (freshnessScore * 0.08) + (surpriseScore * 0.04) - (policyRiskScore * 0.02));
     }
+    if (geoffreyStrict && candidate.finalCriticVerdict === 'allow' && candidate.finalCriticScores) {
+      const finalCritic = candidate.finalCriticScores;
+      const strictNativeVoice = Math.min(
+        accountTasteScore.nativeVoiceScore,
+        finalCritic.nativeVoice ?? finalCritic.voiceFit,
+      );
+      const strictTechnicalCredibility = Math.min(
+        accountTasteScore.technicalCredibilityScore,
+        finalCritic.technicalCredibility ?? accountTasteScore.technicalCredibilityScore,
+      );
+      const strictCringeRisk = Math.max(accountTasteScore.cringeRisk, finalCritic.cringeRisk ?? 0);
+      const strictStiffnessRisk = Math.max(stiffnessRiskScore, finalCritic.stiffnessRisk ?? 0);
+      confidenceScore = clamp(
+        finalCritic.overall * 0.2
+        + strictNativeVoice * 0.18
+        + casualStartupFitScore * 0.14
+        + strictTechnicalCredibility * 0.08
+        + (1 - slopScore) * 0.08
+        + (1 - strictCringeRisk) * 0.07
+        + (1 - strictStiffnessRisk) * 0.06
+        + (1 - generatedPatternScore.score) * 0.06
+        + (1 - accountTasteScore.voiceDriftRisk) * 0.05
+        + (1 - accountTasteScore.sourceCopyRisk) * 0.04
+        + (1 - manualAnchorReskinRiskScore) * 0.04,
+      );
+    }
     if (geoffreyStrict) {
       if (accountTasteScore.action === 'block') {
         confidenceScore = Math.min(confidenceScore, 0.39);
@@ -2300,12 +2335,23 @@ export function rankGeneratedTweets(
     };
   });
 
-  return ranked.sort((a, b) =>
+  return ranked;
+}
+
+export function sortRankedTweets(ranked: RankedProtocolTweet[]): RankedProtocolTweet[] {
+  return [...ranked].sort((a, b) =>
     b.candidateScore - a.candidateScore ||
     b.confidenceScore - a.confidenceScore ||
     a.policyRiskScore - b.policyRiskScore ||
     a.content.localeCompare(b.content)
   );
+}
+
+export function rankGeneratedTweets(
+  candidates: RankableProtocolTweet[],
+  context: CandidateRankingContext,
+): RankedProtocolTweet[] {
+  return sortRankedTweets(scoreGeneratedTweets(candidates, context));
 }
 
 export function selectTopRankedTweets(

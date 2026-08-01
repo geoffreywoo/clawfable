@@ -400,6 +400,15 @@ export interface Tweet {
   rationale?: string | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  judgeProvider?: 'openai' | 'anthropic' | null;
+  judgeModel?: string | null;
+  qualityPolicyVersion?: string | null;
+  voiceCorpusVersion?: string | null;
+  finalCriticProvider?: 'openai' | 'anthropic' | null;
+  finalCriticModel?: string | null;
+  finalCriticVerdict?: 'allow' | 'review' | 'block' | null;
+  finalCriticScores?: CandidateJudgeBreakdown | null;
+  finalCriticVersion?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
   generationMode?: AutonomyMode | null;
@@ -472,6 +481,30 @@ export interface Mention {
   inReplyToTweetId: string | null;
   engagementLikes: number;
   engagementRetweets: number;
+  createdAt: string;
+}
+
+export type AudienceVoiceComplaintTag =
+  | 'ai_slop'
+  | 'bot_voice'
+  | 'not_your_voice'
+  | 'generated_voice';
+
+export interface AudienceVoiceComplaint {
+  id: string;
+  agentId: string;
+  mentionId: string;
+  mentionTweetId: string | null;
+  parentXTweetId: string;
+  parentTweetId: string | null;
+  authorHandle: string;
+  content: string;
+  tags: AudienceVoiceComplaintTag[];
+  confidence: number;
+  generationProvider: Tweet['generationProvider'];
+  generationModel: string | null;
+  sourceLane: ContentSourceLane | null;
+  qualityPolicyVersion: string | null;
   createdAt: string;
 }
 
@@ -803,6 +836,69 @@ export interface TweetPerformance {
   slopScore?: number;
   replyBaitScore?: number;
   earlyVelocityScore?: number;
+  referenceType?: 'quoted' | 'replied_to' | 'retweeted' | null;
+  referencedTweetId?: string | null;
+  hasMedia?: boolean;
+  isTextComplete?: boolean;
+  authorshipProvenance?: VoiceCorpusAuthorshipProvenance;
+  authorshipConfidence?: number;
+  voiceCorpusDispositions?: VoiceCorpusDisposition[];
+  voiceCorpusVersion?: string;
+}
+
+export type VoiceCorpusAuthorshipProvenance =
+  | 'known_clawfable_generated'
+  | 'operator_composed'
+  | 'timeline_unmatched'
+  | 'unknown';
+
+export type VoiceCorpusDisposition =
+  | 'diction_anchor'
+  | 'topic_signal'
+  | 'mechanics_only'
+  | 'negative'
+  | 'excluded';
+
+export interface VoiceCorpusEntry {
+  xTweetId: string;
+  tweetId: string | null;
+  content: string;
+  contentHash: string;
+  provenance: VoiceCorpusAuthorshipProvenance;
+  authorshipConfidence: number;
+  dispositions: VoiceCorpusDisposition[];
+  nativeScore: number;
+  slopScore: number;
+  generatedPatternRisk: number;
+  selectionScore: number;
+  selectionReasons: string[];
+  exclusionReasons: string[];
+  topic: string;
+  featureTags: CandidateFeatureTags;
+  likes: number;
+  retweets: number;
+  replies: number;
+  postedAt: string;
+}
+
+export interface VoiceCorpusSummary {
+  snapshotId: string;
+  version: number;
+  active: boolean;
+  targetAnchorCount: number;
+  minimumAnchorCount: number;
+  anchorCount: number;
+  topicSignalCount: number;
+  mechanicsOnlyCount: number;
+  negativeCount: number;
+  excludedCount: number;
+  knownGeneratedAnchorCount: number;
+  generatedAt: string;
+}
+
+export interface VoiceCorpusSnapshot extends VoiceCorpusSummary {
+  agentId: string;
+  entries: VoiceCorpusEntry[];
 }
 
 export interface ManualExampleCuration {
@@ -842,6 +938,7 @@ export interface OperatorVoiceReference {
   pinnedExamples?: TweetPerformance[];
   startupRegisterExamples?: TweetPerformance[]; // topic-relevant human diction, not only broad engagement winners
   blockedXTweetIds?: string[];
+  corpusVersion?: string;
 }
 
 export interface SourceLanePerformance {
@@ -878,6 +975,7 @@ export interface AgentLearnings {
   operatorVoiceReference?: OperatorVoiceReference; // high-performing human-written voice anchors
   manualTopicProfile?: ManualTopicCluster[];
   manualExampleCuration?: ManualExampleCuration;
+  voiceCorpus?: VoiceCorpusSummary;
   sourceLanePerformance?: SourceLanePerformance[];
   styleModePerformance?: StyleModePerformance[];
   sourceBreakdown?: {

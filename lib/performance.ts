@@ -27,6 +27,7 @@ import {
   invalidateAgentConnection,
   saveRelationshipOpportunities,
   saveViralityPostmortems,
+  saveVoiceCorpusSnapshot,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
@@ -36,7 +37,10 @@ import { extractCandidateFeatureTags, extractStructureType } from './tweet-featu
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
 import { collapsePerformanceSnapshots } from './performance-history';
-import { historicalPerformanceEvidenceWeight } from './winner-learning';
+import { historicalPerformanceEvidenceWeight, inferContentSpreadMechanics } from './winner-learning';
+import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
+import { isGeoffreyAccount } from './account-taste';
+import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 import {
@@ -82,7 +86,26 @@ export function getLearningInsightMaxTokens(historyLength: number): number {
   return 1024;
 }
 
+export function filterLearningMentions(mentions: Mention[]): Mention[] {
+  return mentions.filter((mention) => {
+    const complaint = classifyAudienceVoiceComplaint(mention.content);
+    return !complaint.isComplaint || complaint.confidence < 0.9;
+  });
+}
+
 export function formatLearningInsightTweetExample(tweet: TweetPerformance, textChars: number): string {
+  if (
+    tweet.voiceCorpusDispositions
+    && !tweet.voiceCorpusDispositions.includes('diction_anchor')
+  ) {
+    const mechanics = inferContentSpreadMechanics(tweet.content, {
+      topic: tweet.topic,
+      thesis: tweet.thesis,
+      replies: tweet.replies,
+      retweets: tweet.retweets,
+    });
+    return `- [${tweet.likes} likes, ${tweet.retweets} RTs, source:${tweet.source}] mechanics=${mechanics.join('; ')}`;
+  }
   const content = tweet.content.replace(/\s+/g, ' ').trim();
   const text = content.length <= textChars
     ? content
@@ -143,6 +166,26 @@ function shouldTrackPerformanceCheckpoint(existing: TweetPerformance | undefined
   const lastChecked = parsePerformanceTimestamp(existing.checkedAt);
   if (!lastChecked) return true;
   return Date.parse(checkedAt) - lastChecked >= 10 * 60 * 1000;
+}
+
+function needsManualClassification(existing: TweetPerformance | undefined): boolean {
+  if (!existing) return true;
+  const formatMissing = !existing.format || existing.format === 'unknown';
+  const topicMissing = !existing.topic || ['general', 'unknown'].includes(existing.topic.toLowerCase());
+  return formatMissing || topicMissing;
+}
+
+export function selectTweetClassificationBacklog<T extends { id: string; text: string }>(
+  timeline: T[],
+  latestByXId: Map<string, TweetPerformance>,
+  knownClawfableXIds: Set<string>,
+  limit = 20,
+): T[] {
+  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  return timeline
+    .filter((tweet) => !knownClawfableXIds.has(String(tweet.id)))
+    .filter((tweet) => needsManualClassification(latestByXId.get(String(tweet.id))))
+    .slice(0, boundedLimit);
 }
 
 function manualPostSuccessSignals(signals: LearningSignal[]): { tweetIds: Set<string>; xTweetIds: Set<string> } {
@@ -686,16 +729,19 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const analysis = await getAnalysis(agent.id);
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
 
-  // Collect new tweets to track
+  // Collect new checkpoints plus a bounded classification backlog. Backlog
+  // entries are re-written as fresh snapshots, so later runs naturally move
+  // on instead of reclassifying the same first page forever.
   const checkedAtForRun = new Date().toISOString();
-  const newTweets = timeline.filter((t) =>
-    shouldTrackPerformanceCheckpoint(latestByXId.get(String(t.id)), t.createdAt, checkedAtForRun)
-  );
+  const classificationBacklog = selectTweetClassificationBacklog(timeline, latestByXId, ourXIds, 20);
+  const classificationBacklogIds = new Set(classificationBacklog.map((tweet) => String(tweet.id)));
+  const newTweets = timeline.filter((tweet) => (
+    classificationBacklogIds.has(String(tweet.id))
+    || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
+  ));
   if (newTweets.length === 0) return 0;
 
-  // Batch classify manually written tweets via the fast AI tier (up to 20 at a time)
-  const manualTweets = newTweets.filter((t) => !ourXIds.has(String(t.id)));
-  const classifications = await batchClassifyTweets(manualTweets.slice(0, 20));
+  const classifications = await batchClassifyTweets(classificationBacklog);
 
   let tracked = 0;
 
@@ -765,6 +811,10 @@ export async function checkPerformance(agent: Agent): Promise<number> {
       creativeRiskScore: ourTweet?.creativeRiskScore ?? undefined,
       slopScore: ourTweet?.slopScore ?? scoreSlopRisk(timelineTweet.text, inferredFeatures),
       replyBaitScore: ourTweet?.replyBaitScore ?? scoreReplyPotential(timelineTweet.text, inferredFeatures),
+      referenceType: timelineTweet.referenceType,
+      referencedTweetId: timelineTweet.referencedTweetId,
+      hasMedia: timelineTweet.hasMedia,
+      isTextComplete: timelineTweet.isTextComplete,
     };
     entry.actionRewards = computeActionRewards(entry, analysis?.engagementPatterns || null);
     entry.qualityAdjustedGrowthScore = entry.actionRewards.qualityAdjustedGrowthScore;
@@ -912,10 +962,19 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     getRecentMentions(agent.id, 500).catch(() => []),
     getPostLog(agent.id, 300).catch(() => []),
   ]);
-  const history = normalizeManualPerformanceSources(collapsePerformanceSnapshots(rawHistory), signals);
+  const learningMentions = filterLearningMentions(mentions);
+  let history = normalizeManualPerformanceSources(collapsePerformanceSnapshots(rawHistory), signals);
 
   if (history.length === 0) {
-    return {
+    const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
+      agentId: agent.id,
+      history: [],
+      tweets: allTweets,
+      postLog,
+      signals,
+      curation: manualExampleCuration,
+    });
+    const emptyLearnings: AgentLearnings = {
       agentId: agent.id,
       updatedAt: new Date().toISOString(),
       totalTracked: 0,
@@ -927,6 +986,20 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       topicRankings: [],
       insights: [],
       manualExampleCuration,
+      voiceCorpus: {
+        snapshotId: voiceCorpusSnapshot.snapshotId,
+        version: voiceCorpusSnapshot.version,
+        active: voiceCorpusSnapshot.active,
+        targetAnchorCount: voiceCorpusSnapshot.targetAnchorCount,
+        minimumAnchorCount: voiceCorpusSnapshot.minimumAnchorCount,
+        anchorCount: voiceCorpusSnapshot.anchorCount,
+        topicSignalCount: voiceCorpusSnapshot.topicSignalCount,
+        mechanicsOnlyCount: voiceCorpusSnapshot.mechanicsOnlyCount,
+        negativeCount: voiceCorpusSnapshot.negativeCount,
+        excludedCount: voiceCorpusSnapshot.excludedCount,
+        knownGeneratedAnchorCount: voiceCorpusSnapshot.knownGeneratedAnchorCount,
+        generatedAt: voiceCorpusSnapshot.generatedAt,
+      },
       styleModePerformance: buildStyleModePerformance([], allTweets, signals),
       audienceSegmentPerformance: [],
       promptStrategyPerformance: [],
@@ -936,13 +1009,36 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       topRelationshipHandles: [],
       viralityPostmortems: [],
     };
+    await Promise.all([
+      saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot),
+      saveLearnings(agent.id, emptyLearnings),
+    ]);
+    return emptyLearnings;
+  }
+
+  const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
+    agentId: agent.id,
+    history,
+    tweets: allTweets,
+    postLog,
+    signals,
+    curation: manualExampleCuration,
+  });
+  await saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot);
+  const strictVoiceCorpus = isGeoffreyAccount(agent.handle);
+  if (strictVoiceCorpus) {
+    history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
   }
 
   const autopilotHistory = history.filter((t) => t.source === 'autopilot');
   const manualHistory = history.filter((t) => t.source === 'manual');
   const timelineHistory = history.filter((t) => t.source === 'timeline');
-  const operatorReferenceHistory = history.filter((t) => t.source !== 'autopilot');
-  const operatorHistory = history.filter((t) => t.source !== 'autopilot');
+  const operatorReferenceHistory = strictVoiceCorpus
+    ? history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'))
+    : history.filter((tweet) => tweet.source !== 'autopilot');
+  const operatorHistory = strictVoiceCorpus
+    ? history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'))
+    : history.filter((tweet) => tweet.source !== 'autopilot');
   const trainingHistory = operatorHistory.length > 0
     ? history
     : autopilotHistory.length >= 10
@@ -961,7 +1057,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     weightedLearningScore(b) - weightedLearningScore(a) ||
     weightedEngagementScore(b) - weightedEngagementScore(a)
   );
-  const identityHistory = operatorHistory.length > 0 ? operatorHistory : trainingHistory;
+  const identityHistory = strictVoiceCorpus
+    ? operatorReferenceHistory
+    : operatorHistory.length > 0 ? operatorHistory : trainingHistory;
   const identitySorted = [...identityHistory].sort((a, b) =>
     weightedLearningScore(b) - weightedLearningScore(a) ||
     weightedEngagementScore(b) - weightedEngagementScore(a)
@@ -1009,7 +1107,11 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   // Engagement can learn from every post. Identity cannot: once manual/operator
   // evidence exists, generated posts are excluded from the style fingerprint.
   const styleFingerprint = computeStyleFingerprint(identitySorted.slice(0, 30), identitySorted.slice(-10));
-  const operatorVoiceReference = buildOperatorVoiceReference(operatorReferenceHistory, manualExampleCuration);
+  const operatorVoiceReference = buildOperatorVoiceReference(
+    operatorReferenceHistory,
+    manualExampleCuration,
+    voiceCorpusSnapshot.snapshotId,
+  );
   const manualTopicProfile = buildManualTopicProfile(operatorReferenceHistory, manualExampleCuration);
   const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
   const styleModePerformance = buildStyleModePerformance(history, allTweets, signals);
@@ -1020,11 +1122,11 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const networkClusterPerformance = buildNetworkClusterPerformance(history);
   const relationshipOpportunities = buildRelationshipOpportunities({
     agentId: agent.id,
-    mentions,
+    mentions: learningMentions,
     postLog,
     performanceHistory: history,
   });
-  const topRelationshipHandles = buildTopRelationshipHandles(mentions);
+  const topRelationshipHandles = buildTopRelationshipHandles(learningMentions);
   const baselineLikes = analysisLikeBaseline(history);
   const viralityPostmortems = sorted
     .filter((entry) => {
@@ -1063,6 +1165,20 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     operatorVoiceReference,
     manualTopicProfile,
     manualExampleCuration,
+    voiceCorpus: {
+      snapshotId: voiceCorpusSnapshot.snapshotId,
+      version: voiceCorpusSnapshot.version,
+      active: voiceCorpusSnapshot.active,
+      targetAnchorCount: voiceCorpusSnapshot.targetAnchorCount,
+      minimumAnchorCount: voiceCorpusSnapshot.minimumAnchorCount,
+      anchorCount: voiceCorpusSnapshot.anchorCount,
+      topicSignalCount: voiceCorpusSnapshot.topicSignalCount,
+      mechanicsOnlyCount: voiceCorpusSnapshot.mechanicsOnlyCount,
+      negativeCount: voiceCorpusSnapshot.negativeCount,
+      excludedCount: voiceCorpusSnapshot.excludedCount,
+      knownGeneratedAnchorCount: voiceCorpusSnapshot.knownGeneratedAnchorCount,
+      generatedAt: voiceCorpusSnapshot.generatedAt,
+    },
     sourceLanePerformance,
     styleModePerformance,
     audienceSegmentPerformance,
@@ -1205,6 +1321,7 @@ function buildStartupRegisterExamples(
 function buildOperatorVoiceReference(
   history: TweetPerformance[],
   curation: ManualExampleCuration,
+  corpusVersion?: string,
 ): OperatorVoiceReference | undefined {
   const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
   const usableHistory = history.filter((tweet) =>
@@ -1320,6 +1437,7 @@ function buildOperatorVoiceReference(
     pinnedExamples: pinnedExamples.slice(0, 3),
     startupRegisterExamples,
     blockedXTweetIds: [...blocked],
+    corpusVersion,
   };
 }
 
@@ -1473,7 +1591,7 @@ Include at least one rule comparing autopilot vs manual tweet performance (if bo
 Output bullet points, one per line, no numbering.`,
       prompt: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
 TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${trainingSetLabel})
-MANUAL POSTING RULE: Tweets manually posted by the operator are high-signal approvals. Treat their voice, sentiment, tone, topics, and structure as stronger guidance than autonomous posts unless direct deletion feedback contradicts them.
+VOICE CORPUS RULE: Only rows whose source text is shown are approved diction anchors. Every other row exposes spread mechanics only; never infer wording or cadence from it.
 
 STYLE FINGERPRINT (computed from top 30 tweets):
 - Avg length: ${styleFingerprint.avgLength} chars (${styleFingerprint.shortPct}% short, ${styleFingerprint.mediumPct}% medium, ${styleFingerprint.longPct}% long)
@@ -1489,7 +1607,7 @@ ${formatRankings.slice(0, promptLimits.rankingRows).map((f) => `- ${f.format}: a
 TOPIC RANKINGS:
 ${topicRankings.slice(0, promptLimits.rankingRows).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
 
-TOP ${best.length} TWEETS (with representative text so you can analyze style):
+TOP ${best.length} TWEETS (native anchor text or mechanics-only summaries):
 ${best.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
 BOTTOM ${worst.length} TWEETS:

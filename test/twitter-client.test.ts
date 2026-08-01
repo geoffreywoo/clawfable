@@ -27,7 +27,7 @@ vi.mock('twitter-api-v2', () => ({
   },
 }));
 
-import { decodeKeys, getDeepTimeline, getLatestTwitterTweetIdCursor, getMentionsFromTwitter, getSanitizedTweetTextIssue, postTweet, replyToTweet, sanitizeTweetText } from '@/lib/twitter-client';
+import { decodeKeys, getDeepTimeline, getLatestTwitterTweetIdCursor, getMentionsFromTwitter, getSanitizedTweetTextIssue, getUserTimeline, postTweet, replyToTweet, sanitizeTweetText } from '@/lib/twitter-client';
 
 const keys = {
   appKey: 'consumer-key',
@@ -163,6 +163,42 @@ describe('getLatestTwitterTweetIdCursor', () => {
       { tweetId: 'not-a-tweet-id' },
       {},
     ])).toBeUndefined();
+  });
+});
+
+describe('timeline source metadata', () => {
+  it('uses complete note-tweet text and preserves reference/media provenance', async () => {
+    mocks.userTimeline.mockResolvedValue({
+      data: {
+        data: [{
+          id: 'long-1',
+          text: 'This long post starts here...',
+          note_tweet: { text: 'This is the complete long-form post about hybrid bonding yield and qualification windows.' },
+          created_at: '2026-07-31T12:00:00.000Z',
+          lang: 'en',
+          referenced_tweets: [{ type: 'quoted', id: 'quoted-1' }],
+          attachments: { media_keys: ['media-1'] },
+          public_metrics: { like_count: 10, retweet_count: 2, reply_count: 1, quote_count: 3, bookmark_count: 4 },
+        }],
+        meta: {},
+      },
+    });
+
+    const timeline = await getUserTimeline(keys, 'user-1', 20);
+
+    expect(timeline[0]).toMatchObject({
+      text: 'This is the complete long-form post about hybrid bonding yield and qualification windows.',
+      referenceType: 'quoted',
+      referencedTweetId: 'quoted-1',
+      hasMedia: true,
+      isTextComplete: true,
+      lang: 'en',
+      quotes: 3,
+      bookmarks: 4,
+    });
+    expect(mocks.userTimeline).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      'tweet.fields': expect.arrayContaining(['referenced_tweets', 'attachments', 'note_tweet', 'lang']),
+    }));
   });
 });
 
@@ -321,6 +357,11 @@ describe('getDeepTimeline', () => {
         impressions: 1000,
         quotes: 1,
         bookmarks: 8,
+        referenceType: null,
+        referencedTweetId: null,
+        hasMedia: false,
+        isTextComplete: true,
+        lang: null,
       },
     ]);
     expect(mocks.userTimeline).toHaveBeenNthCalledWith(

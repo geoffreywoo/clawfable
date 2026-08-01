@@ -15,6 +15,19 @@ import {
 } from './network-topic-intelligence';
 
 export type TrendingSourceType = 'x' | 'hacker_news';
+export type TopicSemanticDomain =
+  | 'ai_compute'
+  | 'energy_nuclear'
+  | 'materials_minerals'
+  | 'robotics_automation'
+  | 'manufacturing_industrial'
+  | 'space_defense'
+  | 'browser_infrastructure'
+  | 'startups_markets'
+  | 'crypto'
+  | 'politics_geopolitics'
+  | 'general_technology'
+  | 'other';
 
 export interface TrendingTopic {
   id: number;
@@ -51,6 +64,8 @@ export interface TrendingTopic {
   topicWhyNow?: string | null;
   observedAt?: string | null;
   evidence?: NetworkTopicEvidence[];
+  semanticDomain?: TopicSemanticDomain | null;
+  topicUncertainty?: 'low' | 'medium' | 'high' | null;
 }
 
 export function getTrendingTopicStableId(topic: Pick<TrendingTopic, 'id' | 'networkTopicId'>): string {
@@ -74,7 +89,7 @@ const TOPIC_CLUSTERS: Record<string, TopicCluster> = {
   robotics: {
     priority: 11,
     keywords: [
-      'robot', 'robots', 'robotic', 'robotics', 'humanoid', 'actuator', 'actuators', 'servo',
+      'robot', 'robots', 'robotic', 'robotics', 'humanoid', 'actuator', 'actuators', 'servo motor',
       'autonomous vehicle', 'industrial automation', 'machine vision',
     ],
   },

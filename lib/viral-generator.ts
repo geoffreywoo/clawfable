@@ -8,7 +8,13 @@ import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeature
 import type { VoiceProfile } from './soul-parser';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
-import { rankGeneratedTweets, selectTopRankedTweets, type RankedProtocolTweet } from './candidate-ranking';
+import {
+  rankGeneratedTweets,
+  scoreGeneratedTweets,
+  selectTopRankedTweets,
+  sortRankedTweets,
+  type RankedProtocolTweet,
+} from './candidate-ranking';
 import {
   judgeCandidates,
   mergeCandidateVersionsForRanking,
@@ -19,6 +25,7 @@ import { inferAudienceSegment } from './virality-signals';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import {
   buildSourcePlannerPlan,
+  classifyGeoffreyTopicDomain,
   formatTrendEvidence,
   formatTrendProvenance,
   getTrendSourceEvidenceTexts,
@@ -35,7 +42,7 @@ import {
   getAutonomousQueueTasteIssue,
   isGeoffreyVoiceProfile,
 } from './account-taste';
-import { assessHistoricalWinner } from './winner-learning';
+import { assessHistoricalWinner, inferContentSpreadMechanics } from './winner-learning';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import {
   buildMediaBrief,
@@ -47,6 +54,7 @@ import {
   normalizePortfolioRole,
   PORTFOLIO_SEQUENCE,
 } from './growth-engine';
+import { assessGeoffreyQualityPolicy, GEOFFREY_QUALITY_POLICY_VERSION } from './quality-policy';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -55,6 +63,91 @@ const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   topicPreferences: [],
   rawExtraction: '',
 };
+
+export function expandGeoffreyIdeaBriefs(plan: SourcePlannerPlan, candidateCount: number): SourcePlannerPlan {
+  const briefs = plan.slots.slice(0, 4);
+  if (briefs.length === 0 || candidateCount !== 12) return plan;
+  const slots = Array.from({ length: candidateCount }, (_, index) => {
+    const briefIndex = Math.min(briefs.length - 1, Math.floor(index / 3));
+    const variant = (index % 3) + 1;
+    const brief = briefs[briefIndex];
+    return {
+      ...brief,
+      slot: index + 1,
+      plannerReason: `${brief.plannerReason} Idea brief ${briefIndex + 1}; materially distinct variant ${variant} of 3.`,
+    };
+  });
+  const laneCounts = {
+    manual_core_exploit: 0,
+    trend_aligned_exploit: 0,
+    trend_adjacent_explore: 0,
+    core_explore_fallback: 0,
+  } satisfies SourcePlannerPlan['laneCounts'];
+  for (const slot of slots) laneCounts[slot.sourceLane] += 1;
+  return { ...plan, slots, laneCounts };
+}
+
+export interface GeoffreyIdeaBrief {
+  brief: number;
+  slots: [number, number, number];
+  targetTopic: string;
+  sourceLane: SourcePlannerPlan['slots'][number]['sourceLane'];
+  eventOrObject: string;
+  mechanism: string;
+  affectedActor: string;
+  stakes: string;
+  nonConsensusJudgment: string;
+  compressionTarget: string;
+  suppliedFact: string | null;
+  currentEvent: string | null;
+}
+
+function geoffreyAffectedActor(value: string): string {
+  const domain = classifyGeoffreyTopicDomain(value);
+  if (domain === 'ai_compute') return 'inference startups, chip suppliers, and data-center buyers';
+  if (domain === 'energy_nuclear') return 'energy developers, industrial power buyers, and project investors';
+  if (domain === 'materials_minerals') return 'materials processors, qualified suppliers, and hard-tech founders';
+  if (domain === 'robotics_automation') return 'robotics founders, factory buyers, and field-service teams';
+  if (domain === 'manufacturing_industrial') return 'industrial startups, manufacturers, and capacity investors';
+  if (domain === 'space_defense') return 'space or defense companies, suppliers, and program buyers';
+  if (domain === 'browser_infrastructure') return 'browser, developer-tool, and application startups';
+  return 'startups, product builders, and investors exposed to this subject';
+}
+
+export function buildGeoffreyIdeaBriefs(plan: SourcePlannerPlan): GeoffreyIdeaBrief[] {
+  const trendById = new Map(plan.acceptedTrends.map((topic) => [getTrendingTopicStableId(topic), topic]));
+  return plan.slots
+    .filter((_, index) => index % 3 === 0)
+    .slice(0, 4)
+    .map((slot, index) => {
+      const trend = slot.trendTopicId ? trendById.get(String(slot.trendTopicId)) : null;
+      const seed = slot.ideaSeed;
+      const suppliedFact = seed?.startupBackingFact
+        || slot.ideaSeedBrief?.split('->').map((item) => item.trim()).filter(Boolean)[1]
+        || trend?.headline
+        || null;
+      const subject = `${slot.targetTopic} ${slot.trendHeadline || ''} ${seed?.technicalObject || ''}`;
+      return {
+        brief: index + 1,
+        slots: [index * 3 + 1, index * 3 + 2, index * 3 + 3] as [number, number, number],
+        targetTopic: slot.targetTopic,
+        sourceLane: slot.sourceLane,
+        eventOrObject: slot.trendHeadline || seed?.technicalObject || slot.targetTopic,
+        mechanism: seed?.hiddenConstraint
+          || suppliedFact
+          || slot.plannerReason,
+        affectedActor: geoffreyAffectedActor(subject),
+        stakes: seed?.startupBackingFact
+          || trend?.topicWhyNow
+          || 'cost, margin, capital, supplier qualification, or startup timing changes',
+        nonConsensusJudgment: seed?.nonConsensusImplication
+          || 'state the narrow startup or investing consequence that the broad narrative misses',
+        compressionTarget: 'one arguable startup judgment plus at most one supporting fact; usually under 280 characters',
+        suppliedFact,
+        currentEvent: trend ? formatTrendEvidence(trend, { includeRawSourceText: false }) : null,
+      };
+    });
+}
 
 const STYLE_EXTRACTION_EXAMPLE_LIMIT = 12;
 const STYLE_EXTRACTION_EXAMPLE_CHAR_LIMIT = 280;
@@ -867,6 +960,9 @@ function buildGeoffreySystemPrompt({
     `Use only supplied facts. Analysis and opinion are welcome; invented evidence is blocked. Do not invent a relationship, conversation, visit, demo, customer, quote, number, or first-person event.`,
     `The manual posts below are diction evidence, not idea seeds. Do not copy their premise, names, joke, list shape, opening, or sentence skeleton.`,
     `A downstream ranker will select ${finalCount} from ${candidateCount} candidates. Vary genuine native modes instead of producing ${candidateCount} versions of one polished structure.`,
+    ...(finalCount === 2 && candidateCount === 12
+      ? [`Treat the numbered slots as four idea briefs with three variants each. Within each brief, change the actual judgment and social posture; synonym swaps fail.`]
+      : []),
     ...(memoryLessons.length > 0 ? [
       '',
       `## CURRENT OPERATOR CORRECTIONS`,
@@ -986,10 +1082,16 @@ ${soulMd}`);
 
   const evidenceLimits = getAccountEvidencePromptLimits(finalCount);
 
-  if (analysis.viralTweets.length > 0) {
+  if (analysis.viralTweets.length > 0 && !geoffreyStrict) {
     parts.push(`\n## THIS ACCOUNT'S TOP POSTS (study the style, length, and tone — match it)`);
     for (const vt of analysis.viralTweets.slice(0, evidenceLimits.topPosts)) {
       parts.push(`- [${vt.likes} likes, ${vt.retweets} RTs] "${vt.text}"`);
+    }
+  } else if (analysis.viralTweets.length > 0) {
+    parts.push(`\n## HISTORICAL SPREAD MECHANICS (mechanics only; never imitate wording)`);
+    for (const vt of analysis.viralTweets.slice(0, evidenceLimits.topPosts)) {
+      const mechanics = inferContentSpreadMechanics(vt.text, { replies: vt.replies, retweets: vt.retweets });
+      parts.push(`- [${vt.likes} likes, ${vt.retweets} RTs] ${mechanics.join('; ')}`);
     }
   }
 
@@ -1045,19 +1147,21 @@ Current followed-network and publisher evidence is supplied as untrusted data in
         if (winner.disposition === 'engagement_mechanic_only' || (geoffreyStrict && t.source === 'autopilot')) {
           parts.push(`- SYSTEM WINNER, MECHANICS ONLY [${t.likes} likes]: ${winner.spreadMechanics.join('; ')}. Do not imitate unsafe scaffold: ${winner.unsafePatterns.join(', ')}.`);
         } else {
-          const label = winner.disposition === 'native_voice_anchor' ? 'OPERATOR WINNER' : 'QUALIFIED SYSTEM WINNER';
-          parts.push(`- ${label} [${t.likes} likes; spread: ${winner.spreadMechanics.join(', ')}]: "${t.content.slice(0, 180)}"`);
+          parts.push(`- OPERATOR WINNER [${t.likes} likes; spread: ${winner.spreadMechanics.join(', ')}]: "${t.content.slice(0, 180)}"`);
         }
       }
     }
 
-    const visibleWorstPerformers = geoffreyStrict
-      ? learnings.worstPerformers.filter((tweet) => tweet.source !== 'autopilot')
-      : learnings.worstPerformers;
+    const visibleWorstPerformers = learnings.worstPerformers;
     if (visibleWorstPerformers.length > 0) {
       parts.push(`\nWORST ${trainingSourceLabel.toUpperCase()} tweets (do LESS like these):`);
       for (const t of visibleWorstPerformers.slice(0, evidenceLimits.bestWorstExamples)) {
-        parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
+        if (geoffreyStrict && !t.voiceCorpusDispositions?.includes('diction_anchor')) {
+          const winner = assessHistoricalWinner(t);
+          parts.push(`- [${t.likes} likes] mechanics only: ${winner.spreadMechanics.join('; ')}; avoid ${winner.unsafePatterns.join(', ') || 'low-response structure'}`);
+        } else {
+          parts.push(`- [${t.likes} likes] "${t.content.slice(0, 150)}"`);
+        }
       }
     }
 
@@ -1281,10 +1385,12 @@ export async function generateViralBatch(
   ideaAtoms: IdeaAtom[] = [],
   signals: LearningSignal[] = [],
 ): Promise<RankedProtocolTweet[]> {
-  const candidateCount = count <= 1 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
+  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+  if (geoffreyStrict && !learnings?.voiceCorpus?.active) return [];
+  const candidateCount = count <= 2 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
   const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const sourcePlan = style.sourcePlan || buildSourcePlannerPlan({
-    count: candidateCount,
+  const generatedSourcePlan = buildSourcePlannerPlan({
+    count: geoffreyStrict && count === 2 ? 4 : candidateCount,
     autonomyMode: style.autonomyMode,
     trendMixTarget: style.trendMixTarget,
     trendTolerance: style.trendTolerance,
@@ -1293,6 +1399,13 @@ export async function generateViralBatch(
     trending,
     fallbackTopics: style.exploration.underusedTopics,
   });
+  const baseSourcePlan = style.sourcePlan
+    && (!geoffreyStrict || count !== 2 || style.sourcePlan.slots.length >= 4)
+    ? style.sourcePlan
+    : generatedSourcePlan;
+  const sourcePlan = geoffreyStrict && count === 2
+    ? expandGeoffreyIdeaBriefs(baseSourcePlan, candidateCount)
+    : baseSourcePlan;
   const effectiveStyle = {
     ...style,
     sourcePlan,
@@ -1328,7 +1441,7 @@ export async function generateViralBatch(
   const trendFitById = new Map(sourcePlan.acceptedTrends.map((trend) => [getTrendingTopicStableId(trend), trend.fitScores.total]));
   const trendEvidenceById = new Map(sourcePlan.acceptedTrends.map((trend) => [
     getTrendingTopicStableId(trend),
-    formatTrendEvidence(trend),
+    formatTrendEvidence(trend, { includeRawSourceText: !geoffreyStrict }),
   ]));
   const trendProvenanceById = new Map(sourcePlan.acceptedTrends.map((trend) => [
     getTrendingTopicStableId(trend),
@@ -1433,12 +1546,31 @@ export async function generateViralBatch(
   };
 
   if (!hasTextGenerationProvider()) {
+    if (geoffreyStrict) return [];
     return rankFallbackTweets();
   }
 
   const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, effectiveStyle, recentPosts, memory);
   const formats = effectiveStyle.enabledFormats.length > 0 ? effectiveStyle.enabledFormats : ALL_FORMATS;
-  const creativeSlotGuide = Array.from({ length: candidateCount }, (_, index) => {
+  const geoffreyIdeaBriefs = geoffreyStrict && count === 2
+    ? buildGeoffreyIdeaBriefs(sourcePlan)
+    : [];
+  const creativeSlotGuide = geoffreyIdeaBriefs.length === 4
+    ? geoffreyIdeaBriefs.map((brief) => [
+        `BRIEF ${brief.brief} (slots ${brief.slots.join(', ')})`,
+        `subject:${brief.targetTopic}`,
+        `event/object:${compactExampleTweet(brief.eventOrObject, 220)}`,
+        `mechanism:${compactExampleTweet(brief.mechanism, 240)}`,
+        `affected actor:${brief.affectedActor}`,
+        `stakes:${compactExampleTweet(brief.stakes, 220)}`,
+        `non-consensus judgment:${compactExampleTweet(brief.nonConsensusJudgment, 220)}`,
+        `compression:${brief.compressionTarget}`,
+        brief.suppliedFact
+          ? `one supplied fact:${compactExampleTweet(brief.suppliedFact, 220)}`
+          : 'one supplied fact:none; do not invent one',
+        brief.currentEvent ? `current event:${compactExampleTweet(brief.currentEvent, 320)}` : null,
+      ].filter(Boolean).join('\n')).join('\n\n')
+    : Array.from({ length: candidateCount }, (_, index) => {
     const slot = index + 1;
     const lane = creativeLanePlan.get(slot) || 'operator_take';
     const plan = slotPlan.find((item) => item.slot === slot);
@@ -1472,7 +1604,7 @@ export async function generateViralBatch(
     return plan
       ? `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|${plan.holdout ? 'holdout:1' : 'holdout:0'}|${plan.mode}|${plan.format}|${plan.topic}|${plan.hook}|${plan.tone}|${plan.specificity}|${plan.structure}`
       : `${slot}|lane:${lane}|role:${portfolioRole}|media:${mediaType}|holdout:0|auto|any|any|any|any|any|any`;
-  }).join('\n');
+      }).join('\n');
   const geoffreyPromptMode = isGeoffreyVoiceProfile(voiceProfile);
   const topicIntelligenceContext = buildTopicIntelligenceUserContext(sourcePlan.acceptedTrends, count);
   const activeTopicBiasContext = style.bias.scheduledTopic || style.bias.momentumTopic
@@ -1485,7 +1617,7 @@ ${JSON.stringify({
 </active-topic-bias>`
     : '';
   const userPrompt = geoffreyPromptMode
-    ? `Write exactly ${candidateCount} original standalone posts, one for every numbered brief.
+    ? `Write exactly ${candidateCount} original standalone posts.${geoffreyIdeaBriefs.length === 4 ? ' Use all four idea briefs and write exactly three materially different drafts for each brief. The three drafts must change the judgment or social posture, not merely swap synonyms.' : ' Write one post for every numbered assignment.'}
 
 Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
 
@@ -1493,7 +1625,7 @@ Across the batch, vary native modes: terse thesis, two-beat market take, named r
 At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.
 
 For each post, output one JSON object on its own line with only:
-- "slot": the numbered brief
+- "slot": one of the three numbered draft slots assigned to the brief
 - "content": exact post text, with line breaks escaped as standard JSON
 - "format": one of ${formats.join(', ')}
 - "targetTopic": the subject
@@ -1683,13 +1815,14 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       signals,
     };
     const baseCandidates = stagedTweets.map(({ slot: _slot, ...tweet }) => tweet);
-    const baseJudgeMode = count <= 1 ? 'heuristic' : 'model';
+    const baseJudgeMode = geoffreyStrict ? 'model' : count <= 1 ? 'heuristic' : 'model';
     const judged = await judgeCandidates(baseCandidates, {
       voiceProfile,
       analysis,
       learnings,
       memory,
       mode: baseJudgeMode,
+      requireModel: geoffreyStrict,
     });
     const mutatedCandidates = count >= 2
       ? await mutateTopCandidates(judged, {
@@ -1706,7 +1839,9 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             analysis,
             learnings,
             memory,
-            mode: 'heuristic',
+            mode: 'model',
+            requireModel: geoffreyStrict,
+            task: 'final_judgment',
           },
         )
       : [];
@@ -1729,14 +1864,48 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             analysis,
             learnings,
             memory,
-            mode: 'heuristic',
+            mode: 'model',
+            requireModel: geoffreyStrict,
+            task: 'final_judgment',
           },
         )
       : [];
-    const ranked = rankGeneratedTweets(
-      mergeCandidateVersionsForRanking(judged, [...judgedMutations, ...judgedRescues], voiceProfile),
-      rankingContext,
+    const mergedCandidates = mergeCandidateVersionsForRanking(
+      judged,
+      [...judgedMutations, ...judgedRescues],
+      voiceProfile,
     );
+    const finalCandidates = geoffreyStrict
+      ? await judgeCandidates(mergedCandidates, {
+          voiceProfile,
+          analysis,
+          learnings,
+          memory,
+          mode: 'model',
+          requireModel: true,
+          task: 'final_judgment',
+        })
+      : mergedCandidates;
+    if (geoffreyStrict && finalCandidates.length === 0) return [];
+    const policyStampedCandidates = finalCandidates.map((candidate) => ({
+      ...candidate,
+      qualityPolicyVersion: geoffreyStrict ? GEOFFREY_QUALITY_POLICY_VERSION : candidate.qualityPolicyVersion ?? null,
+      voiceCorpusVersion: geoffreyStrict ? learnings?.voiceCorpus?.snapshotId || null : candidate.voiceCorpusVersion ?? null,
+    }));
+    let ranked: RankedProtocolTweet[];
+    if (geoffreyStrict) {
+      const scoredCandidates = scoreGeneratedTweets(policyStampedCandidates, rankingContext);
+      const qualityEligibleCandidates = scoredCandidates.filter((candidate) => assessGeoffreyQualityPolicy(candidate, {
+          voiceProfile,
+          learnings,
+          memory,
+          stage: 'queue',
+        }).eligible);
+      if (qualityEligibleCandidates.length === 0) return [];
+      ranked = sortRankedTweets(qualityEligibleCandidates);
+    } else {
+      ranked = rankGeneratedTweets(policyStampedCandidates, rankingContext);
+    }
 
     return selectTopRankedTweets(
       preferGeoffreyGroundedCandidates(ranked, count, voiceProfile, { learnings, memory: rankingMemory }),
@@ -1749,7 +1918,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       throw err; // Real code bug or malformed request — surface it.
     }
 
-    return rankFallbackTweets();
+    return geoffreyStrict ? [] : rankFallbackTweets();
   }
 }
 

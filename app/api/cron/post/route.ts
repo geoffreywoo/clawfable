@@ -12,6 +12,8 @@ import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredenti
 import { getBillingSummary } from '@/lib/billing';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
+import { isGeoffreyAccount } from '@/lib/account-taste';
+import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
 export async function GET(request: NextRequest) {
   const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);
@@ -165,8 +167,12 @@ export async function GET(request: NextRequest) {
             ? Date.now() - new Date(existingLearnings.updatedAt).getTime()
             : Infinity;
           const oneDayMs = 24 * 60 * 60 * 1000;
+          const needsVoiceCorpusMigration = isGeoffreyAccount(agent.handle) && (
+            !existingLearnings?.voiceCorpus
+            || existingLearnings.voiceCorpus.version !== VOICE_CORPUS_SCHEMA_VERSION
+          );
 
-          if (hasPerformanceData && (!existingLearnings || learningsAge > oneDayMs)) {
+          if (hasPerformanceData && (!existingLearnings || learningsAge > oneDayMs || needsVoiceCorpusMigration)) {
             const learnings = await buildLearnings(agent);
             await autoAdjustSettings(agent.id, learnings);
           }

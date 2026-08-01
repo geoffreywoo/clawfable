@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
     return `${surface === 'reply' ? 'Reply' : 'Draft'} is ${length} characters; X API posts must be 4000 characters or fewer.`;
   }),
   getAutopostPolicyIssue: vi.fn(() => null),
+  countPostsInLast24h: vi.fn(() => 0),
   getRecentPostDuplicateIssue: vi.fn((_content: string, _recentPosts: string[]) => null as string | null),
   getReplyRepetitionIssue: vi.fn((_reply: string, _previousReplies: string[]) => null as string | null),
   extractMentionHandles: vi.fn((text: string) => (text.match(/@\w+/g) || []).map((handle) => handle.slice(1).toLowerCase())),
@@ -136,6 +137,7 @@ vi.mock('@/lib/survivability', () => ({
   getTweetCompletenessIssue: mocks.getTweetCompletenessIssue,
   getTweetLengthIssue: mocks.getTweetLengthIssue,
   getAutopostPolicyIssue: mocks.getAutopostPolicyIssue,
+  countPostsInLast24h: mocks.countPostsInLast24h,
   getRecentPostDuplicateIssue: mocks.getRecentPostDuplicateIssue,
   getReplyRepetitionIssue: mocks.getReplyRepetitionIssue,
   extractMentionHandles: mocks.extractMentionHandles,
@@ -150,7 +152,7 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, runAutopilot } from '@/lib/autopilot';
+import { archiveStaleNetworkTopicQueue, getGeoffreyTopicPortfolioIssue, runAutopilot } from '@/lib/autopilot';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -218,6 +220,30 @@ const validQueuedTweet = {
   id: '523',
   content: 'your moat is not distribution if the model can rebuild your feature overnight',
   topic: 'startup',
+};
+
+const currentGeoffreyCertification = {
+  qualityPolicyVersion: 'geoffwoo-quality-v1',
+  voiceCorpusVersion: 'voice-corpus-v1-current',
+  finalCriticProvider: 'openai' as const,
+  finalCriticModel: 'gpt-5.6',
+  finalCriticVerdict: 'allow' as const,
+  finalCriticVersion: 'geoffwoo-final-critic-v1',
+};
+
+const activeGeoffreyCorpus = {
+  version: 1,
+  snapshotId: 'voice-corpus-v1-current',
+  active: true,
+  targetAnchorCount: 40,
+  minimumAnchorCount: 12,
+  anchorCount: 12,
+  topicSignalCount: 20,
+  mechanicsOnlyCount: 5,
+  negativeCount: 0,
+  excludedCount: 10,
+  knownGeneratedAnchorCount: 0,
+  generatedAt: '2026-07-31T00:00:00.000Z',
 };
 
 beforeEach(() => {
@@ -288,6 +314,7 @@ beforeEach(() => {
     return `${surface === 'reply' ? 'Reply' : 'Draft'} is ${length} characters; X API posts must be 4000 characters or fewer.`;
   });
   mocks.getAutopostPolicyIssue.mockReturnValue(null);
+  mocks.countPostsInLast24h.mockReturnValue(0);
   mocks.getRecentPostDuplicateIssue.mockReturnValue(null);
   mocks.getReplyRepetitionIssue.mockReturnValue(null);
   mocks.extractMentionHandles.mockImplementation((text: string) => (text.match(/@\w+/g) || []).map((handle) => handle.slice(1).toLowerCase()));
@@ -322,6 +349,42 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('enforces a two-original rolling daily cap for @geoffwoo', async () => {
+    mocks.countPostsInLast24h.mockReturnValue(2);
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+
+    const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('Daily post cap reached');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('treats crypto and politics as one combined one-in-twenty exploration budget', () => {
+    const issue = getGeoffreyTopicPortfolioIssue({
+      ...queuedTweet,
+      content: 'a new election rule changes which defense startups can sell to the government',
+      topic: 'election procurement',
+      sourceLane: 'trend_adjacent_explore',
+      trendTopicId: 'politics-defense-procurement',
+      sourceBrief: 'Qualified network story with two independent authors.',
+    }, [{
+      id: 'log-prior-crypto',
+      agentId: baseAgent.id,
+      tweetId: 'prior-crypto',
+      xTweetId: 'x-prior-crypto',
+      content: 'stablecoin settlement finally has a real customer and margin story',
+      format: 'hot_take',
+      topic: 'stablecoins',
+      postedAt: '2026-07-31T00:00:00.000Z',
+      source: 'autopilot',
+      action: 'posted',
+      reason: 'posted',
+    }]);
+
+    expect(issue).toContain('one of twenty');
+  });
+
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
     const now = Date.parse('2026-07-14T12:00:00.000Z');
     const archived = await archiveStaleNetworkTopicQueue(baseAgent.id, [
@@ -422,6 +485,7 @@ describe('autopilot remote debug logging', () => {
   it('rechecks queued Geoffrey drafts against current manual voice anchors before posting', async () => {
     const driftedDraft = {
       ...validQueuedTweet,
+      ...currentGeoffreyCertification,
       id: 'voice-drifted',
       content: 'Tungsten supply security is a critical strategic priority. Stakeholders must align around resilient conversion capacity and qualified tooling.',
       topic: 'tungsten',
@@ -448,6 +512,7 @@ describe('autopilot remote debug logging', () => {
         summary: 'Geoffrey writes from technical constraints.',
       },
       learnings: {
+        voiceCorpus: activeGeoffreyCorpus,
         operatorVoiceReference: {
           pinnedExamples: [],
           bestPerformers: manualAnchors,
@@ -473,6 +538,7 @@ describe('autopilot remote debug logging', () => {
     const sourceEvidence = 'Hybrid bonding surface roughness determines alignment yield across advanced chiplet packages.';
     const copiedDraft = {
       ...validQueuedTweet,
+      ...currentGeoffreyCertification,
       id: 'source-copy-drift',
       content: 'Hybrid bonding surface roughness determines alignment yield before advanced chiplet packages can ship.',
       topic: 'advanced packaging',
@@ -493,7 +559,13 @@ describe('autopilot remote debug logging', () => {
         communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
         summary: 'Geoffrey writes about compute and manufacturing constraints.',
       },
-      learnings: null,
+      learnings: {
+        voiceCorpus: activeGeoffreyCorpus,
+        operatorVoiceReference: {
+          pinnedExamples: [],
+          bestPerformers: [],
+        },
+      },
       memory: null,
     });
 
@@ -1049,7 +1121,7 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
-  it('only lets explicit exploration candidates bypass confidence in explore mode', async () => {
+  it('does not let explicit exploration candidates bypass confidence in explore mode', async () => {
     const lowConfidenceDefault = {
       ...validQueuedTweet,
       id: 'explore-default-low',
@@ -1076,11 +1148,8 @@ describe('autopilot remote debug logging', () => {
 
     const result = await runAutopilot(baseAgent);
 
-    expect(result.action).toBe('posted');
-    expect(result.tweetId).toBe('explore-tagged-low');
-    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), explicitExplore.content, {
-      username: baseAgent.handle,
-    });
+    expect(result.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
   it('logs reset-aware trend refresh failures during queue refill without blocking generation', async () => {

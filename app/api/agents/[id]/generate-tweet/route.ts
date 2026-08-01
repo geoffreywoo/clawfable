@@ -156,6 +156,8 @@ export async function POST(
       type: 'original',
       status: 'draft',
       topic: topicText,
+      generationProvider: response.provider,
+      generationModel: response.model,
       xTweetId: null,
       quoteTweetId: null,
       quoteTweetAuthor: null,

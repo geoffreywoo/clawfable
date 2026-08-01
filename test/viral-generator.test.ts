@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
+import { buildGeoffreyIdeaBriefs, expandGeoffreyIdeaBriefs, extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
@@ -16,6 +16,129 @@ vi.mock('@anthropic-ai/sdk', () => ({
 describe('generateViralBatch', () => {
   beforeEach(() => {
     anthropicCreateMock.mockReset();
+  });
+
+  it('expands four resolved idea briefs into three materially distinct draft slots each', () => {
+    const base = {
+      slots: Array.from({ length: 4 }, (_, index) => ({
+        slot: index + 1,
+        sourceLane: 'core_explore_fallback',
+        mode: 'explore',
+        targetTopic: ['inference', 'fusion', 'robotics', 'rare earths'][index],
+        trendTopicId: null,
+        trendHeadline: null,
+        ideaSeed: {
+          id: `seed-${index}`,
+          topic: ['inference', 'fusion', 'robotics', 'rare earths'][index],
+          technicalObject: `technical object ${index}`,
+          hiddenConstraint: `hidden mechanism ${index}`,
+          nonConsensusImplication: `non-consensus startup judgment ${index}`,
+          startupBackingFact: `startup stakes fact ${index}`,
+          domains: ['frontier tech'],
+          sourceQueries: [],
+        },
+        ideaSeedBrief: null,
+        plannerReason: `planner reason ${index}`,
+      })),
+      laneCounts: {
+        manual_core_exploit: 0,
+        trend_aligned_exploit: 0,
+        trend_adjacent_explore: 0,
+        core_explore_fallback: 4,
+      },
+      acceptedTrends: [],
+      rejectedTrends: [],
+    } as any;
+    const expanded = expandGeoffreyIdeaBriefs(base, 12);
+    const briefs = buildGeoffreyIdeaBriefs(expanded);
+
+    expect(expanded.slots).toHaveLength(12);
+    expect(briefs).toHaveLength(4);
+    expect(briefs.map((brief) => brief.slots)).toEqual([
+      [1, 2, 3],
+      [4, 5, 6],
+      [7, 8, 9],
+      [10, 11, 12],
+    ]);
+    expect(briefs.every((brief) => (
+      brief.eventOrObject
+      && brief.mechanism
+      && brief.affectedActor
+      && brief.stakes
+      && brief.nonConsensusJudgment
+      && brief.compressionTarget
+    ))).toBe(true);
+    expect(expanded.slots[0].plannerReason).toContain('materially distinct variant 1 of 3');
+    expect(expanded.slots[1].plannerReason).toContain('materially distinct variant 2 of 3');
+    expect(expanded.slots[2].plannerReason).toContain('materially distinct variant 3 of 3');
+  });
+
+  it('uses structured network facts without putting raw network prose into Geoffrey briefs', () => {
+    const rawNetworkProse = 'RAW_NETWORK_PROSE_SENTINEL with a distinctive author cadence';
+    const trend = {
+      id: 41,
+      networkTopicId: 'network-inference-packaging',
+      headline: 'Two suppliers report that advanced packaging yield is constraining inference ASIC deliveries.',
+      source: '@supplier1, @supplier2',
+      relevanceScore: 94,
+      category: 'inference ASIC packaging',
+      timestamp: '2026-07-31T00:00:00.000Z',
+      tweetCount: 2,
+      topTweet: { id: 'raw-1', text: rawNetworkProse, likes: 500, author: 'supplier1' },
+      sourceType: 'x',
+      sourceUrl: 'https://x.com/supplier1/status/raw-1',
+      sourceCount: 2,
+      discoveryMethod: 'followed_network',
+      networkMomentumScore: 0.9,
+      topicConfidence: 0.9,
+      topicWhyNow: 'Two independent supplier accounts are accelerating on the same constraint.',
+      semanticDomain: 'ai_compute',
+      topicUncertainty: 'low',
+      evidence: [{
+        tweetId: 'raw-1',
+        author: 'supplier1',
+        text: rawNetworkProse,
+        createdAt: '2026-07-31T00:00:00.000Z',
+        sourceUrl: 'https://x.com/supplier1/status/raw-1',
+        likes: 500,
+        retweets: 40,
+        replies: 10,
+        quotes: 8,
+        bookmarks: 20,
+        weightedEngagement: 700,
+        authorBaseline: 80,
+        breakoutMultiple: 8,
+        engagementVelocity: 100,
+        viralScore: 0.9,
+      }],
+    } as any;
+    const plan = {
+      slots: [0, 1, 2].map((index) => ({
+        slot: index + 1,
+        sourceLane: 'trend_aligned_exploit',
+        mode: 'exploit',
+        targetTopic: trend.category,
+        trendTopicId: trend.networkTopicId,
+        trendHeadline: trend.headline,
+        ideaSeed: null,
+        ideaSeedBrief: null,
+        plannerReason: 'Qualified structured network story.',
+      })),
+      laneCounts: {
+        manual_core_exploit: 0,
+        trend_aligned_exploit: 3,
+        trend_adjacent_explore: 0,
+        core_explore_fallback: 0,
+      },
+      acceptedTrends: [trend],
+      rejectedTrends: [],
+    } as any;
+
+    const [brief] = buildGeoffreyIdeaBriefs(plan);
+
+    expect(brief.suppliedFact).toContain('advanced packaging yield');
+    expect(brief.currentEvent).toContain('Two suppliers report');
+    expect(brief.currentEvent).not.toContain(rawNetworkProse);
   });
 
   it('keeps Geoffrey final selection grounded when enough sourced candidates exist', () => {
@@ -179,6 +302,7 @@ describe('generateViralBatch', () => {
       bestPerformers: Array.from({ length: 3 }, (_, index) => performance({
         content: `best performer example ${index + 1}`,
         likes: 90 - index,
+        source: 'autopilot',
       })),
       worstPerformers: Array.from({ length: 3 }, (_, index) => performance({
         content: `worst performer example ${index + 1}`,
@@ -760,8 +884,8 @@ describe('generateViralBatch', () => {
     expect(system).not.toContain('top account post 4');
     expect(system).toContain('format-3');
     expect(system).not.toContain('format-4');
-    expect(system).toContain('best performer example 2');
-    expect(system).not.toContain('best performer example 3');
+    expect(system).not.toContain('best performer example 1');
+    expect(system).toContain('SYSTEM WINNER, MECHANICS ONLY');
     expect(system).toContain('worst performer example 2');
     expect(system).not.toContain('worst performer example 3');
     expect(system).toContain('manual anchor example 2');
@@ -806,7 +930,8 @@ describe('generateViralBatch', () => {
     const system = String(anthropicCreateMock.mock.calls[0]?.[0]?.system || '');
     expect(system).toContain('top account post 5');
     expect(system).toContain('format-5');
-    expect(system).toContain('best performer example 3');
+    expect(system).not.toContain('best performer example 1');
+    expect(system).toContain('SYSTEM WINNER, MECHANICS ONLY');
     expect(system).toContain('worst performer example 3');
     expect(system).toContain('manual anchor example 3');
     expect(system).toContain('manual topic 6');
@@ -1531,18 +1656,36 @@ describe('generateViralBatch', () => {
   });
 
   it('uses compact Geoffrey-native creative briefs instead of spreadsheet-like slot pressure', async () => {
-    anthropicCreateMock.mockResolvedValue({
+    anthropicCreateMock.mockImplementation(async (request) => ({
       content: [{
         type: 'text',
-        text: JSON.stringify({
-          slot: 1,
-          content: 'Inference ASIC adoption is turning into a rack power problem. HBM bandwidth can look fine while thermal density decides tokens per watt.',
-          format: 'hot_take',
-          targetTopic: 'Inference ASICs',
-          rationale: 'Technical object, hidden constraint, compressed implication.',
-        }),
+        text: String(request.system || '').includes('brutally honest tweet quality judge')
+          ? JSON.stringify({
+              idx: 0,
+              overall: 0.88,
+              voiceFit: 0.9,
+              clarity: 0.9,
+              novelty: 0.82,
+              audienceFit: 0.86,
+              policySafety: 0.98,
+              nativeVoice: 0.9,
+              casualStartupFit: 0.86,
+              stiffnessRisk: 0.06,
+              cringeRisk: 0.05,
+              technicalCredibility: 0.84,
+              manualAnchorReskinRisk: 0.04,
+              thesis: 'qualified carbide supply caps machining',
+              notes: 'Casual, technical, and startup relevant.',
+            })
+          : JSON.stringify({
+              slot: 1,
+              content: 'everyone talks tungsten ore. qualified carbide powder + tool life still cap machining throughput. this is an actually good startup market.',
+              format: 'hot_take',
+              targetTopic: 'tungsten critical minerals',
+              rationale: 'Technical object, hidden constraint, compressed implication.',
+            }),
       }],
-    });
+    }));
     const geoffreyLearnings = evidenceLearnings();
     geoffreyLearnings.sourceBreakdown = {
       autopilot: 10,
@@ -1575,6 +1718,20 @@ describe('generateViralBatch', () => {
         content: 'software is nepo + codex/claude\nhardware is where alpha is left',
       }),
     ];
+    geoffreyLearnings.voiceCorpus = {
+      snapshotId: 'voice-corpus-v1-test',
+      version: 1,
+      active: true,
+      targetAnchorCount: 40,
+      minimumAnchorCount: 12,
+      anchorCount: 12,
+      topicSignalCount: 12,
+      mechanicsOnlyCount: 10,
+      negativeCount: 0,
+      excludedCount: 0,
+      knownGeneratedAnchorCount: 0,
+      generatedAt: '2026-06-07T00:00:00.000Z',
+    };
 
     const batch = await generateViralBatch(
       {

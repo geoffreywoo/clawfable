@@ -45,6 +45,9 @@ describe('performance history evidence', () => {
       source: 'timeline',
       content: 'bro.. best bullshitter in the game in action @example https://t.co/source',
       likes: 300,
+      authorshipProvenance: 'timeline_unmatched',
+      authorshipConfidence: 0.82,
+      voiceCorpusDispositions: ['topic_signal', 'diction_anchor'],
     }));
     const patternedSystem = assessHistoricalWinner(performance({
       source: 'autopilot',
@@ -62,7 +65,7 @@ describe('performance history evidence', () => {
     expect(patternedSystem.disposition).toBe('engagement_mechanic_only');
     expect(patternedSystem.unsafePatterns).toContain('anonymous-anecdote');
     expect(patternedSystem.spreadMechanics).toEqual(expect.arrayContaining(['concrete before/after contrast', 'measurable stakes']));
-    expect(qualifiedSystem).toMatchObject({ disposition: 'qualified_system_anchor', evidenceWeight: 1 });
+    expect(qualifiedSystem).toMatchObject({ disposition: 'engagement_mechanic_only', evidenceWeight: 1 });
   });
 
   it('does not mistake digits inside source URLs for measurable stakes', () => {

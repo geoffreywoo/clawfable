@@ -7,12 +7,23 @@ import { buildGenerationContext } from '../lib/generation-context';
 import { scoreOperatorAnchorCopyRisk } from '../lib/candidate-ranking';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from '../lib/source-trust';
 import { assessGeneratedWritingPatterns } from '../lib/writing-patterns';
+import { assessGeoffreyQualityPolicy } from '../lib/quality-policy';
+import { buildGenerationQualityAudit } from '../lib/generation-quality-audit';
 
 type QueueAuditItem = {
   id: string;
   topic: string | null;
   generationProvider: Tweet['generationProvider'];
   generationModel: string | null;
+  judgeProvider: Tweet['judgeProvider'];
+  judgeModel: string | null;
+  finalCriticProvider: Tweet['finalCriticProvider'];
+  finalCriticModel: string | null;
+  finalCriticVerdict: Tweet['finalCriticVerdict'];
+  qualityPolicyVersion: string | null;
+  voiceCorpusVersion: string | null;
+  qualityEligible: boolean;
+  qualityIssues: string[];
   sourceBrief: string | null;
   sourceLane: Tweet['sourceLane'];
   trendTopicId: string | null;
@@ -90,6 +101,11 @@ function parseCurrentSource(sourceBrief: string | null | undefined): {
 }
 
 function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueAuditItem['recommendation'] {
+  if (!item.qualityEligible) {
+    return item.qualityIssues.some((issue) => (
+      /slop|cringe|stiffness|generated pattern|voice drift|source copy|anchor reskin|technical credibility|final critic block/i.test(issue)
+    )) ? 'delete' : 'rewrite';
+  }
   if (item.trendTopicId && !item.timelyCurrentSource) return 'delete';
   if (item.tasteAction === 'block') return 'delete';
   if (item.queueTasteIssue) return 'rewrite';
@@ -127,7 +143,7 @@ function recommendationFor(item: Omit<QueueAuditItem, 'recommendation'>): QueueA
 }
 
 function auditReasons(item: Omit<QueueAuditItem, 'recommendation'>): string[] {
-  const reasons: string[] = [];
+  const reasons: string[] = [...item.qualityIssues];
   if (item.trendTopicId && !item.timelyCurrentSource) reasons.push('trend slot lacks a current dated source URL');
   if (item.nativeVoiceScore < 0.6) reasons.push(`native voice ${item.nativeVoiceScore}`);
   if (item.casualStartupScore < 0.52) reasons.push(`casual startup fit ${item.casualStartupScore}`);
@@ -162,6 +178,12 @@ function auditTweet(
     featureTags,
     sourceTexts: getTrustedClaimSourceTexts(tweet, operatorEvidence),
     untrustedSourceTexts: getUntrustedSourceTexts(tweet),
+  });
+  const quality = assessGeoffreyQualityPolicy(tweet, {
+    voiceProfile: generationContext.voiceProfile,
+    learnings: generationContext.learnings,
+    memory: generationContext.memory,
+    stage: 'queue',
   });
   const technical = assessTechnicalCredibility(tweet.content);
   const generatedPatterns = assessGeneratedWritingPatterns(tweet.content);
@@ -198,6 +220,15 @@ function auditTweet(
     topic: tweet.topic,
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
+    judgeProvider: tweet.judgeProvider ?? null,
+    judgeModel: tweet.judgeModel ?? null,
+    finalCriticProvider: tweet.finalCriticProvider ?? null,
+    finalCriticModel: tweet.finalCriticModel ?? null,
+    finalCriticVerdict: tweet.finalCriticVerdict ?? null,
+    qualityPolicyVersion: tweet.qualityPolicyVersion ?? null,
+    voiceCorpusVersion: tweet.voiceCorpusVersion ?? null,
+    qualityEligible: quality.eligible,
+    qualityIssues: quality.issues,
     sourceBrief: tweet.sourceBrief ?? null,
     sourceLane: tweet.sourceLane ?? null,
     trendTopicId: tweet.trendTopicId ?? null,
@@ -252,13 +283,14 @@ async function main() {
     throw new Error(`No agent found for @${handle}`);
   }
 
-  const [queue, learnings, allTweets, signals, generationContext, topicIntelligence] = await Promise.all([
+  const [queue, learnings, allTweets, signals, generationContext, topicIntelligence, qualityAudit] = await Promise.all([
     getQueuedTweets(agent.id),
     getLearnings(agent.id),
     getTweets(agent.id),
     getLearningSignals(agent.id, 100),
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getTopicIntelligenceState(agent.id),
+    buildGenerationQualityAudit(agent),
   ]);
 
   const audited = queue.map((tweet) => auditTweet(tweet, {
@@ -282,6 +314,19 @@ async function main() {
     manualAnchorCount: learnings?.operatorVoiceReference?.bestPerformers.length || 0,
     recentSignalCount: signals.length,
     learningEvidence: generationContext.style.banditPolicy?.evidence || null,
+    qualityPolicyVersion: qualityAudit.policy.qualityPolicyVersion,
+    finalCriticVersion: qualityAudit.policy.finalCriticVersion,
+    voiceCorpus: qualityAudit.corpus,
+    queueEligibility: {
+      eligible: qualityAudit.queue.qualityEligibleCount,
+      skipped: qualityAudit.queue.skippedByQualityCount,
+      policyVersionCounts: qualityAudit.queue.policyVersionCounts,
+      corpusVersionCounts: qualityAudit.queue.corpusVersionCounts,
+      finalCriticVerdicts: qualityAudit.queue.finalCriticVerdicts,
+    },
+    sourceDecisions: qualityAudit.sources,
+    modelFallbacks: qualityAudit.models,
+    complaints: qualityAudit.complaints,
     topicIntelligence: topicIntelligence ? {
       observedAt: topicIntelligence.observedAt,
       refreshSequence: topicIntelligence.refreshSequence,
@@ -314,6 +359,10 @@ async function main() {
   console.log(`${summary.handle} agent=${summary.agentId} queue=${summary.queueDepth} post=${summary.postCandidates} rewrite=${summary.rewrite} delete=${summary.delete}`);
   console.log(`current-event queue=${summary.timelyTrendQueued}/${summary.trendQueued} stale-or-unproven=${summary.staleOrUnprovenTrendQueued} models=${summary.generationModels.join(', ') || 'none'}`);
   console.log(`manual anchors=${summary.manualAnchorCount} recent signals=${summary.recentSignalCount} tracked tweets=${allTweets.length}`);
+  console.log(`policy=${summary.qualityPolicyVersion} critic=${summary.finalCriticVersion} corpus=${summary.voiceCorpus?.snapshotId || 'none'} active=${summary.voiceCorpus?.active || false} purity=${summary.voiceCorpus?.corpusPurity ?? 'n/a'}`);
+  console.log(`strict queue eligible=${summary.queueEligibility.eligible}/${summary.queueDepth} skipped=${summary.queueEligibility.skipped} generationFallbacks=${summary.modelFallbacks.generationFallbackCount} judgeFallbacks=${summary.modelFallbacks.judgeFallbackCount} finalCriticFallbacks=${summary.modelFallbacks.finalCriticFallbackCount}`);
+  console.log(`voice complaints=${summary.complaints.total} affectedPosts=${summary.complaints.affectedParentCount} rate=${summary.complaints.affectedPostRate ?? 'n/a'} metricsOnly=${summary.complaints.metricsOnly}`);
+  console.log(`source decisions accepted=${summary.sourceDecisions.accepted.length} rejected=${summary.sourceDecisions.rejected.length}`);
   if (summary.topicIntelligence) {
     console.log(`network topics observed=${summary.topicIntelligence.observedAt} refreshes=${summary.topicIntelligence.refreshSequence} source=${summary.topicIntelligence.followGraphSource} complete=${summary.topicIntelligence.sourceComplete} partialFailures=${summary.topicIntelligence.partialFailureCount} activeAuthors=${summary.topicIntelligence.activeAuthorCount} knownFollows=${summary.topicIntelligence.followingCount || 'n/a'} sampled=${summary.topicIntelligence.sampledAccounts} viral tweets=${summary.topicIntelligence.trackedViralTweets}`);
     for (const topic of summary.topicIntelligence.topTopics) {
@@ -329,6 +378,7 @@ async function main() {
   for (const item of audited) {
     const preview = item.content.replace(/\s+/g, ' ').slice(0, 220);
     console.log(`[${item.recommendation}] tweet=${item.id} topic=${item.topic || 'general'} candidate=${item.candidateScore ?? 'n/a'} confidence=${item.confidenceScore ?? 'n/a'}`);
+    console.log(`policy eligible=${item.qualityEligible} version=${item.qualityPolicyVersion || 'none'} corpus=${item.voiceCorpusVersion || 'none'} generation=${item.generationProvider || 'none'}:${item.generationModel || 'none'} judge=${item.judgeProvider || 'none'}:${item.judgeModel || 'none'} final=${item.finalCriticProvider || 'none'}:${item.finalCriticModel || 'none'}:${item.finalCriticVerdict || 'none'}`);
     console.log(`scores native=${item.nativeVoiceScore} nativeStyle=${item.nativeStyleScore} casualStartup=${item.casualStartupScore} stiffness=${item.stiffnessRisk} voiceDrift=${item.voiceDriftRisk} technical=${item.technicalCredibilityScore} cringe=${item.cringeRisk} statusTexture=${item.statusTextureRisk} truth=${item.truthfulnessRisk} sourceCopy=${item.sourceCopyRisk} pattern=${item.generatedPatternRisk}${item.generatedPatternHits.length ? ` (${item.generatedPatternHits.join(', ')})` : ''} anchorReskin=${item.manualAnchorReskinRisk} rejectedSimilarity=${item.rejectedDraftSimilarity} slop=${item.slopScore}`);
     console.log(`source lane=${item.sourceLane || 'none'} type=${item.sourceType || 'none'} ageHours=${item.sourceAgeHours ?? 'n/a'} url=${item.sourceUrl || 'none'}`);
     console.log(`reasons: ${item.reasons.join('; ')}`);

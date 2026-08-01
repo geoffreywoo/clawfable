@@ -47,10 +47,11 @@ import {
 } from './twitter-debug';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
-import { assessNativeTopicIdentity } from './source-planner';
+import { assessNativeTopicIdentity, classifyGeoffreyTopicDomain, isCoreGeoffreyTopicDomain } from './source-planner';
 import {
   jitterInterval,
   isDailyCapReached,
+  countPostsInLast24h,
   isNearDuplicate,
   pickDiverseTweet,
   clampPostsPerDay,
@@ -61,7 +62,7 @@ import {
   getAutopostPolicyIssue,
   extractMentionHandles,
 } from './survivability';
-import { getAutonomyConfidenceThreshold } from './candidate-ranking';
+import { getAutonomyConfidenceThreshold, type RankableProtocolTweet } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
@@ -69,6 +70,8 @@ import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHig
 import { assessClaimEvidence } from './claim-evidence';
 import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { assessGeoffreyQualityPolicy, GEOFFREY_QUALITY_POLICY_VERSION } from './quality-policy';
+import { FINAL_CRITIC_VERSION, judgeCandidates } from './generation-judging';
 import { semanticIdeaSimilarity } from './tweet-features';
 import {
   getTrustedClaimSourceTexts,
@@ -121,6 +124,13 @@ export interface AutopilotQueueSelfHealResult {
   before: AutopilotQueueHealth;
   after: AutopilotQueueHealth;
   action: string;
+}
+
+export interface GeoffreyQueuePolicyRefreshResult {
+  before: number;
+  after: number;
+  certified: number;
+  quarantined: number;
 }
 
 interface AutoReplyRunOutcome {
@@ -187,12 +197,36 @@ function effectiveAutopostThreshold(tweet: Tweet, mode: ProtocolSettings['autono
 }
 
 function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
-  if (mode === 'explore' && tweet.generationMode === 'explore') return true;
   return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= effectiveAutopostThreshold(tweet, mode, threshold);
 }
 
 function isAutopostableQueuedTweet(tweet: Tweet): boolean {
   return !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId;
+}
+
+export function getGeoffreyTopicPortfolioIssue(tweet: Tweet, recentPosts: PostLogEntry[]): string | null {
+  const domain = classifyGeoffreyTopicDomain(`${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`);
+  if (isCoreGeoffreyTopicDomain(domain)) return null;
+  if (tweet.sourceLane !== 'trend_adjacent_explore' || !tweet.trendTopicId || !tweet.sourceBrief) {
+    return `off-core ${domain} draft lacks an exceptional sourced exploration lane`;
+  }
+  if (!/\b(?:startups?|founders?|compan(?:y|ies)|products?|customers?|markets?|capital|investors?|costs?|margins?|talent|buyers?|suppliers?)\b/i.test(tweet.content)) {
+    return `off-core ${domain} draft lacks a concrete startup or investing implication`;
+  }
+  const recentOriginals = recentPosts.filter(isSuccessfulOriginalPostLogEntry);
+  const recentDomains = recentOriginals.map((entry) => classifyGeoffreyTopicDomain(`${entry.topic} ${entry.content}`));
+  if (
+    ['crypto', 'politics_geopolitics'].includes(domain)
+    && recentDomains.slice(0, 19).some((recentDomain) => (
+      recentDomain === 'crypto' || recentDomain === 'politics_geopolitics'
+    ))
+  ) {
+    return `${domain} exploration is capped at one of twenty original posts`;
+  }
+  if (recentDomains.slice(0, 7).some((recentDomain) => !isCoreGeoffreyTopicDomain(recentDomain))) {
+    return 'off-core exploration is capped at one of eight original posts';
+  }
+  return null;
 }
 
 const NON_ORIGINAL_LOG_FORMATS = new Set([
@@ -421,16 +455,209 @@ function clearsQueuedPostPreflight(
     && !getQueuedClaimEvidenceIssue(tweet, queuedOperatorEvidence(nativeContext))
     && !getQueuedAiVoiceIssue(agent, tweet)
     && !assessQueuedNativeVoice(agent, tweet, nativeContext).issue
+    && (!nativeContext || assessGeoffreyQualityPolicy(tweet, {
+      voiceProfile: nativeContext.voiceProfile,
+      learnings: nativeContext.learnings,
+      memory: nativeContext.memory,
+      stage: 'queue',
+    }).eligible)
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
   );
+}
+
+function queuedTweetAsCandidate(tweet: Tweet): RankableProtocolTweet {
+  return {
+    content: tweet.content,
+    format: tweet.format || 'unknown',
+    targetTopic: tweet.topic || 'general',
+    rationale: tweet.rationale || 'Existing queued draft under quality-policy rescore.',
+    generationProvider: tweet.generationProvider,
+    generationModel: tweet.generationModel,
+    qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+    voiceCorpusVersion: tweet.voiceCorpusVersion,
+    sourceBrief: tweet.sourceBrief,
+    sourceEvidenceTexts: tweet.sourceEvidenceTexts,
+    sourceLane: tweet.sourceLane,
+    styleMode: tweet.styleMode,
+    trendTopicId: tweet.trendTopicId,
+    trendHeadline: tweet.trendHeadline,
+    creativeLane: tweet.creativeLane,
+    draftExperimentId: `queue-rescore:${tweet.id}`,
+    experimentBatchId: tweet.experimentBatchId,
+    experimentHypothesis: tweet.experimentHypothesis,
+    experimentHoldout: tweet.experimentHoldout,
+    promptVariant: tweet.promptVariant,
+    targetAudienceSegment: tweet.targetAudienceSegment,
+    segmentHypothesis: tweet.segmentHypothesis,
+    promptStrategy: tweet.promptStrategy,
+    mediaExperimentType: tweet.mediaExperimentType,
+    mediaBrief: tweet.mediaBrief,
+    portfolioRole: tweet.portfolioRole,
+    relationshipTargetHandle: tweet.relationshipTargetHandle,
+    trendFitScore: tweet.trendFitScore,
+    criticScores: tweet.criticScores,
+    actionRewardPrediction: tweet.actionRewardPrediction,
+    featureTags: tweet.featureTags,
+    coverageCluster: tweet.coverageCluster,
+    judgeScore: tweet.judgeScore,
+    judgeBreakdown: tweet.judgeBreakdown,
+    judgeNotes: tweet.judgeNotes,
+    judgeProvider: tweet.judgeProvider,
+    judgeModel: tweet.judgeModel,
+    mutationRound: tweet.mutationRound,
+  };
+}
+
+async function rescoreQueuedTweetsForCurrentPolicy(
+  agent: Agent,
+  queuedTweets: Tweet[],
+  context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
+): Promise<Tweet[]> {
+  if (!isGeoffreyAccount(agent.handle) || queuedTweets.length === 0) return queuedTweets;
+  const corpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
+  const stale = queuedTweets.filter((tweet) => (
+    tweet.qualityPolicyVersion !== GEOFFREY_QUALITY_POLICY_VERSION
+    || tweet.voiceCorpusVersion !== corpusVersion
+    || tweet.finalCriticVersion !== FINAL_CRITIC_VERSION
+    || !tweet.finalCriticProvider
+    || !tweet.finalCriticModel
+  ));
+  if (stale.length === 0) return queuedTweets;
+
+  const analysis = await getAnalysis(agent.id);
+  if (!context || !analysis || !context.learnings?.voiceCorpus?.active) {
+    await Promise.all(stale.map((tweet) => updateTweet(tweet.id, {
+      status: 'draft',
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: 'Current Geoffrey voice corpus is unavailable; stale queued draft cannot be certified.',
+    })));
+    return queuedTweets.filter((tweet) => !stale.some((item) => item.id === tweet.id));
+  }
+
+  const judged = await judgeCandidates(stale.map(queuedTweetAsCandidate), {
+    voiceProfile: context.voiceProfile,
+    analysis,
+    learnings: context.learnings,
+    memory: context.memory,
+    mode: 'model',
+    requireModel: true,
+    task: 'final_judgment',
+  });
+  const judgedById = new Map(judged.map((candidate) => [candidate.draftExperimentId, candidate]));
+  const eligible: Tweet[] = [];
+  let quarantined = 0;
+
+  for (const tweet of stale) {
+    const candidate = judgedById.get(`queue-rescore:${tweet.id}`);
+    if (!candidate) {
+      quarantined++;
+      await updateTweet(tweet.id, {
+        status: 'draft',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: 'Final model critic did not return a valid verdict for this stale queued draft.',
+      });
+      continue;
+    }
+    const certified = {
+      ...tweet,
+      ...candidate,
+      topic: tweet.topic,
+      qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+      voiceCorpusVersion: corpusVersion,
+    };
+    const quality = assessGeoffreyQualityPolicy(certified, {
+      voiceProfile: context.voiceProfile,
+      learnings: context.learnings,
+      memory: context.memory,
+      stage: 'queue',
+    });
+    if (!quality.eligible) {
+      quarantined++;
+      await updateTweet(tweet.id, {
+        status: 'draft',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: `Quality policy rescore: ${quality.issues.join('; ')}.`,
+        qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+        voiceCorpusVersion: corpusVersion,
+        judgeProvider: candidate.judgeProvider,
+        judgeModel: candidate.judgeModel,
+        finalCriticProvider: candidate.finalCriticProvider,
+        finalCriticModel: candidate.finalCriticModel,
+        finalCriticVerdict: candidate.finalCriticVerdict,
+        finalCriticScores: candidate.finalCriticScores,
+        finalCriticVersion: candidate.finalCriticVersion,
+      });
+      continue;
+    }
+    const updated = await updateTweet(tweet.id, {
+      qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+      voiceCorpusVersion: corpusVersion,
+      featureTags: candidate.featureTags,
+      coverageCluster: candidate.coverageCluster,
+      judgeScore: candidate.judgeScore,
+      judgeBreakdown: candidate.judgeBreakdown,
+      judgeNotes: candidate.judgeNotes,
+      judgeProvider: candidate.judgeProvider,
+      judgeModel: candidate.judgeModel,
+      finalCriticProvider: candidate.finalCriticProvider,
+      finalCriticModel: candidate.finalCriticModel,
+      finalCriticVerdict: candidate.finalCriticVerdict,
+      finalCriticScores: candidate.finalCriticScores,
+      finalCriticVersion: candidate.finalCriticVersion,
+    });
+    eligible.push(updated);
+  }
+
+  if (quarantined > 0) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'quality_policy_rescore',
+      topic: 'generation',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: `Rescored ${stale.length} stale queued drafts and quarantined ${quarantined}.`,
+    });
+  }
+
+  const staleIds = new Set(stale.map((tweet) => tweet.id));
+  return [...queuedTweets.filter((tweet) => !staleIds.has(tweet.id)), ...eligible];
+}
+
+export async function refreshQueuedTweetsForCurrentQualityPolicy(
+  agent: Agent,
+): Promise<GeoffreyQueuePolicyRefreshResult> {
+  const before = await getQueuedTweets(agent.id);
+  if (!isGeoffreyAccount(agent.handle)) {
+    return {
+      before: before.length,
+      after: before.length,
+      certified: before.length,
+      quarantined: 0,
+    };
+  }
+
+  const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
+  const after = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
+  return {
+    before: before.length,
+    after: after.length,
+    certified: after.length,
+    quarantined: Math.max(0, before.length - after.length),
+  };
 }
 
 async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[], recentPostedContent: string[] = []): Promise<Tweet[]> {
   const nativeContext = isGeoffreyAccount(agent.handle)
     ? await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 })
     : null;
+  const topicPortfolioHistory = nativeContext ? await getPostLog(agent.id, 80) : [];
+  const policyCurrentQueue = await rescoreQueuedTweetsForCurrentPolicy(agent, queuedTweets, nativeContext);
   const validationPassedQueue: Tweet[] = [];
-  for (const queuedTweet of queuedTweets) {
+  for (const queuedTweet of policyCurrentQueue) {
     const sanitizedIssue = getSanitizedTweetTextIssue(queuedTweet.content, 'post');
     if (sanitizedIssue) {
       const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, sanitizedIssue);
@@ -692,6 +919,78 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
         reason,
       });
       continue;
+    }
+
+    if (nativeContext) {
+      const quality = assessGeoffreyQualityPolicy(queuedTweet, {
+        voiceProfile: nativeContext.voiceProfile,
+        learnings: nativeContext.learnings,
+        memory: nativeContext.memory,
+        stage: 'queue',
+      });
+      if (!quality.eligible) {
+        const reason = `Strict Geoffrey quality policy: ${quality.issues.join('; ')}.`;
+        await updateTweet(queuedTweet.id, {
+          status: 'draft',
+          quarantinedAt: new Date().toISOString(),
+          quarantineReason: reason,
+        });
+        await addLearningSignal(agent.id, {
+          tweetId: queuedTweet.id,
+          signalType: 'x_post_rejected',
+          surface: 'autopilot',
+          rewardDelta: -0.72,
+          reason,
+          inferred: true,
+          metadata: {
+            qualityGate: 'geoffrey_quality_policy',
+            qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+            finalCriticProvider: queuedTweet.finalCriticProvider ?? null,
+            finalCriticModel: queuedTweet.finalCriticModel ?? null,
+            nativeVoiceScore: quality.scores.nativeVoice,
+            casualStartupScore: quality.scores.casualStartupFit,
+            slopScore: quality.scores.slop,
+            cringeRisk: quality.scores.cringe,
+            stiffnessRisk: quality.scores.stiffness,
+            generatedPatternRisk: quality.scores.generatedPattern,
+          },
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: queuedTweet.id,
+          xTweetId: queuedTweet.xTweetId || '',
+          content: queuedTweet.content,
+          format: 'geoffrey_quality_policy',
+          topic: queuedTweet.topic || 'general',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason,
+        });
+        continue;
+      }
+      const topicPortfolioIssue = getGeoffreyTopicPortfolioIssue(queuedTweet, topicPortfolioHistory);
+      if (topicPortfolioIssue) {
+        const reason = `Geoffrey topic portfolio gate: ${topicPortfolioIssue}.`;
+        await updateTweet(queuedTweet.id, {
+          status: 'draft',
+          quarantinedAt: new Date().toISOString(),
+          quarantineReason: reason,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: queuedTweet.id,
+          xTweetId: queuedTweet.xTweetId || '',
+          content: queuedTweet.content,
+          format: 'topic_portfolio_gate',
+          topic: queuedTweet.topic || 'general',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason,
+        });
+        continue;
+      }
     }
 
     const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, recentPostedContent);
@@ -1148,7 +1447,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   // Clamp postsPerDay to safe maximum
-  const safePostsPerDay = clampPostsPerDay(settings.postsPerDay);
+  const safePostsPerDay = isGeoffreyAccount(agent.handle)
+    ? Math.min(2, clampPostsPerDay(settings.postsPerDay))
+    : clampPostsPerDay(settings.postsPerDay);
   const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
 
   // Peak hour clustering: during peak hours, use 40% of normal cooldown (post more often).
@@ -1197,7 +1498,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   // Daily hard cap — stop posting if we've hit the absolute limit
-  if (isDailyCapReached(postLog)) {
+  const geoffreyDailyCapReached = isGeoffreyAccount(agent.handle) && countPostsInLast24h(postLog) >= 2;
+  if (geoffreyDailyCapReached || isDailyCapReached(postLog)) {
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
@@ -2518,6 +2820,9 @@ export async function refillQueue(
   bias: { scheduledTopic?: string | null; momentumTopic?: string | null } = {},
 ): Promise<number> {
   try {
+    const geoffreyStrict = isGeoffreyAccount(agent.handle);
+    const refillCount = geoffreyStrict ? Math.min(2, Math.max(0, count)) : count;
+    if (refillCount <= 0) return 0;
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
 
@@ -2607,10 +2912,10 @@ export async function refillQueue(
     // so the batch can explore timely angles instead of repeating evergreen takes.
 
     // Determine how many should be marketing tweets
-    const marketingCount = settings.marketingEnabled && settings.marketingMix > 0
-      ? Math.max(1, Math.round(count * (settings.marketingMix / 100)))
+    const marketingCount = !geoffreyStrict && settings.marketingEnabled && settings.marketingMix > 0
+      ? Math.max(1, Math.round(refillCount * (settings.marketingMix / 100)))
       : 0;
-    const organicCount = count - marketingCount;
+    const organicCount = refillCount - marketingCount;
     const generationStyle = {
       ...style,
       bias: {
@@ -2631,7 +2936,7 @@ export async function refillQueue(
 
     // Generate agent shoutout (cross-promotion with other Clawfable agents)
     const shoutoutBatch: MarketingTweet[] = [];
-    if (settings.agentShoutouts && Math.random() < 0.15) {
+    if (!geoffreyStrict && settings.agentShoutouts && Math.random() < 0.15) {
       // 15% chance per refill to include a shoutout
       try {
         const { generateAgentShoutout } = await import('./proactive-engagement');
@@ -2691,6 +2996,13 @@ export async function refillQueue(
           hasSourceContext: Boolean(item.sourceBrief || item.trendHeadline),
         });
         if (queueTasteIssue) continue;
+        const qualityAssessment = assessGeoffreyQualityPolicy(item, {
+          voiceProfile,
+          learnings,
+          memory,
+          stage: 'queue',
+        });
+        if (!qualityAssessment.eligible) continue;
         if (isNearDuplicate(item.content, recentContent, duplicateThreshold).isDuplicate) continue;
         if (
           isGeoffreyAccount(agent.handle)
@@ -2713,6 +3025,15 @@ export async function refillQueue(
           rationale: item.rationale,
           generationProvider: item.generationProvider ?? null,
           generationModel: item.generationModel ?? null,
+          judgeProvider: item.judgeProvider ?? null,
+          judgeModel: item.judgeModel ?? null,
+          qualityPolicyVersion: item.qualityPolicyVersion ?? null,
+          voiceCorpusVersion: item.voiceCorpusVersion ?? null,
+          finalCriticProvider: item.finalCriticProvider ?? null,
+          finalCriticModel: item.finalCriticModel ?? null,
+          finalCriticVerdict: item.finalCriticVerdict ?? null,
+          finalCriticScores: item.finalCriticScores ?? null,
+          finalCriticVersion: item.finalCriticVersion ?? null,
           sourceBrief: item.sourceBrief ?? null,
           sourceEvidenceTexts: 'sourceEvidenceTexts' in item ? item.sourceEvidenceTexts ?? null : null,
           generationMode: item.generationMode,
@@ -2775,7 +3096,7 @@ export async function refillQueue(
 
     added += await addBatchItems(allBatch, 0.55);
 
-    if (added === 0 && organicCount > 0) {
+    if (added === 0 && organicCount > 0 && !isGeoffreyAccount(agent.handle)) {
       allBatch = buildEmergencyQueueFallbacks({
         topics: voiceProfile.topics,
         recentContent,
@@ -2826,6 +3147,15 @@ interface MarketingTweet {
   rationale: string;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
+  judgeProvider?: 'openai' | 'anthropic' | null;
+  judgeModel?: string | null;
+  qualityPolicyVersion?: string | null;
+  voiceCorpusVersion?: string | null;
+  finalCriticProvider?: 'openai' | 'anthropic' | null;
+  finalCriticModel?: string | null;
+  finalCriticVerdict?: 'allow' | 'review' | 'block' | null;
+  finalCriticScores?: import('./types').CandidateJudgeBreakdown | null;
+  finalCriticVersion?: string | null;
   sourceBrief?: string | null;
   sourceLane?: import('./types').ContentSourceLane | null;
   styleMode?: import('./types').ContentStyleMode | null;

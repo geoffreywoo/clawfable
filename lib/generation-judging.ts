@@ -16,6 +16,7 @@ type JudgeContext = {
 };
 
 export type CandidateJudgeMode = 'model' | 'heuristic';
+export const FINAL_CRITIC_VERSION = 'geoffwoo-final-critic-v1';
 const JUDGE_CANDIDATE_CONTENT_LIMIT = 1200;
 const MUTATION_CANDIDATE_CONTENT_LIMIT = 1000;
 const MUTATION_CRITIC_NOTE_LIMIT = 220;
@@ -351,32 +352,67 @@ function heuristicJudge(candidate: RankableProtocolTweet, context: JudgeContext 
       ? ' Technical anchor present.'
       : '';
 
+  const judgeBreakdown: CandidateJudgeBreakdown = {
+    overall: Number(overall.toFixed(3)),
+    voiceFit: Number(voiceFit.toFixed(3)),
+    clarity: Number(clarity.toFixed(3)),
+    novelty: Number(novelty.toFixed(3)),
+    audienceFit: Number(audienceFit.toFixed(3)),
+    policySafety: Number(policySafety.toFixed(3)),
+    nativeVoice: accountTaste.nativeVoiceScore,
+    casualStartupFit: accountTaste.casualStartupScore,
+    stiffnessRisk: accountTaste.stiffnessRisk,
+    cringeRisk: accountTaste.cringeRisk,
+    technicalCredibility: accountTaste.technicalCredibilityScore,
+  };
   return {
     ...candidate,
     featureTags,
     coverageCluster: candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, featureTags.thesis),
     judgeScore: Number(overall.toFixed(3)),
-    judgeBreakdown: {
-      overall: Number(overall.toFixed(3)),
-      voiceFit: Number(voiceFit.toFixed(3)),
-      clarity: Number(clarity.toFixed(3)),
-      novelty: Number(novelty.toFixed(3)),
-      audienceFit: Number(audienceFit.toFixed(3)),
-      policySafety: Number(policySafety.toFixed(3)),
-      nativeVoice: accountTaste.nativeVoiceScore,
-      casualStartupFit: accountTaste.casualStartupScore,
-      stiffnessRisk: accountTaste.stiffnessRisk,
-      cringeRisk: accountTaste.cringeRisk,
-      technicalCredibility: accountTaste.technicalCredibilityScore,
-    },
+    judgeBreakdown,
     judgeNotes: `Heuristic critic: ${featureTags.hook.replace(/_/g, ' ')} hook, ${featureTags.structure.replace(/_/g, ' ')} structure, ${featureTags.specificity.replace(/_/g, ' ')} specificity.${memoryNote}${slopNote}${elevationNote}${tasteNote}${registerNote}`,
+    judgeProvider: candidate.judgeProvider ?? null,
+    judgeModel: candidate.judgeModel ?? null,
+    finalCriticProvider: candidate.finalCriticProvider ?? null,
+    finalCriticModel: candidate.finalCriticModel ?? null,
+    finalCriticVerdict: candidate.finalCriticVerdict ?? null,
+    finalCriticScores: candidate.finalCriticScores ?? null,
+    finalCriticVersion: candidate.finalCriticVersion ?? null,
   };
+}
+
+function finalCriticVerdict(
+  breakdown: CandidateJudgeBreakdown,
+  geoffreyStrict: boolean,
+): 'allow' | 'review' | 'block' {
+  if (!geoffreyStrict) {
+    if (breakdown.policySafety < 0.5 || breakdown.overall < 0.42) return 'block';
+    return breakdown.overall >= 0.58 && breakdown.voiceFit >= 0.55 ? 'allow' : 'review';
+  }
+  if (
+    breakdown.policySafety < 0.58
+    || (breakdown.nativeVoice ?? breakdown.voiceFit) < 0.5
+    || (breakdown.cringeRisk ?? 0.5) >= 0.5
+    || (breakdown.stiffnessRisk ?? 0.5) >= 0.5
+  ) return 'block';
+  return (
+    breakdown.overall >= 0.58
+    && (breakdown.nativeVoice ?? breakdown.voiceFit) >= 0.65
+    && (breakdown.casualStartupFit ?? 0) >= 0.58
+    && (breakdown.cringeRisk ?? 1) < 0.32
+    && (breakdown.stiffnessRisk ?? 1) < 0.3
+    && (breakdown.manualAnchorReskinRisk ?? 0) < 0.25
+  ) ? 'allow' : 'review';
 }
 
 function parseScoredLines(
   text: string,
   candidates: RankableProtocolTweet[],
   context: JudgeContext,
+  generation: { provider: 'openai' | 'anthropic'; model: string },
+  requireModel: boolean,
+  task: 'bulk_judgment' | 'final_judgment',
 ): JudgedCandidate[] {
   const judged = new Map<number, JudgedCandidate>();
 
@@ -457,22 +493,38 @@ function parseScoredLines(
         technicalCredibility: modelTechnicalCredibility,
         manualAnchorReskinRisk: modelManualAnchorReskinRisk,
       };
+      const isFinalCritic = task === 'final_judgment';
       judged.set(idx, {
         ...candidate,
         featureTags,
         coverageCluster: buildCoverageCluster(candidate.content, candidate.targetTopic, parsed.thesis || featureTags.thesis),
-        judgeScore: Number(judgeBreakdown.overall.toFixed(3)),
-        judgeBreakdown,
+        judgeScore: isFinalCritic && candidate.judgeScore !== null && candidate.judgeScore !== undefined
+          ? candidate.judgeScore
+          : Number(judgeBreakdown.overall.toFixed(3)),
+        judgeBreakdown: isFinalCritic && candidate.judgeBreakdown
+          ? candidate.judgeBreakdown
+          : judgeBreakdown,
         judgeNotes: typeof parsed.notes === 'string'
           ? `${parsed.notes.trim()}${geoffreyStrict ? ` Native=${modelNativeVoice.toFixed(2)} casualStartup=${modelCasualStartupFit.toFixed(2)} stiffness=${modelStiffnessRisk.toFixed(2)} cringe=${modelCringeRisk.toFixed(2)} technical=${modelTechnicalCredibility.toFixed(2)} anchorReskin=${modelManualAnchorReskinRisk.toFixed(2)}.` : ''}`
           : '',
+        judgeProvider: isFinalCritic ? candidate.judgeProvider ?? null : generation.provider,
+        judgeModel: isFinalCritic ? candidate.judgeModel ?? null : generation.model,
+        finalCriticProvider: isFinalCritic ? generation.provider : candidate.finalCriticProvider ?? null,
+        finalCriticModel: isFinalCritic ? generation.model : candidate.finalCriticModel ?? null,
+        finalCriticVerdict: isFinalCritic
+          ? finalCriticVerdict(judgeBreakdown, geoffreyStrict)
+          : candidate.finalCriticVerdict ?? null,
+        finalCriticScores: isFinalCritic ? judgeBreakdown : candidate.finalCriticScores ?? null,
+        finalCriticVersion: isFinalCritic ? FINAL_CRITIC_VERSION : candidate.finalCriticVersion ?? null,
       });
     } catch {
       // Skip malformed lines.
     }
   }
 
-  return candidates.map((candidate, idx) => judged.get(idx) || heuristicJudge(candidate, context));
+  return candidates
+    .map((candidate, idx) => judged.get(idx) || (requireModel ? null : heuristicJudge(candidate, context)))
+    .filter((candidate): candidate is JudgedCandidate => candidate !== null);
 }
 
 export async function judgeCandidates(
@@ -483,16 +535,22 @@ export async function judgeCandidates(
     learnings,
     memory,
     mode = 'model',
+    requireModel = false,
+    task = 'bulk_judgment',
   }: {
     voiceProfile: VoiceProfile;
     analysis: AccountAnalysis;
     learnings: AgentLearnings | null;
     memory: PersonalizationMemory | null;
     mode?: CandidateJudgeMode;
+    requireModel?: boolean;
+    task?: 'bulk_judgment' | 'final_judgment';
   },
 ): Promise<JudgedCandidate[]> {
   const judgeContext = { voiceProfile, analysis, learnings, memory };
-  if (candidates.length === 0 || mode === 'heuristic' || !hasTextGenerationProvider()) {
+  if (candidates.length === 0) return [];
+  if (mode === 'heuristic' || !hasTextGenerationProvider()) {
+    if (requireModel) return [];
     return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
   }
 
@@ -528,7 +586,7 @@ NATIVE ANCHOR BANK:
 ${manualAnchorBank || '[no manual anchors available; be conservative]'}`
       : '';
     const response = await generateText({
-      task: 'bulk_judgment',
+      task,
       tier: 'fast',
       maxTokens: getBulkJudgeMaxTokens(candidates.length),
       system: `You are a brutally honest tweet quality judge for one X account.
@@ -583,9 +641,12 @@ Output one JSON object per line, no markdown.`,
       prompt: `Judge these candidates:\n\n${prompt}`,
     });
 
-    return parseScoredLines(response.text, candidates, judgeContext);
+    return parseScoredLines(response.text, candidates, judgeContext, {
+      provider: response.provider,
+      model: response.model,
+    }, requireModel, task);
   } catch {
-    return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
+    return requireModel ? [] : candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
   }
 }
 
@@ -616,6 +677,13 @@ function parseMutationLines(
         judgeScore: null,
         judgeBreakdown: null,
         judgeNotes: null,
+        judgeProvider: null,
+        judgeModel: null,
+        finalCriticProvider: null,
+        finalCriticModel: null,
+        finalCriticVerdict: null,
+        finalCriticScores: null,
+        finalCriticVersion: null,
         featureTags: null,
       });
     } catch {

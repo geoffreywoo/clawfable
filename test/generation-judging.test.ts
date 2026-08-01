@@ -239,6 +239,101 @@ describe('judgeCandidates fallback critic', () => {
     }));
   });
 
+  it('cannot satisfy a required model judgment with heuristic fallback', async () => {
+    const judged = await judgeCandidates([{
+      content: 'inference pricing keeps falling while rack power keeps getting harder.',
+      format: 'hot_take',
+      targetTopic: 'inference',
+      rationale: 'Power constraint.',
+    }], {
+      voiceProfile: {
+        tone: 'technical investor',
+        topics: ['inference'],
+        antiGoals: ['AI slop'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual technical voice.',
+        summary: 'Geoffrey writes about startups and frontier tech.',
+      },
+      analysis: analysis(),
+      learnings: null,
+      memory: memory(),
+      requireModel: true,
+      task: 'final_judgment',
+    });
+
+    expect(judged).toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('records initial judge and final critic provider provenance separately', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    const score = (overall: number) => JSON.stringify({
+      idx: 0,
+      overall,
+      voiceFit: 0.88,
+      clarity: 0.86,
+      novelty: 0.78,
+      audienceFit: 0.84,
+      policySafety: 0.97,
+      nativeVoice: 0.88,
+      casualStartupFit: 0.86,
+      stiffnessRisk: 0.07,
+      cringeRisk: 0.06,
+      technicalCredibility: 0.76,
+      manualAnchorReskinRisk: 0.04,
+      thesis: 'rack power gates inference pricing',
+      notes: 'Sounds native and specific.',
+    });
+    mocks.generateText
+      .mockResolvedValueOnce({ text: score(0.82), provider: 'openai', model: 'gpt-5.5' })
+      .mockResolvedValueOnce({ text: score(0.9), provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    const voiceProfile = {
+      tone: 'technical investor',
+      topics: ['inference', 'startups'],
+      antiGoals: ['AI slop'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual technical voice.',
+      summary: 'Geoffrey writes about startups and frontier tech.',
+    };
+    const initial = await judgeCandidates([{
+      content: 'inference pricing keeps falling while rack power keeps getting harder. good setup for weird new silicon.',
+      format: 'hot_take',
+      targetTopic: 'inference',
+      rationale: 'Power constraint changes startup timing.',
+    }], {
+      voiceProfile,
+      analysis: analysis(),
+      learnings: null,
+      memory: memory(),
+      requireModel: true,
+      task: 'bulk_judgment',
+    });
+    const final = await judgeCandidates(initial, {
+      voiceProfile,
+      analysis: analysis(),
+      learnings: null,
+      memory: memory(),
+      requireModel: true,
+      task: 'final_judgment',
+    });
+
+    expect(initial[0]).toMatchObject({
+      judgeProvider: 'openai',
+      judgeModel: 'gpt-5.5',
+      finalCriticProvider: null,
+      finalCriticModel: null,
+    });
+    expect(final[0]).toMatchObject({
+      judgeProvider: 'openai',
+      judgeModel: 'gpt-5.5',
+      finalCriticProvider: 'anthropic',
+      finalCriticModel: 'claude-sonnet-4-6',
+      finalCriticVerdict: 'allow',
+      finalCriticVersion: 'geoffwoo-final-critic-v1',
+    });
+    expect(final[0].judgeBreakdown.overall).toBe(initial[0].judgeBreakdown.overall);
+    expect(final[0].finalCriticScores?.overall).toBeGreaterThan(0.8);
+    expect(final[0].finalCriticScores?.overall).not.toBe(initial[0].judgeBreakdown.overall);
+  });
+
   it('penalizes AI-slop cadence in the heuristic critic', async () => {
     const judged = await judgeCandidates([
       {

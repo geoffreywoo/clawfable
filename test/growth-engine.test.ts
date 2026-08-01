@@ -104,6 +104,24 @@ describe('growth-engine', () => {
     })[0].suggestedAction).toBe('reply');
   });
 
+  it('does not turn voice complaints into reply-mined idea prompts', () => {
+    const complaints: Mention[] = [{
+      id: 'm-complaint',
+      agentId: 'agent-1',
+      author: 'Reader',
+      authorHandle: 'reader',
+      content: 'Can you stop with the AI slop? This does not sound like you.',
+      tweetId: 'x-complaint',
+      conversationId: 'x-parent',
+      inReplyToTweetId: 'x-parent',
+      engagementLikes: 12,
+      engagementRetweets: 2,
+      createdAt: new Date().toISOString(),
+    }];
+
+    expect(mineReplyInsights(complaints)).toEqual([]);
+  });
+
   it('detects velocity follow-up opportunities and builds postmortems', () => {
     const entry = perf();
 

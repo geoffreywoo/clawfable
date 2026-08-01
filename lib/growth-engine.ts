@@ -14,6 +14,7 @@ import type {
   TweetPerformance,
   ViralityPostmortem,
 } from './types';
+import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import type { EnrichedTrendingTopic } from './source-planner';
 import { computeActionRewards, inferAudienceSegment } from './virality-signals';
 
@@ -207,6 +208,7 @@ export function mineReplyInsights(mentions: Mention[], limit = 8): ReplyMiningIn
   for (const mention of mentions) {
     const text = mention.content.trim();
     if (text.length < 12) continue;
+    if (classifyAudienceVoiceComplaint(text).isComplaint) continue;
     const lower = text.toLowerCase();
     const question = text.includes('?');
     const objection = /\b(but|wrong|disagree|why|how|what about|doesn't|isn't|can't)\b/.test(lower);

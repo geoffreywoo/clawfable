@@ -381,6 +381,33 @@ export async function getUserByUsername(
   }
 }
 
+export interface TimelineSourceMetadata {
+  referenceType?: 'quoted' | 'replied_to' | 'retweeted' | null;
+  referencedTweetId?: string | null;
+  hasMedia?: boolean;
+  isTextComplete?: boolean;
+  lang?: string | null;
+}
+
+function timelineSourceMetadata(tweet: any): TimelineSourceMetadata {
+  const references = Array.isArray(tweet?.referenced_tweets) ? tweet.referenced_tweets : [];
+  const reference = references.find((item: any) => ['quoted', 'replied_to', 'retweeted'].includes(item?.type));
+  const noteText = typeof tweet?.note_tweet?.text === 'string' ? tweet.note_tweet.text.trim() : '';
+  const baseText = String(tweet?.text || '').trim();
+  return {
+    referenceType: reference?.type || null,
+    referencedTweetId: reference?.id ? String(reference.id) : null,
+    hasMedia: Array.isArray(tweet?.attachments?.media_keys) && tweet.attachments.media_keys.length > 0,
+    isTextComplete: Boolean(noteText || (baseText && !/(?:\.\.\.|\u2026)$/.test(baseText))),
+    lang: typeof tweet?.lang === 'string' ? tweet.lang : null,
+  };
+}
+
+function completeTweetText(tweet: any): string {
+  const noteText = typeof tweet?.note_tweet?.text === 'string' ? tweet.note_tweet.text.trim() : '';
+  return noteText || String(tweet?.text || '');
+}
+
 /**
  * Fetch user's recent tweets with engagement metrics.
  */
@@ -399,18 +426,23 @@ export async function getUserTimeline(
     impressions: number;
     quotes: number;
     bookmarks: number;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
   }>
 > {
   const client = createClient(keys);
   try {
     const result = await client.v2.userTimeline(userId, {
       max_results: Math.min(maxResults, 100),
-      'tweet.fields': ['created_at', 'public_metrics'],
+      'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
       exclude: ['retweets', 'replies'],
     });
     return (result.data.data || []).map((tweet) => ({
       id: tweet.id,
-      text: tweet.text,
+      text: completeTweetText(tweet),
       createdAt: tweet.created_at || new Date().toISOString(),
       likes: tweet.public_metrics?.like_count ?? 0,
       retweets: tweet.public_metrics?.retweet_count ?? 0,
@@ -418,6 +450,7 @@ export async function getUserTimeline(
       impressions: tweet.public_metrics?.impression_count ?? 0,
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+      ...timelineSourceMetadata(tweet),
     }));
   } catch (error) {
     return handleApiError(error, {
@@ -452,6 +485,11 @@ export async function getHomeTimeline(
     authorFollowersCount: number;
     authorVerified: boolean;
     authorProtected: boolean;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
   }>
 > {
   const client = createClient(keys);
@@ -459,7 +497,7 @@ export async function getHomeTimeline(
   try {
     const result = await client.v2.homeTimeline({
       max_results: Math.min(totalLimit, 100),
-      'tweet.fields': ['created_at', 'author_id', 'public_metrics'],
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
       expansions: ['author_id'],
       'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
       exclude: ['retweets', 'replies'],
@@ -471,7 +509,7 @@ export async function getHomeTimeline(
       const author = result.includes.author(tweet);
       return {
         id: tweet.id,
-        text: tweet.text,
+        text: completeTweetText(tweet),
         createdAt: tweet.created_at || new Date().toISOString(),
         likes: tweet.public_metrics?.like_count ?? 0,
         retweets: tweet.public_metrics?.retweet_count ?? 0,
@@ -485,6 +523,7 @@ export async function getHomeTimeline(
         authorFollowersCount: (author as any)?.public_metrics?.followers_count ?? 0,
         authorVerified: (author as any)?.verified ?? false,
         authorProtected: (author as any)?.protected ?? false,
+        ...timelineSourceMetadata(tweet),
       };
     }).filter((tweet) => Boolean(tweet.authorId && tweet.author));
   } catch (error) {
@@ -504,7 +543,7 @@ type TimelineTweet = {
   impressions: number;
   quotes: number;
   bookmarks: number;
-};
+} & TimelineSourceMetadata;
 
 /**
  * Fetch deep tweet history with pagination. Gets up to maxTotal tweets.
@@ -523,7 +562,7 @@ export async function getDeepTimeline(
       const batchSize = Math.min(100, maxTotal - all.length);
       const params: Record<string, unknown> = {
         max_results: batchSize,
-        'tweet.fields': ['created_at', 'public_metrics'],
+        'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'],
         exclude: ['retweets', 'replies'],
       };
       if (paginationToken) params.pagination_token = paginationToken;
@@ -539,7 +578,7 @@ export async function getDeepTimeline(
       for (const tweet of tweets) {
         all.push({
           id: tweet.id,
-          text: tweet.text,
+          text: completeTweetText(tweet),
           createdAt: tweet.created_at || new Date().toISOString(),
           likes: tweet.public_metrics?.like_count ?? 0,
           retweets: tweet.public_metrics?.retweet_count ?? 0,
@@ -547,6 +586,7 @@ export async function getDeepTimeline(
           impressions: tweet.public_metrics?.impression_count ?? 0,
           quotes: tweet.public_metrics?.quote_count ?? 0,
           bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+          ...timelineSourceMetadata(tweet),
         });
       }
 

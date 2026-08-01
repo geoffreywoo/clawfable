@@ -1,4 +1,5 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem, OutcomeEvent, MetricAvailability, RelationshipProfile, IdeaAtom, CriticVerdict } from './types';
+import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem, OutcomeEvent, MetricAvailability, RelationshipProfile, IdeaAtom, CriticVerdict, VoiceCorpusSnapshot, AudienceVoiceComplaint } from './types';
+import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
 import { computeActionRewards, computeEarlyVelocityScore } from './virality-signals';
@@ -558,6 +559,9 @@ const KEYS = {
   agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
   agentVoiceDirectiveRules: (id: string) => `agent:${id}:voice_directive_rules`,
   agentManualExamples: (id: string) => `agent:${id}:manual_examples`,
+  agentVoiceCorpus: (id: string) => `agent:${id}:voice_corpus`,
+  agentAudienceVoiceComplaints: (id: string) => `agent:${id}:audience_voice_complaints`,
+  agentAudienceVoiceComplaintByMention: (agentId: string, mentionId: string) => `agent:${agentId}:audience_voice_complaint:mention:${mentionId}`,
   agentSignals: (id: string) => `agent:${id}:signals`,
   agentOutcomeEvents: (id: string) => `agent:${id}:outcome_events`,
   agentMetricAvailability: (id: string) => `agent:${id}:metric_availability`,
@@ -582,11 +586,13 @@ const KEYS = {
   userUsername: (username: string) => `user:username:${username}`,
   tweet: (id: string) => `tweet:${id}`,
   mention: (id: string) => `mention:${id}`,
+  audienceVoiceComplaint: (id: string) => `audience_voice_complaint:${id}`,
   agentJobs: (id: string) => `agent:${id}:jobs`,
   job: (id: string) => `job:${id}`,
   counterAgent: () => 'counter:agent',
   counterTweet: () => 'counter:tweet',
   counterMention: () => 'counter:mention',
+  counterAudienceVoiceComplaint: () => 'counter:audience_voice_complaint',
   counterJob: () => 'counter:job',
   counterEngagementSession: () => 'counter:engagement_session',
   counterBrowserPairing: () => 'counter:browser_pairing',
@@ -798,6 +804,10 @@ export async function deleteAgent(id: string): Promise<void> {
   const mentionIds = await kvLrange(KEYS.agentMentions(id), 0, -1);
   await Promise.all(mentionIds.map((mid) => kvDel(KEYS.mention(mid))));
   await kvDel(KEYS.agentMentions(id));
+  const complaintIds = await kvLrange(KEYS.agentAudienceVoiceComplaints(id), 0, -1);
+  await Promise.all(complaintIds.map((complaintId) => kvDel(KEYS.audienceVoiceComplaint(String(complaintId)))));
+  await Promise.all(mentionIds.map((mentionId) => kvDel(KEYS.agentAudienceVoiceComplaintByMention(id, String(mentionId)))));
+  await kvDel(KEYS.agentAudienceVoiceComplaints(id));
 
   // Cascade: delete metrics hash
   await kvDel(KEYS.agentMetrics(id));
@@ -812,6 +822,7 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentEvents(id));
   await kvDel(KEYS.agentSoulBackup(id));
   await kvDel(KEYS.agentManualExamples(id));
+  await kvDel(KEYS.agentVoiceCorpus(id));
 
   // Cascade: delete protocol, post log, learnings, performance, baseline, jobs
   await kvDel(KEYS.agentProtocol(id));
@@ -928,6 +939,15 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     rationale: tweet.rationale ?? null,
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
+    judgeProvider: tweet.judgeProvider ?? null,
+    judgeModel: tweet.judgeModel ?? null,
+    qualityPolicyVersion: tweet.qualityPolicyVersion ?? null,
+    voiceCorpusVersion: tweet.voiceCorpusVersion ?? null,
+    finalCriticProvider: tweet.finalCriticProvider ?? null,
+    finalCriticModel: tweet.finalCriticModel ?? null,
+    finalCriticVerdict: tweet.finalCriticVerdict ?? null,
+    finalCriticScores: coerceNullableJson(tweet.finalCriticScores),
+    finalCriticVersion: tweet.finalCriticVersion ?? null,
     sourceBrief: tweet.sourceBrief ?? null,
     sourceEvidenceTexts: coerceNullableJson<string[]>(tweet.sourceEvidenceTexts),
     generationMode: tweet.generationMode ?? null,
@@ -992,6 +1012,7 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
     ...tweet,
     featureTags: tweet.featureTags ? JSON.stringify(tweet.featureTags) : null,
     judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
+    finalCriticScores: tweet.finalCriticScores ? JSON.stringify(tweet.finalCriticScores) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
     sourceEvidenceTexts: tweet.sourceEvidenceTexts ? JSON.stringify(tweet.sourceEvidenceTexts) : null,
     rewardBreakdown: tweet.rewardBreakdown ? JSON.stringify(tweet.rewardBreakdown) : null,
@@ -1062,6 +1083,15 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     rationale: data.rationale ?? null,
     generationProvider: data.generationProvider ?? null,
     generationModel: data.generationModel ?? null,
+    judgeProvider: data.judgeProvider ?? null,
+    judgeModel: data.judgeModel ?? null,
+    qualityPolicyVersion: data.qualityPolicyVersion ?? null,
+    voiceCorpusVersion: data.voiceCorpusVersion ?? null,
+    finalCriticProvider: data.finalCriticProvider ?? null,
+    finalCriticModel: data.finalCriticModel ?? null,
+    finalCriticVerdict: data.finalCriticVerdict ?? null,
+    finalCriticScores: data.finalCriticScores ?? null,
+    finalCriticVersion: data.finalCriticVersion ?? null,
     sourceBrief: data.sourceBrief ?? null,
     sourceEvidenceTexts: data.sourceEvidenceTexts ?? null,
     generationMode: data.generationMode ?? null,
@@ -1209,6 +1239,17 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
     nextData.originalContent = existing.originalContent ?? existing.content;
     nextData.editCount = (existing.editCount ?? 0) + 1;
     nextData.lastEditedAt = new Date().toISOString();
+    if (data.finalCriticVersion === undefined) {
+      nextData.qualityPolicyVersion = null;
+      nextData.voiceCorpusVersion = null;
+      nextData.judgeProvider = null;
+      nextData.judgeModel = null;
+      nextData.finalCriticProvider = null;
+      nextData.finalCriticModel = null;
+      nextData.finalCriticVerdict = null;
+      nextData.finalCriticScores = null;
+      nextData.finalCriticVersion = null;
+    }
     if (existing.quarantinedAt && data.quarantinedAt === undefined && data.quarantineReason === undefined) {
       nextData.quarantinedAt = null;
       nextData.quarantineReason = null;
@@ -1313,6 +1354,57 @@ function normalizeMentionRecord(mention: Mention): Mention {
   });
 }
 
+function normalizeAudienceVoiceComplaint(complaint: AudienceVoiceComplaint): AudienceVoiceComplaint {
+  return {
+    ...complaint,
+    id: String(complaint.id),
+    agentId: String(complaint.agentId),
+    mentionId: String(complaint.mentionId),
+    mentionTweetId: complaint.mentionTweetId != null ? String(complaint.mentionTweetId) : null,
+    parentXTweetId: String(complaint.parentXTweetId),
+    parentTweetId: complaint.parentTweetId != null ? String(complaint.parentTweetId) : null,
+    tags: Array.isArray(complaint.tags) ? complaint.tags : [],
+  };
+}
+
+async function maybeStoreAudienceVoiceComplaint(mention: Mention): Promise<AudienceVoiceComplaint | null> {
+  const classification = classifyAudienceVoiceComplaint(mention.content);
+  const parentXTweetId = String(mention.inReplyToTweetId || '');
+  if (!classification.isComplaint || classification.confidence < 0.9 || !parentXTweetId) return null;
+
+  const indexKey = KEYS.agentAudienceVoiceComplaintByMention(mention.agentId, mention.id);
+  const existingId = await kvGet<string>(indexKey);
+  if (existingId) {
+    const existing = await kvHgetall<AudienceVoiceComplaint>(KEYS.audienceVoiceComplaint(String(existingId)));
+    if (existing) return normalizeAudienceVoiceComplaint(existing);
+  }
+
+  const parentTweet = (await getTweets(mention.agentId))
+    .find((tweet) => String(tweet.xTweetId || '') === parentXTweetId) || null;
+  const counter = await kvIncr(KEYS.counterAudienceVoiceComplaint());
+  const complaint: AudienceVoiceComplaint = {
+    id: String(counter),
+    agentId: mention.agentId,
+    mentionId: mention.id,
+    mentionTweetId: mention.tweetId,
+    parentXTweetId,
+    parentTweetId: parentTweet?.id || null,
+    authorHandle: mention.authorHandle,
+    content: mention.content,
+    tags: classification.tags,
+    confidence: classification.confidence,
+    generationProvider: parentTweet?.generationProvider ?? null,
+    generationModel: parentTweet?.generationModel ?? null,
+    sourceLane: parentTweet?.sourceLane ?? null,
+    qualityPolicyVersion: parentTweet?.qualityPolicyVersion ?? null,
+    createdAt: mention.createdAt,
+  };
+  await kvHset(KEYS.audienceVoiceComplaint(complaint.id), complaint as unknown as Record<string, unknown>);
+  await kvLpush(KEYS.agentAudienceVoiceComplaints(mention.agentId), complaint.id);
+  await kvSet(indexKey, complaint.id);
+  return complaint;
+}
+
 export async function getRecentMentions(agentId: string, limit = 100): Promise<Mention[]> {
   const safeLimit = Math.max(0, Math.min(1000, Math.floor(limit)));
   if (safeLimit === 0) return [];
@@ -1327,6 +1419,23 @@ export async function getMentionCount(agentId: string): Promise<number> {
   return kvLlen(KEYS.agentMentions(agentId));
 }
 
+export async function getAudienceVoiceComplaints(agentId: string, limit = 100): Promise<AudienceVoiceComplaint[]> {
+  const safeLimit = Math.max(0, Math.min(1000, Math.floor(limit)));
+  if (safeLimit === 0) return [];
+  const ids = await kvLrange(KEYS.agentAudienceVoiceComplaints(agentId), 0, safeLimit - 1);
+  const complaints = await kvHgetallMany<AudienceVoiceComplaint>(
+    ids.map((id) => KEYS.audienceVoiceComplaint(String(id))),
+  );
+  return complaints
+    .filter((complaint): complaint is AudienceVoiceComplaint => complaint !== null)
+    .map(normalizeAudienceVoiceComplaint)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function getAudienceVoiceComplaintCount(agentId: string): Promise<number> {
+  return kvLlen(KEYS.agentAudienceVoiceComplaints(agentId));
+}
+
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
   const counter = await kvIncr(KEYS.counterMention());
   const id = String(counter);
@@ -1338,7 +1447,11 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
     if (!claimed) {
       const existingId = await kvGet<string>(tweetIndexKey);
       const existing = existingId ? await kvHgetall<Mention>(KEYS.mention(String(existingId))) : null;
-      if (existing) return normalizeMentionRecord(existing);
+      if (existing) {
+        const normalized = normalizeMentionRecord(existing);
+        await maybeStoreAudienceVoiceComplaint(normalized);
+        return normalized;
+      }
     }
   }
 
@@ -1360,6 +1473,7 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
   if (tweetIndexKey) {
     await kvSet(tweetIndexKey, id);
   }
+  await maybeStoreAudienceVoiceComplaint(mention);
   return mention;
 }
 
@@ -1515,6 +1629,18 @@ export async function updateManualExampleCuration(
   });
   await kvSet(KEYS.agentManualExamples(agentId), next);
   return next;
+}
+
+export async function getVoiceCorpusSnapshot(agentId: string): Promise<VoiceCorpusSnapshot | null> {
+  return kvGet<VoiceCorpusSnapshot>(KEYS.agentVoiceCorpus(agentId));
+}
+
+export async function saveVoiceCorpusSnapshot(
+  agentId: string,
+  snapshot: VoiceCorpusSnapshot,
+): Promise<VoiceCorpusSnapshot> {
+  await kvSet(KEYS.agentVoiceCorpus(agentId), snapshot);
+  return snapshot;
 }
 
 // ─── Autopilot health storage ────────────────────────────────────────────────

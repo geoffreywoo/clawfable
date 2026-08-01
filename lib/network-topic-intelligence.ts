@@ -7,7 +7,7 @@
  */
 
 import { generateText } from './ai';
-import type { TrendingTopic } from './trending';
+import type { TopicSemanticDomain, TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { getFollowing, getHomeTimeline, getUserTimeline } from './twitter-client';
 import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -87,6 +87,8 @@ export interface NetworkTopicHistoryEntry {
   sourceAuthors: string[];
   sourceTweetIds: string[];
   observations: NetworkTopicObservation[];
+  semanticDomain?: TopicSemanticDomain;
+  topicUncertainty?: 'low' | 'medium' | 'high';
 }
 
 export interface NetworkAuthorSignal {
@@ -150,6 +152,8 @@ export interface ExtractedNetworkTopic {
   entities: string[];
   whyNow: string;
   confidence: number;
+  semanticDomain?: TopicSemanticDomain;
+  uncertainty?: 'low' | 'medium' | 'high';
 }
 
 export type NetworkTopicExtractor = (
@@ -321,14 +325,19 @@ export function selectNetworkAccounts(
   return selected.slice(0, boundedLimit);
 }
 
-function isUsableSourcePost(text: string): boolean {
-  const withoutUrls = text
+export function isUsableNetworkSourcePost(tweet: Pick<RawNetworkTweet, 'text' | 'referenceType' | 'hasMedia' | 'isTextComplete' | 'lang'>): boolean {
+  if (tweet.referenceType) return false;
+  if (tweet.isTextComplete === false) return false;
+  if (tweet.lang && tweet.lang !== 'en') return false;
+  const withoutUrls = tweet.text
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/^(@\w+\s*)+/, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (withoutUrls.length < 20) return false;
   if ((withoutUrls.match(/[a-z]/gi) || []).length < 12) return false;
+  if (tweet.hasMedia && withoutUrls.split(/\s+/).length < 18) return false;
+  if (/\b(?:sign up|waitlist|book a demo|use code|subscribe|available now)\b/i.test(withoutUrls)) return false;
   if (/^(?:lol|lmao|congrats|thank you|thanks)\b[.! ]*$/i.test(withoutUrls)) return false;
   if (/\b(?:called worse by better|ruler and microsoft paint)\b/i.test(withoutUrls)) return false;
   if (/\bwould(?:n['\u2019]?t|\s+not) be surprised\b/i.test(withoutUrls)
@@ -449,6 +458,11 @@ function normalizeHomeTimeline(
       authorId: tweet.authorId,
       author: tweet.author,
       followersCount: finite(tweet.authorFollowersCount),
+      referenceType: tweet.referenceType,
+      referencedTweetId: tweet.referencedTweetId,
+      hasMedia: tweet.hasMedia,
+      isTextComplete: tweet.isTextComplete,
+      lang: tweet.lang,
     })),
   };
 }
@@ -459,9 +473,9 @@ export function scoreNetworkTweets(
   now: number,
 ): NetworkTweetObservation[] {
   const observedAt = new Date(now).toISOString();
-  const currentTweets = tweets.filter((tweet) => isCurrent(tweet.createdAt, now) && isUsableSourcePost(tweet.text));
+  const currentTweets = tweets.filter((tweet) => isCurrent(tweet.createdAt, now) && isUsableNetworkSourcePost(tweet));
   const byAuthor = new Map<string, RawNetworkTweet[]>();
-  for (const tweet of tweets.filter((item) => isUsableSourcePost(item.text))) {
+  for (const tweet of tweets.filter(isUsableNetworkSourcePost)) {
     const bucket = byAuthor.get(tweet.authorId) || [];
     bucket.push(tweet);
     byAuthor.set(tweet.authorId, bucket);
@@ -617,6 +631,29 @@ function buildFallbackLabel(tweets: NetworkTweetObservation[]): string {
   return label || 'network discussion';
 }
 
+export function inferNetworkSemanticDomain(value: string): TopicSemanticDomain {
+  const text = value.toLowerCase();
+  if (/\b(?:servo browser|servo web|mozilla servo|browser engine|rendering engine|web engine)\b/.test(text)) return 'browser_infrastructure';
+  if (/\b(?:bitcoin|ethereum|crypto|defi|token|stablecoin|blockchain)\b/.test(text)) return 'crypto';
+  if (/\b(?:election|president|congress|white house|democrat|republican|putin|russia|iran|israel|ukraine|geopolitic|military intelligence)\b/.test(text)) return 'politics_geopolitics';
+  if (/\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|stellarator|grid|transformer|power plant)\b/.test(text)) return 'energy_nuclear';
+  if (/\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|separation chemistry|metallurgy)\b/.test(text)) return 'materials_minerals';
+  if (/\b(?:robot|robotics|humanoid|actuator|servo motor|machine vision|autonomous manipulation)\b/.test(text)) return 'robotics_automation';
+  if (/\b(?:factory|manufactur|machine tool|metrology|yield|industrial automation|supply chain|qualification)\b/.test(text)) return 'manufacturing_industrial';
+  if (/\b(?:space|rocket|launch|satellite|orbital|payload|radiation hardened|defense|military systems?|anduril)\b/.test(text)) return 'space_defense';
+  if (/\b(?:asic|gpu|hbm|chip|semiconductor|inference|model serving|data center|compute|openai|anthropic|claude|chatgpt|e2b|hugging face|nvidia|tsmc)\b/.test(text)) return 'ai_compute';
+  if (/\b(?:startup|founder|venture|funding|valuation|product market|customer|company)\b/.test(text)) return 'startups_markets';
+  if (/\b(?:browser|database|developer tool|software|open source|programming|cloud)\b/.test(text)) return 'general_technology';
+  return 'other';
+}
+
+function normalizedUncertainty(value: unknown, confidence: number): 'low' | 'medium' | 'high' {
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  if (confidence >= 0.78) return 'low';
+  if (confidence >= 0.55) return 'medium';
+  return 'high';
+}
+
 /** Deterministic, topic-agnostic fallback for provider outages and tests. */
 export function buildFallbackNetworkTopics(
   candidates: NetworkTweetObservation[],
@@ -637,13 +674,17 @@ export function buildFallbackNetworkTopics(
     .slice(0, 10)
     .map((group) => {
       const label = buildFallbackLabel(group);
+      const semanticDomain = inferNetworkSemanticDomain(`${label} ${group.map((tweet) => tweet.text).join(' ')}`);
+      const confidence = Number(clamp(0.46 + (group.length - 1) * 0.08).toFixed(3));
       return {
         label,
         summary: `Breakout followed-network discussion about ${label}.`,
         tweetIds: group.map((tweet) => tweet.tweetId),
         entities: [...new Set(group.flatMap((tweet) => extractVisibleEntities(tweet.text)))].slice(0, 8),
         whyNow: group.length > 1 ? `${group.length} followed-network posts are breaking out on the same subject.` : 'A followed-network post is outperforming its author baseline.',
-        confidence: Number(clamp(0.46 + (group.length - 1) * 0.08).toFixed(3)),
+        confidence,
+        semanticDomain,
+        uncertainty: normalizedUncertainty(null, confidence),
       };
     });
 }
@@ -673,6 +714,21 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
       ? item.tweetIds.map(String).filter((id) => inputIds.has(id) && !usedIds.has(id)).slice(0, 8)
       : [];
     if (!label || significantTokens(label).length === 0 || !summary || tweetIds.length === 0) continue;
+    const evidenceText = tweetIds
+      .map((id) => candidates.find((candidate) => candidate.tweetId === id)?.text || '')
+      .join(' ');
+    const inferredDomain = inferNetworkSemanticDomain(`${label} ${summary} ${evidenceText}`);
+    const requestedDomain = String(item.semanticDomain || '') as TopicSemanticDomain;
+    const semanticDomain = inferredDomain !== 'other'
+      ? inferredDomain
+      : [
+          'ai_compute', 'energy_nuclear', 'materials_minerals', 'robotics_automation',
+          'manufacturing_industrial', 'space_defense', 'browser_infrastructure',
+          'startups_markets', 'crypto', 'politics_geopolitics', 'general_technology', 'other',
+        ].includes(requestedDomain)
+        ? requestedDomain
+        : 'other';
+    const confidence = Number(clamp(finite(item.confidence)).toFixed(3));
     tweetIds.forEach((id) => usedIds.add(id));
     normalized.push({
       label,
@@ -682,7 +738,9 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
         ? [...new Set(item.entities.map((entity) => compact(String(entity), 60)).filter(Boolean))].slice(0, 8)
         : [],
       whyNow: compact(String(item.whyNow || 'Breaking out across the followed network.'), 180),
-      confidence: Number(clamp(finite(item.confidence)).toFixed(3)),
+      confidence,
+      semanticDomain,
+      uncertainty: normalizedUncertainty(item.uncertainty, confidence),
     });
     if (normalized.length >= 10) break;
   }
@@ -711,7 +769,9 @@ Rules:
 - Merge posts only when they concern substantially the same subject. Do not merge merely because they share tone or industry.
 - Summaries must stay inside the evidence. Do not invent facts, numbers, causality, or consensus.
 - Ignore engagement-bait phrasing and extract the underlying subject, not the source author's writing style or opinion.
-- Return JSON only: {"topics":[{"label":"...","summary":"...","tweetIds":["..."],"entities":["..."],"whyNow":"...","confidence":0.0}]}.
+- Classify semanticDomain as one of ai_compute, energy_nuclear, materials_minerals, robotics_automation, manufacturing_industrial, space_defense, browser_infrastructure, startups_markets, crypto, politics_geopolitics, general_technology, or other. Servo the browser engine is browser_infrastructure, never robotics.
+- Set uncertainty to low, medium, or high based on whether the evidence supports the exact subject and claimed event.
+- Return JSON only: {"topics":[{"label":"...","summary":"...","tweetIds":["..."],"entities":["..."],"whyNow":"...","confidence":0.0,"semanticDomain":"...","uncertainty":"..."}]}.
 - Use only tweetId values supplied in the input. Assign a tweet to at most one topic. Omit noise rather than forcing it into a cluster.`,
     prompt: `Cluster these followed-network breakout posts into current subjects:\n\n${sourceRows}`,
   });
@@ -816,6 +876,8 @@ function mergeTopicHistory(
       sourceAuthors: [...new Set([...(historical?.sourceAuthors || []), ...authors])].slice(-24),
       sourceTweetIds: [...new Set([...(historical?.sourceTweetIds || []), ...evidence.map((tweet) => tweet.tweetId)])].slice(-32),
       observations: [...(historical?.observations || []), topicObservation].slice(-MAX_TOPIC_OBSERVATIONS),
+      semanticDomain: cluster.semanticDomain,
+      topicUncertainty: cluster.uncertainty,
     };
     currentHistory.push(history);
 
@@ -865,6 +927,8 @@ function mergeTopicHistory(
       topicConfidence: cluster.confidence,
       topicWhyNow: cluster.whyNow,
       observedAt,
+      semanticDomain: cluster.semanticDomain,
+      topicUncertainty: cluster.uncertainty,
       evidence: evidence.map((tweet): NetworkTopicEvidence => ({
         tweetId: tweet.tweetId,
         author: tweet.author,
