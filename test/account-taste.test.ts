@@ -503,6 +503,7 @@ describe('account taste scoring', () => {
       'a rocket company can create more engine demand and basically no direct rhenium supply response. that is a nasty scaling curve.',
       'i care more about the packaging team than another peak-performance slide. advanced chiplet compute only ships if alignment and yield hold up.',
       'i would not underwrite a beryllium machining startup like normal contract manufacturing. safety makes the capacity slower and more expensive before demand matters.',
+      'i stop trusting the chiplet pitch when package yield is missing. that number decides how much compute the startup can actually ship.',
     ];
 
     for (const content of drafts) {

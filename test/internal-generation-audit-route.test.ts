@@ -33,7 +33,7 @@ describe('internal generation quality audit route', () => {
       auditVersion: 1,
       agentId: '13',
       handle: '@geoffwoo',
-      policy: { qualityPolicyVersion: 'geoffwoo-quality-v6', currentVoiceCorpusVersion: 'voice-corpus-v1-test' },
+      policy: { qualityPolicyVersion: 'geoffwoo-quality-v7', currentVoiceCorpusVersion: 'voice-corpus-v1-test' },
       corpus: { active: true, corpusPurity: 1, anchorCount: 40 },
       queue: { depth: 3, qualityEligibleCount: 2, skippedByQualityCount: 1 },
       sources: { accepted: [], rejected: [] },
@@ -65,7 +65,7 @@ describe('internal generation quality audit route', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(mocks.buildGenerationQualityAudit).toHaveBeenCalledWith(expect.objectContaining({ id: '13' }));
     expect(data).toMatchObject({
-      policy: { qualityPolicyVersion: 'geoffwoo-quality-v6' },
+      policy: { qualityPolicyVersion: 'geoffwoo-quality-v7' },
       corpus: { active: true, corpusPurity: 1 },
       queue: { qualityEligibleCount: 2 },
       complaints: { metricsOnly: true },
