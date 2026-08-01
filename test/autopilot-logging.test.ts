@@ -363,8 +363,8 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
-  it('enforces a two-original rolling daily cap for @geoffwoo', async () => {
-    mocks.countPostsInLast24h.mockReturnValue(2);
+  it('enforces a five-original rolling daily cap for @geoffwoo', async () => {
+    mocks.countPostsInLast24h.mockReturnValue(5);
     mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
 
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });

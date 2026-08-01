@@ -660,7 +660,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
                       disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
-                      {[1, 2, 3, 4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}{n === 12 ? ' (max)' : ''}</option>)}
+                      {[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}{n === 12 ? ' (max)' : ''}</option>)}
                     </select>
                   </div>
                   <div className="field"><label>Minimum queue</label>

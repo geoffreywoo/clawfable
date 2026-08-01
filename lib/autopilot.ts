@@ -68,7 +68,12 @@ import { generateText, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
-import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from './account-taste';
+import {
+  assessAccountTaste,
+  GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY,
+  getAutonomousQueueTasteIssue,
+  isGeoffreyAccount,
+} from './account-taste';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
 import {
   assessGeoffreyQualityPolicy,
@@ -1463,7 +1468,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   // Clamp postsPerDay to safe maximum
   const safePostsPerDay = isGeoffreyAccount(agent.handle)
-    ? Math.min(2, clampPostsPerDay(settings.postsPerDay))
+    ? Math.min(GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, clampPostsPerDay(settings.postsPerDay))
     : clampPostsPerDay(settings.postsPerDay);
   const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
 
@@ -1513,7 +1518,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   // Daily hard cap — stop posting if we've hit the absolute limit
-  const geoffreyDailyCapReached = isGeoffreyAccount(agent.handle) && countPostsInLast24h(postLog) >= 2;
+  const geoffreyDailyCapReached = isGeoffreyAccount(agent.handle)
+    && countPostsInLast24h(postLog) >= GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY;
   if (geoffreyDailyCapReached || isDailyCapReached(postLog)) {
     return {
       agentId,

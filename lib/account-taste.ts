@@ -66,6 +66,7 @@ type DomainDictionary = {
 };
 
 const GEOFFREY_HANDLES = new Set(['geoffwoo', 'geoffreywoo']);
+export const GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY = 5;
 
 const DOMAIN_TERMS: DomainDictionary[] = [
   {

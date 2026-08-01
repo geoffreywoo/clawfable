@@ -21,6 +21,8 @@ import {
   isCoreGeoffreyTopicDomain,
 } from './source-planner';
 import { FINAL_CRITIC_VERSION } from './generation-judging';
+import { GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, isGeoffreyAccount } from './account-taste';
+import { clampPostsPerDay } from './survivability';
 
 export const GENERATION_QUALITY_AUDIT_VERSION = 1;
 
@@ -138,6 +140,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const primaryGeneration = getModelChainForTask('tweet_generation')[0];
   const primaryJudge = getModelChainForTask('bulk_judgment')[0];
   const primaryFinalCritic = getModelChainForTask('final_judgment')[0];
+  const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
+  const effectivePostsPerDay = isGeoffreyAccount(agent.handle)
+    ? Math.min(GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, configuredPostsPerDay)
+    : configuredPostsPerDay;
   const queueItems = queue.map((tweet) => {
     const assessment = assessGeoffreyQualityPolicy(tweet, {
       voiceProfile: context.voiceProfile,
@@ -189,6 +195,16 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       finalCriticVersion: FINAL_CRITIC_VERSION,
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
       autopostActivation: getGeoffreyQualityPolicyActivation(),
+    },
+    autopost: {
+      enabled: context.settings.enabled,
+      configuredPostsPerDay,
+      effectivePostsPerDay,
+      maxOriginalsPerRolling24Hours: isGeoffreyAccount(agent.handle)
+        ? GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY
+        : null,
+      minQueueSize: context.settings.minQueueSize,
+      refillBatchLimit: isGeoffreyAccount(agent.handle) ? 2 : null,
     },
     corpus: corpus ? {
       snapshotId: corpus.snapshotId,
