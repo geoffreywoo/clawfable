@@ -94,10 +94,19 @@ describe('generateViralBatch', () => {
     const withRecentTechnical = capGeoffreyTopicPortfolioCandidates(ranked, 5, voiceProfile, {
       recentPosts: ['a recent chip packaging and HBM constraint post'],
     });
+    const withQueuedTopic = capGeoffreyTopicPortfolioCandidates(ranked, 5, voiceProfile, {
+      allTweets: [{
+        status: 'queued',
+        quarantinedAt: null,
+        topic: 'AI products and research',
+        trendTopicId: null,
+      }] as any,
+    });
 
     expect(selected).toHaveLength(5);
     expect(selected.filter((candidate) => /magnet|tritium/.test(candidate.content))).toHaveLength(1);
     expect(withRecentTechnical.some((candidate) => /magnet|tritium/.test(candidate.content))).toBe(false);
+    expect(withQueuedTopic.some((candidate) => candidate.targetTopic === 'AI products and research')).toBe(false);
   });
 
   it('uses structured network facts without putting raw network prose into Geoffrey briefs', () => {

@@ -2365,12 +2365,19 @@ export function rankGeneratedTweets(
 export function selectTopRankedTweets(
   ranked: RankedProtocolTweet[],
   count: number,
-  options: { maxShitpoast?: number; minHoldouts?: number; maxTrendSources?: number } = {},
+  options: {
+    maxShitpoast?: number;
+    minHoldouts?: number;
+    maxTrendSources?: number;
+    requireDistinctSourceKeys?: boolean;
+    requireDistinctTopics?: boolean;
+  } = {},
 ): RankedProtocolTweet[] {
   const selected: RankedProtocolTweet[] = [];
   const usedClusters = new Set<string>();
   const usedPatternSignatures = new Set<string>();
   const usedSourceKeys = new Set<string>();
+  const usedTopicKeys = new Set<string>();
   const selectedRoles = new Map<PostPortfolioRole, number>();
   const maxShitpoast = options.maxShitpoast ?? Number.POSITIVE_INFINITY;
   const maxTrendSources = options.maxTrendSources === undefined
@@ -2389,6 +2396,10 @@ export function selectTopRankedTweets(
     if (candidate.sourceBrief) return `brief:${candidate.sourceBrief.replace(/\s+/g, ' ').trim().toLowerCase()}`;
     return null;
   };
+  const selectionTopicKey = (candidate: RankedProtocolTweet) => candidate.targetTopic
+    ?.replace(/[^a-z0-9]+/gi, ' ')
+    .trim()
+    .toLowerCase() || null;
 
   const canSelect = (candidate: RankedProtocolTweet, enforcePortfolioDiversity = false) => {
     if (candidate.styleMode === SHITPOAST_STYLE_MODE && shitpoastSelected >= maxShitpoast) return false;
@@ -2401,7 +2412,9 @@ export function selectTopRankedTweets(
       return false;
     }
     const sourceKey = selectionSourceKey(candidate);
-    if (enforcePortfolioDiversity && sourceKey && usedSourceKeys.has(sourceKey)) return false;
+    if ((enforcePortfolioDiversity || options.requireDistinctSourceKeys) && sourceKey && usedSourceKeys.has(sourceKey)) return false;
+    const topicKey = selectionTopicKey(candidate);
+    if (options.requireDistinctTopics && topicKey && usedTopicKeys.has(topicKey)) return false;
     const cluster = candidate.coverageCluster || buildCoverageCluster(candidate.content, candidate.targetTopic, candidate.featureTags?.thesis);
     const nearDuplicate = selected.some((item) =>
       isNearDuplicate(item.content, [candidate.content]).isDuplicate
@@ -2432,6 +2445,8 @@ export function selectTopRankedTweets(
     if (patternSignature) usedPatternSignatures.add(patternSignature);
     const sourceKey = selectionSourceKey(candidate);
     if (sourceKey) usedSourceKeys.add(sourceKey);
+    const topicKey = selectionTopicKey(candidate);
+    if (topicKey) usedTopicKeys.add(topicKey);
     if (candidate.styleMode === SHITPOAST_STYLE_MODE) shitpoastSelected++;
     if (isExternalTrendSource(candidate)) trendSourcesSelected++;
   };

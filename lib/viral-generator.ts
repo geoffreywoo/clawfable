@@ -947,6 +947,12 @@ export function capGeoffreyTopicPortfolioCandidates(
   const queuedContent = (context.allTweets || [])
     .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt)
     .map((tweet) => `${tweet.topic || ''} ${tweet.content}`);
+  const queuedTrendTopicIds = new Set((context.allTweets || [])
+    .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt && tweet.trendTopicId)
+    .map((tweet) => String(tweet.trendTopicId)));
+  const queuedTopicKeys = new Set((context.allTweets || [])
+    .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt && tweet.topic)
+    .map((tweet) => String(tweet.topic).replace(/[^a-z0-9]+/gi, ' ').trim().toLowerCase()));
   const deepAlreadyRepresented = [
     ...recentPosts.slice(0, 4),
     ...queuedContent,
@@ -961,6 +967,9 @@ export function capGeoffreyTopicPortfolioCandidates(
   let manufacturingMaterials = 0;
 
   return ranked.filter((candidate) => {
+    const topicKey = String(candidate.targetTopic || '').replace(/[^a-z0-9]+/gi, ' ').trim().toLowerCase();
+    if (candidate.trendTopicId && queuedTrendTopicIds.has(String(candidate.trendTopicId))) return false;
+    if (topicKey && queuedTopicKeys.has(topicKey)) return false;
     const topicContext = `${candidate.targetTopic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`;
     const deep = isGeoffreyDeepTechnicalTopic(topicContext);
     const manufacturing = isGeoffreyManufacturingMaterialsTopic(topicContext);
@@ -1688,7 +1697,13 @@ export async function generateViralBatch(
         { recentPosts, allTweets },
       ),
       count,
-      { maxShitpoast, maxTrendSources },
+      {
+        maxShitpoast,
+        maxTrendSources,
+        ...(isGeoffreyVoiceProfile(voiceProfile)
+          ? { requireDistinctSourceKeys: true, requireDistinctTopics: true }
+          : {}),
+      },
     );
   };
 
@@ -2189,7 +2204,13 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         { recentPosts, allTweets },
       ),
       count,
-      { maxShitpoast, maxTrendSources },
+      {
+        maxShitpoast,
+        maxTrendSources,
+        ...(isGeoffreyVoiceProfile(voiceProfile)
+          ? { requireDistinctSourceKeys: true, requireDistinctTopics: true }
+          : {}),
+      },
     );
     if (diagnostics) {
       diagnostics.stages = { ...diagnostics.stages, selected: selected.length };

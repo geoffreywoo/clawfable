@@ -470,6 +470,36 @@ describe('selectTopRankedTweets', () => {
     expect(selected.map((candidate) => candidate.trendTopicId))
       .toEqual(['network-xiaomi-robotics', 'network-archer-lift']);
   });
+
+  it('skips a slot instead of relaxing required topic and source diversity', () => {
+    const selected = selectTopRankedTweets([
+      ranked({
+        content: 'pfl buying mvp is buying jake paul distribution.',
+        candidateScore: 96,
+        targetTopic: 'PFL MVP merger',
+        trendTopicId: 'network-pfl-mvp',
+        sourceBrief: 'PFL and MVP announced a merger.',
+        coverageCluster: 'sports:pfl mvp distribution',
+        featureTags: { hook: 'bold_claim', tone: 'casual', specificity: 'concrete', structure: 'single_punch', thesis: 'pfl mvp distribution', riskFlags: [] },
+      }),
+      ranked({
+        content: 'the merger still leaves one guy carrying too many cards.',
+        candidateScore: 95,
+        targetTopic: 'PFL MVP merger',
+        trendTopicId: 'network-pfl-mvp',
+        sourceBrief: 'PFL and MVP announced a merger.',
+        coverageCluster: 'sports:pfl mvp headline capacity',
+        featureTags: { hook: 'observation', tone: 'casual', specificity: 'concrete', structure: 'single_punch', thesis: 'one fighter headline capacity', riskFlags: [] },
+      }),
+    ], 2, {
+      minHoldouts: 0,
+      requireDistinctSourceKeys: true,
+      requireDistinctTopics: true,
+    });
+
+    expect(selected).toHaveLength(1);
+    expect(selected[0].content).toContain('buying jake paul distribution');
+  });
 });
 
 describe('rankGeneratedTweets', () => {
