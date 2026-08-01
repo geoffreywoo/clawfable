@@ -70,6 +70,7 @@ export interface TrendingTopic {
   topicWhyNow?: string | null;
   observedAt?: string | null;
   evidence?: NetworkTopicEvidence[];
+  entities?: string[];
   semanticDomain?: TopicSemanticDomain | null;
   topicUncertainty?: 'low' | 'medium' | 'high' | null;
 }

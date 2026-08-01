@@ -69,6 +69,7 @@ describe('Geoffrey semantic topic identity', () => {
   });
 
   it('recognizes the broad native finance, culture, health, and sports lanes', () => {
+    expect(classifyGeoffreyTopicDomain('AI/ML')).toBe('ai_compute');
     expect(classifyGeoffreyTopicDomain('QQQ and public market investing')).toBe('finance_investing');
     expect(classifyGeoffreyTopicDomain('Burning Man status and city culture')).toBe('culture_status');
     expect(classifyGeoffreyTopicDomain('longevity, sleep, and human performance')).toBe('health_performance');
@@ -134,6 +135,17 @@ describe('source planner', () => {
     expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).toContain('x-pinned');
     expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).not.toContain('x-blocked');
     expect(profile.flatMap((item) => item.topTweets.map((tweet) => tweet.xTweetId))).not.toContain('x-collision');
+  });
+
+  it('deduplicates timeline snapshots and keeps the specific topic label', () => {
+    const profile = buildManualTopicProfile([
+      perf({ xTweetId: 'same-post', topic: 'general', likes: 40, content: 'ai products are changing how ambitious builders work' }),
+      perf({ xTweetId: 'same-post', topic: 'AI', likes: 40, content: 'ai products are changing how ambitious builders work' }),
+    ], null);
+
+    expect(profile).toHaveLength(1);
+    expect(profile[0]).toMatchObject({ topic: 'ai', sampleCount: 1 });
+    expect(profile[0].topTweets).toHaveLength(1);
   });
 
   it('classifies trends into aligned, adjacent, and reject lanes', () => {
@@ -384,6 +396,7 @@ describe('source planner', () => {
       topicConfidence: 0.88,
       topicUncertainty: 'low' as const,
       semanticDomain: 'sports_competition' as const,
+      entities: ['Jake Paul', 'NFL'],
       isPrimarySource: false,
       topTweet: {
         id: 'liked-boxing-1',
@@ -403,6 +416,126 @@ describe('source planner', () => {
     expect(topic.fitScores.operatorEngagement).toBe(0.9);
     expect(topic.sourceLane).toBe('reject');
     expect(topic.plannerReason).toContain('two independent authors or primary-source support');
+  });
+
+  it('uses a singleton operator like as a subject cue without promoting it to factual evidence', () => {
+    const likedTopic = {
+      id: 939,
+      networkTopicId: 'network-liked-boxing',
+      headline: 'Jake Paul challenges NFL players to box',
+      source: '@sportswriter',
+      relevanceScore: 90,
+      category: 'Jake Paul NFL boxing challenge',
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.86,
+      networkBreakoutScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'sports_competition' as const,
+      entities: ['Jake Paul', 'NFL'],
+      isPrimarySource: false,
+      topTweet: {
+        id: 'liked-boxing-1',
+        text: 'Jake Paul challenges NFL players to box.',
+        likes: 800,
+        author: 'sportswriter',
+      },
+    };
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'explore',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'casual investor',
+        topics: ['AI', 'startups', 'culture', 'sports'],
+        antiGoals: ['unsupported claims'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: 'Geoffrey writes about startups, markets, culture, and competition.',
+      },
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'culture',
+          angle: 'ambition changes how people react to visible success',
+          weight: 20,
+          sampleCount: 4,
+          avgEngagement: 120,
+          topTweets: [],
+        }],
+      } as AgentLearnings,
+      trending: [likedTopic],
+    });
+
+    const signalSlot = plan.slots.find((slot) => slot.briefEvidence?.mode === 'operator_topic_signal');
+    expect(plan.topicSignals?.map((topic) => topic.networkTopicId)).toContain('network-liked-boxing');
+    expect(signalSlot).toMatchObject({
+      targetTopic: 'Jake Paul, NFL in sports competition',
+      trendTopicId: null,
+      trendHeadline: null,
+      ideaSeed: null,
+      briefEvidence: {
+        mode: 'operator_topic_signal',
+        subject: 'Jake Paul, NFL in sports competition',
+        factualClaimAllowed: false,
+        provenanceId: 'network-liked-boxing',
+      },
+    });
+    expect(signalSlot?.briefEvidence?.instruction).toContain('do not repeat or imply the source headline');
+  });
+
+  it('turns high-performing operator topics into structured historical evidence, not generic placeholders', () => {
+    const nativePost = perf({
+      xTweetId: 'native-culture-1',
+      topic: 'culture',
+      content: 'visible success makes insecure people reveal themselves fast',
+      thesis: 'visible success reveals insecurity',
+      likes: 300,
+      retweets: 45,
+      replies: 12,
+      postedAt: new Date().toISOString(),
+    });
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'balanced',
+      trendMixTarget: 0,
+      voiceProfile: {
+        tone: 'casual investor/operator',
+        topics: ['culture', 'AI', 'startups', 'manufacturing'],
+        antiGoals: ['over-specialized feed'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: 'Geoffrey writes about ambition, companies, markets, and technology.',
+      },
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'culture',
+          angle: 'visible success reveals insecurity',
+          weight: 500,
+          sampleCount: 3,
+          avgEngagement: 420,
+          topTweets: [nativePost],
+        }],
+      } as AgentLearnings,
+      trending: [],
+      fallbackTopics: ['Career', 'VC/Funding', 'AI/ML'],
+    });
+
+    const historical = plan.slots.find((slot) => slot.briefEvidence?.mode === 'historical_operator');
+    expect(historical?.briefEvidence).toMatchObject({
+      subject: 'culture',
+      historicalAngle: 'visible success reveals insecurity',
+      historicalAvgEngagement: 420,
+      historicalSampleCount: 3,
+      factualClaimAllowed: false,
+    });
+    expect(historical?.briefEvidence?.spreadMechanics.length).toBeGreaterThan(0);
+    expect(plan.slots.some((slot) => /career|vc\/funding|ai\/ml/i.test(slot.targetTopic))).toBe(true);
+    expect(plan.slots.map((slot) => slot.ideaSeed?.technicalObject || '').join(' ')).not.toContain('a current');
   });
 
   it('keeps at least 70% of Geoffrey briefs in the demonstrated broad core', () => {

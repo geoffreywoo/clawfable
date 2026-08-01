@@ -50,4 +50,17 @@ describe('source trust boundaries', () => {
     ]);
     expect(getUntrustedSourceTexts(record)).toEqual([]);
   });
+
+  it('treats operator-liked topic cues as untrusted taste evidence rather than factual support', () => {
+    const record = {
+      sourceLane: 'manual_core_exploit' as const,
+      sourceBrief: 'OPERATOR TOPIC SIGNAL ONLY [topicId=network-liked-boxing; subject=Jake Paul NFL boxing; factualClaimAllowed=false]',
+      sourceEvidenceTexts: ['Jake Paul NFL boxing'],
+    };
+
+    expect(isExternalTrendSource(record)).toBe(true);
+    expect(isFollowedNetworkSource(record)).toBe(false);
+    expect(getTrustedClaimSourceTexts(record, ['manual Geoffrey post'])).toEqual(['manual Geoffrey post']);
+    expect(getUntrustedSourceTexts(record)).toEqual(['Jake Paul NFL boxing']);
+  });
 });

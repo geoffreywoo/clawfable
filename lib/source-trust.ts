@@ -21,7 +21,7 @@ export function isExternalTrendSource(record: SourceTrustRecord): boolean {
   const sourceBrief = record.sourceBrief || '';
   return topicId.startsWith('network-')
     || Boolean(topicId && isTrendSourceLane(record.sourceLane))
-    || /\bfollowed-network\b|\bsource\s*=\s*(?:x|hacker news)\b/i.test(sourceBrief);
+    || /\boperator topic signal only\b|\bfollowed-network\b|\bsource\s*=\s*(?:x|hacker news)\b/i.test(sourceBrief);
 }
 
 export function isFollowedNetworkSource(record: SourceTrustRecord): boolean {

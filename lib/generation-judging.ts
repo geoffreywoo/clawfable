@@ -917,6 +917,7 @@ For each input, return three independent posts built from three independent thou
 Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. Do not force a win/lose/pay frame. Generic endings such as "buyers will learn," "suppliers win," "cannot ship," and "the catalog won't save them" are not implications.
 At most one version per input may begin with first-person language. "i think," "i care," "i'd bet," "i would not underwrite," "i start/stop trusting," "i'd worry/care less about X than Y," and "funny that X should be underwritten as Y" cannot be used as personality wrappers around analyst prose. Keep syntax grammatical and mechanisms causally distinct; never coin phrases such as "autonomy-software its way around."
 Keep every supplied fact fixed. First-person opinion is allowed; first-person access or evidence is not.
+When a source says OPERATOR TOPIC SIGNAL ONLY, preserve only the subject cue. Do not turn the source action, event, number, quote, or opinion into a fact during rewriting.
 
 NATIVE MANUAL POSTS (diction evidence only):
 ${nativeAnchorBank || '[no manual anchors available; be conservative]'}

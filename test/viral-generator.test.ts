@@ -177,6 +177,76 @@ describe('generateViralBatch', () => {
     expect(brief.currentEvent).not.toContain(rawNetworkProse);
   });
 
+  it('keeps liked subjects and historical winners in their non-factual evidence lanes', () => {
+    const topicSignalPlan = {
+      slots: [0, 1, 2].map((index) => ({
+        slot: index + 1,
+        sourceLane: 'manual_core_exploit',
+        mode: 'exploit',
+        targetTopic: 'AI forecasting products',
+        trendTopicId: null,
+        trendHeadline: null,
+        ideaSeed: null,
+        ideaSeedBrief: null,
+        briefEvidence: {
+          mode: 'operator_topic_signal',
+          subject: 'AI forecasting products',
+          factualClaimAllowed: false,
+          provenanceId: 'network-liked-ai-forecasting',
+          historicalAngle: null,
+          historicalAvgEngagement: null,
+          historicalSampleCount: null,
+          spreadMechanics: [],
+          instruction: 'Topic cue only; do not repeat the source claim.',
+        },
+        plannerReason: 'Operator topic signal only.',
+      })),
+      laneCounts: {
+        manual_core_exploit: 3,
+        trend_aligned_exploit: 0,
+        trend_adjacent_explore: 0,
+        core_explore_fallback: 0,
+      },
+      acceptedTrends: [],
+      rejectedTrends: [],
+    } as any;
+    const historicalPlan = {
+      ...topicSignalPlan,
+      slots: topicSignalPlan.slots.map((slot: any) => ({
+        ...slot,
+        targetTopic: 'culture',
+        briefEvidence: {
+          mode: 'historical_operator',
+          subject: 'culture',
+          factualClaimAllowed: false,
+          provenanceId: null,
+          historicalAngle: 'visible success reveals insecurity',
+          historicalAvgEngagement: 420,
+          historicalSampleCount: 3,
+          spreadMechanics: ['status or capital tension', 'compressed punchline'],
+          instruction: 'Use topic fit and mechanics only; do not reskin the old claim.',
+        },
+      })),
+    } as any;
+
+    const [topicSignal] = buildGeoffreyIdeaBriefs(topicSignalPlan);
+    const [historical] = buildGeoffreyIdeaBriefs(historicalPlan);
+
+    expect(topicSignal).toMatchObject({
+      eventOrObject: 'AI forecasting products',
+      suppliedFact: null,
+      currentEvent: null,
+      evidenceMode: 'operator_topic_signal',
+    });
+    expect(historical).toMatchObject({
+      eventOrObject: 'culture',
+      suppliedFact: null,
+      evidenceMode: 'historical_operator',
+    });
+    expect(historical.historicalPerformance).toContain('average 420 engagement');
+    expect(historical.historicalPerformance).toContain('compressed punchline');
+  });
+
   it('keeps Geoffrey final selection grounded when enough sourced candidates exist', () => {
     const generic = { content: 'generic vc take', draftExperimentId: 'generic', sourceBrief: null };
     const current = { content: 'current company take', draftExperimentId: 'current', trendTopicId: 'trend-1' };

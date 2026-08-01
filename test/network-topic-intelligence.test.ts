@@ -217,6 +217,7 @@ describe('followed-network topic intelligence', () => {
     expect(result.state.viralTweets[0]).toMatchObject({ operatorEngaged: true });
     expect(result.topics[0]).toMatchObject({
       semanticDomain: 'sports_competition',
+      entities: ['Jake Paul', 'NFL'],
       operatorEngagedSourceCount: 1,
       isPrimarySource: false,
     });

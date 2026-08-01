@@ -1112,7 +1112,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     manualExampleCuration,
     voiceCorpusSnapshot.snapshotId,
   );
-  const manualTopicProfile = buildManualTopicProfile(operatorReferenceHistory, manualExampleCuration);
+  // Diction stays restricted to the clean anchor corpus, while topic taste can
+  // learn from the broader high-confidence operator corpus.
+  const manualTopicProfile = buildManualTopicProfile(operatorHistory, manualExampleCuration);
   const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
   const styleModePerformance = buildStyleModePerformance(history, allTweets, signals);
   const audienceSegmentPerformance = buildAudienceSegmentPerformance(history);

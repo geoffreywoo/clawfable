@@ -1003,6 +1003,7 @@ function mergeTopicHistory(
       topicConfidence: cluster.confidence,
       topicWhyNow: cluster.whyNow,
       observedAt,
+      entities: cluster.entities,
       semanticDomain: cluster.semanticDomain,
       topicUncertainty: cluster.uncertainty,
       evidence: evidence.map((tweet): NetworkTopicEvidence => ({

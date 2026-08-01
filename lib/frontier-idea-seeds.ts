@@ -3,7 +3,7 @@ import { isGeoffreyVoiceProfile } from './account-taste';
 
 export interface FrontierIdeaSeed {
   id: string;
-  kind?: 'frontier' | 'startup' | 'ai_product' | 'markets' | 'culture' | 'health' | 'sports';
+  kind?: 'frontier' | 'startup' | 'ai_product' | 'markets' | 'culture' | 'career' | 'health' | 'sports';
   topic: string;
   technicalObject: string;
   hiddenConstraint: string;
@@ -245,7 +245,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     id: 'startup-revealed-incentives',
     kind: 'startup',
     topic: 'founders, venture, and company building',
-    technicalObject: 'a current founder, funding, hiring, product, or company decision',
+    technicalObject: 'a founder choosing between customer pull, a prestigious investor, fast hiring, and keeping control',
     hiddenConstraint: 'stated conviction and revealed behavior diverge when status, downside, or social proof enters',
     nonConsensusImplication: 'take the founder or investor side that Geoffrey would actually defend instead of teaching a generic lesson',
     startupBackingFact: '',
@@ -256,7 +256,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     id: 'ai-behavior-and-ambition',
     kind: 'ai_product',
     topic: 'AI products, research, and how ambitious people use them',
-    technicalObject: 'a current model, product, research result, or change in how people build and compete',
+    technicalObject: 'a model or AI product that lets one ambitious builder attempt work that previously required a team',
     hiddenConstraint: 'capability matters when it changes behavior, speed, ambition, or company formation, not when it only wins a benchmark',
     nonConsensusImplication: 'react to what people or startups will do differently without writing another AI industry recap',
     startupBackingFact: '',
@@ -267,7 +267,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     id: 'markets-thesis-versus-execution',
     kind: 'markets',
     topic: 'investing, capital markets, and risk',
-    technicalObject: 'a current market move, investor posture, capital allocation, or risk decision',
+    technicalObject: 'a correct technology thesis damaged by leverage, position sizing, timing, or forced selling',
     hiddenConstraint: 'a directionally correct thesis can still lose through sizing, leverage, timing, incentives, or forced selling',
     nonConsensusImplication: 'make one arguable market judgment and separate the idea from its execution',
     startupBackingFact: '',
@@ -278,7 +278,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     id: 'culture-status-revealed-preference',
     kind: 'culture',
     topic: 'culture, status, merit, ambition, and power',
-    technicalObject: 'a current status signal, institution, city norm, or piece of public behavior',
+    technicalObject: 'how people react when a peer wins visibly, gains status, or receives another chance after failing',
     hiddenConstraint: 'people reveal what they value through who they trust, reward, envy, copy, or exclude',
     nonConsensusImplication: 'take a side in casual social language without turning the observation into generic life advice',
     startupBackingFact: '',
@@ -286,10 +286,21 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     sourceQueries: [],
   },
   {
+    id: 'career-agency-over-credential',
+    kind: 'career',
+    topic: 'career, ambition, talent, and agency',
+    technicalObject: 'an ambitious person choosing between credentials, proximity to powerful people, and building something directly',
+    hiddenConstraint: 'career advice usually hides the adviser\'s own risk tolerance, status incentives, and preferred game',
+    nonConsensusImplication: 'make a direct judgment about agency or ambition without turning it into generic career advice',
+    startupBackingFact: '',
+    domains: ['career', 'talent', 'ambition', 'startups'],
+    sourceQueries: [],
+  },
+  {
     id: 'health-performance-agency',
     kind: 'health',
     topic: 'health, longevity, and human performance',
-    technicalObject: 'a current behavior, product, experiment, or tradeoff in health and performance',
+    technicalObject: 'a health or performance habit that survives travel, work pressure, and imperfect adherence',
     hiddenConstraint: 'personal agency, adherence, and opportunity cost matter more than another abstract optimization claim',
     nonConsensusImplication: 'state a personal-value judgment without inventing medical evidence or giving universal health advice',
     startupBackingFact: '',
@@ -300,7 +311,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     id: 'sports-competitive-reality',
     kind: 'sports',
     topic: 'sports, fighting, and competitive behavior',
-    technicalObject: 'a current athlete, contest, challenge, result, or competitive decision',
+    technicalObject: 'an athlete choosing a hard matchup, protecting a record, or staying past the physical peak',
     hiddenConstraint: 'the official narrative and the observable competitive behavior may point in different directions',
     nonConsensusImplication: 'make the narrow competitive judgment; do not manufacture sports news or a motivational lesson',
     startupBackingFact: '',
@@ -408,15 +419,16 @@ export function pickFrontierIdeaSeed({
 
 function preferredGeoffreySeedKinds(targetTopic: string): Array<NonNullable<FrontierIdeaSeed['kind']>> {
   const target = normalize(targetTopic);
-  if (/\b(?:manufactur|factory|industrial|material|mineral|rare earth|tungsten|rhenium|beryllium|magnet|fusion|fission|nuclear|reactor|robot|space|rocket|defense|asic|semiconductor|chip|hbm|data center|grid|energy)\b/.test(target)) {
+  if (/\b(?:manufactur(?:e|ing|er|ers)?|factor(?:y|ies)|industr(?:y|ial)|materials?|minerals?|rare earth|tungsten|rhenium|beryllium|magnets?|fusion|fission|nuclear|reactors?|robots?|robotics|space|rockets?|defense|asics?|semiconductors?|chips?|hbm|data centers?|grid|energy)\b/.test(target)) {
     return ['frontier'];
   }
-  if (/\b(?:boxing|mma|ufc|fight|nfl|nba|football|basketball|soccer|tennis|padel|sport|athlete)\b/.test(target)) return ['sports'];
+  if (/\b(?:boxing|mma|ufc|fight|nfl|nba|football|basketball|soccer|tennis|padel|sports?|athlete)\b/.test(target)) return ['sports'];
   if (/\b(?:health|longevity|lifespan|healthspan|ketone|fitness|exercise|sleep|biohack|human performance|athletic performance)\b/.test(target)) return ['health'];
+  if (/\b(?:career|talent|job market|jobs|hiring|credential|education|agency)\b/.test(target)) return ['career'];
   if (/\b(?:culture|status|merit|nepotis|social|ambition|aura|college|education|elite|power|taste)\b/.test(target)) return ['culture'];
   if (/\b(?:finance|investing|capital market|stock|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(target)) return ['markets'];
   if (/\b(?:ai|model|openai|anthropic|claude|codex|software|developer|research|math|science)\b/.test(target)) return ['ai_product'];
-  if (/\b(?:startup|founder|venture|vc|funding|company|product|customer|talent|career|job)\b/.test(target)) return ['startup'];
+  if (/\b(?:startups?|founders?|venture|vc|funding|companies|company|products?|customers?|talent|career|jobs?)\b/.test(target)) return ['startup'];
   return ['startup', 'ai_product', 'culture', 'markets'];
 }
 
@@ -436,7 +448,13 @@ export function pickGeoffreyIdeaSeed({
   const frontier = FRONTIER_CHOKEPOINT_SEEDS.map((seed) => ({ ...seed, kind: 'frontier' as const }));
   const allSeeds = [...GEOFFREY_BROAD_SEEDS, ...frontier];
   const preferred = allSeeds.filter((seed) => preferredKinds.includes(seed.kind || 'frontier'));
-  const pool = preferred.length > 0 ? preferred : allSeeds;
+  const unusedPreferred = preferred.filter((seed) => !usedSeedIds.has(seed.id));
+  const unusedAll = allSeeds.filter((seed) => !usedSeedIds.has(seed.id));
+  const pool = unusedPreferred.length > 0
+    ? unusedPreferred
+    : unusedAll.length > 0
+      ? unusedAll
+      : preferred.length > 0 ? preferred : allSeeds;
   const ranked = pool
     .map((seed, index) => ({
       seed,
