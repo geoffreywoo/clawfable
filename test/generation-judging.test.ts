@@ -136,6 +136,33 @@ describe('judgeCandidates fallback critic', () => {
       .toEqual([{ idx: 0, overall: 0.6 }, { idx: 1, overall: 0.7 }]);
   });
 
+  it('accepts candidate as the model judgment index key', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: '{"candidate":0,"overall":0.8,"voiceFit":0.78,"clarity":0.8,"novelty":0.75,"audienceFit":0.82,"policySafety":0.95,"nativeVoice":0.76,"casualStartupFit":0.72,"stiffnessRisk":0.12,"cringeRisk":0.1,"technicalCredibility":0.7,"manualAnchorReskinRisk":0.08}',
+      provider: 'openai',
+      model: 'gpt-5.5',
+      stopReason: 'end_turn',
+    });
+
+    const judged = await judgeCandidates([{
+      content: 'magnet startups are process yield companies before they are materials companies.',
+      format: 'hot_take',
+      targetTopic: 'rare earth magnets',
+      rationale: 'Process constraint.',
+    }], {
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: '@geoffwoo', summary: 'investor' },
+      analysis: analysis(),
+      learnings: null,
+      memory: null,
+      mode: 'model',
+      requireModel: true,
+    });
+
+    expect(judged).toHaveLength(1);
+    expect(judged[0].judgeProvider).toBe('openai');
+  });
+
   it('trims long mutation prompt content and critic notes', () => {
     const candidate = judgedCandidate({
       content: `opening ${'mutation evidence '.repeat(100)}FINAL_MUTATION_SENTINEL`,

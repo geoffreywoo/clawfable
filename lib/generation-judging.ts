@@ -76,7 +76,7 @@ export function extractModelJsonRecords(text: string): Record<string, unknown>[]
     }
     if (!value || typeof value !== 'object') return [];
     const record = value as Record<string, unknown>;
-    if ('idx' in record) return [record];
+    if ('idx' in record || 'candidate' in record || 'index' in record) return [record];
     for (const key of ['judgments', 'scores', 'results', 'candidates']) {
       const nested = asRecords(record[key]);
       if (nested.length > 0) return nested;
@@ -478,7 +478,7 @@ function parseScoredLines(
 
   for (const parsed of extractModelJsonRecords(text)) {
     try {
-      const idx = Number(parsed.idx);
+      const idx = Number(parsed.idx ?? parsed.candidate ?? parsed.index);
       const candidate = candidates[idx];
       if (!candidate) continue;
       const parsedThesis = typeof parsed.thesis === 'string' ? parsed.thesis : null;
@@ -753,7 +753,7 @@ function parseMutationLines(
 
   for (const parsed of extractModelJsonRecords(text)) {
     try {
-      const idx = Number(parsed.idx);
+      const idx = Number(parsed.idx ?? parsed.candidate ?? parsed.index);
       const base = candidates[idx];
       const content = typeof parsed.content === 'string' ? parsed.content.trim() : '';
       if (!base || !content) continue;
