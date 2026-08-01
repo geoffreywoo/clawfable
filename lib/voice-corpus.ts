@@ -30,7 +30,7 @@ const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching
 const MEDIA_CAPTION_PATTERN = /\b(?:watch|listen|interview|podcast|episode|video|timestamps?|full (?:conversation|breakdown)|link (?:in|below))\b/i;
 const QUOTATION_PATTERN = /^(?:["'\u201c\u2018].{20,}["'\u201d\u2019](?:\s*[-\u2014].*)?|(?:quote|from)[:\s])/i;
 const TRAILING_FRAGMENT_PATTERN = /(?:,|&|:|;|\b(?:and|or|the|a|an|to|of|for|with|is|are|was|were|has|have|that|which|because|when|if|into|more|mega))\s*$/i;
-const CONTEXT_DEPENDENT_LINK_OPENING = /^(?:sounds about right|beasts\b|the names\b|this\b|that\b|these\b|those\b|it\b|they\b|them\b|he\b|she\b|pomp is right\b)/i;
+const CONTEXT_DEPENDENT_LINK_OPENING = /^(?:sounds about right|beasts\b|the names\b|this\b|that\b|these\b|those\b|it\b|they\b|them\b|he\b|she\b|pomp is right\b|just\b[^.!?\n]{0,120}\b(?:them|him|her)\b)/i;
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));

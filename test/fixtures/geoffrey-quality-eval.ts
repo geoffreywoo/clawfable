@@ -46,4 +46,5 @@ export const GEOFFREY_NEAR_MISS_EVAL = [
   'The future of manufacturing belongs to teams that turn every failure into a learning loop.',
   'Rare earth independence is not a mining story. It is a process-control story.',
   'weird to fund more engine capacity and treat rhenium-bearing alloy like a procurement detail. qualification takes the substitution fantasy off the table. a few grams in each blade can still jam the whole build plan.',
+  'inference chip startups with bad package yield lose, even with great silicon. buyers cannot deploy parts that do not ship.',
 ] as const;

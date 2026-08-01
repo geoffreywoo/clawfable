@@ -201,6 +201,10 @@ describe('versioned voice corpus', () => {
         content: 'robot field service gets expensive once actuator replacement starts eating the margin.',
         hasMedia: true,
       }),
+      performance(96, {
+        xTweetId: 'x-unresolved-pronoun-link',
+        content: 'just accumulate more money and power than them. then implement your own philosophy with money and power. https://t.co/context',
+      }),
     ];
     const snapshot = build([...history, ...questionable]);
 
@@ -210,6 +214,7 @@ describe('versioned voice corpus', () => {
     const clipped = snapshot.entries.find((entry) => entry.xTweetId === 'x-clipped-long-post');
     const contextual = snapshot.entries.find((entry) => entry.xTweetId === 'x-context-dependent-link');
     const attachment = snapshot.entries.find((entry) => entry.xTweetId === 'x-media-attachment');
+    const unresolved = snapshot.entries.find((entry) => entry.xTweetId === 'x-unresolved-pronoun-link');
 
     expect(promo?.exclusionReasons).toContain('promotional post');
     expect(media?.exclusionReasons).toContain('media-dependent caption');
@@ -217,7 +222,8 @@ describe('versioned voice corpus', () => {
     expect(clipped?.exclusionReasons).toContain('possibly truncated or incomplete text');
     expect(contextual?.exclusionReasons).toContain('media-dependent caption');
     expect(attachment?.exclusionReasons).toContain('media-dependent caption');
-    for (const entry of [promo, media, truncated, clipped, contextual, attachment]) {
+    expect(unresolved?.exclusionReasons).toContain('media-dependent caption');
+    for (const entry of [promo, media, truncated, clipped, contextual, attachment, unresolved]) {
       expect(entry?.dispositions).not.toContain('diction_anchor');
     }
   });
