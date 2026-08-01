@@ -171,4 +171,16 @@ describe('generated writing patterns', () => {
       "everyone's building battery companies. fewer are solving cell qualification.",
     ).hits).toContain('everyone-building-fewer');
   });
+
+  it('detects packaged hard-tech investment closers', () => {
+    expect(assessGeneratedWritingPatterns(
+      'robot builders get the headlines. the better business sits upstream with the magnet processors.',
+    ).hits).toEqual(expect.arrayContaining([
+      'headlines-upstream-scaffold',
+      'better-business-scaffold',
+    ]));
+    expect(assessGeneratedWritingPatterns(
+      'buyers can complain about qualification. processors hold the cards.',
+    ).hits).toContain('packaged-industrial-closer');
+  });
 });

@@ -76,6 +76,9 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'x-decides-closer', weight: 0.16, pattern: /\b(?:the|that) [a-z][^.\n]{1,70} decides\.?$/i },
   { label: 'that-number-is-company', weight: 0.2, pattern: /\bthat number is the company\b/i },
   { label: 'how-to-open', weight: 0.16, pattern: /^how to\b/i },
+  { label: 'headlines-upstream-scaffold', weight: 0.42, pattern: /\b(?:gets?|grabs?|takes?) the headlines?\b[^.!?\n]{0,100}[.!?]\s*(?:\n\s*)*(?:but|while|the|i)\b[^.!?\n]{0,160}\b(?:upstream|processor|supplier|business)\b/i },
+  { label: 'better-business-scaffold', weight: 0.38, pattern: /\bthe (?:better|best|real) business (?:is|sits|may be|might be)\b/i },
+  { label: 'packaged-industrial-closer', weight: 0.34, pattern: /\b(?:processors?|suppliers?|whoever owns? [a-z -]{2,40})\s+(?:win|wins|set|sets|hold|holds)\s+(?:the pace|the cards|this market|the market)?\.?$/i },
 ];
 
 function clamp(value: number, min = 0, max = 1): number {

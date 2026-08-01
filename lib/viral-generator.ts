@@ -953,9 +953,9 @@ function buildGeoffreySystemPrompt({
     '',
     `## WRITING PROCESS`,
     `1. Read the source privately. Do not summarize it.`,
-    `2. Decide the immediate startup consequence: which company, product, market, cost, margin, capital need, talent pool, supplier, or timing assumption changes. Put that judgment in the first 120 characters.`,
+    `2. Decide the immediate startup consequence: which company, product, market, cost, margin, capital need, talent pool, supplier, or timing assumption changes. Silently phrase the reaction you would text another investor. Put that judgment in the first 120 characters.`,
     `3. Keep only the single factual detail needed to support that judgment.`,
-    `4. Write the take in a native manual-post mode. Most drafts should be under 280 characters and one to three sentences. A draft over 420 characters needs a named live event and real evidence.`,
+    `4. Write the take in a native manual-post mode. Start at the reaction, bet, or question, not at the technical object. Most drafts should be under 280 characters and one to three sentences. A draft over 420 characters needs a named live event and real evidence.`,
     `5. Delete the explanation after the point lands. Never add a lesson or social-copy closer.`,
     '',
     `## TRUTH AND ORIGINALITY`,
@@ -1672,12 +1672,13 @@ ${JSON.stringify({
 </active-topic-bias>`
     : '';
   const userPrompt = geoffreyPromptMode
-    ? `Write exactly ${candidateCount} original standalone posts.${geoffreyIdeaBriefs.length === 4 ? ' Use all four idea briefs and write exactly three materially different drafts for each brief. The three drafts must change the judgment or social posture, not merely swap synonyms.' : ' Write one post for every numbered assignment.'}
+    ? `Write exactly ${candidateCount} original standalone posts.${geoffreyIdeaBriefs.length === 4 ? ' Use all four idea briefs and write exactly three materially different drafts for each brief. Draft one is a blunt reaction or verdict. Draft two is a first-person bet or direct causal question. Draft three is a high-context company or market consequence. The three drafts must change the judgment or social posture, not merely swap synonyms.' : ' Write one post for every numbered assignment.'}
 
-Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
+Each post must begin from a startup/company/market judgment. In the first 120 characters, name or unmistakably identify the company, product, customer, market, price, cost, margin, capital, investor, founder, talent, supplier, or timing consequence. Silently decide what Geoffrey actually thinks before drafting. The "one supplied fact" is optional backing, not an outline and not a request for an explainer. Do not summarize the source. If a brief does not support a sharp judgment without invention, write the narrowest defensible opinion and stop.
 
-Across the batch, vary native modes: terse thesis, two-beat market take, named reaction when a name is supplied, blunt question, compact technical-backed startup take, or public conviction. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
+Across the batch, vary native modes: terse reaction, first-person market bet, named-company judgment, blunt causal question, two-beat startup take, or public conviction. The final wording should sound like the middle of an ongoing conversation among smart founders and investors. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
 At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.
+Never use "gets the headlines," "the better business," "sits upstream," "processors win," "sets the pace," "holds the cards," or "the money is in X." Those are synthetic hard-tech templates. Name the actual actor and make the narrower bet.
 
 For each post, output one JSON object on its own line with only:
 - "slot": one of the three numbered draft slots assigned to the brief

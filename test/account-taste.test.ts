@@ -417,6 +417,16 @@ describe('account taste scoring', () => {
     expect(native.action).toBe('allow');
   });
 
+  it('recognizes materials processing mechanisms as technical credibility', () => {
+    const assessment = assessTechnicalCredibility(
+      'rhenium is a tiny copper and molybdenum byproduct. turbine-blade buyers can pay way more without creating much new recovery.',
+    );
+
+    expect(assessment.domains).toContain('materials');
+    expect(assessment.mechanismScore).toBeGreaterThanOrEqual(0.1);
+    expect(assessment.score).toBeGreaterThanOrEqual(0.45);
+  });
+
   it('rejects polished technical explainers that are still generic ghostwriting', () => {
     const drafts = [
       'hardware founders: put the ugly production constraint in the pitch.\n\nvacuum leak rate. coating uniformity. thermal drift. tool wear.\n\nif you cannot name what blocks shipment, the prototype is still a science project.',

@@ -96,8 +96,9 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'rare earth', 'neodymium', 'dysprosium', 'terbium', 'tungsten', 'tungsten carbide',
       'ammonium paratungstate', 'antimony', 'gallium', 'germanium', 'graphite',
       'spherical graphite', 'fluorspar', 'hydrofluoric acid', 'rhenium', 'beryllium',
-      'magnet', 'separation chemistry', 'solvent extraction', 'tailings', 'ore grade',
-      'refining', 'sintering',
+      'copper', 'molybdenum', 'superalloy', 'single crystal', 'turbine blade', 'ndfeb',
+      'magnet', 'coercivity', 'grain-boundary diffusion', 'separation chemistry',
+      'solvent extraction', 'tailings', 'ore grade', 'byproduct stream', 'refining', 'sintering',
     ],
   },
   {
@@ -196,6 +197,13 @@ const MECHANISM_TERMS = [
   'before',
   'qualify',
   'qualification',
+  'byproduct',
+  'recover',
+  'recovery',
+  'diffusion',
+  'coercivity',
+  'alloying',
+  'doping',
   'breaks',
   'holds',
   'moves',
@@ -223,6 +231,8 @@ const STARTUP_NATIVE_TERMS = [
   'startup', 'founder', 'company', 'product', 'customer', 'market', 'software', 'hardware',
   'ai', 'model', 'codex', 'compute', 'venture', 'vc', 'capital', 'fund', 'investor', 'pe',
   'valuation', 'round', 'sales', 'talent', 'margin', 'price', 'cost', 'alpha', 'deck', 'decks',
+  'business', 'buyer', 'supplier', 'processor', 'producer', 'miner', 'operator', 'economics',
+  'revenue', 'pricing power', 'cost of capital',
   'funding', 'underwrite', 'underwriting', 'factory',
   'manufacturing', 'robot', 'energy', 'space', 'industrial',
 ];
@@ -231,20 +241,23 @@ const STARTUP_CONSEQUENCE_TERMS = [
   'company', 'product', 'customer', 'market', 'price', 'pricing', 'cost', 'margin', 'capex',
   'valuation', 'fund', 'round', 'returns', 'alpha', 'adoption', 'sales', 'ship', 'scale',
   'ships', 'capacity', 'talent', 'supplier', 'demand', 'supply', 'build', 'buy', 'invest',
-  'funding', 'underwrite', 'underwriting',
+  'funding', 'underwrite', 'underwriting', 'buyer', 'processor', 'producer', 'miner', 'operator',
+  'economics', 'revenue', 'pricing power', 'own', 'control',
 ];
 
 const CASUAL_NATIVE_TERMS = [
   'actually', 'super', 'jus', 'just', 'def', 'obv', 'gonna', 'gotta', 'wanna', 'kinda',
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
   'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
-  'those guys', 'all seem',
+  'those guys', 'all seem', 'i think', "i'd rather", 'pretty', 'wild', 'insane', 'massive',
+  'weird', 'rough', 'cooked', 'locked in', 'sounds about right',
 ];
 
 const MARKET_STAKE_TERMS = [
   'pay', 'pays', 'paying', 'eat', 'compete', 'competes', 'fund', 'funding', 'underwrite',
   'care', 'cares', 'worry', 'win', 'wins', 'lose', 'loses', 'rip', 'scale', 'ship', 'ships',
   'buy', 'buys', 'sell', 'sells', 'margin', 'price', 'capital', 'returns', 'alpha',
+  'better', 'worse', 'hard', 'easy', 'cheap', 'expensive', 'own', 'control', 'matter', 'works',
 ];
 
 const STIFF_ANALYST_TERMS = [
@@ -981,11 +994,15 @@ export function buildGeoffreyNativeWritingBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.
 - Manual/operator posts are the author model. Match their casual high-context diction, compression, uneven rhythm, directness, and social posture. Do not average them into polished prose.
-- Lead with a judgment about a company, product, market, capital, talent, cost, or timing. A technical fact may support that judgment; it is not the post.
+- Begin where a text to another smart founder or investor would begin: the verdict, reaction, bet, or question. Do not introduce the industry first.
+- Lead with a judgment about a company, product, market, capital, talent, cost, or timing. Put the mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
 - Use at most one mechanism unless a named live event genuinely needs more. Lists of materials, process steps, and qualification nouns sound researched rather than lived-in.
-- Valid native modes include a blunt one-liner, a two-beat market take, a named reaction, a direct question, or a compact technical-backed startup judgment.
+- Valid native modes include: a blunt reaction plus one reason; a first-person market bet; a direct causal question; a named-company judgment; or a two-beat take where the second beat gets more casual, not more polished.
+- Prefer a socially legible subject: the specific company, buyers, founders, investors, miners, processors, suppliers, or whoever has to pay. "The industry" and passive market abstractions usually hide the take.
 - Stop when the point lands. Do not add a slogan, balanced closer, cute metaphor, lesson, or advice section.
+- Do not write a miniature supply-chain memo. One uncommon technical noun is often enough. Preserve the surprising implication and delete the tour of how the mechanism works.
 - Reject canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X." Concision does not make a generic construction native.
+- Reject recurring synthetic hard-tech constructions: "X gets the headlines," "the better business is upstream," "processors win," "sets the pace," "holds the cards," and "the money sits in X." State the actual bet without a packaged mic-drop.
 - Casualness must exist in the thought, not as slang pasted onto formal exposition. Never manufacture typos or catchphrases.
 - Spell ordinary words normally. A misspelling found in a manual anchor, including "jus," is evidence of rhythm in that one post, not a reusable voice token.
 - Geoffrey states positions; he does not teach generic founders. Reject audience-label openings, "start with," "you should," diligence worksheets, and topic-swapped advice.

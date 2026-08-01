@@ -173,6 +173,36 @@ describe('versioned voice corpus', () => {
     expect(blocked?.exclusionReasons).toContain('explicitly blocked example');
   });
 
+  it('keeps promotions, media captions, and incomplete text out of diction anchors', () => {
+    const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
+    const questionable = [
+      performance(90, {
+        xTweetId: 'x-promo',
+        content: 'congrats to @example on the new round. happy to support this team as they build the future of industrial automation.',
+      }),
+      performance(91, {
+        xTweetId: 'x-media',
+        content: 'new interview on hardware startups. watch the full conversation here https://example.com/video\n0:00 why now\n4:20 manufacturing',
+      }),
+      performance(92, {
+        xTweetId: 'x-truncated',
+        content: 'integrated codex with connectors and computer use changes how startups can ship software because the most important part of the product is',
+      }),
+    ];
+    const snapshot = build([...history, ...questionable]);
+
+    const promo = snapshot.entries.find((entry) => entry.xTweetId === 'x-promo');
+    const media = snapshot.entries.find((entry) => entry.xTweetId === 'x-media');
+    const truncated = snapshot.entries.find((entry) => entry.xTweetId === 'x-truncated');
+
+    expect(promo?.exclusionReasons).toContain('promotional post');
+    expect(media?.exclusionReasons).toContain('media-dependent caption');
+    expect(truncated?.exclusionReasons).toContain('possibly truncated or incomplete text');
+    for (const entry of [promo, media, truncated]) {
+      expect(entry?.dispositions).not.toContain('diction_anchor');
+    }
+  });
+
   it('atomically replaces the stored snapshot', async () => {
     const first = build(Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index)));
     const second = { ...first, snapshotId: 'voice-corpus-v1-replacement', generatedAt: '2026-08-01T00:00:00.000Z' };

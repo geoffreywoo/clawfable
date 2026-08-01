@@ -26,9 +26,10 @@ const NEGATIVE_SIGNAL_TYPES = new Set([
   'x_post_rejected',
 ]);
 
-const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching today|new episode|follow me|subscribe|use code)\b/i;
+const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching today|new episode|follow me|subscribe|use code|new interview|full interview|new video|watch (?:the|our)|listen to|rt this post|happy to (?:back|support|invest)|proud to (?:back|support|invest)|congrats(?:ulations)? (?:to|@)|our portfolio company|we (?:just )?invested)\b/i;
+const MEDIA_CAPTION_PATTERN = /\b(?:watch|listen|interview|podcast|episode|video|timestamps?|full (?:conversation|breakdown)|link (?:in|below))\b/i;
 const QUOTATION_PATTERN = /^(?:["'\u201c\u2018].{20,}["'\u201d\u2019](?:\s*[-\u2014].*)?|(?:quote|from)[:\s])/i;
-const TRAILING_FRAGMENT_PATTERN = /(?:,|&|\b(?:and|or|the|a|an|to|of|for|with))\s*$/i;
+const TRAILING_FRAGMENT_PATTERN = /(?:,|&|:|;|\b(?:and|or|the|a|an|to|of|for|with|is|are|was|were|has|have|that|which|because|when|if|into|more))\s*$/i;
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
@@ -108,6 +109,9 @@ function exclusionReasons(
   const content = performance.content.trim();
   const prose = content.replace(/https?:\/\/\S+/gi, ' ').replace(/@\w+/g, ' ').replace(/\s+/g, ' ').trim();
   const wordCount = normalizeWords(prose).length;
+  const timestampLines = content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}(?:\s*[-\u2013\u2014]|\s+)/.test(line)).length;
+  const hasLink = /https?:\/\/\S+/i.test(content);
+  const strippedEnding = content.replace(/https?:\/\/\S+/gi, ' ').trim();
   const reasons: string[] = [];
 
   if (provenance === 'known_clawfable_generated') reasons.push('known Clawfable-generated post');
@@ -119,10 +123,16 @@ function exclusionReasons(
   if (performance.referenceType) reasons.push(`${performance.referenceType} post`);
   if (PROMO_PATTERN.test(content)) reasons.push('promotional post');
   if (QUOTATION_PATTERN.test(content)) reasons.push('quotation rather than native prose');
-  if (/https?:\/\/\S+/i.test(content) && wordCount < 16) reasons.push('media or link dependent caption');
+  if (timestampLines >= 2 || (hasLink && MEDIA_CAPTION_PATTERN.test(content))) {
+    reasons.push('media-dependent caption');
+  }
+  if (hasLink && wordCount < 16) reasons.push('media or link dependent caption');
   if (performance.hasMedia && wordCount < 18) reasons.push('media-dependent caption');
   if (performance.isTextComplete === false) reasons.push('incomplete X text payload');
-  if ((content.length >= 220 && TRAILING_FRAGMENT_PATTERN.test(content)) || /(?:\.\.\.|\u2026)$/.test(content)) {
+  if (
+    (strippedEnding.length >= 120 && TRAILING_FRAGMENT_PATTERN.test(strippedEnding))
+    || /(?:\.\.\.|\u2026)$/.test(strippedEnding)
+  ) {
     reasons.push('possibly truncated or incomplete text');
   }
   if (performance.format === 'unknown' || ['general', 'unknown'].includes((performance.topic || '').toLowerCase())) {
