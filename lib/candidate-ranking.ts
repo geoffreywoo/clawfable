@@ -2169,8 +2169,6 @@ export function scoreGeneratedTweets(
     if (geoffreyStrict) {
       if (accountTasteScore.action === 'block') {
         confidenceScore = Math.min(confidenceScore, 0.39);
-      } else if (accountTasteScore.action === 'review') {
-        confidenceScore = Math.min(confidenceScore, 0.49);
       }
       if (anchorCopyRiskScore >= 0.4) confidenceScore = Math.min(confidenceScore, 0.39);
       if (manualAnchorReskinRiskScore >= 0.48) confidenceScore = Math.min(confidenceScore, 0.39);
@@ -2227,8 +2225,6 @@ export function scoreGeneratedTweets(
     if (geoffreyStrict) {
       if (accountTasteScore.action === 'block') {
         confidenceScore = Math.min(confidenceScore, 0.39);
-      } else if (accountTasteScore.action === 'review') {
-        confidenceScore = Math.min(confidenceScore, 0.49);
       }
       if (anchorCopyRiskScore >= 0.4 || manualAnchorReskinRiskScore >= 0.48) {
         confidenceScore = Math.min(confidenceScore, 0.39);

@@ -378,6 +378,11 @@ describe('account taste scoring', () => {
       assessment: nativeStartup,
       hasSourceContext: true,
     })).toBeNull();
+    expect(getAutonomousQueueTasteIssue({
+      voiceProfile: geoffreyVoiceProfile,
+      assessment: { ...nativeStartup, action: 'review' },
+      hasSourceContext: true,
+    })).toBeNull();
     expect(nativeStartup.casualStartupScore).toBeGreaterThan(stiffTechnical.casualStartupScore);
     expect(nativeStartup.stiffnessRisk).toBeLessThan(stiffTechnical.stiffnessRisk);
   });

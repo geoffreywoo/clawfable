@@ -265,7 +265,8 @@ const CASUAL_NATIVE_TERMS = [
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
   'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
   'those guys', 'all seem', 'i think', "i'd rather", 'pretty', 'wild', 'insane', 'massive',
-  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'good', 'bad', 'smart', 'dumb',
+  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'go vertical',
+  'good', 'bad', 'smart', 'dumb',
 ];
 
 const MARKET_STAKE_TERMS = [
@@ -996,7 +997,7 @@ export function getAutonomousQueueTasteIssue({
   hasSourceContext = false,
 }: AutonomousQueueTasteOptions): string | null {
   if (!isGeoffreyVoiceProfile(voiceProfile)) return null;
-  if (assessment.action !== 'allow') {
+  if (assessment.action === 'block') {
     return `strict account taste verdict: ${assessment.action}`;
   }
   if ((anchorCopyRiskContribution || 0) <= -0.04) {

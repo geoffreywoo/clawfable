@@ -917,6 +917,97 @@ describe('rankGeneratedTweets', () => {
     expect(ranked[0].content).toBe(technical!.content);
   });
 
+  it('does not cap a source-backed Geoffrey draft solely for a coarse review verdict', () => {
+    const context = rankingContext();
+    context.voiceProfile = {
+      tone: 'technical operator/investor',
+      topics: ['startups', 'space', 'critical minerals'],
+      antiGoals: ['generic hype', 'AI slop'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual, compressed startup-native voice.',
+      summary: 'Geoffrey writes casual startup and frontier-tech takes.',
+    };
+    const voiceAnchors = [
+      { content: 'software is nepo + codex/claude\nhardware is where alpha is left', topic: 'AI', source: 'timeline' },
+      { content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.', topic: 'finance', source: 'timeline' },
+      { content: 'x algo def way better. more useful content. more friends. yall cooking.', topic: 'product', source: 'timeline' },
+    ];
+    context.learnings = {
+      agentId: 'agent-1',
+      updatedAt: '2026-07-31T00:00:00.000Z',
+      totalTracked: voiceAnchors.length,
+      avgLikes: 0,
+      avgRetweets: 0,
+      bestPerformers: [],
+      worstPerformers: [],
+      formatRankings: [],
+      topicRankings: [],
+      insights: [],
+      operatorVoiceReference: {
+        sampleCount: voiceAnchors.length,
+        bestPerformers: voiceAnchors,
+        startupRegisterExamples: voiceAnchors,
+        pinnedExamples: [],
+        styleFingerprint: {
+          avgLength: 72,
+          shortPct: 67,
+          mediumPct: 33,
+          longPct: 0,
+          questionRatio: 0,
+          usesLineBreaks: true,
+          usesEmojis: false,
+          usesNumbers: false,
+          topHooks: ['bold_claim'],
+          topTones: ['casual'],
+          antiPatterns: [],
+          updatedAt: '2026-07-31T00:00:00.000Z',
+        },
+      },
+    } as unknown as AgentLearnings;
+
+    const [candidate] = rankGeneratedTweets([{
+      content: 'rhenium demand can rise and the supply stream barely cares because it comes from copper and molybdenum mining.',
+      format: 'hot_take',
+      targetTopic: 'rhenium supply for rocket engines',
+      rationale: 'A source-backed constraint with a market implication.',
+      sourceBrief: 'Rhenium is recovered mainly as a byproduct of copper and molybdenum mining and used in aerospace superalloys.',
+      sourceLane: 'manual_core_exploit',
+      judgeScore: 0.8,
+      judgeBreakdown: {
+        overall: 0.8,
+        voiceFit: 0.78,
+        clarity: 0.84,
+        novelty: 0.82,
+        audienceFit: 0.8,
+        policySafety: 0.96,
+        nativeVoice: 0.72,
+        casualStartupFit: 0.59,
+        stiffnessRisk: 0.05,
+        cringeRisk: 0.27,
+        technicalCredibility: 0.49,
+        manualAnchorReskinRisk: 0.04,
+      },
+      finalCriticProvider: 'openai',
+      finalCriticModel: 'gpt-5.6',
+      finalCriticVerdict: 'allow',
+      finalCriticScores: {
+        overall: 0.8,
+        voiceFit: 0.78,
+        clarity: 0.84,
+        novelty: 0.82,
+        audienceFit: 0.8,
+        policySafety: 0.96,
+        nativeVoice: 0.72,
+        casualStartupFit: 0.59,
+        stiffnessRisk: 0.05,
+        cringeRisk: 0.27,
+        technicalCredibility: 0.49,
+        manualAnchorReskinRisk: 0.04,
+      },
+    }], context);
+
+    expect(candidate.confidenceScore).toBeGreaterThan(0.49);
+  });
+
   it('does not let technical nouns rescue a manufactured Geoffrey closer', () => {
     const context = rankingContext();
     context.voiceProfile = {

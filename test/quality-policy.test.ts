@@ -123,6 +123,49 @@ describe('Geoffrey hard quality policy', () => {
     expect(result.scores.casualStartupFit).toBeGreaterThanOrEqual(0.58);
   });
 
+  it('uses the documented numeric gates instead of a stricter coarse review verdict', () => {
+    const result = assess(candidate({
+      content: 'rhenium demand can rise and the supply stream barely cares because it comes from copper and molybdenum mining.',
+      targetTopic: 'rhenium supply for rocket engines',
+      sourceBrief: 'Rhenium is recovered mainly as a byproduct of copper and molybdenum mining and used in aerospace superalloys.',
+      sourceEvidenceTexts: [
+        'Rhenium is recovered mainly as a byproduct of copper and molybdenum mining and used in aerospace superalloys.',
+      ],
+      confidenceScore: 0.76,
+      slopScore: 0.18,
+      judgeBreakdown: {
+        overall: 0.8,
+        voiceFit: 0.78,
+        clarity: 0.84,
+        novelty: 0.82,
+        audienceFit: 0.8,
+        policySafety: 0.96,
+        nativeVoice: 0.72,
+        casualStartupFit: 0.59,
+        stiffnessRisk: 0.05,
+        cringeRisk: 0.27,
+        technicalCredibility: 0.49,
+        manualAnchorReskinRisk: 0.04,
+      },
+      finalCriticScores: {
+        overall: 0.8,
+        voiceFit: 0.78,
+        clarity: 0.84,
+        novelty: 0.82,
+        audienceFit: 0.8,
+        policySafety: 0.96,
+        nativeVoice: 0.72,
+        casualStartupFit: 0.59,
+        stiffnessRisk: 0.05,
+        cringeRisk: 0.27,
+        technicalCredibility: 0.49,
+        manualAnchorReskinRisk: 0.04,
+      },
+    }));
+
+    expect(result.eligible, result.issues.join('; ')).toBe(true);
+  });
+
   it('does not let explore mode bypass the confidence floor', () => {
     const result = assess(candidate({ generationMode: 'explore', confidenceScore: 0.61 }));
 

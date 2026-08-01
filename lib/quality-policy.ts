@@ -146,7 +146,7 @@ export function assessGeoffreyQualityPolicy(
       issues.push(`confidence ${(confidence ?? 0).toFixed(2)} below ${confidenceFloor(candidate.generationMode).toFixed(2)}`);
     }
   }
-  if (taste.action !== 'allow') issues.push(`account taste ${taste.action}`);
+  if (taste.action === 'block') issues.push('account taste block');
   if (nativeVoice < 0.65) issues.push(`native voice ${nativeVoice.toFixed(2)} below 0.65`);
   if (casualStartupFit < 0.58) issues.push(`casual startup fit ${casualStartupFit.toFixed(2)} below 0.58`);
   if (slop >= 0.32) issues.push(`slop ${slop.toFixed(2)} at or above 0.32`);
