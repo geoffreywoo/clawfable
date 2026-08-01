@@ -13,6 +13,7 @@
     "audit:geoffrey": "tsx scripts/audit-geoffrey-generation.ts",
     "eval:geoffrey:shadow": "tsx scripts/shadow-eval-geoffrey.ts",
     "eval:geoffrey:remote-shadow": "tsx scripts/remote-shadow-eval-geoffrey.ts",
+    "eval:geoffrey:model-stacks": "tsx scripts/compare-geoffrey-model-stacks.ts",
     "seeds:geoffrey": "tsx scripts/list-frontier-seeds.ts"
   },
   "dependencies": {

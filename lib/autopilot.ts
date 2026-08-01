@@ -3045,6 +3045,7 @@ export async function refillQueue(
           format: item.format || null,
           topic: item.targetTopic,
           rationale: item.rationale,
+          generationModelStack: item.generationModelStack ?? null,
           generationProvider: item.generationProvider ?? null,
           generationModel: item.generationModel ?? null,
           judgeProvider: item.judgeProvider ?? null,
@@ -3167,6 +3168,7 @@ interface MarketingTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationModelStack?: import('./types').GenerationModelStackId | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   judgeProvider?: 'openai' | 'anthropic' | null;

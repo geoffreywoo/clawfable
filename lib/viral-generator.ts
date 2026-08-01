@@ -3,8 +3,12 @@
  * Optimized for standalone posts, with supervised Engage handling live-network piggybacking.
  */
 
-import { generateText, hasTextGenerationProvider } from './ai';
-import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
+import {
+  generateText,
+  GEOFFREY_PRIMARY_MODEL_STACK,
+  hasTextGenerationProvider,
+} from './ai';
+import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, GenerationModelStackId, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildBanditSlotPlan, type BanditPolicy } from './bandit';
@@ -307,6 +311,7 @@ export interface ProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationModelStack?: GenerationModelStackId | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   sourceBrief?: string | null;
@@ -1390,6 +1395,7 @@ ${formats.join(', ')}
  * Generate a batch of tweets using the configured AI provider, optimized for QTs.
  */
 export interface ViralGenerationDiagnostics {
+  modelStack?: GenerationModelStackId;
   geoffreyStrict?: boolean;
   corpusActive?: boolean;
   corpusVersion?: string | null;
@@ -1432,6 +1438,10 @@ export interface ViralGenerationDiagnostics {
   error?: string;
 }
 
+export interface ViralGenerationOptions {
+  modelStack?: GenerationModelStackId;
+}
+
 export async function generateViralBatch(
   voiceProfile: VoiceProfile,
   analysis: AccountAnalysis,
@@ -1446,9 +1456,13 @@ export async function generateViralBatch(
   ideaAtoms: IdeaAtom[] = [],
   signals: LearningSignal[] = [],
   diagnostics?: ViralGenerationDiagnostics,
+  options: ViralGenerationOptions = {},
 ): Promise<RankedProtocolTweet[]> {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+  const modelStack = options.modelStack
+    || (geoffreyStrict ? GEOFFREY_PRIMARY_MODEL_STACK : 'standard');
   if (diagnostics) {
+    diagnostics.modelStack = modelStack;
     diagnostics.geoffreyStrict = geoffreyStrict;
     diagnostics.corpusActive = learnings?.voiceCorpus?.active === true;
     diagnostics.corpusVersion = learnings?.voiceCorpus?.snapshotId || null;
@@ -1563,6 +1577,7 @@ export async function generateViralBatch(
         });
         return {
           ...tweet,
+          generationModelStack: modelStack,
           generationProvider: 'local' as const,
           generationModel: 'operator-anchor-fallback',
           sourceBrief: (
@@ -1751,6 +1766,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     const response = await generateText({
       task: 'tweet_generation',
       tier: 'quality',
+      modelStack,
       maxTokens: getTweetGenerationMaxTokens(candidateCount),
       system: systemPrompt,
       prompt: userPrompt,
@@ -1859,6 +1875,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             format,
             targetTopic,
             rationale: parsed.rationale || slotAssignment?.rationale || '',
+            generationModelStack: modelStack,
             generationProvider: response.provider,
             generationModel: response.model,
             sourceBrief: [...new Set([
@@ -1935,6 +1952,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       memory,
       mode: baseJudgeMode,
       requireModel: geoffreyStrict,
+      modelStack,
       diagnostics: initialJudgeDiagnostics,
     });
     const mutatedCandidates = count >= 2
@@ -1942,6 +1960,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           voiceProfile,
           memory,
           learnings,
+          modelStack,
         })
       : [];
     const mutationJudgeDiagnostics: CandidateJudgeDiagnostics = {};
@@ -1956,6 +1975,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             mode: 'model',
             requireModel: geoffreyStrict,
             task: 'final_judgment',
+            modelStack,
             diagnostics: mutationJudgeDiagnostics,
           },
         )
@@ -1966,6 +1986,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           voiceProfile,
           memory,
           learnings,
+          modelStack,
         })
       : [];
     const rescueJudgeDiagnostics: CandidateJudgeDiagnostics = {};
@@ -1983,6 +2004,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             mode: 'model',
             requireModel: geoffreyStrict,
             task: 'final_judgment',
+            modelStack,
             diagnostics: rescueJudgeDiagnostics,
           },
         )
@@ -2014,6 +2036,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           mode: 'model',
           requireModel: true,
           task: 'final_judgment',
+          modelStack,
           diagnostics: finalJudgeDiagnostics,
         })
       : [];

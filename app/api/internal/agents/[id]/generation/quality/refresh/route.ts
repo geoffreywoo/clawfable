@@ -17,6 +17,8 @@ import { buildLearnings, checkPerformance } from '@/lib/performance';
 const MAX_CLASSIFICATION_PASSES = 5;
 const MAX_TARGET_QUEUE_DEPTH = 8;
 
+export const maxDuration = 800;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

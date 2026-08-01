@@ -379,6 +379,11 @@ export type DraftExperimentStatus =
   | 'deleted'
   | 'measured';
 
+export type GenerationModelStackId =
+  | 'standard'
+  | 'geoffrey_fable5_gpt56'
+  | 'geoffrey_gpt56_gpt55';
+
 export interface Tweet {
   id: string;
   agentId: string;
@@ -398,6 +403,7 @@ export interface Tweet {
   approvedAt?: string | null;
   postedAt?: string | null;
   rationale?: string | null;
+  generationModelStack?: GenerationModelStackId | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   judgeProvider?: 'openai' | 'anthropic' | null;

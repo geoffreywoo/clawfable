@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import type { GenerationModelStackId } from './types';
 
 export type AiProvider = 'openai' | 'anthropic';
 export type AiModelTier = 'quality' | 'fast';
@@ -39,6 +40,7 @@ export interface GenerateTextOptions {
   maxTokens: number;
   temperature?: number;
   openAiReasoningEffort?: OpenAiReasoningEffort;
+  modelStack?: GenerationModelStackId;
 }
 
 export interface GenerateTextResult {
@@ -51,12 +53,17 @@ export interface GenerateTextResult {
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
 const OPENAI_COPY_MODEL = 'gpt-5.6';
 const OPENAI_QUALITY_MODEL = 'gpt-5.5';
+const ANTHROPIC_FABLE_MODEL = 'claude-fable-5';
 const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
 const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL };
 const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
+const CLAUDE_FABLE: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_FABLE_MODEL };
 const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_QUALITY_MODEL };
+
+export const GEOFFREY_PRIMARY_MODEL_STACK: GenerationModelStackId = 'geoffrey_fable5_gpt56';
+export const GEOFFREY_CONTROL_MODEL_STACK: GenerationModelStackId = 'geoffrey_gpt56_gpt55';
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
   tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
@@ -71,6 +78,21 @@ const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
   exceptional: [OAI_QUALITY, CLAUDE_QUALITY],
   default_quality: [OAI_QUALITY, CLAUDE_QUALITY],
   default_fast: [OAI_QUALITY, CLAUDE_QUALITY],
+};
+
+const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial<Record<AiTask, AiModelTarget[]>>>> = {
+  [GEOFFREY_PRIMARY_MODEL_STACK]: {
+    tweet_generation: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    creative_variant: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    bulk_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    final_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+  },
+  [GEOFFREY_CONTROL_MODEL_STACK]: {
+    tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+    final_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+  },
 };
 
 function getInputMessages({ prompt, messages }: Pick<GenerateTextOptions, 'prompt' | 'messages'>): AiMessage[] {
@@ -177,16 +199,27 @@ function dedupeTargets(targets: AiModelTarget[]): AiModelTarget[] {
   return unique;
 }
 
-export function getModelChainForTask(task: AiTask, tier: AiModelTier = 'quality'): AiModelTarget[] {
-  return dedupeTargets(TASK_MODEL_CHAINS[task] || TASK_MODEL_CHAINS[tier === 'fast' ? 'default_fast' : 'default_quality']);
+export function getModelChainForTask(
+  task: AiTask,
+  tier: AiModelTier = 'quality',
+  modelStack: GenerationModelStackId = 'standard',
+): AiModelTarget[] {
+  const stackOverride = MODEL_STACK_TASK_OVERRIDES[modelStack]?.[task];
+  return dedupeTargets(
+    stackOverride
+    || TASK_MODEL_CHAINS[task]
+    || TASK_MODEL_CHAINS[tier === 'fast' ? 'default_fast' : 'default_quality'],
+  );
 }
 
 function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
   if (options.modelChain?.length) {
-    const taskFallbacks = options.task ? getModelChainForTask(options.task, options.tier) : [];
+    const taskFallbacks = options.task
+      ? getModelChainForTask(options.task, options.tier, options.modelStack)
+      : [];
     return dedupeTargets([...taskFallbacks, ...options.modelChain]);
   }
-  if (options.task) return getModelChainForTask(options.task, options.tier);
+  if (options.task) return getModelChainForTask(options.task, options.tier, options.modelStack);
   return getModelChainForTask(options.tier === 'fast' ? 'default_fast' : 'default_quality', options.tier);
 }
 

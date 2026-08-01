@@ -9,8 +9,9 @@ describe('generated tweet persistence', () => {
       format: 'hot_take',
       targetTopic: 'inference asics',
       rationale: 'A compressed technical startup consequence.',
-      generationProvider: 'openai',
-      generationModel: 'gpt-5.6',
+      generationModelStack: 'geoffrey_fable5_gpt56',
+      generationProvider: 'anthropic',
+      generationModel: 'claude-fable-5',
       judgeProvider: 'anthropic',
       judgeModel: 'claude-opus-4-6',
       qualityPolicyVersion: 'geoffwoo-quality-v9',
@@ -30,8 +31,9 @@ describe('generated tweet persistence', () => {
     } as any, { status: 'preview' });
 
     expect(tweet).toMatchObject({
-      generationProvider: 'openai',
-      generationModel: 'gpt-5.6',
+      generationModelStack: 'geoffrey_fable5_gpt56',
+      generationProvider: 'anthropic',
+      generationModel: 'claude-fable-5',
       judgeProvider: 'anthropic',
       judgeModel: 'claude-opus-4-6',
       qualityPolicyVersion: 'geoffwoo-quality-v9',
@@ -47,8 +49,9 @@ describe('generated tweet persistence', () => {
       content: `${tweet.content}. edited by the operator`,
     });
     expect(edited).toMatchObject({
-      generationProvider: 'openai',
-      generationModel: 'gpt-5.6',
+      generationModelStack: 'geoffrey_fable5_gpt56',
+      generationProvider: 'anthropic',
+      generationModel: 'claude-fable-5',
       qualityPolicyVersion: null,
       voiceCorpusVersion: null,
       judgeProvider: null,

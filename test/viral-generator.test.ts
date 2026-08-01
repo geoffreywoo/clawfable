@@ -1844,8 +1844,9 @@ describe('generateViralBatch', () => {
     expect(userPrompt).not.toContain('|specificity:');
     expect(userPrompt).not.toContain('|structure:');
     expect(batch[0]).toEqual(expect.objectContaining({
+      generationModelStack: 'geoffrey_fable5_gpt56',
       generationProvider: 'anthropic',
-      generationModel: 'claude-sonnet-4-6',
+      generationModel: 'claude-fable-5',
       sourceBrief: expect.stringContaining('qualified tungsten-carbide powder and tool supply'),
     }));
     expect(batch[0]?.sourceBrief).not.toContain('->');

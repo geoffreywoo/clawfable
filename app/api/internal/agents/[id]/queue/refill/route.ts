@@ -11,6 +11,8 @@ import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 
 const MAX_REFILL_COUNT = 20;
 
+export const maxDuration = 800;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

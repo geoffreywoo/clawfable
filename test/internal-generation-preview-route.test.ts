@@ -141,9 +141,13 @@ describe('internal generation preview route', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.generateViralBatch).toHaveBeenCalledOnce();
-    expect(mocks.generateViralBatch.mock.calls[0].at(-1)).toEqual({});
+    expect(mocks.generateViralBatch.mock.calls[0].at(-1)).toEqual({
+      modelStack: 'geoffrey_fable5_gpt56',
+    });
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'internal-generation-preview:test');
+    expect(data.modelStack).toBe('geoffrey_fable5_gpt56');
     expect(data.drafts[0]).toMatchObject({
+      generationModelStack: 'geoffrey_fable5_gpt56',
       generationProvider: 'openai',
       generationModel: 'gpt-5.6',
       judgeProvider: 'openai',
@@ -164,5 +168,31 @@ describe('internal generation preview route', () => {
       queueIssue: null,
     });
     expect(data.diagnostics).toEqual({});
+  });
+
+  it('runs the prior stack only when the protected caller selects the shadow control', async () => {
+    const response = await POST(request({
+      count: 2,
+      modelStack: 'geoffrey_gpt56_gpt55',
+    }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateViralBatch.mock.calls[0].at(-1)).toEqual({
+      modelStack: 'geoffrey_gpt56_gpt55',
+    });
+    expect(data.modelStack).toBe('geoffrey_gpt56_gpt55');
+  });
+
+  it('rejects unknown model stacks before taking the autopilot lock', async () => {
+    const response = await POST(request({ count: 2, modelStack: 'unreviewed-stack' }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
+    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
   });
 });

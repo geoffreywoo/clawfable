@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assessAccountTaste, getAutonomousQueueTasteIssue } from '@/lib/account-taste';
+import {
+  GEOFFREY_CONTROL_MODEL_STACK,
+  GEOFFREY_PRIMARY_MODEL_STACK,
+} from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { assessGeoffreyQualityPolicy } from '@/lib/quality-policy';
@@ -13,8 +17,15 @@ import {
 } from '@/lib/kv-storage';
 import { generateViralBatch, type ViralGenerationDiagnostics } from '@/lib/viral-generator';
 import type { TrendingTopic } from '@/lib/trending';
+import type { GenerationModelStackId } from '@/lib/types';
 
 const MAX_PREVIEW_COUNT = 8;
+const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
+  GEOFFREY_PRIMARY_MODEL_STACK,
+  GEOFFREY_CONTROL_MODEL_STACK,
+]);
+
+export const maxDuration = 800;
 
 export async function POST(
   request: NextRequest,
@@ -32,8 +43,14 @@ export async function POST(
 
   const body = await request.json().catch(() => ({}));
   const requestedCount = Number(body?.count ?? 4);
+  const requestedModelStack = String(body?.modelStack || GEOFFREY_PRIMARY_MODEL_STACK) as GenerationModelStackId;
   if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > MAX_PREVIEW_COUNT) {
     return NextResponse.json({ error: `count must be an integer from 1 to ${MAX_PREVIEW_COUNT}` }, { status: 400 });
+  }
+  if (!ALLOWED_MODEL_STACKS.has(requestedModelStack)) {
+    return NextResponse.json({
+      error: `modelStack must be ${[...ALLOWED_MODEL_STACKS].join(' or ')}`,
+    }, { status: 400 });
   }
 
   const owner = `internal-generation-preview:${Date.now()}:${id}`;
@@ -70,10 +87,12 @@ export async function POST(
       context.ideaAtoms,
       context.signals,
       diagnostics,
+      { modelStack: requestedModelStack },
     );
 
     return NextResponse.json({
       agentId: id,
+      modelStack: requestedModelStack,
       requested: requestedCount,
       generated: drafts.length,
       diagnostics: diagnostics || null,
@@ -101,6 +120,7 @@ export async function POST(
         return {
           content: draft.content,
           topic: draft.targetTopic,
+          generationModelStack: draft.generationModelStack || requestedModelStack,
           generationProvider: draft.generationProvider || null,
           generationModel: draft.generationModel || null,
           judgeProvider: draft.judgeProvider || null,

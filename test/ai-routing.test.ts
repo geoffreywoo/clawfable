@@ -107,6 +107,65 @@ describe('AI model routing', () => {
     ]);
   });
 
+  it('uses Fable 5 for Geoffrey copy and GPT-5.6 for Geoffrey criticism', async () => {
+    const {
+      GEOFFREY_CONTROL_MODEL_STACK,
+      GEOFFREY_PRIMARY_MODEL_STACK,
+      getModelChainForTask,
+    } = await loadDefaultRouter();
+
+    expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)).toEqual([
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+  });
+
+  it('dispatches Geoffrey treatment copy to Fable 5 before any OpenAI fallback', async () => {
+    const openAiCreate = vi.fn();
+    const anthropicCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'fable copy' }],
+      stop_reason: 'end_turn',
+    });
+    const {
+      GEOFFREY_PRIMARY_MODEL_STACK,
+      generateText,
+    } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    const result = await generateText({
+      task: 'tweet_generation',
+      modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+      system: 'Write one post.',
+      prompt: 'probe',
+      maxTokens: 64,
+    });
+
+    expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'claude-fable-5',
+    }));
+    expect(openAiCreate).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      text: 'fable copy',
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+    }));
+  });
+
   it('defaults GPT-5 point-release Responses calls to no reasoning', async () => {
     const create = vi.fn().mockResolvedValue({
       status: 'completed',

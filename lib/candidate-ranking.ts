@@ -9,6 +9,7 @@ import type {
   CreativeLane,
   ContentSourceLane,
   ContentStyleMode,
+  GenerationModelStackId,
   IdeaAtom,
   LearningSignal,
   MediaExperimentType,
@@ -61,6 +62,7 @@ export interface RankableProtocolTweet {
   format: string;
   targetTopic: string;
   rationale: string;
+  generationModelStack?: GenerationModelStackId | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   judgeProvider?: 'openai' | 'anthropic' | null;

@@ -1,7 +1,7 @@
 import { generateText, hasTextGenerationProvider } from './ai';
 import type { AccountAnalysis } from './types';
 import type { VoiceProfile } from './soul-parser';
-import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, PersonalizationMemory } from './types';
+import type { AgentLearnings, CandidateFeatureTags, CandidateJudgeBreakdown, GenerationModelStackId, PersonalizationMemory } from './types';
 import type { RankableProtocolTweet } from './candidate-ranking';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
 import { assessTechnicalElevation, scoreSlopRisk } from './virality-signals';
@@ -131,6 +131,7 @@ export interface JudgedCandidate extends RankableProtocolTweet {
 }
 
 export interface CandidateJudgeDiagnostics {
+  modelStack?: GenerationModelStackId;
   task?: 'bulk_judgment' | 'final_judgment';
   requested?: number;
   mode?: CandidateJudgeMode;
@@ -644,6 +645,7 @@ export async function judgeCandidates(
     mode = 'model',
     requireModel = false,
     task = 'bulk_judgment',
+    modelStack = 'standard',
     diagnostics,
   }: {
     voiceProfile: VoiceProfile;
@@ -653,11 +655,13 @@ export async function judgeCandidates(
     mode?: CandidateJudgeMode;
     requireModel?: boolean;
     task?: 'bulk_judgment' | 'final_judgment';
+    modelStack?: GenerationModelStackId;
     diagnostics?: CandidateJudgeDiagnostics;
   },
 ): Promise<JudgedCandidate[]> {
   const judgeContext = { voiceProfile, analysis, learnings, memory };
   if (diagnostics) {
+    diagnostics.modelStack = modelStack;
     diagnostics.task = task;
     diagnostics.requested = candidates.length;
     diagnostics.mode = mode;
@@ -714,6 +718,7 @@ ${manualAnchorBank || '[no manual anchors available; be conservative]'}`
     const response = await generateText({
       task,
       tier: 'fast',
+      modelStack,
       maxTokens: getBulkJudgeMaxTokens(candidates.length),
       system: `You are a brutally honest tweet quality judge for one X account.
 Score each candidate from 0 to 1 on:
@@ -847,10 +852,12 @@ export async function mutateTopCandidates(
     voiceProfile,
     memory,
     learnings,
+    modelStack = 'standard',
   }: {
     voiceProfile: VoiceProfile;
     memory: PersonalizationMemory | null;
     learnings?: AgentLearnings | null;
+    modelStack?: GenerationModelStackId;
   },
 ): Promise<RankableProtocolTweet[]> {
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
@@ -940,6 +947,7 @@ Output one JSON object per line with:
     const response = await generateText({
       task: 'creative_variant',
       tier: 'fast',
+      modelStack,
       maxTokens: geoffreyStrict
         ? getGeoffreyMutationMaxTokens(mutationTargets.length)
         : getMutationMaxTokens(mutationTargets.length),

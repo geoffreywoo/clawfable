@@ -1,6 +1,10 @@
 import type { Agent, AudienceVoiceComplaint, Tweet, VoiceCorpusEntry } from './types';
 import type { TrendingTopic } from './trending';
-import { getModelChainForTask } from './ai';
+import {
+  GEOFFREY_CONTROL_MODEL_STACK,
+  GEOFFREY_PRIMARY_MODEL_STACK,
+  getModelChainForTask,
+} from './ai';
 import { buildGenerationContext } from './generation-context';
 import {
   getAudienceVoiceComplaints,
@@ -137,9 +141,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     trending,
     fallbackTopics: context.style.exploration.underusedTopics,
   });
-  const primaryGeneration = getModelChainForTask('tweet_generation')[0];
-  const primaryJudge = getModelChainForTask('bulk_judgment')[0];
-  const primaryFinalCritic = getModelChainForTask('final_judgment')[0];
+  const activeModelStack = isGeoffreyAccount(agent.handle)
+    ? GEOFFREY_PRIMARY_MODEL_STACK
+    : 'standard';
+  const primaryGeneration = getModelChainForTask('tweet_generation', 'quality', activeModelStack)[0];
+  const primaryJudge = getModelChainForTask('bulk_judgment', 'quality', activeModelStack)[0];
+  const primaryFinalCritic = getModelChainForTask('final_judgment', 'quality', activeModelStack)[0];
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = isGeoffreyAccount(agent.handle)
     ? Math.min(GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, configuredPostsPerDay)
@@ -166,6 +173,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       qualityEligible: assessment.eligible,
       qualityIssues: assessment.issues,
       scores: assessment.scores,
+      generationModelStack: tweet.generationModelStack || null,
       generationProvider: tweet.generationProvider || null,
       generationModel: tweet.generationModel || null,
       judgeProvider: tweet.judgeProvider || null,
@@ -265,11 +273,14 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       } : null,
     },
     models: {
+      activeStack: activeModelStack,
+      shadowControlStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_CONTROL_MODEL_STACK : null,
       preferred: {
         generation: primaryGeneration,
         judge: primaryJudge,
         finalCritic: primaryFinalCritic,
       },
+      stackUsage: countBy(queueItems.map((item) => item.generationModelStack)),
       generationUsage: countBy(queueItems.map((item) => modelKey(item.generationProvider, item.generationModel))),
       judgeUsage: countBy(queueItems.map((item) => modelKey(item.judgeProvider, item.judgeModel))),
       finalCriticUsage: countBy(queueItems.map((item) => modelKey(item.finalCriticProvider, item.finalCriticModel))),

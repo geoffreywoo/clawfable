@@ -1,3 +1,9 @@
+import {
+  GEOFFREY_CONTROL_MODEL_STACK,
+  GEOFFREY_PRIMARY_MODEL_STACK,
+} from '../lib/ai';
+import type { GenerationModelStackId } from '../lib/types';
+
 const DEFAULT_BASE_URL = 'https://www.clawfable.com';
 const DEFAULT_BATCHES = 12;
 const MAX_BATCHES = 12;
@@ -21,6 +27,14 @@ function readBatchCount(): number {
   return value;
 }
 
+function readModelStack(): GenerationModelStackId {
+  const value = readArg('--model-stack') || GEOFFREY_PRIMARY_MODEL_STACK;
+  if (value !== GEOFFREY_PRIMARY_MODEL_STACK && value !== GEOFFREY_CONTROL_MODEL_STACK) {
+    throw new Error(`--model-stack must be ${GEOFFREY_PRIMARY_MODEL_STACK} or ${GEOFFREY_CONTROL_MODEL_STACK}`);
+  }
+  return value;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -35,7 +49,7 @@ async function requestJson(
     try {
       const response = await fetch(url, {
         ...options,
-        signal: AbortSignal.timeout(330_000),
+        signal: AbortSignal.timeout(780_000),
       });
       const raw = await response.text();
       let data: JsonRecord;
@@ -100,6 +114,7 @@ async function main() {
   const baseUrl = (process.env.CLAWFABLE_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
   const agentId = readArg('--agent-id') || '13';
   const batchesRequested = readBatchCount();
+  const modelStack = readModelStack();
   const compactOutput = process.argv.includes('--compact');
   const base = `${baseUrl}/api/internal/agents/${encodeURIComponent(agentId)}/generation`;
   const auth = { authorization: `Bearer ${secret}` };
@@ -113,7 +128,7 @@ async function main() {
       result = await requestJson(`${base}/preview`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ count: 2, includeDiagnostics: true }),
+        body: JSON.stringify({ count: 2, includeDiagnostics: true, modelStack }),
       });
       if (result.response.status !== 409) break;
       if (lockAttempt === 1 || lockAttempt % 4 === 0) {
@@ -161,6 +176,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     agentId,
     shadow: {
+      modelStack,
       requestedDrafts,
       completedBatches,
       httpErrors: batches.filter((batch) => batch.status !== 200).map((batch) => ({
