@@ -189,4 +189,10 @@ describe('generated writing patterns', () => {
       'Spain has the best midfield. Argentina has the better transition game.\n\nFinal call:\nSpain 58%\nArgentina 42%',
     ).hits).toContain('prediction-percentage-card');
   });
+
+  it('detects qualification language packaged as a synthetic closer', () => {
+    expect(assessGeneratedWritingPatterns(
+      'rhenium sounds replaceable. qualification takes the substitution fantasy off the table.',
+    ).hits).toContain('qualification-off-table');
+  });
 });

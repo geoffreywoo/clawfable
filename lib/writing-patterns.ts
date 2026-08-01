@@ -80,6 +80,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'better-business-scaffold', weight: 0.38, pattern: /\bthe (?:better|best|real) business (?:is|sits|may be|might be)\b/i },
   { label: 'packaged-industrial-closer', weight: 0.34, pattern: /\b(?:processors?|suppliers?|whoever owns? [a-z -]{2,40})\s+(?:win|wins|set|sets|hold|holds)\s+(?:the pace|the cards|this market|the market)?\.?$/i },
   { label: 'prediction-percentage-card', weight: 0.52, pattern: /(?:^|\n)\s*final (?:call|prediction|pick)\s*:\s*(?:\n|$)[\s\S]{0,180}(?:^|\n)[^\n%]{1,50}\b\d{1,3}%\s*(?:\n|$)[\s\S]{0,80}(?:^|\n)[^\n%]{1,50}\b\d{1,3}%\s*$/im },
+  { label: 'qualification-off-table', weight: 0.42, pattern: /\bqualification\b[^.!?\n]{0,120}\b(?:takes?|puts?|removes?)\b[^.!?\n]{0,90}\boff the table\b/i },
 ];
 
 function clamp(value: number, min = 0, max = 1): number {

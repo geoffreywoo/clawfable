@@ -264,7 +264,8 @@ const STIFF_ANALYST_TERMS = [
   'less cooperative', 'production response', 'depends on whether', 'eventually runs into',
   'must account for', 'critical strategic', 'therefore', 'moreover', 'increasingly',
   'commercialization requires', 'the implication is', 'this highlights', 'arrives as a side-stream',
-  'unit counts', 'customer qualification process',
+  'unit counts', 'customer qualification process', 'procurement detail', 'substitution fantasy',
+  'qualification takes', 'off the table', 'build plan',
 ];
 
 const NEUTRAL_RESEARCH_SUMMARY_PATTERNS = [
@@ -1003,6 +1004,7 @@ For @geoffwoo, write like a startup investor/operator reacting in public, not an
 - Do not write a miniature supply-chain memo. One uncommon technical noun is often enough. Preserve the surprising implication and delete the tour of how the mechanism works.
 - Reject canned startup aphorisms such as "judgment/taste is the product," "margins get interesting when," and "startups live or die on X." Concision does not make a generic construction native.
 - Reject recurring synthetic hard-tech constructions: "X gets the headlines," "the better business is upstream," "processors win," "sets the pace," "holds the cards," and "the money sits in X." State the actual bet without a packaged mic-drop.
+- Reject institutional noun piles dressed up with one casual word. "Procurement detail," "substitution fantasy," "qualification takes X off the table," and "build plan" belong in a memo unless the surrounding sentence is unmistakably lived-in.
 - Casualness must exist in the thought, not as slang pasted onto formal exposition. Never manufacture typos or catchphrases.
 - Spell ordinary words normally. A misspelling found in a manual anchor, including "jus," is evidence of rhythm in that one post, not a reusable voice token.
 - Geoffrey states positions; he does not teach generic founders. Reject audience-label openings, "start with," "you should," diligence worksheets, and topic-swapped advice.

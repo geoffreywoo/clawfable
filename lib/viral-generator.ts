@@ -1679,6 +1679,7 @@ Each post must begin from a startup/company/market judgment. In the first 120 ch
 Across the batch, vary native modes: terse reaction, first-person market bet, named-company judgment, blunt causal question, two-beat startup take, or public conviction. The final wording should sound like the middle of an ongoing conversation among smart founders and investors. Do not force slang, a punchline, or a fixed template. Keep most drafts under 280 characters. Never turn the supplied fact into a comma-separated mechanism inventory or a "looks like X / actually Y" explainer.
 At least half the drafts must be one sentence in one paragraph. Do not default to a short setup paragraph followed by a polished explanation.
 Never use "gets the headlines," "the better business," "sits upstream," "processors win," "sets the pace," "holds the cards," or "the money is in X." Those are synthetic hard-tech templates. Name the actual actor and make the narrower bet.
+Avoid institutional noun piles such as "procurement detail," "substitution fantasy," "qualification takes X off the table," and "build plan." A casual first word cannot rescue memo diction.
 
 For each post, output one JSON object on its own line with only:
 - "slot": one of the three numbered draft slots assigned to the brief

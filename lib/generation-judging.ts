@@ -768,8 +768,8 @@ function parseMutationLines(
         judgeScore: null,
         judgeBreakdown: null,
         judgeNotes: null,
-        judgeProvider: null,
-        judgeModel: null,
+        judgeProvider: base.judgeProvider ?? null,
+        judgeModel: base.judgeModel ?? null,
         finalCriticProvider: null,
         finalCriticModel: null,
         finalCriticVerdict: null,
@@ -852,6 +852,7 @@ Write like a high-context message to a smart founder or investor:
 - Spell ordinary words normally. Never copy an anchor's typo, catchphrase, premise, joke, opening, list concept, or sentence skeleton.
 - Reject anything that belongs in an analyst memo or generic startup thread, including "worth watching," "curious to see," tidy contrasts, lessons, slogans, and polished closers.
 - Do not use "gets the headlines," "the better business," "sits upstream," "processors win," "sets the pace," "holds the cards," or "the money is in X." These are generated hard-tech post templates, not Geoffrey's voice.
+- Delete institutional phrases such as "procurement detail," "substitution fantasy," "qualification takes X off the table," and "build plan." One casual opener does not make a noun-heavy memo human.
 - Return three genuinely different final versions for every input. Vary the actual judgment and social posture, not just synonyms. Version one must be a single-sentence blunt market take under 180 characters. Version two may use two asymmetric beats. Version three is a looser high-context reaction. At least one must say plainly who is better or worse off. Do not make all three a setup followed by an explanation.
 
 NATIVE MANUAL POSTS (diction evidence only):

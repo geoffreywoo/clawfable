@@ -783,6 +783,8 @@ describe('judgeCandidates fallback critic', () => {
         targetTopic: 'semiconductor startups',
         sourceBrief: 'Customer-specific packaging qualifications increase engineering work and delay revenue.',
         judgeNotes: 'Accurate, but stiff and written like an analyst memo.',
+        judgeProvider: 'openai',
+        judgeModel: 'gpt-5.5',
       }),
     ], {
       voiceProfile: {
@@ -833,6 +835,8 @@ describe('judgeCandidates fallback critic', () => {
     expect(mutations[0]).toMatchObject({
       content: 'chip startups dont get to software margins if every new customer means another packaging flow',
       mutationRound: 1,
+      judgeProvider: 'openai',
+      judgeModel: 'gpt-5.5',
     });
   });
 
