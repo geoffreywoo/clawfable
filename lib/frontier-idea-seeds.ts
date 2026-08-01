@@ -452,9 +452,9 @@ export function pickGeoffreyIdeaSeed({
   const unusedAll = allSeeds.filter((seed) => !usedSeedIds.has(seed.id));
   const pool = unusedPreferred.length > 0
     ? unusedPreferred
-    : unusedAll.length > 0
-      ? unusedAll
-      : preferred.length > 0 ? preferred : allSeeds;
+    : preferred.length > 0
+      ? preferred
+      : unusedAll.length > 0 ? unusedAll : allSeeds;
   const ranked = pool
     .map((seed, index) => ({
       seed,

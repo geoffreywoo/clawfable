@@ -7,6 +7,7 @@ import {
   generateText,
   GEOFFREY_PRIMARY_MODEL_STACK,
   hasTextGenerationProvider,
+  type AiFallbackAttempt,
 } from './ai';
 import type { AccountAnalysis, AgentLearnings, AudienceSegment, CandidateFeatureTags, CandidateJudgeBreakdown, CreativeLane, ContentSourceLane, ContentStyleMode, GenerationModelStackId, IdeaAtom, LearningSignal, MediaExperimentType, PersonalizationMemory, PostPortfolioRole, PromptStrategy, StyleSignals, Tweet } from './types';
 import type { VoiceProfile } from './soul-parser';
@@ -234,9 +235,9 @@ const SOUL_EXAMPLE_LIMIT = 6;
 const SOUL_EXAMPLE_CHAR_LIMIT = 220;
 
 export function getTweetGenerationMaxTokens(candidateCount: number): number {
-  if (candidateCount <= 12) return 3072;
-  if (candidateCount <= 14) return 3584;
-  return 4096;
+  if (candidateCount <= 12) return 6144;
+  if (candidateCount <= 14) return 7168;
+  return 8192;
 }
 
 export function getStyleExtractionMaxTokens(exampleCount: number): number {
@@ -1514,6 +1515,7 @@ export interface ViralGenerationDiagnostics {
   candidateCount?: number;
   generationProvider?: string | null;
   generationModel?: string | null;
+  modelFallbacks?: AiFallbackAttempt[];
   parse?: {
     jsonLines: number;
     parsed: number;
@@ -1913,6 +1915,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     if (diagnostics) {
       diagnostics.generationProvider = response.provider;
       diagnostics.generationModel = response.model;
+      diagnostics.modelFallbacks = response.fallbackAttempts || [];
     }
 
     const stagedTweets: Array<ProtocolTweet & { slot: number }> = [];

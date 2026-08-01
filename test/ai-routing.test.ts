@@ -157,6 +157,7 @@ describe('AI model routing', () => {
 
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-fable-5',
+      output_config: { effort: 'medium' },
     }));
     expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -369,6 +370,50 @@ describe('AI model routing', () => {
       text: 'gpt-5.5 fallback ok',
       provider: 'openai',
       model: 'gpt-5.5',
+      fallbackAttempts: [{
+        provider: 'openai',
+        model: 'gpt-5.6',
+        reason: 'provider_error',
+        stopReason: null,
+        statusCode: null,
+        errorType: null,
+      }],
+    }));
+  });
+
+  it('records an empty Fable response before using the Geoffrey OpenAI fallback', async () => {
+    const openAiCreate = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: 'fallback copy' }] }],
+    });
+    const anthropicCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'thinking', thinking: '' }],
+      stop_reason: 'max_tokens',
+    });
+    const {
+      GEOFFREY_PRIMARY_MODEL_STACK,
+      generateText,
+    } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    const result = await generateText({
+      task: 'tweet_generation',
+      modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+      system: 'Write one post.',
+      prompt: 'probe',
+      maxTokens: 64,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-5.6',
+      fallbackAttempts: [{
+        provider: 'anthropic',
+        model: 'claude-fable-5',
+        reason: 'empty_text',
+        stopReason: 'max_tokens',
+        statusCode: null,
+        errorType: null,
+      }],
     }));
   });
 });

@@ -496,10 +496,10 @@ describe('generateViralBatch', () => {
   }
 
   it('budgets generation output tokens by candidate portfolio size', () => {
-    expect(getTweetGenerationMaxTokens(12)).toBe(3072);
-    expect(getTweetGenerationMaxTokens(14)).toBe(3584);
-    expect(getTweetGenerationMaxTokens(16)).toBe(4096);
-    expect(getTweetGenerationMaxTokens(20)).toBe(4096);
+    expect(getTweetGenerationMaxTokens(12)).toBe(6144);
+    expect(getTweetGenerationMaxTokens(14)).toBe(7168);
+    expect(getTweetGenerationMaxTokens(16)).toBe(8192);
+    expect(getTweetGenerationMaxTokens(20)).toBe(8192);
     expect(getStyleExtractionMaxTokens(4)).toBe(512);
     expect(getStyleExtractionMaxTokens(8)).toBe(768);
     expect(getStyleExtractionMaxTokens(12)).toBe(1024);
@@ -677,7 +677,7 @@ describe('generateViralBatch', () => {
     expect(batch[0].content).toBe('The first AI wedge is not the demo.\n\nIt is the workflow nobody wants to babysit.');
     expect(batch[0].content).not.toContain('\\n');
     expect(anthropicCreateMock).toHaveBeenCalledTimes(1);
-    expect(anthropicCreateMock.mock.calls[0]?.[0].max_tokens).toBe(3072);
+    expect(anthropicCreateMock.mock.calls[0]?.[0].max_tokens).toBe(6144);
   });
 
   it('normalizes common escaped newline variants in generated tweet text', () => {
@@ -1476,7 +1476,7 @@ describe('generateViralBatch', () => {
     expect(createCall.messages[0].content).not.toContain('creativeLane=');
     expect(createCall.messages[0].content).not.toContain('portfolioRole=');
     expect(createCall.messages[0].content).not.toContain('mediaExperimentType=');
-    expect(createCall.max_tokens).toBe(4096);
+    expect(createCall.max_tokens).toBe(8192);
     expect(createCall.system).toContain('"large batch recent post 15"');
     expect(createCall.system).not.toContain('trend headline 1');
     expect(createCall.messages[0].content).toContain('trend headline 8');

@@ -489,6 +489,111 @@ describe('source planner', () => {
     expect(signalSlot?.briefEvidence?.instruction).toContain('do not repeat or imply the source headline');
   });
 
+  it('uses engagement cues from a different semantic domain than the qualified story', () => {
+    const now = new Date().toISOString();
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'explore',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'casual investor',
+        topics: ['culture', 'sports', 'AI', 'startups', 'career'],
+        antiGoals: ['narrow topic feed'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: 'Geoffrey writes about startups, technology, culture, markets, and competition.',
+      },
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'culture', angle: 'status reveals incentives', weight: 100, sampleCount: 5, avgEngagement: 200, topTweets: [] },
+          { topic: 'AI/ML', angle: 'small teams attempt larger work', weight: 80, sampleCount: 4, avgEngagement: 180, topTweets: [] },
+          { topic: 'Career', angle: 'agency compounds', weight: 60, sampleCount: 3, avgEngagement: 160, topTweets: [] },
+        ],
+      } as AgentLearnings,
+      trending: [
+        {
+          id: 950,
+          networkTopicId: 'network-pfl-mvp',
+          headline: 'PFL and MVP are combining their boxing promotion businesses.',
+          source: '@combat1, @combat2, @combat3',
+          relevanceScore: 95,
+          category: 'PFL MVP boxing merger',
+          timestamp: now,
+          tweetCount: 4,
+          sourceType: 'x' as const,
+          sourceCount: 3,
+          sourceQuality: 0.92,
+          discoveryMethod: 'followed_network' as const,
+          networkMomentumScore: 0.94,
+          networkBreakoutScore: 0.9,
+          topicConfidence: 0.94,
+          topicUncertainty: 'low' as const,
+          semanticDomain: 'sports_competition' as const,
+          entities: ['PFL', 'MVP'],
+          isPrimarySource: false,
+          topTweet: { id: 'pfl-1', text: 'PFL and MVP are combining.', likes: 900, author: 'combat1' },
+        },
+        {
+          id: 951,
+          networkTopicId: 'network-liked-boxing',
+          headline: 'Jake Paul challenges NFL players to box',
+          source: '@sportswriter',
+          relevanceScore: 92,
+          category: 'Jake Paul NFL boxing challenge',
+          timestamp: now,
+          tweetCount: 1,
+          sourceType: 'x' as const,
+          sourceCount: 1,
+          discoveryMethod: 'followed_network' as const,
+          networkMomentumScore: 0.86,
+          networkBreakoutScore: 0.82,
+          operatorEngagementScore: 0.95,
+          operatorEngagedSourceCount: 1,
+          topicConfidence: 0.9,
+          topicUncertainty: 'low' as const,
+          semanticDomain: 'sports_competition' as const,
+          entities: ['Jake Paul', 'NFL'],
+          isPrimarySource: false,
+          topTweet: { id: 'boxing-1', text: 'Jake Paul challenges NFL players to box.', likes: 800, author: 'sportswriter' },
+        },
+        {
+          id: 952,
+          networkTopicId: 'network-liked-preseen',
+          headline: 'Preseen is building an AI forecasting agent.',
+          source: '@aibuilder',
+          relevanceScore: 88,
+          category: 'Preseen AI forecasting agent',
+          timestamp: now,
+          tweetCount: 1,
+          sourceType: 'x' as const,
+          sourceCount: 1,
+          discoveryMethod: 'followed_network' as const,
+          networkMomentumScore: 0.82,
+          networkBreakoutScore: 0.8,
+          operatorEngagementScore: 0.9,
+          operatorEngagedSourceCount: 1,
+          topicConfidence: 0.88,
+          topicUncertainty: 'low' as const,
+          semanticDomain: 'ai_compute' as const,
+          entities: ['Preseen'],
+          isPrimarySource: false,
+          topTweet: { id: 'preseen-1', text: 'Preseen is building an AI forecasting agent.', likes: 500, author: 'aibuilder' },
+        },
+      ],
+      fallbackTopics: ['Career', 'VC/Funding', 'AI/ML'],
+    });
+
+    const signalSlot = plan.slots.find((slot) => slot.briefEvidence?.mode === 'operator_topic_signal');
+    expect(signalSlot?.briefEvidence?.provenanceId).toBe('network-liked-preseen');
+
+    const domains = plan.slots.map((slot) => classifyGeoffreyTopicDomain(
+      `${slot.targetTopic} ${slot.trendHeadline || ''}`,
+    ));
+    expect(new Set(domains).size).toBe(4);
+    expect(domains.filter((domain) => domain === 'sports_competition')).toHaveLength(1);
+    expect(domains.filter((domain) => domain === 'ai_compute')).toHaveLength(1);
+  });
+
   it('turns high-performing operator topics into structured historical evidence, not generic placeholders', () => {
     const nativePost = perf({
       xTweetId: 'native-culture-1',

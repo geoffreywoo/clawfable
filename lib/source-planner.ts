@@ -885,11 +885,13 @@ export function buildSourcePlannerPlan({
   let operatorTopicSignalIndex = 0;
   const usedIdeaSeedIds = new Set<string>();
   const usedTargetTopics = new Set<string>();
+  const usedTopicDomainCounts = new Map<TopicSemanticDomain, number>();
   const usedOperatorTopicSignalIds = new Set<string>();
   let deepTechnicalBriefs = 0;
   let manufacturingMaterialsBriefs = 0;
   const maxDeepTechnicalBriefs = Math.max(1, Math.ceil(count / 5));
   const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(count / 8));
+  const maxTopicDomainBriefs = Math.max(1, Math.ceil(count / 4));
   const maxOperatorTopicSignalBriefs = Math.min(
     operatorTopicSignals.length,
     nativeSlots > 0 ? Math.max(1, Math.floor(nativeSlots / 2)) : 0,
@@ -937,8 +939,13 @@ export function buildSourcePlannerPlan({
       while (operatorTopicSignalIndex < operatorTopicSignals.length) {
         const candidate = operatorTopicSignals[operatorTopicSignalIndex++];
         const candidateId = getTrendingTopicStableId(candidate);
+        const candidateDomain = classifyGeoffreyTopicDomain(
+          `${candidate.category} ${candidate.headline}`,
+          candidate.semanticDomain,
+        );
         if (usedOperatorTopicSignalIds.has(candidateId)) continue;
         if (usedTargetTopics.has(normalizeTopic(candidate.category))) continue;
+        if ((usedTopicDomainCounts.get(candidateDomain) || 0) >= maxTopicDomainBriefs) continue;
         operatorTopicSignal = candidate;
         usedOperatorTopicSignalIds.add(candidateId);
         targetTopic = operatorTopicSignalSubject(candidate);
@@ -953,16 +960,27 @@ export function buildSourcePlannerPlan({
       const topicContext = `${targetTopic} ${trendHeadline || ''}`;
       const deepTechnical = isGeoffreyDeepTechnicalTopic(topicContext);
       const manufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topicContext);
+      const topicDomain = classifyGeoffreyTopicDomain(topicContext);
       const duplicateTopic = usedTargetTopics.has(normalizeTopic(targetTopic));
+      const duplicateDomain = topicDomain !== 'other'
+        && (usedTopicDomainCounts.get(topicDomain) || 0) >= maxTopicDomainBriefs;
       const exceedsPortfolio = (
         (deepTechnical && deepTechnicalBriefs >= maxDeepTechnicalBriefs)
         || (manufacturingMaterials && manufacturingMaterialsBriefs >= maxManufacturingMaterialsBriefs)
+        || duplicateDomain
       );
       if (duplicateTopic || exceedsPortfolio) {
-        const replacement = [...manualTopics, ...fallbackPool, ...coreDefaults].find((topic) => (
-          !usedTargetTopics.has(normalizeTopic(topic))
-          && !isGeoffreyDeepTechnicalTopic(topic)
-        ));
+        const replacement = [...manualTopics, ...fallbackPool, ...coreDefaults].find((topic) => {
+          const replacementDeepTechnical = isGeoffreyDeepTechnicalTopic(topic);
+          const replacementManufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topic);
+          const frontierCapacityAvailable = deepTechnicalBriefs < maxDeepTechnicalBriefs
+            && manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs;
+          return !usedTargetTopics.has(normalizeTopic(topic))
+            && (!replacementDeepTechnical || deepTechnicalBriefs < maxDeepTechnicalBriefs)
+            && (!replacementManufacturingMaterials || manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs)
+            && (!isBroadFrontierTopic(topic) || frontierCapacityAvailable)
+            && (usedTopicDomainCounts.get(classifyGeoffreyTopicDomain(topic)) || 0) < maxTopicDomainBriefs;
+        });
         if (replacement) {
           targetTopic = replacement;
           trendTopicId = null;
@@ -970,15 +988,13 @@ export function buildSourcePlannerPlan({
           operatorTopicSignal = null;
           lane = lane === 'core_explore_fallback' ? lane : 'manual_core_exploit';
           mode = lane === 'manual_core_exploit' ? 'exploit' : 'explore';
-          plannerReason = exceedsPortfolio
+          plannerReason = duplicateDomain
+            ? 'Rebalanced to a different native domain so the batch follows Geoffrey\'s broad historical portfolio.'
+            : exceedsPortfolio
             ? 'Rebalanced toward Geoffrey\'s broader native portfolio; deep industrial topics are a minority lane.'
             : 'Rebalanced to a distinct native topic so the batch does not repeat one subject.';
         }
       }
-      const finalTopicContext = `${targetTopic} ${trendHeadline || ''}`;
-      if (isGeoffreyDeepTechnicalTopic(finalTopicContext)) deepTechnicalBriefs++;
-      if (isGeoffreyManufacturingMaterialsTopic(finalTopicContext)) manufacturingMaterialsBriefs++;
-      usedTargetTopics.add(normalizeTopic(targetTopic));
     }
 
     const preSeedHistoricalCluster = !trendTopicId && !operatorTopicSignal
@@ -1001,7 +1017,18 @@ export function buildSourcePlannerPlan({
         targetTopic = ideaSeed.topic;
       }
       plannerReason = `${plannerReason} ${ideaSeed.kind === 'frontier' ? 'Frontier' : 'Native topic'} seed: ${ideaSeed.technicalObject} / ${ideaSeed.hiddenConstraint}`;
-      if (geoffreyStrict) usedTargetTopics.add(normalizeTopic(targetTopic));
+    }
+
+    if (geoffreyStrict) {
+      const finalTopicContext = `${targetTopic} ${trendHeadline || ''}`;
+      const finalTopicDomain = classifyGeoffreyTopicDomain(finalTopicContext);
+      if (isGeoffreyDeepTechnicalTopic(finalTopicContext)) deepTechnicalBriefs++;
+      if (isGeoffreyManufacturingMaterialsTopic(finalTopicContext)) manufacturingMaterialsBriefs++;
+      usedTargetTopics.add(normalizeTopic(targetTopic));
+      usedTopicDomainCounts.set(
+        finalTopicDomain,
+        (usedTopicDomainCounts.get(finalTopicDomain) || 0) + 1,
+      );
     }
 
     const historicalCluster = preSeedHistoricalCluster

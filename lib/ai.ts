@@ -48,6 +48,16 @@ export interface GenerateTextResult {
   stopReason: string | null;
   provider: AiProvider;
   model: string;
+  fallbackAttempts?: AiFallbackAttempt[];
+}
+
+export interface AiFallbackAttempt {
+  provider: AiProvider;
+  model: string;
+  reason: 'empty_text' | 'provider_error';
+  stopReason: string | null;
+  statusCode: number | null;
+  errorType: string | null;
 }
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
@@ -260,6 +270,9 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
       role: message.role,
       content: message.content,
     })),
+    ...(model === ANTHROPIC_FABLE_MODEL && (
+      options.task === 'tweet_generation' || options.task === 'creative_variant'
+    ) ? { output_config: { effort: 'medium' as const } } : {}),
     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
   });
 
@@ -285,6 +298,25 @@ export function getPrimaryAiProvider(): AiProvider | null {
   return null;
 }
 
+function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode' | 'errorType'> {
+  if (!error || typeof error !== 'object') return { statusCode: null, errorType: null };
+  const value = error as {
+    status?: unknown;
+    code?: unknown;
+    error?: { type?: unknown; error?: { type?: unknown } };
+  };
+  return {
+    statusCode: typeof value.status === 'number' ? value.status : null,
+    errorType: typeof value.error?.error?.type === 'string'
+      ? value.error.error.type
+      : typeof value.error?.type === 'string'
+        ? value.error.type
+        : typeof value.code === 'string'
+          ? value.code
+          : null,
+  };
+}
+
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
   const modelChain = resolveModelChain(options).filter((target) => isProviderConfigured(target.provider));
 
@@ -293,6 +325,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   }
 
   let lastError: unknown = null;
+  const fallbackAttempts: AiFallbackAttempt[] = [];
   for (const target of modelChain) {
     try {
       const result = target.provider === 'openai'
@@ -300,13 +333,32 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         : await generateWithAnthropic(options, target.model);
       if (!result.text.trim()) {
         lastError = new Error(`${target.provider}:${target.model} returned empty text`);
+        fallbackAttempts.push({
+          provider: target.provider,
+          model: target.model,
+          reason: 'empty_text',
+          stopReason: result.stopReason,
+          statusCode: null,
+          errorType: null,
+        });
         continue;
       }
-      return result;
+      return { ...result, fallbackAttempts };
     } catch (error) {
       lastError = error;
+      const providerError = readProviderError(error);
+      fallbackAttempts.push({
+        provider: target.provider,
+        model: target.model,
+        reason: 'provider_error',
+        stopReason: null,
+        ...providerError,
+      });
       if (!IS_TEST_ENV) {
-        console.warn(`[ai] ${target.provider}:${target.model} failed; trying the next configured model.`);
+        const detail = providerError.statusCode || providerError.errorType
+          ? ` (${[providerError.statusCode, providerError.errorType].filter(Boolean).join('/')})`
+          : '';
+        console.warn(`[ai] ${target.provider}:${target.model} failed${detail}; trying the next configured model.`);
       }
     }
   }
