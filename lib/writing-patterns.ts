@@ -84,6 +84,10 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'tautological-deployment-closer', weight: 0.42, pattern: /\b(?:(?:buyers?|customers?|companies|teams?)\s+(?:cannot|can['’]?t)\s+(?:deploy|use|sell|buy|run)\s+(?:parts?|products?|chips?|hardware|systems?)\s+that\s+(?:do|does)\s+not\s+(?:ship|work|run|exist)|(?:cannot|can['’]?t)\s+deploy\s+what\s+(?:does\s+not|doesn['’]?t)\s+ship)\b/i },
   { label: 'paired-market-winners-losers', weight: 0.42, pattern: /\b(?:suppliers?|startups?|companies|founders?|buyers?|processors?|operators?|manufacturers?|resellers?)\b[^.!?\n]{0,100}\bwins?\b[.!?]\s*[^.!?\n]{0,100}\b(?:loses?|pays?|gets?\s+squeezed)\b/i },
   { label: 'still-company-cannot-ship', weight: 0.42, pattern: /\bis still (?:a|the) (?:company|startup|business|vendor) that (?:cannot|can['’]?t) ship\b/i },
+  { label: 'abstract-verb-way-around', weight: 0.42, pattern: /\b(?:cannot|can['’]?t)\s+(?:[a-z]+-)?(?:software|ai|capital|money|code|policy)\s+its way around\b/i },
+  { label: 'announced-preference-comparison', weight: 0.38, pattern: /^i (?:care|worry|think) more about\b[^.!?\n]{2,120}\bthan (?:about )?(?:another|one more)\b/i },
+  { label: 'underwrite-like-normal', weight: 0.42, pattern: /^i (?:would not|wouldn['’]?t|do not|don['’]?t) underwrite\b[^.!?\n]{2,140}\blike (?:a )?(?:normal|typical)\b/i },
+  { label: 'generic-scaling-curve-closer', weight: 0.36, pattern: /\bthat (?:is|looks like) (?:a|an) (?:nasty|brutal|ugly|bad|rough|weird) scaling curve\.?$/i },
 ];
 
 function clamp(value: number, min = 0, max = 1): number {

@@ -100,6 +100,7 @@ async function main() {
   const baseUrl = (process.env.CLAWFABLE_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
   const agentId = readArg('--agent-id') || '13';
   const batchesRequested = readBatchCount();
+  const compactOutput = process.argv.includes('--compact');
   const base = `${baseUrl}/api/internal/agents/${encodeURIComponent(agentId)}/generation`;
   const auth = { authorization: `Bearer ${secret}` };
   await waitForDeploymentAuth(base, auth);
@@ -206,13 +207,15 @@ async function main() {
           return totals;
         }, {}),
         topQualityIssues: Object.entries(diagnosticIssueCounts).sort((a, b) => b[1] - a[1]).slice(0, 20),
-        judgeRuns: diagnostics.map((diagnostic) => ({
-          batch: diagnostic.batch,
-          judges: diagnostic.judges || null,
-        })),
-        samples: diagnostics.flatMap((diagnostic) => diagnostic.qualitySamples || []).slice(0, 12),
+        ...(compactOutput ? {} : {
+          judgeRuns: diagnostics.map((diagnostic) => ({
+            batch: diagnostic.batch,
+            judges: diagnostic.judges || null,
+          })),
+          samples: diagnostics.flatMap((diagnostic) => diagnostic.qualitySamples || []).slice(0, 12),
+        }),
       },
-      eligibleExamples: eligible.slice(0, 4).map((draft) => ({
+      eligibleExamples: eligible.map((draft) => ({
         batch: draft.batch,
         topic: draft.topic,
         content: draft.content,

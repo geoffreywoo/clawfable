@@ -499,6 +499,10 @@ describe('account taste scoring', () => {
       'inference chip startups with bad package yield lose, even with great silicon. buyers cannot deploy parts that do not ship.',
       'the robotics magnet supplier that controls high-temperature performance wins. catalog resellers lose.',
       'an inference-chip startup with a great die and weak packaging is still a company that cannot ship enough working systems.',
+      'i think investors underprice magnet process knowhow. a drone company cannot autonomy-software its way around bad sintering yield at temperature.',
+      'a rocket company can create more engine demand and basically no direct rhenium supply response. that is a nasty scaling curve.',
+      'i care more about the packaging team than another peak-performance slide. advanced chiplet compute only ships if alignment and yield hold up.',
+      'i would not underwrite a beryllium machining startup like normal contract manufacturing. safety makes the capacity slower and more expensive before demand matters.',
     ];
 
     for (const content of drafts) {

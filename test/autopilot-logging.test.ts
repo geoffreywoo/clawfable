@@ -223,7 +223,7 @@ const validQueuedTweet = {
 };
 
 const currentGeoffreyCertification = {
-  qualityPolicyVersion: 'geoffwoo-quality-v5',
+  qualityPolicyVersion: 'geoffwoo-quality-v6',
   voiceCorpusVersion: 'voice-corpus-v1-current',
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',

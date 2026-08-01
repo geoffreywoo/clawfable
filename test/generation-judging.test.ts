@@ -863,6 +863,8 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('three independent posts');
     expect(system).toContain('Do not force a win/lose/pay frame');
     expect(system).toContain('what Geoffrey finds surprising');
+    expect(system).toContain('At most one version per input may begin with first-person language');
+    expect(system).toContain('autonomy-software its way around');
     expect(system).not.toContain('gets the headlines');
     expect(system.indexOf('software is nepo + codex/claude'))
       .toBeLessThan(system.indexOf('x algo def way better'));

@@ -1828,6 +1828,8 @@ describe('generateViralBatch', () => {
     expect(createCall.system).not.toContain('SYSTEM WINNER');
     expect(userPrompt).toContain('it does not have to lead with the affected actor');
     expect(userPrompt).toContain('Make a human attitude legible');
+    expect(userPrompt).toContain('at most one may begin with first-person language');
+    expect(userPrompt).toContain('Keep each mechanism causally coherent');
     expect(userPrompt).not.toContain('In the first 120 characters');
     expect(userPrompt).toContain('gets the headlines');
     expect(userPrompt).toContain('one supplied fact:qualified tungsten-carbide powder and tool supply can cap machining throughput');

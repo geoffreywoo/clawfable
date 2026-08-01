@@ -898,6 +898,7 @@ ${buildGeoffreyNativeGenerationBrief()}
 For each input, return three independent posts built from three independent thoughts, not three formatted versions of one thesis. Change what Geoffrey finds surprising, mispriced, exciting, annoying, funny, or doubtful across versions. Use the posture that is natural to the evidence; do not assign a fixed format to each version.
 
 Change the judgment or social posture across versions. Do not preserve the input's opening, syntax, noun pile, or closer. Do not force a win/lose/pay frame. Generic endings such as "buyers will learn," "suppliers win," "cannot ship," and "the catalog won't save them" are not implications.
+At most one version per input may begin with first-person language. "i think," "i care," "i'd bet," and "i would not underwrite" cannot be used as personality wrappers around analyst prose. Keep syntax grammatical and mechanisms causally distinct; never coin phrases such as "autonomy-software its way around."
 Keep every supplied fact fixed. First-person opinion is allowed; first-person access or evidence is not.
 
 NATIVE MANUAL POSTS (diction evidence only):
