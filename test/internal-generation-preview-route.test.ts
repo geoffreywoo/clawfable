@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireAutopilotLock: vi.fn(),
   assessAccountTaste: vi.fn(),
+  assessGeoffreyQualityPolicy: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
   getAgent: vi.fn(),
@@ -33,6 +34,10 @@ vi.mock('@/lib/viral-generator', () => ({
 vi.mock('@/lib/account-taste', () => ({
   assessAccountTaste: mocks.assessAccountTaste,
   getAutonomousQueueTasteIssue: mocks.getAutonomousQueueTasteIssue,
+}));
+
+vi.mock('@/lib/quality-policy', () => ({
+  assessGeoffreyQualityPolicy: mocks.assessGeoffreyQualityPolicy,
 }));
 
 import { POST } from '@/app/api/internal/agents/[id]/generation/preview/route';
@@ -77,6 +82,14 @@ describe('internal generation preview route', () => {
       targetTopic: 'AI hardware',
       generationProvider: 'openai',
       generationModel: 'gpt-5.6',
+      judgeProvider: 'openai',
+      judgeModel: 'gpt-5.5',
+      finalCriticProvider: 'openai',
+      finalCriticModel: 'gpt-5.5',
+      finalCriticVerdict: 'allow',
+      finalCriticVersion: 'geoffwoo-final-critic-v1',
+      qualityPolicyVersion: 'geoffwoo-quality-v1',
+      voiceCorpusVersion: 'voice-corpus-v1-test',
       mutationRound: 1,
       candidateScore: 72,
       confidenceScore: 0.64,
@@ -100,6 +113,11 @@ describe('internal generation preview route', () => {
       notes: ['native voice fit'],
     });
     mocks.getAutonomousQueueTasteIssue.mockReturnValue(null);
+    mocks.assessGeoffreyQualityPolicy.mockReturnValue({
+      eligible: true,
+      issues: [],
+      scores: { confidence: 0.71, nativeVoice: 0.74 },
+    });
   });
 
   afterEach(() => {
@@ -127,6 +145,16 @@ describe('internal generation preview route', () => {
     expect(data.drafts[0]).toMatchObject({
       generationProvider: 'openai',
       generationModel: 'gpt-5.6',
+      judgeProvider: 'openai',
+      judgeModel: 'gpt-5.5',
+      finalCriticProvider: 'openai',
+      finalCriticModel: 'gpt-5.5',
+      finalCriticVerdict: 'allow',
+      finalCriticVersion: 'geoffwoo-final-critic-v1',
+      qualityPolicyVersion: 'geoffwoo-quality-v1',
+      voiceCorpusVersion: 'voice-corpus-v1-test',
+      qualityEligible: true,
+      qualityIssues: [],
       mutationRound: 1,
       judgeNotes: 'Native diction rewrite.',
       nativeVoiceScore: 0.74,

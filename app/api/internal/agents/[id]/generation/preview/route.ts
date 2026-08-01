@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assessAccountTaste, getAutonomousQueueTasteIssue } from '@/lib/account-taste';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
+import { assessGeoffreyQualityPolicy } from '@/lib/quality-policy';
 import {
   acquireAutopilotLock,
   getAgent,
@@ -81,6 +82,12 @@ export async function POST(
           featureTags: draft.featureTags,
           sourceTexts: draft.sourceEvidenceTexts || [],
         });
+        const quality = assessGeoffreyQualityPolicy(draft, {
+          voiceProfile: context.voiceProfile,
+          learnings: context.learnings,
+          memory: context.memory,
+          stage: 'queue',
+        });
         const queueIssue = getAutonomousQueueTasteIssue({
           voiceProfile: context.voiceProfile,
           assessment: taste,
@@ -93,6 +100,18 @@ export async function POST(
           topic: draft.targetTopic,
           generationProvider: draft.generationProvider || null,
           generationModel: draft.generationModel || null,
+          judgeProvider: draft.judgeProvider || null,
+          judgeModel: draft.judgeModel || null,
+          finalCriticProvider: draft.finalCriticProvider || null,
+          finalCriticModel: draft.finalCriticModel || null,
+          finalCriticVerdict: draft.finalCriticVerdict || null,
+          finalCriticScores: draft.finalCriticScores || null,
+          finalCriticVersion: draft.finalCriticVersion || null,
+          qualityPolicyVersion: draft.qualityPolicyVersion || null,
+          voiceCorpusVersion: draft.voiceCorpusVersion || null,
+          qualityEligible: quality.eligible,
+          qualityIssues: quality.issues,
+          qualityScores: quality.scores,
           mutationRound: draft.mutationRound || null,
           candidateScore: draft.candidateScore,
           confidenceScore: draft.confidenceScore,
@@ -109,6 +128,8 @@ export async function POST(
           tasteNotes: taste.notes,
           queueIssue,
           sourceBrief: draft.sourceBrief || null,
+          sourceLane: draft.sourceLane || null,
+          trendTopicId: draft.trendTopicId || null,
         };
       }),
     });
