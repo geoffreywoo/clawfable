@@ -16,6 +16,7 @@ import {
   type RankedProtocolTweet,
 } from './candidate-ranking';
 import {
+  FINAL_CRITIC_VERSION,
   judgeCandidates,
   mergeCandidateVersionsForRanking,
   mutateTopCandidates,
@@ -1970,8 +1971,20 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       voiceProfile,
     );
     const finalJudgeDiagnostics: CandidateJudgeDiagnostics = {};
-    const finalCandidates = geoffreyStrict
-      ? await judgeCandidates(mergedCandidates, {
+    const alreadyFinalizedCandidates = geoffreyStrict
+      ? mergedCandidates.filter((candidate) => (
+          Boolean(candidate.finalCriticProvider)
+          && Boolean(candidate.finalCriticModel)
+          && Boolean(candidate.finalCriticVerdict)
+          && Boolean(candidate.finalCriticScores)
+          && candidate.finalCriticVersion === FINAL_CRITIC_VERSION
+        ))
+      : [];
+    const pendingFinalCandidates = geoffreyStrict
+      ? mergedCandidates.filter((candidate) => !alreadyFinalizedCandidates.includes(candidate))
+      : [];
+    const newlyFinalizedCandidates = geoffreyStrict && pendingFinalCandidates.length > 0
+      ? await judgeCandidates(pendingFinalCandidates, {
           voiceProfile,
           analysis,
           learnings,
@@ -1981,6 +1994,9 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           task: 'final_judgment',
           diagnostics: finalJudgeDiagnostics,
         })
+      : [];
+    const finalCandidates = geoffreyStrict
+      ? [...alreadyFinalizedCandidates, ...newlyFinalizedCandidates]
       : mergedCandidates;
     if (diagnostics) {
       diagnostics.judges = {
@@ -1998,6 +2014,8 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         rescued: rescuedCandidates.length,
         judgedRescues: judgedRescues.length,
         merged: mergedCandidates.length,
+        alreadyFinalized: alreadyFinalizedCandidates.length,
+        pendingFinalCritic: pendingFinalCandidates.length,
         finalCriticJudged: finalCandidates.length,
       };
     }
@@ -2035,7 +2053,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           for (const issue of assessment.issues) counts[issue] = (counts[issue] || 0) + 1;
           return counts;
         }, {});
-        diagnostics.qualitySamples = qualityAssessments.slice(0, 12).map(({ candidate, assessment }) => ({
+        diagnostics.qualitySamples = qualityAssessments.slice(0, 20).map(({ candidate, assessment }) => ({
           content: candidate.content,
           eligible: assessment.eligible,
           issues: assessment.issues,
