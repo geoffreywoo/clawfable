@@ -15,6 +15,9 @@ import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh'
 import { isGeoffreyAccount } from '@/lib/account-taste';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
+export const maxDuration = 800;
+export const CRON_AUTOPILOT_LOCK_TTL_SECONDS = 15 * 60;
+
 export async function GET(request: NextRequest) {
   const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);
   if (authError) {
@@ -277,7 +280,7 @@ export async function GET(request: NextRequest) {
       if (!settings.enabled && !settings.autoReply) continue;
 
       const runId = `cron:${Date.now()}:${agent.id}`;
-      const lock = await acquireAutopilotLock(agent.id, runId, 8 * 60, 'cron');
+      const lock = await acquireAutopilotLock(agent.id, runId, CRON_AUTOPILOT_LOCK_TTL_SECONDS, 'cron');
       if (!lock.acquired) {
         const reason = lock.lock
           ? `Autopilot already running since ${lock.lock.acquiredAt}; lock expires ${lock.lock.expiresAt}.`

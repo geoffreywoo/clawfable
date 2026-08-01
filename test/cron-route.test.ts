@@ -89,10 +89,15 @@ vi.mock('@/lib/topic-intelligence-refresh', () => ({
   refreshAgentTopicIntelligence: mocks.refreshAgentTopicIntelligence,
 }));
 
-import { GET } from '@/app/api/cron/post/route';
+import { CRON_AUTOPILOT_LOCK_TTL_SECONDS, GET, maxDuration } from '@/app/api/cron/post/route';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 describe('cron autopilot isolation', () => {
+  it('has enough runtime and lock headroom for the quality generation pipeline', () => {
+    expect(maxDuration).toBe(800);
+    expect(CRON_AUTOPILOT_LOCK_TTL_SECONDS).toBeGreaterThan(maxDuration);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
@@ -199,6 +204,12 @@ describe('cron autopilot isolation', () => {
       agentId: 'agent-1',
       action: 'error',
     });
+    expect(mocks.acquireAutopilotLock).toHaveBeenCalledWith(
+      'agent-1',
+      expect.stringMatching(/^cron:/),
+      CRON_AUTOPILOT_LOCK_TTL_SECONDS,
+      'cron',
+    );
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       'agent-1',
       expect.objectContaining({

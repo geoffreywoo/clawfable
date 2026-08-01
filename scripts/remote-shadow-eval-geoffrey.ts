@@ -1,6 +1,7 @@
 const DEFAULT_BASE_URL = 'https://www.clawfable.com';
 const DEFAULT_BATCHES = 12;
 const MAX_BATCHES = 12;
+const MAX_LOCK_ATTEMPTS = 40;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 type JsonRecord = Record<string, any>;
@@ -107,14 +108,16 @@ async function main() {
   const batches: JsonRecord[] = [];
   for (let batch = 1; batch <= batchesRequested; batch++) {
     let result: Awaited<ReturnType<typeof requestJson>> | null = null;
-    for (let lockAttempt = 1; lockAttempt <= 8; lockAttempt++) {
+    for (let lockAttempt = 1; lockAttempt <= MAX_LOCK_ATTEMPTS; lockAttempt++) {
       result = await requestJson(`${base}/preview`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ count: 2, includeDiagnostics: true }),
       });
       if (result.response.status !== 409) break;
-      console.error(`shadow batch ${batch}: waiting for autopilot lock`);
+      if (lockAttempt === 1 || lockAttempt % 4 === 0) {
+        console.error(`shadow batch ${batch}: waiting for autopilot lock (${lockAttempt}/${MAX_LOCK_ATTEMPTS})`);
+      }
       await sleep(15_000);
     }
     if (!result) throw new Error(`Shadow batch ${batch} did not run.`);
