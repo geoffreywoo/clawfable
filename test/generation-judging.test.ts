@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
+import { extractModelJsonRecords, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -115,16 +115,25 @@ describe('judgeCandidates fallback critic', () => {
   });
 
   it('budgets mutation output tokens by target count', () => {
-    expect(getBulkJudgeMaxTokens(1)).toBe(768);
-    expect(getBulkJudgeMaxTokens(4)).toBe(768);
-    expect(getBulkJudgeMaxTokens(8)).toBe(1280);
-    expect(getBulkJudgeMaxTokens(12)).toBe(1536);
-    expect(getBulkJudgeMaxTokens(16)).toBe(2048);
+    expect(getBulkJudgeMaxTokens(1)).toBe(1024);
+    expect(getBulkJudgeMaxTokens(4)).toBe(1024);
+    expect(getBulkJudgeMaxTokens(8)).toBe(2048);
+    expect(getBulkJudgeMaxTokens(12)).toBe(3072);
+    expect(getBulkJudgeMaxTokens(16)).toBe(4096);
     expect(getMutationMaxTokens(1)).toBe(1024);
     expect(getMutationMaxTokens(2)).toBe(1024);
     expect(getMutationMaxTokens(3)).toBe(1536);
     expect(getMutationMaxTokens(4)).toBe(2048);
     expect(getMutationMaxTokens(8)).toBe(3072);
+  });
+
+  it('parses fenced arrays and wrapped model judgments', () => {
+    expect(extractModelJsonRecords('```json\n[{"idx":0,"overall":0.8},{"idx":1,"overall":0.7}]\n```'))
+      .toEqual([{ idx: 0, overall: 0.8 }, { idx: 1, overall: 0.7 }]);
+    expect(extractModelJsonRecords('{"judgments":[{"idx":0,"overall":0.9}]}'))
+      .toEqual([{ idx: 0, overall: 0.9 }]);
+    expect(extractModelJsonRecords('{"0":{"overall":0.6},"1":{"overall":0.7}}'))
+      .toEqual([{ idx: 0, overall: 0.6 }, { idx: 1, overall: 0.7 }]);
   });
 
   it('trims long mutation prompt content and critic notes', () => {
@@ -484,7 +493,7 @@ describe('judgeCandidates fallback critic', () => {
     expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({
       task: 'bulk_judgment',
       tier: 'fast',
-      maxTokens: 768,
+      maxTokens: 1024,
     }));
     expect(judged[0].judgeScore).toBe(0.91);
     expect(judged[0].judgeNotes).toBe('Strong operator-specific mechanism.');

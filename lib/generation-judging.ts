@@ -56,10 +56,55 @@ function formatNativeAnchorForPrompt(content: string): string {
 }
 
 export function getBulkJudgeMaxTokens(candidateCount: number): number {
-  if (candidateCount <= 4) return 768;
-  if (candidateCount <= 8) return 1280;
-  if (candidateCount <= 12) return 1536;
-  return 2048;
+  if (candidateCount <= 4) return 1024;
+  if (candidateCount <= 8) return 2048;
+  if (candidateCount <= 12) return 3072;
+  return 4096;
+}
+
+export function extractModelJsonRecords(text: string): Record<string, unknown>[] {
+  const cleaned = text
+    .split('\n')
+    .filter((line) => !/^\s*```(?:json)?\s*$/i.test(line))
+    .join('\n')
+    .trim();
+  if (!cleaned) return [];
+
+  const asRecords = (value: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+    }
+    if (!value || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    if ('idx' in record) return [record];
+    for (const key of ['judgments', 'scores', 'results', 'candidates']) {
+      const nested = asRecords(record[key]);
+      if (nested.length > 0) return nested;
+    }
+    const indexed = Object.entries(record).flatMap(([key, item]) => {
+      if (!/^\d+$/.test(key) || !item || typeof item !== 'object') return [];
+      const itemRecord = item as Record<string, unknown>;
+      return [{ idx: Number(key), ...itemRecord }];
+    });
+    return indexed;
+  };
+
+  try {
+    const records = asRecords(JSON.parse(cleaned));
+    if (records.length > 0) return records;
+  } catch {
+    // Fall through to newline-delimited JSON.
+  }
+
+  return cleaned.split('\n').flatMap((line) => {
+    const trimmed = line.trim().replace(/,$/, '');
+    if (!trimmed.startsWith('{')) return [];
+    try {
+      return asRecords(JSON.parse(trimmed));
+    } catch {
+      return [];
+    }
+  });
 }
 
 export interface JudgedCandidate extends RankableProtocolTweet {
@@ -416,17 +461,15 @@ function parseScoredLines(
 ): JudgedCandidate[] {
   const judged = new Map<number, JudgedCandidate>();
 
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) continue;
+  for (const parsed of extractModelJsonRecords(text)) {
     try {
-      const parsed = JSON.parse(trimmed);
       const idx = Number(parsed.idx);
       const candidate = candidates[idx];
       if (!candidate) continue;
+      const parsedThesis = typeof parsed.thesis === 'string' ? parsed.thesis : null;
       const featureTags = extractCandidateFeatureTags(candidate.content, {
         topic: candidate.targetTopic,
-        thesisHint: typeof parsed.thesis === 'string' ? parsed.thesis : null,
+        thesisHint: parsedThesis,
       });
       const geoffreyStrict = isGeoffreyVoiceProfile(context.voiceProfile);
       const rawVoiceFit = clamp(Number(parsed.voiceFit) || 0.5);
@@ -497,7 +540,7 @@ function parseScoredLines(
       judged.set(idx, {
         ...candidate,
         featureTags,
-        coverageCluster: buildCoverageCluster(candidate.content, candidate.targetTopic, parsed.thesis || featureTags.thesis),
+        coverageCluster: buildCoverageCluster(candidate.content, candidate.targetTopic, parsedThesis || featureTags.thesis),
         judgeScore: isFinalCritic && candidate.judgeScore !== null && candidate.judgeScore !== undefined
           ? candidate.judgeScore
           : Number(judgeBreakdown.overall.toFixed(3)),
@@ -657,11 +700,8 @@ function parseMutationLines(
 ): RankableProtocolTweet[] {
   const mutations: RankableProtocolTweet[] = [];
 
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) continue;
+  for (const parsed of extractModelJsonRecords(text)) {
     try {
-      const parsed = JSON.parse(trimmed);
       const idx = Number(parsed.idx);
       const base = candidates[idx];
       const content = typeof parsed.content === 'string' ? parsed.content.trim() : '';
