@@ -134,6 +134,8 @@ describe('judgeCandidates fallback critic', () => {
       .toEqual([{ idx: 0, overall: 0.9 }]);
     expect(extractModelJsonRecords('{"0":{"overall":0.6},"1":{"overall":0.7}}'))
       .toEqual([{ idx: 0, overall: 0.6 }, { idx: 1, overall: 0.7 }]);
+    expect(extractModelJsonRecords('{"overall":0.8,"voiceFit":0.7}\n{"overall":0.6,"voiceFit":0.5}'))
+      .toEqual([{ overall: 0.8, voiceFit: 0.7 }, { overall: 0.6, voiceFit: 0.5 }]);
   });
 
   it('accepts candidate as the model judgment index key', async () => {
@@ -161,6 +163,45 @@ describe('judgeCandidates fallback critic', () => {
 
     expect(judged).toHaveLength(1);
     expect(judged[0].judgeProvider).toBe('openai');
+  });
+
+  it('maps ordered model judgments when the provider omits index keys', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    const score = (overall: number, thesis: string) => JSON.stringify({
+      overall,
+      voiceFit: overall,
+      clarity: 0.8,
+      novelty: 0.72,
+      audienceFit: 0.78,
+      policySafety: 0.95,
+      thesis,
+      notes: thesis,
+    });
+    mocks.generateText.mockResolvedValue({
+      text: [score(0.81, 'first ordered judgment'), score(0.67, 'second ordered judgment')].join('\n'),
+      provider: 'openai',
+      model: 'gpt-5.5',
+      stopReason: 'end_turn',
+    });
+
+    const judged = await judgeCandidates([
+      { content: 'first source-backed startup take', format: 'hot_take', targetTopic: 'startups', rationale: 'first' },
+      { content: 'second source-backed startup take', format: 'hot_take', targetTopic: 'startups', rationale: 'second' },
+    ], {
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'direct', summary: 'investor' },
+      analysis: analysis(),
+      learnings: null,
+      memory: null,
+      mode: 'model',
+      requireModel: true,
+    });
+
+    expect(judged).toHaveLength(2);
+    expect(judged.map((candidate) => candidate.judgeScore)).toEqual([0.81, 0.67]);
+    expect(judged.map((candidate) => candidate.judgeNotes)).toEqual([
+      'first ordered judgment',
+      'second ordered judgment',
+    ]);
   });
 
   it('trims long mutation prompt content and critic notes', () => {
@@ -760,17 +801,14 @@ describe('judgeCandidates fallback critic', () => {
     mocks.generateText.mockResolvedValue({
       text: [
         {
-          idx: 0,
           content: 'chip startups dont get to software margins if every new customer means another packaging flow',
           rationale: 'Startup consequence first, one mechanism, casual diction.',
         },
         {
-          idx: 0,
           content: 'custom packaging for every buyer is a rough business. chip startup slowly turns into a services company',
           rationale: 'Different company-economics judgment.',
         },
         {
-          idx: 0,
           content: 'every new chip customer wants their own packaging flow. hard to scale that company like software',
           rationale: 'Looser operator reaction.',
         },

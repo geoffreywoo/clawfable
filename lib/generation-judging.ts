@@ -77,6 +77,12 @@ export function extractModelJsonRecords(text: string): Record<string, unknown>[]
     if (!value || typeof value !== 'object') return [];
     const record = value as Record<string, unknown>;
     if ('idx' in record || 'candidate' in record || 'index' in record) return [record];
+    if (
+      'overall' in record
+      || 'voiceFit' in record
+      || 'nativeVoice' in record
+      || 'content' in record
+    ) return [record];
     for (const key of ['judgments', 'scores', 'results', 'candidates']) {
       const nested = asRecords(record[key]);
       if (nested.length > 0) return nested;
@@ -476,9 +482,13 @@ function parseScoredLines(
 ): JudgedCandidate[] {
   const judged = new Map<number, JudgedCandidate>();
 
-  for (const parsed of extractModelJsonRecords(text)) {
+  const records = extractModelJsonRecords(text);
+  for (const [recordIndex, parsed] of records.entries()) {
     try {
-      const idx = Number(parsed.idx ?? parsed.candidate ?? parsed.index);
+      const explicitIndex = parsed.idx ?? parsed.candidate ?? parsed.index;
+      const idx = explicitIndex === undefined || explicitIndex === null
+        ? recordIndex
+        : Number(explicitIndex);
       const candidate = candidates[idx];
       if (!candidate) continue;
       const parsedThesis = typeof parsed.thesis === 'string' ? parsed.thesis : null;
@@ -751,9 +761,16 @@ function parseMutationLines(
 ): RankableProtocolTweet[] {
   const mutations: RankableProtocolTweet[] = [];
 
-  for (const parsed of extractModelJsonRecords(text)) {
+  const records = extractModelJsonRecords(text);
+  const orderedVariantsPerCandidate = candidates.length > 0 && records.length === candidates.length * 3
+    ? 3
+    : 1;
+  for (const [recordIndex, parsed] of records.entries()) {
     try {
-      const idx = Number(parsed.idx ?? parsed.candidate ?? parsed.index);
+      const explicitIndex = parsed.idx ?? parsed.candidate ?? parsed.index;
+      const idx = explicitIndex === undefined || explicitIndex === null
+        ? Math.floor(recordIndex / orderedVariantsPerCandidate)
+        : Number(explicitIndex);
       const base = candidates[idx];
       const content = typeof parsed.content === 'string' ? parsed.content.trim() : '';
       if (!base || !content) continue;
