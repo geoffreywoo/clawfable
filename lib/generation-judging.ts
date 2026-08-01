@@ -115,6 +115,21 @@ export interface JudgedCandidate extends RankableProtocolTweet {
   judgeNotes: string;
 }
 
+export interface CandidateJudgeDiagnostics {
+  task?: 'bulk_judgment' | 'final_judgment';
+  requested?: number;
+  mode?: CandidateJudgeMode;
+  requireModel?: boolean;
+  provider?: 'openai' | 'anthropic' | null;
+  model?: string | null;
+  stopReason?: string | null;
+  responseLength?: number;
+  responsePreview?: string;
+  parsed?: number;
+  exitReason?: string;
+  error?: string;
+}
+
 export function mergeCandidateVersionsForRanking(
   baseCandidates: JudgedCandidate[],
   dictionEdits: JudgedCandidate[],
@@ -580,6 +595,7 @@ export async function judgeCandidates(
     mode = 'model',
     requireModel = false,
     task = 'bulk_judgment',
+    diagnostics,
   }: {
     voiceProfile: VoiceProfile;
     analysis: AccountAnalysis;
@@ -588,13 +604,31 @@ export async function judgeCandidates(
     mode?: CandidateJudgeMode;
     requireModel?: boolean;
     task?: 'bulk_judgment' | 'final_judgment';
+    diagnostics?: CandidateJudgeDiagnostics;
   },
 ): Promise<JudgedCandidate[]> {
   const judgeContext = { voiceProfile, analysis, learnings, memory };
-  if (candidates.length === 0) return [];
+  if (diagnostics) {
+    diagnostics.task = task;
+    diagnostics.requested = candidates.length;
+    diagnostics.mode = mode;
+    diagnostics.requireModel = requireModel;
+  }
+  if (candidates.length === 0) {
+    if (diagnostics) diagnostics.exitReason = 'no_candidates';
+    return [];
+  }
   if (mode === 'heuristic' || !hasTextGenerationProvider()) {
-    if (requireModel) return [];
-    return candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
+    if (requireModel) {
+      if (diagnostics) diagnostics.exitReason = 'required_model_unavailable';
+      return [];
+    }
+    const heuristic = candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
+    if (diagnostics) {
+      diagnostics.parsed = heuristic.length;
+      diagnostics.exitReason = 'heuristic';
+    }
+    return heuristic;
   }
 
   const prompt = candidates.map((candidate, idx) =>
@@ -684,12 +718,29 @@ Output one JSON object per line, no markdown.`,
       prompt: `Judge these candidates:\n\n${prompt}`,
     });
 
-    return parseScoredLines(response.text, candidates, judgeContext, {
+    const parsed = parseScoredLines(response.text, candidates, judgeContext, {
       provider: response.provider,
       model: response.model,
     }, requireModel, task);
-  } catch {
-    return requireModel ? [] : candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
+    if (diagnostics) {
+      diagnostics.provider = response.provider;
+      diagnostics.model = response.model;
+      diagnostics.stopReason = response.stopReason;
+      diagnostics.responseLength = response.text.length;
+      diagnostics.responsePreview = response.text.slice(0, 2_000);
+      diagnostics.parsed = parsed.length;
+      diagnostics.exitReason = parsed.length > 0 ? 'model_parsed' : 'model_unparsed';
+    }
+    return parsed;
+  } catch (error) {
+    if (diagnostics) {
+      diagnostics.exitReason = 'model_error';
+      diagnostics.error = error instanceof Error ? error.message : String(error);
+    }
+    if (requireModel) return [];
+    const heuristic = candidates.map((candidate) => heuristicJudge(candidate, judgeContext));
+    if (diagnostics) diagnostics.parsed = heuristic.length;
+    return heuristic;
   }
 }
 

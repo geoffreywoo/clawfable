@@ -20,6 +20,7 @@ import {
   mergeCandidateVersionsForRanking,
   mutateTopCandidates,
   selectGeoffreyVoiceRescueTargets,
+  type CandidateJudgeDiagnostics,
 } from './generation-judging';
 import { inferAudienceSegment } from './virality-signals';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
@@ -1390,6 +1391,12 @@ export interface ViralGenerationDiagnostics {
     staged: number;
   };
   stages?: Record<string, number>;
+  judges?: {
+    initial: CandidateJudgeDiagnostics;
+    mutations: CandidateJudgeDiagnostics | null;
+    rescues: CandidateJudgeDiagnostics | null;
+    final: CandidateJudgeDiagnostics;
+  };
   qualityIssueCounts?: Record<string, number>;
   qualitySamples?: Array<{
     content: string;
@@ -1897,6 +1904,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
     };
     const baseCandidates = stagedTweets.map(({ slot: _slot, ...tweet }) => tweet);
     const baseJudgeMode = geoffreyStrict ? 'model' : count <= 1 ? 'heuristic' : 'model';
+    const initialJudgeDiagnostics: CandidateJudgeDiagnostics = {};
     const judged = await judgeCandidates(baseCandidates, {
       voiceProfile,
       analysis,
@@ -1904,6 +1912,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       memory,
       mode: baseJudgeMode,
       requireModel: geoffreyStrict,
+      diagnostics: initialJudgeDiagnostics,
     });
     const mutatedCandidates = count >= 2
       ? await mutateTopCandidates(judged, {
@@ -1912,6 +1921,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           learnings,
         })
       : [];
+    const mutationJudgeDiagnostics: CandidateJudgeDiagnostics = {};
     const judgedMutations = mutatedCandidates.length > 0
       ? await judgeCandidates(
           mutatedCandidates.filter((candidate) => !baseCandidates.some((item) => item.content.trim() === candidate.content.trim())),
@@ -1923,6 +1933,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             mode: 'model',
             requireModel: geoffreyStrict,
             task: 'final_judgment',
+            diagnostics: mutationJudgeDiagnostics,
           },
         )
       : [];
@@ -1934,6 +1945,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           learnings,
         })
       : [];
+    const rescueJudgeDiagnostics: CandidateJudgeDiagnostics = {};
     const judgedRescues = rescuedCandidates.length > 0
       ? await judgeCandidates(
           rescuedCandidates.filter((candidate) => (
@@ -1948,6 +1960,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
             mode: 'model',
             requireModel: geoffreyStrict,
             task: 'final_judgment',
+            diagnostics: rescueJudgeDiagnostics,
           },
         )
       : [];
@@ -1956,6 +1969,7 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
       [...judgedMutations, ...judgedRescues],
       voiceProfile,
     );
+    const finalJudgeDiagnostics: CandidateJudgeDiagnostics = {};
     const finalCandidates = geoffreyStrict
       ? await judgeCandidates(mergedCandidates, {
           voiceProfile,
@@ -1965,9 +1979,16 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           mode: 'model',
           requireModel: true,
           task: 'final_judgment',
+          diagnostics: finalJudgeDiagnostics,
         })
       : mergedCandidates;
     if (diagnostics) {
+      diagnostics.judges = {
+        initial: initialJudgeDiagnostics,
+        mutations: mutatedCandidates.length > 0 ? mutationJudgeDiagnostics : null,
+        rescues: rescuedCandidates.length > 0 ? rescueJudgeDiagnostics : null,
+        final: finalJudgeDiagnostics,
+      };
       diagnostics.stages = {
         baseCandidates: baseCandidates.length,
         judged: judged.length,
