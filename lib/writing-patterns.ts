@@ -88,6 +88,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'announced-preference-comparison', weight: 0.38, pattern: /^i (?:care|worry|think) more about\b[^.!?\n]{2,120}\bthan (?:about )?(?:another|one more)\b/i },
   { label: 'underwrite-like-normal', weight: 0.42, pattern: /^i (?:would not|wouldn['’]?t|do not|don['’]?t) underwrite\b[^.!?\n]{2,140}\blike (?:a )?(?:normal|typical)\b/i },
   { label: 'first-person-trust-wrapper', weight: 0.42, pattern: /^i (?:start|stop|do not|don['’]?t) trust(?:ing)?\b[^.!?\n]{2,150}\bwhen\b/i },
+  { label: 'first-person-less-more-wrapper', weight: 0.46, pattern: /^i(?:['’]d| would)?\s+(?:worry|care|think)\s+less about\b[^.!?\n]{2,150}\band more about\b/i },
   { label: 'generic-scaling-curve-closer', weight: 0.36, pattern: /\bthat (?:is|looks like) (?:a|an) (?:nasty|brutal|ugly|bad|rough|weird) scaling curve\.?$/i },
 ];
 
