@@ -163,6 +163,60 @@ describe('Tweet Generation V2', () => {
     expect(briefs.every((entry) => entry.storyClusterId !== staleStory.id)).toBe(true);
   });
 
+  it('does not spend research brief slots on a permanently rejected subject', () => {
+    const makeStory = (id: string, title: string, topic: string, total: number): StoryCluster => ({
+      schemaVersion: 2,
+      id,
+      agentId: 'agent-1',
+      semanticKey: buildResearchSemanticKey(`${topic} ${title}`),
+      title,
+      summary: title,
+      topic,
+      entities: topic.split(/\s+/),
+      sourceDocumentIds: [`source-${id}`],
+      qualifiedClaimIds: [`claim-${id}`],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0, total },
+      firstSeenAt: '2026-08-01T00:00:00.000Z',
+      lastSeenAt: '2026-08-01T12:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    });
+    const blockedStory = makeStory('story-pfl', 'MVP and PFL merge their combat sports promotions', 'PFL MVP merger', 0.95);
+    const usableStory = makeStory('story-ai', 'Tiny teams are shipping useful robotics systems', 'robotics startups', 0.75);
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [blockedStory, usableStory],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'health', 'AI hardware'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: ['markets'] } } as any,
+      trending: null,
+      allTweets: [],
+      blocks: [{
+        schemaVersion: 2,
+        id: 'block-pfl-mvp',
+        agentId: 'agent-1',
+        scope: 'idea',
+        semanticKey: 'and:like:mvp:not:pfl:remove:tweet',
+        topic: null,
+        storyClusterId: null,
+        ideaId: null,
+        reasonCode: 'bad_premise',
+        reason: 'Remove it and do not regenerate this PFL/MVP merger angle.',
+        permanent: true,
+        blockedUntil: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }],
+    });
+
+    expect(briefs.some((entry) => entry.storyClusterId === blockedStory.id)).toBe(false);
+    expect(briefs.some((entry) => entry.storyClusterId === usableStory.id)).toBe(true);
+  });
+
   it('rejects a cited idea when its claim is unrelated to the qualified evidence', () => {
     const sourcedBrief = brief('sourced', 'AI infrastructure', 'verified_source');
     const source = {
