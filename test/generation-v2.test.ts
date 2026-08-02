@@ -257,6 +257,35 @@ describe('Tweet Generation V2', () => {
     expect(byBrief.get('valid')?.status).toBe('generated');
   });
 
+  it('blocks paraphrases of a permanently rejected named angle before writing', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('pfl', "MVP's highest-value contribution to PFL is cultural distribution rather than fight operations.")],
+      agentId: 'agent-1',
+      runId: 'run-durable-block',
+      briefs: [brief('pfl', 'PFL MVP merger')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [{
+        schemaVersion: 2,
+        id: 'block-pfl-mvp',
+        agentId: 'agent-1',
+        scope: 'idea',
+        semanticKey: 'and:like:mvp:not:pfl:remove:tweet',
+        topic: null,
+        storyClusterId: null,
+        ideaId: null,
+        reasonCode: 'bad_premise',
+        reason: 'I do not like this PFL/MVP tweet. Remove it and do not regenerate this merger angle.',
+        permanent: true,
+        blockedUntil: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({ status: 'rejected', rejectionCodes: expect.arrayContaining(['blocked_idea']) });
+  });
+
   it('builds compact stage prompts without turning positive anchors into content templates', () => {
     const currentBrief = brief('sourced', 'AI infrastructure', 'verified_source');
     const idea = {

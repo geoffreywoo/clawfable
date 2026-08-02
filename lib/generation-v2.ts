@@ -479,6 +479,31 @@ function unsupportedOperatorFact(text: string): boolean {
   return /\b(?:according to|announced|reported|signed|filed|merger|acquisition|this week|today|yesterday)\b|\b20\d{2}\b|\$\d|\b\d+(?:\.\d+)?%/i.test(text);
 }
 
+const DURABLE_ANGLE_BOILERPLATE = new Set([
+  'actually', 'again', 'angle', 'any', 'does', 'idea', 'like', 'never', 'not',
+  'post', 'regenerate', 'remove', 'this', 'tweet', 'use', 'want', 'write',
+]);
+
+function matchesDurableRejectedAngle(
+  block: SemanticBlock,
+  idea: Pick<IdeaCandidate, 'topic' | 'claim' | 'tension' | 'implication' | 'authorReason'>,
+): boolean {
+  if (
+    !block.permanent
+    || !/do not regenerate|don't regenerate|never (?:write|post|use|cover)/i.test(block.reason || '')
+  ) return false;
+  const blockTokens = new Set(significantResearchTokens(
+    `${block.semanticKey.replace(/:/g, ' ')} ${block.topic || ''} ${block.reason || ''}`,
+  ).filter((token) => token.length >= 3 && !DURABLE_ANGLE_BOILERPLATE.has(token)));
+  const candidateTokens = new Set(significantResearchTokens(`${idea.topic} ${ideaText(idea)}`));
+  let shared = 0;
+  for (const token of blockTokens) {
+    if (candidateTokens.has(token)) shared += 1;
+    if (shared >= 2) return true;
+  }
+  return false;
+}
+
 function semanticBlockIssue(
   idea: Pick<IdeaCandidate, 'semanticKey' | 'topic' | 'storyClusterId' | 'claim' | 'tension' | 'implication' | 'authorReason'>,
   blocks: SemanticBlock[],
@@ -499,7 +524,10 @@ function semanticBlockIssue(
     if (block.scope === 'topic' && block.topic && researchTokenSimilarity(block.topic, idea.topic) >= 0.72) {
       return 'blocked_topic';
     }
-    if (block.scope === 'idea' && semanticSimilarity >= 0.5) return 'blocked_idea';
+    if (block.scope === 'idea' && (
+      semanticSimilarity >= 0.5
+      || matchesDurableRejectedAngle(block, idea)
+    )) return 'blocked_idea';
   }
   return null;
 }
