@@ -442,6 +442,12 @@ function topicKey(value: string): string {
   return significantResearchTokens(value).slice(0, 4).sort().join(':') || value.trim().toLowerCase();
 }
 
+const COMMITTED_TWEET_STATUSES = new Set<Tweet['status']>(['queued', 'posted', 'deleted_from_x']);
+
+function isCommittedTweet(tweet: Tweet): boolean {
+  return COMMITTED_TWEET_STATUSES.has(tweet.status);
+}
+
 function storySubject(story: StoryCluster): string {
   return `${story.semanticKey.replace(/:/g, ' ')} ${story.topic} ${story.title} ${story.summary} ${story.entities.join(' ')}`;
 }
@@ -481,7 +487,10 @@ export function buildGenerationBriefsV2({
   blocks?: SemanticBlock[];
 }): GenerationBriefV2[] {
   const briefCount = Math.max(4, Math.min(8, count * 2));
-  const recentStoryIds = new Set(allTweets.slice(0, 80).map((tweet) => tweet.storyClusterId).filter(Boolean));
+  // Failed copy must not consume its source. Only queue/post outcomes establish
+  // that a story or trend has actually entered the account's publishing slate.
+  const committedTweets = allTweets.filter(isCommittedTweet).slice(0, 80);
+  const recentStoryIds = new Set(committedTweets.map((tweet) => tweet.storyClusterId).filter(Boolean));
   const storyCandidates = stories
     .filter((story) => (
       story.evidenceQualified
@@ -546,7 +555,7 @@ export function buildGenerationBriefsV2({
     // trend/frontier material can suggest research, but is not generation evidence.
     trending: null,
     fallbackTopics: [...analysis.engagementPatterns.topTopics, ...style.exploration.underusedTopics],
-    excludedTrendTopicIds: allTweets.slice(0, 80).map((tweet) => tweet.trendTopicId || '').filter(Boolean),
+    excludedTrendTopicIds: committedTweets.map((tweet) => tweet.trendTopicId || '').filter(Boolean),
   });
   for (const slot of sourcePlan.slots) {
     const brief = plannerBrief(slot);
@@ -932,10 +941,13 @@ function ideaSemanticMemory(input: GenerateTweetBatchV2Input): string[] {
     ...(reference?.bestPerformers || []),
   ].filter((entry) => isCuratedOperatorReference(entry, input.learnings)).map((entry) => entry.content);
   const viralOutcomes = (input.analysis.viralTweets || []).map((entry) => entry.text);
+  const committedPremises = input.allTweets
+    .filter(isCommittedTweet)
+    .slice(0, 80)
+    .map((tweet) => tweet.content);
   return uniqueStrings([
     ...operatorPremises,
-    ...input.recentPosts,
-    ...input.allTweets.slice(0, 80).map((tweet) => tweet.content),
+    ...committedPremises,
     ...viralOutcomes,
   ], 140);
 }

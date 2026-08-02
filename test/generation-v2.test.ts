@@ -282,6 +282,62 @@ describe('Tweet Generation V2', () => {
     expect(briefs.some((entry) => entry.storyClusterId === usableStory.id)).toBe(true);
   });
 
+  it('does not consume a sourced story when only its generated copy was rejected', () => {
+    const story = {
+      schemaVersion: 2,
+      id: 'story-copy-rejected',
+      agentId: 'agent-1',
+      semanticKey: 'robotics:factory:release',
+      title: 'A robotics company releases a new factory system',
+      summary: 'The system changes factory deployment economics.',
+      topic: 'robotics startups',
+      entities: ['RoboticsCo'],
+      sourceDocumentIds: ['source-robotics'],
+      qualifiedClaimIds: ['claim-robotics'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0, total: 0.85 },
+      firstSeenAt: '2026-08-01T00:00:00.000Z',
+      lastSeenAt: '2026-08-01T12:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const common = {
+      count: 2,
+      stories: [story],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'health', 'AI hardware'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: ['markets'] } } as any,
+      trending: null,
+    };
+
+    const afterWritingRejection = buildGenerationBriefsV2({
+      ...common,
+      allTweets: [{
+        id: 'draft-rejected',
+        status: 'draft',
+        storyClusterId: story.id,
+        generationRunId: 'run-rejected',
+        quarantinedAt: '2026-08-01T13:00:00.000Z',
+      } as any],
+    });
+    const whileQueued = buildGenerationBriefsV2({
+      ...common,
+      allTweets: [{
+        id: 'draft-queued',
+        status: 'queued',
+        storyClusterId: story.id,
+        generationRunId: 'run-queued',
+      } as any],
+    });
+
+    expect(afterWritingRejection.some((entry) => entry.storyClusterId === story.id)).toBe(true);
+    expect(whileQueued.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+  });
+
   it('rejects a cited idea when its claim is unrelated to the qualified evidence', () => {
     const sourcedBrief = brief('sourced', 'AI infrastructure', 'verified_source');
     const source = {
