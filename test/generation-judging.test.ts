@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractModelJsonRecords, FINAL_CRITIC_VERSION, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getGeoffreyMutationMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
+import { extractModelJsonRecords, FINAL_CRITIC_VERSION, formatCandidateContentForJudgePrompt, formatMutationCandidateForPrompt, getBulkJudgeMaxTokens, getGeoffreyMutationMaxTokens, getMutationMaxTokens, judgeCandidates, mergeCandidateVersionsForRanking, mutateTopCandidates, polishGeoffreyFinalCandidates, selectGeoffreyFinalPolishTargets, selectGeoffreyVoiceRescueTargets, selectMutationTargets } from '@/lib/generation-judging';
 import type { AccountAnalysis, PersonalizationMemory } from '@/lib/types';
 import type { JudgedCandidate } from '@/lib/generation-judging';
 
@@ -1025,5 +1025,115 @@ describe('judgeCandidates fallback critic', () => {
     expect(String(mocks.generateText.mock.calls[0]?.[0]?.system || ''))
       .toContain('already failed one voice pass');
     expect(mutations[0].mutationRound).toBe(2);
+  });
+
+  it('selects only strong Geoffrey near-misses with a surgical copy issue', () => {
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups', 'culture'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups, investing, AI, and culture.',
+    };
+    const nearMiss = judgedCandidate({
+      content: 'a failed founder in sf is a hire. that gap compounds every cycle.',
+      sourceBrief: 'Historical operator topic: startup failure tolerance.',
+      draftExperimentId: 'sf-failure',
+      mutationRound: 2,
+      judgeNotes: 'Best candidate, though the closer adds a generic VC-style beat.',
+      finalCriticVerdict: 'allow',
+      finalCriticScores: {
+        overall: 0.78,
+        voiceFit: 0.79,
+        clarity: 0.94,
+        novelty: 0.69,
+        audienceFit: 0.92,
+        policySafety: 0.98,
+        nativeVoice: 0.79,
+        casualStartupFit: 0.86,
+        stiffnessRisk: 0.18,
+        cringeRisk: 0.2,
+        technicalCredibility: 0.8,
+        manualAnchorReskinRisk: 0.2,
+      },
+    });
+    const blocked = judgedCandidate({
+      ...nearMiss,
+      content: 'generic blocked version',
+      draftExperimentId: 'blocked',
+      finalCriticVerdict: 'block',
+    });
+    const clean = judgedCandidate({
+      ...nearMiss,
+      content: 'sf lets failed founders get back to work fast.',
+      draftExperimentId: 'clean',
+      judgeNotes: 'Strong concise post.',
+    });
+
+    expect(selectGeoffreyFinalPolishTargets([nearMiss, blocked, clean], geoffreyVoice))
+      .toEqual([nearMiss]);
+    expect(selectGeoffreyFinalPolishTargets([nearMiss], {
+      ...geoffreyVoice,
+      communicationStyle: 'general founder voice',
+      summary: 'A general founder.',
+    })).toEqual([]);
+  });
+
+  it('surgically edits a strong near-miss once and preserves provenance for rejudging', async () => {
+    mocks.hasProvider.mockReturnValue(true);
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        idx: 0,
+        content: 'a failed founder in sf is a hire. most other places, they are a cautionary tale.',
+        rationale: 'Deleted the canned closer.',
+      }),
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+    });
+    const candidate = judgedCandidate({
+      content: 'a failed founder in sf is a hire. that gap compounds every cycle.',
+      sourceBrief: 'Historical operator topic: startup failure tolerance.',
+      draftExperimentId: 'sf-failure',
+      mutationRound: 2,
+      judgeNotes: 'The closer adds a generic VC-style beat.',
+      finalCriticVerdict: 'allow',
+    });
+
+    const polished = await polishGeoffreyFinalCandidates([candidate], {
+      voiceProfile: {
+        tone: 'casual startup investor',
+        topics: ['startups', 'culture'],
+        antiGoals: ['AI slop'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+        summary: 'Geoffrey writes about startups and culture.',
+      },
+      memory: memory({ neverDoThisAgain: ['Delete canned VC closers.'] }),
+      learnings: {
+        operatorVoiceReference: {
+          pinnedExamples: [],
+          bestPerformers: [],
+          startupRegisterExamples: [{ content: 'people want to build here because trying again is normal' }],
+        },
+      } as any,
+      modelStack: 'geoffrey_fable5_gpt56',
+    });
+
+    const call = mocks.generateText.mock.calls[0]?.[0];
+    expect(call).toEqual(expect.objectContaining({
+      task: 'creative_variant',
+      modelStack: 'geoffrey_fable5_gpt56',
+      maxTokens: 4096,
+    }));
+    expect(String(call?.system || '')).toContain('Make one surgical edit per draft');
+    expect(String(call?.system || '')).toContain('Usually the right edit is subtraction');
+    expect(String(call?.prompt || '')).toContain('compounds every cycle');
+    expect(polished).toHaveLength(1);
+    expect(polished[0]).toMatchObject({
+      content: 'a failed founder in sf is a hire. most other places, they are a cautionary tale.',
+      generationProvider: 'anthropic',
+      generationModel: 'claude-fable-5',
+      mutationRound: 3,
+      finalCriticVerdict: null,
+    });
   });
 });

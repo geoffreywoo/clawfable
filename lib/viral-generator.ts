@@ -25,6 +25,8 @@ import {
   judgeCandidates,
   mergeCandidateVersionsForRanking,
   mutateTopCandidates,
+  polishGeoffreyFinalCandidates,
+  selectGeoffreyFinalPolishTargets,
   selectGeoffreyVoiceRescueTargets,
   type CandidateJudgeDiagnostics,
 } from './generation-judging';
@@ -1533,6 +1535,7 @@ export interface ViralGenerationDiagnostics {
     mutations: CandidateJudgeDiagnostics | null;
     rescues: CandidateJudgeDiagnostics | null;
     final: CandidateJudgeDiagnostics;
+    polish: CandidateJudgeDiagnostics | null;
   };
   qualityIssueCounts?: Record<string, number>;
   qualitySamples?: Array<{
@@ -2180,15 +2183,44 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
           diagnostics: finalJudgeDiagnostics,
         })
       : [];
-    const finalCandidates = geoffreyStrict
+    const preliminaryFinalCandidates = geoffreyStrict
       ? [...alreadyFinalizedCandidates, ...newlyFinalizedCandidates]
       : mergedCandidates;
+    const finalPolishTargets = geoffreyStrict
+      ? selectGeoffreyFinalPolishTargets(preliminaryFinalCandidates, voiceProfile)
+      : [];
+    const polishedCandidates = finalPolishTargets.length > 0
+      ? await polishGeoffreyFinalCandidates(finalPolishTargets, {
+          voiceProfile,
+          memory,
+          learnings,
+          modelStack,
+        })
+      : [];
+    const polishJudgeDiagnostics: CandidateJudgeDiagnostics = {};
+    const judgedPolish = polishedCandidates.length > 0
+      ? await judgeCandidates(polishedCandidates, {
+          voiceProfile,
+          analysis,
+          learnings,
+          memory,
+          mode: 'model',
+          requireModel: true,
+          task: 'final_judgment',
+          modelStack,
+          diagnostics: polishJudgeDiagnostics,
+        })
+      : [];
+    const finalCandidates = geoffreyStrict && judgedPolish.length > 0
+      ? mergeCandidateVersionsForRanking(preliminaryFinalCandidates, judgedPolish, voiceProfile)
+      : preliminaryFinalCandidates;
     if (diagnostics) {
       diagnostics.judges = {
         initial: initialJudgeDiagnostics,
         mutations: mutatedCandidates.length > 0 ? mutationJudgeDiagnostics : null,
         rescues: rescuedCandidates.length > 0 ? rescueJudgeDiagnostics : null,
         final: finalJudgeDiagnostics,
+        polish: polishedCandidates.length > 0 ? polishJudgeDiagnostics : null,
       };
       diagnostics.stages = {
         baseCandidates: baseCandidates.length,
@@ -2201,6 +2233,10 @@ Output ONLY JSON objects, one per line, no markdown fencing.`;
         merged: mergedCandidates.length,
         alreadyFinalized: alreadyFinalizedCandidates.length,
         pendingFinalCritic: pendingFinalCandidates.length,
+        preliminaryFinalCriticJudged: preliminaryFinalCandidates.length,
+        finalPolishTargets: finalPolishTargets.length,
+        polished: polishedCandidates.length,
+        judgedPolish: judgedPolish.length,
         finalCriticJudged: finalCandidates.length,
       };
     }

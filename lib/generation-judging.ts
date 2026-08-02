@@ -257,6 +257,52 @@ export function selectGeoffreyVoiceRescueTargets(
   return selected;
 }
 
+const FINAL_POLISH_NOTE_PATTERN = /\b(?:closer|construction|cadence|phrasing|wording|writerly|generic|canned|packaged|manufactured|too polished)\b/i;
+const FINAL_POLISH_CONTENT_PATTERN = /\b(?:actual|real) (?:moat|edge|question)\b|\bcompounds? every cycle\b|\bthat(?:'s| is) the (?:whole )?(?:game|point)\b/i;
+
+export function selectGeoffreyFinalPolishTargets(
+  candidates: JudgedCandidate[],
+  voiceProfile: VoiceProfile,
+): JudgedCandidate[] {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return [];
+
+  const eligible = [...candidates]
+    .filter((candidate) => {
+      const critic = candidate.finalCriticScores;
+      if (!critic || candidate.finalCriticVerdict !== 'allow') return false;
+      return (candidate.mutationRound ?? 0) >= 1
+        && Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
+        && critic.overall >= 0.68
+        && (critic.nativeVoice ?? critic.voiceFit) >= 0.68
+        && (critic.casualStartupFit ?? 0.5) >= 0.6
+        && critic.policySafety >= 0.85
+        && (critic.stiffnessRisk ?? 0) < 0.4
+        && (critic.cringeRisk ?? 0) < 0.4
+        && (critic.manualAnchorReskinRisk ?? 0) < 0.3
+        && (
+          FINAL_POLISH_NOTE_PATTERN.test(candidate.judgeNotes || '')
+          || FINAL_POLISH_CONTENT_PATTERN.test(candidate.content)
+        );
+    })
+    .sort((a, b) => (
+      (b.finalCriticScores?.overall ?? 0) - (a.finalCriticScores?.overall ?? 0)
+      || (b.finalCriticScores?.nativeVoice ?? b.finalCriticScores?.voiceFit ?? 0)
+        - (a.finalCriticScores?.nativeVoice ?? a.finalCriticScores?.voiceFit ?? 0)
+    ));
+  const selected: JudgedCandidate[] = [];
+  const seenExperiments = new Set<string>();
+
+  for (const candidate of eligible) {
+    const experimentKey = candidate.draftExperimentId || candidate.sourceBrief || candidate.content;
+    if (seenExperiments.has(experimentKey)) continue;
+    seenExperiments.add(experimentKey);
+    selected.push(candidate);
+    if (selected.length === 3) break;
+  }
+
+  return selected;
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -854,6 +900,74 @@ function parseMutationLines(
   }
 
   return mutations;
+}
+
+export async function polishGeoffreyFinalCandidates(
+  candidates: JudgedCandidate[],
+  {
+    voiceProfile,
+    memory,
+    learnings,
+    modelStack = 'standard',
+  }: {
+    voiceProfile: VoiceProfile;
+    memory: PersonalizationMemory | null;
+    learnings?: AgentLearnings | null;
+    modelStack?: GenerationModelStackId;
+  },
+): Promise<RankableProtocolTweet[]> {
+  if (
+    candidates.length === 0
+    || !isGeoffreyVoiceProfile(voiceProfile)
+    || !hasTextGenerationProvider()
+  ) {
+    return [];
+  }
+
+  const nativeAnchors = [
+    ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
+    ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
+    ...(learnings?.operatorVoiceReference?.bestPerformers || []),
+  ]
+    .filter((entry, index, items) => (
+      entry.content?.trim()
+      && items.findIndex((item) => item.content === entry.content) === index
+    ))
+    .slice(0, 6)
+    .map((entry, index) => `[NATIVE ${index + 1}] ${formatNativeAnchorForPrompt(entry.content)}`)
+    .join('\n');
+  const prompt = candidates
+    .map((candidate, idx) => formatMutationCandidateForPrompt(candidate, idx))
+    .join('\n\n');
+
+  try {
+    const response = await generateText({
+      task: 'creative_variant',
+      tier: 'fast',
+      modelStack,
+      maxTokens: getGeoffreyMutationMaxTokens(candidates.length),
+      openAiReasoningEffort: 'medium',
+      system: `You are the last copy editor for @geoffwoo. These are strong, source-grounded near-misses. Make one surgical edit per draft.
+
+Keep the subject, factual boundary, and core judgment. Delete the exact phrase or closing beat the critic identified as polished, canned, symmetrical, or AI-generated. Usually the right edit is subtraction. Do not invent a replacement slogan, a new thesis, a number, a quote, or first-person evidence.
+
+Never use "actual moat," "real edge," "the real question," "compounds every cycle," "that's the whole game," "not X but Y," or a balanced consultant closer. Remove unsupported precise numbers even when they make the post punchier. Stop when the post has made its point.
+
+Do not imitate an anchor's premise or sentence skeleton. Use these only to calibrate how little explanation Geoffrey often needs:
+${nativeAnchors || '[no native anchors available; make the smallest possible edit]'}
+${memory?.neverDoThisAgain?.length ? `\nOperator bans: ${memory.neverDoThisAgain.slice(0, 3).join(' | ')}` : ''}
+
+Output exactly one JSON object per input idx, one object per line, with idx, content, and rationale.`,
+      prompt: `Surgically edit these near-misses:\n\n${prompt}`,
+    });
+
+    return parseMutationLines(response.text, candidates, {
+      provider: response.provider,
+      model: response.model,
+    });
+  } catch {
+    return [];
+  }
 }
 
 export async function mutateTopCandidates(
