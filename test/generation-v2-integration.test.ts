@@ -183,15 +183,21 @@ describe('generateTweetBatchV2 integration', () => {
 
   it('runs a dry preview without persisting traces or candidate memory', async () => {
     let finalTrace: any = null;
+    let finalArtifacts: any = null;
     const drafts = await generateTweetBatchV2({
       ...input,
       mode: 'preview',
       persistArtifacts: false,
       onTrace: (trace) => { finalTrace = trace; },
+      onArtifacts: (artifacts) => { finalArtifacts = artifacts; },
     });
 
     expect(drafts).toHaveLength(2);
     expect(finalTrace).toMatchObject({ mode: 'preview', status: 'completed' });
+    expect(finalArtifacts).toMatchObject({
+      ideas: expect.arrayContaining([expect.objectContaining({ id: expect.any(String) })]),
+      drafts: expect.arrayContaining([expect.objectContaining({ content: expect.any(String) })]),
+    });
     expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
     expect(mocks.upsertIdeaCandidates).not.toHaveBeenCalled();
     expect(mocks.upsertDraftCandidates).not.toHaveBeenCalled();

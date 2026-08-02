@@ -115,6 +115,33 @@ describe('internal generation preview route', () => {
     }]);
     mocks.generateTweetBatchV2.mockImplementation(async (options: any) => {
       options.onTrace?.({ id: 'run-v2', status: 'completed', mode: 'preview', stageCounts: { draftsSelected: 1 } });
+      options.onArtifacts?.({
+        ideas: [{
+          id: 'idea-v2',
+          briefId: 'brief-v2',
+          storyClusterId: 'story-v2',
+          topic: 'AI startups',
+          claim: 'Model access is no longer the differentiator.',
+          tension: 'Operator judgment remains scarce.',
+          implication: 'Small teams need taste more than another model wrapper.',
+          authorReason: 'The author builds and invests in these teams.',
+          evidenceIds: ['claim-v2'],
+          status: 'selected',
+          rejectionCodes: [],
+          judgeScore: 0.9,
+        }],
+        drafts: [{
+          id: 'draft-v2',
+          ideaId: 'idea-v2',
+          storyClusterId: 'story-v2',
+          content: 'the bottleneck moved from model access to operator taste',
+          format: 'observation',
+          posture: 'plain judgment',
+          status: 'selected',
+          rejectionCodes: [],
+          evidenceIds: ['claim-v2'],
+        }],
+      });
       return [{
         content: 'the bottleneck moved from model access to operator taste',
         targetTopic: 'AI startups',
@@ -252,6 +279,10 @@ describe('internal generation preview route', () => {
         draftCandidateId: 'draft-v2',
       }],
       generationTrace: expect.objectContaining({ id: 'run-v2', status: 'completed' }),
+      candidateDiagnostics: {
+        ideas: [expect.objectContaining({ id: 'idea-v2', status: 'selected' })],
+        drafts: [expect.objectContaining({ id: 'draft-v2', status: 'selected' })],
+      },
     });
   });
 

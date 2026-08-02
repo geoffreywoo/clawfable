@@ -20,7 +20,12 @@ import {
 } from '@/lib/kv-storage';
 import { generateViralBatch, type ViralGenerationDiagnostics } from '@/lib/viral-generator';
 import type { TrendingTopic } from '@/lib/trending';
-import type { GenerationModelStackId, GenerationRunTrace } from '@/lib/types';
+import type {
+  DraftCandidate,
+  GenerationModelStackId,
+  GenerationRunTrace,
+  IdeaCandidate,
+} from '@/lib/types';
 import { isGeoffreyDeepTechnicalTopic } from '@/lib/source-planner';
 
 const MAX_PREVIEW_COUNT = 8;
@@ -86,6 +91,7 @@ export async function POST(
     const pipelineVersion = getGenerationPipelineVersion(agent.handle, requestedPipelineVersion);
     const diagnostics: ViralGenerationDiagnostics | undefined = pipelineVersion === 'v1' && body?.includeDiagnostics === true ? {} : undefined;
     let generationTrace: GenerationRunTrace | null = null;
+    let previewArtifacts: { ideas: IdeaCandidate[]; drafts: DraftCandidate[] } | null = null;
     const drafts = pipelineVersion === 'v2'
       ? await generateTweetBatchV2({
           agentId: id,
@@ -104,6 +110,7 @@ export async function POST(
           mode: 'preview',
           persistArtifacts: false,
           onTrace: (trace) => { generationTrace = trace; },
+          onArtifacts: (artifacts) => { previewArtifacts = artifacts; },
         })
       : await generateViralBatch(
           context.voiceProfile,
@@ -129,6 +136,35 @@ export async function POST(
       generated: drafts.length,
       diagnostics: diagnostics || null,
       generationTrace,
+      candidateDiagnostics: previewArtifacts
+        ? {
+            ideas: previewArtifacts.ideas.map((idea) => ({
+              id: idea.id,
+              briefId: idea.briefId,
+              storyClusterId: idea.storyClusterId,
+              topic: idea.topic,
+              claim: idea.claim,
+              tension: idea.tension,
+              implication: idea.implication,
+              authorReason: idea.authorReason,
+              evidenceIds: idea.evidenceIds,
+              status: idea.status,
+              rejectionCodes: idea.rejectionCodes,
+              judgeScore: idea.judgeScore,
+            })),
+            drafts: previewArtifacts.drafts.map((draft) => ({
+              id: draft.id,
+              ideaId: draft.ideaId,
+              storyClusterId: draft.storyClusterId,
+              content: draft.content,
+              format: draft.format,
+              posture: draft.posture,
+              status: draft.status,
+              rejectionCodes: draft.rejectionCodes,
+              evidenceIds: draft.evidenceIds,
+            })),
+          }
+        : null,
       drafts: drafts.map((draft) => {
         const taste = assessAccountTaste(draft.content, {
           voiceProfile: context.voiceProfile,

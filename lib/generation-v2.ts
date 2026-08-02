@@ -146,6 +146,10 @@ export interface GenerateTweetBatchV2Input {
   mode?: 'live' | 'manual' | 'preview';
   persistArtifacts?: boolean;
   onTrace?: (trace: GenerationRunTrace) => void;
+  onArtifacts?: (artifacts: {
+    ideas: IdeaCandidate[];
+    drafts: DraftCandidate[];
+  }) => void;
 }
 
 async function trackedGenerate(
@@ -1490,14 +1494,23 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     status: 'running',
     error: null,
   };
+  let observedIdeas: IdeaCandidate[] = [];
+  let observedDrafts: DraftCandidate[] = [];
+  const publishArtifacts = () => {
+    input.onArtifacts?.({ ideas: observedIdeas, drafts: observedDrafts });
+  };
   const publishTrace = async () => {
     input.onTrace?.(trace);
     if (persistArtifacts) await saveGenerationRun(input.agentId, trace);
   };
   const persistIdeas = async (candidates: IdeaCandidate[]) => {
+    observedIdeas = candidates;
+    publishArtifacts();
     if (persistArtifacts) await upsertIdeaCandidates(input.agentId, candidates);
   };
   const persistDrafts = async (candidates: DraftCandidate[]) => {
+    observedDrafts = candidates;
+    publishArtifacts();
     if (persistArtifacts) await upsertDraftCandidates(input.agentId, candidates);
   };
   const pauseUntil = getGenerationV2CircuitPauseUntil(await getGenerationRuns(input.agentId, 8));
