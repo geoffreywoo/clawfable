@@ -258,6 +258,63 @@ export function getGeoffreyTopicPortfolioIssue(tweet: Tweet, recentPosts: PostLo
   return null;
 }
 
+const RECENT_STORY_WINDOW_MS = 48 * 60 * 60 * 1000;
+const STORY_IDENTITY_STOP_WORDS = new Set([
+  'acquisition', 'announcement', 'boxing', 'buying', 'challenge', 'company', 'current',
+  'deal', 'fight', 'fighter', 'general', 'launch', 'market', 'merger', 'network', 'news',
+  'product', 'source', 'sports', 'startup', 'startups', 'story', 'technology', 'topic', 'update',
+]);
+
+type GeoffreyStoryRecord = {
+  id?: string | null;
+  content: string;
+  topic?: string | null;
+  sourceBrief?: string | null;
+  sourceLane?: Tweet['sourceLane'];
+  trendTopicId?: string | null;
+  trendHeadline?: string | null;
+  status?: Tweet['status'];
+  xTweetId?: string | null;
+  postedAt?: string | null;
+  createdAt?: string | null;
+  quarantinedAt?: string | null;
+};
+
+function distinctiveStoryTokens(value: string): Set<string> {
+  return new Set(value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !STORY_IDENTITY_STOP_WORDS.has(token) && !/^\d+$/.test(token)));
+}
+
+export function getGeoffreyRecentStoryIssue(
+  candidate: GeoffreyStoryRecord,
+  recentTweets: GeoffreyStoryRecord[],
+  now = Date.now(),
+): string | null {
+  if (!isFollowedNetworkSource(candidate)) return null;
+  const identityTokens = distinctiveStoryTokens(`${candidate.topic || ''} ${candidate.trendHeadline || ''}`);
+  if (identityTokens.size < 2) return null;
+
+  for (const recent of recentTweets) {
+    if (candidate.id && recent.id === candidate.id) continue;
+    if (!recent.xTweetId || !['posted', 'deleted_from_x'].includes(recent.status || '')) continue;
+    if (recent.quarantinedAt) continue;
+    const postedAt = Date.parse(recent.postedAt || recent.createdAt || '');
+    if (!Number.isFinite(postedAt) || now - postedAt > RECENT_STORY_WINDOW_MS) continue;
+    const recentTokens = distinctiveStoryTokens(
+      `${recent.topic || ''} ${recent.trendHeadline || ''} ${recent.content}`,
+    );
+    const shared = [...identityTokens].filter((token) => recentTokens.has(token));
+    if (shared.length >= 2) {
+      return `named source story repeats a recent post (${shared.slice(0, 3).join(', ')})`;
+    }
+  }
+  return null;
+}
+
 const NON_ORIGINAL_LOG_FORMATS = new Set([
   'auto_reply',
   'auto_reply_high_value',
@@ -690,7 +747,20 @@ export async function refreshQueuedTweetsForCurrentQualityPolicy(
   }
 
   const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
-  const after = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
+  const rescored = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
+  const after: Tweet[] = [];
+  for (const tweet of rescored) {
+    const recentStoryIssue = getGeoffreyRecentStoryIssue(tweet, context.allTweets || []);
+    if (!recentStoryIssue) {
+      after.push(tweet);
+      continue;
+    }
+    await updateTweet(tweet.id, {
+      status: 'draft',
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: `Recent story breadth gate: ${recentStoryIssue}.`,
+    });
+  }
   return {
     before: before.length,
     after: after.length,
@@ -1086,7 +1156,8 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
     }
 
     if (nativeContext) {
-      const topicPortfolioIssue = getGeoffreyTopicPortfolioIssue(queuedTweet, topicPortfolioHistory);
+      const topicPortfolioIssue = getGeoffreyRecentStoryIssue(queuedTweet, nativeContext.allTweets || [])
+        || getGeoffreyTopicPortfolioIssue(queuedTweet, topicPortfolioHistory);
       if (topicPortfolioIssue) {
         const reason = `Geoffrey topic portfolio gate: ${topicPortfolioIssue}.`;
         await updateTweet(queuedTweet.id, {
@@ -3121,6 +3192,16 @@ export async function refillQueue(
             { content },
           ) >= 0.48)
         ) {
+          continue;
+        }
+        if (geoffreyStrict && getGeoffreyRecentStoryIssue({
+          content: item.content,
+          topic: item.targetTopic,
+          sourceBrief: item.sourceBrief,
+          sourceLane: item.sourceLane,
+          trendTopicId: item.trendTopicId,
+          trendHeadline: item.trendHeadline,
+        }, allTweets)) {
           continue;
         }
         recentContent.unshift(item.content);

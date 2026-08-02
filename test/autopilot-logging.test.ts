@@ -153,7 +153,7 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
+import { archiveStaleNetworkTopicQueue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
 import { GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
@@ -541,6 +541,37 @@ describe('autopilot remote debug logging', () => {
     }]);
 
     expect(issue).toContain('one of eight');
+  });
+
+  it('blocks a followed-network story already covered under a legacy topic record', () => {
+    const now = Date.parse('2026-08-02T02:00:00.000Z');
+    const issue = getGeoffreyRecentStoryIssue({
+      content: 'does any fighter actually want this merger? one fewer buyer for your next contract is not a gift.',
+      topic: 'MVP PFL merger',
+      sourceLane: 'trend_aligned_exploit',
+      trendTopicId: 'network-pfl-current',
+    }, [{
+      id: 'legacy-pfl-post',
+      content: "pfl buying mvp is really pfl buying jake paul's ability to make people care about a fight.",
+      topic: 'MVP PFL merger',
+      status: 'posted',
+      xTweetId: 'x-legacy-pfl',
+      postedAt: '2026-08-02T00:30:00.000Z',
+    }], now);
+
+    expect(issue).toContain('named source story repeats a recent post');
+    expect(getGeoffreyRecentStoryIssue({
+      content: 'underdog buying a smaller prediction app is a distribution bet.',
+      topic: 'Underdog acquisition',
+      sourceLane: 'trend_aligned_exploit',
+      trendTopicId: 'network-underdog-current',
+    }, [{
+      content: 'pfl buying mvp changes fighter leverage.',
+      topic: 'MVP PFL merger',
+      status: 'posted',
+      xTweetId: 'x-pfl',
+      postedAt: '2026-08-02T00:30:00.000Z',
+    }], now)).toBeNull();
   });
 
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
