@@ -98,6 +98,9 @@ describe('generated writing patterns', () => {
     const splitContrast = assessGeneratedWritingPatterns(
       'your hardware startup does not have a prototype.\n\nit has one unusually cooperative specimen.',
     );
+    const contractedSplitContrast = assessGeneratedWritingPatterns(
+      "the fastest way to lose sf's forgiveness isn't blowing up the company. it's how you talked to people during the year you thought you'd already won.",
+    );
     const nounVerb = assessGeneratedWritingPatterns(
       'ore is the easy noun. purification, morphology and qualification are the verbs.',
     );
@@ -110,6 +113,8 @@ describe('generated writing patterns', () => {
 
     expect(splitContrast.hits).toContain('split-not-x-y');
     expect(splitContrast.score).toBeGreaterThanOrEqual(0.5);
+    expect(contractedSplitContrast.hits).toContain('split-not-x-y');
+    expect(contractedSplitContrast.score).toBeGreaterThanOrEqual(0.5);
     expect(nounVerb.hits).toContain('noun-verb-gimmick');
     expect(slideReality.hits).toContain('slide-reality-scaffold');
     expect(topicLabel.hits).toContain('topic-question-label');

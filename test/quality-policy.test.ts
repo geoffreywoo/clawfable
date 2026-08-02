@@ -253,6 +253,18 @@ describe('Geoffrey hard quality policy', () => {
     })).toBeNull();
   });
 
+  it('blocks a polished split contrast even when every model score allows it', () => {
+    const result = assess(candidate({
+      content: "the fastest way to lose sf's forgiveness isn't blowing up the company. it's how you talked to people during the year you thought you'd already won.",
+      targetTopic: 'culture',
+      sourceBrief: 'A founder-culture observation grounded in operator experience.',
+    }));
+
+    expect(result.eligible).toBe(false);
+    expect(result.scores.generatedPattern).toBeGreaterThanOrEqual(0.28);
+    expect(result.issues.some((issue) => issue.startsWith('generated pattern'))).toBe(true);
+  });
+
   it('requires a model final critic and blocks copied network prose', () => {
     const noCritic = assess(candidate({
       finalCriticProvider: null,

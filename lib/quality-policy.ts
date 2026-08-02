@@ -13,7 +13,7 @@ import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v11';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v12';
 
 export interface GeoffreyQualityPolicyActivation {
   activated: boolean;

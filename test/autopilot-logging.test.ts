@@ -154,6 +154,7 @@ vi.mock('@/lib/ai', () => ({
 }));
 
 import { archiveStaleNetworkTopicQueue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
+import { GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -224,7 +225,7 @@ const validQueuedTweet = {
 };
 
 const currentGeoffreyCertification = {
-  qualityPolicyVersion: 'geoffwoo-quality-v11',
+  qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
   voiceCorpusVersion: 'voice-corpus-v1-current',
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
@@ -354,7 +355,7 @@ afterEach(() => {
 describe('autopilot remote debug logging', () => {
   it('uses the strict GPT-5.6 stack only after an empty Geoffrey primary batch', async () => {
     process.env.VERCEL_ENV = 'production';
-    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v11';
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
     const agent = {
       ...baseAgent,
       handle: 'geoffwoo',
@@ -410,7 +411,7 @@ describe('autopilot remote debug logging', () => {
 
   it('does not pay for the strict fallback when the Geoffrey primary batch has a survivor', async () => {
     process.env.VERCEL_ENV = 'production';
-    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v11';
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
     const agent = {
       ...baseAgent,
       handle: 'geoffwoo',
@@ -459,7 +460,7 @@ describe('autopilot remote debug logging', () => {
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
 
     expect(result.action).toBe('skipped');
-    expect(result.reason).toContain('geoffwoo-quality-v11 remains in shadow');
+    expect(result.reason).toContain(`${GEOFFREY_QUALITY_POLICY_VERSION} remains in shadow`);
     expect(mocks.getQueuedTweets).not.toHaveBeenCalled();
     expect(mocks.postTweet).not.toHaveBeenCalled();
   });

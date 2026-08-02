@@ -33,7 +33,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'staged-dialogue-line', weight: 0.34, pattern: /(?:^|\n)\s*["“][^"”\n]{8,180}["”]\s*(?:\n|$)/m },
   { label: 'paired-question-contrast', weight: 0.46, pattern: /\?\s*(?:\n\s*)+[^?\n]{3,120}\?\s*[\s\S]{0,140}\b(?:same\s+[a-z]|radically different)\b/i },
   { label: 'same-radically-different', weight: 0.34, pattern: /\bsame\s+[a-z][^.\n]{0,55}[.\n]+\s*radically different\s+[a-z]/i },
-  { label: 'split-not-x-y', weight: 0.52, pattern: /\b(?:does not|doesn['’]?t|do not|don['’]?t|is not|isn['’]?t|are not|aren['’]?t|has no|have no)\b[^.!?\n]{0,100}[.!?]\s*(?:\n\s*)*(?:it|this|that|they|the [a-z][a-z -]{0,30})\s+(?:is|are|has|have)\b/i },
+  { label: 'split-not-x-y', weight: 0.52, pattern: /\b(?:does not|doesn['’]?t|do not|don['’]?t|is not|isn['’]?t|are not|aren['’]?t|has no|have no)\b[^.!?\n]{0,100}[.!?]\s*(?:\n\s*)*(?:(?:it|this|that|they|the [a-z][a-z -]{0,30})\s+(?:is|are|has|have)|(?:it|this|that)['’]s|they['’](?:re|ve))\b/i },
   { label: 'x-not-just-y', weight: 0.42, pattern: /,\s*not\s+(?:just|jus)\s+(?:a|an|the)\b/i },
   { label: 'reverse-not-a-contrast', weight: 0.28, pattern: /,\s*not\s+(?:a|an|the)\b/i },
   { label: 'looks-like-actually', weight: 0.42, pattern: /\b(?:looks?|sounds?) like\b[^.!?\n]{2,100}[.!?]\s*(?:\n\s*)*(?:it|this|that|they|the [a-z][a-z -]{0,30})\s*(?:is|are|has|have|['’]s|['’]re)\s+actually\b/i },
