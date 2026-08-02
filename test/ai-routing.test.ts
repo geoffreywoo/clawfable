@@ -121,7 +121,6 @@ describe('AI model routing', () => {
     const {
       GEOFFREY_CONTROL_MODEL_STACK,
       GEOFFREY_PRIMARY_MODEL_STACK,
-      GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
       getModelChainForTask,
     } = await loadDefaultRouter();
 
@@ -150,16 +149,6 @@ describe('AI model routing', () => {
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
     expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-    ]);
-    expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_STRICT_FALLBACK_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.6' },
-      { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-    ]);
-    expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_STRICT_FALLBACK_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);

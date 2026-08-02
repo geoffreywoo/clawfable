@@ -3,7 +3,7 @@ import type { ResearchAgenda, ResearchRefreshState, SourceDocument, StoryCluster
 
 const mocks = vi.hoisted(() => ({
   acquireResearchRefreshLock: vi.fn(),
-  addSemanticBlock: vi.fn(),
+  replaceLegacySemanticBackfillBlocks: vi.fn(),
   getFeedback: vi.fn(),
   getLearnings: vi.fn(),
   getPerformanceHistory: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   acquireResearchRefreshLock: mocks.acquireResearchRefreshLock,
-  addSemanticBlock: mocks.addSemanticBlock,
+  replaceLegacySemanticBackfillBlocks: mocks.replaceLegacySemanticBackfillBlocks,
   getFeedback: mocks.getFeedback,
   getLearnings: mocks.getLearnings,
   getPerformanceHistory: mocks.getPerformanceHistory,
@@ -123,6 +123,10 @@ describe('research refresh orchestration', () => {
     mocks.getTrendingCacheSnapshot.mockResolvedValue({ data: [] });
     mocks.saveResearchAgenda.mockResolvedValue(undefined);
     mocks.saveResearchRefreshState.mockResolvedValue(undefined);
+    mocks.replaceLegacySemanticBackfillBlocks.mockImplementation(async (_agentId, blocks) => [
+      ...blocks,
+      ...(await mocks.getSemanticBlocks()).filter((block: { id: string }) => !block.id.startsWith('semantic-block-backfill-')),
+    ]);
     mocks.upsertSourceDocuments.mockImplementation(async (_agentId, documents) => documents);
     mocks.upsertStoryClusters.mockImplementation(async (_agentId, clusters) => clusters);
     mocks.sourceDocumentsFromTrending.mockReturnValue([]);
@@ -155,7 +159,48 @@ describe('research refresh orchestration', () => {
     }));
     expect(finalState.adapterRefreshedAt).not.toHaveProperty('rss_atom');
     expect(finalState.adapterRefreshedAt).not.toHaveProperty('sec_edgar');
+    expect(mocks.replaceLegacySemanticBackfillBlocks).toHaveBeenCalledWith('agent-1', []);
     expect(mocks.releaseResearchRefreshLock).toHaveBeenCalledWith('agent-1', 'lock-owner');
+  });
+
+  it('replaces only malformed legacy backfill blocks and preserves structured V2 feedback', async () => {
+    const structured = {
+      schemaVersion: 2,
+      id: 'semantic-block-structured',
+      agentId: 'agent-1',
+      scope: 'copy',
+      semanticKey: 'stiff:packaged:writing',
+      topic: 'AI startups',
+      storyClusterId: null,
+      ideaId: 'idea-1',
+      reasonCode: 'bad_writing',
+      reason: 'Sounds packaged.',
+      permanent: false,
+      blockedUntil: '2026-09-01T00:00:00.000Z',
+      createdAt: nowIso,
+    } as const;
+    mocks.getSemanticBlocks.mockResolvedValue([structured, { ...structured, id: 'semantic-block-backfill-old', semanticKey: 'wrong:rationale:key' }]);
+    mocks.getFeedback.mockResolvedValue([{
+      tweetText: 'does any fighter actually want this merger?',
+      rating: 'down',
+      generatedAt: nowIso,
+      reason: 'Bad premise. Do not regenerate this PFL/MVP angle.',
+      source: 'queue_delete',
+      userProvidedReason: true,
+    }]);
+
+    await refreshAgentResearch({
+      id: 'agent-1', handle: 'geoffwoo', name: 'Geoffrey', soulMd: '# AI startups', isConnected: 0,
+    } as any);
+
+    const replacement = await mocks.replaceLegacySemanticBackfillBlocks.mock.results[0]?.value;
+    expect(replacement).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'semantic-block-structured' }),
+      expect.objectContaining({ id: expect.stringContaining('semantic-block-backfill-') }),
+    ]));
+    expect(replacement).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ semanticKey: 'wrong:rationale:key' }),
+    ]));
   });
 
   it('does not refetch or re-age cached evidence while every adapter is still fresh', async () => {

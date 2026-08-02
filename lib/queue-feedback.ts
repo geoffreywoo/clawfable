@@ -22,11 +22,11 @@ export const QUEUE_FEEDBACK_OPTIONS: Array<{
 
 export function inferQueueFeedbackReasonCode(reason: string): QueueFeedbackReasonCode {
   const value = reason.toLowerCase();
-  if (/source|topic|story|irrelevant|not interested|wrong subject/.test(value)) return 'bad_source_topic';
-  if (/duplicate|repeat|already (?:said|posted|covered)|same angle|reskin/.test(value)) return 'duplicate';
-  if (/fact|false|unsupported|misleading|hallucinat|proof|evidence|accuracy/.test(value)) return 'factual_risk';
-  if (/premise|thesis|idea|argument|angle|take is wrong|disagree|do not regenerate/.test(value)) return 'bad_premise';
-  if (/writing|voice|tone|wording|awkward|stiff|slop|generic|sounds like ai|too long/.test(value)) return 'bad_writing';
+  if (/\b(?:duplicate|repeat(?:ed|ing)?|reskin)\b|already (?:said|posted|covered)|same angle/.test(value)) return 'duplicate';
+  if (/\b(?:source|topic|story|irrelevant)\b|not interested|wrong subject/.test(value)) return 'bad_source_topic';
+  if (/\b(?:facts?|factual(?:ly)?|false|unsupported|misleading|proof|evidence|accuracy|invented|made[- ]?up)\b|\bhallucinat(?:e|ed|ion)\b/.test(value)) return 'factual_risk';
+  if (/\b(?:premise|thesis|idea|argument|angle|disagree)\b|take is wrong|do not regenerate/.test(value)) return 'bad_premise';
+  if (/\b(?:writing|voice|tone|wording|awkward|stiff|slop|generic)\b|sounds like ai|too long/.test(value)) return 'bad_writing';
   return 'other';
 }
 

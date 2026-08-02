@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { assessAccountTaste, getAutonomousQueueTasteIssue } from '@/lib/account-taste';
+import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyAccount } from '@/lib/account-taste';
 import {
-  GEOFFREY_CONTROL_MODEL_STACK,
   GEOFFREY_PRIMARY_MODEL_STACK,
-  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
 } from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGenerationPipelineVersion } from '@/lib/generation-pipeline';
@@ -18,7 +16,6 @@ import {
   releaseAutopilotLock,
   resetReadCache,
 } from '@/lib/kv-storage';
-import { generateViralBatch, type ViralGenerationDiagnostics } from '@/lib/viral-generator';
 import type { TrendingTopic } from '@/lib/trending';
 import type {
   DraftCandidate,
@@ -31,8 +28,6 @@ import { isGeoffreyDeepTechnicalTopic } from '@/lib/source-planner';
 const MAX_PREVIEW_COUNT = 8;
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
   GEOFFREY_PRIMARY_MODEL_STACK,
-  GEOFFREY_CONTROL_MODEL_STACK,
-  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
 ]);
 
 export const maxDuration = 800;
@@ -54,9 +49,6 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const requestedCount = Number(body?.count ?? 4);
   const requestedModelStack = String(body?.modelStack || GEOFFREY_PRIMARY_MODEL_STACK) as GenerationModelStackId;
-  const requestedPipelineVersion = body?.pipelineVersion === undefined
-    ? undefined
-    : String(body.pipelineVersion).trim().toLowerCase();
   if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > MAX_PREVIEW_COUNT) {
     return NextResponse.json({ error: `count must be an integer from 1 to ${MAX_PREVIEW_COUNT}` }, { status: 400 });
   }
@@ -65,8 +57,11 @@ export async function POST(
       error: `modelStack must be ${[...ALLOWED_MODEL_STACKS].join(' or ')}`,
     }, { status: 400 });
   }
-  if (requestedPipelineVersion && requestedPipelineVersion !== 'v1' && requestedPipelineVersion !== 'v2') {
-    return NextResponse.json({ error: 'pipelineVersion must be v1 or v2' }, { status: 400 });
+  if (!isGeoffreyAccount(agent.handle)) {
+    return NextResponse.json({ error: 'The V2 generation preview is currently enabled only for Geoffrey.' }, { status: 409 });
+  }
+  if (body?.pipelineVersion !== undefined && String(body.pipelineVersion).trim().toLowerCase() !== 'v2') {
+    return NextResponse.json({ error: 'pipelineVersion must be v2' }, { status: 400 });
   }
 
   const owner = `internal-generation-preview:${Date.now()}:${id}`;
@@ -88,12 +83,10 @@ export async function POST(
     });
     const cachedTrending = await getTrendingCache(id);
     const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : [];
-    const pipelineVersion = getGenerationPipelineVersion(agent.handle, requestedPipelineVersion);
-    const diagnostics: ViralGenerationDiagnostics | undefined = pipelineVersion === 'v1' && body?.includeDiagnostics === true ? {} : undefined;
+    const pipelineVersion = getGenerationPipelineVersion(agent.handle);
     let generationTrace: GenerationRunTrace | null = null;
     let previewArtifacts: { ideas: IdeaCandidate[]; drafts: DraftCandidate[] } | null = null;
-    const drafts = pipelineVersion === 'v2'
-      ? await generateTweetBatchV2({
+    const drafts = await generateTweetBatchV2({
           agentId: id,
           count: requestedCount,
           requestedTopic: typeof body?.topic === 'string' ? body.topic : null,
@@ -111,30 +104,14 @@ export async function POST(
           persistArtifacts: false,
           onTrace: (trace) => { generationTrace = trace; },
           onArtifacts: (artifacts) => { previewArtifacts = artifacts; },
-        })
-      : await generateViralBatch(
-          context.voiceProfile,
-          analysis,
-          requestedCount,
-          trending,
-          context.learnings,
-          agent.soulMd,
-          context.style,
-          context.recentPosts,
-          context.allTweets,
-          context.memory,
-          context.ideaAtoms,
-          context.signals,
-          diagnostics,
-          { modelStack: requestedModelStack },
-        );
+        });
     return NextResponse.json({
       agentId: id,
       pipelineVersion,
       modelStack: requestedModelStack,
       requested: requestedCount,
       generated: drafts.length,
-      diagnostics: diagnostics || null,
+      diagnostics: null,
       generationTrace,
       candidateDiagnostics: previewArtifacts
         ? {

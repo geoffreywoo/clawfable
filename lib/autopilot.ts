@@ -11,6 +11,7 @@ import type { Agent, AgentLearnings, Mention, PostLogEntry, ProtocolSettings, Re
 import {
   addLearningSignal,
   getProtocolSettings,
+  getAgent,
   updateProtocolSettings,
   getQueuedTweets,
   getAnalysis,
@@ -36,6 +37,7 @@ import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
 import { generateTweetBatchV2 } from './generation-v2';
 import { getGenerationPipelineVersion } from './generation-pipeline';
+import { getGeoffreyGeneratedPublishIssue } from './generation-origin';
 import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, getLatestTwitterTweetIdCursor, getSanitizedTweetTextIssue, type TwitterKeys } from './twitter-client';
 import {
@@ -72,7 +74,7 @@ import {
 } from './survivability';
 import { getAutonomyConfidenceThreshold, type RankableProtocolTweet } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { generateText, GEOFFREY_PRIMARY_MODEL_STACK, GEOFFREY_STRICT_FALLBACK_MODEL_STACK, getPrimaryAiProvider } from './ai';
+import { generateText, GEOFFREY_PRIMARY_MODEL_STACK, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
@@ -220,6 +222,11 @@ function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyM
 
 function isAutopostableQueuedTweet(tweet: Tweet): boolean {
   return !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId;
+}
+
+function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): boolean {
+  return isAutopostableQueuedTweet(tweet)
+    && !getGeoffreyGeneratedPublishIssue(agent?.handle, tweet);
 }
 
 export function getGeoffreyTopicPortfolioIssue(tweet: Tweet, recentPosts: PostLogEntry[]): string | null {
@@ -641,15 +648,37 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
 ): Promise<Tweet[]> {
   if (!isGeoffreyAccount(agent.handle) || queuedTweets.length === 0) return queuedTweets;
+  const retired = queuedTweets.filter((tweet) => Boolean(getGeoffreyGeneratedPublishIssue(agent.handle, tweet)));
+  if (retired.length > 0) {
+    await Promise.all(retired.map((tweet) => updateTweet(tweet.id, {
+      status: 'draft',
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: getGeoffreyGeneratedPublishIssue(agent.handle, tweet),
+    })));
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'generation_origin_gate',
+      topic: 'generation',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: `Moved ${retired.length} retired or incomplete generated draft${retired.length === 1 ? '' : 's'} out of Geoffrey's queue.`,
+    });
+  }
+  const currentQueue = queuedTweets.filter((tweet) => !retired.some((entry) => entry.id === tweet.id));
+  if (currentQueue.length === 0) return [];
   const corpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
-  const stale = queuedTweets.filter((tweet) => (
+  const stale = currentQueue.filter((tweet) => (
     tweet.qualityPolicyVersion !== GEOFFREY_QUALITY_POLICY_VERSION
     || tweet.voiceCorpusVersion !== corpusVersion
     || tweet.finalCriticVersion !== getExpectedFinalCriticVersion(tweet.pipelineVersion)
     || !tweet.finalCriticProvider
     || !tweet.finalCriticModel
   ));
-  if (stale.length === 0) return queuedTweets;
+  if (stale.length === 0) return currentQueue;
 
   if (!context || !context.learnings?.voiceCorpus?.active) {
     await Promise.all(stale.map((tweet) => updateTweet(tweet.id, {
@@ -657,7 +686,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       quarantinedAt: new Date().toISOString(),
       quarantineReason: 'Current Geoffrey voice corpus is unavailable; stale queued draft cannot be certified.',
     })));
-    return queuedTweets.filter((tweet) => !stale.some((item) => item.id === tweet.id));
+    return currentQueue.filter((tweet) => !stale.some((item) => item.id === tweet.id));
   }
 
   const staleV2 = stale.filter((tweet) => tweet.pipelineVersion === 'v2');
@@ -675,7 +704,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       quarantinedAt: new Date().toISOString(),
       quarantineReason: 'Current Geoffrey analysis is unavailable; stale queued draft cannot be certified.',
     })));
-    return queuedTweets.filter((tweet) => !stale.some((item) => item.id === tweet.id));
+    return currentQueue.filter((tweet) => !stale.some((item) => item.id === tweet.id));
   }
 
   const judged = staleLegacy.length > 0
@@ -772,7 +801,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   }
 
   const staleIds = new Set(stale.map((tweet) => tweet.id));
-  return [...queuedTweets.filter((tweet) => !staleIds.has(tweet.id)), ...eligible];
+  return [...currentQueue.filter((tweet) => !staleIds.has(tweet.id)), ...eligible];
 }
 
 export async function refreshQueuedTweetsForCurrentQualityPolicy(
@@ -1388,8 +1417,8 @@ export async function inspectAutopilotQueue(
 ): Promise<AutopilotQueueHealth> {
   const settings = settingsArg || await getProtocolSettings(agentId);
   const threshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
-  const queue = await getQueuedTweets(agentId);
-  const activeQueue = queue.filter(isAutopostableQueuedTweet);
+  const [queue, agent] = await Promise.all([getQueuedTweets(agentId), getAgent(agentId)]);
+  const activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
   const completeQueue = activeQueue.filter((tweet) => !getTweetCompletenessIssue(tweet.content));
   const confidenceValues = completeQueue.map(effectiveConfidence);
   const staleCutoff = Date.now() - STALE_LOW_CONFIDENCE_QUEUE_MS;
@@ -1433,7 +1462,7 @@ export async function selfHealAutopilotQueue(
 
   const queuedTweets = await getQueuedTweets(agent.id);
   const completeActiveQueue = queuedTweets
-    .filter((tweet) => isAutopostableQueuedTweet(tweet) && !getTweetCompletenessIssue(tweet.content));
+    .filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet) && !getTweetCompletenessIssue(tweet.content));
   const archived = await archiveStaleLowConfidenceQueue(
     agent.id,
     completeActiveQueue,
@@ -1621,7 +1650,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       queue = await getQueuedTweets(agentId);
     }
   }
-  let activeQueue = queue.filter(isAutopostableQueuedTweet);
+  let activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
 
   const primaryProvider = getPrimaryAiProvider();
   const templateFallbackQueue = activeQueue.filter(isTemplateFallbackTweet);
@@ -1640,7 +1669,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       reason: `Discarded ${templateFallbackQueue.length} template fallback draft${templateFallbackQueue.length === 1 ? '' : 's'} so the queue can refill with richer ${primaryProvider} generations.`,
     });
     queue = await getQueuedTweets(agentId);
-    activeQueue = queue.filter(isAutopostableQueuedTweet);
+    activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
   }
 
   // Ensure queue has content
@@ -1651,7 +1680,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     });
     if (generated > 0) {
       queue = await getQueuedTweets(agentId);
-      activeQueue = queue.filter(isAutopostableQueuedTweet);
+      activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
     }
   }
 
@@ -1765,7 +1794,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
       if (generated > 0) {
         queue = await getQueuedTweets(agentId);
-        activeQueue = queue.filter(isAutopostableQueuedTweet);
+        activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
         validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue, recentPostedContent);
         confidenceFiltered = validationPassedQueue.filter((tweet) =>
           clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
@@ -3159,25 +3188,6 @@ export async function refillQueue(
             modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
           })
         : await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory, ideaAtoms, signals);
-    if (generationPipeline === 'v1' && geoffreyStrict && organicCount > 0 && batch.length === 0) {
-      batch = await generateViralBatch(
-        voiceProfile,
-        analysis,
-        organicCount,
-        trending,
-        learnings,
-        agent.soulMd,
-        generationStyle,
-        recentPosts,
-        allTweets,
-        memory,
-        ideaAtoms,
-        signals,
-        undefined,
-        { modelStack: GEOFFREY_STRICT_FALLBACK_MODEL_STACK },
-      );
-    }
-
     // Generate marketing tweets (promotional content for clawfable.com)
     const marketingBatch = marketingCount > 0
       ? await generateMarketingTweets(agent, voiceProfile, learnings, settings.marketingRole || 'product', marketingCount, recentPosts)

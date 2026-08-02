@@ -106,10 +106,9 @@ Tweet Generation V2 also uses:
 CRON_SECRET=...
 OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
-GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION=geoffwoo-quality-v12
-GEOFFREY_GENERATION_PIPELINE_VERSION=v1
+GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION=geoffwoo-quality-v15
 ```
 
-Keep `GEOFFREY_GENERATION_PIPELINE_VERSION=v1` while deploying the additive research storage. Warm an agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"pipelineVersion":"v2","count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`. Set the switch to `v2` only after the production preview passes; changing it back to `v1` is the immediate rollback.
+Geoffrey is permanently routed through Tweet Generation V2; V1 remains available only for accounts that have not migrated. Warm an agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`. Pause autoposting or remove the active quality-policy version to fail closed during an incident; do not route Geoffrey back to V1.
 
 Optional research controls are `RESEARCH_V2_AGENT_HANDLES`, `RESEARCH_OFFICIAL_HOST_ALLOWLIST`, and `CLAWFABLE_RESEARCH_USER_AGENT`. Optional per-model cost rates can be supplied through `AI_MODEL_COSTS_USD_PER_MILLION_JSON` for the V2 evaluation report (`npm run eval:generation:v2`).

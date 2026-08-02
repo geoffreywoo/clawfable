@@ -9,6 +9,7 @@ import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { findPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
+import { getGeoffreyGeneratedPublishIssue } from '@/lib/generation-origin';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -53,6 +54,12 @@ export async function POST(
       || existingTweet?.replyConversationId
       || null;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
+    const generationOriginIssue = existingTweet
+      ? getGeoffreyGeneratedPublishIssue(agent.handle, existingTweet)
+      : null;
+    if (!isReply && generationOriginIssue) {
+      return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
+    }
     if (isReply && !replyConversationId) {
       replyConversationId = existingTweet?.followupForTweetId || existingTweet?.quoteTweetId || effectiveReplyToId;
     }

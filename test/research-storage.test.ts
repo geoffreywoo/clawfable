@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   acquireResearchRefreshLock,
+  addSemanticBlock,
+  getSemanticBlocks,
   getSourceDocuments,
+  replaceLegacySemanticBackfillBlocks,
   releaseResearchRefreshLock,
   upsertSourceDocuments,
 } from '@/lib/kv-storage';
-import type { SourceDocument } from '@/lib/types';
+import type { SemanticBlock, SourceDocument } from '@/lib/types';
 
 function document(agentId: string, excerpt: string): SourceDocument {
   const now = new Date().toISOString();
@@ -51,5 +54,37 @@ describe('research cache storage', () => {
     expect(second).toMatchObject({ acquired: false, owner: 'owner-b', lock: expect.objectContaining({ owner: 'owner-a' }) });
     await expect(releaseResearchRefreshLock(agentId, 'owner-b')).resolves.toBe(false);
     await expect(releaseResearchRefreshLock(agentId, 'owner-a')).resolves.toBe(true);
+  });
+
+  it('replaces only legacy backfill blocks while preserving structured feedback', async () => {
+    const agentId = `research-blocks-${Date.now()}`;
+    const block = (id: string, semanticKey: string): SemanticBlock => ({
+      schemaVersion: 2,
+      id,
+      agentId,
+      scope: 'idea',
+      semanticKey,
+      topic: 'AI startups',
+      storyClusterId: null,
+      ideaId: null,
+      reasonCode: 'bad_premise',
+      reason: 'Rejected premise.',
+      permanent: true,
+      blockedUntil: null,
+      createdAt: new Date().toISOString(),
+    });
+    await addSemanticBlock(agentId, block('semantic-block-structured', 'structured:key'));
+    await addSemanticBlock(agentId, block('semantic-block-backfill-old', 'malformed:rationale:key'));
+
+    const replacement = block('semantic-block-backfill-new', 'rejected:draft:key');
+    await replaceLegacySemanticBackfillBlocks(agentId, [replacement]);
+
+    expect(await getSemanticBlocks(agentId, true)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'semantic-block-structured', semanticKey: 'structured:key' }),
+      expect.objectContaining({ id: 'semantic-block-backfill-new', semanticKey: 'rejected:draft:key' }),
+    ]));
+    expect(await getSemanticBlocks(agentId, true)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'semantic-block-backfill-old' }),
+    ]));
   });
 });

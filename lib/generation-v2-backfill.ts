@@ -2,7 +2,7 @@ import type { FeedbackEntry, FeedbackBlockScope, SemanticBlock, Tweet } from './
 import { inferQueueFeedbackReasonCode } from './queue-feedback';
 import { buildResearchSemanticKey, stableResearchId } from './research-utils';
 
-export const GENERATION_V2_SEMANTIC_BACKFILL_VERSION = 2;
+export const GENERATION_V2_SEMANTIC_BACKFILL_VERSION = 3;
 
 function scopeForLegacyFeedback(
   reasonCode: SemanticBlock['reasonCode'],
@@ -44,7 +44,7 @@ export function buildLegacyFeedbackSemanticBlocks({
         ? entry.tweetText
         : tweet
           ? `${tweet.topic || ''} ${premiseText}`
-          : `${reason} ${entry.tweetText}`,
+          : entry.tweetText,
     );
     if (!semanticKey) continue;
     const permanent = entry.permanentBlock === true || /do not regenerate|never (?:write|post|use|cover)/i.test(reason);

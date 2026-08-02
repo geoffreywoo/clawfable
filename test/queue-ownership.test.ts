@@ -294,6 +294,75 @@ describe('queue ownership route guard', () => {
     expect(matching[0].userProvidedReason).toBe(true);
   });
 
+  it('attributes explicit V2 live-deletion writing feedback without poisoning the idea', async () => {
+    const agent = await createAgent({
+      handle: 'queue-delete-from-x-v2-writing',
+      name: 'Queue Delete From X V2 Writing',
+      soulMd: '# soul',
+    } as any);
+    const now = new Date().toISOString();
+    await upsertIdeaCandidates(agent.id, [{
+      schemaVersion: 2,
+      id: 'idea-v2-live-delete',
+      agentId: agent.id,
+      generationRunId: 'run-v2-live-delete',
+      briefId: 'brief-v2-live-delete',
+      storyClusterId: null,
+      topic: 'AI startups',
+      claim: 'Tiny teams can attempt larger companies.',
+      tension: 'The efficiency framing misses company formation.',
+      implication: 'Founders can start with broader product scope.',
+      authorReason: 'The operator builds and invests in these teams.',
+      evidenceIds: [],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: 'ai:company:formation:teams',
+      noveltyScore: 0.9,
+      evidenceScore: 0.5,
+      identityScore: 0.9,
+      judgeScore: 0.9,
+      status: 'posted',
+      rejectionCodes: [],
+      createdAt: now,
+      updatedAt: now,
+    }]);
+    const deletedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'tiny teams can now attempt much larger companies',
+      type: 'original',
+      status: 'deleted_from_x',
+      topic: 'AI startups',
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2-live-delete',
+      ideaId: 'idea-v2-live-delete',
+      draftCandidateId: 'draft-v2-live-delete',
+      xTweetId: 'x-v2-delete',
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletionReason: 'The writing sounds stiff and packaged.' }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: deletedTweet.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect((await getIdeaCandidates(agent.id))[0]).toMatchObject({ status: 'selected', rejectionCodes: [] });
+    expect(await getSemanticBlocks(agent.id)).toEqual([
+      expect.objectContaining({ scope: 'copy', reasonCode: 'bad_writing' }),
+    ]);
+    expect((await getLearningSignals(agent.id))[0].metadata).toMatchObject({
+      pipelineVersion: 'v2',
+      feedbackStage: 'writing',
+      feedbackReasonCode: 'bad_writing',
+    });
+  });
+
   it('stores inferred feedback when a deleted-from-X tweet is skipped', async () => {
     const agent = await createAgent({
       handle: 'queue-delete-from-x-skip',

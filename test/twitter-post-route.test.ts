@@ -200,6 +200,50 @@ describe('twitter post route', () => {
     );
   });
 
+  it('blocks a legacy generated Geoffrey draft before acquiring the post lock', async () => {
+    const agent = await createAgent({
+      handle: 'geoffwoo',
+      name: 'Geoffrey Woo',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-geoffwoo',
+    } as any);
+    const tweet = await createTweet({
+      agentId: agent.id,
+      content: 'a retired V1 generated draft',
+      type: 'original',
+      status: 'queued',
+      pipelineVersion: 'v1',
+      generationProvider: 'openai',
+      generationModel: 'gpt-5.6',
+      topic: 'startups',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+    mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+
+    const response = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) },
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(data.code).toBe('generation_origin_retired');
+    expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
   it('does not train or mutate the queue when X posting is rate limited', async () => {
     const agent = await createAgent({
       handle: 'manual-rate-limit-guard',

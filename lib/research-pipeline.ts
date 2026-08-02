@@ -20,7 +20,6 @@ import { buildFrontierSeedDiscoveryPlan } from './frontier-idea-seeds';
 import { estimateAiUsageCostUsd, generateText, hasTextGenerationProvider } from './ai';
 import {
   acquireResearchRefreshLock,
-  addSemanticBlock,
   getFeedback,
   getLearnings,
   getPerformanceHistory,
@@ -31,6 +30,7 @@ import {
   getTrendingCacheSnapshot,
   getTweets,
   releaseResearchRefreshLock,
+  replaceLegacySemanticBackfillBlocks,
   saveResearchAgenda,
   saveResearchRefreshState,
   upsertSourceDocuments,
@@ -612,10 +612,13 @@ export async function refreshAgentResearch(
       current: currentAgenda,
     });
     await saveResearchAgenda(agent.id, agenda);
-    const backfilledBlocks = (previousState?.semanticBackfillVersion || 0) < GENERATION_V2_SEMANTIC_BACKFILL_VERSION
+    const needsSemanticBackfill = (previousState?.semanticBackfillVersion || 0) < GENERATION_V2_SEMANTIC_BACKFILL_VERSION;
+    const backfilledBlocks = needsSemanticBackfill
       ? buildLegacyFeedbackSemanticBlocks({ agentId: agent.id, feedback, tweets, now })
       : [];
-    for (const block of backfilledBlocks) await addSemanticBlock(agent.id, block);
+    const effectiveSemanticBlocks = needsSemanticBackfill
+      ? await replaceLegacySemanticBackfillBlocks(agent.id, backfilledBlocks)
+      : semanticBlocks;
 
     let trending = Array.isArray(trendSnapshot?.data) ? trendSnapshot.data as TrendingTopic[] : [];
     const errors: string[] = [];
@@ -669,7 +672,7 @@ export async function refreshAgentResearch(
       documents: storedDocuments,
       agenda,
       existingClusters,
-      blocks: [...semanticBlocks, ...backfilledBlocks],
+      blocks: effectiveSemanticBlocks,
       observedDocumentIds: new Set(fetchedDocuments.map((document) => document.id)),
       now,
     });

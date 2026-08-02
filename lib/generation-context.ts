@@ -24,6 +24,7 @@ import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-
 import { getGlobalBanditPrior } from './global-bandit-prior';
 import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopicForAccount } from './account-topic-policy';
 import { collapsePerformanceSnapshots } from './performance-history';
+import { isGeoffreyAccount } from './account-taste';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -405,9 +406,11 @@ export async function buildGenerationContext(
     voiceProfile.communicationStyle += `\n\n${PERSONALIZATION_MEMORY_PROMPT_HEADER}\n${memoryPrompt}`;
   }
 
-  const curatedIdeaBank = curateIdeaBankForGeneration(ideaAtoms, { reusableLimit: 12, cautionLimit: 6, referenceLimit: 8 });
+  const curatedIdeaBank = isGeoffreyAccount(agent.handle)
+    ? null
+    : curateIdeaBankForGeneration(ideaAtoms, { reusableLimit: 12, cautionLimit: 6, referenceLimit: 8 });
 
-  if (curatedIdeaBank.reusable.length > 0 || curatedIdeaBank.caution.length > 0) {
+  if (curatedIdeaBank && (curatedIdeaBank.reusable.length > 0 || curatedIdeaBank.caution.length > 0)) {
     const reusableLines = curatedIdeaBank.reusable.length > 0
       ? `Reusable seeds:\n${curatedIdeaBank.reusable.map((entry) => `- [${entry.label.replace(/_/g, ' ')} ${formatPct(entry.reusableScore)}] ${entry.line}`).join('\n')}`
       : 'Reusable seeds: none with enough positive signal yet.';

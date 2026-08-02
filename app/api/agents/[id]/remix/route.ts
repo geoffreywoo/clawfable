@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateTweet, addRemixEntry } from '@/lib/kv-storage';
+import { updateTweet, addRemixEntry, getTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { generateText } from '@/lib/ai';
@@ -34,6 +34,16 @@ export async function POST(
     const body = await request.json();
     const { tweetId, content, direction, customPrompt } = body;
     if (!content) return NextResponse.json({ error: 'content required' }, { status: 400 });
+    const existingTweet = tweetId ? await getTweet(String(tweetId)) : null;
+    if (tweetId && (!existingTweet || String(existingTweet.agentId) !== String(id))) {
+      return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
+    }
+    if (existingTweet?.pipelineVersion === 'v2') {
+      return NextResponse.json({
+        error: 'V2 drafts cannot be mutated in place because that would invalidate their evidence and idea lineage. Generate a fresh V2 candidate instead.',
+        code: 'v2_lineage_immutable',
+      }, { status: 409 });
+    }
 
     // Build the remix instruction
     let instruction: string;

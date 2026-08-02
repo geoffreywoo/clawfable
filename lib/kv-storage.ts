@@ -1422,7 +1422,7 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
       riskNote: data.status === 'deleted_from_x' ? data.deletionReason || existing.deletionReason || null : null,
     }).catch(() => null),
     data.content !== undefined && data.content !== existing.content
-      ? recordV2CandidateOutcomeForTweet(updated, 'edited').catch(() => null)
+      ? recordV2CandidateOutcomeForTweet(updated, 'edited', [], { updateIdea: false }).catch(() => null)
       : data.status !== undefined && data.status !== prevStatus
         ? recordV2CandidateOutcomeForTweet(
             updated,
@@ -1435,6 +1435,8 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
                   : updated.draftCandidateId
                     ? 'selected'
                     : 'generated',
+            [],
+            { updateIdea: data.status !== 'deleted_from_x' },
           ).catch(() => null)
         : Promise.resolve(null),
   ]);
@@ -2845,6 +2847,26 @@ export async function addSemanticBlock(agentId: string, block: SemanticBlock): P
     )),
   ].slice(0, MAX_SEMANTIC_BLOCKS);
   await kvSet(KEYS.agentSemanticBlocks(agentId), next);
+  return normalized;
+}
+
+export async function replaceLegacySemanticBackfillBlocks(
+  agentId: string,
+  blocks: SemanticBlock[],
+): Promise<SemanticBlock[]> {
+  const current = await getSemanticBlocks(agentId, true);
+  const seen = new Set<string>();
+  const normalized = [
+    ...blocks,
+    ...current.filter((block) => !block.id.startsWith('semantic-block-backfill-')),
+  ].flatMap((block) => {
+    const entry = { ...block, agentId, schemaVersion: 2 as const };
+    const key = `${entry.scope}:${entry.semanticKey}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [entry];
+  }).slice(0, MAX_SEMANTIC_BLOCKS);
+  await kvSet(KEYS.agentSemanticBlocks(agentId), normalized);
   return normalized;
 }
 

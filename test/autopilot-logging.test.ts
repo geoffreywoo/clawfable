@@ -3,6 +3,7 @@ import type { Tweet } from '../lib/types';
 
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
+  getAgent: vi.fn(),
   updateProtocolSettings: vi.fn(),
   getQueuedTweets: vi.fn(),
   getAnalysis: vi.fn(),
@@ -68,6 +69,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getProtocolSettings: mocks.getProtocolSettings,
+  getAgent: mocks.getAgent,
   updateProtocolSettings: mocks.updateProtocolSettings,
   getQueuedTweets: mocks.getQueuedTweets,
   getAnalysis: mocks.getAnalysis,
@@ -155,7 +157,6 @@ vi.mock('@/lib/queue-healing', () => ({
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
   GEOFFREY_PRIMARY_MODEL_STACK: 'geoffrey_fable5_gpt56',
-  GEOFFREY_STRICT_FALLBACK_MODEL_STACK: 'geoffrey_gpt56_gpt56',
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
@@ -256,9 +257,9 @@ const activeGeoffreyCorpus = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.GEOFFREY_GENERATION_PIPELINE_VERSION = 'v1';
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
+  mocks.getAgent.mockResolvedValue(baseAgent);
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
   mocks.getAnalysis.mockResolvedValue(null);
@@ -354,7 +355,6 @@ afterEach(() => {
   vi.useRealTimers();
   delete process.env.VERCEL_ENV;
   delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
-  delete process.env.GEOFFREY_GENERATION_PIPELINE_VERSION;
 });
 
 afterEach(() => {
@@ -363,7 +363,6 @@ afterEach(() => {
 
 describe('autopilot remote debug logging', () => {
   it('uses only warmed caches during a V2 refill and never performs live topic discovery', async () => {
-    process.env.GEOFFREY_GENERATION_PIPELINE_VERSION = 'v2';
     process.env.VERCEL_ENV = 'production';
     process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
     const agent = { ...baseAgent, handle: 'geoffwoo' };
@@ -387,104 +386,28 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.generateViralBatch).not.toHaveBeenCalled();
   });
 
-  it('uses the strict GPT-5.6 stack only after an empty Geoffrey primary batch', async () => {
+  it('does not invoke V1 or a strict fallback when V2 returns no eligible drafts', async () => {
     process.env.VERCEL_ENV = 'production';
     process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
-    const agent = {
-      ...baseAgent,
-      handle: 'geoffwoo',
-      apiKey: null,
-      apiSecret: null,
-      accessToken: null,
-      accessSecret: null,
-      xUserId: null,
-    };
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
     mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
     mocks.buildGenerationContext.mockResolvedValue({
-      voiceProfile: {
-        tone: 'casual',
-        topics: ['startups'],
-        antiGoals: [],
-        communicationStyle: 'sharp and direct',
-        summary: 'startup investor',
-      },
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'sharp and direct', summary: 'startup investor' },
       learnings: null,
       settings: { ...baseSettings, minQueueSize: 5 },
-      style: { bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      style: { autonomyMode: 'balanced', bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
       recentPosts: [],
       allTweets: [],
       memory: null,
       ideaAtoms: [],
       signals: [],
     });
-    mocks.generateViralBatch
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{
-        content: 'openai naming the next model god would be hilarious',
-        format: 'hot_take',
-        targetTopic: 'startups',
-        rationale: 'Strict fallback survivor.',
-        generationModelStack: 'geoffrey_gpt56_gpt56',
-        generationProvider: 'openai',
-        generationModel: 'gpt-5.6',
-      }]);
+    mocks.generateTweetBatchV2.mockResolvedValue([]);
 
-    const added = await refillQueue(agent as any, 2);
-
-    expect(added).toBe(1);
-    expect(mocks.generateViralBatch).toHaveBeenCalledTimes(2);
-    expect(mocks.generateViralBatch.mock.calls[1].at(-1)).toEqual({
-      modelStack: 'geoffrey_gpt56_gpt56',
-    });
-    expect(mocks.createTweet).toHaveBeenCalledWith(expect.objectContaining({
-      content: 'openai naming the next model god would be hilarious',
-      generationModelStack: 'geoffrey_gpt56_gpt56',
-      status: 'queued',
-    }));
-  });
-
-  it('does not pay for the strict fallback when the Geoffrey primary batch has a survivor', async () => {
-    process.env.VERCEL_ENV = 'production';
-    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
-    const agent = {
-      ...baseAgent,
-      handle: 'geoffwoo',
-      apiKey: null,
-      apiSecret: null,
-      accessToken: null,
-      accessSecret: null,
-      xUserId: null,
-    };
-    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
-    mocks.buildGenerationContext.mockResolvedValue({
-      voiceProfile: {
-        tone: 'casual',
-        topics: ['startups'],
-        antiGoals: [],
-        communicationStyle: 'sharp and direct',
-        summary: 'startup investor',
-      },
-      learnings: null,
-      settings: { ...baseSettings, minQueueSize: 5 },
-      style: { bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
-      recentPosts: [],
-      allTweets: [],
-      memory: null,
-      ideaAtoms: [],
-      signals: [],
-    });
-    mocks.generateViralBatch.mockResolvedValue([{
-      content: 'openai naming the next model god would be hilarious',
-      format: 'hot_take',
-      targetTopic: 'startups',
-      rationale: 'Primary survivor.',
-      generationModelStack: 'geoffrey_fable5_gpt56',
-      generationProvider: 'anthropic',
-      generationModel: 'claude-fable-5',
-    }]);
-
-    expect(await refillQueue(agent as any, 2)).toBe(1);
-    expect(mocks.generateViralBatch).toHaveBeenCalledOnce();
+    expect(await refillQueue(agent as any, 2)).toBe(0);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledOnce();
+    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
+    expect(mocks.createTweet).not.toHaveBeenCalled();
   });
 
   it('keeps Geoffrey originals in shadow until the production policy version is explicitly activated', async () => {
@@ -786,6 +709,9 @@ describe('autopilot remote debug logging', () => {
       ...currentGeoffreyCertification,
       id: 'v2-current-certification',
       pipelineVersion: 'v2' as const,
+      generationRunId: 'run-v2-current',
+      ideaId: 'idea-v2-current',
+      draftCandidateId: 'draft-v2-current',
       finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
     };
     mocks.getQueuedTweets.mockResolvedValue([v2Draft]);
@@ -815,6 +741,9 @@ describe('autopilot remote debug logging', () => {
       ...currentGeoffreyCertification,
       id: 'v2-stale-certification',
       pipelineVersion: 'v2' as const,
+      generationRunId: 'run-v2-stale',
+      ideaId: 'idea-v2-stale',
+      draftCandidateId: 'draft-v2-stale',
       finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
       voiceCorpusVersion: 'voice-corpus-v1-stale',
     };

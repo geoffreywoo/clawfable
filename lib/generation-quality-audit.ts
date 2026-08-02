@@ -1,12 +1,11 @@
 import type { Agent, AudienceVoiceComplaint, Tweet, VoiceCorpusEntry } from './types';
 import type { TrendingTopic } from './trending';
 import {
-  GEOFFREY_CONTROL_MODEL_STACK,
   GEOFFREY_PRIMARY_MODEL_STACK,
-  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
   getModelChainForTask,
 } from './ai';
 import { buildGenerationContext } from './generation-context';
+import { getGenerationPipelineVersion } from './generation-pipeline';
 import {
   getAudienceVoiceComplaints,
   getQueuedTweets,
@@ -18,6 +17,7 @@ import {
 import {
   assessGeoffreyQualityPolicy,
   GEOFFREY_QUALITY_POLICY_VERSION,
+  getExpectedFinalCriticVersion,
   getGeoffreyQualityPolicyActivation,
 } from './quality-policy';
 import {
@@ -25,11 +25,11 @@ import {
   classifyGeoffreyTopicDomain,
   isCoreGeoffreyTopicDomain,
 } from './source-planner';
-import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, isGeoffreyAccount } from './account-taste';
 import { clampPostsPerDay } from './survivability';
+import { loadGenerationV2Metrics } from './generation-v2-metrics';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 1;
+export const GENERATION_QUALITY_AUDIT_VERSION = 2;
 
 function countBy(values: Array<string | null | undefined>): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -122,7 +122,8 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 }
 
 export async function buildGenerationQualityAudit(agent: Agent) {
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence] = await Promise.all([
+  const pipelineVersion = getGenerationPipelineVersion(agent.handle);
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -130,6 +131,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getTweets(agent.id),
     getTrendingCache(agent.id),
     getTopicIntelligenceState(agent.id),
+    pipelineVersion === 'v2' ? loadGenerationV2Metrics(agent.id) : Promise.resolve(null),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const sourcePlan = buildSourcePlannerPlan({
@@ -145,9 +147,26 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const activeModelStack = isGeoffreyAccount(agent.handle)
     ? GEOFFREY_PRIMARY_MODEL_STACK
     : 'standard';
-  const primaryGeneration = getModelChainForTask('tweet_generation', 'quality', activeModelStack)[0];
-  const primaryJudge = getModelChainForTask('bulk_judgment', 'quality', activeModelStack)[0];
-  const primaryFinalCritic = getModelChainForTask('final_judgment', 'quality', activeModelStack)[0];
+  const primaryIdeaGeneration = getModelChainForTask(
+    pipelineVersion === 'v2' ? 'idea_generation' : 'tweet_generation',
+    'quality',
+    activeModelStack,
+  )[0];
+  const primaryIdeaJudge = getModelChainForTask(
+    pipelineVersion === 'v2' ? 'idea_judgment' : 'bulk_judgment',
+    'quality',
+    activeModelStack,
+  )[0];
+  const primaryWriting = getModelChainForTask(
+    pipelineVersion === 'v2' ? 'tweet_writing' : 'tweet_generation',
+    'quality',
+    activeModelStack,
+  )[0];
+  const primaryCopyJudge = getModelChainForTask(
+    pipelineVersion === 'v2' ? 'copy_judgment' : 'final_judgment',
+    'quality',
+    activeModelStack,
+  )[0];
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = isGeoffreyAccount(agent.handle)
     ? Math.min(GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, configuredPostsPerDay)
@@ -200,8 +219,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     agentId: agent.id,
     handle: `@${agent.handle}`,
     policy: {
+      pipelineVersion,
       qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
-      finalCriticVersion: FINAL_CRITIC_VERSION,
+      finalCriticVersion: getExpectedFinalCriticVersion(pipelineVersion),
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
       autopostActivation: getGeoffreyQualityPolicyActivation(),
     },
@@ -275,27 +295,31 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     },
     models: {
       activeStack: activeModelStack,
-      shadowControlStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_CONTROL_MODEL_STACK : null,
-      strictFallbackStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_STRICT_FALLBACK_MODEL_STACK : null,
+      pipelineVersion,
+      shadowControlStack: null,
+      strictFallbackStack: null,
       preferred: {
-        generation: primaryGeneration,
-        judge: primaryJudge,
-        finalCritic: primaryFinalCritic,
+        ideaGeneration: primaryIdeaGeneration,
+        ideaJudge: primaryIdeaJudge,
+        generation: primaryWriting,
+        judge: primaryCopyJudge,
+        finalCritic: primaryCopyJudge,
       },
       stackUsage: countBy(queueItems.map((item) => item.generationModelStack)),
       generationUsage: countBy(queueItems.map((item) => modelKey(item.generationProvider, item.generationModel))),
       judgeUsage: countBy(queueItems.map((item) => modelKey(item.judgeProvider, item.judgeModel))),
       finalCriticUsage: countBy(queueItems.map((item) => modelKey(item.finalCriticProvider, item.finalCriticModel))),
       generationFallbackCount: queueItems.filter((item) => (
-        item.generationProvider !== primaryGeneration?.provider || item.generationModel !== primaryGeneration?.model
+        item.generationProvider !== primaryWriting?.provider || item.generationModel !== primaryWriting?.model
       )).length,
       judgeFallbackCount: queueItems.filter((item) => (
-        item.judgeProvider !== primaryJudge?.provider || item.judgeModel !== primaryJudge?.model
+        item.judgeProvider !== primaryCopyJudge?.provider || item.judgeModel !== primaryCopyJudge?.model
       )).length,
       finalCriticFallbackCount: queueItems.filter((item) => (
-        item.finalCriticProvider !== primaryFinalCritic?.provider || item.finalCriticModel !== primaryFinalCritic?.model
+        item.finalCriticProvider !== primaryCopyJudge?.provider || item.finalCriticModel !== primaryCopyJudge?.model
       )).length,
     },
+    generationV2,
     complaints: {
       total: complaints.length,
       affectedParentCount: complaintParents.length,

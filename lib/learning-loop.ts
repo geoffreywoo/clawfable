@@ -69,8 +69,29 @@ function isFallbackRationale(value: string | null | undefined): boolean {
 }
 
 export function buildFallbackLearningMetadata(
-  tweet: Pick<Tweet, 'rationale' | 'sourceLane' | 'scoreProvenance' | 'draftExperimentId' | 'featureTags' | 'thesis' | 'topic'>,
+  tweet: Pick<
+    Tweet,
+    | 'rationale'
+    | 'sourceLane'
+    | 'scoreProvenance'
+    | 'draftExperimentId'
+    | 'featureTags'
+    | 'thesis'
+    | 'topic'
+    | 'pipelineVersion'
+    | 'generationRunId'
+    | 'storyClusterId'
+    | 'ideaId'
+    | 'draftCandidateId'
+  >,
 ): Record<string, string | number | boolean | null> {
+  const lineage = {
+    pipelineVersion: tweet.pipelineVersion || null,
+    generationRunId: tweet.generationRunId || null,
+    storyClusterId: tweet.storyClusterId || null,
+    ideaId: tweet.ideaId || null,
+    draftCandidateId: tweet.draftCandidateId || null,
+  };
   const draftExperimentId = String(tweet.draftExperimentId || '');
   const fallbackKind = isFallbackRationale(tweet.rationale)
     ? String(tweet.rationale || '').toLowerCase().includes('emergency')
@@ -80,7 +101,7 @@ export function buildFallbackLearningMetadata(
       ? 'provider_template_fallback'
       : null;
 
-  if (!fallbackKind) return {};
+  if (!fallbackKind) return lineage;
 
   const memoryAlignment = readScore(tweet.scoreProvenance?.memoryAlignment);
   const authorityProof = readScore(tweet.scoreProvenance?.authorityProof);
@@ -89,6 +110,7 @@ export function buildFallbackLearningMetadata(
   const anchorCopyRisk = readScoreMagnitude(tweet.scoreProvenance?.anchorCopyRisk);
 
   return {
+    ...lineage,
     generationFallback: true,
     fallbackKind,
     fallbackMemoryAligned: Boolean(memoryAlignment && memoryAlignment > 0),

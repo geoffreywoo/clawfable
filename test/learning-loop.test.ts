@@ -217,6 +217,31 @@ describe('buildPersonalizationMemory', () => {
     });
   });
 
+  it('keeps V2 candidate lineage on ordinary non-fallback learning signals', () => {
+    const metadata = buildFallbackLearningMetadata({
+      rationale: 'An approved evidence-to-idea draft.',
+      sourceLane: 'trend_aligned_exploit',
+      scoreProvenance: null,
+      draftExperimentId: null,
+      featureTags: null,
+      thesis: 'Inference cost changes company formation.',
+      topic: 'AI startups',
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2',
+      storyClusterId: 'story-v2',
+      ideaId: 'idea-v2',
+      draftCandidateId: 'draft-v2',
+    });
+
+    expect(metadata).toEqual({
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2',
+      storyClusterId: 'story-v2',
+      ideaId: 'idea-v2',
+      draftCandidateId: 'draft-v2',
+    });
+  });
+
   it('turns fallback approval and rejection outcomes into future memory preferences', () => {
     const personalization = buildPersonalizationMemory({
       feedback: [],

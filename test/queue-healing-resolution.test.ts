@@ -92,6 +92,22 @@ describe('resolveQueuedTweetFailure', () => {
     expect(mocks.anthropicCreate).not.toHaveBeenCalled();
   });
 
+  it('quarantines a broken Geoffrey V2 draft instead of mutating its lineage', async () => {
+    const result = await resolveQueuedTweetFailure(
+      baseAgent,
+      { ...baseTweet, pipelineVersion: 'v2' },
+      'Draft ends with an unfinished clause.',
+    );
+
+    expect(result.action).toBe('quarantined');
+    expect(mocks.updateTweet).toHaveBeenCalledWith(baseTweet.id, expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('V2 draft failed queue validation'),
+    }));
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    expect(mocks.deleteTweet).not.toHaveBeenCalled();
+  });
+
   it('deletes the broken draft instead of throwing when content repair generation fails', async () => {
     mocks.anthropicCreate.mockRejectedValue(new Error('Anthropic overloaded'));
 

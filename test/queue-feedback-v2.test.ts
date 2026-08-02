@@ -46,6 +46,7 @@ describe('stage-attributed queue feedback', () => {
     expect(inferQueueFeedbackReasonCode('same PFL premise again, just a synonym reskin')).toBe('duplicate');
     expect(inferQueueFeedbackReasonCode('this number is unsupported and could be misleading')).toBe('factual_risk');
     expect(inferQueueFeedbackReasonCode('Remove it and do not regenerate this merger angle.')).toBe('bad_premise');
+    expect(inferQueueFeedbackReasonCode('The diction feels manufactured and too polished.')).toBe('other');
   });
 
   it('fingerprints rejected wording for writing feedback without blocking the idea', () => {
@@ -159,7 +160,7 @@ describe('legacy semantic backfill', () => {
 
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({ scope: 'idea', reasonCode: 'bad_premise', permanent: true });
-    expect(blocks[0].semanticKey).toContain('pfl');
-    expect(blocks[0].semanticKey).toContain('mvp');
+    expect(blocks[0].semanticKey).toBe(buildResearchSemanticKey('does any fighter actually want this merger?'));
+    expect(blocks[0].semanticKey).not.toContain('regenerate');
   });
 });

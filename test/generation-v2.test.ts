@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildGenerationBriefsV2,
+  buildGenerationLearningBriefV2,
   buildIdeaGenerationPromptV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
@@ -106,6 +107,34 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('uses operator history as topic-level strategy rather than replaying its premise', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      requestedTopic: null,
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: 'EXACT DOWNFALL SCHADENFREUDE PREMISE',
+          weight: 1,
+          sampleCount: 5,
+          avgEngagement: 39,
+          topTweets: [],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+    const startupBrief = briefs.find((entry) => entry.topic === 'startups');
+
+    expect(startupBrief?.summary).toContain('Topic-level history: 5 operator-written posts');
+    expect(JSON.stringify(startupBrief)).not.toContain('EXACT DOWNFALL SCHADENFREUDE PREMISE');
+  });
+
   it('treats a manual request as the only subject and never as evidence', () => {
     const briefs = buildGenerationBriefsV2({
       count: 1,
@@ -161,6 +190,42 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(briefs.every((entry) => entry.storyClusterId !== staleStory.id)).toBe(true);
+  });
+
+  it('filters stories below the same identity threshold used by the idea gate', () => {
+    const lowFitStory = {
+      schemaVersion: 2,
+      id: 'story-low-fit',
+      agentId: 'agent-1',
+      semanticKey: 'consumer:promotion',
+      title: 'A consumer promotion gains attention',
+      summary: 'The promotion is moving through a broad network.',
+      topic: 'consumer promotion',
+      entities: ['Promotion'],
+      sourceDocumentIds: ['source-low-fit'],
+      qualifiedClaimIds: ['claim-low-fit'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.2, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.8 },
+      firstSeenAt: '2026-08-01T00:00:00.000Z',
+      lastSeenAt: '2026-08-01T12:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [lowFitStory],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'health', 'AI hardware'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: ['markets'] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(briefs.every((entry) => entry.storyClusterId !== lowFitStory.id)).toBe(true);
   });
 
   it('does not spend research brief slots on a permanently rejected subject', () => {
@@ -429,6 +494,49 @@ describe('Tweet Generation V2', () => {
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
       })],
     }));
+  });
+
+  it('turns prior outcomes into compact strategy without leaking winning post copy', () => {
+    const learningBrief = buildGenerationLearningBriefV2({
+      manualTopicProfile: [{ topic: 'startups', angle: 'EXACT WINNING PREMISE', weight: 1, sampleCount: 5, avgEngagement: 39, topTweets: [] }],
+      formatRankings: [{ format: 'announcement', avgEngagement: 36, count: 4 }, { format: 'analysis', avgEngagement: 13, count: 1 }],
+      audienceSegmentPerformance: [{ segment: 'generalists', posts: 12, avgEngagement: 33, wins: 7 }],
+      promptStrategyPerformance: [{ strategy: 'high_specificity', posts: 8, avgEngagement: 30, wins: 5 }],
+      operatorVoiceReference: {
+        styleFingerprint: {
+          avgLength: 160,
+          shortPct: 75,
+          mediumPct: 25,
+          longPct: 0,
+          questionRatio: 25,
+          usesLineBreaks: false,
+          usesEmojis: false,
+          usesNumbers: true,
+          topHooks: ['observation', 'question'],
+          topTones: ['casual', 'earnest'],
+          antiPatterns: ['consultant cadence'],
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+      },
+    } as any, {
+      alwaysDoMoreOfThis: ['Use concrete operator evidence.', 'Reuse the energy of: EXACT WINNING POST COPY'],
+      neverDoThisAgain: ['Do not write generic AI advice.'],
+      operatorHiddenPreferences: ['Stop after the point lands.'],
+      identityConstraints: ['Avoid political drift.'],
+    } as any);
+    const prompt = JSON.parse(buildIdeaGenerationPromptV2([brief('operator', 'startups')], voiceProfile, [], learningBrief));
+
+    expect(prompt.learnedEditorialStrategy).toMatchObject({
+      provenTopics: [{ topic: 'startups', sampleCount: 5, avgEngagement: 39 }],
+      winningFormats: [{ format: 'announcement', sampleCount: 4, avgEngagement: 36 }],
+      winningAudiences: [expect.objectContaining({ audience: 'generalists', wins: 7 })],
+      winningStrategies: [expect.objectContaining({ strategy: 'high_specificity', wins: 5 })],
+      voiceMechanics: expect.objectContaining({ averageLength: 160, shortPercent: 75, questionPercent: 25 }),
+      doMore: expect.arrayContaining(['Use concrete operator evidence.', 'Stop after the point lands.']),
+      avoid: expect.arrayContaining(['Do not write generic AI advice.', 'Avoid political drift.', 'consultant cadence']),
+    });
+    expect(JSON.stringify(prompt)).not.toContain('EXACT WINNING PREMISE');
+    expect(JSON.stringify(prompt)).not.toContain('EXACT WINNING POST COPY');
   });
 
   it('uses stable shuffled pairwise ordering and pauses only after three consecutive system failures', () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
+  assessGeoffreyQualityPolicy: vi.fn(),
   getGenerationRuns: vi.fn(),
   getSemanticBlocks: vi.fn(),
   getSourceDocuments: vi.fn(),
@@ -46,7 +47,7 @@ vi.mock('@/lib/account-taste', () => ({
 }));
 
 vi.mock('@/lib/quality-policy', () => ({
-  assessGeoffreyQualityPolicy: () => ({ eligible: true, issues: [], scores: {} }),
+  assessGeoffreyQualityPolicy: mocks.assessGeoffreyQualityPolicy,
   EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION: 'evidence-idea-voice-v2-copy-judge-1',
   GEOFFREY_QUALITY_POLICY_VERSION: 'geoffwoo-quality-v2-test',
 }));
@@ -157,6 +158,7 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
     });
+    mocks.assessGeoffreyQualityPolicy.mockReturnValue({ eligible: true, issues: [], scores: {} });
   });
 
   it('uses the bounded normal call graph and returns fully linked drafts', async () => {
@@ -405,5 +407,25 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCalls).toBe(4);
     expect(drafts).toHaveLength(1);
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(1);
+  });
+
+  it('uses the one reserve retry when every initially judged draft fails final quality', async () => {
+    mocks.assessGeoffreyQualityPolicy.mockImplementation(() => {
+      const copyJudgeCalls = mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment').length;
+      return copyJudgeCalls === 1
+        ? { eligible: false, issues: ['voice_miss'], scores: {} }
+        : { eligible: true, issues: [], scores: {} };
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+
+    expect(drafts).toHaveLength(1);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
+    expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({ retryUsed: 1, draftsSelected: 1 }),
+    });
   });
 });

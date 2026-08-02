@@ -10,6 +10,7 @@ import {
   updateTweet,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
+import { getGeoffreyGeneratedPublishIssue } from './generation-origin';
 
 export class SetupLaunchError extends Error {}
 
@@ -47,7 +48,11 @@ export async function launchAgentFromPreview({
   const requestedApprovals = dedupeIds(approvedTweetIds).map(String);
 
   // Resolve approved IDs against what actually exists in KV.
-  const approvedIds = requestedApprovals.filter((id) => previewIds.has(id));
+  const retiredApprovalIds = requestedApprovals.filter((id) => {
+    const tweet = previewTweets.find((entry) => String(entry.id) === id);
+    return tweet ? Boolean(getGeoffreyGeneratedPublishIssue(agent.handle, tweet)) : false;
+  });
+  const approvedIds = requestedApprovals.filter((id) => previewIds.has(id) && !retiredApprovalIds.includes(id));
 
   // If no valid approvals remain, check if there are any preview tweets at all
   if (previewTweets.length === 0) {
@@ -55,6 +60,9 @@ export async function launchAgentFromPreview({
   }
 
   if (approvedIds.length === 0) {
+    if (retiredApprovalIds.length > 0) {
+      throw new SetupLaunchError('Generate and approve a fresh V2 preview before launch');
+    }
     throw new SetupLaunchError('Approve at least one preview tweet before launch');
   }
 

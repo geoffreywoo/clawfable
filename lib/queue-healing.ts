@@ -3,11 +3,12 @@ import type { Agent, Tweet } from './types';
 import { deleteTweet, updateTweet } from './kv-storage';
 import { getGeneratedTweetIssue, isNearDuplicate } from './survivability';
 import { getPlatformGoalForHandle } from './platform-goal';
+import { isGeoffreyAccount } from './account-taste';
 
 export type QueueIssueDisposition = 'keep' | 'repair';
 
 export interface QueueIssueResolution {
-  action: 'kept' | 'repaired' | 'deleted';
+  action: 'kept' | 'repaired' | 'quarantined' | 'deleted';
   tweet?: Tweet;
   detail: string;
 }
@@ -178,6 +179,18 @@ export async function resolveQueuedTweetFailure(
       action: 'kept',
       tweet: cleared,
       detail: 'Cleared the quarantine because this looks account- or platform-related, not a broken draft.',
+    };
+  }
+
+  if (isGeoffreyAccount(agent.handle) && tweet.pipelineVersion === 'v2') {
+    await updateTweet(tweet.id, {
+      status: 'draft',
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: `V2 draft failed queue validation: ${formatRepairReasonForPrompt(reason)}`,
+    });
+    return {
+      action: 'quarantined',
+      detail: 'Moved the V2 draft out of the queue so a fresh evidence-to-idea candidate can replace it.',
     };
   }
 

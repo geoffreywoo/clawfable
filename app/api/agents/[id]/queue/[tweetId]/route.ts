@@ -24,6 +24,7 @@ import {
   inferQueueFeedbackReasonCode,
   QUEUE_FEEDBACK_OPTIONS,
 } from '@/lib/queue-feedback';
+import { getGeoffreyGeneratedPublishIssue } from '@/lib/generation-origin';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -47,6 +48,12 @@ export async function PATCH(
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
     if (status !== undefined) {
+      if (status === 'queued' || status === 'posted') {
+        const generationOriginIssue = getGeoffreyGeneratedPublishIssue(agent.handle, tweet);
+        if (generationOriginIssue) {
+          return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
+        }
+      }
       if (status === 'queued') {
         const candidateContent = content ?? tweet.content;
         const completenessIssue = getTweetCompletenessIssue(candidateContent);
@@ -155,6 +162,18 @@ export async function PATCH(
       const trimmedReason = typeof deletionReason === 'string' ? deletionReason.trim() : '';
       if (trimmedReason && trimmedReason !== 'skipped') {
         const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content);
+        const reasonCode = inferQueueFeedbackReasonCode(trimmedReason);
+        const stage = feedbackStage(reasonCode);
+        const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
+          ? (await getIdeaCandidates(id, 500)).find((candidate) => candidate.id === tweet.ideaId) || null
+          : null;
+        const semanticBlock = buildSemanticBlockFromQueueFeedback({
+          tweet,
+          idea,
+          reasonCode,
+          reason: trimmedReason,
+          permanent: /do not regenerate|never (?:write|post|use|cover)/i.test(trimmedReason),
+        });
         await saveFeedback(id, {
           tweetId: tweet.id,
           tweetText: tweet.content,
@@ -164,6 +183,10 @@ export async function PATCH(
           intentSummary: trimmedReason,
           source: 'queue_delete',
           userProvidedReason: true,
+          reasonCode,
+          blockScope: semanticBlock?.scope || null,
+          permanentBlock: semanticBlock?.permanent || false,
+          semanticKey: semanticBlock?.semanticKey || null,
         });
         await addLearningSignal(id, {
           tweetId: tweet.id,
@@ -176,10 +199,19 @@ export async function PATCH(
             ...buildFallbackLearningMetadata(tweet),
             ...tasteFeedback.metadata,
             userProvidedReason: true,
+            feedbackReasonCode: reasonCode,
+            feedbackStage: stage,
+            feedbackBlockScope: semanticBlock?.scope || null,
+            feedbackPermanent: semanticBlock?.permanent || false,
+            feedbackSemanticKey: semanticBlock?.semanticKey || null,
             draftExperimentId: tweet.draftExperimentId ?? null,
             creativeLane: tweet.creativeLane ?? null,
             experimentHoldout: tweet.experimentHoldout === true,
           }),
+        });
+        if (semanticBlock) await addSemanticBlock(id, semanticBlock);
+        await recordV2CandidateOutcomeForTweet(tweet, 'deleted', [`feedback:${reasonCode}`], {
+          updateIdea: stage !== 'writing' || semanticBlock?.scope !== 'copy',
         });
       } else if (trimmedReason === 'skipped') {
         const inferredReason = await inferDeleteIntent({
