@@ -308,6 +308,45 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('normalizes common judge score scales without weakening ranking validation', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        const parsed = JSON.parse(options.prompt);
+        const ids = parsed.candidates.map((candidate: any) => candidate.id);
+        return result(JSON.stringify({
+          ranking: ids,
+          comparisons: [],
+          scores: ids.map((id: string) => ({
+            id,
+            overall: 92,
+            voice_fit: '9.1',
+            insight: 88,
+            specificity: 8.6,
+            factual_safety: 98,
+            clarity: '90',
+            novelty: 0.89,
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]).toMatchObject({
+      candidateScore: 92,
+      judgeScore: 0.92,
+      finalCriticScores: expect.objectContaining({
+        voiceFit: 0.91,
+        policySafety: 0.98,
+      }),
+    });
+  });
+
   it('retries once with the next-ranked idea only when every initial draft fails', async () => {
     let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {

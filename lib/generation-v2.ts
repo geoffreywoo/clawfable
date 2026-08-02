@@ -1091,17 +1091,25 @@ interface CopyJudgeResult {
 function copyScore(entry: Record<string, unknown>, validIds: Set<string>): CopyJudgeScore | null {
   const id = typeof entry.id === 'string' ? entry.id : '';
   if (!validIds.has(id)) return null;
-  const score = (key: string): number | null => {
-    const value = entry[key];
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
-      ? value
-      : null;
+  const score = (key: string, aliases: string[] = []): number | null => {
+    const raw = [key, ...aliases]
+      .map((candidate) => entry[candidate])
+      .find((value) => value !== undefined && value !== null);
+    const value = typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && raw.trim() !== ''
+        ? Number(raw)
+        : Number.NaN;
+    if (!Number.isFinite(value) || value < 0 || value > 100) return null;
+    if (value <= 1) return value;
+    if (value <= 10) return Number((value / 10).toFixed(4));
+    return Number((value / 100).toFixed(4));
   };
   const overall = score('overall');
-  const voiceFit = score('voiceFit');
+  const voiceFit = score('voiceFit', ['voice_fit']);
   const insight = score('insight');
   const specificity = score('specificity');
-  const factualSafety = score('factualSafety');
+  const factualSafety = score('factualSafety', ['factual_safety']);
   const clarity = score('clarity');
   const novelty = score('novelty');
   if (
