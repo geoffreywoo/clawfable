@@ -159,8 +159,8 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, getGeoffreyQueuedDomainIssue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
-import { GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
+import { archiveStaleNetworkTopicQueue, getGeoffreyQueuedDomainIssue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
+import { EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION, GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -777,6 +777,68 @@ describe('autopilot remote debug logging', () => {
     }));
     expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
       metadata: expect.objectContaining({ qualityGate: 'native_identity_drift' }),
+    }));
+  });
+
+  it('keeps a currently certified V2 draft out of the legacy queue rescorer', async () => {
+    const v2Draft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-current-certification',
+      pipelineVersion: 'v2' as const,
+      finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
+    };
+    mocks.getQueuedTweets.mockResolvedValue([v2Draft]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'startups'],
+        antiGoals: ['generic consultant prose'],
+        communicationStyle: 'compressed native voice',
+        summary: 'Geoffrey writes from technical constraints.',
+      },
+      learnings: { voiceCorpus: activeGeoffreyCorpus },
+      memory: null,
+      allTweets: [],
+    });
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+  });
+
+  it('quarantines stale V2 certification without downgrading it through the legacy critic', async () => {
+    const staleV2Draft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-stale-certification',
+      pipelineVersion: 'v2' as const,
+      finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
+      voiceCorpusVersion: 'voice-corpus-v1-stale',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([staleV2Draft]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'startups'],
+        antiGoals: ['generic consultant prose'],
+        communicationStyle: 'compressed native voice',
+        summary: 'Geoffrey writes from technical constraints.',
+      },
+      learnings: { voiceCorpus: activeGeoffreyCorpus },
+      memory: null,
+      allTweets: [],
+    });
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-certification', expect.objectContaining({
+      status: 'draft',
+      quarantineReason: expect.stringContaining('evidence-to-idea pipeline'),
     }));
   });
 

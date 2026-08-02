@@ -18,6 +18,14 @@ import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v15';
 export const EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION = 'evidence-idea-voice-v2-copy-judge-1';
 
+export function getExpectedFinalCriticVersion(
+  pipelineVersion?: GenerationPipelineVersion | null,
+): string {
+  return pipelineVersion === 'v2'
+    ? EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION
+    : FINAL_CRITIC_VERSION;
+}
+
 export interface GeoffreyQualityPolicyActivation {
   activated: boolean;
   configuredVersion: string | null;
@@ -207,9 +215,7 @@ export function assessGeoffreyQualityPolicy(
 
   if (sourceIdentityIssue) issues.push(sourceIdentityIssue);
   if (!candidate.finalCriticProvider || !candidate.finalCriticModel) issues.push('missing model final critic');
-  const expectedFinalCriticVersion = candidate.pipelineVersion === 'v2'
-    ? EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION
-    : FINAL_CRITIC_VERSION;
+  const expectedFinalCriticVersion = getExpectedFinalCriticVersion(candidate.pipelineVersion);
   if (candidate.finalCriticVersion !== expectedFinalCriticVersion) issues.push('stale final critic version');
   if (candidate.finalCriticVerdict !== 'allow') issues.push(`final critic ${candidate.finalCriticVerdict || 'missing'}`);
   if (stage === 'queue') {

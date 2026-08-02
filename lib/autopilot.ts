@@ -86,9 +86,10 @@ import { assessGeneratedWritingPatterns } from './writing-patterns';
 import {
   assessGeoffreyQualityPolicy,
   GEOFFREY_QUALITY_POLICY_VERSION,
+  getExpectedFinalCriticVersion,
   getGeoffreyQualityPolicyActivation,
 } from './quality-policy';
-import { FINAL_CRITIC_VERSION, judgeCandidates } from './generation-judging';
+import { judgeCandidates } from './generation-judging';
 import { semanticIdeaSimilarity } from './tweet-features';
 import {
   getTrustedClaimSourceTexts,
@@ -644,14 +645,13 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const stale = queuedTweets.filter((tweet) => (
     tweet.qualityPolicyVersion !== GEOFFREY_QUALITY_POLICY_VERSION
     || tweet.voiceCorpusVersion !== corpusVersion
-    || tweet.finalCriticVersion !== FINAL_CRITIC_VERSION
+    || tweet.finalCriticVersion !== getExpectedFinalCriticVersion(tweet.pipelineVersion)
     || !tweet.finalCriticProvider
     || !tweet.finalCriticModel
   ));
   if (stale.length === 0) return queuedTweets;
 
-  const analysis = await getAnalysis(agent.id);
-  if (!context || !analysis || !context.learnings?.voiceCorpus?.active) {
+  if (!context || !context.learnings?.voiceCorpus?.active) {
     await Promise.all(stale.map((tweet) => updateTweet(tweet.id, {
       status: 'draft',
       quarantinedAt: new Date().toISOString(),
@@ -660,20 +660,40 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     return queuedTweets.filter((tweet) => !stale.some((item) => item.id === tweet.id));
   }
 
-  const judged = await judgeCandidates(stale.map(queuedTweetAsCandidate), {
-    voiceProfile: context.voiceProfile,
-    analysis,
-    learnings: context.learnings,
-    memory: context.memory,
-    mode: 'model',
-    requireModel: true,
-    task: 'final_judgment',
-  });
+  const staleV2 = stale.filter((tweet) => tweet.pipelineVersion === 'v2');
+  const staleLegacy = stale.filter((tweet) => tweet.pipelineVersion !== 'v2');
+  await Promise.all(staleV2.map((tweet) => updateTweet(tweet.id, {
+    status: 'draft',
+    quarantinedAt: new Date().toISOString(),
+    quarantineReason: 'V2 queue certification is stale; regenerate through the evidence-to-idea pipeline.',
+  })));
+
+  const analysis = staleLegacy.length > 0 ? await getAnalysis(agent.id) : null;
+  if (staleLegacy.length > 0 && !analysis) {
+    await Promise.all(staleLegacy.map((tweet) => updateTweet(tweet.id, {
+      status: 'draft',
+      quarantinedAt: new Date().toISOString(),
+      quarantineReason: 'Current Geoffrey analysis is unavailable; stale queued draft cannot be certified.',
+    })));
+    return queuedTweets.filter((tweet) => !stale.some((item) => item.id === tweet.id));
+  }
+
+  const judged = staleLegacy.length > 0
+    ? await judgeCandidates(staleLegacy.map(queuedTweetAsCandidate), {
+      voiceProfile: context.voiceProfile,
+      analysis: analysis!,
+      learnings: context.learnings,
+      memory: context.memory,
+      mode: 'model',
+      requireModel: true,
+      task: 'final_judgment',
+    })
+    : [];
   const judgedById = new Map(judged.map((candidate) => [candidate.draftExperimentId, candidate]));
   const eligible: Tweet[] = [];
-  let quarantined = 0;
+  let quarantined = staleV2.length;
 
-  for (const tweet of stale) {
+  for (const tweet of staleLegacy) {
     const candidate = judgedById.get(`queue-rescore:${tweet.id}`);
     if (!candidate) {
       quarantined++;
@@ -745,7 +765,9 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       postedAt: new Date().toISOString(),
       source: 'autopilot',
       action: 'skipped',
-      reason: `Rescored ${stale.length} stale queued drafts and quarantined ${quarantined}.`,
+      reason: staleV2.length > 0
+        ? `Checked ${stale.length} stale queued drafts and quarantined ${quarantined}, including ${staleV2.length} V2 drafts requiring regeneration.`
+        : `Rescored ${staleLegacy.length} stale queued drafts and quarantined ${quarantined}.`,
     });
   }
 
