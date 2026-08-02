@@ -487,6 +487,15 @@ describe('account taste scoring', () => {
     expect(assessment.score).toBeGreaterThanOrEqual(0.45);
   });
 
+  it('recognizes confidential-computing control-plane mechanisms', () => {
+    const assessment = assessTechnicalCredibility(
+      'i’d fund the control plane for encrypted workloads before another gpu marketplace. my bet is TDX hosts become interchangeable. policy, failover, and auditability are where the software margin lives.',
+    );
+
+    expect(assessment.domains).toContain('compute');
+    expect(assessment.score).toBeGreaterThanOrEqual(0.45);
+  });
+
   it('recognizes casual hard-tech market actors without requiring memo keywords', () => {
     const learnings = {
       operatorVoiceReference: {

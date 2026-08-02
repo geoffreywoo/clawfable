@@ -15,7 +15,7 @@ import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v14';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v15';
 export const EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION = 'evidence-idea-voice-v2-copy-judge-1';
 
 export interface GeoffreyQualityPolicyActivation {

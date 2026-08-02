@@ -75,7 +75,9 @@ const DOMAIN_TERMS: DomainDictionary[] = [
     terms: [
       'asic', 'accelerator', 'inference chip', 'hbm', 'memory bandwidth', 'interconnect', 'nvlink',
       'pcie', 'reticle', 'packaging', 'substrate', 'co-packaged optics', 'latency', 'throughput',
-      'batch size', 'token', 'watts per token',
+      'batch size', 'token', 'watts per token', 'confidential compute', 'confidential computing',
+      'trusted execution environment', 'intel tdx', 'tdx', 'encrypted workload', 'encrypted cvm',
+      'attestation', 'key management', 'control plane', 'failover',
     ],
   },
   {
