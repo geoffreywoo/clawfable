@@ -186,6 +186,22 @@ describe('internal generation preview route', () => {
     expect(data.modelStack).toBe('geoffrey_gpt56_gpt55');
   });
 
+  it('allows the strict GPT-5.6 fallback stack for protected diagnostics', async () => {
+    const response = await POST(request({
+      count: 2,
+      modelStack: 'geoffrey_gpt56_gpt56',
+    }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateViralBatch.mock.calls[0].at(-1)).toEqual({
+      modelStack: 'geoffrey_gpt56_gpt56',
+    });
+    expect(data.modelStack).toBe('geoffrey_gpt56_gpt56');
+  });
+
   it('rejects unknown model stacks before taking the autopilot lock', async () => {
     const response = await POST(request({ count: 2, modelStack: 'unreviewed-stack' }) as any, {
       params: Promise.resolve({ id: '13' }),

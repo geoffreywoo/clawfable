@@ -382,7 +382,8 @@ export type DraftExperimentStatus =
 export type GenerationModelStackId =
   | 'standard'
   | 'geoffrey_fable5_gpt56'
-  | 'geoffrey_gpt56_gpt55';
+  | 'geoffrey_gpt56_gpt55'
+  | 'geoffrey_gpt56_gpt56';
 
 export interface Tweet {
   id: string;

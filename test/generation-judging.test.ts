@@ -800,7 +800,7 @@ describe('judgeCandidates fallback critic', () => {
     expect(mutations[0].content).toBe('AI agent teams earn trust when every failed eval creates a visible rollback rule.');
   });
 
-  it('uses Geoffrey manual startup diction for the final rewrite without inventing evidence', async () => {
+  it('uses cross-topic Geoffrey diction for the final rewrite without leaking the source premise', async () => {
     mocks.hasProvider.mockReturnValue(true);
     mocks.generateText.mockResolvedValue({
       text: [
@@ -855,7 +855,8 @@ describe('judgeCandidates fallback critic', () => {
     const system = String(call?.system || '');
     const prompt = String(call?.prompt || '');
     expect(system).toContain('final versions for @geoffwoo');
-    expect(system).toContain('software is nepo + codex/claude');
+    expect(system).not.toContain('software is nepo + codex/claude');
+    expect(system).toContain('x algo def way better');
     expect(system).toContain('Avoid analyst-memo exposition');
     expect(system).toContain('Never invent access, conversations, customers');
     expect(system).toContain('First-person opinion is allowed');
@@ -867,8 +868,6 @@ describe('judgeCandidates fallback critic', () => {
     expect(system).toContain('At most one version per input may begin with first-person language');
     expect(system).toContain('autonomy-software its way around');
     expect(system).not.toContain('gets the headlines');
-    expect(system.indexOf('software is nepo + codex/claude'))
-      .toBeLessThan(system.indexOf('x algo def way better'));
     expect(prompt).toContain('source=Customer-specific packaging qualifications');
     expect(prompt).toContain('Write three fresh final versions');
     expect(call).toEqual(expect.objectContaining({

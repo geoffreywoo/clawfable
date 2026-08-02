@@ -1943,7 +1943,8 @@ describe('generateViralBatch', () => {
     const userPrompt = String(createCall.messages[0].content || '');
 
     expect(createCall.system).toContain('## GEOFFREY-NATIVE WRITING BRIEF');
-    expect(createCall.system).toContain('## REAL MANUAL STARTUP POSTS');
+    expect(createCall.system).toContain('## CROSS-TOPIC MANUAL DICTION SAMPLES');
+    expect(createCall.system).toContain('## OBSERVED NATIVE RHYTHM');
     expect(createCall.system).toContain('software is nepo + codex/claude');
     expect(createCall.system).toContain('Start with the reaction, bet, or question');
     expect(createCall.system).toContain('Phrase that view as if the reader already knows the topic');

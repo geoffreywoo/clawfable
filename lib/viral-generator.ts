@@ -68,6 +68,7 @@ import {
   PORTFOLIO_SEQUENCE,
 } from './growth-engine';
 import { assessGeoffreyQualityPolicy, GEOFFREY_QUALITY_POLICY_VERSION } from './quality-policy';
+import { selectCrossTopicDictionAnchors } from './voice-anchor-selection';
 
 const DEFAULT_STYLE_SIGNALS: StyleSignals = {
   sentenceLength: 'mixed',
@@ -1058,6 +1059,7 @@ function buildGeoffreySystemPrompt({
   learnings,
   recentPosts,
   memory,
+  activeTopicTexts,
 }: {
   voiceProfile: VoiceProfile;
   finalCount: number;
@@ -1065,16 +1067,18 @@ function buildGeoffreySystemPrompt({
   learnings: AgentLearnings | null;
   recentPosts: string[];
   memory: PersonalizationMemory | null;
+  activeTopicTexts: string[];
 }): string {
   const reference = learnings?.operatorVoiceReference;
-  const anchors = [
+  const anchors = selectCrossTopicDictionAnchors([
     ...(reference?.startupRegisterExamples || []),
     ...(reference?.pinnedExamples || []),
     ...(reference?.bestPerformers || []),
-  ]
+  ], activeTopicTexts)
     .map((entry) => cleanGeoffreyVoiceAnchor(entry.content))
     .filter((content, index, items) => content.length >= 20 && items.indexOf(content) === index)
-    .slice(0, 8);
+    .slice(0, 4);
+  const fingerprint = reference?.styleFingerprint;
   const memoryLessons = [
     ...(memory?.neverDoThisAgain || []),
     ...(memory?.operatorHiddenPreferences || []),
@@ -1115,10 +1119,16 @@ function buildGeoffreySystemPrompt({
       `## CURRENT OPERATOR CORRECTIONS`,
       ...memoryLessons.map((item) => `- ${item}`),
     ] : []),
+    ...(fingerprint ? [
+      '',
+      `## OBSERVED NATIVE RHYTHM`,
+      `Across ${reference?.sampleCount || 0} high-confidence operator posts: average ${fingerprint.avgLength} characters; ${fingerprint.shortPct}% short, ${fingerprint.mediumPct}% medium, ${fingerprint.longPct}% long; ${fingerprint.questionRatio}% questions; line breaks ${fingerprint.usesLineBreaks ? 'common' : 'uncommon'}; emojis ${fingerprint.usesEmojis ? 'used' : 'generally absent'}.`,
+      `Frequent opening modes: ${fingerprint.topHooks.join(', ') || 'direct reaction'}. Frequent tones: ${fingerprint.topTones.join(', ') || 'direct and conversational'}. Treat these as distributional evidence, not a checklist.`,
+    ] : []),
     ...(anchors.length > 0 ? [
       '',
-      `## REAL MANUAL STARTUP POSTS`,
-      `Study the diction, compression, confidence, and startup relevance. Do not reuse content or structure.`,
+      `## CROSS-TOPIC MANUAL DICTION SAMPLES`,
+      `These samples are deliberately outside today's brief domains. Study only diction, compression, confidence, and rhythm. Do not reuse their content or structure.`,
       ...anchors.map((item, index) => `[${index + 1}] "${item.slice(0, 320)}"`),
     ] : []),
     ...(recent.length > 0 ? [
@@ -1143,6 +1153,7 @@ function buildSystemPrompt(
   style: ContentStyleConfig = DEFAULT_STYLE,
   recentPosts: string[] = [],
   memory: PersonalizationMemory | null = null,
+  activeTopicTexts: string[] = [],
 ): string {
   const parts: string[] = [];
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
@@ -1155,6 +1166,7 @@ function buildSystemPrompt(
       learnings,
       recentPosts,
       memory,
+      activeTopicTexts,
     });
   }
 
@@ -1784,7 +1796,26 @@ export async function generateViralBatch(
     return rankFallbackTweets();
   }
 
-  const systemPrompt = buildSystemPrompt(voiceProfile, analysis, count, candidateCount, trending, learnings, soulMd, effectiveStyle, recentPosts, memory);
+  const systemPrompt = buildSystemPrompt(
+    voiceProfile,
+    analysis,
+    count,
+    candidateCount,
+    trending,
+    learnings,
+    soulMd,
+    effectiveStyle,
+    recentPosts,
+    memory,
+    (geoffreyStrict && count === 2
+      ? sourcePlan.slots.filter((_, index) => index % 3 === 0).slice(0, 4)
+      : sourcePlan.slots.slice(0, 4)
+    ).map((slot) => [
+      slot.targetTopic,
+      slot.trendHeadline,
+      slot.ideaSeed?.technicalObject,
+    ].filter(Boolean).join(' ')),
+  );
   const formats = effectiveStyle.enabledFormats.length > 0 ? effectiveStyle.enabledFormats : ALL_FORMATS;
   const geoffreyIdeaBriefs = geoffreyStrict && count === 2
     ? buildGeoffreyIdeaBriefs(sourcePlan)

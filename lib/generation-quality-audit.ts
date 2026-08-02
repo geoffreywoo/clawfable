@@ -3,6 +3,7 @@ import type { TrendingTopic } from './trending';
 import {
   GEOFFREY_CONTROL_MODEL_STACK,
   GEOFFREY_PRIMARY_MODEL_STACK,
+  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
   getModelChainForTask,
 } from './ai';
 import { buildGenerationContext } from './generation-context';
@@ -275,6 +276,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     models: {
       activeStack: activeModelStack,
       shadowControlStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_CONTROL_MODEL_STACK : null,
+      strictFallbackStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_STRICT_FALLBACK_MODEL_STACK : null,
       preferred: {
         generation: primaryGeneration,
         judge: primaryJudge,

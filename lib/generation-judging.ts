@@ -13,6 +13,7 @@ import {
 } from './account-taste';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
+import { selectCrossTopicDictionAnchors } from './voice-anchor-selection';
 
 type JudgeContext = {
   voiceProfile?: VoiceProfile;
@@ -927,16 +928,16 @@ export async function polishGeoffreyFinalCandidates(
     return [];
   }
 
-  const nativeAnchors = [
+  const nativeAnchors = selectCrossTopicDictionAnchors([
     ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
     ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
     ...(learnings?.operatorVoiceReference?.bestPerformers || []),
-  ]
+  ], candidates.map((candidate) => `${candidate.targetTopic || ''} ${candidate.trendHeadline || ''}`))
     .filter((entry, index, items) => (
       entry.content?.trim()
       && items.findIndex((item) => item.content === entry.content) === index
     ))
-    .slice(0, 6)
+    .slice(0, 4)
     .map((entry, index) => `[NATIVE ${index + 1}] ${formatNativeAnchorForPrompt(entry.content)}`)
     .join('\n');
   const prompt = candidates
@@ -1001,16 +1002,16 @@ export async function mutateTopCandidates(
   try {
     const startupRegisterReferences = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
     const nativeAnchorBank = geoffreyStrict
-      ? [
+      ? selectCrossTopicDictionAnchors([
           ...startupRegisterReferences,
           ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
           ...(learnings?.operatorVoiceReference?.bestPerformers || []),
-        ]
+        ], mutationTargets.map((candidate) => `${candidate.targetTopic || ''} ${candidate.trendHeadline || ''}`))
           .filter((entry, index, items) => (
             entry.content?.trim()
             && items.findIndex((item) => item.content === entry.content) === index
           ))
-          .slice(0, 8)
+          .slice(0, 4)
           .map((entry, index) => `[NATIVE ${index + 1}] ${formatNativeAnchorForPrompt(entry.content)}`)
           .join('\n')
       : '';

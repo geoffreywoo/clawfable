@@ -74,6 +74,7 @@ const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_
 
 export const GEOFFREY_PRIMARY_MODEL_STACK: GenerationModelStackId = 'geoffrey_fable5_gpt56';
 export const GEOFFREY_CONTROL_MODEL_STACK: GenerationModelStackId = 'geoffrey_gpt56_gpt55';
+export const GEOFFREY_STRICT_FALLBACK_MODEL_STACK: GenerationModelStackId = 'geoffrey_gpt56_gpt56';
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
   tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
@@ -102,6 +103,12 @@ const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial
     creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
     final_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+  },
+  [GEOFFREY_STRICT_FALLBACK_MODEL_STACK]: {
+    tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    bulk_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    final_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
   },
 };
 

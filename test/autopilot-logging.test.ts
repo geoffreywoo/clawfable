@@ -149,10 +149,11 @@ vi.mock('@/lib/queue-healing', () => ({
 
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
+  GEOFFREY_STRICT_FALLBACK_MODEL_STACK: 'geoffrey_gpt56_gpt56',
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, getGeoffreyTopicPortfolioIssue, runAutopilot } from '@/lib/autopilot';
+import { archiveStaleNetworkTopicQueue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -351,6 +352,106 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('uses the strict GPT-5.6 stack only after an empty Geoffrey primary batch', async () => {
+    process.env.VERCEL_ENV = 'production';
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v10';
+    const agent = {
+      ...baseAgent,
+      handle: 'geoffwoo',
+      apiKey: null,
+      apiSecret: null,
+      accessToken: null,
+      accessSecret: null,
+      xUserId: null,
+    };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'casual',
+        topics: ['startups'],
+        antiGoals: [],
+        communicationStyle: 'sharp and direct',
+        summary: 'startup investor',
+      },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 5 },
+      style: { bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+    mocks.generateViralBatch
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        content: 'openai naming the next model god would be hilarious',
+        format: 'hot_take',
+        targetTopic: 'startups',
+        rationale: 'Strict fallback survivor.',
+        generationModelStack: 'geoffrey_gpt56_gpt56',
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+      }]);
+
+    const added = await refillQueue(agent as any, 2);
+
+    expect(added).toBe(1);
+    expect(mocks.generateViralBatch).toHaveBeenCalledTimes(2);
+    expect(mocks.generateViralBatch.mock.calls[1].at(-1)).toEqual({
+      modelStack: 'geoffrey_gpt56_gpt56',
+    });
+    expect(mocks.createTweet).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'openai naming the next model god would be hilarious',
+      generationModelStack: 'geoffrey_gpt56_gpt56',
+      status: 'queued',
+    }));
+  });
+
+  it('does not pay for the strict fallback when the Geoffrey primary batch has a survivor', async () => {
+    process.env.VERCEL_ENV = 'production';
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v10';
+    const agent = {
+      ...baseAgent,
+      handle: 'geoffwoo',
+      apiKey: null,
+      apiSecret: null,
+      accessToken: null,
+      accessSecret: null,
+      xUserId: null,
+    };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'casual',
+        topics: ['startups'],
+        antiGoals: [],
+        communicationStyle: 'sharp and direct',
+        summary: 'startup investor',
+      },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 5 },
+      style: { bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+    mocks.generateViralBatch.mockResolvedValue([{
+      content: 'openai naming the next model god would be hilarious',
+      format: 'hot_take',
+      targetTopic: 'startups',
+      rationale: 'Primary survivor.',
+      generationModelStack: 'geoffrey_fable5_gpt56',
+      generationProvider: 'anthropic',
+      generationModel: 'claude-fable-5',
+    }]);
+
+    expect(await refillQueue(agent as any, 2)).toBe(1);
+    expect(mocks.generateViralBatch).toHaveBeenCalledOnce();
+  });
+
   it('keeps Geoffrey originals in shadow until the production policy version is explicitly activated', async () => {
     process.env.VERCEL_ENV = 'production';
     delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;

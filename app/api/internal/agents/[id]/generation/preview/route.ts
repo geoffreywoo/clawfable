@@ -3,6 +3,7 @@ import { assessAccountTaste, getAutonomousQueueTasteIssue } from '@/lib/account-
 import {
   GEOFFREY_CONTROL_MODEL_STACK,
   GEOFFREY_PRIMARY_MODEL_STACK,
+  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
 } from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
@@ -24,6 +25,7 @@ const MAX_PREVIEW_COUNT = 8;
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
   GEOFFREY_PRIMARY_MODEL_STACK,
   GEOFFREY_CONTROL_MODEL_STACK,
+  GEOFFREY_STRICT_FALLBACK_MODEL_STACK,
 ]);
 
 export const maxDuration = 800;

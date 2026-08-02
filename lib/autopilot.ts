@@ -70,7 +70,7 @@ import {
 } from './survivability';
 import { getAutonomyConfidenceThreshold, type RankableProtocolTweet } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { generateText, getPrimaryAiProvider } from './ai';
+import { generateText, GEOFFREY_STRICT_FALLBACK_MODEL_STACK, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
@@ -3016,9 +3016,27 @@ export async function refillQueue(
     };
 
     // Generate organic tweets
-    const batch = organicCount > 0
+    let batch = organicCount > 0
       ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory, ideaAtoms, signals)
       : [];
+    if (geoffreyStrict && organicCount > 0 && batch.length === 0) {
+      batch = await generateViralBatch(
+        voiceProfile,
+        analysis,
+        organicCount,
+        trending,
+        learnings,
+        agent.soulMd,
+        generationStyle,
+        recentPosts,
+        allTweets,
+        memory,
+        ideaAtoms,
+        signals,
+        undefined,
+        { modelStack: GEOFFREY_STRICT_FALLBACK_MODEL_STACK },
+      );
+    }
 
     // Generate marketing tweets (promotional content for clawfable.com)
     const marketingBatch = marketingCount > 0
