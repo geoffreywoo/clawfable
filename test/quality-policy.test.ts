@@ -3,6 +3,7 @@ import { FINAL_CRITIC_VERSION } from '@/lib/generation-judging';
 import {
   assessGeoffreyQualityPolicy,
   GEOFFREY_QUALITY_POLICY_VERSION,
+  getSourceIdentityAlignmentIssue,
   getGeoffreyQualityPolicyActivation,
   type GeoffreyQualityCandidate,
 } from '@/lib/quality-policy';
@@ -234,6 +235,22 @@ describe('Geoffrey hard quality policy', () => {
       'stale quality policy version',
       'stale voice corpus version',
     ]));
+  });
+
+  it('blocks a topic-signal draft that launders a named subject into a generic category take', () => {
+    const drifted = candidate({
+      content: 'inference startups get valued like software and buy like a commodity business. one of those two prices is wrong.',
+      targetTopic: 'Preseen in ai compute',
+      sourceBrief: 'OPERATOR TOPIC SIGNAL ONLY [topicId=preseen; subject=Preseen in ai compute; factualClaimAllowed=false]',
+      sourceEvidenceTexts: ['Preseen in ai compute'],
+    });
+
+    expect(getSourceIdentityAlignmentIssue(drifted)).toBe('source identity drift: draft does not engage preseen');
+    expect(assess(drifted).issues).toContain('source identity drift: draft does not engage preseen');
+    expect(getSourceIdentityAlignmentIssue({
+      ...drifted,
+      content: 'preseen is betting people will pay for better forecasts before they trust an ai to make the decision.',
+    })).toBeNull();
   });
 
   it('requires a model final critic and blocks copied network prose', () => {

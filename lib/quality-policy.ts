@@ -13,7 +13,7 @@ import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v10';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v11';
 
 export interface GeoffreyQualityPolicyActivation {
   activated: boolean;
@@ -79,6 +79,44 @@ export interface GeoffreyQualityAssessment {
 
 function confidenceFloor(mode: GeoffreyQualityCandidate['generationMode']): number {
   return mode === 'safe' ? 0.7 : 0.62;
+}
+
+const SOURCE_IDENTITY_STOP_WORDS = new Set([
+  'about', 'agent', 'agents', 'and', 'company', 'companies', 'compute', 'core', 'current',
+  'explore', 'fallback', 'for', 'from', 'general', 'into', 'investing', 'investor', 'investors',
+  'market', 'markets', 'new', 'operator', 'signal', 'software', 'source', 'startup', 'startups',
+  'subject', 'technology', 'that', 'the', 'this', 'topic', 'with', 'world',
+  'ai', 'tech',
+]);
+
+function sourceIdentityTokens(value: string): string[] {
+  return [...new Set(value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !SOURCE_IDENTITY_STOP_WORDS.has(token) && !/^\d+$/.test(token)))];
+}
+
+export function getSourceIdentityAlignmentIssue(candidate: GeoffreyQualityCandidate): string | null {
+  const sourceBrief = candidate.sourceBrief || '';
+  const topicSignal = /\bOPERATOR TOPIC SIGNAL ONLY\b/i.test(sourceBrief);
+  const liveSource = Boolean(candidate.trendTopicId || candidate.trendHeadline);
+  if (!topicSignal && !liveSource) return null;
+
+  const signalSubject = sourceBrief.match(/\bsubject=([^;\]]+)/i)?.[1]?.trim() || '';
+  const sourceSubject = signalSubject
+    || candidate.trendHeadline
+    || candidate.targetTopic
+    || candidate.topic
+    || '';
+  const distinctiveTokens = sourceIdentityTokens(sourceSubject);
+  if (distinctiveTokens.length === 0) return null;
+
+  const contentTokens = new Set(sourceIdentityTokens(candidate.content));
+  if (distinctiveTokens.some((token) => contentTokens.has(token))) return null;
+
+  return `source identity drift: draft does not engage ${distinctiveTokens.slice(0, 3).join(', ')}`;
 }
 
 export function assessGeoffreyQualityPolicy(
@@ -148,7 +186,9 @@ export function assessGeoffreyQualityPolicy(
     critic?.technicalCredibility ?? taste.technicalCredibilityScore,
   );
   const issues: string[] = [];
+  const sourceIdentityIssue = getSourceIdentityAlignmentIssue(candidate);
 
+  if (sourceIdentityIssue) issues.push(sourceIdentityIssue);
   if (!candidate.finalCriticProvider || !candidate.finalCriticModel) issues.push('missing model final critic');
   if (candidate.finalCriticVersion !== FINAL_CRITIC_VERSION) issues.push('stale final critic version');
   if (candidate.finalCriticVerdict !== 'allow') issues.push(`final critic ${candidate.finalCriticVerdict || 'missing'}`);
