@@ -2715,10 +2715,10 @@ export async function getStoryClusters(agentId: string, limit = MAX_STORY_CLUSTE
 }
 
 export async function upsertStoryClusters(agentId: string, clusters: StoryCluster[]): Promise<StoryCluster[]> {
-  if (clusters.length === 0) return getStoryClusters(agentId);
-  const current = await getStoryClusters(agentId, MAX_STORY_CLUSTERS);
+  // Clustering runs over the full retained document cache, so its output is a
+  // complete snapshot. Keeping superseded IDs creates duplicate story families.
   const next = newestByTimestamp(
-    mergeRecordsById(current, clusters.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+    mergeRecordsById([], clusters.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
     (entry) => entry.lastSeenAt,
   ).slice(0, MAX_STORY_CLUSTERS);
   await kvSet(KEYS.agentStoryClusters(agentId), next);

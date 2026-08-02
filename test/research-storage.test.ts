@@ -4,11 +4,13 @@ import {
   addSemanticBlock,
   getSemanticBlocks,
   getSourceDocuments,
+  getStoryClusters,
   replaceLegacySemanticBackfillBlocks,
   releaseResearchRefreshLock,
   upsertSourceDocuments,
+  upsertStoryClusters,
 } from '@/lib/kv-storage';
-import type { SemanticBlock, SourceDocument } from '@/lib/types';
+import type { SemanticBlock, SourceDocument, StoryCluster } from '@/lib/types';
 
 function document(agentId: string, excerpt: string): SourceDocument {
   const now = new Date().toISOString();
@@ -34,6 +36,38 @@ function document(agentId: string, excerpt: string): SourceDocument {
   };
 }
 
+function story(agentId: string, id: string, title: string): StoryCluster {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 2,
+    id,
+    agentId,
+    semanticKey: `story:${id}`,
+    title,
+    summary: title,
+    topic: 'technology',
+    entities: [],
+    sourceDocumentIds: [],
+    qualifiedClaimIds: [],
+    primarySourceCount: 0,
+    independentSourceCount: 0,
+    evidenceQualified: false,
+    scores: {
+      identityFit: 0.5,
+      evidenceStrength: 0.5,
+      consequence: 0.5,
+      freshness: 0.5,
+      novelty: 0.5,
+      networkMomentum: 0,
+      total: 0.5,
+    },
+    firstSeenAt: now,
+    lastSeenAt: now,
+    blockedUntil: null,
+    blockReason: null,
+  };
+}
+
 describe('research cache storage', () => {
   it('is idempotent by stable source ID and replaces refreshed content', async () => {
     const agentId = `research-storage-${Date.now()}`;
@@ -43,6 +77,16 @@ describe('research cache storage', () => {
     const stored = await getSourceDocuments(agentId);
     expect(stored).toHaveLength(1);
     expect(stored[0].excerpt).toBe('The refreshed supported claim is long enough.');
+  });
+
+  it('replaces the complete story snapshot instead of retaining superseded clusters', async () => {
+    const agentId = `research-stories-${Date.now()}`;
+    await upsertStoryClusters(agentId, [story(agentId, 'story-old', 'Old duplicate story')]);
+    await upsertStoryClusters(agentId, [story(agentId, 'story-current', 'Current merged story')]);
+
+    expect(await getStoryClusters(agentId)).toEqual([
+      expect.objectContaining({ id: 'story-current', title: 'Current merged story' }),
+    ]);
   });
 
   it('prevents overlapping cron refreshes and only lets the owner release the lock', async () => {

@@ -519,7 +519,11 @@ describe('Tweet Generation V2', () => {
         },
       },
     } as any, {
-      alwaysDoMoreOfThis: ['Use concrete operator evidence.', 'Reuse the energy of: EXACT WINNING POST COPY'],
+      alwaysDoMoreOfThis: [
+        'Use concrete operator evidence.',
+        'Reuse the energy of: EXACT WINNING POST COPY',
+        'Fallback lesson: provider template fallback drafts can survive approval.',
+      ],
       neverDoThisAgain: ['Do not write generic AI advice.'],
       operatorHiddenPreferences: ['Stop after the point lands.'],
       identityConstraints: ['Avoid political drift.'],
@@ -537,6 +541,7 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(prompt)).not.toContain('EXACT WINNING PREMISE');
     expect(JSON.stringify(prompt)).not.toContain('EXACT WINNING POST COPY');
+    expect(JSON.stringify(prompt)).not.toContain('Fallback lesson');
   });
 
   it('uses stable shuffled pairwise ordering and pauses only after three consecutive system failures', () => {

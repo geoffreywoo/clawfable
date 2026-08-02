@@ -598,6 +598,8 @@ function safeLearningDirectives(values: string[] | undefined, limit: number): st
   return uniqueStrings((values || []).filter((value) => (
     value.length >= 8
     && !/^reuse the energy of:/i.test(value)
+    && !/^fallback lesson:/i.test(value)
+    && !/provider template fallback/i.test(value)
     && !/https?:\/\//i.test(value)
   )), limit).map((value) => value.slice(0, 240));
 }
