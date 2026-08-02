@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildGeoffreyIdeaBriefs, capGeoffreyTopicPortfolioCandidates, expandGeoffreyIdeaBriefs, extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
+import { buildGeoffreyIdeaBriefs, capGeoffreyTopicPortfolioCandidates, expandGeoffreyIdeaBriefs, extractStyleSignals, formatSoulExampleTweets, formatStyleExtractionExamples, generateSoulMd, generateViralBatch, getAccountEvidencePromptLimits, getRecentlyUsedTrendTopicIds, getRecentPostsPromptLimit, getSoulGenerationMaxTokens, getStyleExtractionMaxTokens, getTrendingPromptLimit, getTweetGenerationMaxTokens, preferGeoffreyGroundedCandidates } from '@/lib/viral-generator';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import type { AgentLearnings, PersonalizationMemory, TweetPerformance } from '@/lib/types';
 
@@ -505,6 +505,26 @@ describe('generateViralBatch', () => {
     expect(getStyleExtractionMaxTokens(12)).toBe(1024);
     expect(getSoulGenerationMaxTokens(0)).toBe(768);
     expect(getSoulGenerationMaxTokens(6)).toBe(1024);
+  });
+
+  it('keeps queued and recently posted trends out of new source plans', () => {
+    const now = Date.parse('2026-08-02T00:00:00.000Z');
+    const tweet = (overrides: Record<string, unknown>) => ({
+      trendTopicId: null,
+      status: 'posted',
+      postedAt: null,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      quarantinedAt: null,
+      ...overrides,
+    }) as any;
+
+    expect(getRecentlyUsedTrendTopicIds([
+      tweet({ trendTopicId: 'queued-trend', status: 'queued', createdAt: '2026-01-01T00:00:00.000Z' }),
+      tweet({ trendTopicId: 'recent-post', postedAt: '2026-08-01T23:00:00.000Z' }),
+      tweet({ trendTopicId: 'old-post', postedAt: '2026-07-01T00:00:00.000Z' }),
+      tweet({ trendTopicId: 'quarantined', status: 'queued', quarantinedAt: '2026-08-01T20:00:00.000Z' }),
+      tweet({ trendTopicId: 'recent-post', postedAt: '2026-08-01T22:00:00.000Z' }),
+    ], now)).toEqual(['queued-trend', 'recent-post']);
   });
 
   it('caps recent-post prompt context by requested batch size', () => {

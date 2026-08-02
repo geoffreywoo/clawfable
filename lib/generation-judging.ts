@@ -178,7 +178,6 @@ export function selectMutationTargets(
   const ranked = [...candidates]
     .filter((candidate) => geoffreyStrict
       ? Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
-        && (candidate.judgeScore || 0) >= 0.28
         && candidate.judgeBreakdown.policySafety >= 0.75
       : (candidate.judgeScore || 0) >= 0.48)
     .sort((a, b) => {

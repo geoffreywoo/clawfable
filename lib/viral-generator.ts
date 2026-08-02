@@ -242,6 +242,18 @@ export function getTweetGenerationMaxTokens(candidateCount: number): number {
   return 8192;
 }
 
+export function getRecentlyUsedTrendTopicIds(allTweets: Tweet[], now = Date.now()): string[] {
+  const recentPostCutoff = now - (7 * 24 * 60 * 60 * 1000);
+  return [...new Set(allTweets.flatMap((tweet) => {
+    if (!tweet.trendTopicId || tweet.quarantinedAt) return [];
+    if (tweet.status === 'queued') return [String(tweet.trendTopicId)];
+    const postedAt = Date.parse(tweet.postedAt || tweet.createdAt || '');
+    return tweet.status === 'posted' && Number.isFinite(postedAt) && postedAt >= recentPostCutoff
+      ? [String(tweet.trendTopicId)]
+      : [];
+  }))];
+}
+
 export function getStyleExtractionMaxTokens(exampleCount: number): number {
   if (exampleCount <= 4) return 512;
   if (exampleCount <= 8) return 768;
@@ -1591,9 +1603,7 @@ export async function generateViralBatch(
   const candidateCount = count <= 2 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
   if (diagnostics) diagnostics.candidateCount = candidateCount;
   const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const queuedTrendTopicIds = allTweets
-    .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt && tweet.trendTopicId)
-    .map((tweet) => String(tweet.trendTopicId));
+  const recentlyUsedTrendTopicIds = getRecentlyUsedTrendTopicIds(allTweets);
   const generatedSourcePlan = buildSourcePlannerPlan({
     count: geoffreyStrict && count === 2 ? 4 : candidateCount,
     autonomyMode: style.autonomyMode,
@@ -1606,7 +1616,7 @@ export async function generateViralBatch(
       ...analysis.engagementPatterns.topTopics,
       ...style.exploration.underusedTopics,
     ],
-    excludedTrendTopicIds: queuedTrendTopicIds,
+    excludedTrendTopicIds: recentlyUsedTrendTopicIds,
   });
   const baseSourcePlan = style.sourcePlan
     && (!geoffreyStrict || count !== 2 || style.sourcePlan.slots.length >= 4)

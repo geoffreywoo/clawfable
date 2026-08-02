@@ -958,7 +958,7 @@ describe('judgeCandidates fallback critic', () => {
       content: 'A formal and overworked first draft.',
       sourceBrief: 'Qualified source about a company event.',
       draftExperimentId: 'grounded-weak',
-      judgeScore: 0.31,
+      judgeScore: 0.12,
       judgeBreakdown: {
         overall: 0.31,
         voiceFit: 0.25,
