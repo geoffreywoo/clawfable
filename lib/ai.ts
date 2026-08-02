@@ -316,7 +316,10 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
       || options.task === 'idea_generation'
       || options.task === 'tweet_writing'
     ) ? { output_config: { effort: 'medium' as const } } : {}),
-    ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
+    // Fable uses output_config effort and rejects the deprecated temperature field.
+    ...(typeof options.temperature === 'number' && model !== ANTHROPIC_FABLE_MODEL
+      ? { temperature: options.temperature }
+      : {}),
   });
 
   return {

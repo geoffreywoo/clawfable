@@ -171,12 +171,14 @@ describe('AI model routing', () => {
       system: 'Write one post.',
       prompt: 'probe',
       maxTokens: 64,
+      temperature: 0.8,
     });
 
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-fable-5',
       output_config: { effort: 'medium' },
     }));
+    expect(anthropicCreate.mock.calls[0]?.[0]).not.toHaveProperty('temperature');
     expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       text: 'fable copy',
