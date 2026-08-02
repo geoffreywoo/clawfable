@@ -1591,6 +1591,9 @@ export async function generateViralBatch(
   const candidateCount = count <= 2 ? 12 : count <= 3 ? 14 : count <= 5 ? 16 : Math.min(20, count + 10);
   if (diagnostics) diagnostics.candidateCount = candidateCount;
   const experimentBatchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const queuedTrendTopicIds = allTweets
+    .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt && tweet.trendTopicId)
+    .map((tweet) => String(tweet.trendTopicId));
   const generatedSourcePlan = buildSourcePlannerPlan({
     count: geoffreyStrict && count === 2 ? 4 : candidateCount,
     autonomyMode: style.autonomyMode,
@@ -1603,6 +1606,7 @@ export async function generateViralBatch(
       ...analysis.engagementPatterns.topTopics,
       ...style.exploration.underusedTopics,
     ],
+    excludedTrendTopicIds: queuedTrendTopicIds,
   });
   const baseSourcePlan = style.sourcePlan
     && (!geoffreyStrict || count !== 2 || style.sourcePlan.slots.length >= 4)

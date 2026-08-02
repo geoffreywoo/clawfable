@@ -946,6 +946,47 @@ describe('judgeCandidates fallback critic', () => {
     })).toHaveLength(4);
   });
 
+  it('rewrites the best safe draft from a grounded Geoffrey brief even when first-pass prose is weak', () => {
+    const geoffreyVoice = {
+      tone: 'casual startup investor',
+      topics: ['AI', 'startups', 'culture'],
+      antiGoals: [],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
+      summary: 'Geoffrey writes about startups, investing, AI, and culture.',
+    };
+    const weakButGrounded = judgedCandidate({
+      content: 'A formal and overworked first draft.',
+      sourceBrief: 'Qualified source about a company event.',
+      draftExperimentId: 'grounded-weak',
+      judgeScore: 0.31,
+      judgeBreakdown: {
+        overall: 0.31,
+        voiceFit: 0.25,
+        clarity: 0.7,
+        novelty: 0.5,
+        audienceFit: 0.6,
+        policySafety: 0.94,
+      },
+    });
+    const unsafe = judgedCandidate({
+      ...weakButGrounded,
+      content: 'Unsafe grounded draft.',
+      draftExperimentId: 'unsafe',
+      judgeScore: 0.4,
+      judgeBreakdown: { ...weakButGrounded.judgeBreakdown, policySafety: 0.5 },
+    });
+    const unsourced = judgedCandidate({
+      ...weakButGrounded,
+      content: 'Unsourced draft.',
+      sourceBrief: null,
+      draftExperimentId: 'unsourced',
+      judgeScore: 0.8,
+    });
+
+    expect(selectMutationTargets([weakButGrounded, unsafe, unsourced], geoffreyVoice))
+      .toEqual([weakButGrounded]);
+  });
+
   it('rescues at most one close voice failure per Geoffrey source', () => {
     const geoffreyVoice = {
       tone: 'casual startup investor',

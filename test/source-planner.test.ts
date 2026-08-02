@@ -489,6 +489,52 @@ describe('source planner', () => {
     expect(signalSlot?.briefEvidence?.instruction).toContain('do not repeat or imply the source headline');
   });
 
+  it('does not spend a new brief on a qualified trend already represented in the queue', () => {
+    const trend = {
+      id: 940,
+      networkTopicId: 'network-pfl-mvp',
+      headline: 'PFL and MVP are combining their boxing promotion businesses.',
+      source: '@combat1, @combat2, @combat3',
+      relevanceScore: 96,
+      category: 'PFL MVP boxing merger',
+      timestamp: new Date().toISOString(),
+      tweetCount: 4,
+      sourceType: 'x' as const,
+      sourceCount: 3,
+      sourceQuality: 0.92,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.94,
+      networkBreakoutScore: 0.9,
+      topicConfidence: 0.94,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'sports_competition' as const,
+      entities: ['PFL', 'MVP'],
+      topTweet: { id: 'pfl-1', text: 'PFL and MVP are combining.', likes: 900, author: 'combat1' },
+    };
+    const plan = buildSourcePlannerPlan({
+      count: 4,
+      autonomyMode: 'explore',
+      trendMixTarget: 35,
+      trendTolerance: 'moderate',
+      voiceProfile: {
+        tone: 'casual investor',
+        topics: ['culture', 'sports', 'AI', 'startups'],
+        antiGoals: ['repeated queue topics'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: 'Geoffrey writes about startups, technology, culture, markets, and competition.',
+      },
+      learnings: null,
+      trending: [trend],
+      fallbackTopics: ['Career', 'VC/Funding', 'AI/ML'],
+      excludedTrendTopicIds: ['network-pfl-mvp'],
+    });
+
+    expect(plan.slots.every((slot) => slot.trendTopicId !== 'network-pfl-mvp')).toBe(true);
+    expect(plan.acceptedTrends).toEqual([]);
+    expect(new Set(plan.slots.map((slot) => classifyGeoffreyTopicDomain(slot.targetTopic))).size)
+      .toBeGreaterThanOrEqual(3);
+  });
+
   it('uses engagement cues from a different semantic domain than the qualified story', () => {
     const now = new Date().toISOString();
     const plan = buildSourcePlannerPlan({

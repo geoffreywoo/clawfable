@@ -772,6 +772,7 @@ export function buildSourcePlannerPlan({
   learnings,
   trending,
   fallbackTopics = [],
+  excludedTrendTopicIds = [],
 }: {
   count: number;
   autonomyMode: 'safe' | 'balanced' | 'explore';
@@ -781,12 +782,15 @@ export function buildSourcePlannerPlan({
   learnings: AgentLearnings | null;
   trending: TrendingTopic[] | null;
   fallbackTopics?: string[];
+  excludedTrendTopicIds?: string[];
 }): SourcePlannerPlan {
-  const accepted = enrichTrendingTopics(trending || [], voiceProfile, learnings, trendTolerance)
+  const excludedTrendIds = new Set(excludedTrendTopicIds.map((id) => String(id).trim()).filter(Boolean));
+  const classified = enrichTrendingTopics(trending || [], voiceProfile, learnings, trendTolerance)
     .sort((a, b) => b.fitScores.total - a.fitScores.total || b.relevanceScore - a.relevanceScore);
+  const accepted = classified.filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)));
   const acceptedAligned = accepted.filter((topic) => topic.sourceLane === 'trend_aligned_exploit');
   const acceptedAdjacent = accepted.filter((topic) => topic.sourceLane === 'trend_adjacent_explore');
-  const rejectedTrends = accepted.filter((topic) => topic.sourceLane === 'reject');
+  const rejectedTrends = classified.filter((topic) => topic.sourceLane === 'reject');
   const operatorTopicSignals = accepted
     .filter(isSpecificOperatorTopicSignal)
     .sort((a, b) => (

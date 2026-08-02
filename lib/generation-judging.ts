@@ -176,7 +176,11 @@ export function selectMutationTargets(
   const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
   const mutationLimit = geoffreyStrict ? 4 : 4;
   const ranked = [...candidates]
-    .filter((candidate) => (candidate.judgeScore || 0) >= 0.48)
+    .filter((candidate) => geoffreyStrict
+      ? Boolean(candidate.sourceBrief || candidate.trendHeadline || candidate.trendTopicId)
+        && (candidate.judgeScore || 0) >= 0.28
+        && candidate.judgeBreakdown.policySafety >= 0.75
+      : (candidate.judgeScore || 0) >= 0.48)
     .sort((a, b) => {
       if (geoffreyStrict) {
         const aGrounded = Number(Boolean(a.sourceBrief || a.trendHeadline || a.trendTopicId));
