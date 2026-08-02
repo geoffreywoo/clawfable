@@ -83,6 +83,16 @@ describe('AI model routing', () => {
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
+    expect(getModelChainForTask('idea_generation')).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+    ]);
+    expect(getModelChainForTask('tweet_writing')).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+    ]);
   });
 
   it('uses GPT-5.5 first for cheaper and fast task routes too', async () => {
@@ -126,6 +136,14 @@ describe('AI model routing', () => {
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
+    expect(getModelChainForTask('idea_generation', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)[0]).toEqual({
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+    });
+    expect(getModelChainForTask('idea_judgment', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)[0]).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6',
+    });
     expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },

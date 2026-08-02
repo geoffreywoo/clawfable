@@ -9,6 +9,7 @@ import type {
   CreativeLane,
   ContentSourceLane,
   ContentStyleMode,
+  GenerationPipelineVersion,
   GenerationModelStackId,
   IdeaAtom,
   LearningSignal,
@@ -17,6 +18,7 @@ import type {
   PostPortfolioRole,
   PromptStrategy,
   Tweet,
+  TweetEvidenceReference,
   TweetPerformance,
   AutonomyMode,
 } from './types';
@@ -77,6 +79,12 @@ export interface RankableProtocolTweet {
   finalCriticVersion?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
+  pipelineVersion?: GenerationPipelineVersion | null;
+  generationRunId?: string | null;
+  storyClusterId?: string | null;
+  ideaId?: string | null;
+  draftCandidateId?: string | null;
+  evidenceReferences?: TweetEvidenceReference[] | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;

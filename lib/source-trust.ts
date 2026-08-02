@@ -1,4 +1,4 @@
-import type { ContentSourceLane } from './types';
+import type { ContentSourceLane, GenerationPipelineVersion, TweetEvidenceReference } from './types';
 
 export interface SourceTrustRecord {
   sourceBrief?: string | null;
@@ -6,6 +6,8 @@ export interface SourceTrustRecord {
   sourceLane?: ContentSourceLane | null;
   trendTopicId?: string | null;
   trendHeadline?: string | null;
+  pipelineVersion?: GenerationPipelineVersion | null;
+  evidenceReferences?: TweetEvidenceReference[] | null;
 }
 
 function compactEvidenceText(value: string): string {
@@ -47,6 +49,14 @@ export function getTrustedClaimSourceTexts(
   record: SourceTrustRecord,
   operatorEvidence: string[],
 ): string[] {
+  const v2Evidence = record.evidenceReferences || [];
+  const v2EvidenceQualified = v2Evidence.some((entry) => entry.trustTier === 'primary')
+    || new Set(v2Evidence.map((entry) => entry.publisher.trim().toLowerCase()).filter(Boolean)).size >= 2;
+  if (record.pipelineVersion === 'v2' && v2EvidenceQualified) {
+    return (record.sourceEvidenceTexts || [])
+      .map((value) => compactEvidenceText(String(value || '')))
+      .filter(Boolean);
+  }
   if (isExternalTrendSource(record)) return operatorEvidence;
   return [record.sourceBrief, record.trendHeadline, ...operatorEvidence]
     .map((value) => String(value || '').trim())

@@ -395,6 +395,12 @@ export interface ProtocolTweet {
   generationModel?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
+  pipelineVersion?: import('./types').GenerationPipelineVersion | null;
+  generationRunId?: string | null;
+  storyClusterId?: string | null;
+  ideaId?: string | null;
+  draftCandidateId?: string | null;
+  evidenceReferences?: import('./types').TweetEvidenceReference[] | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   creativeLane?: CreativeLane | null;

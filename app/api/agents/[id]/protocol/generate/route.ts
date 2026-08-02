@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnalysis } from '@/lib/kv-storage';
+import { getAnalysis, getTrendingCache } from '@/lib/kv-storage';
 import { generateViralBatch } from '@/lib/viral-generator';
+import { generateTweetBatchV2 } from '@/lib/generation-v2';
+import { getGenerationPipelineVersion } from '@/lib/generation-pipeline';
+import { GEOFFREY_PRIMARY_MODEL_STACK } from '@/lib/ai';
+import type { TrendingTopic } from '@/lib/trending';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
@@ -33,11 +37,34 @@ export async function POST(
       directiveLimit: 10,
     });
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
+    const pipelineVersion = getGenerationPipelineVersion(agent.handle);
+    const cachedTrending = pipelineVersion === 'v2' ? await getTrendingCache(id) : null;
+    const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : null;
+    const batch = pipelineVersion === 'v2'
+      ? await generateTweetBatchV2({
+          agentId: id,
+          count,
+          voiceProfile,
+          analysis,
+          learnings,
+          style,
+          recentPosts,
+          allTweets,
+          memory,
+          signals,
+          trending,
+          modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+          mode: 'manual',
+        })
+      : await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
     const completeBatch = batch.filter((item) => !getGeneratedTweetIssue(item.content));
 
     if (completeBatch.length === 0) {
-      return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
+      return NextResponse.json({
+        error: pipelineVersion === 'v2'
+          ? 'No ideas cleared the evidence, originality, and voice gates. Try again after the research cache refreshes.'
+          : 'Generation failed - no tweets produced',
+      }, { status: pipelineVersion === 'v2' ? 422 : 500 });
     }
 
     // Store as draft tweets

@@ -3,7 +3,9 @@ import type {
   CandidateFeatureTags,
   CandidateJudgeBreakdown,
   ContentSourceLane,
+  GenerationPipelineVersion,
   PersonalizationMemory,
+  TweetEvidenceReference,
 } from './types';
 import type { VoiceProfile } from './soul-parser';
 import { assessAccountTaste, isGeoffreyVoiceProfile } from './account-taste';
@@ -14,6 +16,7 @@ import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-tr
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
 export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v12';
+export const EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION = 'evidence-idea-voice-v2-copy-judge-1';
 
 export interface GeoffreyQualityPolicyActivation {
   activated: boolean;
@@ -42,6 +45,8 @@ export interface GeoffreyQualityCandidate {
   thesis?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
+  pipelineVersion?: GenerationPipelineVersion | null;
+  evidenceReferences?: TweetEvidenceReference[] | null;
   trendHeadline?: string | null;
   sourceLane?: ContentSourceLane | null;
   trendTopicId?: string | null;
@@ -190,7 +195,10 @@ export function assessGeoffreyQualityPolicy(
 
   if (sourceIdentityIssue) issues.push(sourceIdentityIssue);
   if (!candidate.finalCriticProvider || !candidate.finalCriticModel) issues.push('missing model final critic');
-  if (candidate.finalCriticVersion !== FINAL_CRITIC_VERSION) issues.push('stale final critic version');
+  const expectedFinalCriticVersion = candidate.pipelineVersion === 'v2'
+    ? EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION
+    : FINAL_CRITIC_VERSION;
+  if (candidate.finalCriticVersion !== expectedFinalCriticVersion) issues.push('stale final critic version');
   if (candidate.finalCriticVerdict !== 'allow') issues.push(`final critic ${candidate.finalCriticVerdict || 'missing'}`);
   if (stage === 'queue') {
     if (candidate.qualityPolicyVersion !== GEOFFREY_QUALITY_POLICY_VERSION) issues.push('stale quality policy version');

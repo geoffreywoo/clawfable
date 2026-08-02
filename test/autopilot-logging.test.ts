@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   upsertRelationshipProfile: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
+  generateTweetBatchV2: vi.fn(),
   postTweet: vi.fn(),
   replyToTweet: vi.fn(),
   decodeKeys: vi.fn(),
@@ -102,6 +103,10 @@ vi.mock('@/lib/viral-generator', () => ({
   generateViralBatch: mocks.generateViralBatch,
 }));
 
+vi.mock('@/lib/generation-v2', () => ({
+  generateTweetBatchV2: mocks.generateTweetBatchV2,
+}));
+
 vi.mock('@/lib/twitter-client', () => ({
   postTweet: mocks.postTweet,
   replyToTweet: mocks.replyToTweet,
@@ -149,6 +154,7 @@ vi.mock('@/lib/queue-healing', () => ({
 
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
+  GEOFFREY_PRIMARY_MODEL_STACK: 'geoffrey_fable5_gpt56',
   GEOFFREY_STRICT_FALLBACK_MODEL_STACK: 'geoffrey_gpt56_gpt56',
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
@@ -250,6 +256,7 @@ const activeGeoffreyCorpus = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.GEOFFREY_GENERATION_PIPELINE_VERSION = 'v1';
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
@@ -340,12 +347,14 @@ beforeEach(() => {
     provider: 'openai',
     model: 'gpt-5.4',
   });
+  mocks.generateTweetBatchV2.mockResolvedValue([]);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   delete process.env.VERCEL_ENV;
   delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
+  delete process.env.GEOFFREY_GENERATION_PIPELINE_VERSION;
 });
 
 afterEach(() => {
@@ -353,6 +362,31 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('uses only warmed caches during a V2 refill and never performs live topic discovery', async () => {
+    process.env.GEOFFREY_GENERATION_PIPELINE_VERSION = 'v2';
+    process.env.VERCEL_ENV = 'production';
+    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.getTrendingCache.mockResolvedValue(null);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'direct', summary: 'founder' },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 2 },
+      style: { autonomyMode: 'balanced', bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+
+    await expect(refillQueue(agent as any, 2)).resolves.toBe(0);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({ trending: null }));
+    expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
+    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
+  });
+
   it('uses the strict GPT-5.6 stack only after an empty Geoffrey primary batch', async () => {
     process.env.VERCEL_ENV = 'production';
     process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;

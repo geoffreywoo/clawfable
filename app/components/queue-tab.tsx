@@ -4,13 +4,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { TweetDecisionPanel } from '@/app/components/tweet-decision-panel';
 import { getAutopilotScheduleStatus } from '@/lib/autopilot-status';
 import type { LearningSnapshot } from '@/lib/learning-snapshot';
-import type { Tweet, ProtocolSettings } from '@/lib/types';
+import type { QueueFeedbackReasonCode, Tweet, ProtocolSettings } from '@/lib/types';
 
 interface QueueTabProps {
   agentId: string;
 }
 
 const QUEUE_REFRESH_INTERVAL_MS = 15000;
+const DELETE_REASON_OPTIONS: Array<{ code: QueueFeedbackReasonCode; label: string }> = [
+  { code: 'bad_source_topic', label: 'Bad source/topic' },
+  { code: 'bad_premise', label: 'Bad premise' },
+  { code: 'bad_writing', label: 'Bad writing' },
+  { code: 'duplicate', label: 'Duplicate' },
+  { code: 'factual_risk', label: 'Factual risk' },
+  { code: 'other', label: 'Other' },
+];
 
 export function QueueTab({ agentId }: QueueTabProps) {
   const [queue, setQueue] = useState<Tweet[]>([]);
@@ -29,6 +37,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [customPrompt, setCustomPrompt] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Tweet | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReasonCode, setDeleteReasonCode] = useState<QueueFeedbackReasonCode | null>(null);
+  const [deletePermanent, setDeletePermanent] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deletionFeedback, setDeletionFeedback] = useState<Record<string, string>>({});
   const [submittingDeletionId, setSubmittingDeletionId] = useState<string | null>(null);
@@ -88,6 +98,20 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const resetDeleteFeedback = () => {
+    setDeleteTarget(null);
+    setDeleteReason('');
+    setDeleteReasonCode(null);
+    setDeletePermanent(false);
+  };
+
+  const openDeleteFeedback = (tweet: Tweet) => {
+    setDeleteReason('');
+    setDeleteReasonCode(null);
+    setDeletePermanent(false);
+    setDeleteTarget(tweet);
   };
 
   const trackSignal = async (
@@ -177,13 +201,16 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const res = await fetch(`/api/agents/${agentId}/queue/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(skipReason ? {} : { reason: deleteReason.trim() }),
+        body: JSON.stringify(skipReason ? {} : {
+          reason: deleteReason.trim() || undefined,
+          reasonCode: deleteReasonCode || undefined,
+          permanent: deletePermanent,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Delete failed');
 
-      setDeleteTarget(null);
-      setDeleteReason('');
+      resetDeleteFeedback();
       showToast(
         data.feedbackSource === 'user'
           ? 'Removed from queue and saved to voice memory'
@@ -698,7 +725,12 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => { setDeleteTarget(tweet); setDeleteReason(''); }}
+                    onClick={() => {
+                      openDeleteFeedback(tweet);
+                      setDeleteReason('');
+                      setDeleteReasonCode(null);
+                      setDeletePermanent(false);
+                    }}
                     data-testid={`button-delete-${tweet.id}`}
                     title="Remove"
                     style={{ padding: '4px 8px', color: '#ef4444' }}
@@ -713,11 +745,11 @@ export function QueueTab({ agentId }: QueueTabProps) {
       </div>
 
       {deleteTarget && (
-        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteSubmitting && setDeleteTarget(null)}>
-          <div className="modal" style={{ maxWidth: '460px' }}>
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteSubmitting && resetDeleteFeedback()}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="queue-delete-title" style={{ maxWidth: '460px' }}>
             <div className="wizard-body">
               <div className="wizard-step-header">
-                <h3>Why remove this draft?</h3>
+                <h3 id="queue-delete-title">Why remove this draft?</h3>
                 <p>A short reason is the strongest signal. If you skip, Clawfable will infer likely intent and still use the delete as feedback.</p>
               </div>
 
@@ -734,21 +766,52 @@ export function QueueTab({ agentId }: QueueTabProps) {
               </div>
 
               <div className="wizard-builder-section">
-                <div className="wizard-section-label">Delete reason (optional)</div>
+                <div className="wizard-section-label">What failed?</div>
+                <div className="queue-feedback-reasons" role="group" aria-label="Draft rejection reason">
+                  {DELETE_REASON_OPTIONS.map((option) => (
+                    <button
+                      key={option.code}
+                      type="button"
+                      className={`queue-feedback-reason${deleteReasonCode === option.code ? ' is-selected' : ''}`}
+                      aria-pressed={deleteReasonCode === option.code}
+                      onClick={() => setDeleteReasonCode(option.code)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="wizard-builder-section">
+                <div className="wizard-section-label">Context (optional)</div>
                 <textarea
                   className="textarea"
                   value={deleteReason}
                   onChange={(event) => setDeleteReason(event.target.value)}
-                  placeholder="Examples: too generic, wrong tone, weak hook, off-topic, sounds forced..."
-                  rows={4}
+                  placeholder="What specifically should the system learn?"
+                  rows={3}
                 />
                 <p className="wizard-section-hint">
-                  Explicit reasons are strongest. If you skip, we&apos;ll guess likely intent and still store the delete as feedback.
+                  The category routes feedback to research, premise selection, or writing instead of penalizing everything.
                 </p>
               </div>
 
+              {deleteTarget.pipelineVersion === 'v2' && (deleteReasonCode || deleteReason.trim()) && (
+                <label className="queue-feedback-permanent">
+                  <input
+                    type="checkbox"
+                    checked={deletePermanent}
+                    onChange={(event) => setDeletePermanent(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Do not regenerate this angle</strong>
+                    <small>Keep this semantic block indefinitely.</small>
+                  </span>
+                </label>
+              )}
+
               <div className="wizard-actions">
-                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => setDeleteTarget(null)}>
+                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={resetDeleteFeedback}>
                   Cancel
                 </button>
                 <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => handleDelete(true)}>
@@ -756,11 +819,11 @@ export function QueueTab({ agentId }: QueueTabProps) {
                 </button>
                 <button
                   className="btn btn-primary"
-                  disabled={deleteSubmitting || !deleteReason.trim()}
+                  disabled={deleteSubmitting || (!deleteReasonCode && !deleteReason.trim())}
                   onClick={() => handleDelete(false)}
-                  style={{ background: deleteReason.trim() ? 'var(--primary)' : undefined }}
+                  style={{ background: deleteReasonCode || deleteReason.trim() ? 'var(--primary)' : undefined }}
                 >
-                  {deleteSubmitting ? 'Removing...' : 'Save reason and remove'}
+                  {deleteSubmitting ? 'Removing...' : 'Save feedback and remove'}
                 </button>
               </div>
             </div>

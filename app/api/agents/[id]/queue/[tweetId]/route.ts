@@ -1,13 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addLearningSignal, deleteTweet, getTweet, markIdeaAtomRejectedForTweet, saveFeedback, updateTweet } from '@/lib/kv-storage';
+import {
+  addLearningSignal,
+  addSemanticBlock,
+  deleteTweet,
+  getIdeaCandidates,
+  getTweet,
+  markIdeaAtomRejectedForTweet,
+  recordV2CandidateOutcomeForTweet,
+  saveFeedback,
+  updateTweet,
+} from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
 import { buildFallbackLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
-import { validateQueueUpdateRequest } from '@/lib/request-validation';
+import { validateQueueDeleteRequest, validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { classifyTasteFeedbackReason } from '@/lib/account-taste';
+import {
+  buildSemanticBlockFromQueueFeedback,
+  feedbackStage,
+  inferQueueFeedbackReasonCode,
+  QUEUE_FEEDBACK_OPTIONS,
+} from '@/lib/queue-feedback';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -223,13 +239,36 @@ export async function DELETE(
     }
 
     const body = await request.json().catch(() => null);
-    const userReason = typeof body?.reason === 'string' ? body.reason.trim() : '';
-    const intentSummary = userReason || await inferDeleteIntent({
-      agentName: agent.name,
-      soulMd: agent.soulMd,
-      tweetText: tweet.content,
-    });
+    const parsed = validateQueueDeleteRequest(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid feedback' }, { status: 400 });
+    }
+    const userReason = parsed.value.reason || '';
+    const structuredOption = parsed.value.reasonCode
+      ? QUEUE_FEEDBACK_OPTIONS.find((option) => option.code === parsed.value?.reasonCode)
+      : null;
+    const intentSummary = userReason
+      || structuredOption?.description
+      || await inferDeleteIntent({
+        agentName: agent.name,
+        soulMd: agent.soulMd,
+        tweetText: tweet.content,
+      });
+    const reasonCode = parsed.value.reasonCode || inferQueueFeedbackReasonCode(intentSummary);
+    const stage = feedbackStage(reasonCode);
+    const userProvidedFeedback = Boolean(userReason || parsed.value.reasonCode);
     const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content);
+    const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
+      ? (await getIdeaCandidates(id, 500)).find((candidate) => candidate.id === tweet.ideaId) || null
+      : null;
+    const semanticBlock = buildSemanticBlockFromQueueFeedback({
+      tweet,
+      idea,
+      reasonCode,
+      reason: intentSummary,
+      requestedScope: parsed.value.blockScope,
+      permanent: parsed.value.permanent,
+    });
 
     await saveFeedback(id, {
       tweetId: tweet.id,
@@ -239,7 +278,11 @@ export async function DELETE(
       reason: userReason || undefined,
       intentSummary,
       source: 'queue_delete',
-      userProvidedReason: !!userReason,
+      userProvidedReason: userProvidedFeedback,
+      reasonCode,
+      blockScope: semanticBlock?.scope || null,
+      permanentBlock: semanticBlock?.permanent || false,
+      semanticKey: semanticBlock?.semanticKey || null,
     });
     await addLearningSignal(id, {
       tweetId: tweet.id,
@@ -247,23 +290,40 @@ export async function DELETE(
       surface: tweet.type === 'reply' ? 'mentions' : 'queue',
       rewardDelta: -0.75,
       reason: intentSummary,
-      inferred: !userReason,
+      inferred: !userProvidedFeedback,
       metadata: metadataWithStyleMode(tweet, {
         ...buildFallbackLearningMetadata(tweet),
         ...tasteFeedback.metadata,
-        userProvidedReason: !!userReason,
+        userProvidedReason: userProvidedFeedback,
+        feedbackReasonCode: reasonCode,
+        feedbackStage: stage,
+        feedbackBlockScope: semanticBlock?.scope || null,
+        feedbackPermanent: semanticBlock?.permanent || false,
+        feedbackSemanticKey: semanticBlock?.semanticKey || null,
+        pipelineVersion: tweet.pipelineVersion || 'v1',
+        generationRunId: tweet.generationRunId || null,
+        storyClusterId: tweet.storyClusterId || null,
+        ideaId: tweet.ideaId || null,
+        draftCandidateId: tweet.draftCandidateId || null,
         draftExperimentId: tweet.draftExperimentId ?? null,
         creativeLane: tweet.creativeLane ?? null,
         experimentHoldout: tweet.experimentHoldout === true,
       }),
     });
 
+    if (semanticBlock) await addSemanticBlock(id, semanticBlock);
+    await recordV2CandidateOutcomeForTweet(tweet, 'deleted', [`feedback:${reasonCode}`], {
+      updateIdea: stage !== 'writing' || semanticBlock?.scope !== 'copy',
+    });
     await markIdeaAtomRejectedForTweet(tweet, intentSummary);
     await deleteTweet(tweetId);
     return NextResponse.json({
       success: true,
-      feedbackSource: userReason ? 'user' : 'inferred',
+      feedbackSource: userProvidedFeedback ? 'user' : 'inferred',
       intentSummary,
+      reasonCode,
+      blockScope: semanticBlock?.scope || null,
+      permanentBlock: semanticBlock?.permanent || false,
     });
   } catch (err) {
     try { return handleAuthError(err); } catch {}

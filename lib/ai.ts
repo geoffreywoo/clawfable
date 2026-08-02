@@ -6,6 +6,11 @@ export type AiProvider = 'openai' | 'anthropic';
 export type AiModelTier = 'quality' | 'fast';
 export type OpenAiReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type AiTask =
+  | 'source_enrichment'
+  | 'idea_generation'
+  | 'idea_judgment'
+  | 'tweet_writing'
+  | 'copy_judgment'
   | 'tweet_generation'
   | 'creative_variant'
   | 'bulk_judgment'
@@ -48,7 +53,27 @@ export interface GenerateTextResult {
   stopReason: string | null;
   provider: AiProvider;
   model: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
   fallbackAttempts?: AiFallbackAttempt[];
+}
+
+export function estimateAiUsageCostUsd(
+  model: string,
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+): number | null {
+  if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') return null;
+  const raw = process.env.AI_MODEL_COSTS_USD_PER_MILLION_JSON;
+  if (!raw) return null;
+  try {
+    const config = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
+    const rates = config[model];
+    if (typeof rates?.input !== 'number' || typeof rates.output !== 'number') return null;
+    return Number((((inputTokens * rates.input) + (outputTokens * rates.output)) / 1_000_000).toFixed(6));
+  } catch {
+    return null;
+  }
 }
 
 export interface AiFallbackAttempt {
@@ -77,6 +102,11 @@ export const GEOFFREY_CONTROL_MODEL_STACK: GenerationModelStackId = 'geoffrey_gp
 export const GEOFFREY_STRICT_FALLBACK_MODEL_STACK: GenerationModelStackId = 'geoffrey_gpt56_gpt56';
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
+  source_enrichment: [OAI_QUALITY, CLAUDE_QUALITY],
+  idea_generation: [OAI_COPY, CLAUDE_QUALITY, OAI_QUALITY],
+  idea_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+  tweet_writing: [OAI_COPY, CLAUDE_QUALITY, OAI_QUALITY],
+  copy_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
   tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
   creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
   bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
@@ -93,18 +123,30 @@ const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
 
 const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial<Record<AiTask, AiModelTarget[]>>>> = {
   [GEOFFREY_PRIMARY_MODEL_STACK]: {
+    idea_generation: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    tweet_writing: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    idea_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    copy_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     tweet_generation: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     creative_variant: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     bulk_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     final_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
   },
   [GEOFFREY_CONTROL_MODEL_STACK]: {
+    idea_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    tweet_writing: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    idea_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+    copy_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
     tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
     final_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
   },
   [GEOFFREY_STRICT_FALLBACK_MODEL_STACK]: {
+    idea_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    tweet_writing: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    idea_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    copy_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     bulk_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
@@ -261,6 +303,8 @@ async function generateWithOpenAi(options: GenerateTextOptions, model: string): 
     stopReason: getOpenAiStopReason(response),
     provider: 'openai',
     model,
+    inputTokens: response.usage?.input_tokens ?? null,
+    outputTokens: response.usage?.output_tokens ?? null,
   };
 }
 
@@ -278,7 +322,10 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
       content: message.content,
     })),
     ...(model === ANTHROPIC_FABLE_MODEL && (
-      options.task === 'tweet_generation' || options.task === 'creative_variant'
+      options.task === 'tweet_generation'
+      || options.task === 'creative_variant'
+      || options.task === 'idea_generation'
+      || options.task === 'tweet_writing'
     ) ? { output_config: { effort: 'medium' as const } } : {}),
     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
   });
@@ -292,6 +339,8 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
     stopReason: response.stop_reason || null,
     provider: 'anthropic',
     model,
+    inputTokens: response.usage?.input_tokens ?? null,
+    outputTokens: response.usage?.output_tokens ?? null,
   };
 }
 

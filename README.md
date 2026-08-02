@@ -99,3 +99,17 @@ KV_REST_API_READ_ONLY_TOKEN
 Local dev works without them — the app falls back to in-memory storage automatically.
 
 X API connection is handled via OAuth 1.0a through the setup wizard — no manual key entry required.
+
+Tweet Generation V2 also uses:
+
+```bash
+CRON_SECRET=...
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION=geoffwoo-quality-v12
+GEOFFREY_GENERATION_PIPELINE_VERSION=v1
+```
+
+Keep `GEOFFREY_GENERATION_PIPELINE_VERSION=v1` while deploying the additive research storage. Warm an agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"pipelineVersion":"v2","count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`. Set the switch to `v2` only after the production preview passes; changing it back to `v1` is the immediate rollback.
+
+Optional research controls are `RESEARCH_V2_AGENT_HANDLES`, `RESEARCH_OFFICIAL_HOST_ALLOWLIST`, and `CLAWFABLE_RESEARCH_USER_AGENT`. Optional per-model cost rates can be supplied through `AI_MODEL_COSTS_USD_PER_MILLION_JSON` for the V2 evaluation report (`npm run eval:generation:v2`).

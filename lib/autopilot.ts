@@ -34,6 +34,8 @@ import {
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateViralBatch } from './viral-generator';
+import { generateTweetBatchV2 } from './generation-v2';
+import { getGenerationPipelineVersion } from './generation-pipeline';
 import { buildGenerationContext } from './generation-context';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, getLatestTwitterTweetIdCursor, getSanitizedTweetTextIssue, type TwitterKeys } from './twitter-client';
 import {
@@ -70,7 +72,7 @@ import {
 } from './survivability';
 import { getAutonomyConfidenceThreshold, type RankableProtocolTweet } from './candidate-ranking';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { generateText, GEOFFREY_STRICT_FALLBACK_MODEL_STACK, getPrimaryAiProvider } from './ai';
+import { generateText, GEOFFREY_PRIMARY_MODEL_STACK, GEOFFREY_STRICT_FALLBACK_MODEL_STACK, getPrimaryAiProvider } from './ai';
 import { getPlatformGoalForHandle } from './platform-goal';
 import { assessTasteRisk, getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply, type HighValueReplyScore } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
@@ -3017,10 +3019,14 @@ export async function refillQueue(
       negativeLimit: 10,
       directiveLimit: 10,
     });
+    const generationPipeline = getGenerationPipelineVersion(agent.handle);
 
     // Fetch trending topics (cached, 4h TTL)
     let trending: TrendingTopic[] | null = null;
-    if (agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
+    if (generationPipeline === 'v2') {
+      const cached = await getTrendingCache(agent.id).catch(() => null);
+      trending = Array.isArray(cached) ? cached as TrendingTopic[] : null;
+    } else if (agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId) {
       try {
         const cached = await getTrendingCache(agent.id);
         if (cached) {
@@ -3111,11 +3117,27 @@ export async function refillQueue(
       },
     };
 
-    // Generate organic tweets
-    let batch = organicCount > 0
-      ? await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory, ideaAtoms, signals)
-      : [];
-    if (geoffreyStrict && organicCount > 0 && batch.length === 0) {
+    // V2 owns Geoffrey's full live refill path. It intentionally returns fewer
+    // drafts when no idea clears the evidence and taste stages.
+    let batch = organicCount <= 0
+      ? []
+      : generationPipeline === 'v2'
+        ? await generateTweetBatchV2({
+            agentId: agent.id,
+            count: organicCount,
+            voiceProfile,
+            analysis,
+            learnings,
+            style: generationStyle,
+            recentPosts,
+            allTweets,
+            memory,
+            signals,
+            trending,
+            modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+          })
+        : await generateViralBatch(voiceProfile, analysis, organicCount, trending, learnings, agent.soulMd, generationStyle, recentPosts, allTweets, memory, ideaAtoms, signals);
+    if (generationPipeline === 'v1' && geoffreyStrict && organicCount > 0 && batch.length === 0) {
       batch = await generateViralBatch(
         voiceProfile,
         analysis,
@@ -3260,6 +3282,12 @@ export async function refillQueue(
           finalCriticVersion: item.finalCriticVersion ?? null,
           sourceBrief: item.sourceBrief ?? null,
           sourceEvidenceTexts: 'sourceEvidenceTexts' in item ? item.sourceEvidenceTexts ?? null : null,
+          pipelineVersion: 'pipelineVersion' in item ? item.pipelineVersion ?? null : null,
+          generationRunId: 'generationRunId' in item ? item.generationRunId ?? null : null,
+          storyClusterId: 'storyClusterId' in item ? item.storyClusterId ?? null : null,
+          ideaId: 'ideaId' in item ? item.ideaId ?? null : null,
+          draftCandidateId: 'draftCandidateId' in item ? item.draftCandidateId ?? null : null,
+          evidenceReferences: 'evidenceReferences' in item ? item.evidenceReferences ?? null : null,
           generationMode: item.generationMode,
           candidateScore: item.candidateScore,
           confidenceScore: item.confidenceScore,

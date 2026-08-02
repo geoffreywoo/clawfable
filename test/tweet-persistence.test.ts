@@ -28,6 +28,20 @@ describe('generated tweet persistence', () => {
         stiffnessRisk: 0.12,
       },
       finalCriticVersion: 'geoffwoo-final-critic-v1',
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2-provenance',
+      storyClusterId: 'story-v2-provenance',
+      ideaId: 'idea-v2-provenance',
+      draftCandidateId: 'draft-v2-provenance',
+      evidenceReferences: [{
+        sourceDocumentId: 'source-v2-provenance',
+        url: 'https://example.com/evidence',
+        title: 'Inference economics release',
+        publisher: 'Example Labs',
+        publishedAt: '2026-08-01T00:00:00.000Z',
+        trustTier: 'primary',
+        claim: 'Memory bandwidth sets the serving constraint.',
+      }],
     } as any, { status: 'preview' });
 
     expect(tweet).toMatchObject({
@@ -43,6 +57,12 @@ describe('generated tweet persistence', () => {
       finalCriticVerdict: 'allow',
       finalCriticVersion: 'geoffwoo-final-critic-v1',
       finalCriticScores: expect.objectContaining({ nativeVoice: 0.8 }),
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2-provenance',
+      storyClusterId: 'story-v2-provenance',
+      ideaId: 'idea-v2-provenance',
+      draftCandidateId: 'draft-v2-provenance',
+      evidenceReferences: [expect.objectContaining({ sourceDocumentId: 'source-v2-provenance' })],
     });
 
     const edited = await updateTweet(tweet.id, {
@@ -60,6 +80,10 @@ describe('generated tweet persistence', () => {
       finalCriticModel: null,
       finalCriticVerdict: null,
       finalCriticVersion: null,
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2-provenance',
+      ideaId: 'idea-v2-provenance',
+      draftCandidateId: 'draft-v2-provenance',
     });
   });
 });

@@ -6,8 +6,10 @@ const mocks = vi.hoisted(() => ({
   assessGeoffreyQualityPolicy: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateViralBatch: vi.fn(),
+  generateTweetBatchV2: vi.fn(),
   getAgent: vi.fn(),
   getAnalysis: vi.fn(),
+  getGenerationRuns: vi.fn(),
   getAutonomousQueueTasteIssue: vi.fn(),
   getTrendingCache: vi.fn(),
   releaseAutopilotLock: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   getAgent: mocks.getAgent,
   getAnalysis: mocks.getAnalysis,
+  getGenerationRuns: mocks.getGenerationRuns,
   getTrendingCache: mocks.getTrendingCache,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   resetReadCache: mocks.resetReadCache,
@@ -31,13 +34,19 @@ vi.mock('@/lib/viral-generator', () => ({
   generateViralBatch: mocks.generateViralBatch,
 }));
 
+vi.mock('@/lib/generation-v2', () => ({
+  generateTweetBatchV2: mocks.generateTweetBatchV2,
+}));
+
 vi.mock('@/lib/account-taste', () => ({
   assessAccountTaste: mocks.assessAccountTaste,
   getAutonomousQueueTasteIssue: mocks.getAutonomousQueueTasteIssue,
+  isGeoffreyAccount: (handle: string) => ['geoffwoo', 'geoffreywoo'].includes(handle.toLowerCase()),
 }));
 
 vi.mock('@/lib/quality-policy', () => ({
   assessGeoffreyQualityPolicy: mocks.assessGeoffreyQualityPolicy,
+  EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION: 'evidence-idea-voice-v2-copy-judge-1',
 }));
 
 import { POST } from '@/app/api/internal/agents/[id]/generation/preview/route';
@@ -57,9 +66,11 @@ describe('internal generation preview route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
+    process.env.GEOFFREY_GENERATION_PIPELINE_VERSION = 'v1';
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'geoffreywoo', soulMd: '# SOUL' });
     mocks.getAnalysis.mockResolvedValue({ agentId: '13' });
     mocks.getTrendingCache.mockResolvedValue([]);
+    mocks.getGenerationRuns.mockResolvedValue([{ id: 'run-v2', status: 'completed', stageCounts: { draftsSelected: 1 } }]);
     mocks.acquireAutopilotLock.mockResolvedValue({
       acquired: true,
       owner: 'internal-generation-preview:test',
@@ -102,6 +113,20 @@ describe('internal generation preview route', () => {
       trendHeadline: null,
       scoreProvenance: { anchorCopyRisk: 0 },
     }]);
+    mocks.generateTweetBatchV2.mockImplementation(async (options: any) => {
+      options.onTrace?.({ id: 'run-v2', status: 'completed', mode: 'preview', stageCounts: { draftsSelected: 1 } });
+      return [{
+        content: 'the bottleneck moved from model access to operator taste',
+        targetTopic: 'AI startups',
+        pipelineVersion: 'v2',
+        generationRunId: 'run-v2',
+        ideaId: 'idea-v2',
+        draftCandidateId: 'draft-v2',
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+        evidenceReferences: [],
+      }];
+    });
     mocks.assessAccountTaste.mockReturnValue({
       nativeVoiceScore: 0.74,
       casualStartupScore: 0.66,
@@ -122,6 +147,7 @@ describe('internal generation preview route', () => {
 
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.GEOFFREY_GENERATION_PIPELINE_VERSION;
   });
 
   it('rejects requests without the configured bearer secret', async () => {
@@ -200,6 +226,33 @@ describe('internal generation preview route', () => {
       modelStack: 'geoffrey_gpt56_gpt56',
     });
     expect(data.modelStack).toBe('geoffrey_gpt56_gpt56');
+  });
+
+  it('runs a non-persisting V2 production preview with candidate lineage', async () => {
+    const response = await POST(request({ count: 2, pipelineVersion: 'v2' }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: '13',
+      count: 2,
+      modelStack: 'geoffrey_fable5_gpt56',
+      mode: 'preview',
+      persistArtifacts: false,
+    }));
+    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
+    expect(data).toMatchObject({
+      pipelineVersion: 'v2',
+      generated: 1,
+      drafts: [{
+        generationRunId: 'run-v2',
+        ideaId: 'idea-v2',
+        draftCandidateId: 'draft-v2',
+      }],
+      generationTrace: expect.objectContaining({ id: 'run-v2', status: 'completed' }),
+    });
   });
 
   it('rejects unknown model stacks before taking the autopilot lock', async () => {

@@ -385,6 +385,18 @@ export type GenerationModelStackId =
   | 'geoffrey_gpt56_gpt55'
   | 'geoffrey_gpt56_gpt56';
 
+export type GenerationPipelineVersion = 'v1' | 'v2';
+
+export type QueueFeedbackReasonCode =
+  | 'bad_source_topic'
+  | 'bad_premise'
+  | 'bad_writing'
+  | 'duplicate'
+  | 'factual_risk'
+  | 'other';
+
+export type FeedbackBlockScope = 'copy' | 'idea' | 'story' | 'topic';
+
 export interface Tweet {
   id: string;
   agentId: string;
@@ -418,6 +430,12 @@ export interface Tweet {
   finalCriticVersion?: string | null;
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
+  pipelineVersion?: GenerationPipelineVersion | null;
+  generationRunId?: string | null;
+  storyClusterId?: string | null;
+  ideaId?: string | null;
+  draftCandidateId?: string | null;
+  evidenceReferences?: TweetEvidenceReference[] | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;
@@ -602,6 +620,234 @@ export interface IdeaAtom {
   };
   createdAt: string;
   updatedAt: string;
+}
+
+export type ResearchSourceType =
+  | 'x'
+  | 'hacker_news'
+  | 'rss_atom'
+  | 'sec_edgar'
+  | 'arxiv'
+  | 'github_releases'
+  | 'official';
+
+export type SourceTrustTier = 'primary' | 'trusted' | 'community';
+
+export interface SourceClaim {
+  id: string;
+  text: string;
+  kind: 'fact' | 'announcement' | 'measurement' | 'opinion';
+  confidence: number;
+  entities: string[];
+}
+
+export interface SourceDocument {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  sourceType: ResearchSourceType;
+  canonicalUrl: string;
+  title: string;
+  publisher: string;
+  publishedAt: string;
+  fetchedAt: string;
+  trustTier: SourceTrustTier;
+  isPrimary: boolean;
+  excerpt: string;
+  contentHash: string;
+  entities: string[];
+  claims: SourceClaim[];
+  topics: string[];
+  query: string | null;
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface StoryClusterScores {
+  identityFit: number;
+  evidenceStrength: number;
+  consequence: number;
+  freshness: number;
+  novelty: number;
+  networkMomentum: number;
+  total: number;
+}
+
+export interface StoryCluster {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  semanticKey: string;
+  title: string;
+  summary: string;
+  topic: string;
+  entities: string[];
+  sourceDocumentIds: string[];
+  qualifiedClaimIds: string[];
+  primarySourceCount: number;
+  independentSourceCount: number;
+  evidenceQualified: boolean;
+  scores: StoryClusterScores;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  blockedUntil: string | null;
+  blockReason: string | null;
+}
+
+export interface ResearchFeedConfig {
+  id: string;
+  url: string;
+  publisher: string;
+  trustTier: SourceTrustTier;
+  topics: string[];
+  sourceType?: 'rss_atom' | 'official';
+}
+
+export interface ResearchAgenda {
+  schemaVersion: 2;
+  agentId: string;
+  queries: string[];
+  operatorTopics?: string[];
+  pinnedQuestions: string[];
+  blockedTopics: string[];
+  blockedStoryKeys: string[];
+  domainWeights: Record<string, number>;
+  rssFeeds: ResearchFeedConfig[];
+  githubRepositories: string[];
+  updatedAt: string;
+}
+
+export type GenerationCandidateStatus =
+  | 'generated'
+  | 'selected'
+  | 'rejected'
+  | 'queued'
+  | 'posted'
+  | 'edited'
+  | 'deleted';
+
+export interface IdeaCandidate {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  generationRunId: string;
+  briefId: string;
+  storyClusterId: string | null;
+  topic: string;
+  claim: string;
+  tension: string;
+  implication: string;
+  authorReason: string;
+  evidenceIds: string[];
+  counterargument: string | null;
+  factualRisk: 'low' | 'medium' | 'high';
+  semanticKey: string;
+  noveltyScore: number;
+  evidenceScore: number;
+  identityScore: number;
+  judgeScore: number | null;
+  status: GenerationCandidateStatus;
+  rejectionCodes: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DraftCandidate {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  generationRunId: string;
+  ideaId: string;
+  storyClusterId: string | null;
+  content: string;
+  format: string;
+  posture: string;
+  voiceAnchorIds: string[];
+  evidenceIds: string[];
+  generationProvider: 'openai' | 'anthropic' | null;
+  generationModel: string | null;
+  judgeProvider: 'openai' | 'anthropic' | null;
+  judgeModel: string | null;
+  judgeScore: number | null;
+  status: GenerationCandidateStatus;
+  rejectionCodes: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TweetEvidenceReference {
+  sourceDocumentId: string;
+  url: string;
+  title: string;
+  publisher: string;
+  publishedAt: string;
+  trustTier: SourceTrustTier;
+  claim: string | null;
+}
+
+export interface GenerationModelCallTrace {
+  stage: 'source_enrichment' | 'idea_generation' | 'idea_judgment' | 'tweet_writing' | 'copy_judgment';
+  provider: 'openai' | 'anthropic' | null;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  estimatedCostUsd: number | null;
+  durationMs: number;
+  succeeded: boolean;
+  error: string | null;
+}
+
+export interface GenerationRunTrace {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  pipelineVersion: 'v2';
+  mode?: 'live' | 'manual' | 'preview';
+  requestedCount: number;
+  sourceDocumentIds: string[];
+  storyClusterIds: string[];
+  ideaCandidateIds: string[];
+  draftCandidateIds: string[];
+  selectedDraftIds: string[];
+  stageCounts: Record<string, number>;
+  rejectionCounts: Record<string, number>;
+  modelCalls: GenerationModelCallTrace[];
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  estimatedCostUsd: number | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  status: 'running' | 'completed' | 'empty' | 'failed';
+  error: string | null;
+}
+
+export interface SemanticBlock {
+  schemaVersion: 2;
+  id: string;
+  agentId: string;
+  scope: FeedbackBlockScope;
+  semanticKey: string;
+  topic: string | null;
+  storyClusterId: string | null;
+  ideaId: string | null;
+  reasonCode: QueueFeedbackReasonCode;
+  reason: string | null;
+  permanent: boolean;
+  blockedUntil: string | null;
+  createdAt: string;
+}
+
+export interface ResearchRefreshState {
+  schemaVersion: 2;
+  agentId: string;
+  lastStartedAt: string | null;
+  lastCompletedAt: string | null;
+  adapterRefreshedAt: Partial<Record<ResearchSourceType, string>>;
+  documentsFetched: number;
+  storiesQualified: number;
+  partialFailures: string[];
+  modelCalls?: GenerationModelCallTrace[];
+  semanticBackfillVersion?: number;
 }
 
 export interface ValidationResult<T> {
@@ -1287,6 +1533,10 @@ export interface FeedbackEntry {
   intentSummary?: string;
   source?: 'preview_feedback' | 'queue_delete' | 'taste_calibration';
   userProvidedReason?: boolean;
+  reasonCode?: QueueFeedbackReasonCode;
+  blockScope?: FeedbackBlockScope | null;
+  permanentBlock?: boolean;
+  semanticKey?: string | null;
 }
 
 export type LearningSignalType =

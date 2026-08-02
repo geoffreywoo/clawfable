@@ -1,4 +1,10 @@
-import type { LearningSignal, ProtocolSettings, ValidationResult } from './types';
+import type {
+  FeedbackBlockScope,
+  LearningSignal,
+  ProtocolSettings,
+  QueueFeedbackReasonCode,
+  ValidationResult,
+} from './types';
 import { clampPostsPerDay, getTweetCompletenessIssue } from './survivability';
 import { assessTasteRisk } from './virality-signals';
 
@@ -37,6 +43,15 @@ const TWEET_STATUSES = new Set(['draft', 'queued', 'posted'] as const);
 const TWEET_TYPES = new Set(['original', 'reply', 'quote'] as const);
 const AUTONOMY_MODES = new Set(['safe', 'balanced', 'explore'] as const);
 const TREND_TOLERANCES = new Set(['adjacent', 'moderate', 'aggressive'] as const);
+const QUEUE_FEEDBACK_REASONS = new Set<QueueFeedbackReasonCode>([
+  'bad_source_topic',
+  'bad_premise',
+  'bad_writing',
+  'duplicate',
+  'factual_risk',
+  'other',
+]);
+const FEEDBACK_BLOCK_SCOPES = new Set<FeedbackBlockScope>(['copy', 'idea', 'story', 'topic']);
 
 function fail<T>(error: string): ValidationResult<T> {
   return { ok: false, error };
@@ -173,6 +188,37 @@ export function validateQueueUpdateRequest(body: unknown): ValidationResult<Queu
     updates.deletionReason = optionalString(body.deletionReason, 500) || '';
   }
   return ok(updates);
+}
+
+export interface QueueDeleteRequest {
+  reason?: string;
+  reasonCode?: QueueFeedbackReasonCode;
+  blockScope?: FeedbackBlockScope;
+  permanent: boolean;
+}
+
+export function validateQueueDeleteRequest(body: unknown): ValidationResult<QueueDeleteRequest> {
+  if (body === null || body === undefined) return ok({ permanent: false });
+  if (!isRecord(body)) return fail('Invalid JSON body');
+  const reason = optionalString(body.reason, 500);
+  let reasonCode: QueueFeedbackReasonCode | undefined;
+  if (body.reasonCode !== undefined) {
+    if (typeof body.reasonCode !== 'string' || !QUEUE_FEEDBACK_REASONS.has(body.reasonCode as QueueFeedbackReasonCode)) {
+      return fail('Invalid feedback reason');
+    }
+    reasonCode = body.reasonCode as QueueFeedbackReasonCode;
+  }
+  let blockScope: FeedbackBlockScope | undefined;
+  if (body.blockScope !== undefined) {
+    if (typeof body.blockScope !== 'string' || !FEEDBACK_BLOCK_SCOPES.has(body.blockScope as FeedbackBlockScope)) {
+      return fail('Invalid feedback block scope');
+    }
+    blockScope = body.blockScope as FeedbackBlockScope;
+  }
+  if (body.permanent !== undefined && typeof body.permanent !== 'boolean') {
+    return fail('permanent must be a boolean');
+  }
+  return ok({ reason, reasonCode, blockScope, permanent: body.permanent === true });
 }
 
 export function validateLearningSignalRequest(body: unknown): ValidationResult<Omit<LearningSignal, 'id' | 'agentId' | 'createdAt'>> {

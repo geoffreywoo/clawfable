@@ -31,11 +31,24 @@ export function tweetStyleMode(tweet: Pick<Tweet, 'styleMode'> | null | undefine
 }
 
 export function metadataWithStyleMode(
-  tweet: Pick<Tweet, 'styleMode'> | null | undefined,
+  tweet: Pick<
+    Tweet,
+    | 'styleMode'
+    | 'pipelineVersion'
+    | 'generationRunId'
+    | 'storyClusterId'
+    | 'ideaId'
+    | 'draftCandidateId'
+  > | null | undefined,
   metadata: Record<string, string | number | boolean | null> = {},
 ): Record<string, string | number | boolean | null> {
   return {
     ...metadata,
     styleMode: tweetStyleMode(tweet),
+    pipelineVersion: tweet?.pipelineVersion || 'v1',
+    generationRunId: tweet?.generationRunId || null,
+    storyClusterId: tweet?.storyClusterId || null,
+    ideaId: tweet?.ideaId || null,
+    draftCandidateId: tweet?.draftCandidateId || null,
   };
 }

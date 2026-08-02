@@ -8,6 +8,11 @@ interface TweetDecisionPanelProps {
   tweet: Pick<
     Tweet,
     | 'id'
+    | 'pipelineVersion'
+    | 'generationRunId'
+    | 'storyClusterId'
+    | 'ideaId'
+    | 'evidenceReferences'
     | 'candidateScore'
     | 'confidenceScore'
     | 'voiceScore'
@@ -27,6 +32,7 @@ interface TweetDecisionPanelProps {
     | 'toneType'
     | 'specificityType'
     | 'structureType'
+    | 'thesis'
     | 'coverageCluster'
     | 'judgeScore'
     | 'judgeNotes'
@@ -135,6 +141,16 @@ function ScoreRow({
 }
 
 export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps) {
+  const isV2 = tweet.pipelineVersion === 'v2';
+  const evidence = (tweet.evidenceReferences || []).filter((reference) => /^https?:\/\//i.test(reference.url));
+  const evidencePublishers = new Set(evidence.map((reference) => reference.publisher.trim().toLowerCase()).filter(Boolean));
+  const evidenceStatus = evidence.some((reference) => reference.trustTier === 'primary')
+    ? 'Primary-source grounded'
+    : evidencePublishers.size >= 2
+      ? 'Independently corroborated'
+      : evidence.length > 0
+        ? 'Linked evidence'
+        : 'Operator judgment';
   const signals = buildSignals(tweet, snapshot);
   const insight = snapshot?.decisionInsights?.[tweet.id] ?? null;
   const insightState = statusMeta(insight?.state || 'waiting');
@@ -153,43 +169,86 @@ export function TweetDecisionPanel({ tweet, snapshot }: TweetDecisionPanelProps)
   return (
     <div className="decision-panel">
       <div className="decision-panel-top">
-        <div className="decision-summary-grid decision-summary-grid-modern">
-          <div className="decision-summary-card">
-            <span className="decision-summary-label">Overall fit</span>
-            <span className="decision-summary-value">{tweet.candidateScore ?? 'N/A'}</span>
-          </div>
-          <div className="decision-summary-card">
-            <span className="decision-summary-label">Confidence</span>
-            <span className="decision-summary-value">{pct(tweet.confidenceScore)}</span>
-          </div>
-          <div className="decision-summary-card">
-            <span className="decision-summary-label">Draft type</span>
-            <span className="decision-summary-value">{betLabel}</span>
-          </div>
-          <div className="decision-summary-card">
-            <span className="decision-summary-label">Result state</span>
-            <span className={`decision-summary-badge ${toneClass(insightState.tone)}`}>{insightState.label}</span>
-          </div>
-        </div>
+        {isV2 ? (
+          <section className="decision-v2-provenance" aria-label="Draft evidence and idea">
+            <div className="decision-v2-heading">
+              <div>
+                <p className="decision-explainer-label">Why this draft</p>
+                <h4>Evidence to idea to voice</h4>
+              </div>
+              <span className="decision-v2-version">V2</span>
+            </div>
+            <div className="decision-v2-idea-grid">
+              <div>
+                <span>Core idea</span>
+                <p>{tweet.experimentHypothesis || tweet.thesis || 'A distinct operator judgment selected before copy was written.'}</p>
+              </div>
+              <div>
+                <span>Author-specific angle</span>
+                <p>{tweet.rationale || 'Selected for its fit with the operator-written voice and worldview.'}</p>
+              </div>
+            </div>
+            <div className="decision-v2-evidence">
+              <div className="decision-v2-evidence-head">
+                <span>Evidence</span>
+                <strong>{evidenceStatus}</strong>
+              </div>
+              {evidence.length > 0 ? (
+                <div className="decision-v2-source-list">
+                  {evidence.slice(0, 4).map((reference) => (
+                    <a key={reference.sourceDocumentId} href={reference.url} target="_blank" rel="noreferrer">
+                      <span>{reference.publisher}</span>
+                      <strong>{reference.title}</strong>
+                      <small>{reference.trustTier.replace(/_/g, ' ')} source</small>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="decision-v2-evidence-note">No current-event evidence is being asserted. This draft was qualified as an operator-owned opinion.</p>
+              )}
+            </div>
+          </section>
+        ) : (
+          <>
+            <div className="decision-summary-grid decision-summary-grid-modern">
+              <div className="decision-summary-card">
+                <span className="decision-summary-label">Overall fit</span>
+                <span className="decision-summary-value">{tweet.candidateScore ?? 'N/A'}</span>
+              </div>
+              <div className="decision-summary-card">
+                <span className="decision-summary-label">Confidence</span>
+                <span className="decision-summary-value">{pct(tweet.confidenceScore)}</span>
+              </div>
+              <div className="decision-summary-card">
+                <span className="decision-summary-label">Draft type</span>
+                <span className="decision-summary-value">{betLabel}</span>
+              </div>
+              <div className="decision-summary-card">
+                <span className="decision-summary-label">Result state</span>
+                <span className={`decision-summary-badge ${toneClass(insightState.tone)}`}>{insightState.label}</span>
+              </div>
+            </div>
 
-        <div className="decision-explainer">
-          <p className="decision-explainer-label">Why this draft</p>
-          <p className="decision-explainer-copy">
-            {tweet.experimentHypothesis || tweet.rationale || 'This draft ranked highest after quality, novelty, predicted value, and risk were weighed together.'}
-          </p>
-          <div className="decision-explainer-meta">
-            <span className="learning-source-chip">Predicted {predictedScore !== null ? `${predictedScore}%` : 'N/A'}</span>
-            {tweet.portfolioRole && <span className="learning-source-chip">{tweet.portfolioRole.replace(/_/g, ' ')}</span>}
-            {tweet.mediaExperimentType && tweet.mediaExperimentType !== 'text_only' && <span className="learning-source-chip">{tweet.mediaExperimentType}</span>}
-            {typeof tweet.trendFitScore === 'number' && <span className="learning-source-chip">Trend fit {Math.round(tweet.trendFitScore * 100)}%</span>}
-            {actualScore !== null && <span className="learning-source-chip">Actual {actualScore}%</span>}
-            {insight?.learningDelta !== null && insight?.learningDelta !== undefined && (
-              <span className={`learning-source-chip ${toneClass(insight.learningDelta >= 0 ? 'positive' : 'danger')}`}>
-                Delta {insight.learningDelta >= 0 ? '+' : ''}{insight.learningDelta}
-              </span>
-            )}
-          </div>
-        </div>
+            <div className="decision-explainer">
+              <p className="decision-explainer-label">Why this draft</p>
+              <p className="decision-explainer-copy">
+                {tweet.experimentHypothesis || tweet.rationale || 'This draft ranked highest after quality, novelty, predicted value, and risk were weighed together.'}
+              </p>
+              <div className="decision-explainer-meta">
+                <span className="learning-source-chip">Predicted {predictedScore !== null ? `${predictedScore}%` : 'N/A'}</span>
+                {tweet.portfolioRole && <span className="learning-source-chip">{tweet.portfolioRole.replace(/_/g, ' ')}</span>}
+                {tweet.mediaExperimentType && tweet.mediaExperimentType !== 'text_only' && <span className="learning-source-chip">{tweet.mediaExperimentType}</span>}
+                {typeof tweet.trendFitScore === 'number' && <span className="learning-source-chip">Trend fit {Math.round(tweet.trendFitScore * 100)}%</span>}
+                {actualScore !== null && <span className="learning-source-chip">Actual {actualScore}%</span>}
+                {insight?.learningDelta !== null && insight?.learningDelta !== undefined && (
+                  <span className={`learning-source-chip ${toneClass(insight.learningDelta >= 0 ? 'positive' : 'danger')}`}>
+                    Delta {insight.learningDelta >= 0 ? '+' : ''}{insight.learningDelta}
+                  </span>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {signals.length > 0 && (

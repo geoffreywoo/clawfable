@@ -1,4 +1,56 @@
-import type { Agent, Tweet, Mention, Metric, CreateAgentInput, UpdateAgentInput, CreateTweetInput, UpdateTweetInput, CreateMentionInput, MetricInput, AccountAnalysis, User, Session, ProtocolSettings, PostLogEntry, TweetJob, CreateTweetJobInput, UpdateTweetJobInput, TweetPerformance, AgentLearnings, WizardData, StyleSignals, FeedbackEntry, FunnelEvent, SoulVersion, VoiceDirective, LearningSignal, VoiceDirectiveRule, BrowserCompanionPairing, EngagementSession, ManualExampleCuration, AutopilotHealthSnapshot, DraftExperiment, TrendOpportunity, RelationshipOpportunity, ViralityPostmortem, OutcomeEvent, MetricAvailability, RelationshipProfile, IdeaAtom, CriticVerdict, VoiceCorpusSnapshot, AudienceVoiceComplaint } from './types';
+import type {
+  Agent,
+  Tweet,
+  Mention,
+  Metric,
+  CreateAgentInput,
+  UpdateAgentInput,
+  CreateTweetInput,
+  UpdateTweetInput,
+  CreateMentionInput,
+  MetricInput,
+  AccountAnalysis,
+  User,
+  Session,
+  ProtocolSettings,
+  PostLogEntry,
+  TweetJob,
+  CreateTweetJobInput,
+  UpdateTweetJobInput,
+  TweetPerformance,
+  AgentLearnings,
+  WizardData,
+  StyleSignals,
+  FeedbackEntry,
+  FunnelEvent,
+  SoulVersion,
+  VoiceDirective,
+  LearningSignal,
+  VoiceDirectiveRule,
+  BrowserCompanionPairing,
+  EngagementSession,
+  ManualExampleCuration,
+  AutopilotHealthSnapshot,
+  DraftExperiment,
+  TrendOpportunity,
+  RelationshipOpportunity,
+  ViralityPostmortem,
+  OutcomeEvent,
+  MetricAvailability,
+  RelationshipProfile,
+  IdeaAtom,
+  CriticVerdict,
+  VoiceCorpusSnapshot,
+  AudienceVoiceComplaint,
+  ResearchAgenda,
+  SourceDocument,
+  StoryCluster,
+  IdeaCandidate,
+  DraftCandidate,
+  GenerationRunTrace,
+  SemanticBlock,
+  ResearchRefreshState,
+} from './types';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { normalizeUsername } from './internal-accounts';
 import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirectiveRule } from './voice-directives';
@@ -567,6 +619,15 @@ const KEYS = {
   agentMetricAvailability: (id: string) => `agent:${id}:metric_availability`,
   agentRelationshipProfiles: (id: string) => `agent:${id}:relationship_profiles`,
   agentIdeaAtoms: (id: string) => `agent:${id}:idea_atoms`,
+  agentResearchAgenda: (id: string) => `agent:${id}:research_agenda:v2`,
+  agentSourceDocuments: (id: string) => `agent:${id}:source_documents:v2`,
+  agentStoryClusters: (id: string) => `agent:${id}:story_clusters:v2`,
+  agentIdeaCandidates: (id: string) => `agent:${id}:idea_candidates:v2`,
+  agentDraftCandidates: (id: string) => `agent:${id}:draft_candidates:v2`,
+  agentGenerationRuns: (id: string) => `agent:${id}:generation_runs:v2`,
+  agentSemanticBlocks: (id: string) => `agent:${id}:semantic_blocks:v2`,
+  agentResearchRefresh: (id: string) => `agent:${id}:research_refresh:v2`,
+  agentResearchLock: (id: string) => `agent:${id}:research_lock:v2`,
   agentCriticVerdicts: (id: string) => `agent:${id}:critic_verdicts`,
   agentAutopilotLock: (id: string) => `agent:${id}:autopilot_lock`,
   agentTopicIntelligenceLock: (id: string) => `agent:${id}:topic_intelligence_lock`,
@@ -835,6 +896,15 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentTrendingCache(id));
   await kvDel(KEYS.agentTopicIntelligence(id));
   await kvDel(KEYS.agentTopicIntelligenceLock(id));
+  await kvDel(KEYS.agentResearchAgenda(id));
+  await kvDel(KEYS.agentSourceDocuments(id));
+  await kvDel(KEYS.agentStoryClusters(id));
+  await kvDel(KEYS.agentIdeaCandidates(id));
+  await kvDel(KEYS.agentDraftCandidates(id));
+  await kvDel(KEYS.agentGenerationRuns(id));
+  await kvDel(KEYS.agentSemanticBlocks(id));
+  await kvDel(KEYS.agentResearchRefresh(id));
+  await kvDel(KEYS.agentResearchLock(id));
   const experimentIds = await kvLrange(KEYS.agentExperiments(id), 0, -1);
   await Promise.all(experimentIds.map((experimentId) => kvDel(KEYS.draftExperiment(String(experimentId)))));
   await kvDel(KEYS.agentExperiments(id));
@@ -951,6 +1021,12 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     finalCriticVersion: tweet.finalCriticVersion ?? null,
     sourceBrief: tweet.sourceBrief ?? null,
     sourceEvidenceTexts: coerceNullableJson<string[]>(tweet.sourceEvidenceTexts),
+    pipelineVersion: tweet.pipelineVersion ?? null,
+    generationRunId: tweet.generationRunId ?? null,
+    storyClusterId: tweet.storyClusterId ?? null,
+    ideaId: tweet.ideaId ?? null,
+    draftCandidateId: tweet.draftCandidateId ?? null,
+    evidenceReferences: coerceNullableJson(tweet.evidenceReferences),
     generationMode: tweet.generationMode ?? null,
     candidateScore: coerceNullableNumber(tweet.candidateScore),
     confidenceScore: coerceNullableNumber(tweet.confidenceScore),
@@ -1016,6 +1092,7 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
     finalCriticScores: tweet.finalCriticScores ? JSON.stringify(tweet.finalCriticScores) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
     sourceEvidenceTexts: tweet.sourceEvidenceTexts ? JSON.stringify(tweet.sourceEvidenceTexts) : null,
+    evidenceReferences: tweet.evidenceReferences ? JSON.stringify(tweet.evidenceReferences) : null,
     rewardBreakdown: tweet.rewardBreakdown ? JSON.stringify(tweet.rewardBreakdown) : null,
     criticScores: tweet.criticScores ? JSON.stringify(tweet.criticScores) : null,
     actionRewardPrediction: tweet.actionRewardPrediction ? JSON.stringify(tweet.actionRewardPrediction) : null,
@@ -1096,6 +1173,12 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     finalCriticVersion: data.finalCriticVersion ?? null,
     sourceBrief: data.sourceBrief ?? null,
     sourceEvidenceTexts: data.sourceEvidenceTexts ?? null,
+    pipelineVersion: data.pipelineVersion ?? null,
+    generationRunId: data.generationRunId ?? null,
+    storyClusterId: data.storyClusterId ?? null,
+    ideaId: data.ideaId ?? null,
+    draftCandidateId: data.draftCandidateId ?? null,
+    evidenceReferences: data.evidenceReferences ?? null,
     generationMode: data.generationMode ?? null,
     candidateScore: data.candidateScore ?? null,
     confidenceScore: data.confidenceScore ?? null,
@@ -1214,6 +1297,11 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
         generationModelStack: tweet.generationModelStack,
         generationProvider: tweet.generationProvider,
         generationModel: tweet.generationModel,
+        pipelineVersion: tweet.pipelineVersion,
+        generationRunId: tweet.generationRunId,
+        storyClusterId: tweet.storyClusterId,
+        ideaId: tweet.ideaId,
+        draftCandidateId: tweet.draftCandidateId,
         candidateScore: tweet.candidateScore,
         confidenceScore: tweet.confidenceScore,
         sourceLane: tweet.sourceLane,
@@ -1227,6 +1315,16 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
       queuedDelta: tweet.status === 'queued' ? 1 : 0,
       postedDelta: tweet.status === 'posted' ? 1 : 0,
     }).catch(() => null),
+    recordV2CandidateOutcomeForTweet(
+      tweet,
+      tweet.status === 'queued'
+        ? 'queued'
+        : tweet.status === 'posted'
+          ? 'posted'
+          : tweet.draftCandidateId
+            ? 'selected'
+            : 'generated',
+    ).catch(() => null),
   ]);
   return tweet;
 }
@@ -1323,6 +1421,22 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
       rejectedDelta: data.status === 'deleted_from_x' && prevStatus !== 'deleted_from_x' ? 1 : 0,
       riskNote: data.status === 'deleted_from_x' ? data.deletionReason || existing.deletionReason || null : null,
     }).catch(() => null),
+    data.content !== undefined && data.content !== existing.content
+      ? recordV2CandidateOutcomeForTweet(updated, 'edited').catch(() => null)
+      : data.status !== undefined && data.status !== prevStatus
+        ? recordV2CandidateOutcomeForTweet(
+            updated,
+            data.status === 'queued'
+              ? 'queued'
+              : data.status === 'posted'
+                ? 'posted'
+                : data.status === 'deleted_from_x'
+                  ? 'deleted'
+                  : updated.draftCandidateId
+                    ? 'selected'
+                    : 'generated',
+          ).catch(() => null)
+        : Promise.resolve(null),
   ]);
 
   return updated;
@@ -1929,7 +2043,7 @@ export async function addPerformanceEntry(agentId: string, entry: TweetPerforman
   const measuredReward = entry.actionRewards?.total ?? computeActionRewards(entry).total;
   if (entry.tweetId) {
     const tweet = await getTweet(String(entry.tweetId));
-    if (tweet) {
+    if (tweet && tweet.pipelineVersion !== 'v2') {
       await updateIdeaAtomOutcomeFromTweet(tweet, {
         rewardDelta: measuredReward,
         riskNote: entry.slopScore && entry.slopScore > 0.35 ? `Slop risk ${entry.slopScore}` : null,
@@ -2420,6 +2534,7 @@ async function recordIdeaAtomFromTweet(
     riskNote?: string | null;
   } = {}
 ): Promise<void> {
+  if (tweet.pipelineVersion === 'v2') return;
   const claim = extractIdeaClaim(tweet);
   if (!claim) return;
   const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
@@ -2475,6 +2590,7 @@ async function recordIdeaAtomFromTweet(
 }
 
 export async function markIdeaAtomRejectedForTweet(tweet: Tweet, reason?: string | null): Promise<void> {
+  if (tweet.pipelineVersion === 'v2') return;
   const claim = extractIdeaClaim(tweet);
   if (!claim) return;
   const existing = await getIdeaAtoms(tweet.agentId, MAX_IDEA_ATOMS);
@@ -2529,6 +2645,247 @@ async function updateIdeaAtomOutcomeFromTweet(
 export async function getIdeaAtoms(agentId: string, limit = 40): Promise<IdeaAtom[]> {
   const data = await kvGet<IdeaAtom[]>(KEYS.agentIdeaAtoms(agentId));
   return (data ?? []).slice(0, limit);
+}
+
+// ─── Evidence-to-idea generation V2 ────────────────────────────────────────
+
+const MAX_SOURCE_DOCUMENTS = 400;
+const MAX_STORY_CLUSTERS = 240;
+const MAX_IDEA_CANDIDATES = 600;
+const MAX_DRAFT_CANDIDATES = 600;
+const MAX_GENERATION_RUNS = 120;
+const MAX_SEMANTIC_BLOCKS = 240;
+
+function newestByTimestamp<T>(
+  entries: T[],
+  getTimestamp: (entry: T) => string,
+): T[] {
+  return [...entries].sort((left, right) => (
+    Date.parse(getTimestamp(right)) - Date.parse(getTimestamp(left))
+  ));
+}
+
+function mergeRecordsById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const merged = new Map(current.map((entry) => [String(entry.id), entry]));
+  for (const entry of incoming) merged.set(String(entry.id), entry);
+  return [...merged.values()];
+}
+
+export async function getResearchAgenda(agentId: string): Promise<ResearchAgenda | null> {
+  const agenda = await kvGet<ResearchAgenda>(KEYS.agentResearchAgenda(agentId));
+  return agenda?.schemaVersion === 2 ? agenda : null;
+}
+
+export async function saveResearchAgenda(agentId: string, agenda: ResearchAgenda): Promise<void> {
+  await kvSet(KEYS.agentResearchAgenda(agentId), { ...agenda, agentId, schemaVersion: 2 });
+}
+
+export async function getSourceDocuments(agentId: string, limit = MAX_SOURCE_DOCUMENTS): Promise<SourceDocument[]> {
+  const documents = await kvGet<SourceDocument[]>(KEYS.agentSourceDocuments(agentId));
+  return newestByTimestamp(
+    (documents ?? []).filter((entry) => entry.schemaVersion === 2),
+    (entry) => entry.fetchedAt,
+  ).slice(0, Math.max(0, limit));
+}
+
+export async function upsertSourceDocuments(agentId: string, documents: SourceDocument[]): Promise<SourceDocument[]> {
+  if (documents.length === 0) return getSourceDocuments(agentId);
+  const now = Date.now();
+  const current = await getSourceDocuments(agentId, MAX_SOURCE_DOCUMENTS);
+  const normalized = documents.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }));
+  const retained = mergeRecordsById(current, normalized).filter((entry) => {
+    const fetchedAt = Date.parse(entry.fetchedAt);
+    if (!Number.isFinite(fetchedAt)) return false;
+    const retentionDays = entry.trustTier === 'primary' ? 180 : 14;
+    return now - fetchedAt <= retentionDays * 24 * 60 * 60 * 1000;
+  });
+  const next = newestByTimestamp(retained, (entry) => entry.fetchedAt).slice(0, MAX_SOURCE_DOCUMENTS);
+  await kvSet(KEYS.agentSourceDocuments(agentId), next);
+  return next;
+}
+
+export async function getStoryClusters(agentId: string, limit = MAX_STORY_CLUSTERS): Promise<StoryCluster[]> {
+  const clusters = await kvGet<StoryCluster[]>(KEYS.agentStoryClusters(agentId));
+  return newestByTimestamp(
+    (clusters ?? []).filter((entry) => entry.schemaVersion === 2),
+    (entry) => entry.lastSeenAt,
+  ).slice(0, Math.max(0, limit));
+}
+
+export async function upsertStoryClusters(agentId: string, clusters: StoryCluster[]): Promise<StoryCluster[]> {
+  if (clusters.length === 0) return getStoryClusters(agentId);
+  const current = await getStoryClusters(agentId, MAX_STORY_CLUSTERS);
+  const next = newestByTimestamp(
+    mergeRecordsById(current, clusters.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+    (entry) => entry.lastSeenAt,
+  ).slice(0, MAX_STORY_CLUSTERS);
+  await kvSet(KEYS.agentStoryClusters(agentId), next);
+  return next;
+}
+
+export async function getIdeaCandidates(agentId: string, limit = 100): Promise<IdeaCandidate[]> {
+  const candidates = await kvGet<IdeaCandidate[]>(KEYS.agentIdeaCandidates(agentId));
+  return newestByTimestamp(
+    (candidates ?? []).filter((entry) => entry.schemaVersion === 2),
+    (entry) => entry.createdAt,
+  ).slice(0, Math.max(0, limit));
+}
+
+export async function upsertIdeaCandidates(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
+  const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
+  const next = newestByTimestamp(
+    mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+    (entry) => entry.createdAt,
+  ).slice(0, MAX_IDEA_CANDIDATES);
+  await kvSet(KEYS.agentIdeaCandidates(agentId), next);
+  return next;
+}
+
+export async function updateIdeaCandidate(
+  agentId: string,
+  ideaId: string,
+  updates: Partial<Omit<IdeaCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
+): Promise<IdeaCandidate | null> {
+  const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
+  const found = current.find((entry) => entry.id === ideaId);
+  if (!found) return null;
+  const updated: IdeaCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
+  await upsertIdeaCandidates(agentId, [updated]);
+  return updated;
+}
+
+export async function getDraftCandidates(agentId: string, limit = 100): Promise<DraftCandidate[]> {
+  const candidates = await kvGet<DraftCandidate[]>(KEYS.agentDraftCandidates(agentId));
+  return newestByTimestamp(
+    (candidates ?? []).filter((entry) => entry.schemaVersion === 2),
+    (entry) => entry.createdAt,
+  ).slice(0, Math.max(0, limit));
+}
+
+export async function upsertDraftCandidates(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
+  const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
+  const next = newestByTimestamp(
+    mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+    (entry) => entry.createdAt,
+  ).slice(0, MAX_DRAFT_CANDIDATES);
+  await kvSet(KEYS.agentDraftCandidates(agentId), next);
+  return next;
+}
+
+export async function updateDraftCandidate(
+  agentId: string,
+  draftId: string,
+  updates: Partial<Omit<DraftCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
+): Promise<DraftCandidate | null> {
+  const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
+  const found = current.find((entry) => entry.id === draftId);
+  if (!found) return null;
+  const updated: DraftCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
+  await upsertDraftCandidates(agentId, [updated]);
+  return updated;
+}
+
+export async function recordV2CandidateOutcomeForTweet(
+  tweet: Tweet,
+  status: IdeaCandidate['status'],
+  rejectionCodes: string[] = [],
+  options: { updateIdea?: boolean; updateDraft?: boolean } = {},
+): Promise<void> {
+  if (tweet.pipelineVersion !== 'v2') return;
+  const updateIdea = options.updateIdea !== false;
+  const updateDraft = options.updateDraft !== false;
+  const updates = {
+    status,
+    ...(rejectionCodes.length > 0 ? { rejectionCodes } : {}),
+  };
+  await Promise.all([
+    updateIdea && tweet.ideaId ? updateIdeaCandidate(tweet.agentId, tweet.ideaId, updates) : Promise.resolve(null),
+    updateDraft && tweet.draftCandidateId ? updateDraftCandidate(tweet.agentId, tweet.draftCandidateId, updates) : Promise.resolve(null),
+  ]);
+}
+
+export async function getGenerationRuns(agentId: string, limit = 50): Promise<GenerationRunTrace[]> {
+  const runs = await kvGet<GenerationRunTrace[]>(KEYS.agentGenerationRuns(agentId));
+  return newestByTimestamp(
+    (runs ?? []).filter((entry) => entry.schemaVersion === 2),
+    (entry) => entry.startedAt,
+  ).slice(0, Math.max(0, limit));
+}
+
+export async function saveGenerationRun(agentId: string, trace: GenerationRunTrace): Promise<void> {
+  const current = await getGenerationRuns(agentId, MAX_GENERATION_RUNS);
+  const next = newestByTimestamp(
+    mergeRecordsById(current, [{ ...trace, agentId, schemaVersion: 2 as const }]),
+    (entry) => entry.startedAt,
+  ).slice(0, MAX_GENERATION_RUNS);
+  await kvSet(KEYS.agentGenerationRuns(agentId), next);
+}
+
+export async function getSemanticBlocks(agentId: string, includeExpired = false): Promise<SemanticBlock[]> {
+  const blocks = await kvGet<SemanticBlock[]>(KEYS.agentSemanticBlocks(agentId));
+  const now = Date.now();
+  return newestByTimestamp(
+    (blocks ?? []).filter((entry) => entry.schemaVersion === 2).filter((entry) => {
+      if (includeExpired || entry.permanent || !entry.blockedUntil) return true;
+      const blockedUntil = Date.parse(entry.blockedUntil);
+      return Number.isFinite(blockedUntil) && blockedUntil > now;
+    }),
+    (entry) => entry.createdAt,
+  );
+}
+
+export async function addSemanticBlock(agentId: string, block: SemanticBlock): Promise<SemanticBlock> {
+  const current = await getSemanticBlocks(agentId, true);
+  const normalized = { ...block, agentId, schemaVersion: 2 as const };
+  const next = [
+    normalized,
+    ...current.filter((entry) => !(
+      entry.scope === normalized.scope
+      && entry.semanticKey === normalized.semanticKey
+    )),
+  ].slice(0, MAX_SEMANTIC_BLOCKS);
+  await kvSet(KEYS.agentSemanticBlocks(agentId), next);
+  return normalized;
+}
+
+export async function getResearchRefreshState(agentId: string): Promise<ResearchRefreshState | null> {
+  const state = await kvGet<ResearchRefreshState>(KEYS.agentResearchRefresh(agentId));
+  return state?.schemaVersion === 2 ? state : null;
+}
+
+export async function saveResearchRefreshState(agentId: string, state: ResearchRefreshState): Promise<void> {
+  await kvSet(KEYS.agentResearchRefresh(agentId), { ...state, agentId, schemaVersion: 2 });
+}
+
+export interface ResearchRefreshLock {
+  agentId: string;
+  owner: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+export async function acquireResearchRefreshLock(
+  agentId: string,
+  owner = `research-refresh:${crypto.randomUUID()}`,
+  ttlSeconds = 12 * 60,
+): Promise<{ acquired: boolean; owner: string; lock: ResearchRefreshLock | null }> {
+  const now = Date.now();
+  const lock: ResearchRefreshLock = {
+    agentId,
+    owner,
+    acquiredAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
+  };
+  const acquired = await kvSet(KEYS.agentResearchLock(agentId), lock, { nx: true, ex: ttlSeconds });
+  return {
+    acquired,
+    owner,
+    lock: acquired ? lock : await kvGet<ResearchRefreshLock>(KEYS.agentResearchLock(agentId)),
+  };
+}
+
+export async function releaseResearchRefreshLock(agentId: string, owner: string): Promise<boolean> {
+  return kvCompareObjectFieldAndDelete(KEYS.agentResearchLock(agentId), 'owner', owner);
 }
 
 function buildCriticVerdict(tweet: Tweet): CriticVerdict {
@@ -2690,7 +3047,7 @@ export async function addLearningSignal(
   await updateDraftExperimentFromSignal(agentId, full);
   if (full.tweetId) {
     const tweet = await getTweet(String(full.tweetId));
-    if (tweet) {
+    if (tweet && tweet.pipelineVersion !== 'v2') {
       const rejectedDelta = (
         full.signalType === 'deleted_from_queue'
         || full.signalType === 'deleted_from_x'

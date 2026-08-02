@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgent, createTweet, getFeedback, getTweet, saveFeedback } from '@/lib/kv-storage';
+import {
+  createAgent,
+  createTweet,
+  getFeedback,
+  getIdeaCandidates,
+  getLearningSignals,
+  getSemanticBlocks,
+  getTweet,
+  saveFeedback,
+  upsertIdeaCandidates,
+} from '@/lib/kv-storage';
 
 vi.mock('@/lib/auth', () => ({
   requireAgentAccess: vi.fn(async (id: string) => ({
@@ -160,6 +170,82 @@ describe('queue ownership route guard', () => {
       typeof entry.intentSummary === 'string' &&
       entry.intentSummary.length > 0
     )).toBe(true);
+  });
+
+  it('routes structured V2 premise feedback into semantic memory and candidate lineage', async () => {
+    const agent = await createAgent({
+      handle: 'queue-delete-v2-feedback',
+      name: 'Queue Delete V2 Feedback',
+      soulMd: '# soul',
+    } as any);
+    const now = new Date().toISOString();
+    await upsertIdeaCandidates(agent.id, [{
+      schemaVersion: 2,
+      id: 'idea-v2-feedback',
+      agentId: agent.id,
+      generationRunId: 'run-v2-feedback',
+      briefId: 'brief-v2-feedback',
+      storyClusterId: 'story-v2-feedback',
+      topic: 'AI startups',
+      claim: 'Small AI teams gain company-formation leverage before incumbents gain efficiency.',
+      tension: 'The incumbent story obscures new company formation.',
+      implication: 'Founders should pursue larger product scope.',
+      authorReason: 'The operator builds and invests in new companies.',
+      evidenceIds: [],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: 'ai:company:formation:leverage',
+      noveltyScore: 0.9,
+      evidenceScore: 0.5,
+      identityScore: 0.9,
+      judgeScore: 0.9,
+      status: 'selected',
+      rejectionCodes: [],
+      createdAt: now,
+      updatedAt: now,
+    }]);
+    const queuedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'Small AI teams gain company-formation leverage before incumbents gain efficiency.',
+      type: 'original',
+      status: 'queued',
+      topic: 'AI startups',
+      pipelineVersion: 'v2',
+      generationRunId: 'run-v2-feedback',
+      storyClusterId: 'story-v2-feedback',
+      ideaId: 'idea-v2-feedback',
+      draftCandidateId: null,
+      evidenceReferences: [],
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await DELETE(
+      new Request('http://localhost/api/queue', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reasonCode: 'bad_premise', reason: 'Wrong company-formation claim.', permanent: true }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: queuedTweet.id }) },
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toMatchObject({ reasonCode: 'bad_premise', blockScope: 'idea', permanentBlock: true });
+    expect(await getSemanticBlocks(agent.id)).toEqual([
+      expect.objectContaining({ ideaId: 'idea-v2-feedback', reasonCode: 'bad_premise', permanent: true }),
+    ]);
+    expect((await getIdeaCandidates(agent.id))[0]).toMatchObject({
+      status: 'deleted',
+      rejectionCodes: ['feedback:bad_premise'],
+    });
+    expect((await getLearningSignals(agent.id))[0].metadata).toMatchObject({
+      pipelineVersion: 'v2',
+      feedbackStage: 'idea',
+      feedbackReasonCode: 'bad_premise',
+    });
   });
 
   it('upserts deleted-from-X feedback when the operator supplies a better reason later', async () => {

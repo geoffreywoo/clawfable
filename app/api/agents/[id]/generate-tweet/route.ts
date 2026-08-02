@@ -5,13 +5,17 @@ import {
   deleteTweet,
   getAnalysis,
   getPreviewTweets,
+  getTrendingCache,
 } from '@/lib/kv-storage';
 import { generateViralBatch } from '@/lib/viral-generator';
+import { generateTweetBatchV2 } from '@/lib/generation-v2';
+import { getGenerationPipelineVersion } from '@/lib/generation-pipeline';
 import { normalizeGeneratedTweetContent } from '@/lib/tweet-text';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
-import { generateText } from '@/lib/ai';
+import { generateText, GEOFFREY_PRIMARY_MODEL_STACK } from '@/lib/ai';
+import type { TrendingTopic } from '@/lib/trending';
 import { validateGenerationRequest } from '@/lib/request-validation';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 import {
@@ -51,6 +55,7 @@ export async function POST(
       count: batchCount,
       replaceTweetId,
     } = parsed.value;
+    const pipelineVersion = getGenerationPipelineVersion(agent.handle);
     const isPreviewRequest = batchCount !== undefined && !topic && !headline;
 
     if (!isPreviewRequest && !batchCount && !topic && !headline) {
@@ -74,7 +79,25 @@ export async function POST(
       }
 
       const previewCount = batchCount ?? 1;
-      const batch = await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
+      const cachedTrending = pipelineVersion === 'v2' ? await getTrendingCache(id) : null;
+      const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : null;
+      const batch = pipelineVersion === 'v2'
+        ? await generateTweetBatchV2({
+            agentId: id,
+            count: previewCount,
+            voiceProfile,
+            analysis,
+            learnings,
+            style,
+            recentPosts,
+            allTweets,
+            memory,
+            signals,
+            trending,
+            modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+            mode: 'preview',
+          })
+        : await generateViralBatch(voiceProfile, analysis, previewCount, null, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
       const tweets = [];
       for (const item of batch) {
         if (getGeneratedTweetIssue(item.content)) continue;
@@ -115,7 +138,24 @@ export async function POST(
         topTweet: { id: 'manual-topic', text: topicContext, likes: 0, author: agent.handle },
       }];
 
-      const batch = await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
+      const batch = pipelineVersion === 'v2'
+        ? await generateTweetBatchV2({
+            agentId: id,
+            count: 1,
+            requestedTopic: topicContext,
+            voiceProfile,
+            analysis,
+            learnings,
+            style,
+            recentPosts,
+            allTweets,
+            memory,
+            signals,
+            trending: null,
+            modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+            mode: 'manual',
+          })
+        : await generateViralBatch(voiceProfile, analysis, 1, fakeTrending, learnings, agent.soulMd, style, recentPosts, allTweets, memory, ideaAtoms, signals);
       if (batch.length > 0) {
         const item = batch[0];
         const generationIssue = getGeneratedTweetIssue(item.content);
@@ -125,6 +165,13 @@ export async function POST(
         const tweet = await createTweetFromGeneratedCandidate(id, item, { status: 'draft', topic: topicContext });
         return NextResponse.json(tweet);
       }
+      if (pipelineVersion === 'v2') {
+        return NextResponse.json({ error: 'No draft cleared the evidence, originality, and voice gates.' }, { status: 422 });
+      }
+    }
+
+    if (pipelineVersion === 'v2') {
+      return NextResponse.json({ error: 'Run account analysis before generating V2 drafts.' }, { status: 400 });
     }
 
     // Fallback: simple one-shot generation without analysis
