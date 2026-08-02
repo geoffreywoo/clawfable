@@ -44,6 +44,7 @@ export interface GenerateTextOptions {
   modelChain?: AiModelTarget[];
   maxTokens: number;
   temperature?: number;
+  jsonSchema?: Record<string, unknown>;
   openAiReasoningEffort?: OpenAiReasoningEffort;
   modelStack?: GenerationModelStackId;
 }
@@ -302,6 +303,22 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
   const anthropic = apiKey ? new Anthropic({ apiKey }) : null;
   if (!anthropic) throw new Error('ANTHROPIC_API_KEY is not configured');
 
+  const useFableEffort = model === ANTHROPIC_FABLE_MODEL && (
+    options.task === 'tweet_generation'
+    || options.task === 'creative_variant'
+    || options.task === 'idea_generation'
+    || options.task === 'tweet_writing'
+  );
+  const outputConfig = {
+    ...(useFableEffort ? { effort: 'medium' as const } : {}),
+    ...(options.jsonSchema ? {
+      format: {
+        type: 'json_schema' as const,
+        schema: options.jsonSchema,
+      },
+    } : {}),
+  };
+
   const response = await anthropic.messages.create({
     model,
     max_tokens: options.maxTokens,
@@ -310,12 +327,7 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
       role: message.role,
       content: message.content,
     })),
-    ...(model === ANTHROPIC_FABLE_MODEL && (
-      options.task === 'tweet_generation'
-      || options.task === 'creative_variant'
-      || options.task === 'idea_generation'
-      || options.task === 'tweet_writing'
-    ) ? { output_config: { effort: 'medium' as const } } : {}),
+    ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
     // Fable uses output_config effort and rejects the deprecated temperature field.
     ...(typeof options.temperature === 'number' && model !== ANTHROPIC_FABLE_MODEL
       ? { temperature: options.temperature }

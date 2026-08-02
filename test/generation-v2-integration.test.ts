@@ -164,11 +164,15 @@ describe('generateTweetBatchV2 integration', () => {
   it('uses the bounded normal call graph and returns fully linked drafts', async () => {
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+    const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation')?.[0];
+    const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing')?.[0];
 
     expect(tasks.filter((task) => task === 'idea_generation')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'idea_judgment')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(3);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
+    expect(ideaCall).toMatchObject({ maxTokens: 8000, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall).toMatchObject({ jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(drafts).toHaveLength(2);
     expect(drafts[0]).toMatchObject({
       pipelineVersion: 'v2',
@@ -244,9 +248,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
-    expect(writerSystem).toContain('Translate the memo into ordinary words');
-    expect(writerSystem).toContain('Draft one must use first person');
-    expect(writerSystem).toContain("the author's bet rather than established consensus");
+    expect(writerSystem).toContain('express one defensible judgment in ordinary words');
+    expect(writerSystem).toContain('Use first person only when it adds real ownership');
+    expect(writerSystem).toContain('do not make "my bet" or "I\'d build" the default frame');
     expect(writerSystem).toContain('under 280 characters and at most three sentences');
     expect(previousPremises).toContain('operator-written diction anchor');
     expect(previousPremises).toContain('timeline diction from the curated voice corpus');

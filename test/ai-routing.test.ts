@@ -164,6 +164,11 @@ describe('AI model routing', () => {
       GEOFFREY_PRIMARY_MODEL_STACK,
       generateText,
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+    const jsonSchema = {
+      type: 'object',
+      properties: { drafts: { type: 'array' } },
+      required: ['drafts'],
+    };
 
     const result = await generateText({
       task: 'tweet_generation',
@@ -172,11 +177,15 @@ describe('AI model routing', () => {
       prompt: 'probe',
       maxTokens: 64,
       temperature: 0.8,
+      jsonSchema,
     });
 
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-fable-5',
-      output_config: { effort: 'medium' },
+      output_config: {
+        effort: 'medium',
+        format: { type: 'json_schema', schema: jsonSchema },
+      },
     }));
     expect(anthropicCreate.mock.calls[0]?.[0]).not.toHaveProperty('temperature');
     expect(openAiCreate).not.toHaveBeenCalled();

@@ -793,6 +793,7 @@ export interface GenerationModelCallTrace {
   durationMs: number;
   succeeded: boolean;
   error: string | null;
+  stopReason?: string | null;
 }
 
 export interface GenerationRunTrace {
