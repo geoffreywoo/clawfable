@@ -284,6 +284,16 @@ async function generateWithOpenAi(options: GenerateTextOptions, model: string): 
     instructions: options.system,
     input: getInputMessages(options),
     max_output_tokens: options.maxTokens,
+    ...(options.jsonSchema ? {
+      text: {
+        format: {
+          type: 'json_schema' as const,
+          name: `${options.task || 'structured'}_response`,
+          schema: options.jsonSchema,
+          strict: true,
+        },
+      },
+    } : {}),
     ...(reasoning ? { reasoning } : {}),
     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
   });

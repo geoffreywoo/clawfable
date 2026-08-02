@@ -122,7 +122,6 @@ const DRAFT_GENERATION_SCHEMA: Record<string, unknown> = {
   properties: {
     drafts: {
       type: 'array',
-      maxItems: MAX_DRAFTS_PER_IDEA,
       items: {
         type: 'object',
         additionalProperties: false,

@@ -216,6 +216,39 @@ describe('AI model routing', () => {
     }));
   });
 
+  it('forwards structured output schemas to OpenAI fallbacks', async () => {
+    const create = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: '{"drafts":[]}' }] }],
+    });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const jsonSchema = {
+      type: 'object',
+      properties: { drafts: { type: 'array' } },
+      required: ['drafts'],
+    };
+
+    await generateText({
+      task: 'tweet_writing',
+      modelChain: [{ provider: 'openai', model: 'gpt-5.6' }],
+      system: 'Return drafts.',
+      prompt: 'probe',
+      maxTokens: 64,
+      jsonSchema,
+    });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'tweet_writing_response',
+          schema: jsonSchema,
+          strict: true,
+        },
+      },
+    }));
+  });
+
   it('allows explicit OpenAI reasoning effort overrides', async () => {
     const create = vi.fn().mockResolvedValue({
       status: 'completed',
