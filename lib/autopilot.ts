@@ -300,10 +300,10 @@ export function getGeoffreyRecentStoryIssue(
 
   for (const recent of recentTweets) {
     if (candidate.id && recent.id === candidate.id) continue;
-    if (!recent.xTweetId || !['posted', 'deleted_from_x'].includes(recent.status || '')) continue;
+    if (!['posted', 'deleted_from_x'].includes(recent.status || '')) continue;
     if (recent.quarantinedAt) continue;
     const postedAt = Date.parse(recent.postedAt || recent.createdAt || '');
-    if (!Number.isFinite(postedAt) || now - postedAt > RECENT_STORY_WINDOW_MS) continue;
+    if (Number.isFinite(postedAt) && now - postedAt > RECENT_STORY_WINDOW_MS) continue;
     const recentTokens = distinctiveStoryTokens(
       `${recent.topic || ''} ${recent.trendHeadline || ''} ${recent.content}`,
     );

@@ -555,8 +555,7 @@ describe('autopilot remote debug logging', () => {
       content: "pfl buying mvp is really pfl buying jake paul's ability to make people care about a fight.",
       topic: 'MVP PFL merger',
       status: 'posted',
-      xTweetId: 'x-legacy-pfl',
-      postedAt: '2026-08-02T00:30:00.000Z',
+      postedAt: null,
     }], now);
 
     expect(issue).toContain('named source story repeats a recent post');
