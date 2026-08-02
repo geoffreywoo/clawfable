@@ -315,6 +315,24 @@ export function getGeoffreyRecentStoryIssue(
   return null;
 }
 
+export function getGeoffreyQueuedDomainIssue(
+  candidate: Pick<GeoffreyStoryRecord, 'id' | 'content' | 'topic' | 'trendHeadline'>,
+  queuedTweets: GeoffreyStoryRecord[],
+): string | null {
+  const domain = classifyGeoffreyTopicDomain(
+    `${candidate.topic || ''} ${candidate.trendHeadline || ''} ${candidate.content}`,
+  );
+  const matching = queuedTweets.find((tweet) => (
+    tweet.id !== candidate.id
+    && tweet.status === 'queued'
+    && !tweet.quarantinedAt
+    && classifyGeoffreyTopicDomain(
+      `${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`,
+    ) === domain
+  ));
+  return matching ? `queue already contains a ${domain} draft (${matching.id || 'existing'})` : null;
+}
+
 const NON_ORIGINAL_LOG_FORMATS = new Set([
   'auto_reply',
   'auto_reply_high_value',
@@ -749,16 +767,23 @@ export async function refreshQueuedTweetsForCurrentQualityPolicy(
   const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
   const rescored = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
   const after: Tweet[] = [];
-  for (const tweet of rescored) {
+  const ordered = [...rescored].sort((a, b) => (
+    effectiveConfidence(b) - effectiveConfidence(a)
+    || (b.candidateScore ?? 0) - (a.candidateScore ?? 0)
+    || a.createdAt.localeCompare(b.createdAt)
+  ));
+  for (const tweet of ordered) {
     const recentStoryIssue = getGeoffreyRecentStoryIssue(tweet, context.allTweets || []);
-    if (!recentStoryIssue) {
+    const queuedDomainIssue = getGeoffreyQueuedDomainIssue(tweet, after);
+    const breadthIssue = recentStoryIssue || queuedDomainIssue;
+    if (!breadthIssue) {
       after.push(tweet);
       continue;
     }
     await updateTweet(tweet.id, {
       status: 'draft',
       quarantinedAt: new Date().toISOString(),
-      quarantineReason: `Recent story breadth gate: ${recentStoryIssue}.`,
+      quarantineReason: `Queue breadth gate: ${breadthIssue}.`,
     });
   }
   return {
@@ -3200,6 +3225,13 @@ export async function refillQueue(
           sourceBrief: item.sourceBrief,
           sourceLane: item.sourceLane,
           trendTopicId: item.trendTopicId,
+          trendHeadline: item.trendHeadline,
+        }, allTweets)) {
+          continue;
+        }
+        if (geoffreyStrict && getGeoffreyQueuedDomainIssue({
+          content: item.content,
+          topic: item.targetTopic,
           trendHeadline: item.trendHeadline,
         }, allTweets)) {
           continue;

@@ -153,7 +153,7 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
+import { archiveStaleNetworkTopicQueue, getGeoffreyQueuedDomainIssue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, runAutopilot } from '@/lib/autopilot';
 import { GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
@@ -571,6 +571,30 @@ describe('autopilot remote debug logging', () => {
       xTweetId: 'x-pfl',
       postedAt: '2026-08-02T00:30:00.000Z',
     }], now)).toBeNull();
+  });
+
+  it('keeps the active queue to one draft per semantic domain', () => {
+    expect(getGeoffreyQueuedDomainIssue({
+      id: 'nfl-draft',
+      content: 'an nfl player boxing jake paul is a bad trade for the player.',
+      topic: 'Jake Paul NFL boxing challenge',
+    }, [{
+      id: 'pfl-draft',
+      content: 'one fewer buyer for your next fight contract is not a gift.',
+      topic: 'MVP PFL merger',
+      status: 'queued',
+    }])).toContain('sports_competition');
+
+    expect(getGeoffreyQueuedDomainIssue({
+      id: 'ai-draft',
+      content: 'openai made another coding model cheaper.',
+      topic: 'OpenAI coding models',
+    }, [{
+      id: 'pfl-draft',
+      content: 'one fewer buyer for your next fight contract is not a gift.',
+      topic: 'MVP PFL merger',
+      status: 'queued',
+    }])).toBeNull();
   });
 
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
