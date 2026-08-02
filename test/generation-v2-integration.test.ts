@@ -207,6 +207,7 @@ describe('generateTweetBatchV2 integration', () => {
     await generateTweetBatchV2({
       ...input,
       learnings: {
+        voiceCorpus: { active: true },
         operatorVoiceReference: {
           pinnedExamples: [{
             xTweetId: 'operator-1',
@@ -220,6 +221,12 @@ describe('generateTweetBatchV2 integration', () => {
             topic: 'markets',
             source: 'manual',
             authorshipProvenance: 'known_clawfable_generated',
+          }, {
+            xTweetId: 'timeline-1',
+            content: 'timeline diction from the curated voice corpus',
+            topic: 'markets',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
           }],
           startupRegisterExamples: [],
           bestPerformers: [],
@@ -230,6 +237,7 @@ describe('generateTweetBatchV2 integration', () => {
     const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing');
     const anchors = JSON.parse(writerCall?.[0].prompt || '{}').voiceAnchors.map((anchor: any) => anchor.text);
     expect(anchors).toContain('operator-written diction anchor');
+    expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
   });
 

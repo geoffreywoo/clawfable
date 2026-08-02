@@ -25,7 +25,7 @@ export function inferQueueFeedbackReasonCode(reason: string): QueueFeedbackReaso
   if (/source|topic|story|irrelevant|not interested|wrong subject/.test(value)) return 'bad_source_topic';
   if (/duplicate|repeat|already (?:said|posted|covered)|same angle|reskin/.test(value)) return 'duplicate';
   if (/fact|false|unsupported|misleading|hallucinat|proof|evidence|accuracy/.test(value)) return 'factual_risk';
-  if (/premise|thesis|idea|argument|take is wrong|disagree/.test(value)) return 'bad_premise';
+  if (/premise|thesis|idea|argument|angle|take is wrong|disagree|do not regenerate/.test(value)) return 'bad_premise';
   if (/writing|voice|tone|wording|awkward|stiff|slop|generic|sounds like ai|too long/.test(value)) return 'bad_writing';
   return 'other';
 }

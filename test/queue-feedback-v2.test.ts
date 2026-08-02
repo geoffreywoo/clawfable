@@ -45,6 +45,7 @@ describe('stage-attributed queue feedback', () => {
     expect(feedbackStage('bad_writing')).toBe('writing');
     expect(inferQueueFeedbackReasonCode('same PFL premise again, just a synonym reskin')).toBe('duplicate');
     expect(inferQueueFeedbackReasonCode('this number is unsupported and could be misleading')).toBe('factual_risk');
+    expect(inferQueueFeedbackReasonCode('Remove it and do not regenerate this merger angle.')).toBe('bad_premise');
   });
 
   it('fingerprints rejected wording for writing feedback without blocking the idea', () => {
@@ -138,5 +139,27 @@ describe('legacy semantic backfill', () => {
     expect(blocks[0].semanticKey).toBe(buildResearchSemanticKey(`AI startups ${legacyTweet.thesis}`));
     expect(blocks[0].semanticKey).not.toContain('rationale');
     expect(blocks[0].semanticKey).not.toContain('media');
+  });
+
+  it('recovers an idea block from legacy angle feedback after the deleted tweet is gone', () => {
+    const blocks = buildLegacyFeedbackSemanticBlocks({
+      agentId: 'agent-1',
+      tweets: [],
+      now,
+      feedback: [{
+        tweetText: 'does any fighter actually want this merger?',
+        rating: 'down',
+        generatedAt: now.toISOString(),
+        reason: 'I do not like this PFL/MVP tweet. Remove it and do not regenerate this merger angle.',
+        intentSummary: 'Do not regenerate this merger angle.',
+        source: 'queue_delete',
+        userProvidedReason: true,
+      }],
+    });
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ scope: 'idea', reasonCode: 'bad_premise', permanent: true });
+    expect(blocks[0].semanticKey).toContain('pfl');
+    expect(blocks[0].semanticKey).toContain('mvp');
   });
 });
