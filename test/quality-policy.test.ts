@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FINAL_CRITIC_VERSION } from '@/lib/generation-judging';
 import {
   assessGeoffreyQualityPolicy,
+  EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
   GEOFFREY_QUALITY_POLICY_VERSION,
   getSourceIdentityAlignmentIssue,
   getGeoffreyQualityPolicyActivation,
@@ -233,6 +234,42 @@ describe('Geoffrey hard quality policy', () => {
 
     expect(result.eligible).toBe(false);
     expect(result.issues).toContain('factual safety 0.60 below 0.72');
+  });
+
+  it('allows a primary-source V2 draft with strong native voice to narrowly miss the startup-register heuristic', () => {
+    const result = assess(candidate({
+      content: 'i’d fund shadow evaluation and rollback before adding more crypto model researchers. my bet is the edge comes from not replacing a model without proof, not from producing more challengers.',
+      targetTopic: 'crypto forecasting',
+      pipelineVersion: 'v2',
+      trendTopicId: 'story-forecasting',
+      trendHeadline: 'Train Often, Deploy Selectively: Forward-Gated Model Replacement',
+      sourceEvidenceTexts: [
+        'A retrained candidate does not necessarily outperform a continuously maintained incumbent.',
+      ],
+      evidenceReferences: [{
+        sourceDocumentId: 'source-forecasting',
+        url: 'https://arxiv.org/abs/example',
+        title: 'Train Often, Deploy Selectively',
+        publisher: 'arXiv',
+        publishedAt: '2026-08-01T00:00:00.000Z',
+        trustTier: 'primary',
+        claim: 'A retrained candidate does not necessarily outperform a maintained incumbent.',
+      }],
+      finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
+      finalCriticScores: {
+        ...candidate().finalCriticScores!,
+        voiceFit: 0.84,
+        policySafety: 0.9,
+        nativeVoice: 0.8,
+        casualStartupFit: 0.8,
+        stiffnessRisk: 0.02,
+        cringeRisk: 0.1,
+      },
+    }));
+
+    expect(result.scores.casualStartupFit).toBeGreaterThanOrEqual(0.55);
+    expect(result.scores.casualStartupFit).toBeLessThan(0.58);
+    expect(result.eligible, result.issues.join('; ')).toBe(true);
   });
 
   it('blocks stale policy and corpus versions even with a high engagement prediction', () => {

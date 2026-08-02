@@ -15,7 +15,7 @@ import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v13';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v14';
 export const EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION = 'evidence-idea-voice-v2-copy-judge-1';
 
 export interface GeoffreyQualityPolicyActivation {
@@ -193,6 +193,15 @@ export function assessGeoffreyQualityPolicy(
     taste.technicalCredibilityScore,
     critic?.technicalCredibility ?? taste.technicalCredibilityScore,
   );
+  const primarySourceNativeVoiceException = candidate.pipelineVersion === 'v2'
+    && Boolean(candidate.evidenceReferences?.some((reference) => reference.trustTier === 'primary'))
+    && nativeVoice >= 0.7
+    && casualStartupFit >= 0.55
+    && stiffness < 0.12
+    && cringe < 0.3
+    && generatedPattern < 0.2
+    && voiceDrift < 0.1
+    && slop < 0.25;
   const issues: string[] = [];
   const sourceIdentityIssue = getSourceIdentityAlignmentIssue(candidate);
 
@@ -216,7 +225,9 @@ export function assessGeoffreyQualityPolicy(
     issues.push(`factual safety ${(critic?.policySafety ?? 0).toFixed(2)} below 0.72`);
   }
   if (nativeVoice < 0.65) issues.push(`native voice ${nativeVoice.toFixed(2)} below 0.65`);
-  if (casualStartupFit < 0.58) issues.push(`casual startup fit ${casualStartupFit.toFixed(2)} below 0.58`);
+  if (casualStartupFit < 0.58 && !primarySourceNativeVoiceException) {
+    issues.push(`casual startup fit ${casualStartupFit.toFixed(2)} below 0.58`);
+  }
   if (slop >= 0.32) issues.push(`slop ${slop.toFixed(2)} at or above 0.32`);
   if (cringe >= 0.32) issues.push(`cringe ${cringe.toFixed(2)} at or above 0.32`);
   if (stiffness >= 0.3) issues.push(`stiffness ${stiffness.toFixed(2)} at or above 0.30`);
