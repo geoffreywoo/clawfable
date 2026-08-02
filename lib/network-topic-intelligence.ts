@@ -140,6 +140,7 @@ export interface NetworkTopicEvidence {
   engagementVelocity: number;
   viralScore: number;
   operatorEngaged?: boolean;
+  isPrimarySource?: boolean;
 }
 
 export interface NetworkTweetObservation extends NetworkTopicEvidence {
@@ -204,6 +205,51 @@ function normalizeLabel(value: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const FIRST_PARTY_HANDLE_SUFFIXES = [
+  'official',
+  'comms',
+  'hq',
+  'team',
+  'inc',
+  'labs',
+  'ai',
+  'app',
+  'mma',
+  'sports',
+  'company',
+  'co',
+];
+
+function normalizeIdentity(value: string): string {
+  return normalizeLabel(value)
+    .replace(/\b(?:the|official)\b/g, ' ')
+    .replace(/\s+/g, '');
+}
+
+function authorMatchesEntity(author: string, entity: string): boolean {
+  const authorIdentity = normalizeIdentity(author.replace(/^@/, ''));
+  const entityIdentity = normalizeIdentity(entity);
+  if (authorIdentity.length < 3 || entityIdentity.length < 3) return false;
+  if (authorIdentity === entityIdentity) return true;
+  return FIRST_PARTY_HANDLE_SUFFIXES.some((suffix) => (
+    authorIdentity === `${entityIdentity}${suffix}`
+    || entityIdentity === `${authorIdentity}${suffix}`
+  ));
+}
+
+export function isLikelyPrimaryNetworkEvidence(
+  evidence: Pick<NetworkTopicEvidence, 'author' | 'text'>,
+  topic: Pick<ExtractedNetworkTopic, 'entities' | 'label'>,
+): boolean {
+  const identities = [...topic.entities, topic.label]
+    .filter((value, index, items) => value && items.indexOf(value) === index);
+  if (!identities.some((entity) => authorMatchesEntity(evidence.author, entity))) return false;
+
+  const text = evidence.text.replace(/https?:\/\/\S+/g, ' ').trim();
+  return /\b(?:i|i['\u2019]m|i['\u2019]ve|i['\u2019]ll|my|we|we['\u2019]re|we['\u2019]ve|we['\u2019]ll|our|announce|announced|announcing|launch|launched|launching|introduce|introduced|release|released|ship|shipped|build|built|building|raise|raised|sign|signed|partner|partnered|merge|merged|merger|acquire|acquired|acquisition|agreement|offer|offered)\b/i.test(text)
+    || identities.some((entity) => normalizeLabel(text).includes(normalizeLabel(entity)));
 }
 
 function compact(value: string, limit: number): string {
@@ -911,6 +957,12 @@ function mergeTopicHistory(
       : null;
     const topicId = historical?.id || buildTopicId(cluster.label, cluster.entities);
     const authors = [...new Set(evidence.map((tweet) => tweet.author))];
+    const primaryEvidenceIds = new Set(
+      evidence
+        .filter((tweet) => isLikelyPrimaryNetworkEvidence(tweet, cluster))
+        .map((tweet) => tweet.tweetId),
+    );
+    const hasPrimarySource = primaryEvidenceIds.size > 0;
     const averageViral = evidence.slice(0, 5).reduce((sum, tweet) => sum + tweet.viralScore, 0) / Math.min(5, evidence.length);
     const peakViral = Math.max(...evidence.map((tweet) => tweet.viralScore));
     const sourceDiversity = clamp(authors.length / 4);
@@ -988,10 +1040,10 @@ function mergeTopicHistory(
       sourceType: 'x',
       sourceUrl: topTweet.sourceUrl,
       publisher: authors.map((author) => `@${author}`).join(', '),
-      isPrimarySource: false,
+      isPrimarySource: hasPrimarySource,
       sourceCount: authors.length,
       engagementScore: Math.round(weightedTotal),
-      sourceQuality: Number(clamp(0.58 + sourceDiversity * 0.08).toFixed(3)),
+      sourceQuality: Number(clamp(0.58 + sourceDiversity * 0.08 + (hasPrimarySource ? 0.12 : 0)).toFixed(3)),
       discoveryMethod: 'followed_network',
       networkTopicId: topicId,
       networkMomentumScore: Number(momentumScore.toFixed(3)),
@@ -1023,6 +1075,7 @@ function mergeTopicHistory(
         engagementVelocity: tweet.engagementVelocity,
         viralScore: tweet.viralScore,
         operatorEngaged: tweet.operatorEngaged === true,
+        isPrimarySource: primaryEvidenceIds.has(tweet.tweetId),
       })),
     });
   }

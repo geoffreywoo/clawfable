@@ -24,6 +24,7 @@ import {
   discoverNetworkTopicIntelligence,
   extractNetworkTopicsWithAi,
   inferNetworkSemanticDomain,
+  isLikelyPrimaryNetworkEvidence,
   isUsableNetworkSourcePost,
   scoreNetworkTweets,
   selectNetworkAccounts,
@@ -133,6 +134,53 @@ describe('followed-network topic intelligence', () => {
     expect(result.topics[0].evidence?.map((item) => item.tweetId)).toEqual(['a-hot', 'b-hot']);
     expect(result.state.viralTweets.find((tweet) => tweet.id === 'a-hot')?.topicIds).toContain(result.topics[0].networkTopicId);
     expect(result.state.topics[0].observations).toHaveLength(1);
+  });
+
+  it('qualifies an original post from the named subject as primary evidence', async () => {
+    mocks.getFollowing.mockResolvedValue([
+      { id: 'jake', name: 'Jake Paul', username: 'jakepaul', description: '', followersCount: 5000000, verified: true },
+    ]);
+    mocks.getUserTimeline.mockResolvedValue([
+      timelineTweet('jake-offer', 'I am offering $1 million to any NFL player who can box me better than he runs routes.', 5000),
+      timelineTweet('jake-normal', 'training camp day twenty and still moving', 50),
+    ]);
+
+    const result = await discoverNetworkTopicIntelligence(keys, 'geoff-user-id', {
+      now: Date.parse('2026-07-14T12:00:00.000Z'),
+      accountLimit: 1,
+      extractor: async () => [{
+        label: 'Jake Paul NFL boxing offer',
+        summary: 'Jake Paul offered $1 million to an NFL player who can outperform him in boxing.',
+        tweetIds: ['jake-offer'],
+        entities: ['Jake Paul', 'NFL'],
+        whyNow: 'The first-party offer is receiving unusual engagement.',
+        confidence: 0.92,
+        semanticDomain: 'sports_competition',
+        uncertainty: 'low',
+      }],
+    });
+
+    expect(result.topics[0]).toMatchObject({
+      sourceCount: 1,
+      isPrimarySource: true,
+    });
+    expect(result.topics[0].evidence?.[0]).toMatchObject({
+      author: 'jakepaul',
+      isPrimarySource: true,
+    });
+    expect(result.topics[0].sourceQuality).toBeGreaterThan(0.7);
+  });
+
+  it('does not mistake fan or unrelated handles for a primary source', () => {
+    const topic = { label: 'Tesla factory expansion', entities: ['Tesla'] };
+    expect(isLikelyPrimaryNetworkEvidence({
+      author: 'TeslaFan',
+      text: 'Tesla announced another factory expansion.',
+    }, topic)).toBe(false);
+    expect(isLikelyPrimaryNetworkEvidence({
+      author: 'UnderdogComms',
+      text: 'We announced an agreement for Underdog to be acquired.',
+    }, { label: 'Underdog acquisition', entities: ['Underdog'] })).toBe(true);
   });
 
   it('uses the official home timeline as the primary low-read follow-graph crawl', async () => {
