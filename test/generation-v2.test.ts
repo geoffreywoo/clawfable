@@ -263,6 +263,55 @@ describe('Tweet Generation V2', () => {
     expect(ideas[0].rejectionCodes).toContain('claim_not_grounded_in_evidence');
   });
 
+  it('accepts a sourced idea anchored by a short distinctive release phrase', () => {
+    const sourcedBrief = brief('release', 'AI developer tools', 'verified_source');
+    sourcedBrief.evidenceIds = ['source-release'];
+    sourcedBrief.sourceDocumentIds = ['source-release'];
+    sourcedBrief.qualifiedClaimIds = ['claim-release'];
+    const source = {
+      schemaVersion: 2,
+      id: 'source-release',
+      agentId: 'agent-1',
+      sourceType: 'github_releases',
+      canonicalUrl: 'https://github.com/example/sdk/releases/tag/v2',
+      title: 'v2',
+      publisher: 'example/sdk',
+      publishedAt: '2026-08-01T10:00:00.000Z',
+      fetchedAt: '2026-08-01T11:00:00.000Z',
+      trustTier: 'primary',
+      isPrimary: true,
+      excerpt: 'Features api: fast tier.',
+      contentHash: 'hash-release',
+      entities: [],
+      claims: [{
+        id: 'claim-release',
+        text: 'Features api: fast tier.',
+        kind: 'fact',
+        confidence: 0.9,
+        entities: [],
+      }],
+      topics: ['AI developer tools'],
+      query: null,
+      metadata: {},
+    } satisfies SourceDocument;
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('release', 'A first-class fast tier makes latency an explicit product choice for agent developers.'),
+        evidenceIds: ['source-release'],
+      }],
+      agentId: 'agent-1',
+      runId: 'run-release',
+      briefs: [sourcedBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      documents: [source],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
+  });
+
   it('rejects PFL/MVP reskins, repeated explainers, political drift, and missing evidence before writing', () => {
     const briefs = [
       brief('pfl', 'PFL MVP boxing merger'),

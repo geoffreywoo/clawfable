@@ -15,7 +15,7 @@ import { FINAL_CRITIC_VERSION } from './generation-judging';
 import { getTrustedClaimSourceTexts, getUntrustedSourceTexts } from './source-trust';
 import { isGeoffreyDeepTechnicalTopic } from './source-planner';
 
-export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v12';
+export const GEOFFREY_QUALITY_POLICY_VERSION = 'geoffwoo-quality-v13';
 export const EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION = 'evidence-idea-voice-v2-copy-judge-1';
 
 export interface GeoffreyQualityPolicyActivation {
@@ -212,6 +212,9 @@ export function assessGeoffreyQualityPolicy(
     }
   }
   if (taste.action === 'block') issues.push('account taste block');
+  if ((critic?.policySafety ?? 0) < 0.72) {
+    issues.push(`factual safety ${(critic?.policySafety ?? 0).toFixed(2)} below 0.72`);
+  }
   if (nativeVoice < 0.65) issues.push(`native voice ${nativeVoice.toFixed(2)} below 0.65`);
   if (casualStartupFit < 0.58) issues.push(`casual startup fit ${casualStartupFit.toFixed(2)} below 0.58`);
   if (slop >= 0.32) issues.push(`slop ${slop.toFixed(2)} at or above 0.32`);

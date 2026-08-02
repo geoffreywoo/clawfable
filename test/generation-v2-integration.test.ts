@@ -236,11 +236,16 @@ describe('generateTweetBatchV2 integration', () => {
 
     const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing');
     const anchors = JSON.parse(writerCall?.[0].prompt || '{}').voiceAnchors.map((anchor: any) => anchor.text);
+    const writerSystem = String(writerCall?.[0].system || '');
     const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation');
     const previousPremises = JSON.parse(ideaCall?.[0].prompt || '{}').previousPremises;
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
+    expect(writerSystem).toContain('Translate the memo into ordinary words');
+    expect(writerSystem).toContain('Draft one must use first person');
+    expect(writerSystem).toContain("the author's bet rather than established consensus");
+    expect(writerSystem).toContain('under 280 characters and at most three sentences');
     expect(previousPremises).toContain('operator-written diction anchor');
     expect(previousPremises).toContain('timeline diction from the curated voice corpus');
     expect(previousPremises).not.toContain('generated diction must not return');
@@ -364,6 +369,22 @@ describe('generateTweetBatchV2 integration', () => {
         policySafety: 0.98,
       }),
     });
+  });
+
+  it('accepts fenced copy-judge JSON after a provider analysis preface', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        const judged = rankingResponse(options.prompt, 'candidates');
+        return result(`I compared the candidates on voice, insight, and factual safety.\n\n\`\`\`json\n${judged.text}\n\`\`\``);
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toHaveLength(2);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({ status: 'completed' });
   });
 
   it('retries once with the next-ranked idea only when every initial draft fails', async () => {

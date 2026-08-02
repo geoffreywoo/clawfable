@@ -31,12 +31,17 @@ describe('semantic idea similarity', () => {
 
   it('detects a competitor-downfall premise after social-language substitution', () => {
     const posted = "don't pray on other people's downfall. it simply reveals your own insecurity of never having your own meteoric rise.";
-    const reskin = "a culture that celebrates competitors' setbacks will eventually make internal failure unsafe.";
+    const reskins = [
+      "a culture that celebrates competitors' setbacks will eventually make internal failure unsafe.",
+      "teams should distinguish competitive intensity from personal hostility. fixation on another person losing redirects energy from execution, and personalized resentment is a management liability.",
+    ];
 
-    expect(semanticIdeaSimilarity(
-      { content: posted, topic: 'culture' },
-      { content: reskin, topic: 'culture' },
-    )).toBeGreaterThanOrEqual(0.38);
+    for (const reskin of reskins) {
+      expect(semanticIdeaSimilarity(
+        { content: posted, topic: 'culture' },
+        { content: reskin, topic: 'culture' },
+      )).toBeGreaterThanOrEqual(0.68);
+    }
   });
 
   it('detects the same rhenium byproduct thesis after the posture and nouns change', () => {

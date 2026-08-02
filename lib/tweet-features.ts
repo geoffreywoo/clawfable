@@ -75,16 +75,17 @@ function canonicalIdeaToken(token: string): string {
   if (/^(buyer|customer|lender)/.test(token)) return 'counterparty';
   if (/^(capacity|output|supply|availab)/.test(token)) return 'supply';
   if (/^(cell|anode)/.test(token)) return 'battery-cell';
-  if (/^(celebrat|laugh|mock|pray|root)/.test(token)) return 'schadenfreude';
+  if (/^(aggress|celebrat|hostil|laugh|mock|pray|resent|root|spite)/.test(token)) return 'schadenfreude';
   if (/^(coat)/.test(token)) return 'coating';
   if (/^(compar|mark|resale|valu|worth)/.test(token)) return 'valuation';
   if (/^(digg|mine|mining|mined|ore)/.test(token)) return 'extraction';
   if (/^(industr|manufactur|production)/.test(token)) return 'industrial';
-  if (/^(downfall|fail|failure|setback)/.test(token)) return 'failure';
+  if (/^(downfall|fail|failure|losing|setback)/.test(token)) return 'failure';
   if (/^(insecur|unsafe)/.test(token)) return 'vulnerability';
   if (/^(maint)/.test(token)) return 'maintenance';
   if (/^(moly)/.test(token)) return 'molybdenum';
   if (/^(morph|particle|shape)/.test(token)) return 'morphology';
+  if (/^(people|person)/.test(token)) return 'people';
   if (/^(purif|purity)/.test(token)) return 'purification';
   if (/^(qualif)/.test(token)) return 'qualification';
   if (token.length > 5 && token.endsWith('s')) return token.slice(0, -1);
@@ -284,7 +285,14 @@ export function semanticIdeaSimilarity(
   for (const token of a) {
     if (b.has(token)) overlap++;
   }
-  if (overlap < 3) return 0;
+
+  // The wording around another person's failure varies widely, but this
+  // two-concept combination is specific enough to identify the same premise.
+  const competitorDownfallMatch = a.has('schadenfreude')
+    && b.has('schadenfreude')
+    && a.has('failure')
+    && b.has('failure');
+  if (overlap < 3) return competitorDownfallMatch ? 0.68 : 0;
 
   const containment = overlap / Math.min(a.size, b.size);
   const union = new Set([...a, ...b]).size;
@@ -294,10 +302,11 @@ export function semanticIdeaSimilarity(
   const leftEntities = ideaEntityTerms([left.topic, left.thesis, left.content].filter(Boolean).join(' '));
   const rightEntities = ideaEntityTerms([right.topic, right.thesis, right.content].filter(Boolean).join(' '));
   const entityOverlap = [...leftEntities].some((entity) => rightEntities.has(entity));
-  return Math.max(0, Math.min(1,
+  const similarity = Math.max(0, Math.min(1,
     (containment * 0.82)
     + (jaccard * 0.18)
     + (domainOverlap ? 0.04 : 0)
     + (entityOverlap ? 0.24 : 0),
   ));
+  return competitorDownfallMatch ? Math.max(0.68, similarity) : similarity;
 }

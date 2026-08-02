@@ -223,6 +223,18 @@ describe('Geoffrey hard quality policy', () => {
     expect(result.issues).toContain('confidence 0.61 below 0.62');
   });
 
+  it('blocks copy the final critic considers factually unsafe', () => {
+    const result = assess(candidate({
+      finalCriticScores: {
+        ...candidate().finalCriticScores!,
+        policySafety: 0.6,
+      },
+    }));
+
+    expect(result.eligible).toBe(false);
+    expect(result.issues).toContain('factual safety 0.60 below 0.72');
+  });
+
   it('blocks stale policy and corpus versions even with a high engagement prediction', () => {
     const result = assess(candidate({
       qualityPolicyVersion: 'old-policy',
