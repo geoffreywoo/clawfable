@@ -236,9 +236,14 @@ describe('generateTweetBatchV2 integration', () => {
 
     const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing');
     const anchors = JSON.parse(writerCall?.[0].prompt || '{}').voiceAnchors.map((anchor: any) => anchor.text);
+    const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation');
+    const previousPremises = JSON.parse(ideaCall?.[0].prompt || '{}').previousPremises;
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
+    expect(previousPremises).toContain('operator-written diction anchor');
+    expect(previousPremises).toContain('timeline diction from the curated voice corpus');
+    expect(previousPremises).not.toContain('generated diction must not return');
   });
 
   it('returns fewer drafts after malformed idea output instead of inventing fallback copy', async () => {

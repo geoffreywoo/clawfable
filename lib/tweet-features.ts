@@ -75,10 +75,13 @@ function canonicalIdeaToken(token: string): string {
   if (/^(buyer|customer|lender)/.test(token)) return 'counterparty';
   if (/^(capacity|output|supply|availab)/.test(token)) return 'supply';
   if (/^(cell|anode)/.test(token)) return 'battery-cell';
+  if (/^(celebrat|laugh|mock|pray|root)/.test(token)) return 'schadenfreude';
   if (/^(coat)/.test(token)) return 'coating';
   if (/^(compar|mark|resale|valu|worth)/.test(token)) return 'valuation';
   if (/^(digg|mine|mining|mined|ore)/.test(token)) return 'extraction';
   if (/^(industr|manufactur|production)/.test(token)) return 'industrial';
+  if (/^(downfall|fail|failure|setback)/.test(token)) return 'failure';
+  if (/^(insecur|unsafe)/.test(token)) return 'vulnerability';
   if (/^(maint)/.test(token)) return 'maintenance';
   if (/^(moly)/.test(token)) return 'molybdenum';
   if (/^(morph|particle|shape)/.test(token)) return 'morphology';
@@ -281,7 +284,7 @@ export function semanticIdeaSimilarity(
   for (const token of a) {
     if (b.has(token)) overlap++;
   }
-  if (overlap < 5) return 0;
+  if (overlap < 3) return 0;
 
   const containment = overlap / Math.min(a.size, b.size);
   const union = new Set([...a, ...b]).size;

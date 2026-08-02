@@ -29,6 +29,16 @@ describe('semantic idea similarity', () => {
     expect(semanticIdeaSimilarity({ content: graphite }, { content: fusion })).toBe(0);
   });
 
+  it('detects a competitor-downfall premise after social-language substitution', () => {
+    const posted = "don't pray on other people's downfall. it simply reveals your own insecurity of never having your own meteoric rise.";
+    const reskin = "a culture that celebrates competitors' setbacks will eventually make internal failure unsafe.";
+
+    expect(semanticIdeaSimilarity(
+      { content: posted, topic: 'culture' },
+      { content: reskin, topic: 'culture' },
+    )).toBeGreaterThanOrEqual(0.38);
+  });
+
   it('detects the same rhenium byproduct thesis after the posture and nouns change', () => {
     const posted = 'space demand can rip while rhenium supply barely notices. rhenium used in single-crystal superalloys arrives through tiny molybdenum and copper byproduct streams, then the blade metallurgy needs qualification. how are aerospace forecasts pricing that lag?';
     const reskins = [

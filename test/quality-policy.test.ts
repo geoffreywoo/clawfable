@@ -253,6 +253,20 @@ describe('Geoffrey hard quality policy', () => {
     })).toBeNull();
   });
 
+  it('accepts distinctive evidence language when a draft naturally inflects the source headline', () => {
+    const grounded = candidate({
+      content: "i'd bet the real product is stopping a worse retrain from shipping.",
+      targetTopic: 'forecasting systems',
+      trendTopicId: 'story-forecasting',
+      trendHeadline: 'Train Often, Deploy Selectively: Forward-Gated Model Replacement',
+      sourceEvidenceTexts: [
+        'Production forecasting systems retrain models regularly, but a retrained candidate does not necessarily outperform the incumbent.',
+      ],
+    });
+
+    expect(getSourceIdentityAlignmentIssue(grounded)).toBeNull();
+  });
+
   it('blocks a polished split contrast even when every model score allows it', () => {
     const result = assess(candidate({
       content: "the fastest way to lose sf's forgiveness isn't blowing up the company. it's how you talked to people during the year you thought you'd already won.",

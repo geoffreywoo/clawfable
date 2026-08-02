@@ -88,8 +88,9 @@ function confidenceFloor(mode: GeoffreyQualityCandidate['generationMode']): numb
 
 const SOURCE_IDENTITY_STOP_WORDS = new Set([
   'about', 'agent', 'agents', 'and', 'company', 'companies', 'compute', 'core', 'current',
+  'business', 'data',
   'explore', 'fallback', 'for', 'from', 'general', 'into', 'investing', 'investor', 'investors',
-  'market', 'markets', 'new', 'operator', 'signal', 'software', 'source', 'startup', 'startups',
+  'market', 'markets', 'model', 'models', 'new', 'operator', 'product', 'products', 'signal', 'software', 'source', 'startup', 'startups', 'system', 'systems',
   'subject', 'technology', 'that', 'the', 'this', 'topic', 'with', 'world',
   'ai', 'tech',
 ]);
@@ -120,6 +121,8 @@ export function getSourceIdentityAlignmentIssue(candidate: GeoffreyQualityCandid
 
   const contentTokens = new Set(sourceIdentityTokens(candidate.content));
   if (distinctiveTokens.some((token) => contentTokens.has(token))) return null;
+  const evidenceTokens = sourceIdentityTokens((candidate.sourceEvidenceTexts || []).join(' '));
+  if (evidenceTokens.some((token) => contentTokens.has(token))) return null;
 
   return `source identity drift: draft does not engage ${distinctiveTokens.slice(0, 3).join(', ')}`;
 }
