@@ -468,4 +468,37 @@ describe('AI model routing', () => {
       }],
     }));
   });
+
+  it('gives the primary model the full stage deadline instead of dividing it across fallbacks', async () => {
+    const openAiCreate = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: 'unexpected fallback' }] }],
+    });
+    const anthropicCreate = vi.fn(() => new Promise((resolve) => {
+      setTimeout(() => resolve({
+        content: [{ type: 'text', text: 'primary completed' }],
+        stop_reason: 'end_turn',
+      }), 60);
+    }));
+    const {
+      PUBLISHING_V2_MODEL_STACK,
+      generateText,
+    } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    const result = await generateText({
+      task: 'idea_generation',
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      system: 'Return the requested idea.',
+      prompt: 'probe',
+      maxTokens: 64,
+      timeoutMs: 100,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      text: 'primary completed',
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+    }));
+    expect(openAiCreate).not.toHaveBeenCalled();
+  });
 });

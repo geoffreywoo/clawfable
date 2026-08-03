@@ -419,12 +419,9 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     const target = modelChain[index];
     const remainingMs = deadlineAt === null ? null : deadlineAt - Date.now();
     if (remainingMs !== null && remainingMs <= 0) break;
-    const remainingTargets = modelChain.length - index;
     const attemptTimeoutMs = remainingMs === null
       ? null
-      : remainingTargets === 1
-        ? remainingMs
-        : Math.max(1, Math.floor(remainingMs / Math.min(2, remainingTargets)));
+      : remainingMs;
     try {
       const generation = target.provider === 'openai'
         ? generateWithOpenAi(options, target.model)
