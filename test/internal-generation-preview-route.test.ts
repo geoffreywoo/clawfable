@@ -195,6 +195,9 @@ describe('internal generation preview route', () => {
         generationRunId: 'run-v2',
         ideaId: 'idea-v2',
         draftCandidateId: 'draft-v2',
+        parentTweetId: null,
+        parentIdeaId: null,
+        parentDraftCandidateId: null,
         generationEvidenceReferences: [expect.objectContaining({ id: 'source-v2' })],
       }],
     });

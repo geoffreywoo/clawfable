@@ -243,6 +243,7 @@ describe('generateTweetBatchV2 integration', () => {
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
     const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation')?.[0];
     const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing')?.[0];
+    const copyJudgeCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0];
 
     expect(tasks.filter((task) => task === 'idea_generation')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'idea_judgment')).toHaveLength(1);
@@ -250,6 +251,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 3800, jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(writerCall).toMatchObject({ maxTokens: 900, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(280);
+    expect(JSON.parse(copyJudgeCall.prompt).candidates.every((candidate: any) => candidate.voiceAnchors.length >= 3)).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts[0]).toMatchObject({
       pipelineVersion: 'v2',
@@ -456,6 +459,36 @@ describe('generateTweetBatchV2 integration', () => {
       status: 'failed',
       error: 'Copy judgment returned malformed output.',
     });
+  });
+
+  it('rejects polished copy when the judge reports weak operator voice fit', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        const ids = JSON.parse(options.prompt).candidates.map((candidate: any) => candidate.id);
+        return result(JSON.stringify({
+          ranking: ids,
+          scores: ids.map((id: string) => ({
+            id,
+            overall: 0.9,
+            voiceFit: 0.4,
+            insight: 0.86,
+            specificity: 0.82,
+            factualSafety: 0.98,
+            clarity: 0.92,
+            novelty: 0.84,
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['copy_judge_voice_mismatch']) }),
+    ]));
   });
 
   it('normalizes common judge score scales without weakening ranking validation', async () => {

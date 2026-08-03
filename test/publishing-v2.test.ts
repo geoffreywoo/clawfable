@@ -178,12 +178,16 @@ describe('V2 publishing surfaces', () => {
         onTrace: (trace: any) => { finalTrace = trace; },
       });
       const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+      const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing')?.[0];
+      const copyJudgeCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0];
 
       expect(finalTrace.error).toBeNull();
       expect(finalTrace).toMatchObject({ status: 'completed', outcomeCode: 'completed' });
       expect(tasks.filter((task) => task === 'idea_generation')).toHaveLength(1);
       expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(2);
       expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
+      expect(writerCall.jsonSchema.properties.content.maxLength).toBe(280);
+      expect(JSON.parse(copyJudgeCall.prompt).voiceAnchors).toHaveLength(3);
       expect(drafts).toHaveLength(2);
       expect(drafts[0]).toMatchObject({
         pipelineVersion: 'v2',
@@ -202,8 +206,35 @@ describe('V2 publishing surfaces', () => {
   );
 
   it('keeps copy-only remixes under the parent idea without forging a new premise', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'tweet_writing') {
+        return result(JSON.stringify({
+          content: 'retries should reuse the same qualified artifact instead of generating replacement copy.',
+          format: 'observation',
+          posture: 'shorter version of the parent claim',
+        }));
+      }
+      if (options.task === 'copy_judgment') {
+        const candidates = JSON.parse(options.prompt).candidates;
+        return result(JSON.stringify({
+          ranking: candidates.map((candidate: any) => candidate.id),
+          scores: candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: 0.9,
+            voiceFit: 0.9,
+            insight: 0.86,
+            specificity: 0.82,
+            factualSafety: 0.98,
+            clarity: 0.92,
+            novelty: 0.84,
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
     const drafts = await generatePublishingBatchV2({
       ...input,
+      allTweets: [{ id: 'tweet-parent', content: parent.content }],
       request: {
         surface: 'remix',
         triggerId: 'remix-copy-only',
@@ -217,6 +248,7 @@ describe('V2 publishing surfaces', () => {
     });
 
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'idea_generation')).toBe(false);
+    expect(drafts).toHaveLength(2);
     expect(drafts[0]).toMatchObject({
       ideaId: 'idea-parent',
       parentTweetId: 'tweet-parent',
@@ -240,6 +272,55 @@ describe('V2 publishing surfaces', () => {
     expect(drafts).toEqual([]);
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(finalTrace).toMatchObject({ status: 'empty', outcomeCode: 'prompt_injection', error: null });
+  });
+
+  it('rejects contextual copy when the judge reports weak operator voice fit', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') {
+        return result(JSON.stringify({
+          claim: 'Reliable publishing requires preserving the qualified artifact through delivery.',
+          tension: 'Retry convenience can quietly change approved public copy.',
+          implication: 'Treat generation and delivery as separate state transitions.',
+          authorReason: 'This author operates an automated publishing product.',
+          counterargument: 'Regenerating can appear faster during an outage.',
+          factualRisk: 'low',
+        }));
+      }
+      if (options.task === 'tweet_writing') {
+        return result(JSON.stringify({
+          content: 'delivery retries should reuse the approved artifact. regeneration is a new editorial decision.',
+          format: 'observation',
+          posture: 'direct judgment',
+        }));
+      }
+      if (options.task === 'copy_judgment') {
+        const ids = JSON.parse(options.prompt).candidates.map((candidate: any) => candidate.id);
+        return result(JSON.stringify({
+          ranking: ids,
+          scores: ids.map((id: string) => ({
+            id,
+            overall: 0.9,
+            voiceFit: 0.4,
+            insight: 0.86,
+            specificity: 0.82,
+            factualSafety: 0.98,
+            clarity: 0.92,
+            novelty: 0.84,
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generatePublishingBatchV2({
+      ...input,
+      request: { surface: 'reply', triggerId: 'reply-low-voice', targetPost: target },
+    });
+
+    expect(drafts).toEqual([]);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['copy_judge_voice_mismatch']) }),
+    ]));
   });
 
   it('disables marketing when no current ProductFact exists', async () => {
