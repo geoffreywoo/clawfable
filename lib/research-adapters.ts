@@ -2,6 +2,7 @@ import type {
   ResearchAgenda,
   ResearchFeedConfig,
   ResearchSourceType,
+  SourceClaim,
   SourceDocument,
   SourceTrustTier,
 } from './types';
@@ -119,6 +120,48 @@ function compactText(value: string, limit: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
+function secFilingClaims(title: string, excerpt: string, canonicalUrl: string): SourceClaim[] {
+  const match = title.match(/^([A-Z0-9][A-Z0-9 /-]{0,24}?)\s+-\s+(.+)$/i);
+  if (!match) return extractDeterministicClaims(title, excerpt);
+  const form = match[1].toUpperCase();
+  const subject = match[2]
+    .replace(/\(\d{6,}\)/g, '')
+    .replace(/\((?:Subject|Filed by|Filer)\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!subject) return extractDeterministicClaims(title, excerpt);
+  const filedAt = excerpt.match(/\bFiled:\s*(\d{4}-\d{2}-\d{2})\b/i)?.[1] || null;
+  const text = `${subject} filed SEC form ${form}${filedAt ? ` on ${filedAt}` : ''}.`;
+  return [{
+    id: stableResearchId('claim', canonicalUrl, form, subject, filedAt || ''),
+    text,
+    kind: 'announcement',
+    confidence: 0.92,
+    entities: extractResearchEntities(subject),
+  }];
+}
+
+const LOW_SIGNAL_SEC_FORM = /^(?:13F|424B|NPORT|N-PX|UPLOAD|CORRESP)\b/i;
+const GENERIC_SEC_MATCH_TOKENS = new Set([
+  'company', 'companies', 'corp', 'corporation', 'finance', 'financial', 'filed',
+  'filer', 'market', 'markets', 'startup', 'startups', 'subject', 'tech', 'technology',
+]);
+
+function secEntryMatchesAgenda(
+  entry: { title: string; excerpt: string },
+  agenda: ResearchAgenda,
+): boolean {
+  const form = entry.title.split(/\s+-\s+/, 1)[0] || '';
+  if (LOW_SIGNAL_SEC_FORM.test(form)) return false;
+  const desired = new Set(significantResearchTokens([
+    ...agenda.queries,
+    ...agenda.pinnedQuestions,
+    ...Object.keys(agenda.domainWeights),
+  ].join(' ')).filter((token) => !GENERIC_SEC_MATCH_TOKENS.has(token)));
+  if (desired.size === 0) return false;
+  return significantResearchTokens(entry.title).some((token) => desired.has(token));
+}
+
 function safePublishedAt(value: string | null | undefined, now: Date): string {
   const parsed = Date.parse(value || '');
   return Number.isFinite(parsed) && parsed <= now.getTime() + 24 * 60 * 60 * 1000
@@ -231,6 +274,9 @@ function feedDocument({
   const excerpt = compactText(entry.excerpt, 1200);
   const entities = extractResearchEntities(`${title}. ${excerpt}`);
   const publishedAt = safePublishedAt(entry.publishedAt, now);
+  const claims = sourceType === 'sec_edgar'
+    ? secFilingClaims(title, excerpt, canonicalUrl)
+    : extractDeterministicClaims(title, excerpt);
   return {
     schemaVersion: 2,
     id: stableResearchId('source', canonicalUrl),
@@ -246,7 +292,7 @@ function feedDocument({
     excerpt,
     contentHash: stableResearchId('content', title, excerpt),
     entities,
-    claims: extractDeterministicClaims(title, excerpt),
+    claims,
     topics: feed.topics,
     query,
     metadata: { publishedAtKnown: publishedAt !== '1970-01-01T00:00:00.000Z' },
@@ -377,7 +423,7 @@ export async function fetchSecEdgar(
       topics: ['markets', 'startups', 'finance', 'companies'],
     };
     const documents = parseSyndicationFeed(xml, 80)
-      .filter((entry) => entryMatchesAgenda(entry.title, entry.excerpt, feed.topics, context.agenda, false))
+      .filter((entry) => secEntryMatchesAgenda(entry, context.agenda))
       .slice(0, 20)
       .map((entry) => feedDocument({
         agentId: context.agentId,
@@ -401,7 +447,7 @@ function arxivQueryUrl(query: string): string {
     .split(/\s+/)
     .map((term) => term.trim())
     .filter((term) => term.length >= 3)
-    .slice(0, 6)
+    .slice(0, 3)
     .map((term) => `all:${term.replace(/[^a-zA-Z0-9+_.-]/g, '')}`)
     .filter((term) => term.length > 4)
     .join('+AND+');

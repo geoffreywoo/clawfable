@@ -55,11 +55,21 @@ describe('research agenda and story qualification', () => {
         communicationStyle: 'plain',
         summary: 'founder and investor',
       },
-      learnings: null,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: 'run similar max book leopold except do not leverage',
+          weight: 1,
+          sampleCount: 4,
+          avgEngagement: 18,
+          topTweets: [],
+        }],
+      } as any,
       performance: [{
         tweetId: 'tweet-1', xTweetId: 'x-1', content: 'vertical AI buyers', format: 'observation', topic: 'vertical AI',
         postedAt: now.toISOString(), checkedAt: now.toISOString(), likes: 20, retweets: 2, replies: 3,
         impressions: 3000, engagementRate: 0.01, wasViral: false, source: 'manual',
+        thesis: 'day jakepaul journey march antifund commas https',
       }, {
         tweetId: '', xTweetId: 'x-unknown', content: 'unverified timeline post', format: 'observation', topic: 'unverified timeline topic',
         postedAt: now.toISOString(), checkedAt: now.toISOString(), likes: 200, retweets: 20, replies: 30,
@@ -80,8 +90,75 @@ describe('research agenda and story qualification', () => {
     expect(built.queries).toEqual(expect.arrayContaining(['What changed in inference economics?', 'AI hardware', 'vertical AI']));
     expect(built.queries).not.toContain('unverified timeline topic');
     expect(built.queries).not.toContain('generated topic');
+    expect(built.queries).not.toContain('day jakepaul journey march antifund commas https');
+    expect(built.queries).not.toContain('run similar max book leopold except do not leverage');
     expect(built.blockedTopics).toContain('mineral explainers');
     expect(built).not.toHaveProperty('evidence');
+  });
+
+  it('puts distinct high-specificity frontier searches ahead of broad account topics', () => {
+    const built = buildResearchAgenda({
+      agent: { id: 'agent-1', name: 'geoffreywoo', handle: 'geoffreywoo', soulMd: '' } as any,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['crypto', 'tech', 'startup'],
+        antiGoals: [],
+        communicationStyle: 'short and direct',
+        summary: 'You are geoffreywoo.',
+      },
+      learnings: null,
+      performance: [],
+      feedback: [],
+      tweets: [],
+    });
+
+    expect(built.queries.slice(0, 3)).toEqual([
+      'inference ASIC HBM bandwidth rack power tokens per watt',
+      'hybrid bonding alignment yield chiplets',
+      'robot actuator life duty cycle field service',
+    ]);
+    expect(built.queries).toEqual(expect.arrayContaining(['crypto', 'tech', 'startup']));
+    expect(built.queries.filter((query) => /(?:inference|bonding|robot|transformer|tungsten|antimony|gallium|graphite|fluorspar)/i.test(query)).length).toBeLessThanOrEqual(12);
+  });
+
+  it('removes a blocked frontier angle without suppressing the broader source portfolio', () => {
+    const built = buildResearchAgenda({
+      agent: { id: 'agent-1', name: 'geoffreywoo', handle: 'geoffreywoo', soulMd: '' } as any,
+      voiceProfile: {
+        tone: 'analyst',
+        topics: ['AI', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'short and direct',
+        summary: 'You are geoffreywoo.',
+      },
+      learnings: null,
+      performance: [],
+      feedback: [],
+      tweets: [],
+      semanticBlocks: [{
+        schemaVersion: 2,
+        id: 'block-graphite-angle',
+        agentId: 'agent-1',
+        scope: 'idea',
+        semanticKey: 'and:apparently:battery:digging:graphite:independence:means',
+        topic: null,
+        storyClusterId: null,
+        ideaId: null,
+        reasonCode: 'duplicate',
+        reason: 'Do not repeat the mine-versus-processing graphite angle.',
+        permanent: true,
+        blockedUntil: null,
+        createdAt: now.toISOString(),
+      }],
+    });
+
+    expect(built.queries.some((query) => /graphite/i.test(query))).toBe(false);
+    expect(built.queries).toEqual(expect.arrayContaining([
+      'inference ASIC HBM bandwidth rack power tokens per watt',
+      'acid grade fluorspar hydrofluoric acid semiconductor etch',
+      'AI',
+      'startups',
+    ]));
   });
 
   it('qualifies a primary source or two independent sources, but not unsupported chatter', () => {
@@ -104,6 +181,58 @@ describe('research agenda and story qualification', () => {
     });
     expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('secondary-a'))?.qualifiedClaimIds).toHaveLength(2);
     expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('chatter'))?.evidenceQualified).toBe(false);
+  });
+
+  it('does not treat stale or one-token arXiv matches as current identity evidence', () => {
+    const arxivAgenda = {
+      ...agenda,
+      queries: [
+        'hybrid bonding alignment yield chiplets',
+        'robot actuator life duty cycle field service',
+        'inference ASIC HBM bandwidth rack power tokens per watt',
+      ],
+      domainWeights: { hybrid: 1, bonding: 1, alignment: 0.8, chiplet: 0.8 },
+    };
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda: arxivAgenda,
+      now,
+      documents: [
+        source({
+          id: 'stale-query',
+          sourceType: 'arxiv',
+          query: 'startup',
+          title: 'A startup portfolio optimization paper',
+          publisher: 'arXiv',
+          trustTier: 'primary',
+          isPrimary: true,
+        }),
+        source({
+          id: 'one-token',
+          sourceType: 'arxiv',
+          query: arxivAgenda.queries[0],
+          title: 'Hybrid portfolio optimization methods',
+          excerpt: 'A hybrid statistical method evaluates portfolios.',
+          publisher: 'arXiv',
+          trustTier: 'primary',
+          isPrimary: true,
+        }),
+        source({
+          id: 'aligned-query',
+          sourceType: 'arxiv',
+          query: arxivAgenda.queries[0],
+          title: 'Hybrid bonding alignment for chiplet systems',
+          excerpt: 'The paper measures hybrid bonding alignment and package yield.',
+          publisher: 'arXiv',
+          trustTier: 'primary',
+          isPrimary: true,
+        }),
+      ],
+    });
+
+    expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('stale-query'))?.scores.identityFit).toBeLessThan(0.55);
+    expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('one-token'))?.scores.identityFit).toBeLessThan(0.55);
+    expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('aligned-query'))?.scores.identityFit).toBeGreaterThanOrEqual(0.55);
   });
 
   it('does not treat two unrelated claims as corroboration merely because their story titles cluster', () => {

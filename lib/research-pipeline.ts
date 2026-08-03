@@ -97,8 +97,8 @@ function uniqueStrings(values: Array<string | null | undefined>, limit: number):
   const result: string[] = [];
   for (const value of values) {
     const normalized = value?.replace(/\s+/g, ' ').trim();
-    if (!normalized || normalized.length < 3) continue;
-    const key = normalized.toLowerCase();
+    const key = normalized?.toLowerCase() || '';
+    if (!normalized || (normalized.length < 3 && !['ai', 'vc'].includes(key))) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(normalized.slice(0, 220));
@@ -131,7 +131,7 @@ function operatorTopics(performance: TweetPerformance[]): string[] {
       - (left.qualityAdjustedGrowthScore || left.likes + left.retweets * 2 + left.replies * 2)
     ))
     .slice(0, 30)
-    .flatMap((entry) => [entry.topic, entry.thesis])
+    .map((entry) => entry.topic)
     .filter((value): value is string => Boolean(value?.trim()));
 }
 
@@ -166,6 +166,7 @@ export function buildResearchAgenda({
   performance,
   feedback,
   tweets,
+  semanticBlocks = [],
   current,
 }: {
   agent: Agent;
@@ -174,20 +175,50 @@ export function buildResearchAgenda({
   performance: TweetPerformance[];
   feedback: FeedbackEntry[];
   tweets: Tweet[];
+  semanticBlocks?: SemanticBlock[];
   current?: ResearchAgenda | null;
 }): ResearchAgenda {
   const profile = voiceProfile || parseSoulMd(agent.name || agent.handle, agent.soulMd || '');
   const historicalTopics = operatorTopics(performance);
-  const manualTopics = learnings?.manualTopicProfile?.flatMap((entry) => [entry.topic, entry.angle]) || [];
-  const frontierQueries = buildFrontierSeedDiscoveryPlan(profile, 8)
-    .flatMap((entry) => entry.researchQueries.slice(0, 3));
+  // Successful post premises are semantic memory, not search queries. Feeding raw
+  // theses or learned angles back into sourcing creates noisy, self-referential research.
+  const manualTopics = learnings?.manualTopicProfile?.map((entry) => entry.topic) || [];
+  const discoveryProfile = {
+    ...profile,
+    summary: `${profile.summary}\nAccount identity: @${agent.handle}`,
+  };
+  const activeIdeaBlocks = semanticBlocks.filter((block) => (
+    block.scope !== 'copy'
+    && (block.permanent || !block.blockedUntil || Date.parse(block.blockedUntil) > Date.now())
+  ));
+  const frontierPlan = buildFrontierSeedDiscoveryPlan(discoveryProfile, 20)
+    .filter((entry) => {
+      const seedSubject = [
+        entry.seed.topic,
+        entry.seed.technicalObject,
+        entry.seed.hiddenConstraint,
+        entry.seed.nonConsensusImplication,
+      ].join(' ');
+      return !activeIdeaBlocks.some((block) => {
+        const blockedSubject = `${block.semanticKey.replace(/:/g, ' ')} ${block.topic || ''}`;
+        return researchTokenSimilarity(entry.seed.topic, blockedSubject) >= 0.48
+          || researchTokenSimilarity(seedSubject, blockedSubject) >= 0.44;
+      });
+    })
+    .slice(0, 8);
+  // Interleave domains before taking a second query from any one seed. The
+  // adapters that consume only the first three queries then get a real portfolio
+  // instead of three near-identical searches or three one-word account topics.
+  const frontierQueries = [0, 1, 2].flatMap((queryIndex) => (
+    frontierPlan.map((entry) => entry.researchQueries[queryIndex]).filter(Boolean)
+  )).slice(0, 12);
   const querySeeds = uniqueStrings([
     ...(current?.pinnedQuestions || []),
     ...(current?.operatorTopics || []),
+    ...frontierQueries,
     ...profile.topics,
     ...manualTopics,
     ...historicalTopics,
-    ...frontierQueries,
   ], 28);
   const blockedTopics = uniqueStrings([
     ...(current?.blockedTopics || []),
@@ -348,7 +379,17 @@ function identityFit(document: SourceDocument, agenda: ResearchAgenda): number {
     if (!desired.has(token)) continue;
     weightedOverlap += 0.5 + (agenda.domainWeights[token] || 0.5);
   }
-  return clampResearchScore(weightedOverlap / 5);
+  const baseFit = clampResearchScore(weightedOverlap / 5);
+  if (document.sourceType !== 'arxiv' || !document.query) return baseFit;
+
+  const activeArxivQueries = agenda.queries.slice(0, 3).map((query) => query.toLowerCase());
+  if (!activeArxivQueries.includes(document.query.toLowerCase())) return Math.min(baseFit, 0.18);
+  const requiredTokens = significantResearchTokens(document.query).slice(0, 3);
+  const contentTokens = new Set(significantResearchTokens(`${document.title} ${document.excerpt}`));
+  const matchedTokens = requiredTokens.filter((token) => contentTokens.has(token)).length;
+  if (matchedTokens < Math.min(2, requiredTokens.length)) return Math.min(baseFit, 0.24);
+  const queryCoverage = matchedTokens / Math.max(1, requiredTokens.length);
+  return clampResearchScore(baseFit * 0.7 + queryCoverage * 0.3);
 }
 
 function consequenceScore(documents: SourceDocument[]): number {
@@ -609,6 +650,7 @@ export async function refreshAgentResearch(
       performance,
       feedback,
       tweets,
+      semanticBlocks,
       current: currentAgenda,
     });
     await saveResearchAgenda(agent.id, agenda);

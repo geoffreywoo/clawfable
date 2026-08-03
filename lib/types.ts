@@ -774,6 +774,13 @@ export type GenerationCandidateStatus =
   | 'edited'
   | 'deleted';
 
+export interface IdeaJudgeBreakdown {
+  evidenceFidelity: number;
+  authorFit: number;
+  consequence: number;
+  distinctiveness: number;
+}
+
 export interface IdeaCandidate {
   schemaVersion: 2;
   id: string;
@@ -799,6 +806,7 @@ export interface IdeaCandidate {
   evidenceScore: number;
   identityScore: number;
   judgeScore: number | null;
+  judgeBreakdown?: IdeaJudgeBreakdown | null;
   status: GenerationCandidateStatus;
   rejectionCodes: string[];
   createdAt: string;

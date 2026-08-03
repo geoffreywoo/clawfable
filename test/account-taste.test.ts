@@ -20,6 +20,11 @@ describe('account taste scoring', () => {
     expect(isGeoffreyVoiceProfile(geoffreyVoiceProfile)).toBe(true);
     expect(isGeoffreyVoiceProfile({
       ...geoffreyVoiceProfile,
+      communicationStyle: 'short, casual, high-conviction',
+      summary: 'You are geoffreywoo. You focus on AI, crypto, tech, and startups.',
+    })).toBe(true);
+    expect(isGeoffreyVoiceProfile({
+      ...geoffreyVoiceProfile,
       communicationStyle: 'technical and compressed',
       summary: 'Writes about inference ASICs, tungsten, and industrial capacity.',
     })).toBe(false);

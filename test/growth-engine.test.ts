@@ -3,7 +3,6 @@ import {
   buildPostPortfolioPlan,
   buildRelationshipOpportunities,
   buildTrendOpportunities,
-  buildVelocityFollowupFallback,
   buildViralityPostmortem,
   inferMediaExperimentType,
   inferPortfolioRole,
@@ -126,7 +125,6 @@ describe('growth-engine', () => {
     const entry = perf();
 
     expect(shouldCreateVelocityFollowup(entry)).toBe(true);
-    expect(buildVelocityFollowupFallback(entry)).toContain('The');
 
     const postmortem = buildViralityPostmortem('agent-1', entry);
     expect(postmortem.performanceSummary).toContain('18 likes');

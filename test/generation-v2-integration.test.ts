@@ -62,10 +62,10 @@ function ideaResponse(prompt: string) {
   const parsed = JSON.parse(prompt);
   const ideas = parsed.briefs.flatMap((brief: any, briefIndex: number) => [0, 1, 2].map((variant) => ({
     briefId: brief.id,
-    claim: `${brief.topic} has an operating constraint ${briefIndex}-${variant} that changes company formation`,
-    tension: `Visible excitement ${briefIndex}-${variant} obscures who captures the durable advantage`,
-    implication: `Founders should change product scope and capital timing for path ${briefIndex}-${variant}`,
-    authorReason: `This author has built and invested through this exact company formation tradeoff ${briefIndex}-${variant}`,
+    claim: `${brief.topic} changes which proof must exist before a team commits capacity on path ${briefIndex}-${variant}`,
+    tension: `The visible launch on path ${briefIndex}-${variant} arrives before buyers know which operating promise will hold`,
+    implication: `Sequence the proof, capacity commitment, and buyer decision differently for path ${briefIndex}-${variant}`,
+    authorReason: `The author's recurring lens is who commits scarce capital before uncertainty clears on path ${briefIndex}-${variant}`,
     evidenceIds: brief.allowedEvidenceIds,
     counterargument: `Incumbents could absorb the advantage on path ${briefIndex}-${variant}`,
     factualRisk: 'low',
@@ -79,7 +79,13 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
   return result(JSON.stringify({
     ranking: ids,
     comparisons: [],
-    scores: ids.map((id: string) => ({
+    scores: ids.map((id: string) => key === 'ideas' ? ({
+      id,
+      evidenceFidelity: 0.96,
+      authorFit: 0.9,
+      consequence: 0.88,
+      distinctiveness: 0.86,
+    }) : ({
       id,
       overall: 0.9,
       voiceFit: 0.92,
@@ -96,13 +102,13 @@ function writerResponse(prompt: string) {
   const parsed = JSON.parse(prompt);
   const topic = parsed.idea.topic;
   return result(JSON.stringify({ drafts: [{
-    content: `${topic}: the useful edge appears when a tiny team changes what it can attempt, not when a large company trims another workflow.`,
+    content: `${topic}: prove the buyer decision before reserving the expensive capacity. the launch order matters more than the demo.`,
     format: 'observation',
-    posture: 'plain operator judgment',
+    posture: 'plain capital allocation judgment',
   }, {
-    content: `The interesting part of ${topic} is company formation. Small teams can now start with an ambition that used to require an organization.`,
+    content: `${topic} gets interesting when customers commit before the full system exists. that changes what has to be proven first.`,
     format: 'hot_take',
-    posture: 'company formation contrast',
+    posture: 'buyer commitment observation',
   }] }), 'anthropic');
 }
 
@@ -326,6 +332,43 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('keeps an ordinary dry preview source-backed just like live generation', async () => {
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    mocks.getStoryClusters.mockResolvedValue([]);
+    let finalTrace: any = null;
+
+    const drafts = await generateTweetBatchV2({
+      ...input,
+      mode: 'preview',
+      persistArtifacts: false,
+      entitlement: null,
+      onTrace: (trace) => { finalTrace = trace; },
+    });
+
+    expect(drafts).toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(finalTrace).toMatchObject({
+      status: 'empty',
+      outcomeCode: 'no_qualified_context',
+      stageCounts: expect.objectContaining({ briefs: 0 }),
+    });
+  });
+
+  it('allows an explicit operator topic only in non-persisting preview mode', async () => {
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    mocks.getStoryClusters.mockResolvedValue([]);
+
+    await generateTweetBatchV2({
+      ...input,
+      requestedTopic: 'how AI changes company formation',
+      mode: 'preview',
+      persistArtifacts: false,
+      entitlement: null,
+    });
+
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'idea_generation')).toBe(true);
+  });
+
   it('uses only operator-written posts as diction anchors', async () => {
     await generateTweetBatchV2({
       ...input,
@@ -378,6 +421,70 @@ describe('generateTweetBatchV2 integration', () => {
     expect(previousPremises).toContain('operator-written diction anchor');
     expect(previousPremises).toContain('timeline diction from the curated voice corpus');
     expect(previousPremises).not.toContain('generated diction must not return');
+  });
+
+  it('shows both judges the actual evidence and stage-specific rejection lessons', async () => {
+    mocks.getSemanticBlocks.mockResolvedValue([{
+      schemaVersion: 2,
+      id: 'idea-lesson',
+      agentId: 'agent-1',
+      scope: 'idea',
+      semanticKey: 'pricing:release:inference',
+      topic: null,
+      storyClusterId: null,
+      ideaId: null,
+      reasonCode: 'bad_premise',
+      reason: 'Do not infer pricing or buyer behavior from a feature-only release.',
+      permanent: false,
+      blockedUntil: null,
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }, {
+      schemaVersion: 2,
+      id: 'copy-lesson',
+      agentId: 'agent-1',
+      scope: 'copy',
+      semanticKey: 'consultant:memo:writing',
+      topic: null,
+      storyClusterId: null,
+      ideaId: null,
+      reasonCode: 'bad_writing',
+      reason: 'The premise was usable, but the writing sounded like a consultant memo.',
+      permanent: false,
+      blockedUntil: null,
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }]);
+
+    await generateTweetBatchV2(input);
+
+    const ideaJudge = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
+    const copyJudge = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
+    expect(ideaJudge.author.worldview).toContain('founder and investor');
+    expect(ideaJudge.priorIdeaRejections).toContain('Do not infer pricing or buyer behavior from a feature-only release.');
+    expect(ideaJudge.ideas.every((idea: any) => idea.evidence.some((entry: any) => entry.claim))).toBe(true);
+    expect(copyJudge.priorWritingRejections).toContain('The premise was usable, but the writing sounded like a consultant memo.');
+    expect(copyJudge.candidates.every((candidate: any) => candidate.evidence.some((entry: any) => entry.claim))).toBe(true);
+  });
+
+  it('discards ideas with weak evidence fidelity before calling a writer', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') {
+        const judged = rankingResponse(options.prompt, 'ideas');
+        const parsed = JSON.parse(judged.text);
+        parsed.scores = parsed.scores.map((score: any) => ({ ...score, evidenceFidelity: 0.4 }));
+        return result(JSON.stringify(parsed));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'tweet_writing')).toBe(false);
+    expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'rejected',
+        rejectionCodes: expect.arrayContaining(['idea_judge_evidence_mismatch']),
+      }),
+    ]));
   });
 
   it('returns fewer drafts after malformed idea output instead of inventing fallback copy', async () => {

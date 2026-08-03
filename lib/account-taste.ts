@@ -796,6 +796,8 @@ export function isGeoffreyVoiceProfile(voiceProfile?: VoiceProfile | null): bool
 
   return haystack.includes('@geoffwoo')
     || haystack.includes('@geoffreywoo')
+    || haystack.includes('you are geoffwoo')
+    || haystack.includes('you are geoffreywoo')
     || haystack.includes('account topic policy for geoffwoo')
     || haystack.includes('account topic policy for geoffreywoo');
 }

@@ -238,6 +238,7 @@ export async function POST(
               status: idea.status,
               rejectionCodes: idea.rejectionCodes,
               judgeScore: idea.judgeScore,
+              judgeBreakdown: idea.judgeBreakdown || null,
             })),
             drafts: previewArtifacts.drafts.map((draft) => ({
               id: draft.id,

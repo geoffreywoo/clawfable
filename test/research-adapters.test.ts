@@ -168,4 +168,38 @@ describe('research adapters', () => {
     expect(github.documents).toHaveLength(3);
     expect(github.documents.every((document) => document.sourceType === 'github_releases' && document.isPrimary)).toBe(true);
   });
+
+  it('turns SEC index metadata into an explicit filing claim', async () => {
+    const xml = '<feed><entry><title>SCHEDULE 13D/A - Hyperscale Data, Inc. (0000896493) (Filed by)</title><link href="https://www.sec.gov/Archives/edgar/data/896493/example-index.htm"/><updated>2026-08-01T10:00:00Z</updated><summary>Filed: 2026-08-01 AccNo: 0000000000-00-000001 Size: 10 KB</summary></entry></feed>';
+    const fetchImpl = vi.fn(async () => new Response(xml, { status: 200 })) as unknown as typeof fetch;
+    const result = await fetchSecEdgar({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: ['hyperscale data'] },
+      trending: [],
+      fetchImpl,
+      now,
+    });
+
+    expect(result.documents[0]?.claims).toEqual([
+      expect.objectContaining({
+        kind: 'announcement',
+        confidence: 0.92,
+        text: 'Hyperscale Data, Inc. filed SEC form SCHEDULE 13D/A on 2026-08-01.',
+      }),
+    ]);
+  });
+
+  it('drops routine SEC forms that only match generic finance terms', async () => {
+    const xml = '<feed><entry><title>424B2 - Morgan Stanley Finance LLC (0001666268) (Filer)</title><link href="https://www.sec.gov/Archives/edgar/data/1666268/example-index.htm"/><updated>2026-08-01T10:00:00Z</updated><summary>Filed: 2026-08-01 AccNo: 0000000000-00-000001 Size: 469 KB</summary></entry></feed>';
+    const fetchImpl = vi.fn(async () => new Response(xml, { status: 200 })) as unknown as typeof fetch;
+    const result = await fetchSecEdgar({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: ['finance markets'] },
+      trending: [],
+      fetchImpl,
+      now,
+    });
+
+    expect(result.documents).toEqual([]);
+  });
 });

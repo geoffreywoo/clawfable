@@ -327,17 +327,6 @@ export function shouldCreateVelocityFollowup(entry: TweetPerformance): boolean {
   return score >= 0.58 || entry.replies >= 2 || weightedEngagement(entry) >= 24;
 }
 
-export function buildVelocityFollowupFallback(entry: TweetPerformance): string {
-  const topic = topicLabel(entry.topic);
-  const hook = entry.replies >= 2
-    ? 'The replies are circling the same mistake:'
-    : 'The thing I would add:';
-  const point = entry.thesis && entry.thesis.length > 20
-    ? entry.thesis
-    : entry.content.replace(/\s+/g, ' ').slice(0, 120);
-  return `${hook}\n\n${point}\n\nThe interesting part is not the headline. It is what compounds after everyone notices ${topic}.`;
-}
-
 export function buildViralityPostmortem(
   agentId: string,
   entry: TweetPerformance,

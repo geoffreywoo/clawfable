@@ -5,12 +5,15 @@ import {
   buildIdeaGenerationPromptV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
+  getV2GeneratedWritingIssue,
+  isStoryEditoriallyQualifiedV2,
   normalizeIdeaCandidatesV2,
   orderV2IdsForPairwise,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
 import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster } from '@/lib/types';
+import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
 
 const voiceProfile = {
   tone: 'casual and direct',
@@ -226,6 +229,41 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(briefs.every((entry) => entry.storyClusterId !== lowFitStory.id)).toBe(true);
+  });
+
+  it('requires both author fit and consequence before spending generation compute on a story', () => {
+    const qualified = {
+      schemaVersion: 2,
+      id: 'story-qualified',
+      agentId: 'agent-1',
+      semanticKey: 'inference:capacity:contract',
+      title: 'An inference provider changes capacity contracts',
+      summary: 'The contract changes when buyers must reserve capacity.',
+      topic: 'AI infrastructure',
+      entities: ['InferenceCo'],
+      sourceDocumentIds: ['source-qualified'],
+      qualifiedClaimIds: ['claim-qualified'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.8, evidenceStrength: 0.9, consequence: 0.7, freshness: 0.9, novelty: 0.8, networkMomentum: 0, total: 0.8 },
+      firstSeenAt: '2026-08-01T00:00:00.000Z',
+      lastSeenAt: '2026-08-01T12:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+
+    expect(isStoryEditoriallyQualifiedV2(qualified)).toBe(true);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-generic-fit',
+      scores: { ...qualified.scores, identityFit: 0.5 },
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-low-consequence',
+      scores: { ...qualified.scores, consequence: 0.22 },
+    })).toBe(false);
   });
 
   it('does not spend research brief slots on a permanently rejected subject', () => {
@@ -550,6 +588,21 @@ describe('Tweet Generation V2', () => {
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
       })],
     }));
+  });
+
+  it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
+    const rejectedProductionDrafts = [
+      "liquidation cascade research keeps failing as a crash oracle. early-warning signals don't reproduce across events, seven BTC cascades and each looks different. real product is boring: sell adaptive margin and exposure controls to exchanges and MMs. stop promising traders the call.",
+      'AI labs treat geopolitics like an annual ethics module while their deploy decisions, partnerships, and access controls are already moving international dynamics. the review belongs at the product decision, not the training slide.',
+      'attestation is quietly becoming a procurement feature, not just a security primitive. encrypted CVMs can protect weights in use, but buyers still need proof the right hardware and stack actually ran their job. whoever turns that proof into policies and audit logs wins more than the exchange selling the machines.',
+      "underdog selling to IG group tells you the real choke point in prediction markets isn't the app. it's the exchange + compliance stack. even the best consumer front end had to buy its way into regulated rails. every standalone prediction app should read that closely.",
+      "boardy giving away deck reviews and meeting prep for free tells you those aren't the product. the product is remembering what you're working toward across every conversation. tasks are commodity, accumulated context is the moat.",
+      "how many agent builders are actually classifying calls by latency sensitivity now that there's a fast tier? most workflow steps are delay-tolerant. blasting every token through premium speed is just burning money for vibes.",
+      'corollary for founders: treat licensing and exchange access as the product, not a back-office chore. build it, partner for it, or acquire it early. a slick front end without owned rails is just a customer acquisition funnel for whoever controls clearing.',
+    ];
+
+    expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);
+    expect(GEOFFREY_NATIVE_EVAL.every((anchor) => getV2GeneratedWritingIssue(anchor) === null)).toBe(true);
   });
 
   it('turns prior outcomes into compact strategy without leaking winning post copy', () => {
