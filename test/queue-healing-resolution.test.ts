@@ -70,6 +70,8 @@ describe('resolveQueuedTweetFailure', () => {
 
     expect(result.action).toBe('kept');
     expect(mocks.updateTweet).toHaveBeenCalledWith(baseTweet.id, {
+      status: 'queued',
+      preQuarantineStatus: null,
       quarantinedAt: null,
       quarantineReason: null,
     });
@@ -85,6 +87,8 @@ describe('resolveQueuedTweetFailure', () => {
 
     expect(result.action).toBe('kept');
     expect(mocks.updateTweet).toHaveBeenCalledWith(baseTweet.id, {
+      status: 'queued',
+      preQuarantineStatus: null,
       quarantinedAt: null,
       quarantineReason: null,
     });
@@ -101,33 +105,28 @@ describe('resolveQueuedTweetFailure', () => {
 
     expect(result.action).toBe('quarantined');
     expect(mocks.updateTweet).toHaveBeenCalledWith(baseTweet.id, expect.objectContaining({
-      status: 'draft',
-      quarantineReason: expect.stringContaining('V2 draft failed queue validation'),
+      status: 'quarantined',
+      preQuarantineStatus: 'queued',
+      quarantineReason: expect.stringContaining('Draft failed queue validation'),
     }));
     expect(mocks.anthropicCreate).not.toHaveBeenCalled();
     expect(mocks.deleteTweet).not.toHaveBeenCalled();
   });
 
-  it('deletes the broken draft instead of throwing when content repair generation fails', async () => {
-    mocks.anthropicCreate.mockRejectedValue(new Error('Anthropic overloaded'));
-
+  it('quarantines content failures without invoking a repair model or deleting history', async () => {
     const result = await resolveQueuedTweetFailure(
       baseAgent,
       { ...baseTweet, quarantinedAt: '2026-04-10T01:00:00.000Z' },
       'post_tweet: duplicate content',
     );
 
-    expect(result.action).toBe('deleted');
-    expect(result.detail).toContain('Anthropic overloaded');
-    expect(mocks.deleteTweet).toHaveBeenCalledWith(baseTweet.id);
+    expect(result.action).toBe('quarantined');
+    expect(result.detail).toContain('immutable artifact');
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    expect(mocks.deleteTweet).not.toHaveBeenCalled();
   });
 
-  it('sends bounded repair prompt context to the model', async () => {
-    mocks.anthropicCreate.mockResolvedValue({
-      content: [{ type: 'text', text: 'anthropic policy claims need concrete receipts before they sound credible' }],
-      stop_reason: 'end_turn',
-    });
-
+  it('bounds stored quarantine reasons without sending content to a model', async () => {
     await resolveQueuedTweetFailure(
       {
         ...baseAgent,
@@ -141,12 +140,9 @@ describe('resolveQueuedTweetFailure', () => {
       `post_tweet duplicate ${'failure metadata '.repeat(80)}REASON_SENTINEL`,
     );
 
-    const call = mocks.anthropicCreate.mock.calls[0]?.[0];
-    const prompt = String(call?.messages?.[0]?.content || '');
-    expect(call.max_tokens).toBe(1024);
-    expect(call.system).not.toContain('SOUL_SENTINEL');
-    expect(prompt).toContain('core thesis');
-    expect(prompt).not.toContain('DRAFT_SENTINEL');
-    expect(prompt).not.toContain('REASON_SENTINEL');
+    const updates = mocks.updateTweet.mock.calls[0]?.[1];
+    expect(String(updates?.quarantineReason)).toContain('post_tweet duplicate');
+    expect(String(updates?.quarantineReason)).not.toContain('REASON_SENTINEL');
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
   });
 });

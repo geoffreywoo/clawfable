@@ -177,8 +177,9 @@ export async function getAgentQueueFeed(agentId: string): Promise<Tweet[]> {
     && Boolean(tweet.followupForTweetId)
     && new Date(tweet.createdAt).getTime() > sevenDaysAgo
   );
+  const quarantined = allTweets.filter((tweet) => tweet.status === 'quarantined');
 
-  return [...followupDrafts, ...deletedFromX, ...queued].map(withDecisionProvenanceSummary);
+  return [...followupDrafts, ...quarantined, ...deletedFromX, ...queued].map(withDecisionProvenanceSummary);
 }
 
 export async function getProtocolSnapshot(user: User, agentOrId: Agent | string): Promise<ProtocolSnapshot> {

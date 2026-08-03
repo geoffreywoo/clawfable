@@ -21,6 +21,20 @@ export interface BillingEntitlements {
   prioritySupport: boolean;
 }
 
+export type AutomationEntitlementSource = 'agent_exemption' | 'stripe_paid' | 'none';
+
+export interface AutomationEntitlement {
+  source: AutomationEntitlementSource;
+  eligible: boolean;
+  reason: string;
+  verifiedAt: string | null;
+  paidThrough: string | null;
+  paidInvoiceId: string | null;
+  paidInvoiceSubscriptionId?: string | null;
+  paidAmountCents: number | null;
+  paidCurrency: string | null;
+}
+
 export interface BillingSummary {
   configured: boolean;
   checkoutReady: boolean;
@@ -39,6 +53,13 @@ export interface BillingSummary {
   stripeSubscriptionId: string | null;
   billingEmail: string | null;
   currentPeriodEnd: string | null;
+  billingVerifiedAt: string | null;
+  paidThrough: string | null;
+  lastPaidInvoiceId: string | null;
+  lastPaidInvoiceSubscriptionId?: string | null;
+  lastPaidInvoiceAt: string | null;
+  lastPaidAmountCents: number | null;
+  lastPaidCurrency: string | null;
   entitlements: BillingEntitlements;
 }
 
@@ -52,6 +73,15 @@ export interface User {
   billingStatus: BillingStatus;
   plan: BillingPlan;
   currentPeriodEnd: string | null;
+  billingVerifiedAt: string | null;
+  paidThrough: string | null;
+  lastPaidInvoiceId: string | null;
+  lastPaidInvoiceSubscriptionId?: string | null;
+  lastPaidInvoiceAt: string | null;
+  lastPaidAmountCents: number | null;
+  lastPaidCurrency: string | null;
+  lastRefundedInvoiceId?: string | null;
+  lastRefundedAt?: string | null;
   createdAt: string;
 }
 
@@ -112,7 +142,7 @@ export interface AgentDetail {
 }
 
 export type AutonomyMode = 'safe' | 'balanced' | 'explore';
-export type TweetStatus = 'preview' | 'draft' | 'queued' | 'posted' | 'deleted_from_x';
+export type TweetStatus = 'preview' | 'draft' | 'queued' | 'quarantined' | 'posted' | 'deleted_from_x';
 export type MetricAvailabilityStatus =
   | 'available'
   | 'not_connected'
@@ -381,10 +411,19 @@ export type DraftExperimentStatus =
 
 export type GenerationModelStackId =
   | 'standard'
-  | 'geoffrey_fable5_gpt56'
-  | 'geoffrey_gpt56_gpt55';
+  | 'publishing_v2_quality';
 
 export type GenerationPipelineVersion = 'v1' | 'v2';
+
+export type GenerationSurface =
+  | 'original'
+  | 'reply'
+  | 'followup'
+  | 'remix'
+  | 'marketing'
+  | 'relationship';
+
+export type PublishingContentProvenance = 'operator_written' | 'generated_v2' | 'historical_v1';
 
 export type QueueFeedbackReasonCode =
   | 'bad_source_topic'
@@ -430,11 +469,19 @@ export interface Tweet {
   sourceBrief?: string | null;
   sourceEvidenceTexts?: string[] | null;
   pipelineVersion?: GenerationPipelineVersion | null;
+  generationSurface?: GenerationSurface | null;
+  generationTriggerId?: string | null;
+  generationIdempotencyKey?: string | null;
+  contentProvenance?: PublishingContentProvenance | null;
   generationRunId?: string | null;
   storyClusterId?: string | null;
   ideaId?: string | null;
   draftCandidateId?: string | null;
+  parentTweetId?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftCandidateId?: string | null;
   evidenceReferences?: TweetEvidenceReference[] | null;
+  generationEvidenceReferences?: GenerationEvidenceReference[] | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;
@@ -491,6 +538,7 @@ export interface Tweet {
   trendHeadline?: string | null;
   quarantineReason?: string | null;
   quarantinedAt?: string | null;
+  preQuarantineStatus?: Exclude<TweetStatus, 'quarantined'> | null;
   createdAt: string;
 }
 
@@ -544,6 +592,7 @@ export interface Metric {
 export type OutcomeEventType =
   | 'generated'
   | 'queued'
+  | 'quarantined'
   | 'posted'
   | 'edited'
   | 'deleted'
@@ -720,6 +769,7 @@ export type GenerationCandidateStatus =
   | 'selected'
   | 'rejected'
   | 'queued'
+  | 'quarantined'
   | 'posted'
   | 'edited'
   | 'deleted';
@@ -729,6 +779,11 @@ export interface IdeaCandidate {
   id: string;
   agentId: string;
   generationRunId: string;
+  surface?: GenerationSurface;
+  triggerId?: string | null;
+  idempotencyKey?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftId?: string | null;
   briefId: string;
   storyClusterId: string | null;
   topic: string;
@@ -755,6 +810,11 @@ export interface DraftCandidate {
   id: string;
   agentId: string;
   generationRunId: string;
+  surface?: GenerationSurface;
+  triggerId?: string | null;
+  idempotencyKey?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftId?: string | null;
   ideaId: string;
   storyClusterId: string | null;
   content: string;
@@ -783,6 +843,83 @@ export interface TweetEvidenceReference {
   claim: string | null;
 }
 
+export type GenerationEvidenceKind =
+  | 'research_source'
+  | 'target_post'
+  | 'thread_context'
+  | 'original_post'
+  | 'performance_snapshot'
+  | 'product_fact'
+  | 'remix_parent';
+
+export interface GenerationEvidenceReference {
+  id: string;
+  kind: GenerationEvidenceKind;
+  sourceDocumentId: string | null;
+  url: string | null;
+  title: string;
+  publisher: string | null;
+  content: string;
+  publishedAt: string | null;
+  verifiedAt: string | null;
+  expiresAt: string | null;
+  trustTier: SourceTrustTier | null;
+}
+
+export interface ProductFact {
+  schemaVersion: 2;
+  id: string;
+  familyId: string;
+  statement: string;
+  provenanceUrl: string;
+  provenanceLabel: string;
+  verifiedByUserId: string;
+  verifiedAt: string;
+  expiresAt: string;
+  version: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PublishingGenerationRequest =
+  | { surface: 'original'; triggerId?: string | null; requestedTopic?: string | null }
+  | { surface: 'reply'; triggerId: string; targetPost: GenerationEvidenceReference; threadContext?: GenerationEvidenceReference[] }
+  | { surface: 'followup'; triggerId: string; originalPost: GenerationEvidenceReference; performance: GenerationEvidenceReference }
+  | { surface: 'remix'; triggerId: string; parentTweetId: string; parentIdeaId: string | null; parentDraftId: string | null; direction: string; changesClaim: boolean; inheritedEvidence: GenerationEvidenceReference[] }
+  | { surface: 'marketing'; triggerId: string; productFacts: GenerationEvidenceReference[] }
+  | { surface: 'relationship'; triggerId: string; targetPost: GenerationEvidenceReference; targetHandle: string };
+
+export type GenerationOutcomeCode =
+  | 'completed'
+  | 'no_qualified_context'
+  | 'voice_not_ready'
+  | 'quality_empty'
+  | 'quality_empty_paused'
+  | 'idea_generation_failed'
+  | 'idea_judgment_failed'
+  | 'writing_failed'
+  | 'copy_judgment_failed'
+  | 'run_deadline'
+  | 'payment_required'
+  | 'prompt_injection'
+  | 'malformed_output'
+  | 'provider_failure';
+
+export interface GenerationOutcomeEvent {
+  id: string;
+  agentId: string;
+  generationRunId: string;
+  surface: GenerationSurface;
+  triggerId: string | null;
+  stage: 'context' | 'idea' | 'writing' | 'selection' | 'queue' | 'publish' | 'performance';
+  code: GenerationOutcomeCode;
+  candidateId: string | null;
+  sourceDocumentIds: string[];
+  metadata: Record<string, string | number | boolean | null>;
+  createdAt: string;
+}
+
 export interface GenerationModelCallTrace {
   stage: 'source_enrichment' | 'idea_generation' | 'idea_judgment' | 'tweet_writing' | 'copy_judgment';
   provider: 'openai' | 'anthropic' | null;
@@ -802,6 +939,14 @@ export interface GenerationRunTrace {
   agentId: string;
   pipelineVersion: 'v2';
   mode?: 'live' | 'manual' | 'preview';
+  surface?: GenerationSurface;
+  triggerId?: string | null;
+  idempotencyKey?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftId?: string | null;
+  entitlement?: AutomationEntitlement | null;
+  outcomeCode?: GenerationOutcomeCode | null;
+  inputFingerprint?: string | null;
   requestedCount: number;
   sourceDocumentIds: string[];
   storyClusterIds: string[];
@@ -814,6 +959,7 @@ export interface GenerationRunTrace {
   totalInputTokens: number;
   totalOutputTokens: number;
   estimatedCostUsd: number | null;
+  costDataStatus?: 'complete' | 'partial' | 'missing';
   startedAt: string;
   completedAt: string | null;
   durationMs: number | null;

@@ -1,11 +1,10 @@
 import type { Agent, AudienceVoiceComplaint, Tweet, VoiceCorpusEntry } from './types';
 import type { TrendingTopic } from './trending';
 import {
-  GEOFFREY_PRIMARY_MODEL_STACK,
+  PUBLISHING_V2_MODEL_STACK,
   getModelChainForTask,
 } from './ai';
 import { buildGenerationContext } from './generation-context';
-import { getGenerationPipelineVersion } from './generation-pipeline';
 import {
   getAudienceVoiceComplaints,
   getQueuedTweets,
@@ -13,21 +12,17 @@ import {
   getTrendingCache,
   getTweets,
   getVoiceCorpusSnapshot,
+  getSourceDocuments,
+  getStoryClusters,
+  getResearchAgenda,
 } from './kv-storage';
-import {
-  assessGeoffreyQualityPolicy,
-  GEOFFREY_QUALITY_POLICY_VERSION,
-  getExpectedFinalCriticVersion,
-  getGeoffreyQualityPolicyActivation,
-} from './quality-policy';
-import {
-  buildSourcePlannerPlan,
-  classifyGeoffreyTopicDomain,
-  isCoreGeoffreyTopicDomain,
-} from './source-planner';
-import { GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, isGeoffreyAccount } from './account-taste';
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
+import { getGeneratedPublishIssue } from './generation-origin';
+import {
+  PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_QUALITY_POLICY_VERSION,
+} from './generation-v2';
 
 export const GENERATION_QUALITY_AUDIT_VERSION = 2;
 
@@ -122,8 +117,8 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 }
 
 export async function buildGenerationQualityAudit(agent: Agent) {
-  const pipelineVersion = getGenerationPipelineVersion(agent.handle);
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2] = await Promise.all([
+  const pipelineVersion = 'v2' as const;
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -131,68 +126,48 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getTweets(agent.id),
     getTrendingCache(agent.id),
     getTopicIntelligenceState(agent.id),
-    pipelineVersion === 'v2' ? loadGenerationV2Metrics(agent.id) : Promise.resolve(null),
+    loadGenerationV2Metrics(agent.id),
+    getSourceDocuments(agent.id, 300),
+    getStoryClusters(agent.id, 200),
+    getResearchAgenda(agent.id),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
-  const sourcePlan = buildSourcePlannerPlan({
-    count: 8,
-    autonomyMode: context.style.autonomyMode,
-    trendMixTarget: context.style.trendMixTarget,
-    trendTolerance: context.style.trendTolerance,
-    voiceProfile: context.voiceProfile,
-    learnings: context.learnings,
-    trending,
-    fallbackTopics: context.style.exploration.underusedTopics,
-  });
-  const activeModelStack = isGeoffreyAccount(agent.handle)
-    ? GEOFFREY_PRIMARY_MODEL_STACK
-    : 'standard';
+  const activeModelStack = PUBLISHING_V2_MODEL_STACK;
   const primaryIdeaGeneration = getModelChainForTask(
-    pipelineVersion === 'v2' ? 'idea_generation' : 'tweet_generation',
+    'idea_generation',
     'quality',
     activeModelStack,
   )[0];
   const primaryIdeaJudge = getModelChainForTask(
-    pipelineVersion === 'v2' ? 'idea_judgment' : 'bulk_judgment',
+    'idea_judgment',
     'quality',
     activeModelStack,
   )[0];
   const primaryWriting = getModelChainForTask(
-    pipelineVersion === 'v2' ? 'tweet_writing' : 'tweet_generation',
+    'tweet_writing',
     'quality',
     activeModelStack,
   )[0];
   const primaryCopyJudge = getModelChainForTask(
-    pipelineVersion === 'v2' ? 'copy_judgment' : 'final_judgment',
+    'copy_judgment',
     'quality',
     activeModelStack,
   )[0];
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
-  const effectivePostsPerDay = isGeoffreyAccount(agent.handle)
-    ? Math.min(GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY, configuredPostsPerDay)
-    : configuredPostsPerDay;
+  const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const queueItems = queue.map((tweet) => {
-    const assessment = assessGeoffreyQualityPolicy(tweet, {
-      voiceProfile: context.voiceProfile,
-      learnings: context.learnings,
-      memory: context.memory,
-      stage: 'queue',
-    });
-    const semanticDomain = classifyGeoffreyTopicDomain(
-      `${tweet.topic || ''} ${tweet.trendHeadline || ''} ${tweet.content}`,
-    );
+    const originIssue = getGeneratedPublishIssue(tweet);
+    const qualityIssues = [originIssue, tweet.quarantineReason].filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
       xTweetId: tweet.xTweetId,
       topic: tweet.topic,
       sourceLane: tweet.sourceLane || null,
       trendTopicId: tweet.trendTopicId || null,
-      semanticDomain,
-      coreTopic: isCoreGeoffreyTopicDomain(semanticDomain),
       sourceEvidenceCount: tweet.sourceEvidenceTexts?.length || 0,
-      qualityEligible: assessment.eligible,
-      qualityIssues: assessment.issues,
-      scores: assessment.scores,
+      qualityEligible: qualityIssues.length === 0 && !tweet.quarantinedAt,
+      qualityIssues,
+      scores: tweet.finalCriticScores || null,
       generationModelStack: tweet.generationModelStack || null,
       generationProvider: tweet.generationProvider || null,
       generationModel: tweet.generationModel || null,
@@ -220,20 +195,23 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     handle: `@${agent.handle}`,
     policy: {
       pipelineVersion,
-      qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
-      finalCriticVersion: getExpectedFinalCriticVersion(pipelineVersion),
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
-      autopostActivation: getGeoffreyQualityPolicyActivation(),
+      autopostActivation: {
+        activated: true,
+        source: 'v2_only',
+        configuredVersion: 'v2',
+        requiresExplicitProductionActivation: false,
+      },
     },
     autopost: {
       enabled: context.settings.enabled,
       configuredPostsPerDay,
       effectivePostsPerDay,
-      maxOriginalsPerRolling24Hours: isGeoffreyAccount(agent.handle)
-        ? GEOFFREY_MAX_ORIGINAL_POSTS_PER_DAY
-        : null,
+      maxOriginalsPerRolling24Hours: 5,
       minQueueSize: context.settings.minQueueSize,
-      refillBatchLimit: isGeoffreyAccount(agent.handle) ? 2 : null,
+      refillBatchLimit: 2,
     },
     corpus: corpus ? {
       snapshotId: corpus.snapshotId,
@@ -262,28 +240,45 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       items: queueItems,
     },
     sources: {
-      laneCounts: sourcePlan.laneCounts,
-      accepted: sourcePlan.acceptedTrends.map((topic) => ({
-        id: topic.networkTopicId || String(topic.id),
-        headline: topic.headline,
-        sourceLane: topic.sourceLane,
-        plannerReason: topic.plannerReason,
-        semanticDomain: topic.semanticDomain || null,
-        uncertainty: topic.topicUncertainty || null,
-        sourceCount: topic.sourceCount || topic.evidence?.length || 0,
-        sourceAuthors: [...new Set((topic.evidence || []).map((evidence) => evidence.author))],
-        isPrimarySource: topic.isPrimarySource === true,
+      documentCount: sourceDocuments.length,
+      storyCount: storyClusters.length,
+      qualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
+      blockedStoryCount: storyClusters.filter((story) => Boolean(story.blockedUntil || story.blockReason)).length,
+      sourceTypeCounts: countBy(sourceDocuments.map((document) => document.sourceType)),
+      trustTierCounts: countBy(sourceDocuments.map((document) => document.trustTier)),
+      publisherCounts: countBy(sourceDocuments.map((document) => document.publisher)),
+      agenda: researchAgenda ? {
+        updatedAt: researchAgenda.updatedAt,
+        queryCount: researchAgenda.queries.length,
+        operatorTopicCount: researchAgenda.operatorTopics?.length || 0,
+        pinnedQuestionCount: researchAgenda.pinnedQuestions.length,
+        blockedTopicCount: researchAgenda.blockedTopics.length,
+        feedCount: researchAgenda.rssFeeds.length,
+        githubRepositoryCount: researchAgenda.githubRepositories.length,
+      } : null,
+      accepted: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).map((story) => ({
+        id: story.id,
+        headline: story.title,
+        topic: story.topic,
+        semanticKey: story.semanticKey,
+        sourceDocumentIds: story.sourceDocumentIds,
+        primarySourceCount: story.primarySourceCount,
+        independentSourceCount: story.independentSourceCount,
+        scores: story.scores,
       })),
-      rejected: sourcePlan.rejectedTrends.map((topic) => ({
-        id: topic.networkTopicId || String(topic.id),
-        headline: topic.headline,
-        plannerReason: topic.plannerReason,
-        semanticDomain: topic.semanticDomain || null,
-        uncertainty: topic.topicUncertainty || null,
-        sourceCount: topic.sourceCount || topic.evidence?.length || 0,
-        sourceAuthors: [...new Set((topic.evidence || []).map((evidence) => evidence.author))],
-        isPrimarySource: topic.isPrimarySource === true,
+      rejected: storyClusters.filter((story) => !story.evidenceQualified || Boolean(story.blockedUntil)).map((story) => ({
+        id: story.id,
+        headline: story.title,
+        topic: story.topic,
+        semanticKey: story.semanticKey,
+        sourceDocumentIds: story.sourceDocumentIds,
+        evidenceQualified: story.evidenceQualified,
+        blockReason: story.blockReason,
+        blockedUntil: story.blockedUntil,
+        primarySourceCount: story.primarySourceCount,
+        independentSourceCount: story.independentSourceCount,
       })),
+      warmedNetworkTopicCount: trending.length,
       intelligence: topicIntelligence ? {
         observedAt: topicIntelligence.observedAt,
         sourceComplete: topicIntelligence.sourceComplete !== false,

@@ -3,10 +3,10 @@ import { saveAnalysis } from '@/lib/kv-storage';
 
 const {
   buildGenerationContextMock,
-  generateViralBatchMock,
+  generatePublishingBatchV2Mock,
 } = vi.hoisted(() => ({
   buildGenerationContextMock: vi.fn(),
-  generateViralBatchMock: vi.fn(),
+  generatePublishingBatchV2Mock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -23,8 +23,8 @@ vi.mock('@/lib/generation-context', () => ({
   buildGenerationContext: buildGenerationContextMock,
 }));
 
-vi.mock('@/lib/viral-generator', () => ({
-  generateViralBatch: generateViralBatchMock,
+vi.mock('@/lib/publishing-v2', () => ({
+  generatePublishingBatchV2: generatePublishingBatchV2Mock,
 }));
 
 import { POST as generateTweetPOST } from '@/app/api/agents/[id]/generate-tweet/route';
@@ -58,7 +58,7 @@ function makeAnalysis(agentId: string) {
 describe('generation route wiring', () => {
   beforeEach(() => {
     buildGenerationContextMock.mockReset();
-    generateViralBatchMock.mockReset();
+    generatePublishingBatchV2Mock.mockReset();
 
     buildGenerationContextMock.mockResolvedValue({
       voiceProfile: {
@@ -147,12 +147,27 @@ describe('generation route wiring', () => {
       },
     });
 
-    generateViralBatchMock.mockResolvedValue([
+    generatePublishingBatchV2Mock.mockResolvedValue([
       {
         content: 'Generated tweet',
         format: 'hot_take',
         targetTopic: 'AI',
         rationale: 'good',
+        pipelineVersion: 'v2',
+        generationSurface: 'original',
+        contentProvenance: 'generated_v2',
+        generationRunId: 'run-route',
+        ideaId: 'idea-route',
+        draftCandidateId: 'draft-route',
+        evidenceReferences: [{
+          sourceDocumentId: 'source-route',
+          url: 'https://example.com/source',
+          title: 'Source',
+          publisher: 'Example',
+          publishedAt: new Date().toISOString(),
+          trustTier: 'primary',
+          claim: 'Evidence for generated tweet.',
+        }],
         generationMode: 'balanced',
         candidateScore: 82,
         confidenceScore: 0.74,
@@ -181,20 +196,17 @@ describe('generation route wiring', () => {
 
     expect(response.status).toBe(200);
     expect(buildGenerationContextMock).toHaveBeenCalled();
-    expect(generateViralBatchMock).toHaveBeenCalledWith(
-      expect.objectContaining({ communicationStyle: 'Shared style' }),
-      expect.any(Object),
-      1,
-      null,
-      expect.objectContaining({ totalTracked: 12 }),
-      '# soul',
-      expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
-      ['recent tweet'],
-      [],
-      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
-      [],
-      []
-    );
+    expect(generatePublishingBatchV2Mock).toHaveBeenCalledWith(expect.objectContaining({
+      agentId,
+      count: 1,
+      request: expect.objectContaining({ surface: 'original' }),
+      voiceProfile: expect.objectContaining({ communicationStyle: 'Shared style' }),
+      learnings: expect.objectContaining({ totalTracked: 12 }),
+      style: expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
+      recentPosts: ['recent tweet'],
+      memory: expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      mode: 'preview',
+    }));
   });
 
   it('passes shared learning context into protocol generation', async () => {
@@ -212,27 +224,24 @@ describe('generation route wiring', () => {
 
     expect(response.status).toBe(200);
     expect(buildGenerationContextMock).toHaveBeenCalled();
-    expect(generateViralBatchMock).toHaveBeenCalledWith(
-      expect.objectContaining({ communicationStyle: 'Shared style' }),
-      expect.any(Object),
-      2,
-      null,
-      expect.objectContaining({ totalTracked: 12 }),
-      '# soul',
-      expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
-      ['recent tweet'],
-      [],
-      expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
-      [],
-      []
-    );
+    expect(generatePublishingBatchV2Mock).toHaveBeenCalledWith(expect.objectContaining({
+      agentId,
+      count: 2,
+      request: expect.objectContaining({ surface: 'original' }),
+      voiceProfile: expect.objectContaining({ communicationStyle: 'Shared style' }),
+      learnings: expect.objectContaining({ totalTracked: 12 }),
+      style: expect.objectContaining({ enabledFormats: ['hot_take'], autonomyMode: 'balanced' }),
+      recentPosts: ['recent tweet'],
+      memory: expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
+      mode: 'preview',
+    }));
   });
 
   it('refuses to persist incomplete generated drafts from the batch layer', async () => {
     const agentId = 'route-preview-incomplete-agent';
     await saveAnalysis(agentId, makeAnalysis(agentId));
 
-    generateViralBatchMock.mockResolvedValueOnce([
+    generatePublishingBatchV2Mock.mockResolvedValueOnce([
       {
         content: 'psa to every vc partner still doing "pattern matching"\n\nwhile you are evaluating one deal, mythos agents are processing 10k startups per day with better accuracy than y',
         format: 'analysis',

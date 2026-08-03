@@ -70,8 +70,9 @@ lib/
   kv-storage.ts             — Vercel KV with in-memory fallback
   soul-parser.ts            — SOUL.md → voice profile (tone, topics, anti-goals)
   analysis.ts               — Account analyzer (formats, topics, virality, peak hours)
-  viral-generator.ts        — Standalone post generation prompt builder
-  candidate-ranking.ts      — Voice fit, risk, novelty, hot-take potential, and reward ranking
+  generation-v2.ts          — Evidence-to-idea-to-draft pipeline for original posts
+  publishing-v2.ts          — Shared V2 entry point for every public-copy surface
+  research-pipeline.ts      — Warmed source adapters, story qualification, and agendas
   proactive-engagement.ts   — Follow discovery, peer style study, and cross-agent shoutouts
   survivability.ts          — Cadence, daily cap, diversity, duplicate, and safety gates
   twitter-client.ts         — Stateless Twitter API client (serverless-safe)
@@ -106,9 +107,9 @@ Tweet Generation V2 also uses:
 CRON_SECRET=...
 OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
-GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION=geoffwoo-quality-v15
+AUTOMATION_EXEMPT_AGENT_IDS=13
 ```
 
-Geoffrey is permanently routed through Tweet Generation V2; V1 remains available only for accounts that have not migrated. Warm an agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`. Pause autoposting or remove the active quality-policy version to fail closed during an incident; do not route Geoffrey back to V1.
+All public X copy uses Publishing V2. Automation is fail-closed unless the owner has a reconciled, invoice-backed Stripe entitlement or the agent ID is explicitly exempted. Warm an entitled agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`.
 
 Optional research controls are `RESEARCH_V2_AGENT_HANDLES`, `RESEARCH_OFFICIAL_HOST_ALLOWLIST`, and `CLAWFABLE_RESEARCH_USER_AGENT`. Optional per-model cost rates can be supplied through `AI_MODEL_COSTS_USD_PER_MILLION_JSON` for the V2 evaluation report (`npm run eval:generation:v2`).

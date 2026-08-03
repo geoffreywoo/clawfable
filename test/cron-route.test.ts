@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   addCronLogEntry: vi.fn(),
   getLearnings: vi.fn(),
   getPerformanceHistory: vi.fn(),
+  getQueuedTweets: vi.fn(),
+  quarantineAgentAutomation: vi.fn(),
   resetReadCache: vi.fn(),
   getAgentOwnerId: vi.fn(),
   getUser: vi.fn(),
@@ -49,6 +51,8 @@ vi.mock('@/lib/kv-storage', () => ({
   addCronLogEntry: mocks.addCronLogEntry,
   getLearnings: mocks.getLearnings,
   getPerformanceHistory: mocks.getPerformanceHistory,
+  getQueuedTweets: mocks.getQueuedTweets,
+  quarantineAgentAutomation: mocks.quarantineAgentAutomation,
   resetReadCache: mocks.resetReadCache,
   getAgentOwnerId: mocks.getAgentOwnerId,
   getUser: mocks.getUser,
@@ -101,6 +105,7 @@ describe('cron autopilot isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = 'agent-1';
     mocks.getAgents.mockResolvedValue([
       {
         id: 'agent-1',
@@ -144,8 +149,10 @@ describe('cron autopilot isolation', () => {
       peakHours: [],
       contentCalendar: {},
     });
-    mocks.getAgentOwnerId.mockResolvedValue(null);
+    mocks.getAgentOwnerId.mockResolvedValue('owner-1');
     mocks.getUser.mockResolvedValue(null);
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.quarantineAgentAutomation.mockResolvedValue({ generatedQuarantined: 0, operatorDraftsReturned: 0 });
     mocks.runAutopilot.mockRejectedValue(new Error('repair pipeline blew up'));
     mocks.addCronLogEntry.mockResolvedValue(undefined);
     mocks.getLearnings.mockResolvedValue(null);
@@ -177,6 +184,7 @@ describe('cron autopilot isolation', () => {
 
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
 
   function cronRequest(): Request {
@@ -192,6 +200,20 @@ describe('cron autopilot isolation', () => {
 
     expect(response.status).toBe(503);
     expect(mocks.getAgents).not.toHaveBeenCalled();
+  });
+
+  it('shuts down a non-paying account before any X, learning, or autopilot work', async () => {
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+
+    const response = await GET(cronRequest() as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.quarantineAgentAutomation).toHaveBeenCalledWith('agent-1', expect.any(String));
+    expect(mocks.runAutopilot).not.toHaveBeenCalled();
+    expect(mocks.checkPerformance).not.toHaveBeenCalled();
+    expect(mocks.buildLearnings).not.toHaveBeenCalled();
+    expect(mocks.refreshAgentTopicIntelligence).not.toHaveBeenCalled();
+    expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
   });
 
   it('logs the failure and keeps cron alive when runAutopilot throws', async () => {

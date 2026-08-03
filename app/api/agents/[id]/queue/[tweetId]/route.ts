@@ -2,17 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   addLearningSignal,
   addSemanticBlock,
+  createTweet,
   deleteTweet,
   getIdeaCandidates,
   getTweet,
-  markIdeaAtomRejectedForTweet,
   recordV2CandidateOutcomeForTweet,
   saveFeedback,
   updateTweet,
 } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
-import { buildFallbackLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
+import { buildGenerationLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { validateQueueDeleteRequest, validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
@@ -24,7 +24,8 @@ import {
   inferQueueFeedbackReasonCode,
   QUEUE_FEEDBACK_OPTIONS,
 } from '@/lib/queue-feedback';
-import { getGeoffreyGeneratedPublishIssue } from '@/lib/generation-origin';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -33,7 +34,7 @@ export async function PATCH(
 ) {
   const { id, tweetId } = await params;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
     const tweet = await getTweet(String(tweetId));
     if (!tweet || String(tweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
@@ -45,11 +46,15 @@ export async function PATCH(
       return NextResponse.json({ error: parsed.error || 'Invalid queue update' }, { status: 400 });
     }
     const { content, status, scheduledAt, deletionReason } = parsed.value;
+    const immutableV2Edit = content !== undefined
+      && content !== tweet.content
+      && tweet.pipelineVersion === 'v2';
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
     if (status !== undefined) {
       if (status === 'queued' || status === 'posted') {
-        const generationOriginIssue = getGeoffreyGeneratedPublishIssue(agent.handle, tweet);
+        await assertAgentAutomationEntitlement(id, { agent, user });
+        const generationOriginIssue = immutableV2Edit ? null : getGeneratedPublishIssue(tweet);
         if (generationOriginIssue) {
           return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
         }
@@ -75,6 +80,62 @@ export async function PATCH(
     }
     if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt;
     if (deletionReason !== undefined) updates.deletionReason = deletionReason;
+
+    if (immutableV2Edit) {
+      const requestedChildStatus = status || (tweet.status === 'queued' ? 'queued' : 'draft');
+      const childStatus = requestedChildStatus;
+      if (childStatus === 'queued') {
+        await assertAgentAutomationEntitlement(id, { agent, user });
+        const completenessIssue = getTweetCompletenessIssue(content);
+        if (completenessIssue) {
+          return NextResponse.json({ error: completenessIssue }, { status: 422 });
+        }
+      }
+      const child = await createTweet({
+        agentId: id,
+        content,
+        type: tweet.type,
+        status: childStatus,
+        format: tweet.format,
+        topic: tweet.topic,
+        rationale: 'Operator-authored immutable child of a V2 draft.',
+        contentProvenance: 'operator_written',
+        generationSurface: tweet.generationSurface,
+        parentTweetId: tweet.id,
+        parentIdeaId: tweet.ideaId,
+        parentDraftCandidateId: tweet.draftCandidateId,
+        quoteTweetId: tweet.quoteTweetId,
+        quoteTweetAuthor: tweet.quoteTweetAuthor,
+        followupForTweetId: tweet.followupForTweetId,
+        replyConversationId: tweet.replyConversationId,
+        xTweetId: null,
+        scheduledAt: scheduledAt ?? tweet.scheduledAt,
+      });
+      await updateTweet(tweet.id, {
+        status: 'quarantined',
+        preQuarantineStatus: tweet.status === 'quarantined' ? tweet.preQuarantineStatus : tweet.status,
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: `Superseded by operator-written child ${child.id}.`,
+      });
+      const editSummary = summarizeEditDelta(tweet.content, content);
+      await addLearningSignal(id, {
+        tweetId: child.id,
+        signalType: childStatus === 'queued' ? 'edited_before_queue' : 'edited_before_post',
+        surface: tweet.type === 'reply' ? 'mentions' : 'queue',
+        rewardDelta: editSummary.rewardDelta,
+        reason: editSummary.summary,
+        metadata: metadataWithStyleMode(tweet, {
+          ...editSummary.metadata,
+          parentTweetId: tweet.id,
+          parentIdeaId: tweet.ideaId || null,
+          parentDraftCandidateId: tweet.draftCandidateId || null,
+          operatorProvenance: true,
+        }),
+      });
+      await recordV2CandidateOutcomeForTweet(tweet, 'edited', ['operator_immutable_child'], { updateIdea: false });
+      return NextResponse.json({ ...child, immutableParentId: tweet.id });
+    }
+
     const updated = await updateTweet(tweetId, updates as Parameters<typeof updateTweet>[1]);
 
     if (status === 'queued' && tweet.status !== 'queued') {
@@ -87,7 +148,7 @@ export async function PATCH(
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
           metadata: metadataWithStyleMode(updated, {
-            ...buildFallbackLearningMetadata(updated),
+            ...buildGenerationLearningMetadata(updated),
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
@@ -106,7 +167,7 @@ export async function PATCH(
           surface: tweet.type === 'reply' ? 'mentions' : tweet.status === 'preview' ? 'setup' : 'queue',
           rewardDelta: 0.85,
           metadata: metadataWithStyleMode(updated, {
-            ...buildFallbackLearningMetadata(updated),
+            ...buildGenerationLearningMetadata(updated),
             draftExperimentId: updated.draftExperimentId ?? null,
             creativeLane: updated.creativeLane ?? null,
             experimentHoldout: updated.experimentHoldout === true,
@@ -127,7 +188,7 @@ export async function PATCH(
           rewardDelta: editSummary.rewardDelta,
           reason: editSummary.summary,
           metadata: metadataWithStyleMode(updated, {
-            ...buildFallbackLearningMetadata(updated),
+            ...buildGenerationLearningMetadata(updated),
             ...editSummary.metadata,
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
@@ -147,7 +208,7 @@ export async function PATCH(
         surface: tweet.type === 'reply' ? 'mentions' : 'manual_post',
         rewardDelta: 0.7,
         metadata: metadataWithStyleMode(updated, {
-          ...buildFallbackLearningMetadata(updated),
+          ...buildGenerationLearningMetadata(updated),
           confidenceScore: updated.confidenceScore ?? null,
           candidateScore: updated.candidateScore ?? null,
           generationMode: updated.generationMode ?? null,
@@ -196,7 +257,7 @@ export async function PATCH(
           rewardDelta: -0.95,
           reason: trimmedReason,
           metadata: metadataWithStyleMode(tweet, {
-            ...buildFallbackLearningMetadata(tweet),
+            ...buildGenerationLearningMetadata(tweet),
             ...tasteFeedback.metadata,
             userProvidedReason: true,
             feedbackReasonCode: reasonCode,
@@ -238,7 +299,7 @@ export async function PATCH(
           reason: inferredReason,
           inferred: true,
           metadata: metadataWithStyleMode(tweet, {
-            ...buildFallbackLearningMetadata(tweet),
+            ...buildGenerationLearningMetadata(tweet),
             ...tasteFeedback.metadata,
             userProvidedReason: false,
             draftExperimentId: tweet.draftExperimentId ?? null,
@@ -251,6 +312,9 @@ export async function PATCH(
 
     return NextResponse.json(updated);
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to update tweet';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -324,7 +388,7 @@ export async function DELETE(
       reason: intentSummary,
       inferred: !userProvidedFeedback,
       metadata: metadataWithStyleMode(tweet, {
-        ...buildFallbackLearningMetadata(tweet),
+        ...buildGenerationLearningMetadata(tweet),
         ...tasteFeedback.metadata,
         userProvidedReason: userProvidedFeedback,
         feedbackReasonCode: reasonCode,
@@ -332,7 +396,7 @@ export async function DELETE(
         feedbackBlockScope: semanticBlock?.scope || null,
         feedbackPermanent: semanticBlock?.permanent || false,
         feedbackSemanticKey: semanticBlock?.semanticKey || null,
-        pipelineVersion: tweet.pipelineVersion || 'v1',
+        pipelineVersion: tweet.pipelineVersion || null,
         generationRunId: tweet.generationRunId || null,
         storyClusterId: tweet.storyClusterId || null,
         ideaId: tweet.ideaId || null,
@@ -347,7 +411,6 @@ export async function DELETE(
     await recordV2CandidateOutcomeForTweet(tweet, 'deleted', [`feedback:${reasonCode}`], {
       updateIdea: stage !== 'writing' || semanticBlock?.scope !== 'copy',
     });
-    await markIdeaAtomRejectedForTweet(tweet, intentSummary);
     await deleteTweet(tweetId);
     return NextResponse.json({
       success: true,

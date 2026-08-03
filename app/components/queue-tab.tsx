@@ -54,6 +54,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
         ? data.queue.filter((tweet: Tweet): tweet is Tweet =>
             Boolean(tweet) && (
               tweet.status === 'queued'
+              || tweet.status === 'quarantined'
               || tweet.status === 'deleted_from_x'
               || (tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId))
             ))
@@ -334,7 +335,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const queuedTweets = queue.filter((tweet) => tweet.status === 'queued');
   const followupDrafts = queue.filter((tweet) => tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId));
   const activeQueuedTweets = [...followupDrafts, ...queuedTweets.filter((tweet) => !tweet.quarantinedAt)];
-  const quarantinedTweets = queuedTweets.filter((tweet) => tweet.quarantinedAt);
+  const quarantinedTweets = queue.filter((tweet) => tweet.status === 'quarantined' || Boolean(tweet.quarantinedAt));
   const feedbackTweets = queue.filter((tweet) => tweet.status === 'deleted_from_x');
   const scheduleStatus = autopilotSettings
     ? getAutopilotScheduleStatus(autopilotSettings, {
@@ -537,7 +538,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     style={{ color: 'var(--primary)' }}
                     onClick={() => { setEditingId(tweet.id); setEditContent(tweet.content); }}
                   >
-                    Edit to rescue
+                    Edit into new draft
                   </button>
                 </div>
               </div>

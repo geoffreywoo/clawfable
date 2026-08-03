@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireAutopilotLock: vi.fn(),
   assessAccountTaste: vi.fn(),
-  assessGeoffreyQualityPolicy: vi.fn(),
   buildGenerationContext: vi.fn(),
   generateTweetBatchV2: vi.fn(),
   getAgent: vi.fn(),
   getAnalysis: vi.fn(),
   getAutonomousQueueTasteIssue: vi.fn(),
+  getProductFacts: vi.fn(),
   getTrendingCache: vi.fn(),
   releaseAutopilotLock: vi.fn(),
   resetReadCache: vi.fn(),
@@ -18,6 +18,7 @@ vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   getAgent: mocks.getAgent,
   getAnalysis: mocks.getAnalysis,
+  getProductFacts: mocks.getProductFacts,
   getTrendingCache: mocks.getTrendingCache,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   resetReadCache: mocks.resetReadCache,
@@ -25,16 +26,24 @@ vi.mock('@/lib/kv-storage', () => ({
 
 vi.mock('@/lib/generation-context', () => ({ buildGenerationContext: mocks.buildGenerationContext }));
 vi.mock('@/lib/generation-v2', () => ({ generateTweetBatchV2: mocks.generateTweetBatchV2 }));
+vi.mock('@/lib/publishing-v2', () => ({ generatePublishingBatchV2: mocks.generateTweetBatchV2 }));
+vi.mock('@/lib/automation-entitlement', () => ({
+  getAgentAutomationEntitlement: vi.fn(async () => ({
+    source: 'agent_exemption',
+    eligible: true,
+    reason: 'test exemption',
+    verifiedAt: new Date().toISOString(),
+    paidThrough: null,
+    paidInvoiceId: null,
+    paidAmountCents: null,
+    paidCurrency: null,
+  })),
+}));
 vi.mock('@/lib/account-taste', () => ({
   assessAccountTaste: mocks.assessAccountTaste,
   getAutonomousQueueTasteIssue: mocks.getAutonomousQueueTasteIssue,
   isGeoffreyAccount: (handle: string) => ['geoffwoo', 'geoffreywoo'].includes(handle.toLowerCase()),
 }));
-vi.mock('@/lib/quality-policy', () => ({
-  assessGeoffreyQualityPolicy: mocks.assessGeoffreyQualityPolicy,
-  EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION: 'evidence-idea-voice-v2-copy-judge-1',
-}));
-
 import { POST } from '@/app/api/internal/agents/[id]/generation/preview/route';
 
 function request(body: Record<string, unknown>, secret = 'test-cron-secret'): Request {
@@ -55,6 +64,17 @@ describe('internal generation preview route', () => {
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'geoffreywoo', soulMd: '# SOUL' });
     mocks.getAnalysis.mockResolvedValue({ agentId: '13' });
     mocks.getTrendingCache.mockResolvedValue([]);
+    mocks.getProductFacts.mockResolvedValue([{
+      id: 'fact-1:v1',
+      familyId: 'fact-1',
+      statement: 'Clawfable stores evidence and draft lineage.',
+      provenanceUrl: 'https://www.clawfable.com/',
+      provenanceLabel: 'Clawfable product page',
+      verifiedByUserId: 'owner-1',
+      verifiedAt: '2026-08-01T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      active: true,
+    }]);
     mocks.acquireAutopilotLock.mockResolvedValue({
       acquired: true,
       owner: 'internal-generation-preview:test',
@@ -105,6 +125,8 @@ describe('internal generation preview route', () => {
         content: 'the bottleneck moved from model access to operator taste',
         targetTopic: 'AI startups',
         pipelineVersion: 'v2',
+        generationSurface: 'original',
+        contentProvenance: 'generated_v2',
         generationRunId: 'run-v2',
         ideaId: 'idea-v2',
         draftCandidateId: 'draft-v2',
@@ -124,7 +146,6 @@ describe('internal generation preview route', () => {
       notes: ['native voice fit'],
     });
     mocks.getAutonomousQueueTasteIssue.mockReturnValue(null);
-    mocks.assessGeoffreyQualityPolicy.mockReturnValue({ eligible: true, issues: [], scores: { confidence: 0.71 } });
   });
 
   afterEach(() => {
@@ -150,7 +171,7 @@ describe('internal generation preview route', () => {
     expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
       agentId: '13',
       count: 2,
-      modelStack: 'geoffrey_fable5_gpt56',
+      modelStack: 'publishing_v2_quality',
       mode: 'preview',
       persistArtifacts: false,
     }));
@@ -169,7 +190,6 @@ describe('internal generation preview route', () => {
         generationRunId: 'run-v2',
         ideaId: 'idea-v2',
         draftCandidateId: 'draft-v2',
-        qualityEligible: true,
       }],
     });
   });
@@ -185,7 +205,7 @@ describe('internal generation preview route', () => {
   });
 
   it('rejects retired model stacks before taking the autopilot lock', async () => {
-    const response = await POST(request({ count: 2, modelStack: 'geoffrey_gpt56_gpt55' }) as any, {
+    const response = await POST(request({ count: 2, modelStack: 'standard' }) as any, {
       params: Promise.resolve({ id: '13' }),
     });
 
@@ -193,13 +213,58 @@ describe('internal generation preview route', () => {
     expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
   });
 
-  it('rejects non-Geoffrey accounts until they are migrated to V2', async () => {
+  it('runs the same V2 preview contract for every entitled account', async () => {
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'another-agent', soulMd: '# SOUL' });
     const response = await POST(request({ count: 2 }) as any, {
       params: Promise.resolve({ id: '13' }),
     });
 
-    expect(response.status).toBe(409);
-    expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.acquireAutopilotLock).toHaveBeenCalled();
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: '13',
+      request: expect.objectContaining({ surface: 'original' }),
+    }));
+  });
+
+  it.each([
+    ['reply', {
+      surface: 'reply',
+      triggerId: 'reply-1',
+      targetPost: { id: 'target-1', kind: 'target_post', content: 'Target post context', url: 'https://x.com/a/status/1' },
+    }],
+    ['followup', {
+      surface: 'followup',
+      triggerId: 'followup-1',
+      originalPost: { id: 'original-1', kind: 'original_post', content: 'Original post context' },
+      performance: { id: 'performance-1', kind: 'performance_snapshot', content: 'Performance context' },
+    }],
+    ['remix', {
+      surface: 'remix',
+      triggerId: 'remix-1',
+      parentTweetId: 'tweet-1',
+      parentIdeaId: 'idea-1',
+      parentDraftId: 'draft-1',
+      direction: 'Make it shorter.',
+      inheritedEvidence: [{ id: 'parent-1', kind: 'remix_parent', content: 'Parent copy' }],
+    }],
+    ['marketing', { surface: 'marketing', triggerId: 'marketing-1' }],
+    ['relationship', {
+      surface: 'relationship',
+      triggerId: 'relationship-1',
+      targetHandle: 'builder',
+      targetPost: { id: 'target-2', kind: 'target_post', content: 'Builder post context', url: 'https://x.com/builder/status/2' },
+    }],
+  ])('constructs qualified %s preview context without persisting', async (surface, body) => {
+    const response = await POST(request(body as Record<string, unknown>) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'preview',
+      persistArtifacts: false,
+      request: expect.objectContaining({ surface }),
+    }));
   });
 });

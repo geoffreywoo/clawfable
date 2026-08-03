@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { runAutopilot } from '@/lib/autopilot';
 import { acquireAutopilotLock, addCronLogEntry, addOutcomeEvent, addPostLogEntry, getProtocolSettings, releaseAutopilotLock } from '@/lib/kv-storage';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
-import { assertCanUseAutopilot, BillingError } from '@/lib/billing';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // POST /api/agents/[id]/protocol/run — manually trigger autopilot for one agent
 export async function POST(
@@ -14,8 +13,7 @@ export async function POST(
   const { id } = await params;
   try {
     const { user, agent } = await requireAgentAccess(id);
-    const agentCount = await getAccessibleAgentCount(user);
-    assertCanUseAutopilot(user, agentCount);
+    await assertAgentAutomationEntitlement(id, { agent, user });
     const settings = await getProtocolSettings(id);
     const runId = `manual:${Date.now()}:${id}`;
     const lock = await acquireAutopilotLock(id, runId, 8 * 60, 'manual');
@@ -93,8 +91,8 @@ export async function POST(
 
     return NextResponse.json({ ...result, runId });
   } catch (err) {
-    if (err instanceof BillingError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
     }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Autopilot run failed';

@@ -1,18 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { getGeoffreyGeneratedPublishIssue } from '@/lib/generation-origin';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 
-describe('Geoffrey generation origin gate', () => {
-  it('allows complete V2 lineage and operator-composed originals', () => {
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', {
+describe('generated publishing origin gate', () => {
+  it('allows complete V2 lineage and explicit operator-written content', () => {
+    expect(getGeneratedPublishIssue({
       type: 'original',
       pipelineVersion: 'v2',
+      contentProvenance: 'generated_v2',
+      generationSurface: 'original',
       generationRunId: 'run-1',
       ideaId: 'idea-1',
       draftCandidateId: 'draft-1',
+      evidenceReferences: [{
+        sourceDocumentId: 'source-1',
+        url: 'https://example.com/source',
+        title: 'Source',
+        publisher: 'Example',
+        publishedAt: new Date().toISOString(),
+        trustTier: 'primary',
+        claim: 'Verified claim',
+      }],
     })).toBeNull();
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', {
+    expect(getGeneratedPublishIssue({
       type: 'original',
       pipelineVersion: null,
+      contentProvenance: 'operator_written',
       generationRunId: null,
       ideaId: null,
       draftCandidateId: null,
@@ -20,14 +32,15 @@ describe('Geoffrey generation origin gate', () => {
   });
 
   it('blocks explicit V1 output, inferred legacy generation, and incomplete V2 lineage', () => {
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', {
+    expect(getGeneratedPublishIssue({
       type: 'original',
       pipelineVersion: 'v1',
+      contentProvenance: 'historical_v1',
       generationRunId: null,
       ideaId: null,
       draftCandidateId: null,
     })).toContain('V1-generated posts are retired');
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', {
+    expect(getGeneratedPublishIssue({
       type: 'original',
       pipelineVersion: null,
       generationRunId: null,
@@ -35,24 +48,38 @@ describe('Geoffrey generation origin gate', () => {
       draftCandidateId: null,
       generationProvider: 'openai',
     })).toContain('V1-generated posts are retired');
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', {
+    expect(getGeneratedPublishIssue({
       type: 'original',
       pipelineVersion: 'v2',
+      contentProvenance: 'generated_v2',
+      generationSurface: 'original',
+      generationRunId: 'run-1',
+      ideaId: 'idea-1',
+      draftCandidateId: 'draft-1',
+      evidenceReferences: [],
+      generationEvidenceReferences: [],
+    })).toContain('qualified evidence lineage');
+    expect(getGeneratedPublishIssue({
+      type: 'original',
+      pipelineVersion: 'v2',
+      contentProvenance: 'generated_v2',
+      generationSurface: 'original',
       generationRunId: 'run-1',
       ideaId: null,
       draftCandidateId: null,
-    })).toContain('complete generation, idea, and draft lineage');
+    })).toContain('complete surface, generation, idea, and draft lineage');
   });
 
-  it('does not change non-Geoffrey or reply behavior', () => {
+  it('applies to every account and reply surface', () => {
     const legacy = {
       type: 'original' as const,
       pipelineVersion: 'v1' as const,
+      contentProvenance: 'historical_v1' as const,
       generationRunId: null,
       ideaId: null,
       draftCandidateId: null,
     };
-    expect(getGeoffreyGeneratedPublishIssue('another-agent', legacy)).toBeNull();
-    expect(getGeoffreyGeneratedPublishIssue('geoffwoo', { ...legacy, type: 'reply' })).toBeNull();
+    expect(getGeneratedPublishIssue(legacy)).toContain('retired');
+    expect(getGeneratedPublishIssue({ ...legacy, type: 'reply' })).toContain('retired');
   });
 });

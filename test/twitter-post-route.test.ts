@@ -47,6 +47,23 @@ vi.mock('@/lib/queue-healing', () => ({
   resolveQueuedTweetFailure: mocks.resolveQueuedTweetFailure,
 }));
 
+vi.mock('@/lib/automation-entitlement', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/automation-entitlement')>('@/lib/automation-entitlement');
+  return {
+    ...actual,
+    assertAgentAutomationEntitlement: vi.fn(async () => ({
+      source: 'agent_exemption',
+      eligible: true,
+      reason: 'test exemption',
+      verifiedAt: new Date().toISOString(),
+      paidThrough: null,
+      paidInvoiceId: null,
+      paidAmountCents: null,
+      paidCurrency: null,
+    })),
+  };
+});
+
 import { POST } from '@/app/api/agents/[id]/twitter/post/route';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
@@ -79,17 +96,21 @@ describe('twitter post route', () => {
     });
     mocks.resolveQueuedTweetFailure.mockImplementation(async (_agent: unknown, tweet: any) => {
       const updated = await updateTweet(tweet.id, {
-        content: 'your thesis is obsolete before the partner meeting ends',
+        status: 'quarantined',
+        scheduledAt: null,
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: 'Draft failed queue validation: mid-word or mid-thought',
+        preQuarantineStatus: tweet.status,
       });
       return {
-        action: 'repaired',
+        action: 'quarantined',
         tweet: updated,
-        detail: 'Auto-repaired the draft and kept it queued.',
+        detail: 'Quarantined the immutable draft.',
       };
     });
   });
 
-  it('auto-fixes incomplete queued drafts instead of quarantining them', async () => {
+  it('quarantines incomplete queued drafts without rewriting them', async () => {
     const agent = await createAgent({
       handle: 'manual-post-lock',
       name: 'Manual Post Guard',
@@ -135,11 +156,12 @@ describe('twitter post route', () => {
 
     expect(response.status).toBe(422);
     expect(String(data.error)).toContain('mid-word or mid-thought');
-    expect(data.autoFixed).toBe(true);
+    expect(data.autoFixed).toBe(false);
     expect(mocks.postTweet).not.toHaveBeenCalled();
-    expect(updatedTweet?.quarantinedAt).toBeNull();
-    expect(updatedTweet?.quarantineReason).toBeNull();
-    expect(updatedTweet?.content).toBe('your thesis is obsolete before the partner meeting ends');
+    expect(updatedTweet?.status).toBe('quarantined');
+    expect(updatedTweet?.quarantinedAt).toEqual(expect.any(String));
+    expect(updatedTweet?.quarantineReason).toContain('mid-word or mid-thought');
+    expect(updatedTweet?.content).toBe(tweet.content);
   });
 
   it('posts through the agent lock and passes the known handle to X writes', async () => {

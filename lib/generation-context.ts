@@ -1,8 +1,7 @@
-import type { Agent, AgentLearnings, IdeaAtom, LearningSignal, PersonalizationMemory, ProtocolSettings, Tweet, TweetPerformance } from './types';
+import type { Agent, AgentLearnings, LearningSignal, PersonalizationMemory, ProtocolSettings, Tweet, TweetPerformance } from './types';
 import {
   getBaseline,
   getFeedback,
-  getIdeaAtoms,
   getLearningSignals,
   getLearnings,
   getPerformanceHistory,
@@ -16,15 +15,13 @@ import {
   getVoiceDirectiveRules,
 } from './kv-storage';
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
-import { ALL_FORMATS, type ContentStyleConfig } from './viral-generator';
+import { ALL_FORMATS, type ContentStyleConfig } from './content-style';
 import { buildBanditPolicy } from './bandit';
 import { buildPersonalizationMemory } from './learning-loop';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
-import { applyAccountLearningPolicy, applyAccountTopicPolicy, shouldSuppressTopicForAccount } from './account-topic-policy';
 import { collapsePerformanceSnapshots } from './performance-history';
-import { isGeoffreyAccount } from './account-taste';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
   lengthMix: { short: 30, medium: 30, long: 40 },
@@ -61,7 +58,6 @@ export interface GenerationContext {
   memory: PersonalizationMemory;
   recentPosts: string[];
   allTweets: Tweet[];
-  ideaAtoms: IdeaAtom[];
   signals: LearningSignal[];
 }
 
@@ -155,136 +151,6 @@ function normalizeManualPerformanceSources(
   });
 }
 
-function clamp(value: number, min = 0, max = 1): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function clampSigned(value: number, min = -1, max = 1): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function daysSince(timestamp: string | null | undefined, now = Date.now()): number {
-  if (!timestamp) return 999;
-  const parsed = new Date(timestamp).getTime();
-  if (!Number.isFinite(parsed)) return 999;
-  return Math.max(0, (now - parsed) / (24 * 60 * 60 * 1000));
-}
-
-function formatPct(value: number): string {
-  return `${Math.round(clamp(value) * 100)}%`;
-}
-
-function riskNoteSignalsHardRejection(riskNote: string | null): boolean {
-  return /\b(rejected|policy|overclaim|unsafe|not tasteful|delete|deleted)\b/i.test(riskNote || '');
-}
-
-export interface CuratedIdeaAtom {
-  atom: IdeaAtom;
-  reusableScore: number;
-  riskScore: number;
-  label: 'proven' | 'fresh_test' | 'cooldown' | 'rework_or_avoid';
-  line: string;
-}
-
-export interface CuratedIdeaBank {
-  reusable: CuratedIdeaAtom[];
-  caution: CuratedIdeaAtom[];
-  referenceClaims: string[];
-}
-
-function scoreIdeaAtomForGeneration(atom: IdeaAtom, now = Date.now()): CuratedIdeaAtom {
-  const generated = Math.max(atom.performance.generated || 0, 1);
-  const queuedRate = (atom.performance.queued || 0) / generated;
-  const postedRate = (atom.performance.posted || 0) / generated;
-  const rejectionRate = (atom.performance.rejected || 0) / generated;
-  const avgReward = clampSigned(atom.performance.avgReward || 0);
-  const ageDays = daysSince(atom.lastUsedAt || atom.updatedAt || atom.createdAt, now);
-  const recencyPressure = clamp((12 - Math.min(ageDays, 12)) / 12);
-  const saturationPressure = generated >= 4
-    ? clamp((generated - Math.max(atom.performance.posted || 0, atom.performance.queued || 0)) / generated)
-    : 0;
-  const staleUnproven = ageDays >= 45 && (atom.performance.posted || 0) === 0 && avgReward <= 0
-    ? clamp((ageDays - 45) / 90)
-    : 0;
-  const hardRiskNote = riskNoteSignalsHardRejection(atom.riskNote);
-  const riskScore = clamp(
-    (rejectionRate * 0.5)
-    + (Math.max(0, -avgReward) * 0.28)
-    + (saturationPressure * recencyPressure * 0.24)
-    + (staleUnproven * 0.18)
-    + (hardRiskNote ? 0.2 : 0)
-  );
-  const reusableScore = clampSigned(
-    (postedRate * 0.34)
-    + (queuedRate * 0.18)
-    + (Math.max(0, avgReward) * 0.34)
-    + (generated <= 2 && rejectionRate === 0 ? 0.08 : 0)
-    - riskScore,
-    -1,
-    1
-  );
-
-  const label: CuratedIdeaAtom['label'] = riskScore >= 0.42 || rejectionRate >= 0.45 || avgReward <= -0.22 || hardRiskNote
-    ? 'rework_or_avoid'
-    : generated >= 4 && recencyPressure >= 0.58 && saturationPressure >= 0.2
-      ? 'cooldown'
-      : (atom.performance.posted || 0) > 0 || avgReward > 0.18 || queuedRate >= 0.5
-        ? 'proven'
-        : 'fresh_test';
-
-  const proofParts = [
-    `${atom.performance.generated || 0} generated`,
-    `${atom.performance.queued || 0} queued`,
-    `${atom.performance.posted || 0} posted`,
-    `${atom.performance.rejected || 0} rejected`,
-    `avg reward ${avgReward >= 0 ? '+' : ''}${avgReward.toFixed(2)}`,
-  ];
-  const guidance = label === 'rework_or_avoid'
-    ? 'rework only if the claim becomes narrower, better evidenced, and less risky'
-    : label === 'cooldown'
-      ? 'cool down or mutate into a new adjacent claim'
-      : label === 'fresh_test'
-        ? 'fresh test seed; use once with concrete proof'
-        : 'reuse as a thesis seed with fresh wording, examples, and format';
-  const riskSuffix = atom.riskNote ? `; note: ${atom.riskNote.slice(0, 140)}` : '';
-  const line = `${atom.claim}${atom.topic ? ` (${atom.topic})` : ''} - ${guidance}; ${proofParts.join(', ')}${riskSuffix}`;
-
-  return {
-    atom,
-    reusableScore: Number(reusableScore.toFixed(3)),
-    riskScore: Number(riskScore.toFixed(3)),
-    label,
-    line,
-  };
-}
-
-export function curateIdeaBankForGeneration(
-  ideaAtoms: IdeaAtom[],
-  options: { now?: number; reusableLimit?: number; cautionLimit?: number; referenceLimit?: number } = {},
-): CuratedIdeaBank {
-  const now = options.now ?? Date.now();
-  const reusableLimit = options.reusableLimit ?? 10;
-  const cautionLimit = options.cautionLimit ?? 6;
-  const referenceLimit = options.referenceLimit ?? 8;
-  const scored = ideaAtoms
-    .map((atom) => scoreIdeaAtomForGeneration(atom, now))
-    .sort((a, b) => b.reusableScore - a.reusableScore || a.riskScore - b.riskScore || a.atom.claim.localeCompare(b.atom.claim));
-
-  const reusable = scored
-    .filter((entry) => entry.label === 'proven' || entry.label === 'fresh_test')
-    .slice(0, reusableLimit);
-  const caution = scored
-    .filter((entry) => entry.label === 'rework_or_avoid' || entry.label === 'cooldown')
-    .sort((a, b) => b.riskScore - a.riskScore || b.atom.performance.rejected - a.atom.performance.rejected)
-    .slice(0, cautionLimit);
-  const referenceClaims = reusable
-    .filter((entry) => entry.reusableScore > 0.08)
-    .map((entry) => entry.atom.claim)
-    .slice(0, referenceLimit);
-
-  return { reusable, caution, referenceClaims };
-}
-
 export async function buildGenerationContext(
   agent: Agent,
   options: BuildGenerationContextOptions = {},
@@ -306,7 +172,6 @@ export async function buildGenerationContext(
     baseline,
     globalPrior,
     mentions,
-    ideaAtoms,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -322,13 +187,11 @@ export async function buildGenerationContext(
     getBaseline(agent.id),
     getGlobalBanditPrior(),
     getRecentMentions(agent.id, 100).catch(() => []),
-    getIdeaAtoms(agent.id, 24).catch(() => []),
   ]);
 
-  const effectiveLearnings = applyAccountLearningPolicy(agent.handle, learnings);
-  const voiceProfile = applyAccountTopicPolicy(agent.handle, parseSoulMd(agent.name, agent.soulMd));
+  const effectiveLearnings = learnings;
+  const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
   const liveTweets = allTweets.filter((tweet) => LIVE_CONTENT_STATUSES.has(tweet.status));
-  const accountTopicAllowed = (topic: string | null | undefined) => !shouldSuppressTopicForAccount(agent.handle, topic);
 
   // Bootstrap with wizard-derived style only until live learnings have enough evidence.
   if ((!effectiveLearnings || effectiveLearnings.totalTracked < 10) && styleSignals?.rawExtraction) {
@@ -372,10 +235,10 @@ export async function buildGenerationContext(
   const candidateTopics = [...new Set([
     ...voiceProfile.topics,
     ...(effectiveLearnings?.topicRankings.map((entry) => entry.topic) || []),
-    ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic) && accountTopicAllowed(topic)),
+    ...allTweets.map((tweet) => tweet.topic).filter((topic): topic is string => Boolean(topic)),
   ])];
   const normalizedPerformanceRows = normalizeManualPerformanceSources(performanceHistory, signals)
-    .filter((entry) => accountTopicAllowed(entry.topic));
+    .filter((entry) => Boolean(entry.topic));
   const normalizedPerformanceHistory = collapsePerformanceSnapshots(normalizedPerformanceRows).slice(0, 100);
   const banditPolicy = buildBanditPolicy({
     performanceHistory: normalizedPerformanceRows,
@@ -404,24 +267,6 @@ export async function buildGenerationContext(
   const memoryPrompt = buildPersonalizationMemoryPrompt(memory);
   if (memoryPrompt) {
     voiceProfile.communicationStyle += `\n\n${PERSONALIZATION_MEMORY_PROMPT_HEADER}\n${memoryPrompt}`;
-  }
-
-  const curatedIdeaBank = isGeoffreyAccount(agent.handle)
-    ? null
-    : curateIdeaBankForGeneration(ideaAtoms, { reusableLimit: 12, cautionLimit: 6, referenceLimit: 8 });
-
-  if (curatedIdeaBank && (curatedIdeaBank.reusable.length > 0 || curatedIdeaBank.caution.length > 0)) {
-    const reusableLines = curatedIdeaBank.reusable.length > 0
-      ? `Reusable seeds:\n${curatedIdeaBank.reusable.map((entry) => `- [${entry.label.replace(/_/g, ' ')} ${formatPct(entry.reusableScore)}] ${entry.line}`).join('\n')}`
-      : 'Reusable seeds: none with enough positive signal yet.';
-    const cautionLines = curatedIdeaBank.caution.length > 0
-      ? `\nRework or avoid:\n${curatedIdeaBank.caution.map((entry) => `- [${entry.label.replace(/_/g, ' ')} risk ${formatPct(entry.riskScore)}] ${entry.line}`).join('\n')}`
-      : '';
-    voiceProfile.communicationStyle += `\n\n## IDEA GRAPH / THESIS BANK\nUse proven claim atoms as reusable concept seeds. Combine them with fresh formats, examples, and current context; do not repeat exact wording. Treat rejected, saturated, or stale atoms as cautionary evidence.\n${reusableLines}${cautionLines}`;
-    memory.referenceBank = [
-      ...(memory.referenceBank || []),
-      ...curatedIdeaBank.referenceClaims,
-    ].slice(0, 18);
   }
 
   if (memory.identityConstraints.length > 0) {
@@ -472,7 +317,6 @@ export async function buildGenerationContext(
     memory,
     recentPosts,
     allTweets,
-    ideaAtoms,
     signals,
   };
 }

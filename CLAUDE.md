@@ -52,7 +52,7 @@ For generated posts:
 - Avoid default AI cadence: "not X, but Y", "the real edge/moat/question", "most people don't realize", "the winners will be", and clean consultant scaffolds that could fit any AI account.
 - Be careful with abstract words like leverage, moat, signal, optics, systems, velocity, feedback loop, playbook, narrative, and compounding. They need concrete proof or a fresh angle.
 - Human rhythm can be asymmetric. Fragments are fine when the voice supports them. Perfectly balanced advice often reads generated.
-- Anti-slop work should usually touch `lib/viral-generator.ts`, `lib/generation-judging.ts`, `lib/virality-signals.ts`, `lib/candidate-ranking.ts`, and focused tests.
+- Publishing-quality work should usually touch `lib/generation-v2.ts`, `lib/publishing-v2.ts`, `lib/virality-signals.ts`, deterministic eligibility gates, and focused tests.
 - If regenerating production queue content, delete or demote the stale queued drafts, record the negative learning signal, then refill through the app/autopilot path that uses current ranking rules. Verify queue depth and slop scores afterward.
 
 ## Commands
@@ -168,7 +168,7 @@ When changing models, routing, reasoning effort, or fallback behavior, update an
 - `twitter-client.ts`, `twitter-debug.ts`, `twitter-read-backoff.ts`, `x-account-conflicts.ts` - X API access, OAuth credentials, diagnostics, and read backoff.
 - `soul-parser.ts`, `soul-from-tweets.ts`, `voice-directives.ts`, `style-mode.ts` - SOUL.md parsing, generated voice profiles, and voice rules.
 - `analysis.ts`, `tweet-features.ts`, `generation-context.ts`, `source-planner.ts`, `trending.ts` - Account/content analysis and source planning.
-- `viral-generator.ts`, `candidate-ranking.ts`, `generation-judging.ts`, `virality-signals.ts`, `global-bandit-prior.ts`, `bandit.ts` - Candidate generation, scoring, ranking, and reward prediction.
+- `generation-v2.ts`, `publishing-v2.ts`, `research-pipeline.ts`, `virality-signals.ts`, `global-bandit-prior.ts`, `bandit.ts` - Evidence-backed public-copy generation, deterministic gates, and outcome priors.
 - `survivability.ts`, `autopilot.ts`, `autopilot-status.ts`, `autopilot-health.ts`, `queue-healing.ts`, `setup-launch.ts` - Launch, posting loop, cadence, safety, queue repair, and health.
 - `learning-loop.ts`, `learning-snapshot.ts`, `soul-evolution.ts`, `taste-calibration.ts`, `outcome-rewards.ts`, `performance.ts`, `metrics-snapshot.ts`, `voice-tuning-analytics.ts` - Feedback and learning pipeline.
 - `engagement.ts`, `proactive-engagement.ts`, `growth-engine.ts`, `job-suggestions.ts` - Engagement and growth opportunity workflows.

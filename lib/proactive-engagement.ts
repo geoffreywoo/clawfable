@@ -5,16 +5,19 @@
  * 2. Shout out other Clawfable agents for cross-promotion
  */
 
-import type { Agent, ProtocolSettings } from './types';
+import type { Agent, GenerationEvidenceReference, ProtocolSettings } from './types';
 import type { TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { followUser, getFollowing } from './twitter-client';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
-import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory } from './kv-storage';
-import { generateText } from './ai';
+import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory, getTweets, getAnalysis } from './kv-storage';
+import { PUBLISHING_V2_MODEL_STACK } from './ai';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
-import { formatShoutoutSoulSummaryForPrompt, getShoutoutMaxTokens } from './promotion-prompt';
 import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
+import { assertAgentAutomationEntitlement } from './automation-entitlement';
+import { buildGenerationContext } from './generation-context';
+import { generatePublishingBatchV2 } from './publishing-v2';
+import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 
 async function recordEngagementTrendRefreshError(agent: Agent, err: unknown): Promise<void> {
   const invalidCredentials = isInvalidTwitterCredentialError(err);
@@ -103,32 +106,63 @@ export async function likeNetworkTweets(
  */
 export async function generateAgentShoutout(
   agent: Agent,
-): Promise<{ content: string; targetHandle: string } | null> {
+): Promise<{ content: string; targetHandle: string; candidate: RankedProtocolTweet } | null> {
   try {
-    // Find other public Clawfable agents
+    const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
     const allAgents = await getAgents();
     const otherAgents = allAgents.filter(
       (a) => a.id !== agent.id && a.setupStep === 'ready' && a.soulPublic !== 0 && a.handle !== agent.handle
     );
-
     if (otherAgents.length === 0) return null;
+    const targetCandidates = await Promise.all(otherAgents.map(async (target) => ({
+      target,
+      post: (await getTweets(target.id)).find((tweet) => tweet.status === 'posted' && tweet.xTweetId && tweet.content.trim()),
+    })));
+    const qualified = targetCandidates
+      .filter((entry): entry is { target: Agent; post: NonNullable<typeof entry.post> } => Boolean(entry.post))
+      .sort((left, right) => Date.parse(right.post.postedAt || right.post.createdAt) - Date.parse(left.post.postedAt || left.post.createdAt));
+    const selected = qualified[0];
+    if (!selected) return null;
 
-    // Pick a random agent to shout out
-    const target = otherAgents[Math.floor(Math.random() * otherAgents.length)];
-
-    const response = await generateText({
-      task: 'tweet_generation',
-      tier: 'quality',
-      maxTokens: getShoutoutMaxTokens(),
-      system: `You are @${agent.handle}. Write a brief, natural shoutout tweet mentioning @${target.handle} (${target.name}). The shoutout should feel organic, not forced. Reference their work or perspective. Stay in your voice. Keep it under 200 chars. No hashtags. Output ONLY the tweet text.`,
-      prompt: `Write a shoutout for @${target.handle}. Their soul summary: "${formatShoutoutSoulSummaryForPrompt(target.soulSummary, target.name)}". Make it feel natural.`,
+    const analysis = await getAnalysis(agent.id);
+    if (!analysis) return null;
+    const context = await buildGenerationContext(agent, { negativeLimit: 6, directiveLimit: 10 });
+    const targetPost: GenerationEvidenceReference = {
+      id: `x-post:${selected.post.xTweetId}`,
+      kind: 'target_post',
+      sourceDocumentId: null,
+      url: `https://x.com/${selected.target.handle.replace(/^@/, '')}/status/${selected.post.xTweetId}`,
+      title: `Post by @${selected.target.handle.replace(/^@/, '')}`,
+      publisher: selected.target.handle.replace(/^@/, ''),
+      content: selected.post.content,
+      publishedAt: selected.post.postedAt || selected.post.createdAt,
+      verifiedAt: new Date().toISOString(),
+      expiresAt: null,
+      trustTier: 'primary',
+    };
+    const [candidate] = await generatePublishingBatchV2({
+      agentId: agent.id,
+      count: 1,
+      request: {
+        surface: 'relationship',
+        triggerId: `relationship:${selected.post.xTweetId}`,
+        targetPost,
+        targetHandle: selected.target.handle,
+      },
+      voiceProfile: context.voiceProfile,
+      analysis,
+      learnings: context.learnings,
+      style: context.style,
+      recentPosts: context.recentPosts,
+      allTweets: context.allTweets,
+      memory: context.memory,
+      signals: context.signals,
+      trending: null,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      mode: 'live',
+      entitlement,
     });
-
-    const content = response.text
-      .trim()
-      .replace(/^["']|["']$/g, '');
-
-    return content.length > 0 ? { content, targetHandle: target.handle } : null;
+    return candidate ? { content: candidate.content, targetHandle: selected.target.handle, candidate } : null;
   } catch {
     return null;
   }
@@ -155,6 +189,7 @@ export async function discoverAndFollow(
   keys: TwitterKeys,
   settings: ProtocolSettings,
 ): Promise<number> {
+  await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!settings.autoFollow || !agent.xUserId) return 0;
 
   const recentPostLog = await getPostLog(agent.id, 30);

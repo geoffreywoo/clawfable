@@ -155,11 +155,16 @@ describe('performance learning smoke', () => {
       }) as any);
     }
 
-    for (let i = 0; i < 3; i++) {
+    const operatorExamples = [
+      'founders notice operating constraints before the market has a clean name for them',
+      'factory operators see yield drift weeks before quarterly numbers make the damage obvious',
+      'compute buyers watch clearing prices because capacity bottlenecks surface there first',
+    ];
+    for (let i = 0; i < operatorExamples.length; i++) {
       await addPerformanceEntry(agent.id, performanceEntry({
         tweetId: `manual-${i}`,
         xTweetId: `x-manual-${i}`,
-        content: `manual tweet ${i}`,
+        content: operatorExamples[i],
         format: 'question',
         topic: 'Crypto',
         likes: 200 + i,
@@ -414,7 +419,7 @@ describe('performance learning smoke', () => {
     await addPerformanceEntry(agent.id, performanceEntry({
       tweetId: '',
       xTweetId: 'x-dup-1',
-      content: 'duplicate hit tweet',
+      content: 'founders notice the distribution constraint before the market has a clean name for it',
       format: 'hot_take',
       topic: 'AI',
       likes: 110,
@@ -426,7 +431,7 @@ describe('performance learning smoke', () => {
     await addPerformanceEntry(agent.id, performanceEntry({
       tweetId: '',
       xTweetId: 'x-dup-1',
-      content: 'duplicate hit tweet',
+      content: 'founders notice the distribution constraint before the market has a clean name for it',
       format: 'hot_take',
       topic: 'AI',
       likes: 140,
@@ -438,7 +443,7 @@ describe('performance learning smoke', () => {
     await addPerformanceEntry(agent.id, performanceEntry({
       tweetId: '',
       xTweetId: 'x-unique-2',
-      content: 'second manual winner',
+      content: 'factory operators see yield drift weeks before the quarterly numbers make it obvious',
       format: 'question',
       topic: 'AI',
       likes: 95,
@@ -448,7 +453,7 @@ describe('performance learning smoke', () => {
     await addPerformanceEntry(agent.id, performanceEntry({
       tweetId: '',
       xTweetId: 'x-unique-3',
-      content: 'third manual winner',
+      content: 'compute buyers care about clearing price because capacity constraints surface there first',
       format: 'observation',
       topic: 'AI',
       likes: 80,
@@ -503,8 +508,9 @@ describe('performance learning smoke', () => {
     const learnings = await buildLearnings(agent);
     const bestIds = learnings.operatorVoiceReference?.bestPerformers.map((entry) => entry.xTweetId) ?? [];
 
-    expect(bestIds).toHaveLength(8);
+    expect(bestIds).toHaveLength(7);
     expect(bestIds).not.toContain('x-media-stub');
+    expect(bestIds).not.toContain('x-substantive-0');
     expect(bestIds.every((id) => id.startsWith('x-substantive-'))).toBe(true);
   });
 
@@ -559,13 +565,13 @@ describe('performance learning smoke', () => {
 
     await addPerformanceEntry(agent.id, performanceEntry({
       xTweetId: 'x-interview-primary',
-      content: 'New interview with the team about sports, investments, and venture capital. Six years ago none of our athlete friends had heard of venture capital.',
+      content: 'six years ago none of our athlete friends had heard of venture capital. now they compare fund terms before signing brand deals.',
       likes: 120,
       source: 'timeline',
     }) as any);
     await addPerformanceEntry(agent.id, performanceEntry({
       xTweetId: 'x-interview-duplicate',
-      content: 'New interview with the team about the intersection of sports, business, and venture capital. Six years ago none of our athlete friends knew anything about venture capital.',
+      content: 'six years ago none of our athlete friends knew venture capital. now they compare investment terms before they sign major brand deals.',
       likes: 90,
       source: 'timeline',
     }) as any);

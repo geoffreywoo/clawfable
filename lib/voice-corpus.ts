@@ -155,7 +155,10 @@ function entrySignature(entry: VoiceCorpusEntry): string {
 
 function selectDictionAnchors(entries: VoiceCorpusEntry[], pinnedIds: Set<string>): VoiceCorpusEntry[] {
   const eligible = entries
-    .filter((entry) => entry.exclusionReasons.length === 0 && entry.dispositions.includes('topic_signal'))
+    .filter((entry) => (
+      entry.dispositions.includes('topic_signal')
+      && (entry.exclusionReasons.length === 0 || pinnedIds.has(entry.xTweetId))
+    ))
     .sort((left, right) => (
       Number(pinnedIds.has(right.xTweetId)) - Number(pinnedIds.has(left.xTweetId))
       || right.selectionScore - left.selectionScore
@@ -280,7 +283,7 @@ export function buildVoiceCorpusSnapshot({
     );
     const dispositions: VoiceCorpusDisposition[] = [];
     if (provenance === 'known_clawfable_generated') dispositions.push('mechanics_only');
-    else if (exclusions.length === 0) dispositions.push('topic_signal');
+    else if (provenance !== 'unknown' && !negative && !blocked) dispositions.push('topic_signal');
     if (negative || blocked) dispositions.push('negative');
     if (exclusions.length > 0 && !dispositions.includes('mechanics_only')) dispositions.push('excluded');
 
@@ -313,15 +316,15 @@ export function buildVoiceCorpusSnapshot({
 
   const selected = selectDictionAnchors(entries, pinnedIds);
   const active = selected.length >= VOICE_CORPUS_MIN_ANCHORS;
-  if (active) {
-    for (const entry of selected) {
-      entry.dispositions = [...new Set<VoiceCorpusDisposition>([...entry.dispositions, 'diction_anchor'])];
+  for (const entry of selected) {
+    entry.dispositions = [...new Set<VoiceCorpusDisposition>([...entry.dispositions, 'diction_anchor'])];
+    if (active) {
       entry.selectionReasons.push('activated in the current diction corpus');
+    } else {
+      entry.selectionReasons.push(
+        `eligible but inactive until ${VOICE_CORPUS_MIN_ANCHORS} anchors are available`,
+      );
     }
-  } else {
-    selected.forEach((entry) => entry.selectionReasons.push(
-      `eligible but inactive until ${VOICE_CORPUS_MIN_ANCHORS} anchors are available`,
-    ));
   }
 
   const snapshotBasis = entries
@@ -330,7 +333,7 @@ export function buildVoiceCorpusSnapshot({
     .join('|');
   const snapshotId = `voice-corpus-v${VOICE_CORPUS_SCHEMA_VERSION}-${stableHash(snapshotBasis)}`;
   const count = (disposition: VoiceCorpusDisposition) => entries.filter((entry) => entry.dispositions.includes(disposition)).length;
-  const anchorCount = active ? count('diction_anchor') : 0;
+  const anchorCount = count('diction_anchor');
 
   return {
     snapshotId,

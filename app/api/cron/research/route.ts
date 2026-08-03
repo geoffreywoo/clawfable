@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GEOFFREY_PRIMARY_MODEL_STACK } from '@/lib/ai';
-import { isGeoffreyAccount } from '@/lib/account-taste';
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { getAgents, getProtocolSettings, resetReadCache } from '@/lib/kv-storage';
 import { refreshAgentResearch } from '@/lib/research-pipeline';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 
 export const maxDuration = 800;
 
@@ -16,15 +16,13 @@ export async function GET(request: NextRequest) {
   resetReadCache();
   const agents = await getAgents();
   const results = [];
-  const additionalHandles = (process.env.RESEARCH_V2_AGENT_HANDLES || '')
-    .split(',')
-    .map((handle) => handle.trim().replace(/^@/, '').toLowerCase())
-    .filter(Boolean);
   for (const agent of agents) {
     const settings = await getProtocolSettings(agent.id);
-    if (!settings.enabled || (!isGeoffreyAccount(agent.handle) && !additionalHandles.includes(agent.handle.toLowerCase()))) continue;
+    if (!settings.enabled) continue;
+    const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
+    if (!entitlement.eligible) continue;
     results.push(await refreshAgentResearch(agent, {
-      modelStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_PRIMARY_MODEL_STACK : 'standard',
+      modelStack: PUBLISHING_V2_MODEL_STACK,
     }));
   }
 

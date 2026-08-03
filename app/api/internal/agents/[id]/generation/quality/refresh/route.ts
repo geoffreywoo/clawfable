@@ -13,6 +13,7 @@ import {
   resetReadCache,
 } from '@/lib/kv-storage';
 import { buildLearnings, checkPerformance } from '@/lib/performance';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 const MAX_CLASSIFICATION_PASSES = 5;
 const MAX_TARGET_QUEUE_DEPTH = 8;
@@ -32,6 +33,14 @@ export async function POST(
   const { id } = await params;
   const agent = await getAgent(id);
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+  try {
+    await assertAgentAutomationEntitlement(id, { agent });
+  } catch (error) {
+    if (error instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(error), { status: error.status });
+    }
+    throw error;
+  }
 
   const body = await request.json().catch(() => ({}));
   const classificationPasses = Number(body?.classificationPasses ?? MAX_CLASSIFICATION_PASSES);

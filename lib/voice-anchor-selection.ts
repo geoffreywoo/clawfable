@@ -1,5 +1,5 @@
 import type { TweetPerformance } from './types';
-import { classifyGeoffreyTopicDomain } from './source-planner';
+import { researchTokenSimilarity, significantResearchTokens } from './research-utils';
 
 type DictionAnchor = Pick<TweetPerformance, 'content'> & Partial<Pick<TweetPerformance, 'topic'>>;
 
@@ -18,17 +18,19 @@ export function selectCrossTopicDictionAnchors<T extends DictionAnchor>(
     Boolean(entry.content?.trim())
     && items.findIndex((item) => item.content.trim() === entry.content.trim()) === index
   ));
-  const activeDomains = new Set(
-    activeTopicTexts
-      .map((topic) => classifyGeoffreyTopicDomain(topic))
-      .filter((domain) => domain !== 'other'),
-  );
-  if (activeDomains.size === 0) return unique.slice(0, limit);
+  const activeSubject = activeTopicTexts.join(' ').trim();
+  if (significantResearchTokens(activeSubject).length === 0) return unique.slice(0, limit);
+  const activeTokens = new Set(significantResearchTokens(activeSubject));
 
   return unique
-    .filter((entry) => {
-      const domain = classifyGeoffreyTopicDomain(`${entry.topic || ''} ${entry.content}`);
-      return domain === 'other' || !activeDomains.has(domain);
-    })
+    .map((entry) => ({
+      entry,
+      subjectSimilarity: Math.max(
+        researchTokenSimilarity(activeSubject, `${entry.topic || ''} ${entry.content}`),
+        significantResearchTokens(entry.topic || '').some((token) => activeTokens.has(token)) ? 1 : 0,
+      ),
+    }))
+    .filter(({ subjectSimilarity }) => subjectSimilarity < 0.38)
+    .map(({ entry }) => entry)
     .slice(0, limit);
 }

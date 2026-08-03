@@ -27,14 +27,15 @@ function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: 
 }
 
 function performanceEntry(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
+  const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   return {
     tweetId: overrides.tweetId || crypto.randomUUID(),
     xTweetId: overrides.xTweetId || crypto.randomUUID(),
     content: overrides.content || 'tweet',
     format: overrides.format || 'hot_take',
     topic: overrides.topic || 'AI',
-    postedAt: overrides.postedAt || '2026-04-01T00:00:00.000Z',
-    checkedAt: overrides.checkedAt || '2026-04-01T01:00:00.000Z',
+    postedAt: overrides.postedAt || recent,
+    checkedAt: overrides.checkedAt || new Date().toISOString(),
     likes: overrides.likes ?? 10,
     retweets: overrides.retweets ?? 2,
     replies: overrides.replies ?? 1,
@@ -62,7 +63,7 @@ function tweetEntry(overrides: Partial<Tweet> = {}): Tweet {
     quoteTweetAuthor: overrides.quoteTweetAuthor ?? null,
     scheduledAt: overrides.scheduledAt ?? null,
     deletionReason: overrides.deletionReason ?? null,
-    createdAt: overrides.createdAt || '2026-04-01T00:00:00.000Z',
+    createdAt: overrides.createdAt || new Date().toISOString(),
   };
 }
 

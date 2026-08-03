@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateText } from '@/lib/ai';
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { buildEngagementDraft } from '@/lib/engagement';
-import { getAnalysis, createTweet, addLearningSignal } from '@/lib/kv-storage';
-import type { EngagementCandidate } from '@/lib/types';
-import { getPlatformGoalForHandle } from '@/lib/platform-goal';
-import { scoreHighValueReply } from '@/lib/virality-signals';
+import { getAnalysis, addLearningSignal } from '@/lib/kv-storage';
+import type { EngagementCandidate, GenerationEvidenceReference } from '@/lib/types';
 import { hasPostedReplyForConversation } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
-import {
-  formatReplyMemoryForPrompt,
-  formatReplyReferenceTweetsForPrompt,
-  formatReplySoulForPrompt,
-  formatReplyTargetTextForPrompt,
-} from '@/lib/reply-prompt';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
+import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
+import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -34,7 +29,8 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
+    const entitlement = await assertAgentAutomationEntitlement(id, { agent, user });
     const body = await request.json();
     const candidate = body?.candidate as Partial<EngagementCandidate> | undefined;
 
@@ -54,80 +50,64 @@ export async function POST(
       }, { status: 409 });
     }
 
-    const [{ voiceProfile, memory }, analysis] = await Promise.all([
+    const [context, analysis] = await Promise.all([
       buildGenerationContext(agent, {
         negativeLimit: 6,
         directiveLimit: 10,
       }),
       getAnalysis(id),
     ]);
-    const valueScore = scoreHighValueReply({
-      text: candidate.text,
-      authorUsername: candidate.authorHandle.replace(/^@/, ''),
-      authorName: candidate.authorName,
-      createdAt: candidate.createdAt,
-    }, { topics: voiceProfile.topics });
-
-    const systemParts: string[] = [];
-    systemParts.push(`You are @${agent.handle} (${agent.name}). Write a reply to another account on X in this account's voice.`);
-    systemParts.push(`\n## CLAWFABLE PLATFORM GOAL (NON-NEGOTIABLE)
-${getPlatformGoalForHandle(agent.handle)}
-
-Preserve the account's authentic voice while increasing the odds of niche attention, conversation, and virality.`);
-    systemParts.push(`\n## VOICE CONTRACT
-- Tone: ${voiceProfile.tone}
-- Style: ${voiceProfile.communicationStyle}
-- Topics: ${voiceProfile.topics.join(', ') || 'the agent voice topics'}
-- Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
-
-    const memoryPrompt = formatReplyMemoryForPrompt(memory);
-    if (memoryPrompt) {
-      systemParts.push(`\n${memoryPrompt}`);
+    if (!analysis) {
+      return NextResponse.json({ error: 'Run account analysis before generating replies.' }, { status: 409 });
     }
 
-    const soulPrompt = formatReplySoulForPrompt(agent.soulMd);
-    if (soulPrompt) {
-      systemParts.push(`\n## SOUL.md\n${soulPrompt}`);
-    }
-
-    if (analysis?.viralTweets?.length) {
-      systemParts.push('\n## STRONG REFERENCE TWEETS');
-      systemParts.push(formatReplyReferenceTweetsForPrompt(analysis.viralTweets));
-    }
-
-    systemParts.push(`\n## ENGAGE REPLY RULES
-- Reply to the specific tweet, not a generic topic.
-- Add a point, angle, example, or disagreement. Avoid empty applause.
-- Treat this as high-value reply drafting: value score ${valueScore.score} (${valueScore.reason}); strategy ${valueScore.responseStrategy.replace(/_/g, ' ')}.
-- Keep it concise and screenshotable unless the argument needs more room.
-- Do not mention being an AI, assistant, or prompt.
-- Output only the reply text.`);
-
-    const response = await generateText({
-      task: 'reply_generation',
-      tier: 'quality',
-      maxTokens: 260,
-      system: systemParts.join('\n'),
-      prompt: `Target tweet from @${candidate.authorHandle}:\n\n"${formatReplyTargetTextForPrompt(candidate.text)}"\n\nWrite the best reply for @${agent.handle}.`,
-    });
-
-    const content = response.text.trim().replace(/^["']|["']$/g, '');
-    if (!content) {
-      return NextResponse.json({ error: 'Failed to generate a reply draft' }, { status: 500 });
-    }
-
-    const tweet = await createTweet({
+    const targetPost: GenerationEvidenceReference = {
+      id: `x-post:${candidate.tweetId}`,
+      kind: 'target_post',
+      sourceDocumentId: null,
+      url: candidate.tweetUrl,
+      title: `Post by @${candidate.authorHandle.replace(/^@/, '')}`,
+      publisher: candidate.authorHandle.replace(/^@/, ''),
+      content: candidate.text,
+      publishedAt: candidate.createdAt,
+      verifiedAt: new Date().toISOString(),
+      expiresAt: null,
+      trustTier: 'community',
+    };
+    const [generated] = await generatePublishingBatchV2({
       agentId: id,
-      content,
-      type: 'reply',
+      count: 1,
+      request: {
+        surface: 'reply',
+        triggerId: candidate.tweetId,
+        targetPost,
+      },
+      voiceProfile: context.voiceProfile,
+      analysis,
+      learnings: context.learnings,
+      style: context.style,
+      recentPosts: context.recentPosts,
+      allTweets: context.allTweets,
+      memory: context.memory,
+      signals: context.signals,
+      trending: null,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      mode: 'manual',
+      entitlement,
+    });
+    if (!generated) {
+      return NextResponse.json({
+        error: 'No reply cleared the context, safety, originality, and voice gates.',
+        code: 'no_qualified_reply',
+      }, { status: 422 });
+    }
+
+    const tweet = await createTweetFromGeneratedCandidate(id, generated, {
       status: 'draft',
-      topic: `Engage reply to @${candidate.authorHandle}`,
-      xTweetId: null,
-      quoteTweetId: null,
-      quoteTweetAuthor: candidate.authorHandle,
+      type: 'reply',
+      topic: `Engage reply to @${candidate.authorHandle.replace(/^@/, '')}`,
       followupForTweetId: candidate.tweetId,
       replyConversationId: candidate.tweetId,
-      scheduledAt: null,
     });
 
     await addLearningSignal(id, {
@@ -140,8 +120,8 @@ Preserve the account's authentic voice while increasing the odds of niche attent
         targetHandle: candidate.authorHandle,
         targetTweetId: candidate.tweetId,
         candidateScore: candidate.score,
-        replyValueScore: valueScore.score,
-        responseStrategy: valueScore.responseStrategy,
+        generationRunId: generated.generationRunId || null,
+        ideaId: generated.ideaId || null,
       },
     });
 
@@ -151,6 +131,9 @@ Preserve the account's authentic voice while increasing the odds of niche attent
       candidate,
     });
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to generate engage reply';
     return NextResponse.json({ error: message }, { status: 500 });

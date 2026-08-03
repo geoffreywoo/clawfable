@@ -2,13 +2,16 @@ import type {
   AccountAnalysis,
   ActionRewardBreakdown,
   AgentLearnings,
+  AutomationEntitlement,
   CandidateJudgeBreakdown,
   CandidateScoreProvenance,
   ContentSourceLane,
   DraftCandidate,
+  GenerationEvidenceReference,
   GenerationModelCallTrace,
   GenerationModelStackId,
   GenerationRunTrace,
+  GenerationSurface,
   IdeaCandidate,
   LearningSignal,
   PersonalizationMemory,
@@ -20,8 +23,8 @@ import type {
   TweetPerformance,
 } from './types';
 import type { VoiceProfile } from './soul-parser';
-import type { ContentStyleConfig } from './viral-generator';
-import type { RankedProtocolTweet } from './candidate-ranking';
+import type { ContentStyleConfig } from './content-style';
+import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import type { TrendingTopic } from './trending';
 import {
   estimateAiUsageCostUsd,
@@ -39,13 +42,6 @@ import {
   upsertDraftCandidates,
   upsertIdeaCandidates,
 } from './kv-storage';
-import { buildSourcePlannerPlan, isGeoffreyDeepTechnicalTopic, type SourcePlannerSlot } from './source-planner';
-import { assessAccountTaste, getAutonomousQueueTasteIssue, isGeoffreyVoiceProfile } from './account-taste';
-import {
-  assessGeoffreyQualityPolicy,
-  EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
-  GEOFFREY_QUALITY_POLICY_VERSION,
-} from './quality-policy';
 import { assessClaimEvidence } from './claim-evidence';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
@@ -75,10 +71,19 @@ import {
 } from './research-utils';
 
 const PIPELINE_VERSION = 'v2' as const;
-const FINAL_CRITIC_VERSION = EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION;
+export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-2';
+export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-2';
 const MAX_IDEA_CANDIDATES_PER_BRIEF = 3;
 const MAX_DRAFTS_PER_IDEA = 2;
 const SYSTEM_ERROR_PAUSE_MS = 2 * 60 * 60 * 1000;
+const QUALITY_EMPTY_PAUSE_MS = 2 * 60 * 60 * 1000;
+const GENERATION_RUN_DEADLINE_MS = 180 * 1000;
+const STAGE_DEADLINES_MS: Partial<Record<GenerationModelCallTrace['stage'], number>> = {
+  idea_generation: 60 * 1000,
+  idea_judgment: 30 * 1000,
+  tweet_writing: 30 * 1000,
+  copy_judgment: 30 * 1000,
+};
 
 const IDEA_GENERATION_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -156,6 +161,26 @@ export function getGenerationV2CircuitPauseUntil(
   return pauseUntil > now.getTime() ? new Date(pauseUntil).toISOString() : null;
 }
 
+export function getGenerationV2QualityPauseUntil(
+  runs: GenerationRunTrace[],
+  inputFingerprint: string,
+  now = new Date(),
+): string | null {
+  const previous = [...runs]
+    .filter((run) => (
+      run.mode !== 'preview'
+      && run.status === 'empty'
+      && run.inputFingerprint === inputFingerprint
+      && (run.outcomeCode === 'quality_empty' || run.outcomeCode === 'no_qualified_context')
+    ))
+    .sort((left, right) => Date.parse(right.completedAt || right.startedAt) - Date.parse(left.completedAt || left.startedAt))[0];
+  if (!previous) return null;
+  const completedAt = Date.parse(previous.completedAt || previous.startedAt);
+  if (!Number.isFinite(completedAt)) return null;
+  const pauseUntil = completedAt + QUALITY_EMPTY_PAUSE_MS;
+  return pauseUntil > now.getTime() ? new Date(pauseUntil).toISOString() : null;
+}
+
 function allWritingCallsFailed(calls: GenerationModelCallTrace[]): boolean {
   const writing = calls.filter((call) => call.stage === 'tweet_writing');
   return writing.length > 0 && writing.every((call) => !call.succeeded);
@@ -218,7 +243,13 @@ export interface GenerateTweetBatchV2Input {
   signals: LearningSignal[];
   trending: TrendingTopic[] | null;
   modelStack: GenerationModelStackId;
+  surface?: GenerationSurface;
+  triggerId?: string | null;
+  idempotencyKey?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftId?: string | null;
   mode?: 'live' | 'manual' | 'preview';
+  entitlement?: AutomationEntitlement | null;
   persistArtifacts?: boolean;
   onTrace?: (trace: GenerationRunTrace) => void;
   onArtifacts?: (artifacts: {
@@ -227,14 +258,17 @@ export interface GenerateTweetBatchV2Input {
   }) => void;
 }
 
-async function trackedGenerate(
+export async function trackedGenerate(
   stage: GenerationModelCallTrace['stage'],
   options: GenerateTextOptions,
   calls: GenerationModelCallTrace[],
 ): Promise<GenerateTextResult> {
   const startedAt = Date.now();
   try {
-    const result = await generateText(options);
+    const result = await generateText({
+      ...options,
+      timeoutMs: options.timeoutMs ?? STAGE_DEADLINES_MS[stage],
+    });
     calls.push({
       stage,
       provider: result.provider,
@@ -345,29 +379,39 @@ function evidenceReferences(documents: SourceDocument[]): TweetEvidenceReference
   }));
 }
 
-function plannerBrief(slot: SourcePlannerSlot): GenerationBriefV2 {
-  const evidence = slot.briefEvidence;
-  const historicalStats = evidence?.mode === 'historical_operator'
-    ? [
-        evidence.historicalSampleCount ? `${evidence.historicalSampleCount} operator-written posts` : null,
-        evidence.historicalAvgEngagement !== null && evidence.historicalAvgEngagement !== undefined
-          ? `average engagement ${Math.round(evidence.historicalAvgEngagement)}`
-          : null,
-      ].filter(Boolean).join(', ')
+function publishingEvidenceReferences(documents: SourceDocument[]): GenerationEvidenceReference[] {
+  return documents.slice(0, 6).map((document) => ({
+    id: `research-source:${document.id}`,
+    kind: 'research_source',
+    sourceDocumentId: document.id,
+    url: document.canonicalUrl,
+    title: document.title,
+    publisher: document.publisher,
+    content: document.claims.map((claim) => claim.text).join(' ').slice(0, 1600) || document.excerpt,
+    publishedAt: document.publishedAt,
+    verifiedAt: document.fetchedAt,
+    expiresAt: null,
+    trustTier: document.trustTier,
+  }));
+}
+
+function operatorTopicBrief(
+  topic: string,
+  index: number,
+  identityScore: number,
+  provenance: string,
+  sampleCount?: number,
+): GenerationBriefV2 {
+  const historyPrefix = sampleCount
+    ? `Topic-level history: ${sampleCount} operator-written posts. `
     : '';
-  const spreadMechanics = evidence?.spreadMechanics?.length
-    ? ` Proven mechanics: ${evidence.spreadMechanics.join('; ')}.`
-    : '';
-  const summary = evidence?.mode === 'historical_operator'
-    ? `Develop a fresh adjacent judgment about ${slot.targetTopic}.${historicalStats ? ` Topic-level history: ${historicalStats}.` : ''}${spreadMechanics} Do not reuse a prior premise.`
-    : evidence?.instruction?.trim()
-      || `Develop an original operator judgment about ${slot.targetTopic}.`;
+  const summary = `${historyPrefix}Develop a fresh operator judgment about ${topic}. This subject comes from ${provenance}, not from a factual source. Do not reuse a prior premise.`;
   return {
-    id: stableResearchId('brief', 'operator', slot.slot, slot.targetTopic, summary),
-    topic: slot.targetTopic,
-    sourceLane: slot.sourceLane,
+    id: stableResearchId('brief', 'operator', index, topic, provenance),
+    topic,
+    sourceLane: 'manual_core_exploit',
     storyClusterId: null,
-    title: slot.targetTopic,
+    title: topic,
     summary,
     authorOpportunity: 'Turn an operator-owned subject into a current judgment without inventing events, measurements, customers, or quotes.',
     evidenceMode: 'operator_opinion',
@@ -375,13 +419,42 @@ function plannerBrief(slot: SourcePlannerSlot): GenerationBriefV2 {
     sourceDocumentIds: [],
     qualifiedClaimIds: [],
     evidence: [],
-    sourceBrief: `OPERATOR-OWNED TOPIC [subject=${slot.targetTopic}; mode=${slot.briefEvidence?.mode || 'historical_operator'}] ${summary}`.slice(0, 900),
+    sourceBrief: `OPERATOR-OWNED TOPIC [subject=${topic}; provenance=${provenance}] ${summary}`.slice(0, 900),
     trendTopicId: null,
     trendHeadline: null,
-    identityScore: 0.72,
+    identityScore,
     evidenceScore: 0.5,
     freshnessScore: 0.45,
   };
+}
+
+function operatorTopicCandidates({
+  voiceProfile,
+  analysis,
+  learnings,
+  style,
+}: Pick<Parameters<typeof buildGenerationBriefsV2>[0], 'voiceProfile' | 'analysis' | 'learnings' | 'style'>): Array<{
+  topic: string;
+  identityScore: number;
+  provenance: string;
+  sampleCount?: number;
+}> {
+  const candidates = [
+    ...[...(learnings?.manualTopicProfile || [])]
+      .filter((entry) => entry.sampleCount > 0)
+      .sort((left, right) => right.avgEngagement - left.avgEngagement || right.sampleCount - left.sampleCount)
+      .map((entry) => ({ topic: entry.topic, identityScore: 0.94, provenance: 'operator-written topic outcomes', sampleCount: entry.sampleCount })),
+    ...voiceProfile.topics.map((topic) => ({ topic, identityScore: 0.86, provenance: 'the active SOUL topic agenda' })),
+    ...analysis.engagementPatterns.topTopics.map((topic) => ({ topic, identityScore: 0.78, provenance: 'mature account performance' })),
+    ...style.exploration.underusedTopics.map((topic) => ({ topic, identityScore: 0.68, provenance: 'an underused operator topic' })),
+  ];
+  const seen = new Set<string>();
+  return candidates.filter((entry) => {
+    const key = topicKey(entry.topic);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function storyBrief(story: StoryCluster, documents: SourceDocument[]): GenerationBriefV2 {
@@ -505,7 +578,7 @@ export function buildGenerationBriefsV2({
   const briefs: GenerationBriefV2[] = [];
   const usedTopics = new Set<string>();
   const usedStorySubjects: string[] = [];
-  const maxResearchBriefs = Math.max(1, briefCount - 1);
+  const maxResearchBriefs = briefCount;
 
   const requested = requestedTopic?.replace(/\s+/g, ' ').trim().slice(0, 280);
   if (requested) {
@@ -544,23 +617,16 @@ export function buildGenerationBriefsV2({
     if (briefs.length >= maxResearchBriefs) break;
   }
 
-  const sourcePlan = buildSourcePlannerPlan({
-    count: briefCount,
-    autonomyMode: style.autonomyMode,
-    trendMixTarget: style.trendMixTarget,
-    trendTolerance: style.trendTolerance,
-    voiceProfile,
-    learnings,
-    // Network observations enter V2 only after research qualification. Static
-    // trend/frontier material can suggest research, but is not generation evidence.
-    trending: null,
-    fallbackTopics: [...analysis.engagementPatterns.topTopics, ...style.exploration.underusedTopics],
-    excludedTrendTopicIds: committedTweets.map((tweet) => tweet.trendTopicId || '').filter(Boolean),
-  });
-  for (const slot of sourcePlan.slots) {
-    const brief = plannerBrief(slot);
-    const key = topicKey(brief.topic);
+  const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
+  for (const [index, candidate] of operatorTopicCandidates({ voiceProfile, analysis, learnings, style }).entries()) {
+    const brief = operatorTopicBrief(candidate.topic, index, candidate.identityScore, candidate.provenance, candidate.sampleCount);
+    const key = topicKey(candidate.topic);
     if (usedTopics.has(key)) continue;
+    if (recentTopicKeys.has(key) && briefs.length < Math.min(briefCount, 3)) continue;
+    if (blocks.some((block) => (
+      block.scope !== 'copy'
+      && researchTokenSimilarity(candidate.topic, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62
+    ))) continue;
     briefs.push(brief);
     usedTopics.add(key);
     if (briefs.length >= briefCount) break;
@@ -803,6 +869,11 @@ export function normalizeIdeaCandidatesV2({
   recentPosts,
   blocks,
   documents = [],
+  surface = 'original',
+  triggerId = null,
+  idempotencyKey = null,
+  parentIdeaId = null,
+  parentDraftId = null,
   now,
 }: {
   raw: Array<Record<string, unknown>>;
@@ -813,6 +884,11 @@ export function normalizeIdeaCandidatesV2({
   recentPosts: string[];
   blocks: SemanticBlock[];
   documents?: SourceDocument[];
+  surface?: GenerationSurface;
+  triggerId?: string | null;
+  idempotencyKey?: string | null;
+  parentIdeaId?: string | null;
+  parentDraftId?: string | null;
   now: string;
 }): IdeaCandidate[] {
   const candidatesPerBrief = new Map<string, number>();
@@ -840,6 +916,11 @@ export function normalizeIdeaCandidatesV2({
       id: stableResearchId('idea', runId, brief.id, index, claim),
       agentId,
       generationRunId: runId,
+      surface,
+      triggerId,
+      idempotencyKey,
+      parentIdeaId,
+      parentDraftId,
       briefId: brief.id,
       storyClusterId: brief.storyClusterId,
       topic: brief.topic,
@@ -991,6 +1072,11 @@ async function generateIdeas({
     recentPosts: semanticMemory,
     blocks,
     documents,
+    surface: input.surface || 'original',
+    triggerId: input.triggerId || null,
+    idempotencyKey: input.idempotencyKey || null,
+    parentIdeaId: input.parentIdeaId || null,
+    parentDraftId: input.parentDraftId || null,
     now: new Date().toISOString(),
   });
 }
@@ -1103,7 +1189,6 @@ interface DraftEvaluation {
   brief: GenerationBriefV2;
   sourceDocuments: SourceDocument[];
   anchors: DictionAnchor[];
-  taste: ReturnType<typeof assessAccountTaste>;
 }
 
 function collectOperatorAnchors(input: GenerateTweetBatchV2Input): DictionAnchor[] {
@@ -1123,6 +1208,11 @@ function collectOperatorAnchors(input: GenerateTweetBatchV2Input): DictionAnchor
   return fromPerformance.filter((entry, index, entries) => (
     entries.findIndex((candidate) => candidate.content.trim() === entry.content.trim()) === index
   ));
+}
+
+export function isV2VoiceReady(input: GenerateTweetBatchV2Input): boolean {
+  const requiredAnchors = Math.max(1, Math.min(3, input.learnings?.voiceCorpus?.minimumAnchorCount || 3));
+  return input.learnings?.voiceCorpus?.active === true && collectOperatorAnchors(input).length >= requiredAnchors;
 }
 
 function anchorsForIdea(idea: IdeaCandidate, anchors: DictionAnchor[]): DictionAnchor[] {
@@ -1220,6 +1310,11 @@ async function writeIdeaDrafts({
       id: stableResearchId('draft', runId, idea.id, index, content),
       agentId: input.agentId,
       generationRunId: runId,
+      surface: input.surface || 'original',
+      triggerId: input.triggerId || null,
+      idempotencyKey: input.idempotencyKey || null,
+      parentIdeaId: input.parentIdeaId || null,
+      parentDraftId: input.parentDraftId || null,
       ideaId: idea.id,
       storyClusterId: idea.storyClusterId,
       content,
@@ -1276,21 +1371,7 @@ function preflightDraft({
     ...input.allTweets.slice(0, 80).map((tweet) => tweet.content),
   ], 0.55);
   const anchorReskin = isNearDuplicate(content, anchors.map((anchor) => anchor.content), 0.68);
-  const taste = assessAccountTaste(content, {
-    voiceProfile: input.voiceProfile,
-    learnings: input.learnings,
-    memory: input.memory,
-    featureTags,
-    sourceTexts: claims,
-    untrustedSourceTexts,
-  });
-  const queueTasteIssue = getAutonomousQueueTasteIssue({
-    voiceProfile: input.voiceProfile,
-    assessment: taste,
-    hasSourceContext: brief.evidenceMode === 'verified_source',
-    technicalLane: isGeoffreyDeepTechnicalTopic(`${idea.topic} ${content}`),
-  });
-  const slop = scoreSlopRisk(content, featureTags);
+  const sourceCopy = isNearDuplicate(content, untrustedSourceTexts, 0.72);
   const blockedCopy = blocks.some((block) => (
     block.scope === 'copy'
     && researchTokenSimilarity(content, block.semanticKey.replace(/:/g, ' ')) >= 0.56
@@ -1304,15 +1385,13 @@ function preflightDraft({
   if (brief.evidenceMode === 'operator_opinion' && unsupportedOperatorFact(content)) codes.push('unsupported_operator_fact');
   if (recentDuplicate.isDuplicate) codes.push('recent_copy_duplicate');
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
-  if (taste.action === 'block' || queueTasteIssue) codes.push('account_taste');
-  if (slop >= 0.36) codes.push('generated_writing_pattern');
-  if (taste.sourceCopyRisk >= 0.3) codes.push('source_copy');
+  if (sourceCopy.isDuplicate) codes.push('source_copy');
   if (blockedCopy) codes.push('blocked_copy_pattern');
   if (codes.length > 0) {
     draft.status = 'rejected';
     draft.rejectionCodes = uniqueStrings(codes);
   }
-  return { draft, idea, brief, sourceDocuments: documents, anchors, taste };
+  return { draft, idea, brief, sourceDocuments: documents, anchors };
 }
 
 async function generateDraftEvaluations({
@@ -1521,7 +1600,7 @@ function scoreProvenance(
     predictedReward: Number((score.insight * 0.15).toFixed(3)),
     noveltyCoverage: Number((evaluation.idea.noveltyScore * 0.2).toFixed(3)),
     sourceLaneFit: Number((evaluation.idea.evidenceScore * 0.1).toFixed(3)),
-    nativeVoice: Number((evaluation.taste.nativeVoiceScore * 0.1).toFixed(3)),
+    nativeVoice: Number((score.voiceFit * 0.1).toFixed(3)),
     riskPenalty: Number(((1 - score.factualSafety) * 0.18).toFixed(3)),
   };
 }
@@ -1530,7 +1609,11 @@ function finalCriticBreakdown(
   score: CopyJudgeScore,
   evaluation: DraftEvaluation,
 ): CandidateJudgeBreakdown {
-  const taste = evaluation.taste;
+  const featureTags = extractCandidateFeatureTags(evaluation.draft.content, {
+    topic: evaluation.idea.topic,
+    thesisHint: evaluation.idea.claim,
+  });
+  const slop = scoreSlopRisk(evaluation.draft.content, featureTags);
   return {
     overall: score.overall,
     voiceFit: score.voiceFit,
@@ -1538,11 +1621,11 @@ function finalCriticBreakdown(
     novelty: score.novelty,
     audienceFit: evaluation.idea.identityScore,
     policySafety: score.factualSafety,
-    nativeVoice: taste.nativeVoiceScore,
-    casualStartupFit: taste.casualStartupScore,
-    stiffnessRisk: taste.stiffnessRisk,
-    cringeRisk: taste.cringeRisk,
-    technicalCredibility: taste.technicalCredibilityScore,
+    nativeVoice: score.voiceFit,
+    casualStartupFit: score.voiceFit,
+    stiffnessRisk: 1 - score.clarity,
+    cringeRisk: slop,
+    technicalCredibility: score.specificity,
     manualAnchorReskinRisk: isNearDuplicate(
       evaluation.draft.content,
       evaluation.anchors.map((anchor) => anchor.content),
@@ -1557,19 +1640,19 @@ function toRankedTweet(
   judge: CopyJudgeResult,
   input: GenerateTweetBatchV2Input,
 ): RankedProtocolTweet {
-  const { draft, idea, brief, sourceDocuments, taste } = evaluation;
+  const { draft, idea, brief, sourceDocuments } = evaluation;
   const featureTags = extractCandidateFeatureTags(draft.content, { topic: idea.topic, thesisHint: idea.claim });
   const finalScores = finalCriticBreakdown(score, evaluation);
   const slopScore = scoreSlopRisk(draft.content, featureTags);
   const confidenceScore = clampResearchScore(
-    score.overall * 0.45
-    + taste.nativeVoiceScore * 0.2
+    score.overall * 0.5
+    + score.voiceFit * 0.2
     + idea.evidenceScore * 0.15
     + idea.identityScore * 0.12
     + score.factualSafety * 0.08,
   );
   const criticScores = {
-    voice: taste.nativeVoiceScore,
+    voice: score.voiceFit,
     audience: idea.identityScore,
     novelty: score.novelty,
     slop: 1 - slopScore,
@@ -1578,6 +1661,7 @@ function toRankedTweet(
   };
   const actionRewardPrediction = zeroActionReward(score.overall);
   const refs = evidenceReferences(sourceDocuments);
+  const generationRefs = publishingEvidenceReferences(sourceDocuments);
   const sourceEvidenceTexts = sourceClaims(sourceDocuments);
   const audience = inferAudienceSegment(draft.content, idea.topic);
   const promptStrategy = inferPromptStrategy({
@@ -1593,23 +1677,30 @@ function toRankedTweet(
     targetTopic: idea.topic,
     rationale: `${idea.authorReason} ${idea.implication}`.slice(0, 500),
     pipelineVersion: PIPELINE_VERSION,
+    generationSurface: input.surface || 'original',
+    generationTriggerId: input.triggerId || null,
+    generationIdempotencyKey: input.idempotencyKey || null,
+    contentProvenance: 'generated_v2',
     generationRunId: draft.generationRunId,
     storyClusterId: draft.storyClusterId,
     ideaId: draft.ideaId,
     draftCandidateId: draft.id,
+    parentIdeaId: input.parentIdeaId || null,
+    parentDraftCandidateId: input.parentDraftId || null,
     evidenceReferences: refs,
+    generationEvidenceReferences: generationRefs,
     generationModelStack: input.modelStack,
     generationProvider: draft.generationProvider,
     generationModel: draft.generationModel,
     judgeProvider: judge.provider,
     judgeModel: judge.model,
-    qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+    qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
     voiceCorpusVersion: input.learnings?.voiceCorpus?.snapshotId || null,
     finalCriticProvider: judge.provider,
     finalCriticModel: judge.model,
     finalCriticVerdict: judge.provider ? 'allow' : 'review',
     finalCriticScores: finalScores,
-    finalCriticVersion: FINAL_CRITIC_VERSION,
+    finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
     sourceBrief: brief.sourceBrief,
     sourceEvidenceTexts,
     sourceLane: brief.sourceLane,
@@ -1618,16 +1709,16 @@ function toRankedTweet(
     generationMode: input.style.autonomyMode,
     candidateScore: Math.round(score.overall * 100),
     confidenceScore,
-    voiceScore: taste.nativeVoiceScore,
+    voiceScore: score.voiceFit,
     noveltyScore: idea.noveltyScore,
     surpriseScore: clampResearchScore((idea.noveltyScore + score.insight) / 2),
-    creativeRiskScore: clampResearchScore((taste.cringeRisk + taste.generatedPatternRisk) / 2),
+    creativeRiskScore: slopScore,
     slopScore,
     replyBaitScore: criticScores.replyPotential,
     predictedEngagementScore: score.overall,
     freshnessScore: brief.freshnessScore,
     repetitionRiskScore: 1 - idea.noveltyScore,
-    policyRiskScore: Math.max(1 - score.factualSafety, taste.truthfulnessRisk),
+    policyRiskScore: 1 - score.factualSafety,
     featureTags,
     coverageCluster: buildCoverageCluster(draft.content, idea.topic, idea.claim),
     judgeScore: score.overall,
@@ -1694,21 +1785,17 @@ async function selectFinalTweets({
     if (evaluation.idea.storyClusterId && selectedStories.has(evaluation.idea.storyClusterId)) continue;
     const score = judge.scores.get(evaluation.draft.id);
     if (!score) continue;
-    const candidate = toRankedTweet(evaluation, score, judge, input);
-    const quality = assessGeoffreyQualityPolicy(candidate, {
-      voiceProfile: input.voiceProfile,
-      learnings: input.learnings,
-      memory: input.memory,
-      stage: 'queue',
-    });
-    if (!quality.eligible) {
+    if (score.factualSafety < 0.72 || score.overall < 0.52 || score.insight < 0.42) {
       evaluation.draft.status = 'rejected';
       evaluation.draft.rejectionCodes = uniqueStrings([
         ...evaluation.draft.rejectionCodes,
-        ...quality.issues.map((issue) => `quality:${issue}`),
+        score.factualSafety < 0.72 ? 'copy_judge_factual_risk' : null,
+        score.overall < 0.52 ? 'copy_judge_low_quality' : null,
+        score.insight < 0.42 ? 'copy_judge_weak_idea_expression' : null,
       ]);
       continue;
     }
+    const candidate = toRankedTweet(evaluation, score, judge, input);
     evaluation.draft.status = 'selected';
     evaluation.draft.judgeProvider = judge.provider;
     evaluation.draft.judgeModel = judge.model;
@@ -1745,6 +1832,11 @@ function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
   const totalInputTokens = trace.modelCalls.reduce((sum, call) => sum + (call.inputTokens || 0), 0);
   const totalOutputTokens = trace.modelCalls.reduce((sum, call) => sum + (call.outputTokens || 0), 0);
   const costs = trace.modelCalls.map((call) => call.estimatedCostUsd).filter((cost): cost is number => typeof cost === 'number');
+  const costDataStatus = costs.length === trace.modelCalls.length && costs.length > 0
+    ? 'complete'
+    : costs.length > 0
+      ? 'partial'
+      : 'missing';
   const completedAt = new Date().toISOString();
   return {
     ...trace,
@@ -1753,6 +1845,11 @@ function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
     estimatedCostUsd: costs.length === trace.modelCalls.length && costs.length > 0
       ? Number(costs.reduce((sum, cost) => sum + cost, 0).toFixed(6))
       : null,
+    costDataStatus,
+    stageCounts: {
+      ...trace.stageCounts,
+      costUnknownCalls: trace.modelCalls.length - costs.length,
+    },
     completedAt,
     durationMs: Date.parse(completedAt) - Date.parse(trace.startedAt),
   };
@@ -1767,6 +1864,14 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     agentId: input.agentId,
     pipelineVersion: PIPELINE_VERSION,
     mode: input.mode || (persistArtifacts ? 'live' : 'preview'),
+    surface: input.surface || 'original',
+    triggerId: input.triggerId || null,
+    idempotencyKey: input.idempotencyKey || null,
+    parentIdeaId: input.parentIdeaId || null,
+    parentDraftId: input.parentDraftId || null,
+    entitlement: input.entitlement || null,
+    outcomeCode: null,
+    inputFingerprint: null,
     requestedCount: input.count,
     sourceDocumentIds: [],
     storyClusterIds: [],
@@ -1804,19 +1909,32 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     publishArtifacts();
     if (persistArtifacts) await upsertDraftCandidates(input.agentId, candidates);
   };
-  const pauseUntil = getGenerationV2CircuitPauseUntil(await getGenerationRuns(input.agentId, 8));
-  if (pauseUntil) {
+  await publishTrace();
+
+  if (trace.mode !== 'preview' && input.entitlement?.eligible !== true) {
     trace.status = 'empty';
-    trace.error = 'circuit_paused';
+    trace.error = 'payment_required';
+    trace.outcomeCode = 'payment_required';
     trace = finalizeTrace(trace);
     await publishTrace();
     return [];
   }
-  await publishTrace();
+
+  const recentRuns = await getGenerationRuns(input.agentId, 8);
+  const pauseUntil = getGenerationV2CircuitPauseUntil(recentRuns);
+  if (pauseUntil) {
+    trace.status = 'empty';
+    trace.error = 'circuit_paused';
+    trace.outcomeCode = 'provider_failure';
+    trace = finalizeTrace(trace);
+    await publishTrace();
+    return [];
+  }
 
   if (input.count <= 0 || !hasTextGenerationProvider()) {
     trace.status = input.count <= 0 ? 'empty' : 'failed';
     trace.error = input.count <= 0 ? null : 'No AI provider configured.';
+    trace.outcomeCode = input.count <= 0 ? 'no_qualified_context' : 'provider_failure';
     trace = finalizeTrace(trace);
     await publishTrace();
     return [];
@@ -1824,13 +1942,22 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
   let ideas: IdeaCandidate[] = [];
   let evaluations: DraftEvaluation[] = [];
+  const runDeadlineAt = Date.now() + GENERATION_RUN_DEADLINE_MS;
   try {
+    if (!isV2VoiceReady(input)) {
+      trace.status = 'empty';
+      trace.error = 'voice_not_ready';
+      trace.outcomeCode = 'voice_not_ready';
+      trace = finalizeTrace(trace);
+      await publishTrace();
+      return [];
+    }
     const [documents, stories, blocks] = await Promise.all([
       getSourceDocuments(input.agentId, 300),
       getStoryClusters(input.agentId, 200),
       getSemanticBlocks(input.agentId),
     ]);
-    const briefs = buildGenerationBriefsV2({
+    const builtBriefs = buildGenerationBriefsV2({
       count: input.count,
       requestedTopic: input.requestedTopic,
       stories,
@@ -1843,6 +1970,30 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       allTweets: input.allTweets,
       blocks,
     });
+    const briefs = trace.mode === 'live'
+      ? builtBriefs.filter((brief) => (
+          brief.evidenceMode === 'verified_source'
+          && brief.sourceDocumentIds.length > 0
+          && brief.qualifiedClaimIds.length > 0
+        ))
+      : builtBriefs;
+    trace.inputFingerprint = stableResearchId(
+      'generation-input-v2',
+      input.surface || 'original',
+      input.requestedTopic || '',
+      documents.map((document) => `${document.id}:${document.contentHash}`).sort().join(','),
+      stories.map((story) => `${story.id}:${story.lastSeenAt}:${story.blockReason || ''}`).sort().join(','),
+      blocks.map((block) => `${block.id}:${block.blockedUntil || ''}`).sort().join(','),
+    );
+    const qualityPauseUntil = getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);
+    if (qualityPauseUntil) {
+      trace.status = 'empty';
+      trace.error = 'quality_empty_paused';
+      trace.outcomeCode = 'quality_empty_paused';
+      trace = finalizeTrace(trace);
+      await publishTrace();
+      return [];
+    }
     trace.sourceDocumentIds = uniqueStrings(briefs.flatMap((brief) => brief.sourceDocumentIds), 100);
     trace.storyClusterIds = uniqueStrings(briefs.map((brief) => brief.storyClusterId), 40);
     trace.stageCounts = {
@@ -1854,11 +2005,13 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     };
     if (briefs.length === 0) {
       trace.status = 'empty';
+      trace.outcomeCode = 'no_qualified_context';
       trace = finalizeTrace(trace);
       await publishTrace();
       return [];
     }
 
+    if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     ideas = await generateIdeas({ input, briefs, documents, blocks, runId, calls: trace.modelCalls });
     trace.ideaCandidateIds = ideas.map((idea) => idea.id);
     trace.stageCounts.ideasGenerated = ideas.length;
@@ -1869,10 +2022,12 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     if (ideas.length === 0) {
       trace.status = 'failed';
       trace.error = 'Idea generator returned no parseable candidates.';
+      trace.outcomeCode = 'malformed_output';
       trace = finalizeTrace(trace);
       await publishTrace();
       return [];
     }
+    if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     const selectedIdeas = await selectIdeas({ ideas, input, calls: trace.modelCalls });
     trace.stageCounts.ideasSelected = selectedIdeas.length;
     await persistIdeas(ideas);
@@ -1885,11 +2040,13 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
           : null;
       trace.status = ideaJudgeFailure ? 'failed' : 'empty';
       trace.error = ideaJudgeFailure;
+      trace.outcomeCode = ideaJudgeFailure ? 'idea_judgment_failed' : 'quality_empty';
       trace = finalizeTrace(trace);
       await publishTrace();
       return [];
     }
 
+    if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     evaluations = await generateDraftEvaluations({
       ideas: selectedIdeas,
       briefs,
@@ -1905,7 +2062,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const reserve = ideas
         .filter((idea) => idea.status === 'rejected' && idea.rejectionCodes.length === 1 && idea.rejectionCodes[0] === 'idea_not_selected')
         .sort((left, right) => (right.judgeScore ?? 0) - (left.judgeScore ?? 0))[0];
-      if (reserve) {
+      if (reserve && Date.now() + 30_000 < runDeadlineAt) {
         retryUsed = true;
         reserve.status = 'selected';
         reserve.rejectionCodes = [];
@@ -1942,11 +2099,17 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         : noParseableDrafts
           ? 'Writer calls returned no parseable drafts.'
           : null;
+      trace.outcomeCode = allCallsFailed
+        ? 'writing_failed'
+        : noParseableDrafts
+          ? 'malformed_output'
+          : 'quality_empty';
       trace = finalizeTrace(trace);
       await publishTrace();
       return [];
     }
 
+    if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     let selected = await selectFinalTweets({ evaluations, input, calls: trace.modelCalls });
     const initialCopyJudgeFailure = evaluations.some((entry) => (
       entry.draft.rejectionCodes.includes('copy_judge_unavailable')
@@ -1956,7 +2119,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const reserve = ideas
         .filter((idea) => idea.status === 'rejected' && idea.rejectionCodes.length === 1 && idea.rejectionCodes[0] === 'idea_not_selected')
         .sort((left, right) => (right.judgeScore ?? 0) - (left.judgeScore ?? 0))[0];
-      if (reserve) {
+      if (reserve && Date.now() + 60_000 < runDeadlineAt) {
         retryUsed = true;
         reserve.status = 'selected';
         reserve.rejectionCodes = [];
@@ -1994,6 +2157,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         : null;
     trace.status = selected.length > 0 ? 'completed' : copyJudgeFailure ? 'failed' : 'empty';
     trace.error = copyJudgeFailure;
+    trace.outcomeCode = selected.length > 0 ? 'completed' : copyJudgeFailure ? 'copy_judgment_failed' : 'quality_empty';
     await persistDrafts(finalDrafts);
     await persistIdeas(ideas);
     trace = finalizeTrace(trace);
@@ -2002,6 +2166,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   } catch (error) {
     trace.status = 'failed';
     trace.error = error instanceof Error ? error.message : String(error);
+    trace.outcomeCode = trace.error === 'run_deadline' ? 'run_deadline' : 'provider_failure';
     trace.rejectionCounts = countRejections(ideas, evaluations.map((entry) => entry.draft));
     trace = finalizeTrace(trace);
     await publishTrace().catch(() => null);

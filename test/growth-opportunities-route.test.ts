@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requireAgentAccess: vi.fn(),
   handleAuthError: vi.fn((err: unknown) => { throw err; }),
   getLearnings: vi.fn(),
+  getAgentOwnerId: vi.fn(),
   getPerformanceHistory: vi.fn(),
   getPostLog: vi.fn(),
   getProtocolSettings: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getLearnings: mocks.getLearnings,
+  getAgentOwnerId: mocks.getAgentOwnerId,
   getPerformanceHistory: mocks.getPerformanceHistory,
   getPostLog: mocks.getPostLog,
   getProtocolSettings: mocks.getProtocolSettings,
@@ -82,7 +84,9 @@ describe('growth opportunities route', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
     mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+    mocks.getAgentOwnerId.mockResolvedValue('user-1');
     mocks.getProtocolSettings.mockResolvedValue({
       supervisedTrendDesk: true,
       relationshipQueueEnabled: true,
@@ -104,6 +108,10 @@ describe('growth opportunities route', () => {
     mocks.enrichTrendingTopics.mockReturnValue([]);
     mocks.buildTrendOpportunities.mockReturnValue([]);
     mocks.buildRelationshipOpportunities.mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
 
   it('returns cached trend opportunities and logs reset-aware X failures', async () => {

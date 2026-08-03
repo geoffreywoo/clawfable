@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { handleAuthError, requireAgentAccess } from '@/lib/auth';
 import { launchAgentFromPreview, SetupLaunchError } from '@/lib/setup-launch';
+import { AutomationEntitlementError, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // POST /api/agents/[id]/launch
 export async function POST(
@@ -31,6 +32,9 @@ export async function POST(
     console.log(`[launch] success: queued=${result.queuedCount} discarded=${result.discardedCount}`);
     return NextResponse.json({ success: true, ...result });
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     if (err instanceof SetupLaunchError) {
       return NextResponse.json({ error: err.message }, { status: 400 });

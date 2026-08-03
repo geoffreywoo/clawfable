@@ -117,51 +117,41 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses Fable 5 for Geoffrey copy and GPT-5.6 for Geoffrey criticism', async () => {
+  it('uses Fable 5 for V2 copy and GPT-5.6 for V2 criticism', async () => {
     const {
-      GEOFFREY_CONTROL_MODEL_STACK,
-      GEOFFREY_PRIMARY_MODEL_STACK,
+      PUBLISHING_V2_MODEL_STACK,
       getModelChainForTask,
     } = await loadDefaultRouter();
 
-    expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)).toEqual([
+    expect(getModelChainForTask('tweet_generation', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)).toEqual([
+    expect(getModelChainForTask('final_judgment', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('idea_generation', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)[0]).toEqual({
+    expect(getModelChainForTask('idea_generation', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
       provider: 'anthropic',
       model: 'claude-fable-5',
     });
-    expect(getModelChainForTask('idea_judgment', 'quality', GEOFFREY_PRIMARY_MODEL_STACK)[0]).toEqual({
+    expect(getModelChainForTask('idea_judgment', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
-    expect(getModelChainForTask('tweet_generation', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.6' },
-      { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-    ]);
-    expect(getModelChainForTask('final_judgment', 'quality', GEOFFREY_CONTROL_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.5' },
-      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-    ]);
   });
 
-  it('dispatches Geoffrey treatment copy to Fable 5 before any OpenAI fallback', async () => {
+  it('dispatches V2 copy to Fable 5 before provider failover', async () => {
     const openAiCreate = vi.fn();
     const anthropicCreate = vi.fn().mockResolvedValue({
       content: [{ type: 'text', text: 'fable copy' }],
       stop_reason: 'end_turn',
     });
     const {
-      GEOFFREY_PRIMARY_MODEL_STACK,
+      PUBLISHING_V2_MODEL_STACK,
       generateText,
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
     const jsonSchema = {
@@ -172,7 +162,7 @@ describe('AI model routing', () => {
 
     const result = await generateText({
       task: 'tweet_generation',
-      modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
       system: 'Write one post.',
       prompt: 'probe',
       maxTokens: 64,
@@ -443,7 +433,7 @@ describe('AI model routing', () => {
     }));
   });
 
-  it('records an empty Fable response before using the Geoffrey OpenAI fallback', async () => {
+  it('records an empty Fable response before using V2 OpenAI failover', async () => {
     const openAiCreate = vi.fn().mockResolvedValue({
       status: 'completed',
       output: [{ content: [{ type: 'output_text', text: 'fallback copy' }] }],
@@ -453,13 +443,13 @@ describe('AI model routing', () => {
       stop_reason: 'max_tokens',
     });
     const {
-      GEOFFREY_PRIMARY_MODEL_STACK,
+      PUBLISHING_V2_MODEL_STACK,
       generateText,
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
 
     const result = await generateText({
       task: 'tweet_generation',
-      modelStack: GEOFFREY_PRIMARY_MODEL_STACK,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
       system: 'Write one post.',
       prompt: 'probe',
       maxTokens: 64,

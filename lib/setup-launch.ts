@@ -4,13 +4,13 @@ import {
   getAgent,
   getPreviewTweets,
   logFunnelEvent,
-  markIdeaAtomRejectedForTweet,
   updateAgent,
   updateProtocolSettings,
   updateTweet,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
-import { getGeoffreyGeneratedPublishIssue } from './generation-origin';
+import { getGeneratedPublishIssue } from './generation-origin';
+import { assertAgentAutomationEntitlement } from './automation-entitlement';
 
 export class SetupLaunchError extends Error {}
 
@@ -40,6 +40,7 @@ export async function launchAgentFromPreview({
   if (!agent) {
     throw new SetupLaunchError('Agent not found');
   }
+  await assertAgentAutomationEntitlement(agentId, { agent });
 
   const previewTweets = await getPreviewTweets(agentId);
   // Vercel KV (Upstash) auto-deserializes numeric strings as numbers.
@@ -50,7 +51,7 @@ export async function launchAgentFromPreview({
   // Resolve approved IDs against what actually exists in KV.
   const retiredApprovalIds = requestedApprovals.filter((id) => {
     const tweet = previewTweets.find((entry) => String(entry.id) === id);
-    return tweet ? Boolean(getGeoffreyGeneratedPublishIssue(agent.handle, tweet)) : false;
+    return tweet ? Boolean(getGeneratedPublishIssue(tweet)) : false;
   });
   const approvedIds = requestedApprovals.filter((id) => previewIds.has(id) && !retiredApprovalIds.includes(id));
 
@@ -85,8 +86,6 @@ export async function launchAgentFromPreview({
       },
     });
   }));
-  const rejectedTweets = previewTweets.filter((tweet) => !approvedIdSet.has(tweet.id));
-  await Promise.all(rejectedTweets.map((tweet) => markIdeaAtomRejectedForTweet(tweet, 'Not selected during setup review')));
   await Promise.all(rejectedIds.map((id) => deleteTweet(id)));
 
   await updateProtocolSettings(agentId, {

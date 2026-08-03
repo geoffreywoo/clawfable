@@ -1,7 +1,7 @@
 import { createTweet } from './kv-storage';
 import { withDecisionProvenanceSummary } from './decision-provenance';
 import type { CreateTweetInput, Tweet } from './types';
-import type { RankedProtocolTweet } from './candidate-ranking';
+import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 
 export type GeneratedTweetStatus = 'preview' | 'draft' | 'queued';
 
@@ -11,12 +11,15 @@ export async function createTweetFromGeneratedCandidate(
   options: {
     status: GeneratedTweetStatus;
     topic?: string | null;
+    type?: 'original' | 'reply' | 'quote';
+    followupForTweetId?: string | null;
+    replyConversationId?: string | null;
   },
 ): Promise<Tweet> {
   const data: CreateTweetInput = {
     agentId,
     content: item.content,
-    type: 'original',
+    type: options.type || 'original',
     status: options.status,
     format: item.format || null,
     topic: options.topic ?? item.targetTopic ?? 'general',
@@ -36,11 +39,19 @@ export async function createTweetFromGeneratedCandidate(
     sourceBrief: item.sourceBrief ?? null,
     sourceEvidenceTexts: item.sourceEvidenceTexts ?? null,
     pipelineVersion: item.pipelineVersion ?? null,
+    generationSurface: item.generationSurface ?? 'original',
+    generationTriggerId: item.generationTriggerId ?? null,
+    generationIdempotencyKey: item.generationIdempotencyKey ?? null,
+    contentProvenance: 'generated_v2',
     generationRunId: item.generationRunId ?? null,
     storyClusterId: item.storyClusterId ?? null,
     ideaId: item.ideaId ?? null,
     draftCandidateId: item.draftCandidateId ?? null,
+    parentTweetId: item.parentTweetId ?? null,
+    parentIdeaId: item.parentIdeaId ?? null,
+    parentDraftCandidateId: item.parentDraftCandidateId ?? null,
     evidenceReferences: item.evidenceReferences ?? null,
+    generationEvidenceReferences: item.generationEvidenceReferences ?? null,
     generationMode: item.generationMode,
     candidateScore: item.candidateScore,
     confidenceScore: item.confidenceScore,
@@ -88,6 +99,8 @@ export async function createTweetFromGeneratedCandidate(
     mediaBrief: item.mediaBrief ?? null,
     portfolioRole: item.portfolioRole ?? null,
     relationshipTargetHandle: item.relationshipTargetHandle ?? null,
+    followupForTweetId: options.followupForTweetId ?? null,
+    replyConversationId: options.replyConversationId ?? null,
     trendFitScore: item.trendFitScore ?? null,
     xTweetId: null,
     quoteTweetId: null,

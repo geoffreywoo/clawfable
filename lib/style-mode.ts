@@ -45,7 +45,7 @@ export function metadataWithStyleMode(
   return {
     ...metadata,
     styleMode: tweetStyleMode(tweet),
-    pipelineVersion: tweet?.pipelineVersion || 'v1',
+    pipelineVersion: tweet?.pipelineVersion || null,
     generationRunId: tweet?.generationRunId || null,
     storyClusterId: tweet?.storyClusterId || null,
     ideaId: tweet?.ideaId || null,

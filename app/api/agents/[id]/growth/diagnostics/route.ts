@@ -3,7 +3,8 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import {
   getAutopilotLock,
   getCriticVerdicts,
-  getIdeaAtoms,
+  getGenerationRuns,
+  getIdeaCandidates,
   getMetricAvailability,
   getOutcomeEvents,
   getRelationshipProfiles,
@@ -17,11 +18,12 @@ export async function GET(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const [outcomes, metricAvailability, relationships, ideas, criticVerdicts, autopilotLock] = await Promise.all([
+    const [outcomes, metricAvailability, relationships, generationRuns, ideaCandidates, criticVerdicts, autopilotLock] = await Promise.all([
       getOutcomeEvents(id, 100),
       getMetricAvailability(id),
       getRelationshipProfiles(id, 100),
-      getIdeaAtoms(id, 60),
+      getGenerationRuns(id, 60),
+      getIdeaCandidates(id, 120),
       getCriticVerdicts(id, 100),
       getAutopilotLock(id),
     ]);
@@ -30,13 +32,15 @@ export async function GET(
       outcomes,
       metricAvailability,
       relationships,
-      ideas,
+      generationRuns,
+      ideaCandidates,
       criticVerdicts,
       autopilotLock,
       summary: {
         outcomeEvents: outcomes.length,
         relationshipProfiles: relationships.length,
-        ideaAtoms: ideas.length,
+        generationRuns: generationRuns.length,
+        ideaCandidates: ideaCandidates.length,
         reviewVerdicts: criticVerdicts.filter((item) => item.action === 'review').length,
         blockedVerdicts: criticVerdicts.filter((item) => item.action === 'block').length,
       },

@@ -10,10 +10,7 @@
     "test:watch": "vitest",
     "build": "next build",
     "start": "next start",
-    "audit:geoffrey": "tsx scripts/audit-geoffrey-generation.ts",
-    "eval:geoffrey:shadow": "tsx scripts/shadow-eval-geoffrey.ts",
-    "eval:geoffrey:remote-shadow": "tsx scripts/remote-shadow-eval-geoffrey.ts",
-    "eval:geoffrey:model-stacks": "tsx scripts/compare-geoffrey-model-stacks.ts",
+    "audit:generation": "tsx scripts/audit-generation.ts",
     "eval:generation:v2": "tsx scripts/eval-generation-v2.ts",
     "seeds:geoffrey": "tsx scripts/list-frontier-seeds.ts"
   },

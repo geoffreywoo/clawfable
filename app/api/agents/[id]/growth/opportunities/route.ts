@@ -18,6 +18,7 @@ import { enrichTrendingTopics } from '@/lib/source-planner';
 import { buildRelationshipOpportunities, buildTrendOpportunities } from '@/lib/growth-engine';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // GET /api/agents/[id]/growth/opportunities
 export async function GET(
@@ -26,7 +27,8 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
+    await assertAgentAutomationEntitlement(id, { agent, user });
     const [settings, learnings, mentions, postLog, performanceHistory] = await Promise.all([
       getProtocolSettings(id),
       getLearnings(id),
@@ -125,6 +127,9 @@ export async function GET(
       },
     });
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch growth opportunities' }, { status: 500 });
   }

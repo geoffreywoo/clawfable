@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccessibleAgentCount } from '@/lib/account-access';
-import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, getAgentOwnerId, getUser, updateProtocolSettings, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent, getQueuedTweets, quarantineAgentAutomation } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
@@ -9,10 +8,9 @@ import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { discoverAndFollow } from '@/lib/proactive-engagement';
 import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
-import { getBillingSummary } from '@/lib/billing';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
-import { isGeoffreyAccount } from '@/lib/account-taste';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
 export const maxDuration = 800;
@@ -41,61 +39,56 @@ export async function GET(request: NextRequest) {
       // Early exit: if agent isn't connected AND has no autopilot config, skip everything.
       // Saves KV commands on dormant or unconfigured agents.
       const settings = await getProtocolSettings(agent.id);
-      const ownerId = await getAgentOwnerId(agent.id);
-      const owner = ownerId
-        ? await getUser(ownerId)
-        : agent.xUserId
-          ? await getUser(String(agent.xUserId))
-          : null;
-      const billing = owner ? getBillingSummary(owner, await getAccessibleAgentCount(owner)) : null;
-      const automationAllowed = billing ? billing.canUseAutopilot : true;
-
-      if (!automationAllowed && (
-        settings.enabled
-        || settings.autoReply
-        || settings.proactiveReplies
-        || settings.proactiveLikes
-        || settings.autoFollow
-        || settings.agentShoutouts
-      )) {
-        await updateProtocolSettings(agent.id, {
-          enabled: false,
-          autoReply: false,
-          proactiveReplies: false,
-          proactiveLikes: false,
-          autoFollow: false,
-          agentShoutouts: false,
-        });
-        await addPostLogEntry(agent.id, {
-          agentId: agent.id,
-          tweetId: '',
-          xTweetId: '',
-          content: '',
-          format: 'billing_lock',
-          topic: 'billing',
-          postedAt: new Date().toISOString(),
-          source: 'cron',
-          action: 'skipped',
-          reason: `Automation disabled on ${billing?.label || 'free'} plan.`,
-        });
-        await setAutopilotHealth({
-          agentId: agent.id,
-          status: 'blocked',
-          checkedAt: new Date().toISOString(),
-          reason: `Automation disabled on ${billing?.label || 'free'} plan.`,
-          details: ['Upgrade or change billing before autopilot can run again.'],
-          lastPostedAt: settings.lastPostedAt,
-          expectedPostBy: null,
-          minutesOverdue: 0,
-          cadenceHours: 0,
-          queueDepth: 0,
-          postableQueueDepth: 0,
-          staleLowConfidenceDepth: 0,
-          maxConfidence: null,
-          externalBlocker: 'billing',
-          selfHealAttemptedAt: null,
-          selfHealAction: null,
-        });
+      const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
+      if (!entitlement.eligible) {
+        const queued = await getQueuedTweets(agent.id);
+        const hadAutomationState = (
+          settings.enabled
+          || settings.autoReply
+          || settings.proactiveReplies
+          || settings.proactiveLikes
+          || settings.autoFollow
+          || settings.agentShoutouts
+          || settings.earlyVelocityFollowups
+          || settings.supervisedTrendDesk
+          || settings.relationshipQueueEnabled
+          || settings.portfolioOptimizerEnabled
+          || settings.marketingEnabled
+          || queued.length > 0
+        );
+        if (hadAutomationState) {
+          await quarantineAgentAutomation(agent.id, entitlement.reason);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'billing_lock',
+            topic: 'billing',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'skipped',
+            reason: entitlement.reason,
+          });
+          await setAutopilotHealth({
+            agentId: agent.id,
+            status: 'blocked',
+            checkedAt: new Date().toISOString(),
+            reason: entitlement.reason,
+            details: ['A non-zero paid Stripe invoice is required before automation can be enabled.'],
+            lastPostedAt: settings.lastPostedAt,
+            expectedPostBy: null,
+            minutesOverdue: 0,
+            cadenceHours: 0,
+            queueDepth: 0,
+            postableQueueDepth: 0,
+            staleLowConfidenceDepth: 0,
+            maxConfidence: null,
+            externalBlocker: 'billing',
+            selfHealAttemptedAt: null,
+            selfHealAction: null,
+          });
+        }
         continue;
       }
 
@@ -170,7 +163,7 @@ export async function GET(request: NextRequest) {
             ? Date.now() - new Date(existingLearnings.updatedAt).getTime()
             : Infinity;
           const oneDayMs = 24 * 60 * 60 * 1000;
-          const needsVoiceCorpusMigration = isGeoffreyAccount(agent.handle) && (
+          const needsVoiceCorpusMigration = (
             !existingLearnings?.voiceCorpus
             || existingLearnings.voiceCorpus.version !== VOICE_CORPUS_SCHEMA_VERSION
           );

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet, deleteTweet } from '@/lib/kv-storage';
+import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet } from '@/lib/kv-storage';
 import type { VoiceDirective, VoiceDirectiveRule } from '@/lib/types';
 import { generateText } from '@/lib/ai';
 import { getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
@@ -12,6 +12,7 @@ import {
   getDirectiveAuditMaxTokens,
   getVoiceChatResponseMaxTokens,
 } from '@/lib/voice-chat-prompt';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 
 // GET /api/agents/[id]/voice-chat — get chat history + active directives
 export async function GET(
@@ -44,7 +45,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
     const body = await request.json();
     const { message } = body;
     if (!message || typeof message !== 'string') {
@@ -128,16 +129,16 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
     await addVoiceChatMessage(id, agentMsg);
 
     // If a new directive was locked in, audit the queue for stale tweets that violate it
-    let queueAudit: { purged: number; rewritten: number } = { purged: 0, rewritten: 0 };
-    if (extractedDirective) {
+    let queueAudit: { quarantined: number } = { quarantined: 0 };
+    if (extractedDirective && (await getAgentAutomationEntitlement(id, { agent, user })).eligible) {
       try {
         queueAudit = await auditQueueAgainstDirective(id, agent, extractedDirective);
       } catch { /* non-critical */ }
     }
 
     return NextResponse.json({
-      reply: agentReply + (queueAudit.purged > 0 || queueAudit.rewritten > 0
-        ? `\n\n(Audited queue: ${queueAudit.rewritten} tweets rewritten, ${queueAudit.purged} removed)`
+      reply: agentReply + (queueAudit.quarantined > 0
+        ? `\n\n(Audited queue: ${queueAudit.quarantined} conflicting drafts quarantined for review)`
         : ''),
       directive: extractedDirective,
       directiveRule: savedRule,
@@ -153,17 +154,16 @@ If the operator is just chatting (not giving voice feedback), respond naturally 
 }
 
 /**
- * Audit all queued tweets against a new directive.
- * Tweets that violate the directive get rewritten in-place.
- * Tweets that can't be salvaged get purged.
+ * Audit queued tweets against a new directive without mutating generated copy.
+ * Conflicts are quarantined so any replacement must go through a new V2 run.
  */
 async function auditQueueAgainstDirective(
   agentId: string,
   agent: { name: string; handle: string; soulMd: string },
   directive: string,
-): Promise<{ purged: number; rewritten: number }> {
+): Promise<{ quarantined: number }> {
   const queue = await getQueuedTweets(agentId);
-  if (queue.length === 0) return { purged: 0, rewritten: 0 };
+  if (queue.length === 0) return { quarantined: 0 };
 
   const tweetList = formatDirectiveAuditTweetList(queue);
 
@@ -173,10 +173,9 @@ async function auditQueueAgainstDirective(
     maxTokens: getDirectiveAuditMaxTokens(queue.length),
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:
 - PASS: tweet already complies with the directive
-- REWRITE: tweet violates the directive but can be fixed. Output the rewritten version.
-- PURGE: tweet fundamentally conflicts and should be removed
+- QUARANTINE: tweet conflicts with the directive and requires a newly qualified draft
 
-Output one JSON line per tweet: {"idx": N, "action": "pass|rewrite|purge", "rewritten": "new text if rewrite"}
+Output one JSON line per tweet: {"idx": N, "action": "pass|quarantine"}
 Only output JSON lines, no other text.
 
 Voice: @${agent.handle} (${agent.name})`,
@@ -185,13 +184,13 @@ Voice: @${agent.handle} (${agent.name})`,
 QUEUED TWEETS TO AUDIT:
 ${tweetList}
 
-Audit each tweet against the directive. Be strict — if it violates the spirit of the directive, rewrite or purge it.`,
+Audit each tweet against the directive. Be strict: quarantine anything that violates its spirit.`,
   });
 
   const text = response.text;
 
-  let purged = 0;
-  let rewritten = 0;
+  let quarantined = 0;
+  const quarantinedAt = new Date().toISOString();
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -202,21 +201,18 @@ Audit each tweet against the directive. Be strict — if it violates the spirit 
       if (typeof idx !== 'number' || idx < 0 || idx >= queue.length) continue;
       const tweet = queue[idx];
 
-      if (parsed.action === 'rewrite' && parsed.rewritten) {
-        const cleanRewritten = parsed.rewritten
-          .replace(/^["']|["']$/g, '')
-          .replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '')
-          .trim();
-        if (cleanRewritten.length > 10) {
-          await updateTweet(tweet.id, { content: cleanRewritten });
-          rewritten++;
-        }
-      } else if (parsed.action === 'purge') {
-        await deleteTweet(tweet.id);
-        purged++;
+      if (parsed.action === 'quarantine') {
+        await updateTweet(tweet.id, {
+          status: 'quarantined',
+          scheduledAt: null,
+          quarantinedAt,
+          quarantineReason: `Conflicts with voice directive: ${directive}`,
+          preQuarantineStatus: tweet.status === 'quarantined' ? null : tweet.status,
+        });
+        quarantined++;
       }
     } catch { /* skip malformed */ }
   }
 
-  return { purged, rewritten };
+  return { quarantined };
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addLearningSignal, addPostLogEntry, acquireAutopilotLock, getTweet, invalidateAgentConnection, releaseAutopilotLock, updateTweet } from '@/lib/kv-storage';
+import { addLearningSignal, addPostLogEntry, acquireAutopilotLock, createTweet, getTweet, invalidateAgentConnection, releaseAutopilotLock, updateTweet } from '@/lib/kv-storage';
 import { postTweet, replyToTweet, decodeKeys, getSanitizedTweetTextIssue } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getTweetCompletenessIssue, getTweetLengthIssue } from '@/lib/survivability';
@@ -9,7 +9,8 @@ import { metadataWithStyleMode } from '@/lib/style-mode';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { findPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
-import { getGeoffreyGeneratedPublishIssue } from '@/lib/generation-origin';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -23,17 +24,19 @@ export async function POST(
   let currentAgent: Awaited<ReturnType<typeof requireAgentAccess>>['agent'] | null = null;
   let lockOwner: string | null = null;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
     currentAgent = agent;
+    await assertAgentAutomationEntitlement(id, { agent, user });
 
     if (!agent.isConnected || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) {
       return NextResponse.json({ error: 'Twitter API not configured for this agent' }, { status: 503 });
     }
 
     const body = await request.json();
-    const { content, replyToId, tweetId } = body;
+    const { replyToId, tweetId } = body;
+    let content = String(body?.content || '');
     dbTweetId = tweetId ? String(tweetId) : null;
-    if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
+    if (!content.trim()) return NextResponse.json({ error: 'Content required' }, { status: 400 });
     existingTweet = dbTweetId ? await getTweet(String(dbTweetId)) : null;
     if (dbTweetId && (!existingTweet || String(existingTweet.agentId) !== String(id))) {
       return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
@@ -46,6 +49,13 @@ export async function POST(
         tweetId: existingTweet.xTweetId,
       });
     }
+    if (existingTweet && content.trim() !== existingTweet.content.trim()) {
+      return NextResponse.json({
+        error: 'The supplied content does not match the persisted draft. Save the edit first so V2 can create immutable child lineage.',
+        code: 'immutable_draft_mismatch',
+      }, { status: 409 });
+    }
+    if (existingTweet) content = existingTweet.content;
     const inferredReplyToId = existingTweet?.type === 'reply'
       ? (existingTweet.followupForTweetId || existingTweet.quoteTweetId || null)
       : null;
@@ -55,9 +65,9 @@ export async function POST(
       || null;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
     const generationOriginIssue = existingTweet
-      ? getGeoffreyGeneratedPublishIssue(agent.handle, existingTweet)
+      ? getGeneratedPublishIssue(existingTweet)
       : null;
-    if (!isReply && generationOriginIssue) {
+    if (generationOriginIssue) {
       return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
     }
     if (isReply && !replyConversationId) {
@@ -88,9 +98,9 @@ export async function POST(
         const resolved = await resolveQueuedTweetFailure(agent, existingTweet, sanitizedIssue);
         return NextResponse.json({
           error: sanitizedIssue,
-          autoFixed: resolved.action === 'repaired',
+          autoFixed: false,
           queueResolved: true,
-          repairedContent: resolved.tweet?.content ?? null,
+          repairedContent: null,
           queueAction: resolved.action,
         }, { status: 422 });
       }
@@ -103,9 +113,9 @@ export async function POST(
         const resolved = await resolveQueuedTweetFailure(agent, existingTweet, lengthIssue);
         return NextResponse.json({
           error: lengthIssue,
-          autoFixed: resolved.action === 'repaired',
+          autoFixed: false,
           queueResolved: true,
-          repairedContent: resolved.tweet?.content ?? null,
+          repairedContent: null,
           queueAction: resolved.action,
         }, { status: 422 });
       }
@@ -118,9 +128,9 @@ export async function POST(
         const resolved = await resolveQueuedTweetFailure(agent, existingTweet, completenessIssue);
         return NextResponse.json({
           error: completenessIssue,
-          autoFixed: resolved.action === 'repaired',
+          autoFixed: false,
           queueResolved: true,
-          repairedContent: resolved.tweet?.content ?? null,
+          repairedContent: null,
           queueAction: resolved.action,
         }, { status: 422 });
       }
@@ -135,7 +145,7 @@ export async function POST(
       voiceScore: existingTweet?.voiceScore,
       highValueScore: existingTweet?.replyBaitScore,
     });
-    if (taste.action === 'block') {
+    if (existingTweet?.pipelineVersion !== 'v2' && taste.action === 'block') {
       return NextResponse.json({
         error: `Taste gate blocked posting: ${taste.reasons.join(', ') || 'quality risk'}`,
         tasteRisk: {
@@ -155,8 +165,26 @@ export async function POST(
     }
     lockOwner = lock.owner;
 
+    if (!dbTweetId) {
+      const operatorDraft = await createTweet({
+        agentId: id,
+        content: String(content),
+        type: isReply ? 'reply' : 'original',
+        status: 'draft',
+        topic: isReply ? 'reply' : 'manual',
+        contentProvenance: 'operator_written',
+        followupForTweetId: isReply ? effectiveReplyToId : null,
+        replyConversationId: isReply ? replyConversationId : null,
+        quoteTweetId: isReply ? effectiveReplyToId : null,
+        quoteTweetAuthor: null,
+        xTweetId: null,
+        scheduledAt: null,
+      });
+      dbTweetId = operatorDraft.id;
+      existingTweet = operatorDraft;
+    }
+
     if (dbTweetId) {
-      existingTweet = await getTweet(String(dbTweetId));
       if (!existingTweet || String(existingTweet.agentId) !== String(id)) {
         return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
       }
@@ -269,9 +297,13 @@ export async function POST(
       success: true,
       tweetUrl: result.tweetUrl,
       tweetId: result.tweetId,
+      localTweetId: dbTweetId,
       persistenceWarning: persistenceFailures.length ? persistenceFailures.join('; ') : undefined,
     });
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = formatActionError(err, isReply ? 'manual_reply' : 'manual_post', {
       draftId: dbTweetId || undefined,
@@ -327,12 +359,12 @@ export async function POST(
     if (dbTweetId && existingTweet?.status === 'queued' && currentAgent) {
       const resolved = await resolveQueuedTweetFailure(currentAgent, existingTweet, message).catch(() => null);
       queueAction = resolved?.action ?? null;
-      repairedContent = resolved?.tweet?.content ?? null;
+      repairedContent = null;
     }
     return NextResponse.json({
       error: message,
       queueResolved: Boolean(queueAction),
-      autoFixed: queueAction === 'repaired',
+      autoFixed: false,
       repairedContent,
       queueAction,
     }, { status: 500 });

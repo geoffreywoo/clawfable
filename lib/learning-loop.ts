@@ -1,6 +1,5 @@
 import type {
   AgentLearnings,
-  FallbackShapeOutcomeCounter,
   FeedbackEntry,
   LearningSignal,
   Mention,
@@ -61,72 +60,29 @@ function readPreferenceHints(metadata: LearningSignal['metadata']): string[] {
   return unique(hints);
 }
 
-function isFallbackRationale(value: string | null | undefined): boolean {
-  const rationale = String(value || '').toLowerCase();
-  return rationale.includes('template fallback')
-    || rationale.includes('emergency fallback')
-    || rationale.includes('emergency deterministic');
-}
-
-export function buildFallbackLearningMetadata(
+export function buildGenerationLearningMetadata(
   tweet: Pick<
     Tweet,
-    | 'rationale'
-    | 'sourceLane'
-    | 'scoreProvenance'
-    | 'draftExperimentId'
-    | 'featureTags'
-    | 'thesis'
-    | 'topic'
     | 'pipelineVersion'
     | 'generationRunId'
+    | 'generationSurface'
+    | 'generationTriggerId'
     | 'storyClusterId'
     | 'ideaId'
     | 'draftCandidateId'
+    | 'evidenceReferences'
   >,
 ): Record<string, string | number | boolean | null> {
-  const lineage = {
+  return {
     pipelineVersion: tweet.pipelineVersion || null,
     generationRunId: tweet.generationRunId || null,
+    generationSurface: tweet.generationSurface || null,
+    generationTriggerId: tweet.generationTriggerId || null,
     storyClusterId: tweet.storyClusterId || null,
     ideaId: tweet.ideaId || null,
     draftCandidateId: tweet.draftCandidateId || null,
-  };
-  const draftExperimentId = String(tweet.draftExperimentId || '');
-  const fallbackKind = isFallbackRationale(tweet.rationale)
-    ? String(tweet.rationale || '').toLowerCase().includes('emergency')
-      ? 'emergency_queue_fallback'
-      : 'provider_template_fallback'
-    : tweet.sourceLane === 'core_explore_fallback' || draftExperimentId.includes('-fallback-')
-      ? 'provider_template_fallback'
-      : null;
-
-  if (!fallbackKind) return lineage;
-
-  const memoryAlignment = readScore(tweet.scoreProvenance?.memoryAlignment);
-  const authorityProof = readScore(tweet.scoreProvenance?.authorityProof);
-  const conversationQuality = readScore(tweet.scoreProvenance?.conversationQuality);
-  const operatorAnchor = readScore(tweet.scoreProvenance?.operatorAnchor);
-  const anchorCopyRisk = readScoreMagnitude(tweet.scoreProvenance?.anchorCopyRisk);
-
-  return {
-    ...lineage,
-    generationFallback: true,
-    fallbackKind,
-    fallbackMemoryAligned: Boolean(memoryAlignment && memoryAlignment > 0),
-    fallbackMemoryAlignment: memoryAlignment,
-    fallbackOperatorAnchor: Boolean(operatorAnchor && operatorAnchor > 0),
-    fallbackOperatorAnchorScore: operatorAnchor,
-    fallbackAnchorCopyRisk: anchorCopyRisk,
-    fallbackAuthorityProof: authorityProof,
-    fallbackConversationQuality: conversationQuality,
-    fallbackSourceLane: tweet.sourceLane || null,
-    fallbackTopic: tweet.topic || null,
-    fallbackHook: tweet.featureTags?.hook || null,
-    fallbackTone: tweet.featureTags?.tone || null,
-    fallbackSpecificity: tweet.featureTags?.specificity || null,
-    fallbackStructure: tweet.featureTags?.structure || null,
-    fallbackThesis: tweet.featureTags?.thesis || tweet.thesis || null,
+    evidenceCount: tweet.evidenceReferences?.length || 0,
+    evidenceSourceIds: tweet.evidenceReferences?.map((reference) => reference.sourceDocumentId).join(',') || null,
   };
 }
 
@@ -205,162 +161,6 @@ function summarizeNativeTasteComplaints(signals: LearningSignal[], feedback: Fee
   return sortCounts(counts).slice(0, 7);
 }
 
-function summarizeFallbackOutcomePreferences(signals: LearningSignal[]): string[] {
-  const counts: Record<string, number> = {};
-
-  for (const signal of signals) {
-    if (signal.metadata?.generationFallback !== true) continue;
-    const memoryAligned = signal.metadata.fallbackMemoryAligned === true;
-    const operatorAnchored = signal.metadata.fallbackOperatorAnchor === true;
-    const kind = typeof signal.metadata.fallbackKind === 'string'
-      ? signal.metadata.fallbackKind.replace(/_/g, ' ')
-      : 'fallback draft';
-    const kindLabel = operatorAnchored ? `operator-anchor ${kind}` : kind;
-    const thesis = typeof signal.metadata.fallbackThesis === 'string' ? signal.metadata.fallbackThesis.trim() : '';
-    const thesisLabel = thesis ? ` Thesis: ${thesis.slice(0, 90)}.` : '';
-    const topic = typeof signal.metadata.fallbackTopic === 'string' ? signal.metadata.fallbackTopic.trim() : '';
-    const topicLabel = topic ? ` Topic: ${topic.slice(0, 48)}.` : '';
-    const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
-    const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
-    const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
-    const shape = [hook, structure, specificity].filter(Boolean).join('/');
-    const shapeLabel = shape ? ` Shape: ${shape}.` : '';
-    const copyRisk = typeof signal.metadata.fallbackAnchorCopyRisk === 'number' ? signal.metadata.fallbackAnchorCopyRisk : 0;
-    const copyRiskLabel = operatorAnchored && copyRisk > 0.05
-      ? ` Anchor copy risk was ${Math.round(copyRisk * 100)}%, so keep varying the literal wording.`
-      : '';
-
-    if (signal.signalType === 'approved_without_edit' || signal.signalType === 'x_post_succeeded') {
-      const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts can survive approval/posting; keep borrowing the human-written hook, tone, and structure without copying anchor text.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
-        : memoryAligned
-        ? `Fallback lesson: memory-aligned ${kind} drafts can survive approval/posting; keep using learned specificity and structure when providers degrade.${shapeLabel}${topicLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts survived approval/posting; preserve the fallback shape but keep watching for generic phrasing.${shapeLabel}${topicLabel}${thesisLabel}`;
-      counts[line] = (counts[line] || 0) + 1;
-    }
-
-    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
-      const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts still needed operator edits; keep the anchor-derived shape but relearn the claim, proof, or cadence from the rewrite.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts still needed operator edits; treat fallback prose as a starting point, not a voice match.${shapeLabel}${topicLabel}${thesisLabel}`;
-      counts[line] = (counts[line] || 0) + 1;
-    }
-
-    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
-      const line = operatorAnchored
-        ? `Fallback lesson: ${kindLabel} drafts were rejected; do not trust anchor shape alone unless the next draft adds fresher proof, a narrower claim, and safer wording.${copyRiskLabel}${shapeLabel}${topicLabel}${thesisLabel}`
-        : `Fallback lesson: ${kind} drafts were rejected; cool down this deterministic fallback shape unless it has fresher proof or a narrower claim.${shapeLabel}${topicLabel}${thesisLabel}`;
-      counts[line] = (counts[line] || 0) + 1;
-    }
-  }
-
-  return sortCounts(counts).slice(0, 3);
-}
-
-function summarizeFallbackShapeOutcomes(signals: LearningSignal[]): FallbackShapeOutcomeCounter[] {
-  type WeightedFallbackShapeOutcomeCounter = FallbackShapeOutcomeCounter & {
-    weightedRaw: number;
-    weightedTotal: number;
-  };
-
-  const fallbackSignals = signals.filter((signal) =>
-    signal.metadata?.generationFallback === true && signal.metadata.fallbackOperatorAnchor === true
-  );
-  const referenceTime = Math.max(
-    0,
-    ...fallbackSignals.map((signal) => new Date(signal.createdAt).getTime()).filter(Number.isFinite),
-  );
-  const counters = new Map<string, WeightedFallbackShapeOutcomeCounter>();
-
-  for (const signal of fallbackSignals) {
-    const fallbackKind = typeof signal.metadata.fallbackKind === 'string' ? signal.metadata.fallbackKind.trim() : '';
-    const topic = typeof signal.metadata.fallbackTopic === 'string' ? signal.metadata.fallbackTopic.trim() : '';
-    const hook = typeof signal.metadata.fallbackHook === 'string' ? signal.metadata.fallbackHook.trim() : '';
-    const structure = typeof signal.metadata.fallbackStructure === 'string' ? signal.metadata.fallbackStructure.trim() : '';
-    const specificity = typeof signal.metadata.fallbackSpecificity === 'string' ? signal.metadata.fallbackSpecificity.trim() : '';
-    if (!fallbackKind || !hook || !structure || !specificity) continue;
-
-    const shape = [hook, structure, specificity].join('/');
-    const key = `${fallbackKind}:${topic.toLowerCase()}:${shape}`;
-    const current = counters.get(key) || {
-      fallbackKind,
-      topic: topic || undefined,
-      shape,
-      hook,
-      structure,
-      specificity,
-      approved: 0,
-      posted: 0,
-      edited: 0,
-      rejected: 0,
-      total: 0,
-      netScore: 0,
-      updatedAt: signal.createdAt,
-      weightedRaw: 0,
-      weightedTotal: 0,
-    };
-
-    let rawSignalScore = 0;
-    let latestOutcome: FallbackShapeOutcomeCounter['latestOutcome'] | null = null;
-    if (signal.signalType === 'approved_without_edit') {
-      current.approved += 1;
-      rawSignalScore = 0.7;
-      latestOutcome = 'approved';
-    }
-    if (signal.signalType === 'x_post_succeeded') {
-      current.posted += 1;
-      rawSignalScore = 1;
-      latestOutcome = 'posted';
-    }
-    if (signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
-      current.edited += 1;
-      rawSignalScore = -0.45;
-      latestOutcome = 'edited';
-    }
-    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x' || signal.signalType === 'x_post_rejected') {
-      current.rejected += 1;
-      rawSignalScore = -1.2;
-      latestOutcome = 'rejected';
-    }
-
-    current.total = current.approved + current.posted + current.edited + current.rejected;
-    if (rawSignalScore !== 0 && referenceTime > 0) {
-      const observedAt = new Date(signal.createdAt).getTime();
-      const ageDays = Number.isFinite(observedAt) ? Math.max(0, (referenceTime - observedAt) / (24 * 60 * 60 * 1000)) : 0;
-      const recencyWeight = ageDays <= 14
-        ? 1
-        : ageDays >= 90
-          ? 0.35
-          : 1 - ((ageDays - 14) / 76 * 0.65);
-      current.weightedRaw += rawSignalScore * recencyWeight;
-      current.weightedTotal += recencyWeight;
-    }
-    const signalTime = new Date(signal.createdAt).getTime();
-    if (Number.isFinite(signalTime) && signalTime >= new Date(current.updatedAt).getTime()) {
-      current.updatedAt = signal.createdAt;
-      if (latestOutcome) {
-        current.latestOutcome = latestOutcome;
-        current.latestOutcomeAt = signal.createdAt;
-      }
-    }
-    counters.set(key, current);
-  }
-
-  return [...counters.values()]
-    .filter((counter) => counter.total > 0)
-    .map((counter) => {
-      const confidence = Math.min(1, counter.weightedTotal / 4);
-      const netScore = Math.max(-1, Math.min(1, (counter.weightedRaw / Math.max(counter.weightedTotal, 1)) * confidence));
-      const { weightedRaw: _weightedRaw, weightedTotal: _weightedTotal, ...publicCounter } = counter;
-      return {
-        ...publicCounter,
-        netScore: Number(netScore.toFixed(3)),
-      };
-    })
-    .sort((a, b) => Math.abs(b.netScore) - Math.abs(a.netScore) || b.total - a.total || a.shape.localeCompare(b.shape))
-    .slice(0, 8);
-}
-
 function summarizeEditTransformations(signals: LearningSignal[]): string[] {
   const counts: Record<string, number> = {};
 
@@ -435,12 +235,6 @@ function summarizeWeeklyChanges(
 function readScore(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value > 1 ? Math.max(0, Math.min(1, value / 100)) : Math.max(0, Math.min(1, value));
-}
-
-function readScoreMagnitude(value: number | null | undefined): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  const normalized = Math.abs(value > 1 ? value / 100 : value);
-  return Math.max(0, Math.min(1, normalized));
 }
 
 function readTweetPromise(tweet: Tweet): number | null {
@@ -613,11 +407,9 @@ export function buildPersonalizationMemory({
     .map((arm) => `${arm.arm} needs more data`);
 
   const operatorHiddenPreferences = unique([
-    ...summarizeFallbackOutcomePreferences(signals),
     ...summarizeOperatorPreferences(signals, remixPatterns),
     ...summarizeNativeTasteComplaints(signals, feedback),
   ]).slice(0, 7);
-  const fallbackShapeOutcomes = summarizeFallbackShapeOutcomes(signals);
   const editTransformations = summarizeEditTransformations(signals);
   const referenceBank = summarizeReferenceBank(performanceHistory);
   const conversationInsights = summarizeConversationInsights(performanceHistory);
@@ -645,7 +437,6 @@ export function buildPersonalizationMemory({
     topicsWithMomentum,
     formatsUnderTested,
     operatorHiddenPreferences,
-    fallbackShapeOutcomes,
     editTransformations,
     referenceBank,
     conversationInsights,

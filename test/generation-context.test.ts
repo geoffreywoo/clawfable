@@ -10,86 +10,12 @@ import {
   saveLearnings,
   saveStyleSignals,
   saveAnalysis,
-  markIdeaAtomRejectedForTweet,
 } from '@/lib/kv-storage';
-import { buildGenerationContext, curateIdeaBankForGeneration } from '@/lib/generation-context';
-import type { IdeaAtom } from '@/lib/types';
+import { buildGenerationContext } from '@/lib/generation-context';
 
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class AnthropicMock {},
 }));
-
-function ideaAtom(overrides: Partial<IdeaAtom> & { claim: string }): IdeaAtom {
-  return {
-    id: overrides.id || `atom-${overrides.claim.slice(0, 8)}`,
-    agentId: overrides.agentId || 'agent-1',
-    claim: overrides.claim,
-    tension: overrides.tension ?? null,
-    audience: overrides.audience ?? 'ai_builders',
-    proof: overrides.proof ?? null,
-    example: overrides.example ?? overrides.claim,
-    riskNote: overrides.riskNote ?? null,
-    topic: overrides.topic ?? 'AI agents',
-    sourceTweetId: overrides.sourceTweetId ?? null,
-    lastUsedAt: overrides.lastUsedAt ?? '2026-04-15T00:00:00.000Z',
-    performance: overrides.performance || {
-      generated: 1,
-      queued: 0,
-      posted: 0,
-      rejected: 0,
-      avgReward: 0,
-    },
-    createdAt: overrides.createdAt || '2026-04-01T00:00:00.000Z',
-    updatedAt: overrides.updatedAt || '2026-04-15T00:00:00.000Z',
-  };
-}
-
-describe('idea bank curation', () => {
-  it('promotes proven thesis atoms while withholding rejected and saturated atoms from references', () => {
-    const bank = curateIdeaBankForGeneration([
-      ideaAtom({
-        claim: 'agent memory eval loops compound faster than dashboards',
-        performance: {
-          generated: 6,
-          queued: 5,
-          posted: 4,
-          rejected: 0,
-          avgReward: 0.62,
-        },
-      }),
-      ideaAtom({
-        claim: 'ai agents replace every employee',
-        riskNote: 'Rejected: Overclaimed and not tasteful',
-        performance: {
-          generated: 5,
-          queued: 1,
-          posted: 0,
-          rejected: 4,
-          avgReward: -0.56,
-        },
-      }),
-      ideaAtom({
-        claim: 'agent teams need eval loops before adding tools',
-        lastUsedAt: '2026-04-17T00:00:00.000Z',
-        performance: {
-          generated: 12,
-          queued: 8,
-          posted: 7,
-          rejected: 0,
-          avgReward: 0.66,
-        },
-      }),
-    ], {
-      now: new Date('2026-04-18T00:00:00.000Z').getTime(),
-    });
-
-    expect(bank.reusable.map((entry) => entry.atom.claim)).toContain('agent memory eval loops compound faster than dashboards');
-    expect(bank.referenceClaims).toContain('agent memory eval loops compound faster than dashboards');
-    expect(bank.referenceClaims).not.toContain('ai agents replace every employee');
-    expect(bank.caution.find((entry) => entry.atom.claim === 'ai agents replace every employee')?.label).toBe('rework_or_avoid');
-    expect(bank.caution.find((entry) => entry.atom.claim === 'agent teams need eval loops before adding tools')?.label).toBe('cooldown');
-  });
-});
 
 describe('generation context', () => {
   it('builds the live policy from unique posts and includes operator timeline evidence', async () => {
@@ -379,14 +305,14 @@ describe('generation context', () => {
     expect(context.voiceProfile.communicationStyle).toContain('AI distribution is moving from model quality to workflow leverage');
   });
 
-  it('injects a quality-aware thesis bank into generation context', async () => {
+  it('does not inject legacy IdeaAtom thesis mappings into V2 generation context', async () => {
     const agent = await createAgent({
       handle: 'context-agent-ideas',
       name: 'Context Agent Ideas',
       soulMd: '# SOUL\n\nSpecific AI operator lessons.',
     } as any);
 
-    const proven = await createTweet({
+    await createTweet({
       agentId: agent.id,
       content: 'Agent memory eval loops compound faster than dashboards when every correction trains the next release.',
       type: 'original',
@@ -412,7 +338,7 @@ describe('generation context', () => {
       scheduledAt: null,
       thesis: 'agent memory eval loops compound faster than dashboards',
     });
-    const rejected = await createTweet({
+    await createTweet({
       agentId: agent.id,
       content: 'AI agents replace every employee once companies wire them into Slack.',
       type: 'original',
@@ -425,7 +351,6 @@ describe('generation context', () => {
       scheduledAt: null,
       thesis: 'ai agents replace every employee',
     });
-    await markIdeaAtomRejectedForTweet(rejected, 'Overclaimed and not tasteful');
 
     await saveLearnings(agent.id, {
       agentId: agent.id,
@@ -473,11 +398,8 @@ describe('generation context', () => {
 
     const context = await buildGenerationContext(agent);
 
-    expect(context.voiceProfile.communicationStyle).toContain('## IDEA GRAPH / THESIS BANK');
-    expect(context.voiceProfile.communicationStyle).toContain('[proven');
-    expect(context.voiceProfile.communicationStyle).toContain(proven.thesis);
-    expect(context.voiceProfile.communicationStyle).toContain('Rework or avoid:');
-    expect(context.memory.referenceBank).toContain(proven.thesis);
+    expect(context.voiceProfile.communicationStyle).not.toContain('## IDEA GRAPH / THESIS BANK');
+    expect(context.memory.referenceBank).not.toContain('agent memory eval loops compound faster than dashboards');
     expect(context.memory.referenceBank).not.toContain('ai agents replace every employee');
   });
 

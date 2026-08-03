@@ -1,6 +1,5 @@
-import type { BillingEntitlements, BillingPlan, BillingStatus, BillingSummary, User } from './types';
+import type { AutomationEntitlement, BillingEntitlements, BillingPlan, BillingStatus, BillingSummary, User } from './types';
 import { isStripeCheckoutConfigured, isStripeConfigured } from './stripe';
-import { getInternalSharedUsernames, normalizeUsername } from './internal-accounts';
 
 const PLAN_LABELS: Record<BillingPlan, string> = {
   free: 'Free',
@@ -59,15 +58,65 @@ export function normalizeBillingStatus(value: unknown): BillingStatus {
 }
 
 export function isPaidStatus(status: BillingStatus): boolean {
-  return status === 'active' || status === 'trialing';
+  return status === 'active';
 }
 
-function getGrandfatheredUsernames(): Set<string> {
-  return getInternalSharedUsernames();
+export function isGrandfatheredUser(_user: Pick<User, 'username'>): boolean {
+  return false;
 }
 
-export function isGrandfatheredUser(user: Pick<User, 'username'>): boolean {
-  return getGrandfatheredUsernames().has(normalizeUsername(user.username));
+export function getPaidAutomationEntitlementForUser(
+  user: User | null,
+  now = new Date(),
+): AutomationEntitlement {
+  const base = {
+    source: 'none' as const,
+    verifiedAt: user?.billingVerifiedAt ?? null,
+    paidThrough: user?.paidThrough ?? null,
+    paidInvoiceId: user?.lastPaidInvoiceId ?? null,
+    paidInvoiceSubscriptionId: user?.lastPaidInvoiceSubscriptionId ?? null,
+    paidAmountCents: user?.lastPaidAmountCents ?? null,
+    paidCurrency: user?.lastPaidCurrency ?? null,
+  };
+  if (!user) return { ...base, eligible: false, reason: 'Agent owner is missing.' };
+  if (user.billingStatus !== 'active') {
+    return { ...base, eligible: false, reason: user.billingStatus === 'trialing' ? 'Trials do not include automated publishing.' : 'An active paid subscription is required.' };
+  }
+  if (user.plan !== 'pro' && user.plan !== 'scale') {
+    return { ...base, eligible: false, reason: 'The active Stripe subscription is not tied to a paid Clawfable plan.' };
+  }
+  if (!user.stripeCustomerId || !user.stripeSubscriptionId) {
+    return { ...base, eligible: false, reason: 'Stripe subscription verification is missing.' };
+  }
+  if (!user.billingVerifiedAt || !user.lastPaidInvoiceId || !user.lastPaidInvoiceAt) {
+    return { ...base, eligible: false, reason: 'A paid Stripe invoice has not been verified.' };
+  }
+  if (!user.lastPaidAmountCents || user.lastPaidAmountCents <= 0) {
+    return { ...base, eligible: false, reason: 'The latest Stripe invoice did not collect payment.' };
+  }
+  if (user.lastRefundedInvoiceId && user.lastRefundedInvoiceId === user.lastPaidInvoiceId) {
+    return { ...base, eligible: false, reason: 'The current Stripe invoice was fully refunded.' };
+  }
+  const paidThrough = user.paidThrough ? Date.parse(user.paidThrough) : Number.NaN;
+  if (!Number.isFinite(paidThrough) || paidThrough <= now.getTime()) {
+    return { ...base, eligible: false, reason: 'The paid subscription period has ended.' };
+  }
+  if (user.lastPaidInvoiceSubscriptionId !== user.stripeSubscriptionId) {
+    return { ...base, eligible: false, reason: 'The paid invoice does not match the active Stripe subscription.' };
+  }
+  const currentPeriodEnd = user.currentPeriodEnd ? Date.parse(user.currentPeriodEnd) : Number.NaN;
+  if (!Number.isFinite(currentPeriodEnd) || currentPeriodEnd <= now.getTime()) {
+    return { ...base, eligible: false, reason: 'The active Stripe billing period is missing or expired.' };
+  }
+  if (paidThrough + 60_000 < currentPeriodEnd) {
+    return { ...base, eligible: false, reason: 'The paid invoice does not cover the current Stripe billing period.' };
+  }
+  return {
+    ...base,
+    source: 'stripe_paid',
+    eligible: true,
+    reason: 'Stripe payment is verified for the current subscription period.',
+  };
 }
 
 function getEffectiveBillingState(user: User): {
@@ -78,27 +127,17 @@ function getEffectiveBillingState(user: User): {
   isPaid: boolean;
   entitlements: BillingEntitlements;
 } {
-  const grandfathered = isGrandfatheredUser(user);
+  const grandfathered = false;
   const status = normalizeBillingStatus(user.billingStatus);
   const plan = normalizePlan(user.plan);
-  if (grandfathered) {
-    return {
-      grandfathered: true,
-      plan: 'scale',
-      status: 'active',
-      label: 'Grandfathered',
-      isPaid: true,
-      entitlements: PLAN_ENTITLEMENTS.scale,
-    };
-  }
-
-  const effectivePlan = isPaidStatus(status) ? plan : 'free';
+  const isPaid = getPaidAutomationEntitlementForUser(user).eligible;
+  const effectivePlan = isPaid ? plan : 'free';
   return {
     grandfathered: false,
     plan,
     status,
     label: PLAN_LABELS[plan],
-    isPaid: isPaidStatus(status),
+    isPaid,
     entitlements: PLAN_ENTITLEMENTS[effectivePlan],
   };
 }
@@ -133,6 +172,13 @@ export function getBillingSummary(user: User, agentCount: number): BillingSummar
     stripeSubscriptionId: user.stripeSubscriptionId || null,
     billingEmail: user.billingEmail || null,
     currentPeriodEnd: user.currentPeriodEnd || null,
+    billingVerifiedAt: user.billingVerifiedAt || null,
+    paidThrough: user.paidThrough || null,
+    lastPaidInvoiceId: user.lastPaidInvoiceId || null,
+    lastPaidInvoiceSubscriptionId: user.lastPaidInvoiceSubscriptionId || null,
+    lastPaidInvoiceAt: user.lastPaidInvoiceAt || null,
+    lastPaidAmountCents: user.lastPaidAmountCents ?? null,
+    lastPaidCurrency: user.lastPaidCurrency || null,
     entitlements,
   };
 }

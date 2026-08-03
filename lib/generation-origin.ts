@@ -1,9 +1,7 @@
 import type { Tweet } from './types';
-import { isGeoffreyAccount } from './account-taste';
 
 type GenerationOriginTweet = Pick<
   Tweet,
-  | 'type'
   | 'pipelineVersion'
   | 'generationRunId'
   | 'ideaId'
@@ -13,7 +11,11 @@ type GenerationOriginTweet = Pick<
   | 'generationModelStack'
   | 'draftExperimentId'
   | 'rationale'
->;
+  | 'contentProvenance'
+  | 'generationSurface'
+  | 'evidenceReferences'
+  | 'generationEvidenceReferences'
+> & { type?: Tweet['type'] };
 
 function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
   return Boolean(
@@ -25,18 +27,21 @@ function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
   );
 }
 
-export function getGeoffreyGeneratedPublishIssue(
-  handle: string | null | undefined,
-  tweet: GenerationOriginTweet,
-): string | null {
-  if (!isGeoffreyAccount(handle) || tweet.type === 'reply') return null;
+export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string | null {
   if (tweet.pipelineVersion === 'v2') {
-    return tweet.generationRunId && tweet.ideaId && tweet.draftCandidateId
-      ? null
-      : 'Geoffrey V2-generated posts require complete generation, idea, and draft lineage.';
+    if (tweet.contentProvenance !== 'generated_v2') {
+      return 'V2-generated posts require explicit generated_v2 provenance.';
+    }
+    if (!tweet.generationSurface || !tweet.generationRunId || !tweet.ideaId || !tweet.draftCandidateId) {
+      return 'V2-generated posts require complete surface, generation, idea, and draft lineage.';
+    }
+    const evidenceCount = (tweet.generationEvidenceReferences || []).length
+      + (tweet.evidenceReferences || []).length;
+    return evidenceCount > 0 ? null : 'V2-generated posts require qualified evidence lineage.';
   }
-  if (tweet.pipelineVersion === 'v1' || hasGeneratedContentProvenance(tweet)) {
-    return 'Geoffrey V1-generated posts are retired. Regenerate this draft through V2.';
+  if (tweet.contentProvenance === 'historical_v1' || tweet.pipelineVersion === 'v1' || hasGeneratedContentProvenance(tweet)) {
+    return 'V1-generated posts are retired. Regenerate this draft through V2.';
   }
-  return null;
+  if (tweet.contentProvenance === 'operator_written') return null;
+  return 'Publishing requires explicit operator-written provenance.';
 }

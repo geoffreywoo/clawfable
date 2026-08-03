@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireAutopilotLock: vi.fn(),
   getAgent: vi.fn(),
+  getAgentOwnerId: vi.fn(),
   getTopicIntelligenceState: vi.fn(),
   releaseAutopilotLock: vi.fn(),
   resetReadCache: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   getAgent: mocks.getAgent,
+  getAgentOwnerId: mocks.getAgentOwnerId,
   getTopicIntelligenceState: mocks.getTopicIntelligenceState,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   resetReadCache: mocks.resetReadCache,
@@ -34,7 +36,9 @@ describe('internal topic intelligence refresh route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = '13';
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'geoffwoo' });
+    mocks.getAgentOwnerId.mockResolvedValue('owner-13');
     mocks.acquireAutopilotLock.mockResolvedValue({
       acquired: true,
       owner: 'internal-topic-refresh:test',
@@ -91,6 +95,7 @@ describe('internal topic intelligence refresh route', () => {
 
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
 
   it('rejects requests without the configured bearer secret', async () => {

@@ -47,6 +47,7 @@ export interface GenerateTextOptions {
   jsonSchema?: Record<string, unknown>;
   openAiReasoningEffort?: OpenAiReasoningEffort;
   modelStack?: GenerationModelStackId;
+  timeoutMs?: number;
 }
 
 export interface GenerateTextResult {
@@ -80,10 +81,34 @@ export function estimateAiUsageCostUsd(
 export interface AiFallbackAttempt {
   provider: AiProvider;
   model: string;
-  reason: 'empty_text' | 'provider_error';
+  reason: 'empty_text' | 'provider_error' | 'timeout';
   stopReason: string | null;
   statusCode: number | null;
   errorType: string | null;
+}
+
+class AiGenerationTimeoutError extends Error {
+  readonly code = 'AI_GENERATION_TIMEOUT';
+
+  constructor(readonly provider: AiProvider, readonly model: string, timeoutMs: number) {
+    super(`${provider}:${model} exceeded the ${timeoutMs}ms generation deadline`);
+    this.name = 'AiGenerationTimeoutError';
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, error: Error): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(error), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
@@ -98,8 +123,7 @@ const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_M
 const CLAUDE_FABLE: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_FABLE_MODEL };
 const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_QUALITY_MODEL };
 
-export const GEOFFREY_PRIMARY_MODEL_STACK: GenerationModelStackId = 'geoffrey_fable5_gpt56';
-export const GEOFFREY_CONTROL_MODEL_STACK: GenerationModelStackId = 'geoffrey_gpt56_gpt55';
+export const PUBLISHING_V2_MODEL_STACK: GenerationModelStackId = 'publishing_v2_quality';
 
 const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
   source_enrichment: [OAI_QUALITY, CLAUDE_QUALITY],
@@ -122,7 +146,7 @@ const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
 };
 
 const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial<Record<AiTask, AiModelTarget[]>>>> = {
-  [GEOFFREY_PRIMARY_MODEL_STACK]: {
+  [PUBLISHING_V2_MODEL_STACK]: {
     idea_generation: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     tweet_writing: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     idea_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
@@ -131,16 +155,8 @@ const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial
     creative_variant: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     bulk_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     final_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
-  },
-  [GEOFFREY_CONTROL_MODEL_STACK]: {
-    idea_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
-    tweet_writing: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
-    idea_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
-    copy_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
-    tweet_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
-    creative_variant: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
-    bulk_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
-    final_judgment: [OAI_QUALITY, CLAUDE_QUALITY],
+    reply_generation: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    reply_scoring: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
   },
 };
 
@@ -396,11 +412,30 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
 
   let lastError: unknown = null;
   const fallbackAttempts: AiFallbackAttempt[] = [];
-  for (const target of modelChain) {
+  const deadlineAt = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? Date.now() + options.timeoutMs
+    : null;
+  for (let index = 0; index < modelChain.length; index++) {
+    const target = modelChain[index];
+    const remainingMs = deadlineAt === null ? null : deadlineAt - Date.now();
+    if (remainingMs !== null && remainingMs <= 0) break;
+    const remainingTargets = modelChain.length - index;
+    const attemptTimeoutMs = remainingMs === null
+      ? null
+      : remainingTargets === 1
+        ? remainingMs
+        : Math.max(1, Math.floor(remainingMs / Math.min(2, remainingTargets)));
     try {
-      const result = target.provider === 'openai'
-        ? await generateWithOpenAi(options, target.model)
-        : await generateWithAnthropic(options, target.model);
+      const generation = target.provider === 'openai'
+        ? generateWithOpenAi(options, target.model)
+        : generateWithAnthropic(options, target.model);
+      const result = attemptTimeoutMs === null
+        ? await generation
+        : await withTimeout(
+            generation,
+            attemptTimeoutMs,
+            new AiGenerationTimeoutError(target.provider, target.model, attemptTimeoutMs),
+          );
       if (!result.text.trim()) {
         lastError = new Error(`${target.provider}:${target.model} returned empty text`);
         fallbackAttempts.push({
@@ -420,7 +455,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
       fallbackAttempts.push({
         provider: target.provider,
         model: target.model,
-        reason: 'provider_error',
+        reason: error instanceof AiGenerationTimeoutError ? 'timeout' : 'provider_error',
         stopReason: null,
         ...providerError,
       });
@@ -431,6 +466,10 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         console.warn(`[ai] ${target.provider}:${target.model} failed${detail}; trying the next configured model.`);
       }
     }
+  }
+
+  if (deadlineAt !== null && Date.now() >= deadlineAt && !(lastError instanceof AiGenerationTimeoutError)) {
+    lastError = new Error(`AI generation exceeded the ${options.timeoutMs}ms stage deadline`);
   }
 
   throw lastError instanceof Error ? lastError : new Error('AI generation failed');

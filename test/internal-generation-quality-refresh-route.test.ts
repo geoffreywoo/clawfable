@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   buildLearnings: vi.fn(),
   checkPerformance: vi.fn(),
   getAgent: vi.fn(),
+  getAgentOwnerId: vi.fn(),
   getQueuedTweets: vi.fn(),
   refillQueue: vi.fn(),
   refreshQueuedTweetsForCurrentQualityPolicy: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('@/lib/generation-quality-audit', () => ({
 vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   getAgent: mocks.getAgent,
+  getAgentOwnerId: mocks.getAgentOwnerId,
   getQueuedTweets: mocks.getQueuedTweets,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   resetReadCache: mocks.resetReadCache,
@@ -54,7 +56,9 @@ describe('internal generation quality refresh route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = '13';
     mocks.getAgent.mockResolvedValue(agent);
+    mocks.getAgentOwnerId.mockResolvedValue('owner-13');
     mocks.acquireAutopilotLock.mockResolvedValue({ acquired: true, owner: 'refresh-owner', lock: null });
     mocks.releaseAutopilotLock.mockResolvedValue(true);
     mocks.checkPerformance.mockResolvedValue(20);
@@ -92,6 +96,7 @@ describe('internal generation quality refresh route', () => {
 
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
 
   it('requires internal authentication', async () => {

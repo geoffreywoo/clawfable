@@ -13,6 +13,12 @@ function makeUser(overrides: Partial<User> = {}): User {
     billingStatus: 'free',
     plan: 'free',
     currentPeriodEnd: null,
+    billingVerifiedAt: null,
+    paidThrough: null,
+    lastPaidInvoiceId: null,
+    lastPaidInvoiceAt: null,
+    lastPaidAmountCents: null,
+    lastPaidCurrency: null,
     createdAt: '2026-04-08T00:00:00.000Z',
     ...overrides,
   };
@@ -34,6 +40,14 @@ describe('billing entitlements', () => {
       billingStatus: 'active',
       stripeCustomerId: 'cus_123',
       stripeSubscriptionId: 'sub_123',
+      currentPeriodEnd: '2099-09-01T00:00:00.000Z',
+      billingVerifiedAt: '2026-08-01T00:00:00.000Z',
+      paidThrough: '2099-09-01T00:00:00.000Z',
+      lastPaidInvoiceId: 'in_123',
+      lastPaidInvoiceSubscriptionId: 'sub_123',
+      lastPaidInvoiceAt: '2026-08-01T00:00:00.000Z',
+      lastPaidAmountCents: 9900,
+      lastPaidCurrency: 'usd',
     }), 3);
 
     expect(summary.label).toBe('Pro');
@@ -64,28 +78,26 @@ describe('billing entitlements', () => {
     expect(() => assertCanUseAutopilot(makeUser(), 1)).toThrowError(BillingError);
   });
 
-  it('recognizes the internal fleet handles as grandfathered', () => {
-    expect(isGrandfatheredUser(makeUser({ username: 'geoffreywoo' }))).toBe(true);
-    expect(isGrandfatheredUser(makeUser({ username: 'geoffwoo' }))).toBe(true);
-    expect(isGrandfatheredUser(makeUser({ username: '@antihunterai' }))).toBe(true);
+  it('does not grant billing privileges from an internal username', () => {
+    expect(isGrandfatheredUser(makeUser({ username: 'geoffreywoo' }))).toBe(false);
+    expect(isGrandfatheredUser(makeUser({ username: 'geoffwoo' }))).toBe(false);
+    expect(isGrandfatheredUser(makeUser({ username: '@antihunterai' }))).toBe(false);
     expect(isGrandfatheredUser(makeUser({ username: 'someoneelse' }))).toBe(false);
   });
 
-  it('gives grandfathered accounts full access without an active subscription', () => {
+  it('ignores stale KV-only paid flags without invoice verification', () => {
     const summary = getBillingSummary(makeUser({
       username: 'clawfable',
-      billingStatus: 'free',
-      plan: 'free',
+      billingStatus: 'active',
+      plan: 'scale',
     }), 4);
 
-    expect(summary.grandfathered).toBe(true);
-    expect(summary.label).toBe('Grandfathered');
+    expect(summary.grandfathered).toBe(false);
+    expect(summary.label).toBe('Scale');
     expect(summary.plan).toBe('scale');
-    expect(summary.isPaid).toBe(true);
-    expect(summary.maxAgents).toBe(25);
-    expect(summary.canCreateAgent).toBe(true);
-    expect(summary.canUseAutopilot).toBe(true);
-    expect(summary.checkoutReady).toBe(false);
-    expect(summary.portalReady).toBe(false);
+    expect(summary.isPaid).toBe(false);
+    expect(summary.maxAgents).toBe(1);
+    expect(summary.canCreateAgent).toBe(false);
+    expect(summary.canUseAutopilot).toBe(false);
   });
 });

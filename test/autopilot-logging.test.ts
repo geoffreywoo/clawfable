@@ -4,6 +4,8 @@ import type { Tweet } from '../lib/types';
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
   getAgent: vi.fn(),
+  getAgentOwnerId: vi.fn(),
+  getUser: vi.fn(),
   updateProtocolSettings: vi.fn(),
   getQueuedTweets: vi.fn(),
   getAnalysis: vi.fn(),
@@ -26,12 +28,14 @@ const mocks = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
   getPerformanceHistory: vi.fn(),
   getRelationshipProfiles: vi.fn(),
+  getProductFacts: vi.fn(),
   addLearningSignal: vi.fn(),
   invalidateAgentConnection: vi.fn(),
   upsertRelationshipProfile: vi.fn(),
   buildGenerationContext: vi.fn(),
-  generateViralBatch: vi.fn(),
   generateTweetBatchV2: vi.fn(),
+  createTweetFromGeneratedCandidate: vi.fn(),
+  buildLearnings: vi.fn(),
   postTweet: vi.fn(),
   replyToTweet: vi.fn(),
   decodeKeys: vi.fn(),
@@ -70,6 +74,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/kv-storage', () => ({
   getProtocolSettings: mocks.getProtocolSettings,
   getAgent: mocks.getAgent,
+  getAgentOwnerId: mocks.getAgentOwnerId,
+  getUser: mocks.getUser,
   updateProtocolSettings: mocks.updateProtocolSettings,
   getQueuedTweets: mocks.getQueuedTweets,
   getAnalysis: mocks.getAnalysis,
@@ -92,6 +98,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getConversationHistory: mocks.getConversationHistory,
   getPerformanceHistory: mocks.getPerformanceHistory,
   getRelationshipProfiles: mocks.getRelationshipProfiles,
+  getProductFacts: mocks.getProductFacts,
   addLearningSignal: mocks.addLearningSignal,
   invalidateAgentConnection: mocks.invalidateAgentConnection,
   upsertRelationshipProfile: mocks.upsertRelationshipProfile,
@@ -101,12 +108,52 @@ vi.mock('@/lib/generation-context', () => ({
   buildGenerationContext: mocks.buildGenerationContext,
 }));
 
-vi.mock('@/lib/viral-generator', () => ({
-  generateViralBatch: mocks.generateViralBatch,
-}));
-
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
+  PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-1',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-quality-1',
+}));
+
+vi.mock('@/lib/publishing-v2', () => ({
+  generatePublishingBatchV2: vi.fn(async (input: any) => {
+    if (input.request?.surface !== 'reply') return mocks.generateTweetBatchV2(input);
+    const response = await mocks.generateText();
+    const content = String(response?.text || '').trim();
+    if (!content) return [];
+    return [{
+      content,
+      format: 'reply',
+      targetTopic: 'reply',
+      rationale: 'V2 reply test candidate',
+      pipelineVersion: 'v2',
+      generationSurface: 'reply',
+      generationTriggerId: input.request.triggerId,
+      contentProvenance: 'generated_v2',
+      generationRunId: 'run-reply-test',
+      ideaId: 'idea-reply-test',
+      draftCandidateId: 'draft-reply-test',
+      evidenceReferences: [{
+        sourceDocumentId: input.request.targetPost?.id || 'target',
+        url: input.request.targetPost?.url || 'https://x.com/test/status/1',
+        title: 'Target post',
+        publisher: 'test',
+        publishedAt: new Date().toISOString(),
+        trustTier: 'community',
+        claim: input.request.targetPost?.content || null,
+      }],
+      generationEvidenceReferences: [input.request.targetPost],
+      confidenceScore: 0.9,
+      candidateScore: 90,
+    }];
+  }),
+}));
+
+vi.mock('@/lib/tweet-persistence', () => ({
+  createTweetFromGeneratedCandidate: mocks.createTweetFromGeneratedCandidate,
+}));
+
+vi.mock('@/lib/performance', () => ({
+  buildLearnings: mocks.buildLearnings,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
@@ -156,12 +203,12 @@ vi.mock('@/lib/queue-healing', () => ({
 
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
-  GEOFFREY_PRIMARY_MODEL_STACK: 'geoffrey_fable5_gpt56',
+  PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, getGeoffreyQueuedDomainIssue, getGeoffreyRecentStoryIssue, getGeoffreyTopicPortfolioIssue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
-import { EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION, GEOFFREY_QUALITY_POLICY_VERSION } from '@/lib/quality-policy';
+import { archiveStaleNetworkTopicQueue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
+import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/generation-v2';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -220,6 +267,7 @@ const queuedTweet: Tweet = {
   quoteTweetId: null,
   quoteTweetAuthor: null,
   scheduledAt: null,
+  contentProvenance: 'operator_written',
   deletionReason: null,
   createdAt: '2026-04-07T00:00:00.000Z',
 };
@@ -232,12 +280,27 @@ const validQueuedTweet = {
 };
 
 const currentGeoffreyCertification = {
-  qualityPolicyVersion: GEOFFREY_QUALITY_POLICY_VERSION,
+  pipelineVersion: 'v2' as const,
+  contentProvenance: 'generated_v2' as const,
+  generationSurface: 'original' as const,
+  generationRunId: 'run-current',
+  ideaId: 'idea-current',
+  draftCandidateId: 'draft-current',
+  evidenceReferences: [{
+    sourceDocumentId: 'source-current',
+    url: 'https://example.com/current',
+    title: 'Current evidence',
+    publisher: 'Example',
+    publishedAt: '2026-07-31T00:00:00.000Z',
+    trustTier: 'primary' as const,
+    claim: 'Current evidence claim',
+  }],
+  qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
   voiceCorpusVersion: 'voice-corpus-v1-current',
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
   finalCriticVerdict: 'allow' as const,
-  finalCriticVersion: 'geoffwoo-final-critic-v2',
+  finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
 };
 
 const activeGeoffreyCorpus = {
@@ -255,11 +318,32 @@ const activeGeoffreyCorpus = {
   generatedAt: '2026-07-31T00:00:00.000Z',
 };
 
+function v2CandidateFromTweet(tweet: Tweet) {
+  return {
+    content: tweet.content,
+    format: tweet.format || 'hot_take',
+    targetTopic: tweet.topic || 'general',
+    rationale: 'Qualified V2 replacement.',
+    pipelineVersion: 'v2' as const,
+    generationSurface: 'original' as const,
+    contentProvenance: 'generated_v2' as const,
+    generationRunId: `run-${tweet.id}`,
+    ideaId: `idea-${tweet.id}`,
+    draftCandidateId: `draft-${tweet.id}`,
+    evidenceReferences: currentGeoffreyCertification.evidenceReferences,
+    sourceEvidenceTexts: ['A qualified primary source supports the replacement idea.'],
+    candidateScore: tweet.candidateScore ?? 90,
+    confidenceScore: tweet.confidenceScore ?? 0.9,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getAgent.mockResolvedValue(baseAgent);
+  mocks.getAgentOwnerId.mockResolvedValue('owner-logging-1');
+  mocks.getUser.mockResolvedValue(null);
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
   mocks.getAnalysis.mockResolvedValue(null);
@@ -269,6 +353,7 @@ beforeEach(() => {
   mocks.getConversationHistory.mockResolvedValue([]);
   mocks.getPerformanceHistory.mockResolvedValue([]);
   mocks.getRelationshipProfiles.mockResolvedValue([]);
+  mocks.getProductFacts.mockResolvedValue([]);
   mocks.getTrendingCache.mockResolvedValue([]);
   mocks.getTrendingCacheSnapshot.mockResolvedValue({
     data: [],
@@ -315,6 +400,13 @@ beforeEach(() => {
       communicationStyle: 'sharp and direct',
       summary: 'summary',
     },
+    learnings: null,
+    settings: { ...baseSettings },
+    style: { autonomyMode: 'balanced', bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+    recentPosts: [],
+    allTweets: [],
+    memory: null,
+    signals: [],
   });
   mocks.getMentionsFromTwitter.mockResolvedValue([]);
   mocks.getTweetCompletenessIssue.mockImplementation(() => null);
@@ -349,12 +441,39 @@ beforeEach(() => {
     model: 'gpt-5.4',
   });
   mocks.generateTweetBatchV2.mockResolvedValue([]);
+  mocks.postTweet.mockResolvedValue({ tweetId: 'x-default', username: 'debugbot' });
+  mocks.createTweetFromGeneratedCandidate.mockImplementation(async (agentId: string, candidate: any, options: any) => ({
+    ...queuedTweet,
+    id: `persisted-${candidate.draftCandidateId || 'reply'}`,
+    agentId,
+    content: candidate.content,
+    type: options.type || 'original',
+    status: options.status,
+    topic: options.topic,
+    pipelineVersion: 'v2',
+    generationSurface: candidate.generationSurface,
+    generationTriggerId: candidate.generationTriggerId,
+    contentProvenance: 'generated_v2',
+    generationRunId: candidate.generationRunId,
+    ideaId: candidate.ideaId,
+    draftCandidateId: candidate.draftCandidateId,
+    evidenceReferences: candidate.evidenceReferences,
+  }));
+  mocks.buildLearnings.mockResolvedValue({
+    voiceCorpus: { ...activeGeoffreyCorpus },
+    operatorVoiceReference: {
+      pinnedExamples: [],
+      startupRegisterExamples: [],
+      bestPerformers: [],
+    },
+  });
+  process.env.AUTOMATION_EXEMPT_AGENT_IDS = baseAgent.id;
 });
 
 afterEach(() => {
   vi.useRealTimers();
   delete process.env.VERCEL_ENV;
-  delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
+  delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
 });
 
 afterEach(() => {
@@ -364,7 +483,6 @@ afterEach(() => {
 describe('autopilot remote debug logging', () => {
   it('uses only warmed caches during a V2 refill and never performs live topic discovery', async () => {
     process.env.VERCEL_ENV = 'production';
-    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
     const agent = { ...baseAgent, handle: 'geoffwoo' };
     mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
     mocks.getTrendingCache.mockResolvedValue(null);
@@ -383,12 +501,10 @@ describe('autopilot remote debug logging', () => {
     await expect(refillQueue(agent as any, 2)).resolves.toBe(0);
     expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({ trending: null }));
     expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
-    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
   });
 
   it('does not invoke V1 or a strict fallback when V2 returns no eligible drafts', async () => {
     process.env.VERCEL_ENV = 'production';
-    process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION = GEOFFREY_QUALITY_POLICY_VERSION;
     const agent = { ...baseAgent, handle: 'geoffwoo' };
     mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
     mocks.buildGenerationContext.mockResolvedValue({
@@ -406,20 +522,16 @@ describe('autopilot remote debug logging', () => {
 
     expect(await refillQueue(agent as any, 2)).toBe(0);
     expect(mocks.generateTweetBatchV2).toHaveBeenCalledOnce();
-    expect(mocks.generateViralBatch).not.toHaveBeenCalled();
     expect(mocks.createTweet).not.toHaveBeenCalled();
   });
 
-  it('keeps Geoffrey originals in shadow until the production policy version is explicitly activated', async () => {
+  it('ignores the retired Geoffrey pipeline switch and uses the V2-only publish path', async () => {
     process.env.VERCEL_ENV = 'production';
-    delete process.env.GEOFFREY_AUTOPOST_QUALITY_POLICY_VERSION;
-
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result.action).toBe('skipped');
-    expect(result.reason).toContain(`${GEOFFREY_QUALITY_POLICY_VERSION} remains in shadow`);
-    expect(mocks.getQueuedTweets).not.toHaveBeenCalled();
-    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(result.action).toBe('posted');
+    expect(mocks.getQueuedTweets).toHaveBeenCalled();
+    expect(mocks.postTweet).toHaveBeenCalledOnce();
   });
 
   it('enforces a five-original rolling daily cap for @geoffwoo', async () => {
@@ -431,127 +543,6 @@ describe('autopilot remote debug logging', () => {
     expect(result.action).toBe('skipped');
     expect(result.reason).toContain('Daily post cap reached');
     expect(mocks.postTweet).not.toHaveBeenCalled();
-  });
-
-  it('treats crypto and politics as one combined one-in-twenty exploration budget', () => {
-    const issue = getGeoffreyTopicPortfolioIssue({
-      ...queuedTweet,
-      content: 'a new election rule changes which defense startups can sell to the government',
-      topic: 'election procurement',
-      sourceLane: 'trend_adjacent_explore',
-      trendTopicId: 'politics-defense-procurement',
-      sourceBrief: 'Qualified network story with two independent authors.',
-    }, [{
-      id: 'log-prior-crypto',
-      agentId: baseAgent.id,
-      tweetId: 'prior-crypto',
-      xTweetId: 'x-prior-crypto',
-      content: 'stablecoin settlement finally has a real customer and margin story',
-      format: 'hot_take',
-      topic: 'stablecoins',
-      postedAt: '2026-07-31T00:00:00.000Z',
-      source: 'autopilot',
-      action: 'posted',
-      reason: 'posted',
-    }]);
-
-    expect(issue).toContain('one of twenty');
-  });
-
-  it('caps deep technical originals at one in five even when the domain is core', () => {
-    const issue = getGeoffreyTopicPortfolioIssue({
-      ...queuedTweet,
-      content: 'tritium breeding remains the fusion reactor bottleneck',
-      topic: 'fusion energy',
-    }, [{
-      id: 'log-prior-chip',
-      agentId: baseAgent.id,
-      tweetId: 'prior-chip',
-      xTweetId: 'x-prior-chip',
-      content: 'HBM and package yield set the ceiling for this inference chip',
-      format: 'hot_take',
-      topic: 'inference ASICs',
-      postedAt: '2026-07-31T00:00:00.000Z',
-      source: 'autopilot',
-      action: 'posted',
-    }]);
-
-    expect(issue).toContain('one of five');
-  });
-
-  it('caps manufacturing and materials originals at one in eight', () => {
-    const issue = getGeoffreyTopicPortfolioIssue({
-      ...queuedTweet,
-      content: 'metrology still decides whether this factory can hold tolerance',
-      topic: 'automated manufacturing',
-    }, [{
-      id: 'log-prior-materials',
-      agentId: baseAgent.id,
-      tweetId: 'prior-materials',
-      xTweetId: 'x-prior-materials',
-      content: 'grain-boundary diffusion changes high-temperature magnet coercivity',
-      format: 'hot_take',
-      topic: 'rare earth materials',
-      postedAt: '2026-07-30T00:00:00.000Z',
-      source: 'autopilot',
-      action: 'posted',
-    }]);
-
-    expect(issue).toContain('one of eight');
-  });
-
-  it('blocks a followed-network story already covered under a legacy topic record', () => {
-    const now = Date.parse('2026-08-02T02:00:00.000Z');
-    const issue = getGeoffreyRecentStoryIssue({
-      content: 'does any fighter actually want this merger? one fewer buyer for your next contract is not a gift.',
-      topic: 'MVP PFL merger',
-      sourceLane: 'trend_aligned_exploit',
-      trendTopicId: 'network-pfl-current',
-    }, [{
-      id: 'legacy-pfl-post',
-      content: "pfl buying mvp is really pfl buying jake paul's ability to make people care about a fight.",
-      topic: 'MVP PFL merger',
-      status: 'posted',
-      postedAt: null,
-    }], now);
-
-    expect(issue).toContain('named source story repeats a recent post');
-    expect(getGeoffreyRecentStoryIssue({
-      content: 'underdog buying a smaller prediction app is a distribution bet.',
-      topic: 'Underdog acquisition',
-      sourceLane: 'trend_aligned_exploit',
-      trendTopicId: 'network-underdog-current',
-    }, [{
-      content: 'pfl buying mvp changes fighter leverage.',
-      topic: 'MVP PFL merger',
-      status: 'posted',
-      xTweetId: 'x-pfl',
-      postedAt: '2026-08-02T00:30:00.000Z',
-    }], now)).toBeNull();
-  });
-
-  it('keeps the active queue to one draft per semantic domain', () => {
-    expect(getGeoffreyQueuedDomainIssue({
-      id: 'nfl-draft',
-      content: 'an nfl player boxing jake paul is a bad trade for the player.',
-      topic: 'Jake Paul NFL boxing challenge',
-    }, [{
-      id: 'pfl-draft',
-      content: 'one fewer buyer for your next fight contract is not a gift.',
-      topic: 'MVP PFL merger',
-      status: 'queued',
-    }])).toContain('sports_competition');
-
-    expect(getGeoffreyQueuedDomainIssue({
-      id: 'ai-draft',
-      content: 'openai made another coding model cheaper.',
-      topic: 'OpenAI coding models',
-    }, [{
-      id: 'pfl-draft',
-      content: 'one fewer buyer for your next fight contract is not a gift.',
-      topic: 'MVP PFL merger',
-      status: 'queued',
-    }])).toBeNull();
   });
 
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
@@ -589,7 +580,7 @@ describe('autopilot remote debug logging', () => {
 
     expect(archived).toBe(1);
     expect(mocks.updateTweet).toHaveBeenCalledWith('network-stale', expect.objectContaining({
-      status: 'draft',
+      status: 'quarantined',
       quarantineReason: expect.stringContaining('lost current momentum support'),
     }));
     expect(mocks.updateTweet).not.toHaveBeenCalledWith('network-current', expect.anything());
@@ -608,7 +599,7 @@ describe('autopilot remote debug logging', () => {
 
     expect(archived).toBe(1);
     expect(mocks.updateTweet).toHaveBeenCalledWith('network-gone', expect.objectContaining({
-      status: 'draft',
+      status: 'quarantined',
     }));
   });
 
@@ -625,7 +616,7 @@ describe('autopilot remote debug logging', () => {
 
     expect(archived).toBe(1);
     expect(mocks.updateTweet).toHaveBeenCalledWith('legacy-network-topic', expect.objectContaining({
-      status: 'draft',
+      status: 'quarantined',
       quarantineReason: expect.stringContaining('lost current momentum support'),
     }));
   });
@@ -651,12 +642,12 @@ describe('autopilot remote debug logging', () => {
     expect(archived).toBe(1);
   });
 
-  it('rechecks queued Geoffrey drafts against current manual voice anchors before posting', async () => {
+  it('does not re-run legacy voice scoring against an immutable V2 draft before posting', async () => {
     const driftedDraft = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
       id: 'voice-drifted',
-      content: 'Tungsten supply security is a critical strategic priority. Stakeholders must align around resilient conversion capacity and qualified tooling.',
+      content: 'tungsten headlines start at the mine. the delivery bottleneck is qualified tooling after conversion.',
       topic: 'tungsten',
       confidenceScore: 0.9,
       candidateScore: 94,
@@ -692,15 +683,12 @@ describe('autopilot remote debug logging', () => {
 
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result.action).toBe('skipped');
-    expect(mocks.postTweet).not.toHaveBeenCalled();
-    expect(mocks.updateTweet).toHaveBeenCalledWith('voice-drifted', expect.objectContaining({
-      status: 'draft',
-      quarantineReason: expect.stringContaining('Native identity gate'),
-    }));
-    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
-      metadata: expect.objectContaining({ qualityGate: 'native_identity_drift' }),
-    }));
+    expect(result.action).toBe('posted');
+    expect(mocks.postTweet).toHaveBeenCalledWith(
+      expect.anything(),
+      driftedDraft.content,
+      { username: 'geoffwoo' },
+    );
   });
 
   it('keeps a currently certified V2 draft out of the legacy queue rescorer', async () => {
@@ -712,7 +700,7 @@ describe('autopilot remote debug logging', () => {
       generationRunId: 'run-v2-current',
       ideaId: 'idea-v2-current',
       draftCandidateId: 'draft-v2-current',
-      finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
+      finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
     };
     mocks.getQueuedTweets.mockResolvedValue([v2Draft]);
     mocks.buildGenerationContext.mockResolvedValue({
@@ -735,7 +723,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
-  it('quarantines stale V2 certification without downgrading it through the legacy critic', async () => {
+  it('does not invalidate immutable V2 lineage when the voice corpus later changes', async () => {
     const staleV2Draft = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -744,7 +732,7 @@ describe('autopilot remote debug logging', () => {
       generationRunId: 'run-v2-stale',
       ideaId: 'idea-v2-stale',
       draftCandidateId: 'draft-v2-stale',
-      finalCriticVersion: EVIDENCE_IDEA_VOICE_FINAL_CRITIC_VERSION,
+      finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       voiceCorpusVersion: 'voice-corpus-v1-stale',
     };
     mocks.getQueuedTweets.mockResolvedValue([staleV2Draft]);
@@ -763,12 +751,9 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
     expect(mocks.generateText).not.toHaveBeenCalled();
-    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-certification', expect.objectContaining({
-      status: 'draft',
-      quarantineReason: expect.stringContaining('evidence-to-idea pipeline'),
-    }));
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
   it('blocks a Geoffrey thesis reskin using stored posts when the post log is empty', async () => {
@@ -845,7 +830,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
       expect.objectContaining({ handle: 'geoffwoo' }),
       expect.objectContaining({ id: 'rhenium-reskin' }),
-      expect.stringContaining('Semantic idea repeats a recent Geoffrey post'),
+      expect.stringContaining('Semantic idea repeats a recent post'),
     );
     expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
       tweetId: 'rhenium-reskin',
@@ -892,14 +877,14 @@ describe('autopilot remote debug logging', () => {
 
     expect(result.action).toBe('skipped');
     expect(mocks.postTweet).not.toHaveBeenCalled();
-    expect(mocks.updateTweet).toHaveBeenCalledWith('source-copy-drift', expect.objectContaining({
-      status: 'draft',
-      quarantineReason: expect.stringContaining('Native identity gate'),
-    }));
+    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ handle: 'geoffwoo' }),
+      expect.objectContaining({ id: 'source-copy-drift' }),
+      expect.stringContaining('Source-copy gate'),
+    );
     expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
       metadata: expect.objectContaining({
-        qualityGate: 'native_identity_drift',
-        sourceCopyRisk: expect.any(Number),
+        qualityGate: 'source_copy',
       }),
     }));
   });
@@ -1051,30 +1036,21 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.deleteTweet).not.toHaveBeenCalled();
   });
 
-  it('clears stale template fallback drafts when richer generation is available again', async () => {
-    mocks.getQueuedTweets
-      .mockResolvedValueOnce([
-        {
-          ...queuedTweet,
-          id: 'fallback-1',
-          rationale: 'Template fallback: generic resilient format when richer generation is unavailable.',
-        },
-      ])
-      .mockResolvedValueOnce([validQueuedTweet]);
-
-    mocks.postTweet.mockResolvedValue({ tweetId: 'x-123', username: 'debugbot' });
+  it('quarantines retired template fallback drafts instead of deleting them', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([{
+      ...queuedTweet,
+      id: 'fallback-1',
+      rationale: 'Template fallback: generic resilient format when richer generation is unavailable.',
+    }]);
 
     const result = await runAutopilot(baseAgent);
 
-    expect(mocks.deleteTweet).toHaveBeenCalledWith('fallback-1');
-    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
-      baseAgent.id,
-      expect.objectContaining({
-        format: 'queue_refresh',
-      }),
-    );
-    expect(result.action).toBe('posted');
-    expect(result.tweetId).toBe(validQueuedTweet.id);
+    expect(mocks.deleteTweet).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith('fallback-1', expect.objectContaining({
+      status: 'quarantined',
+      quarantineReason: expect.stringContaining('V1-generated posts are retired'),
+    }));
+    expect(result.action).toBe('skipped');
   });
 
   it('does not report an X post failure when learning persistence fails after the write succeeded', async () => {
@@ -1155,7 +1131,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).toHaveBeenCalledWith(
       'unsafe-mention',
       expect.objectContaining({
-        status: 'draft',
+        status: 'quarantined',
         quarantineReason: expect.stringContaining('unsolicited @mentions'),
       }),
     );
@@ -1198,7 +1174,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).toHaveBeenCalledWith(
       'unsupported-authority',
       expect.objectContaining({
-        status: 'draft',
+        status: 'quarantined',
         quarantineReason: expect.stringContaining('Authority gate'),
       }),
     );
@@ -1225,6 +1201,7 @@ describe('autopilot remote debug logging', () => {
   it('quarantines generated drafts with unsupported personal or numeric claims', async () => {
     const fabricatedTweet = {
       ...validQueuedTweet,
+      ...currentGeoffreyCertification,
       id: 'fabricated-evidence',
       content: 'A machine shop owner showed me two end mills. One ran 11 hours. One chipped after 47 minutes.',
       confidenceScore: 0.91,
@@ -1251,7 +1228,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).toHaveBeenCalledWith(
       'fabricated-evidence',
       expect.objectContaining({
-        status: 'draft',
+        status: 'quarantined',
         quarantineReason: expect.stringContaining('Claim evidence gate'),
       }),
     );
@@ -1390,19 +1367,7 @@ describe('autopilot remote debug logging', () => {
       allTweets: [],
       memory: null,
     });
-    mocks.generateViralBatch.mockResolvedValue([
-      {
-        content: freshQueuedTweet.content,
-        format: freshQueuedTweet.format,
-        targetTopic: freshQueuedTweet.topic,
-        rationale: 'fresh replacement',
-        generationProvider: 'openai',
-        generationModel: 'gpt-5.6',
-        sourceBrief: 'Verified source brief for the fresh draft.',
-        candidateScore: freshQueuedTweet.candidateScore,
-        confidenceScore: freshQueuedTweet.confidenceScore,
-      },
-    ]);
+    mocks.generateTweetBatchV2.mockResolvedValue([v2CandidateFromTweet(freshQueuedTweet)]);
     mocks.postTweet.mockResolvedValue({ tweetId: 'x-fresh-1', username: 'debugbot' });
 
     const result = await runAutopilot(baseAgent);
@@ -1412,25 +1377,27 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).toHaveBeenCalledWith(
       'low-1',
       expect.objectContaining({
-        status: 'draft',
+        status: 'quarantined',
         quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
       }),
     );
     expect(mocks.updateTweet).toHaveBeenCalledWith(
       'low-2',
       expect.objectContaining({
-        status: 'draft',
+        status: 'quarantined',
         quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
       }),
     );
-    expect(mocks.createTweet).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        content: freshQueuedTweet.content,
+        pipelineVersion: 'v2',
+      }),
+      expect.objectContaining({
       status: 'queued',
-      content: freshQueuedTweet.content,
-      generationProvider: 'openai',
-      generationModel: 'gpt-5.6',
-      sourceBrief: 'Verified source brief for the fresh draft.',
-      confidenceScore: freshQueuedTweet.confidenceScore,
-    }));
+      }),
+    );
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
@@ -1440,7 +1407,7 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
-  it('does not let explicit exploration candidates bypass confidence in explore mode', async () => {
+  it('does not apply the retired additive confidence veto to judge-selected V2 drafts', async () => {
     const lowConfidenceDefault = {
       ...validQueuedTweet,
       id: 'explore-default-low',
@@ -1451,6 +1418,7 @@ describe('autopilot remote debug logging', () => {
     };
     const explicitExplore = {
       ...validQueuedTweet,
+      ...currentGeoffreyCertification,
       id: 'explore-tagged-low',
       content: 'explicit exploration draft can test a new angle',
       generationMode: 'explore',
@@ -1467,11 +1435,15 @@ describe('autopilot remote debug logging', () => {
 
     const result = await runAutopilot(baseAgent);
 
-    expect(result.action).toBe('skipped');
-    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(result.action).toBe('posted');
+    expect(mocks.postTweet).toHaveBeenCalledWith(
+      expect.anything(),
+      explicitExplore.content,
+      { username: baseAgent.handle },
+    );
   });
 
-  it('logs reset-aware trend refresh failures during queue refill without blocking generation', async () => {
+  it('uses warmed research during queue refill and never starts a live trend refresh', async () => {
     const staleLowConfidenceTweets = [
       {
         ...queuedTweet,
@@ -1516,41 +1488,14 @@ describe('autopilot remote debug logging', () => {
       allTweets: [],
       memory: null,
     });
-    mocks.generateViralBatch.mockResolvedValue([
-      {
-        content: freshQueuedTweet.content,
-        format: freshQueuedTweet.format,
-        targetTopic: freshQueuedTweet.topic,
-        rationale: 'fresh replacement',
-        candidateScore: freshQueuedTweet.candidateScore,
-        confidenceScore: freshQueuedTweet.confidenceScore,
-      },
-    ]);
-    mocks.discoverCurrentTrends.mockRejectedValue(new TwitterActionError({
-      action: 'refill_queue_trends',
-      statusCode: 429,
-      title: 'Too Many Requests',
-      detail: 'Rate limit exceeded',
-      rateLimit: { resetAt: '2026-04-07T12:20:00.000Z' },
-    }));
+    mocks.generateTweetBatchV2.mockResolvedValue([v2CandidateFromTweet(freshQueuedTweet)]);
     mocks.postTweet.mockResolvedValue({ tweetId: 'x-trend-refill', username: 'debugbot' });
 
     const result = await runAutopilot(baseAgent);
 
     expect(result.action).toBe('posted');
-    expect(mocks.generateViralBatch).toHaveBeenCalled();
-    expect(mocks.generateViralBatch.mock.calls[0][3]).toEqual([]);
-    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
-      baseAgent.id,
-      expect.objectContaining({
-        format: 'trend_refresh_error',
-        topic: 'network_growth',
-        source: 'autopilot',
-        action: 'error',
-        errorCode: 'x_rate_limit',
-        reason: expect.stringContaining('X queue-refill topic intelligence rate limited until 2026-04-07T12:20:00.000Z'),
-      }),
-    );
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalled();
+    expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
   });
 
   it('writes detailed auto-reply failures into the activity log', async () => {
@@ -3034,7 +2979,7 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
-  it('repairs incomplete queued drafts before they can post', async () => {
+  it('quarantines incomplete immutable drafts and posts the next qualified artifact', async () => {
     mocks.getQueuedTweets.mockResolvedValue([
       {
         ...queuedTweet,
@@ -3047,6 +2992,11 @@ describe('autopilot remote debug logging', () => {
         ? 'Draft ends with an incomplete trailing fragment (“the only”).'
         : null
     );
+    mocks.resolveQueuedTweetFailure.mockResolvedValue({
+      action: 'quarantined',
+      tweet: null,
+      detail: 'Quarantined the immutable artifact. A new qualified draft must replace it.',
+    });
     mocks.postTweet.mockResolvedValue({
       tweetId: 'x-valid-1',
       tweetUrl: 'https://x.com/debugbot/status/x-valid-1',
@@ -3056,17 +3006,17 @@ describe('autopilot remote debug logging', () => {
     const result = await runAutopilot(baseAgent);
 
     expect(result.action).toBe('posted');
-    expect(result.tweetId).toBe('522');
+    expect(result.tweetId).toBe('523');
     expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
       baseAgent,
       expect.objectContaining({ id: '522' }),
       expect.stringContaining('incomplete trailing fragment')
     );
-    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), 'rebuilt queue draft', { username: baseAgent.handle });
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), validQueuedTweet.content, { username: baseAgent.handle });
 
     const repairEntry = mocks.addPostLogEntry.mock.calls
       .map(([, entry]) => entry)
-      .find((entry) => entry.tweetId === '522' && entry.reason.includes('Auto-repaired the draft'));
+      .find((entry) => entry.tweetId === '522' && entry.reason.includes('Quarantined the immutable artifact'));
 
     expect(repairEntry).toBeDefined();
   });

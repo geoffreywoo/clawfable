@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createTweet: vi.fn(),
+  getAgentOwnerId: vi.fn(),
   getTweets: vi.fn(),
   getPerformanceHistory: vi.fn(),
   addPerformanceEntry: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   createTweet: mocks.createTweet,
+  getAgentOwnerId: mocks.getAgentOwnerId,
   getTweets: mocks.getTweets,
   getPerformanceHistory: mocks.getPerformanceHistory,
   addPerformanceEntry: mocks.addPerformanceEntry,
@@ -95,6 +97,8 @@ describe('performance tracking X API failures', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+    mocks.getAgentOwnerId.mockResolvedValue('owner-performance');
     mocks.decodeKeys.mockReturnValue({
       appKey: 'key',
       appSecret: 'secret',
@@ -109,6 +113,10 @@ describe('performance tracking X API failures', () => {
     mocks.addPostLogEntry.mockResolvedValue(undefined);
     mocks.invalidateAgentConnection.mockResolvedValue(undefined);
     mocks.saveAnalysis.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
 
   it('disconnects invalid credentials when timeline performance tracking is rejected', async () => {

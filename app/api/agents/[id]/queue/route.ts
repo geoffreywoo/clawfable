@@ -3,6 +3,7 @@ import { createTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getAgentQueueFeed } from '@/lib/dashboard-data';
 import { validateQueueCreateRequest } from '@/lib/request-validation';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // GET /api/agents/[id]/queue
 export async function GET(
@@ -26,7 +27,8 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
+    await assertAgentAutomationEntitlement(id, { agent, user });
     const body = await request.json();
     const parsed = validateQueueCreateRequest(body);
     if (!parsed.ok || !parsed.value) {
@@ -44,9 +46,13 @@ export async function POST(
       quoteTweetId: quoteTweetId || null,
       quoteTweetAuthor: quoteTweetAuthor || null,
       scheduledAt: null,
+      contentProvenance: 'operator_written',
     });
     return NextResponse.json(tweet);
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to add to queue' }, { status: 500 });
   }

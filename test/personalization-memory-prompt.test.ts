@@ -66,9 +66,7 @@ describe('buildPersonalizationMemoryPrompt', () => {
 
   it('truncates very long lessons before they enter provider prompts', () => {
     const prompt = buildPersonalizationMemoryPrompt(memory({
-      operatorHiddenPreferences: [
-        `Operators prefer very specific observations ${'with repeated extra context '.repeat(20)}`,
-      ],
+      operatorHiddenPreferences: [`Operators prefer very specific observations ${'with repeated extra context '.repeat(20)}`],
     }));
 
     const lessonLine = prompt.split('\n').find((line) => line.startsWith('- Operators prefer'));
@@ -78,9 +76,7 @@ describe('buildPersonalizationMemoryPrompt', () => {
 
   it('shows recent rejected drafts as anti-paraphrase memory', () => {
     const prompt = buildPersonalizationMemoryPrompt(memory({
-      rejectedDrafts: [
-        'future status object: a robot cell that ran the entire shift without an exception.',
-      ],
+      rejectedDrafts: ['future status object: a robot cell that ran the entire shift without an exception.'],
     }));
 
     expect(prompt).toContain('## RECENT REJECTED DRAFTS');
@@ -88,105 +84,26 @@ describe('buildPersonalizationMemoryPrompt', () => {
     expect(prompt).toContain('future status object');
   });
 
-  it('includes compact fallback shape outcome counters in the generation prompt', () => {
+  it('does not expose historical fallback-shape records to V2 prompts', () => {
     const prompt = buildPersonalizationMemoryPrompt(memory({
-      fallbackShapeOutcomes: [
-        {
-          fallbackKind: 'provider_template_fallback',
-          topic: 'AI agents',
-          shape: 'bold_claim/single_punch/tactical',
-          hook: 'bold_claim',
-          structure: 'single_punch',
-          specificity: 'tactical',
-          approved: 1,
-          posted: 1,
-          edited: 0,
-          rejected: 4,
-          total: 6,
-          netScore: -0.7,
-          latestOutcome: 'rejected',
-          latestOutcomeAt: '2026-06-08T00:00:00.000Z',
-          updatedAt: '2026-06-08T00:00:00.000Z',
-        },
-      ],
+      fallbackShapeOutcomes: [{
+        fallbackKind: 'provider_template_fallback',
+        topic: 'AI agents',
+        shape: 'bold_claim/single_punch/tactical',
+        hook: 'bold_claim',
+        structure: 'single_punch',
+        specificity: 'tactical',
+        approved: 1,
+        posted: 1,
+        edited: 0,
+        rejected: 4,
+        total: 6,
+        netScore: -0.7,
+        updatedAt: '2026-06-08T00:00:00.000Z',
+      }],
     }));
 
-    expect(prompt).toContain('## FALLBACK SHAPE OUTCOMES');
-    expect(prompt).toContain('provider template fallback on AI agents');
-    expect(prompt).toContain('bold claim / single punch / tactical had 6 signals');
-    expect(prompt).toContain('2 approval/post, 0 edits, 4 rejects; net -0.7');
-    expect(prompt).toContain('Latest: rejected 2026-06-08');
-    expect(prompt).toContain('cool before reuse');
-  });
-
-  it('caps fallback shape outcome counters and records omitted counters in the budget', () => {
-    const prompt = buildPersonalizationMemoryPrompt(memory({
-      fallbackShapeOutcomes: [
-        {
-          fallbackKind: 'provider_template_fallback',
-          topic: 'AI agents',
-          shape: 'bold_claim/single_punch/tactical',
-          hook: 'bold_claim',
-          structure: 'single_punch',
-          specificity: 'tactical',
-          approved: 3,
-          posted: 1,
-          edited: 0,
-          rejected: 0,
-          total: 4,
-          netScore: 0.8,
-          updatedAt: '2026-06-08T00:00:00.000Z',
-        },
-        {
-          fallbackKind: 'provider_template_fallback',
-          topic: 'Startups',
-          shape: 'question/list/concrete',
-          hook: 'question',
-          structure: 'list',
-          specificity: 'concrete',
-          approved: 0,
-          posted: 0,
-          edited: 1,
-          rejected: 3,
-          total: 4,
-          netScore: -0.9,
-          updatedAt: '2026-06-08T01:00:00.000Z',
-        },
-        {
-          fallbackKind: 'emergency_queue_fallback',
-          topic: 'Creator tools',
-          shape: 'observation/argument/data_driven',
-          hook: 'observation',
-          structure: 'argument',
-          specificity: 'data_driven',
-          approved: 1,
-          posted: 0,
-          edited: 2,
-          rejected: 0,
-          total: 3,
-          netScore: -0.2,
-          updatedAt: '2026-06-08T02:00:00.000Z',
-        },
-        {
-          fallbackKind: 'emergency_queue_fallback',
-          topic: 'Ops',
-          shape: 'contrarian/comparison/tactical',
-          hook: 'contrarian',
-          structure: 'comparison',
-          specificity: 'tactical',
-          approved: 0,
-          posted: 0,
-          edited: 0,
-          rejected: 2,
-          total: 2,
-          netScore: -0.5,
-          updatedAt: '2026-06-08T03:00:00.000Z',
-        },
-      ],
-    }));
-
-    expect(prompt.match(/had \d signals/g)).toHaveLength(3);
-    expect(prompt).not.toContain('emergency queue fallback on Ops');
-    expect(prompt).toContain('1 lower-priority lessons are still used by ranking/scoring');
+    expect(prompt).not.toContain('FALLBACK SHAPE');
+    expect(prompt).not.toContain('provider template fallback');
   });
 });

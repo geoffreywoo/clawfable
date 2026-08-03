@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   addPostLogEntry: vi.fn(),
   getAgents: vi.fn(),
   getPerformanceHistory: vi.fn(),
+  getTweets: vi.fn(),
+  buildGenerationContext: vi.fn(),
+  generatePublishingBatchV2: vi.fn(),
   refreshAgentTopicIntelligence: vi.fn(),
   replyToTweet: vi.fn(),
   likeTweet: vi.fn(),
@@ -23,6 +26,7 @@ vi.mock('@/lib/kv-storage', () => ({
   addPostLogEntry: mocks.addPostLogEntry,
   getAgents: mocks.getAgents,
   getPerformanceHistory: mocks.getPerformanceHistory,
+  getTweets: mocks.getTweets,
 }));
 
 vi.mock('@/lib/topic-intelligence-refresh', () => ({
@@ -39,6 +43,28 @@ vi.mock('@/lib/twitter-client', () => ({
 
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
+  PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
+}));
+
+vi.mock('@/lib/automation-entitlement', () => ({
+  assertAgentAutomationEntitlement: vi.fn(async () => ({
+    source: 'agent_exemption',
+    eligible: true,
+    reason: 'test exemption',
+    verifiedAt: new Date().toISOString(),
+    paidThrough: null,
+    paidInvoiceId: null,
+    paidAmountCents: null,
+    paidCurrency: null,
+  })),
+}));
+
+vi.mock('@/lib/generation-context', () => ({
+  buildGenerationContext: mocks.buildGenerationContext,
+}));
+
+vi.mock('@/lib/publishing-v2', () => ({
+  generatePublishingBatchV2: mocks.generatePublishingBatchV2,
 }));
 
 import { discoverAndFollow, generateAgentShoutout, likeNetworkTweets, replyToViralTweets } from '@/lib/proactive-engagement';
@@ -109,6 +135,30 @@ describe('proactive engagement', () => {
     });
     mocks.addPostLogEntry.mockResolvedValue(undefined);
     mocks.getPerformanceHistory.mockResolvedValue([]);
+    mocks.getTweets.mockResolvedValue([]);
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id, contentFingerprint: 'test' });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'direct', topics: ['AI'], antiGoals: [], communicationStyle: 'plain', summary: 'builder' },
+      learnings: null,
+      style: {},
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      signals: [],
+    });
+    mocks.generatePublishingBatchV2.mockResolvedValue([{
+      content: 'builderbot keeps shipping receipts in public',
+      format: 'relationship',
+      targetTopic: 'builderbot',
+      rationale: 'Verified relationship post.',
+      pipelineVersion: 'v2',
+      generationSurface: 'relationship',
+      contentProvenance: 'generated_v2',
+      generationRunId: 'run-relationship',
+      ideaId: 'idea-relationship',
+      draftCandidateId: 'draft-relationship',
+      evidenceReferences: [],
+    }]);
   });
 
   it('keeps proactive API replies disabled even when a legacy setting is true', async () => {
@@ -119,7 +169,7 @@ describe('proactive engagement', () => {
     expect(mocks.replyToTweet).not.toHaveBeenCalled();
   });
 
-  it('uses compact shoutout summaries and smaller output budget', async () => {
+  it('requires a verified target post and uses the shared relationship publisher', async () => {
     mocks.getAgents.mockResolvedValue([
       agent,
       {
@@ -130,19 +180,33 @@ describe('proactive engagement', () => {
         soulSummary: `builder voice ${'summary detail '.repeat(40)}SHOUTOUT_SENTINEL`,
       },
     ]);
-    mocks.generateText.mockResolvedValue({ text: 'builderbot keeps shipping receipts in public' });
+    mocks.getTweets.mockImplementation(async (agentId: string) => agentId === 'agent-2' ? [{
+      id: 'target-post-1',
+      agentId: 'agent-2',
+      content: 'shipped the new workflow with measured latency receipts',
+      type: 'original',
+      status: 'posted',
+      xTweetId: 'x-target-1',
+      createdAt: '2026-07-31T00:00:00.000Z',
+      postedAt: '2026-07-31T01:00:00.000Z',
+    }] : []);
 
     const shoutout = await generateAgentShoutout(agent);
 
-    const call = mocks.generateText.mock.calls[0]?.[0];
     expect(shoutout?.targetHandle).toBe('builderbot');
-    expect(call).toEqual(expect.objectContaining({
-      task: 'tweet_generation',
-      tier: 'quality',
-      maxTokens: 128,
+    expect(mocks.generatePublishingBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: agent.id,
+      request: expect.objectContaining({
+        surface: 'relationship',
+        targetHandle: 'builderbot',
+        targetPost: expect.objectContaining({
+          content: 'shipped the new workflow with measured latency receipts',
+          url: 'https://x.com/builderbot/status/x-target-1',
+        }),
+      }),
+      modelStack: 'publishing_v2_quality',
     }));
-    expect(call.prompt).toContain('@builderbot');
-    expect(call.prompt).not.toContain('SHOUTOUT_SENTINEL');
+    expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
   it('backs off proactive trend refresh after a recent X read endpoint failure', async () => {

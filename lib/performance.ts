@@ -4,7 +4,7 @@
  * and feeds insights back into generation.
  */
 
-import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, StyleModePerformance, Tweet, LearningSignal, AudienceSegment, PromptStrategy, MediaExperimentType, PostPortfolioRole, Mention } from './types';
+import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, StyleModePerformance, Tweet, LearningSignal, AudienceSegment, PromptStrategy, MediaExperimentType, PostPortfolioRole, Mention, GenerationEvidenceReference } from './types';
 import {
   createTweet,
   getTweets,
@@ -32,14 +32,13 @@ import {
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
-import { generateText } from './ai';
+import { generateText, PUBLISHING_V2_MODEL_STACK } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
 import { collapsePerformanceSnapshots } from './performance-history';
 import { historicalPerformanceEvidenceWeight, inferContentSpreadMechanics } from './winner-learning';
 import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
-import { isGeoffreyAccount } from './account-taste';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
@@ -54,13 +53,16 @@ import {
 } from './virality-signals';
 import {
   buildRelationshipOpportunities,
-  buildVelocityFollowupFallback,
   buildViralityPostmortem,
   inferPortfolioRole,
   shouldCreateVelocityFollowup,
 } from './growth-engine';
 import { isNearDuplicate } from './survivability';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { buildGenerationContext } from './generation-context';
+import { generatePublishingBatchV2 } from './publishing-v2';
+import { createTweetFromGeneratedCandidate } from './tweet-persistence';
+import { assertAgentAutomationEntitlement } from './automation-entitlement';
 
 function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
   return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
@@ -562,54 +564,81 @@ async function createVelocityFollowupDraft(
     return null;
   }
 
-  const fallback = buildVelocityFollowupFallback(entry);
-  let content = fallback;
-  try {
-    const promptSoul = formatVelocityFollowupSoulForPrompt(agent.soulMd);
-    const promptPost = formatVelocityFollowupPostForPrompt(entry.content);
-    const response = await generateText({
-      task: 'reply_generation',
-      tier: 'fast',
-      maxTokens: getVelocityFollowupMaxTokens(entry.content.length),
-      system: `You write follow-up reply drafts for an X account. Keep the account voice, add substance, and do not use engagement bait. Output only the reply text.`,
-      prompt: `Account: ${agent.name} (@${agent.handle})
-SOUL.md:
-${promptSoul}
-
-Original post taking off:
-"${promptPost}"
-
-Metrics now: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies, ${entry.impressions} impressions.
-
-Write one reply that adds a sharper second-order point, answers the most likely objection, or gives a concrete example. Do not say "thanks for the replies".`,
-    });
-    const trimmed = response.text.trim().replace(/^["']|["']$/g, '');
-    if (trimmed.length >= 20) content = trimmed;
-  } catch {
-    content = fallback;
-  }
-
-  const tweet = await createTweet({
+  const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
+  const analysis = await getAnalysis(agent.id);
+  if (!analysis) return null;
+  const context = await buildGenerationContext(agent, {
+    negativeLimit: 6,
+    directiveLimit: 10,
+  });
+  const checkedAt = entry.checkedAt || new Date().toISOString();
+  const evidence: { originalPost: GenerationEvidenceReference; performance: GenerationEvidenceReference } = {
+    originalPost: {
+      id: `x-post:${entry.xTweetId}`,
+      kind: 'original_post',
+      sourceDocumentId: null,
+      url: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${entry.xTweetId}`,
+      title: 'Original post',
+      publisher: agent.handle.replace(/^@/, ''),
+      content: entry.content,
+      publishedAt: entry.postedAt,
+      verifiedAt: checkedAt,
+      expiresAt: null,
+      trustTier: 'primary',
+    },
+    performance: {
+      id: `performance:${entry.xTweetId}:${checkedAt}`,
+      kind: 'performance_snapshot',
+      sourceDocumentId: null,
+      url: null,
+      title: 'Observed X performance',
+      publisher: 'X API',
+      content: JSON.stringify({
+        likes: entry.likes,
+        reposts: entry.retweets,
+        replies: entry.replies,
+        impressions: entry.impressions,
+        engagementRate: entry.engagementRate,
+        earlyVelocityScore: entry.earlyVelocityScore ?? null,
+      }),
+      publishedAt: checkedAt,
+      verifiedAt: checkedAt,
+      expiresAt: new Date(Date.parse(checkedAt) + 6 * 60 * 60 * 1000).toISOString(),
+      trustTier: 'primary',
+    },
+  };
+  const [candidate] = await generatePublishingBatchV2({
     agentId: agent.id,
-    content,
-    type: 'reply',
+    count: 1,
+    request: {
+      surface: 'followup',
+      triggerId: `early-velocity:${entry.xTweetId}:${checkedAt}`,
+      originalPost: evidence.originalPost,
+      performance: evidence.performance,
+    },
+    voiceProfile: context.voiceProfile,
+    analysis,
+    learnings: context.learnings,
+    style: context.style,
+    recentPosts: context.recentPosts,
+    allTweets: context.allTweets,
+    memory: context.memory,
+    signals: context.signals,
+    trending: null,
+    modelStack: PUBLISHING_V2_MODEL_STACK,
+    mode: 'live',
+    entitlement,
+  });
+  if (!candidate) return null;
+
+  const tweet = await createTweetFromGeneratedCandidate(agent.id, candidate, {
     status: 'draft',
-    format: 'velocity_followup',
+    type: 'reply',
     topic: entry.topic || 'followup',
-    xTweetId: null,
-    quoteTweetId: entry.xTweetId,
-    quoteTweetAuthor: null,
-    scheduledAt: null,
-    rationale: `Supervised follow-up draft for a post with early velocity (${entry.likes} likes, ${entry.replies} replies).`,
-    generationMode: 'balanced',
-    sourceLane: 'manual_core_exploit',
-    creativeLane: 'teaching_threadlet',
-    targetAudienceSegment: entry.targetAudienceSegment || entry.networkCluster || inferAudienceSegment(entry.content, entry.topic),
-    segmentHypothesis: 'Follow-up while attention is active should convert passive engagement into higher-quality replies.',
-    promptStrategy: 'reply_bait',
-    portfolioRole: 'reply_bait',
-    mediaExperimentType: 'text_only',
     followupForTweetId: entry.xTweetId,
+    replyConversationId: entry.xTweetId,
+  });
+  await updateTweet(tweet.id, {
     followupTrigger: `early_velocity:${entry.earlyVelocityScore ?? 0}`,
   });
 
@@ -617,18 +646,17 @@ Write one reply that adds a sharper second-order point, answers the most likely 
     agentId: agent.id,
     tweetId: tweet.id,
     xTweetId: entry.xTweetId,
-    content,
+    content: tweet.content,
     format: 'velocity_followup_draft',
     topic: entry.topic || 'followup',
     postedAt: new Date().toISOString(),
     source: 'cron',
     action: 'skipped',
-    reason: 'Created supervised follow-up draft from early velocity signal.',
+    reason: 'Created a supervised V2 follow-up draft from verified early-velocity evidence.',
   });
 
   return tweet;
 }
-
 /**
  * Check performance of ALL recent tweets on the timeline.
  * Tracks both Clawfable-posted and manually written tweets.
@@ -636,6 +664,7 @@ Write one reply that adds a sharper second-order point, answers the most likely 
  * what the human operator writes when they want maximum engagement.
  */
 export async function checkPerformance(agent: Agent): Promise<number> {
+  await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
     return 0;
   }
@@ -1025,20 +1054,13 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     curation: manualExampleCuration,
   });
   await saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot);
-  const strictVoiceCorpus = isGeoffreyAccount(agent.handle);
-  if (strictVoiceCorpus) {
-    history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
-  }
+  history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
 
   const autopilotHistory = history.filter((t) => t.source === 'autopilot');
   const manualHistory = history.filter((t) => t.source === 'manual');
   const timelineHistory = history.filter((t) => t.source === 'timeline');
-  const operatorReferenceHistory = strictVoiceCorpus
-    ? history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'))
-    : history.filter((tweet) => tweet.source !== 'autopilot');
-  const operatorHistory = strictVoiceCorpus
-    ? history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'))
-    : history.filter((tweet) => tweet.source !== 'autopilot');
+  const operatorReferenceHistory = history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'));
+  const operatorHistory = history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'));
   const trainingHistory = operatorHistory.length > 0
     ? history
     : autopilotHistory.length >= 10
@@ -1057,9 +1079,11 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     weightedLearningScore(b) - weightedLearningScore(a) ||
     weightedEngagementScore(b) - weightedEngagementScore(a)
   );
-  const identityHistory = strictVoiceCorpus
+  const identityHistory = operatorReferenceHistory.length > 0
     ? operatorReferenceHistory
-    : operatorHistory.length > 0 ? operatorHistory : trainingHistory;
+    : operatorHistory.length > 0
+      ? operatorHistory
+      : trainingHistory;
   const identitySorted = [...identityHistory].sort((a, b) =>
     weightedLearningScore(b) - weightedLearningScore(a) ||
     weightedEngagementScore(b) - weightedEngagementScore(a)

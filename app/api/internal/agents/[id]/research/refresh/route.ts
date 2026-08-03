@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GEOFFREY_PRIMARY_MODEL_STACK } from '@/lib/ai';
-import { isGeoffreyAccount } from '@/lib/account-taste';
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { getAgent, resetReadCache } from '@/lib/kv-storage';
 import { refreshAgentResearch } from '@/lib/research-pipeline';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 export const maxDuration = 800;
 
@@ -20,10 +20,18 @@ export async function POST(
   const { id } = await params;
   const agent = await getAgent(id);
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+  try {
+    await assertAgentAutomationEntitlement(id, { agent });
+  } catch (error) {
+    if (error instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(error), { status: error.status });
+    }
+    throw error;
+  }
 
   const result = await refreshAgentResearch(agent, {
     force: true,
-    modelStack: isGeoffreyAccount(agent.handle) ? GEOFFREY_PRIMARY_MODEL_STACK : 'standard',
+    modelStack: PUBLISHING_V2_MODEL_STACK,
   });
   return NextResponse.json(result, { status: result.busy ? 409 : 200 });
 }

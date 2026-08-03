@@ -10,6 +10,7 @@ import {
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
 import { formatActionError } from '@/lib/twitter-debug';
 import { getTrendingTopicStableId } from '@/lib/trending';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 export async function POST(
   request: NextRequest,
@@ -24,6 +25,14 @@ export async function POST(
   const { id } = await params;
   const agent = await getAgent(id);
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+  try {
+    await assertAgentAutomationEntitlement(id, { agent });
+  } catch (error) {
+    if (error instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(error), { status: error.status });
+    }
+    throw error;
+  }
 
   const owner = `internal-topic-refresh:${Date.now()}:${id}`;
   const lock = await acquireAutopilotLock(id, owner, 5 * 60, 'manual');

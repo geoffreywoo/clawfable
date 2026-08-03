@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   releaseAutopilotLock: vi.fn(),
   addOutcomeEvent: vi.fn(),
   runAutopilot: vi.fn(),
+  getAgentOwnerId: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -54,6 +55,7 @@ vi.mock('@/lib/kv-storage', () => ({
   acquireAutopilotLock: mocks.acquireAutopilotLock,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   addOutcomeEvent: mocks.addOutcomeEvent,
+  getAgentOwnerId: mocks.getAgentOwnerId,
   getUserAgents: vi.fn(),
   getTweets: vi.fn(),
   getMentions: vi.fn(),
@@ -105,6 +107,10 @@ const grandfatheredUser = {
 } as const;
 
 describe('billing route guards', () => {
+  afterEach(() => {
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireUser.mockResolvedValue(freeUser);
@@ -113,6 +119,7 @@ describe('billing route guards', () => {
       agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
     });
     mocks.getAccessibleAgentCount.mockResolvedValue(1);
+    mocks.getAgentOwnerId.mockResolvedValue(freeUser.id);
     mocks.canAccessAgent.mockResolvedValue(false);
     mocks.getAgentByHandle.mockResolvedValue(null);
     mocks.acquireAutopilotLock.mockResolvedValue({
@@ -177,8 +184,8 @@ describe('billing route guards', () => {
 
     const data = await response.json();
 
-    expect(response.status).toBe(403);
-    expect(data.code).toBe('autopilot_locked');
+    expect(response.status).toBe(402);
+    expect(data.code).toBe('payment_required');
     expect(mocks.updateProtocolSettings).not.toHaveBeenCalled();
   });
 
@@ -190,12 +197,12 @@ describe('billing route guards', () => {
 
     const data = await response.json();
 
-    expect(response.status).toBe(403);
-    expect(data.code).toBe('autopilot_locked');
+    expect(response.status).toBe(402);
+    expect(data.code).toBe('payment_required');
     expect(mocks.runAutopilot).not.toHaveBeenCalled();
   });
 
-  it('lets grandfathered users create additional agents without upgrading', async () => {
+  it('does not treat an internal username as a billing entitlement', async () => {
     mocks.requireUser.mockResolvedValue(grandfatheredUser);
     mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.createAgent.mockResolvedValue({ id: 'agent-2' });
@@ -206,17 +213,18 @@ describe('billing route guards', () => {
       body: JSON.stringify({ handle: 'newagent', name: 'New Agent', soulMd: '# soul' }),
     }) as any);
 
-    expect(response.status).toBe(200);
-    expect(mocks.createAgent).toHaveBeenCalled();
+    expect(response.status).toBe(403);
+    expect(mocks.createAgent).not.toHaveBeenCalled();
   });
 
-  it('lets grandfathered users enable autopilot without billing lock', async () => {
+  it('lets only an exact exempt agent enable automation without payment', async () => {
     mocks.requireAgentAccess.mockResolvedValue({
       user: grandfatheredUser,
       agent: { id: 'agent-1', name: 'Agent 1', soulMd: '# soul' },
     });
     mocks.getAccessibleAgentCount.mockResolvedValue(1);
     mocks.updateProtocolSettings.mockResolvedValue({ enabled: true });
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = 'agent-1';
 
     const response = await protocolSettingsPATCH(new Request('http://localhost/api/protocol/settings', {
       method: 'PATCH',
