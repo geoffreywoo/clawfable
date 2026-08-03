@@ -335,8 +335,11 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
     || options.task === 'idea_generation'
     || options.task === 'tweet_writing'
   );
+  const fableEffort = options.task === 'idea_generation' || options.task === 'tweet_writing'
+    ? 'low' as const
+    : 'medium' as const;
   const outputConfig = {
-    ...(useFableEffort ? { effort: 'medium' as const } : {}),
+    ...(useFableEffort ? { effort: fableEffort } : {}),
     ...(options.jsonSchema ? {
       format: {
         type: 'json_schema' as const,

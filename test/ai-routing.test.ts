@@ -499,6 +499,9 @@ describe('AI model routing', () => {
       provider: 'anthropic',
       model: 'claude-fable-5',
     }));
+    expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
+      output_config: expect.objectContaining({ effort: 'low' }),
+    }));
     expect(openAiCreate).not.toHaveBeenCalled();
   });
 });

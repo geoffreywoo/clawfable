@@ -248,8 +248,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'idea_judgment')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(3);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
-    expect(ideaCall).toMatchObject({ maxTokens: 8000, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall).toMatchObject({ jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(ideaCall).toMatchObject({ maxTokens: 3800, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall).toMatchObject({ maxTokens: 900, jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(drafts).toHaveLength(2);
     expect(drafts[0]).toMatchObject({
       pipelineVersion: 'v2',
