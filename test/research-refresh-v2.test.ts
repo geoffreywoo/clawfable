@@ -21,7 +21,9 @@ const mocks = vi.hoisted(() => ({
   fetchArxiv: vi.fn(),
   fetchConfiguredFeeds: vi.fn(),
   fetchGithubReleases: vi.fn(),
+  fetchNewsSearch: vi.fn(),
   fetchSecEdgar: vi.fn(),
+  fetchUsgsPublications: vi.fn(),
   sourceDocumentsFromTrending: vi.fn(),
   refreshAgentTopicIntelligence: vi.fn(),
 }));
@@ -56,7 +58,10 @@ vi.mock('@/lib/research-adapters', () => ({
   fetchArxiv: mocks.fetchArxiv,
   fetchConfiguredFeeds: mocks.fetchConfiguredFeeds,
   fetchGithubReleases: mocks.fetchGithubReleases,
+  fetchNewsSearch: mocks.fetchNewsSearch,
   fetchSecEdgar: mocks.fetchSecEdgar,
+  fetchUsgsPublications: mocks.fetchUsgsPublications,
+  isLowSignalSecFilingTitle: (title: string) => /^424B\d*\b/i.test(title),
   sourceDocumentsFromTrending: mocks.sourceDocumentsFromTrending,
 }));
 
@@ -138,6 +143,8 @@ describe('research refresh orchestration', () => {
     mocks.fetchSecEdgar.mockResolvedValue({ sourceType: 'sec_edgar', documents: [], errors: ['sec_edgar: unavailable'] });
     mocks.fetchArxiv.mockResolvedValue({ sourceType: 'arxiv', documents: [], errors: [] });
     mocks.fetchGithubReleases.mockResolvedValue({ sourceType: 'github_releases', documents: [document('github-1', 'github_releases')], errors: [] });
+    mocks.fetchNewsSearch.mockResolvedValue({ sourceType: 'news_search', documents: [], errors: [] });
+    mocks.fetchUsgsPublications.mockResolvedValue({ sourceType: 'official_publications', documents: [], errors: [] });
   });
 
   afterEach(() => {
@@ -227,7 +234,7 @@ describe('research refresh orchestration', () => {
       blockReason: null,
     } satisfies StoryCluster;
     const adapterRefreshedAt = Object.fromEntries(
-      ['x', 'hacker_news', 'rss_atom', 'official', 'sec_edgar', 'arxiv', 'github_releases'].map((sourceType) => [sourceType, nowIso]),
+      ['x', 'hacker_news', 'rss_atom', 'news_search', 'official', 'official_publications', 'sec_edgar', 'arxiv', 'github_releases'].map((sourceType) => [sourceType, nowIso]),
     );
     mocks.getResearchRefreshState.mockResolvedValue({
       schemaVersion: 2,
@@ -250,9 +257,11 @@ describe('research refresh orchestration', () => {
     expect(result.documentsFetched).toBe(0);
     expect(mocks.refreshAgentTopicIntelligence).not.toHaveBeenCalled();
     expect(mocks.fetchConfiguredFeeds).not.toHaveBeenCalled();
+    expect(mocks.fetchNewsSearch).not.toHaveBeenCalled();
     expect(mocks.fetchSecEdgar).not.toHaveBeenCalled();
     expect(mocks.fetchArxiv).not.toHaveBeenCalled();
     expect(mocks.fetchGithubReleases).not.toHaveBeenCalled();
+    expect(mocks.fetchUsgsPublications).not.toHaveBeenCalled();
     expect(mocks.sourceDocumentsFromTrending).not.toHaveBeenCalled();
     const storedClusters = mocks.upsertStoryClusters.mock.calls[0]?.[1] as StoryCluster[];
     expect(storedClusters[0].lastSeenAt).toBe(existingCluster.lastSeenAt);

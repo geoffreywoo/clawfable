@@ -48,7 +48,10 @@ import {
   fetchArxiv,
   fetchConfiguredFeeds,
   fetchGithubReleases,
+  fetchNewsSearch,
   fetchSecEdgar,
+  fetchUsgsPublications,
+  isLowSignalSecFilingTitle,
   sourceDocumentsFromTrending,
   type ResearchAdapterContext,
   type ResearchAdapterResult,
@@ -66,7 +69,9 @@ const RESEARCH_INTERVAL_MS: Partial<Record<ResearchSourceType, number>> = {
   x: 4 * 60 * 60 * 1000,
   hacker_news: 4 * 60 * 60 * 1000,
   rss_atom: 4 * 60 * 60 * 1000,
+  news_search: 4 * 60 * 60 * 1000,
   official: 4 * 60 * 60 * 1000,
+  official_publications: 12 * 60 * 60 * 1000,
   sec_edgar: 4 * 60 * 60 * 1000,
   arxiv: 12 * 60 * 60 * 1000,
   github_releases: 6 * 60 * 60 * 1000,
@@ -300,7 +305,7 @@ export async function enrichSourceDocuments(
   onModelCall?: (call: GenerationModelCallTrace) => void,
 ): Promise<SourceDocument[]> {
   if (documents.length === 0 || !hasTextGenerationProvider()) return documents;
-  const selected = documents.slice(0, 24);
+  const selected = selectSourceDocumentsForEnrichment(documents, 24);
   const startedAt = Date.now();
   let result: Awaited<ReturnType<typeof generateText>>;
   try {
@@ -361,6 +366,31 @@ export async function enrichSourceDocuments(
   });
 }
 
+export function selectSourceDocumentsForEnrichment(
+  documents: SourceDocument[],
+  limit: number,
+): SourceDocument[] {
+  const queues = new Map<ResearchSourceType, SourceDocument[]>();
+  for (const document of documents) {
+    const queue = queues.get(document.sourceType) || [];
+    queue.push(document);
+    queues.set(document.sourceType, queue);
+  }
+  const selected: SourceDocument[] = [];
+  while (selected.length < Math.max(0, limit) && [...queues.values()].some((queue) => queue.length > 0)) {
+    for (const queue of queues.values()) {
+      const document = queue.shift();
+      if (document) selected.push(document);
+      if (selected.length >= limit) break;
+    }
+  }
+  return selected;
+}
+
+export function isResearchDocumentEligibleForClustering(document: SourceDocument): boolean {
+  return document.sourceType !== 'sec_edgar' || !isLowSignalSecFilingTitle(document.title);
+}
+
 function identityFit(document: SourceDocument, agenda: ResearchAgenda): number {
   const desired = new Set(significantResearchTokens([
     ...agenda.queries,
@@ -399,10 +429,17 @@ function consequenceScore(documents: SourceDocument[]): number {
 }
 
 function freshnessScore(documents: SourceDocument[], nowMs: number): number {
-  const newest = Math.max(...documents.map((entry) => Date.parse(entry.publishedAt)).filter(Number.isFinite), 0);
-  if (newest <= 0) return 0;
-  const ageHours = Math.max(0, nowMs - newest) / (60 * 60 * 1000);
-  return clampResearchScore(1 - ageHours / (14 * 24));
+  return Math.max(0, ...documents.map((document) => {
+    const publishedAt = Date.parse(document.publishedAt);
+    if (!Number.isFinite(publishedAt) || publishedAt <= 0) return 0;
+    const ageHours = Math.max(0, nowMs - publishedAt) / (60 * 60 * 1000);
+    const lifetimeDays = document.sourceType === 'official_publications'
+      ? 365
+      : document.sourceType === 'arxiv'
+        ? 180
+        : 14;
+    return clampResearchScore(1 - ageHours / (lifetimeDays * 24));
+  }));
 }
 
 function qualifiedClaimIds(documents: SourceDocument[]): string[] {
@@ -588,7 +625,9 @@ async function refreshExternalSources(
   const nowMs = (context.now || new Date()).getTime();
   const tasks: Array<Promise<ResearchAdapterResult>> = [];
   if (adapterDue(state, 'rss_atom', nowMs, force)) tasks.push(fetchConfiguredFeeds(context, 'rss_atom'));
+  if (adapterDue(state, 'news_search', nowMs, force)) tasks.push(fetchNewsSearch(context));
   if (adapterDue(state, 'official', nowMs, force)) tasks.push(fetchConfiguredFeeds(context, 'official'));
+  if (adapterDue(state, 'official_publications', nowMs, force)) tasks.push(fetchUsgsPublications(context));
   if (adapterDue(state, 'sec_edgar', nowMs, force)) tasks.push(fetchSecEdgar(context));
   if (adapterDue(state, 'arxiv', nowMs, force)) tasks.push(fetchArxiv(context));
   if (adapterDue(state, 'github_releases', nowMs, force)) tasks.push(fetchGithubReleases(context));
@@ -709,9 +748,10 @@ export async function refreshAgentResearch(
       }
     }
     const storedDocuments = await upsertSourceDocuments(agent.id, enriched);
+    const clusterDocuments = storedDocuments.filter(isResearchDocumentEligibleForClustering);
     const clusters = clusterAndQualifySources({
       agentId: agent.id,
-      documents: storedDocuments,
+      documents: clusterDocuments,
       agenda,
       existingClusters,
       blocks: effectiveSemanticBlocks,

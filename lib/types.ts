@@ -674,10 +674,12 @@ export type ResearchSourceType =
   | 'x'
   | 'hacker_news'
   | 'rss_atom'
+  | 'news_search'
   | 'sec_edgar'
   | 'arxiv'
   | 'github_releases'
-  | 'official';
+  | 'official'
+  | 'official_publications';
 
 export type SourceTrustTier = 'primary' | 'trusted' | 'community';
 

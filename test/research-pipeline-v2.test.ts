@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildResearchAgenda, clusterAndQualifySources } from '@/lib/research-pipeline';
+import {
+  buildResearchAgenda,
+  clusterAndQualifySources,
+  isResearchDocumentEligibleForClustering,
+  selectSourceDocumentsForEnrichment,
+} from '@/lib/research-pipeline';
 import type { ResearchAgenda, SourceDocument } from '@/lib/types';
 
 const now = new Date('2026-08-01T12:00:00.000Z');
@@ -278,6 +283,68 @@ describe('research agenda and story qualification', () => {
     });
 
     expect(cluster.scores.freshness).toBe(0);
+  });
+
+  it('keeps durable primary publications useful longer than event feeds', () => {
+    const publishedAt = '2026-04-01T12:00:00.000Z';
+    const [official] = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda,
+      now,
+      documents: [source({
+        id: 'usgs-report',
+        sourceType: 'official_publications',
+        title: 'AI mineral supply costs change startup market timing',
+        publisher: 'U.S. Geological Survey',
+        trustTier: 'primary',
+        isPrimary: true,
+        publishedAt,
+      })],
+    });
+    const [news] = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda,
+      now,
+      documents: [source({
+        id: 'old-news',
+        sourceType: 'news_search',
+        title: 'AI mineral supply costs change startup market timing',
+        publisher: 'Publication',
+        publishedAt,
+      })],
+    });
+
+    expect(official.scores.freshness).toBeGreaterThan(0.5);
+    expect(news.scores.freshness).toBe(0);
+  });
+
+  it('spreads source enrichment capacity across adapters', () => {
+    const documents = [
+      source({ id: 'x-1', sourceType: 'x', title: 'X one', publisher: 'X' }),
+      source({ id: 'x-2', sourceType: 'x', title: 'X two', publisher: 'X' }),
+      source({ id: 'news', sourceType: 'news_search', title: 'News', publisher: 'News' }),
+      source({ id: 'usgs', sourceType: 'official_publications', title: 'USGS', publisher: 'USGS' }),
+      source({ id: 'arxiv', sourceType: 'arxiv', title: 'arXiv', publisher: 'arXiv' }),
+    ];
+
+    expect(selectSourceDocumentsForEnrichment(documents, 4).map((document) => document.id)).toEqual([
+      'x-1', 'news', 'usgs', 'arxiv',
+    ]);
+  });
+
+  it('keeps routine SEC cache entries out of clustering', () => {
+    expect(isResearchDocumentEligibleForClustering(source({
+      id: 'routine-sec',
+      sourceType: 'sec_edgar',
+      title: '424B2 - Morgan Stanley Finance LLC (Filer)',
+      publisher: 'SEC',
+    }))).toBe(false);
+    expect(isResearchDocumentEligibleForClustering(source({
+      id: 'material-sec',
+      sourceType: 'sec_edgar',
+      title: '8-K - Acme AI Infrastructure, Inc. (Filer)',
+      publisher: 'SEC',
+    }))).toBe(true);
   });
 
   it('blocks political drift and explicit source/topic exclusions before generation', () => {

@@ -29,6 +29,7 @@ const DEFAULT_OFFICIAL_HOST_ALLOWLIST = [
   'nasa.gov',
   'openai.com',
   'sec.gov',
+  'usgs.gov',
 ];
 
 export const DEFAULT_RESEARCH_FEEDS: ResearchFeedConfig[] = [
@@ -141,7 +142,7 @@ function secFilingClaims(title: string, excerpt: string, canonicalUrl: string): 
   }];
 }
 
-const LOW_SIGNAL_SEC_FORM = /^(?:13F|424B|NPORT|N-PX|UPLOAD|CORRESP)\b/i;
+const LOW_SIGNAL_SEC_FORM = /^(?:13F(?:-HR)?|424B\d*|NPORT(?:-P)?|N-PX|UPLOAD|CORRESP)\b/i;
 const GENERIC_SEC_MATCH_TOKENS = new Set([
   'company', 'companies', 'corp', 'corporation', 'finance', 'financial', 'filed',
   'filer', 'market', 'markets', 'startup', 'startups', 'subject', 'tech', 'technology',
@@ -152,7 +153,7 @@ function secEntryMatchesAgenda(
   agenda: ResearchAgenda,
 ): boolean {
   const form = entry.title.split(/\s+-\s+/, 1)[0] || '';
-  if (LOW_SIGNAL_SEC_FORM.test(form)) return false;
+  if (isLowSignalSecFilingTitle(form)) return false;
   const desired = new Set(significantResearchTokens([
     ...agenda.queries,
     ...agenda.pinnedQuestions,
@@ -160,6 +161,11 @@ function secEntryMatchesAgenda(
   ].join(' ')).filter((token) => !GENERIC_SEC_MATCH_TOKENS.has(token)));
   if (desired.size === 0) return false;
   return significantResearchTokens(entry.title).some((token) => desired.has(token));
+}
+
+export function isLowSignalSecFilingTitle(title: string): boolean {
+  const form = title.split(/\s+-\s+/, 1)[0] || title;
+  return LOW_SIGNAL_SEC_FORM.test(form.trim());
 }
 
 function safePublishedAt(value: string | null | undefined, now: Date): string {
@@ -263,7 +269,7 @@ function feedDocument({
   query = null,
 }: {
   agentId: string;
-  sourceType: 'rss_atom' | 'official' | 'sec_edgar' | 'arxiv' | 'github_releases';
+  sourceType: 'rss_atom' | 'news_search' | 'official' | 'official_publications' | 'sec_edgar' | 'arxiv' | 'github_releases';
   feed: Pick<ResearchFeedConfig, 'publisher' | 'trustTier' | 'topics'>;
   entry: { title: string; url: string; publishedAt: string; excerpt: string };
   now: Date;
@@ -297,6 +303,179 @@ function feedDocument({
     query,
     metadata: { publishedAtKnown: publishedAt !== '1970-01-01T00:00:00.000Z' },
   };
+}
+
+function newsSearchQueries(agenda: ResearchAgenda): string[] {
+  return agenda.queries
+    .map((query) => ({ query, tokens: significantResearchTokens(query).slice(0, 5) }))
+    .filter((entry) => entry.tokens.length >= 3)
+    .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.tokens.join(' ') === entry.tokens.join(' ')) === index)
+    .slice(0, 6)
+    .map((entry) => entry.query);
+}
+
+function googleNewsQueryUrl(query: string): string {
+  const tokens = significantResearchTokens(query).slice(0, 5).join(' ');
+  const url = new URL('https://news.google.com/rss/search');
+  url.searchParams.set('q', `${tokens} when:14d`);
+  url.searchParams.set('hl', 'en-US');
+  url.searchParams.set('gl', 'US');
+  url.searchParams.set('ceid', 'US:en');
+  return url.toString();
+}
+
+function newsTitleAndPublisher(rawTitle: string): { title: string; publisher: string } {
+  const separator = rawTitle.lastIndexOf(' - ');
+  if (separator < 1 || separator >= rawTitle.length - 3) {
+    return { title: rawTitle, publisher: 'Google News result' };
+  }
+  return {
+    title: rawTitle.slice(0, separator).trim(),
+    publisher: rawTitle.slice(separator + 3).trim().slice(0, 160) || 'Google News result',
+  };
+}
+
+export async function fetchNewsSearch(
+  context: ResearchAdapterContext,
+): Promise<ResearchAdapterResult> {
+  const fetchImpl = context.fetchImpl || fetch;
+  const now = context.now || new Date();
+  const queries = newsSearchQueries(context.agenda);
+  const documents: SourceDocument[] = [];
+  const errors: string[] = [];
+  const results = await Promise.allSettled(queries.map(async (query) => {
+    const xml = await fetchText(googleNewsQueryUrl(query), fetchImpl);
+    const queryTokens = new Set(significantResearchTokens(query).slice(0, 5));
+    return parseSyndicationFeed(xml, 8).flatMap((entry) => {
+      const parsed = newsTitleAndPublisher(entry.title);
+      const contentTokens = new Set(significantResearchTokens(`${parsed.title} ${entry.excerpt}`));
+      const overlap = [...queryTokens].filter((token) => contentTokens.has(token)).length;
+      const publishedAt = Date.parse(entry.publishedAt);
+      const ageMs = now.getTime() - publishedAt;
+      if (overlap < 2 || !Number.isFinite(publishedAt) || ageMs < -24 * 60 * 60 * 1000 || ageMs > 15 * 24 * 60 * 60 * 1000) {
+        return [];
+      }
+      const document = feedDocument({
+        agentId: context.agentId,
+        sourceType: 'news_search',
+        feed: {
+          publisher: parsed.publisher,
+          trustTier: 'community',
+          topics: significantResearchTokens(query).slice(0, 6),
+        },
+        entry: {
+          ...entry,
+          title: parsed.title,
+          excerpt: entry.excerpt.replace(new RegExp(`${parsed.publisher.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), '').trim(),
+        },
+        now,
+        query,
+      });
+      return [{
+        ...document,
+        metadata: {
+          ...document.metadata,
+          discovery: 'google_news_rss',
+          aggregatorUrl: document.canonicalUrl,
+        },
+      }];
+    });
+  }));
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') documents.push(...result.value);
+    else errors.push(`news_search:${queries[index] || 'query'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+  });
+  const unique = documents.filter((document, index, entries) => entries.findIndex((entry) => entry.id === document.id) === index);
+  return { sourceType: 'news_search', documents: unique.slice(0, MAX_DOCUMENTS_PER_ADAPTER), errors };
+}
+
+const USGS_COMMODITY_TOKENS = new Set([
+  'antimony', 'beryllium', 'dysprosium', 'fluorspar', 'gallium', 'germanium',
+  'graphite', 'neon', 'rhenium', 'terbium', 'tungsten',
+]);
+
+function usgsPublicationQueries(agenda: ResearchAgenda): Array<{ query: string; commodity: string }> {
+  const commodities = agenda.queries.flatMap((query) => (
+    significantResearchTokens(query)
+      .filter((token) => USGS_COMMODITY_TOKENS.has(token))
+      .map((commodity) => ({ query, commodity }))
+  ));
+  return commodities
+    .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.commodity === entry.commodity) === index)
+    .slice(0, 5);
+}
+
+function usgsRecordDocument(
+  agentId: string,
+  record: Record<string, unknown>,
+  query: string,
+  commodity: string,
+  now: Date,
+): SourceDocument | null {
+  const indexId = String(record.indexId || '').trim();
+  const title = compactText(String(record.displayTitle || record.title || ''), 300);
+  if (!indexId || !title) return null;
+  const canonicalUrl = `https://pubs.usgs.gov/publication/${encodeURIComponent(indexId)}`;
+  const excerpt = stripResearchMarkup(String(record.docAbstract || ''), 1200);
+  const publishedAt = safePublishedAt(
+    String(record.publicationDate || record.displayToPublicDate || ''),
+    now,
+  );
+  const entities = extractResearchEntities(`${title}. ${excerpt}`);
+  return {
+    schemaVersion: 2,
+    id: stableResearchId('source', canonicalUrl),
+    agentId,
+    sourceType: 'official_publications',
+    canonicalUrl,
+    title,
+    publisher: 'U.S. Geological Survey',
+    publishedAt,
+    fetchedAt: now.toISOString(),
+    trustTier: 'primary',
+    isPrimary: true,
+    excerpt,
+    contentHash: stableResearchId('content', title, excerpt),
+    entities,
+    claims: extractDeterministicClaims(title, excerpt),
+    topics: ['materials', 'critical minerals', commodity],
+    query,
+    metadata: {
+      publishedAtKnown: publishedAt !== '1970-01-01T00:00:00.000Z',
+      usgsIndexId: indexId,
+      doi: typeof record.doi === 'string' ? record.doi : null,
+    },
+  };
+}
+
+export async function fetchUsgsPublications(
+  context: ResearchAdapterContext,
+): Promise<ResearchAdapterResult> {
+  const fetchImpl = context.fetchImpl || fetch;
+  const now = context.now || new Date();
+  const queries = usgsPublicationQueries(context.agenda);
+  const documents: SourceDocument[] = [];
+  const errors: string[] = [];
+  const results = await Promise.allSettled(queries.map(async ({ query, commodity }) => {
+    const url = new URL('https://pubs.usgs.gov/pubs-services/publication/');
+    url.searchParams.set('q', commodity);
+    url.searchParams.set('page_size', '5');
+    url.searchParams.set('page_number', '1');
+    url.searchParams.set('pub_x_days', '365');
+    const raw = await fetchText(url.toString(), fetchImpl, { Accept: 'application/json' }, true);
+    const parsed = JSON.parse(raw) as { records?: unknown[] };
+    return (Array.isArray(parsed.records) ? parsed.records : []).flatMap((record) => {
+      if (!record || typeof record !== 'object') return [];
+      const document = usgsRecordDocument(context.agentId, record as Record<string, unknown>, query, commodity, now);
+      return document ? [document] : [];
+    });
+  }));
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') documents.push(...result.value);
+    else errors.push(`usgs:${queries[index]?.commodity || 'query'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+  });
+  const unique = documents.filter((document, index, entries) => entries.findIndex((entry) => entry.id === document.id) === index);
+  return { sourceType: 'official_publications', documents: unique.slice(0, MAX_DOCUMENTS_PER_ADAPTER), errors };
 }
 
 export function sourceDocumentsFromTrending(
@@ -527,8 +706,10 @@ export async function runExternalResearchAdapters(
 ): Promise<ResearchAdapterResult[]> {
   return Promise.all([
     fetchConfiguredFeeds(context),
+    fetchNewsSearch(context),
     fetchSecEdgar(context),
     fetchArxiv(context),
     fetchGithubReleases(context),
+    fetchUsgsPublications(context),
   ]);
 }

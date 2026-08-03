@@ -3,6 +3,8 @@ import {
   fetchArxiv,
   fetchConfiguredFeeds,
   fetchGithubReleases,
+  fetchNewsSearch,
+  fetchUsgsPublications,
   getResearchFeedUrlIssue,
   fetchSecEdgar,
   sourceDocumentsFromTrending,
@@ -201,5 +203,71 @@ describe('research adapters', () => {
     });
 
     expect(result.documents).toEqual([]);
+  });
+
+  it('discovers fresh query-matched news without promoting it to primary evidence', async () => {
+    const xml = `<rss><channel>
+      <item><title>Chiplet hybrid bonding yield improves at production scale - Fabrication Weekly</title><link>https://news.google.com/rss/articles/story-1</link><pubDate>Fri, 31 Jul 2026 10:00:00 GMT</pubDate><description>Chiplet hybrid bonding yield improved in a new production process. Fabrication Weekly</description></item>
+      <item><title>Unrelated sports result - Sports Desk</title><link>https://news.google.com/rss/articles/story-2</link><pubDate>Fri, 31 Jul 2026 10:00:00 GMT</pubDate><description>A match ended.</description></item>
+    </channel></rss>`;
+    const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(xml, { status: 200 }));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+    const query = 'hybrid bonding alignment yield chiplets';
+    const result = await fetchNewsSearch({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: [query] },
+      trending: [],
+      fetchImpl,
+      now,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0][0])).toContain('when%3A14d');
+    expect(result.errors).toEqual([]);
+    expect(result.documents).toEqual([
+      expect.objectContaining({
+        sourceType: 'news_search',
+        publisher: 'Fabrication Weekly',
+        title: 'Chiplet hybrid bonding yield improves at production scale',
+        trustTier: 'community',
+        isPrimary: false,
+        query,
+      }),
+    ]);
+  });
+
+  it('retrieves canonical primary records from the USGS publications API', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({
+      records: [{
+        indexId: 'ofr20261018',
+        displayTitle: 'Production of mineral commodities and infrastructure in China',
+        publicationDate: '2026-06-12',
+        docAbstract: '<p>China produced 98 percent of global gallium supply and held major tungsten processing capacity.</p>',
+        doi: '10.3133/ofr20261018',
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+    const query = 'USGS tungsten mineral commodity summary';
+    const result = await fetchUsgsPublications({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: [query] },
+      trending: [],
+      fetchImpl,
+      now,
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('q=tungsten');
+    expect(result.errors).toEqual([]);
+    expect(result.documents).toEqual([
+      expect.objectContaining({
+        sourceType: 'official_publications',
+        canonicalUrl: 'https://pubs.usgs.gov/publication/ofr20261018',
+        publisher: 'U.S. Geological Survey',
+        trustTier: 'primary',
+        isPrimary: true,
+        query,
+      }),
+    ]);
+    expect(result.documents[0].excerpt).not.toContain('<p>');
   });
 });
