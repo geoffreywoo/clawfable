@@ -147,7 +147,7 @@ const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
 
 const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial<Record<AiTask, AiModelTarget[]>>>> = {
   [PUBLISHING_V2_MODEL_STACK]: {
-    idea_generation: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
+    idea_generation: [OAI_COPY, CLAUDE_FABLE, OAI_QUALITY, CLAUDE_QUALITY],
     tweet_writing: [CLAUDE_FABLE, OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     idea_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],
     copy_judgment: [OAI_COPY, OAI_QUALITY, CLAUDE_QUALITY],

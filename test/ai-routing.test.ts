@@ -135,8 +135,8 @@ describe('AI model routing', () => {
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
     expect(getModelChainForTask('idea_generation', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
-      provider: 'anthropic',
-      model: 'claude-fable-5',
+      provider: 'openai',
+      model: 'gpt-5.6',
     });
     expect(getModelChainForTask('idea_judgment', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
       provider: 'openai',
@@ -486,9 +486,9 @@ describe('AI model routing', () => {
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
 
     const result = await generateText({
-      task: 'idea_generation',
+      task: 'tweet_writing',
       modelStack: PUBLISHING_V2_MODEL_STACK,
-      system: 'Return the requested idea.',
+      system: 'Return the requested draft.',
       prompt: 'probe',
       maxTokens: 64,
       timeoutMs: 100,

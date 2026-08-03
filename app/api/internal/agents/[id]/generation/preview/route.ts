@@ -261,6 +261,7 @@ export async function POST(
           ideaId: draft.ideaId || null,
           draftCandidateId: draft.draftCandidateId || null,
           evidenceReferences: draft.evidenceReferences || [],
+          generationEvidenceReferences: draft.generationEvidenceReferences || [],
           topic: draft.targetTopic,
           generationModelStack: draft.generationModelStack || requestedModelStack,
           generationProvider: draft.generationProvider || null,

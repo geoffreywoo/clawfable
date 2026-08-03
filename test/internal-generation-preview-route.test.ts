@@ -133,6 +133,11 @@ describe('internal generation preview route', () => {
         generationProvider: 'openai',
         generationModel: 'gpt-5.6',
         evidenceReferences: [],
+        generationEvidenceReferences: [{
+          id: 'source-v2',
+          kind: 'research_source',
+          content: 'Qualified source evidence',
+        }],
       }];
     });
     mocks.assessAccountTaste.mockReturnValue({
@@ -190,6 +195,7 @@ describe('internal generation preview route', () => {
         generationRunId: 'run-v2',
         ideaId: 'idea-v2',
         draftCandidateId: 'draft-v2',
+        generationEvidenceReferences: [expect.objectContaining({ id: 'source-v2' })],
       }],
     });
   });
