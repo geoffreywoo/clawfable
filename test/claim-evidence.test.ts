@@ -30,6 +30,37 @@ describe('claim evidence', () => {
     expect(assessClaimEvidence('The meeting gets 10x more serious.', ['The portfolio was worth $10b.']).risk).toBeGreaterThan(0.4);
   });
 
+  it('normalizes percent notation but rejects cross-claim numeric synthesis', () => {
+    const support = [
+      'Of 77 commodities, China produced 74 and ranked first for 39.',
+      'Gallium production reached 98 percent; reserve shares ranged from 20 percent for zinc to 52 percent for tungsten.',
+    ];
+    const scoped = assessClaimEvidence('China produced up to 98% of global gallium.', support);
+    const spliced = assessClaimEvidence(
+      'China led 39 commodities while holding 20–52% of reserves for those same commodities.',
+      support,
+    );
+
+    expect(scoped.unsupportedNumbers).toEqual([]);
+    expect(scoped.crossClaimNumbers).toEqual([]);
+    expect(scoped.risk).toBe(0);
+    expect(spliced.unsupportedNumbers).toEqual([]);
+    expect(spliced.crossClaimNumbers).toEqual(expect.arrayContaining(['39', '20%', '52%']));
+    expect(spliced.issue).toContain('combines separate evidence claims');
+  });
+
+  it('rejects concrete mechanisms that qualified evidence never establishes', () => {
+    const result = assessClaimEvidence(
+      'The leverage sits in processing and refining capacity, not geology.',
+      ['China produced 74 commodities and ranked first for 39 of them.'],
+      { lockEvidenceConcepts: true },
+    );
+
+    expect(result.unsupportedEvidenceConcepts).toContain('processing or refining');
+    expect(result.risk).toBeGreaterThanOrEqual(0.7);
+    expect(result.issue).toContain('evidence does not establish');
+  });
+
   it('does not mistake model and product identifiers for unsupported quantities', () => {
     expect(assessClaimEvidence('Xiaomi-Robotics-1 matters because Xiaomi can ship it.', []).risk).toBe(0);
     expect(assessClaimEvidence('GPT-5.6 is a model release.', []).risk).toBe(0);

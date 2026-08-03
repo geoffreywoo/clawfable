@@ -471,6 +471,51 @@ describe('Tweet Generation V2', () => {
     expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
   });
 
+  it('rejects an idea that combines numbers from separately scoped evidence claims', () => {
+    const sourcedBrief = {
+      ...brief('minerals', 'critical minerals', 'verified_source'),
+      qualifiedClaimIds: ['claim-production', 'claim-reserves'],
+      evidence: [{
+        sourceDocumentId: 'source-minerals',
+        claimId: 'claim-production',
+        publisher: 'USGS',
+        publishedAt: '2026-08-01T10:00:00.000Z',
+        claim: 'Of 77 commodities, China produced 74 and ranked first for 39.',
+      }, {
+        sourceDocumentId: 'source-minerals',
+        claimId: 'claim-reserves',
+        publisher: 'USGS',
+        publishedAt: '2026-08-01T10:00:00.000Z',
+        claim: 'Reserve shares ranged from 20 percent for zinc to 52 percent for tungsten.',
+      }],
+    } satisfies GenerationBriefV2;
+    const source = {
+      id: 'source-minerals',
+      claims: [{ id: 'claim-production', text: sourcedBrief.evidence[0].claim, kind: 'measurement' }, {
+        id: 'claim-reserves', text: sourcedBrief.evidence[1].claim, kind: 'measurement',
+      }],
+    } as SourceDocument;
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('minerals', 'China led 39 commodities while holding 20–52% of reserves for those same commodities.'),
+        evidenceIds: ['source-minerals'],
+      }],
+      agentId: 'agent-1',
+      runId: 'run-mineral-scope',
+      briefs: [sourcedBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      documents: [source],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['claim_not_grounded_in_evidence']),
+    });
+  });
+
   it('rejects PFL/MVP reskins, repeated explainers, political drift, and missing evidence before writing', () => {
     const briefs = [
       brief('pfl', 'PFL MVP boxing merger'),
@@ -579,6 +624,13 @@ describe('Tweet Generation V2', () => {
     }]));
 
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
+    expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
+    expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
+      evidenceId: 'source-sourced',
+      claim: expect.any(String),
+    })]);
+    expect(ideaPrompt.briefs[0].evidence[0]).not.toHaveProperty('claimId');
+    expect(ideaPrompt.briefs[0].evidence[0]).not.toHaveProperty('sourceDocumentId');
     expect(writingPrompt).toEqual(expect.objectContaining({
       idea: expect.objectContaining({ claim: idea.claim }),
       evidenceMode: 'verified_source',

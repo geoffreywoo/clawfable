@@ -60,16 +60,19 @@ function result(text: string, provider: 'openai' | 'anthropic' = 'openai') {
 
 function ideaResponse(prompt: string) {
   const parsed = JSON.parse(prompt);
-  const ideas = parsed.briefs.flatMap((brief: any, briefIndex: number) => [0, 1, 2].map((variant) => ({
-    briefId: brief.id,
-    claim: `${brief.topic} changes which proof must exist before a team commits capacity on path ${briefIndex}-${variant}`,
-    tension: `The visible launch on path ${briefIndex}-${variant} arrives before buyers know which operating promise will hold`,
-    implication: `Sequence the proof, capacity commitment, and buyer decision differently for path ${briefIndex}-${variant}`,
-    authorReason: `The author's recurring lens is who commits scarce capital before uncertainty clears on path ${briefIndex}-${variant}`,
-    evidenceIds: brief.allowedEvidenceIds,
-    counterargument: `Incumbents could absorb the advantage on path ${briefIndex}-${variant}`,
-    factualRisk: 'low',
-  })));
+  const ideas = parsed.briefs.flatMap((brief: any, briefIndex: number) => [0, 1, 2].map((variant) => {
+    const path = `${String.fromCharCode(97 + briefIndex)}${String.fromCharCode(97 + variant)}`;
+    return {
+      briefId: brief.id,
+      claim: `${brief.topic} changes which proof must exist before a team commits capacity on path ${path}`,
+      tension: `The visible launch on path ${path} arrives before buyers know which operating promise will hold`,
+      implication: `Sequence the proof, capacity commitment, and buyer decision differently for path ${path}`,
+      authorReason: `The author's recurring lens is who commits scarce capital before uncertainty clears on path ${path}`,
+      evidenceIds: brief.allowedEvidenceIds,
+      counterargument: `Incumbents could absorb the advantage on path ${path}`,
+      factualRisk: 'low',
+    };
+  }));
   return result(JSON.stringify({ ideas }), 'anthropic');
 }
 
@@ -295,6 +298,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
     expect(mocks.upsertIdeaCandidates).not.toHaveBeenCalled();
     expect(mocks.upsertDraftCandidates).not.toHaveBeenCalled();
+    expect(mocks.getGenerationRuns).not.toHaveBeenCalled();
   });
 
   it('stops live generation before model calls when entitlement is missing', async () => {
@@ -410,6 +414,7 @@ describe('generateTweetBatchV2 integration', () => {
     const anchors = JSON.parse(writerCall?.[0].prompt || '{}').voiceAnchors.map((anchor: any) => anchor.text);
     const writerSystem = String(writerCall?.[0].system || '');
     const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation');
+    const ideaSystem = String(ideaCall?.[0].system || '');
     const previousPremises = JSON.parse(ideaCall?.[0].prompt || '{}').previousPremises;
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
@@ -418,6 +423,12 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem).toContain('Use first person only when it adds real ownership');
     expect(writerSystem).toContain('do not make "my bet" or "I\'d build" the default frame');
     expect(writerSystem).toContain('under 280 characters and at most three sentences');
+    expect(writerSystem).toContain("every number's subject, denominator, geography, time period, and measurement type");
+    expect(ideaSystem).toContain('never splice figures from different commodities, cohorts, or scopes');
+    expect(ideaSystem).toContain('claim field of a verified-source idea must be directly entailed');
+    const ideaPrompt = JSON.parse(ideaCall?.[0].prompt || '{}');
+    expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
+    expect(ideaPrompt.briefs.flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
     expect(previousPremises).toContain('operator-written diction anchor');
     expect(previousPremises).toContain('timeline diction from the curated voice corpus');
     expect(previousPremises).not.toContain('generated diction must not return');

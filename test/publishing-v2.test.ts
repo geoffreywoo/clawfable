@@ -187,6 +187,8 @@ describe('V2 publishing surfaces', () => {
       expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(2);
       expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
       expect(writerCall.jsonSchema.properties.content.maxLength).toBe(280);
+      expect(writerCall.system).toContain("every number's subject, denominator, geography, time period, and measurement type");
+      expect(copyJudgeCall.system).toContain("change a figure's subject, denominator, geography, period, or measurement type");
       expect(JSON.parse(copyJudgeCall.prompt).voiceAnchors).toHaveLength(3);
       expect(drafts).toHaveLength(2);
       expect(drafts[0]).toMatchObject({
