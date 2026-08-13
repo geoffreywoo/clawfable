@@ -307,9 +307,22 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall).toMatchObject({ maxTokens: 1600, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall).toMatchObject({
+      maxTokens: 3200,
+      timeoutMs: 75_000,
+      jsonSchema: expect.objectContaining({
+        type: 'object',
+        properties: expect.objectContaining({
+          drafts: expect.objectContaining({
+            items: expect.objectContaining({
+              required: ['content', 'format', 'posture'],
+            }),
+          }),
+        }),
+      }),
+    });
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
-    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content']);
+    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
