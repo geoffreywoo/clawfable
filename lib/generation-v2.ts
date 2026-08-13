@@ -81,10 +81,17 @@ import { assessGeneratedWritingPatterns } from './writing-patterns';
 import { classifyGeoffreyTopicDomain, isGeoffreyDeepTechnicalTopic } from './source-planner';
 import { inferContentSpreadMechanics } from './winner-learning';
 import { pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
+import {
+  PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_QUALITY_POLICY_VERSION,
+} from './publishing-quality-policy';
+
+export {
+  PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_QUALITY_POLICY_VERSION,
+} from './publishing-quality-policy';
 
 const PIPELINE_VERSION = 'v2' as const;
-export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-6';
-export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-10';
 export const V2_MAX_DRAFT_CHARACTERS = 1200;
 export const V2_MAX_GENERATED_SLOP_RISK = 0.32;
 export const V2_MAX_GENERATED_PATTERN_RISK = 0.28;
