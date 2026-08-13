@@ -995,6 +995,7 @@ describe('Tweet Generation V2', () => {
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
     expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments or preferences');
+    expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
       evidenceId: 'source-sourced',
       claim: expect.any(String),
@@ -1004,6 +1005,10 @@ describe('Tweet Generation V2', () => {
     expect(writingPrompt).toEqual(expect.objectContaining({
       idea: expect.objectContaining({ claim: idea.claim }),
       evidenceMode: 'verified_source',
+      subjectContext: expect.objectContaining({
+        title: 'AI infrastructure',
+        instruction: expect.stringContaining('reason to publish now'),
+      }),
       factualWritingContract: expect.stringContaining('directly supported'),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
       voiceAnchors: [expect.objectContaining({

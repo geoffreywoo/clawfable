@@ -101,7 +101,7 @@ describe('research agenda and story qualification', () => {
     expect(built).not.toHaveProperty('evidence');
   });
 
-  it('puts distinct high-specificity frontier searches ahead of broad account topics', () => {
+  it('puts native discovery ahead of most frontier searches without dropping the frontier portfolio', () => {
     const built = buildResearchAgenda({
       agent: { id: 'agent-1', name: 'geoffreywoo', handle: 'geoffreywoo', soulMd: '' } as any,
       voiceProfile: {
@@ -117,10 +117,11 @@ describe('research agenda and story qualification', () => {
       tweets: [],
     });
 
-    expect(built.queries.slice(0, 3)).toEqual([
+    expect(built.queries.slice(0, 4)).toEqual([
+      'technology products software developers startups companies',
+      'startup founders funding acquisitions products customers',
       'inference ASIC HBM bandwidth rack power tokens per watt',
       'hybrid bonding alignment yield chiplets',
-      'robot actuator life duty cycle field service',
     ]);
     expect(built.queries).toEqual(expect.arrayContaining(['crypto', 'tech', 'startup']));
     expect(built.queries.filter((query) => /(?:inference|bonding|robot|transformer|tungsten|antimony|gallium|graphite|fluorspar)/i.test(query)).length).toBeLessThanOrEqual(12);
@@ -186,6 +187,42 @@ describe('research agenda and story qualification', () => {
     });
     expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('secondary-a'))?.qualifiedClaimIds).toHaveLength(2);
     expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('chatter'))?.evidenceQualified).toBe(false);
+  });
+
+  it('uses learned semantic domains to qualify named live AI product stories', () => {
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda,
+      now,
+      documents: [
+        source({
+          id: 'named-ai-product',
+          title: 'Cognition ships a new model in Devin after a benchmark jump',
+          excerpt: 'Cognition made the model available in Devin and reported higher benchmark performance.',
+          publisher: 'Cognition',
+          trustTier: 'primary',
+          isPrimary: true,
+          topics: ['AI products'],
+          entities: ['Cognition', 'Devin'],
+        }),
+        source({
+          id: 'unrelated-ocean',
+          title: 'Researchers catalog a new deep ocean current',
+          excerpt: 'The expedition cataloged a current in the southern ocean.',
+          publisher: 'Ocean Institute',
+          trustTier: 'primary',
+          isPrimary: true,
+          topics: ['ocean science'],
+          entities: ['Ocean Institute'],
+        }),
+      ],
+    });
+
+    const ai = clusters.find((cluster) => cluster.sourceDocumentIds.includes('named-ai-product'))!;
+    const unrelated = clusters.find((cluster) => cluster.sourceDocumentIds.includes('unrelated-ocean'))!;
+    expect(ai.scores.identityFit).toBeGreaterThanOrEqual(0.68);
+    expect(ai.scores.consequence).toBeGreaterThanOrEqual(0.48);
+    expect(unrelated.scores.identityFit).toBeLessThan(0.55);
   });
 
   it('does not treat stale or one-token arXiv matches as current identity evidence', () => {

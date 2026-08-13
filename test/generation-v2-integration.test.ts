@@ -483,10 +483,11 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem).toContain("do not march through its claim, tension, and implication in order");
     expect(writerSystem).toContain('Use first person only when it adds real ownership');
     expect(writerSystem).toContain('do not make "my bet" or "I\'d build" the default frame');
-    expect(writerSystem).toContain('one sentence, roughly 8-24 words');
-    expect(writerSystem).toContain('at most 190 characters');
-    expect(writerSystem).toContain('Variant three should be an owned preference');
-    expect(writerSystem).toContain('Do not turn any variant into a miniature essay');
+    expect(writerSystem).toContain('Write three natural attempts, not three slots in a copy template');
+    expect(writerSystem).toContain('Do not force any attempt into one sentence, 8-24 words');
+    expect(writerSystem).toContain('uneven short paragraphs');
+    expect(writerSystem).toContain('Reject symmetrical maxims');
+    expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, time period, and measurement type");
     expect(ideaSystem).toContain('never splice figures from different commodities, cohorts, or scopes');
     expect(ideaSystem).toContain('claim field of a verified-source idea must be directly entailed');
