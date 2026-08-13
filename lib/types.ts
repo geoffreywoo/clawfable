@@ -843,6 +843,7 @@ export interface DraftCandidate {
   judgeProvider: 'openai' | 'anthropic' | null;
   judgeModel: string | null;
   judgeScore: number | null;
+  mutationRound?: number;
   status: GenerationCandidateStatus;
   rejectionCodes: string[];
   createdAt: string;

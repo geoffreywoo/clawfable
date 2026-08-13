@@ -159,7 +159,7 @@ describe('Tweet Generation V2', () => {
     expect(briefs.filter((entry) => entry.evidenceMode === 'operator_opinion')).toHaveLength(3);
   });
 
-  it('keeps half the refill slate in company, technology, or investing topics even when those topics were recently used', () => {
+  it('keeps at least 70% of refill briefs in core topics without excluding recent proven lanes', () => {
     const briefs = buildGenerationBriefsV2({
       count: 2,
       stories: [],
@@ -185,12 +185,14 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(briefs).toHaveLength(4);
-    expect(briefs.filter((entry) => [
+    const coreBriefs = briefs.filter((entry) => [
       'ai_compute',
       'startups_markets',
       'finance_investing',
       'general_technology',
-    ].includes(classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`)))).toHaveLength(2);
+    ].includes(classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`)));
+    expect(coreBriefs).toHaveLength(3);
+    expect(briefs.map((entry) => entry.topic)).toEqual(expect.arrayContaining(['AI', 'startups']));
   });
 
   it('lets an idea rejection block its premise without suppressing the whole native topic', () => {

@@ -303,6 +303,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaCall).toMatchObject({ maxTokens: 3800, jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(writerCall).toMatchObject({ maxTokens: 1600, jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
+    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     expect(JSON.parse(copyJudgeCall.prompt).candidates.every((candidate: any) => candidate.voiceAnchors.length >= 3)).toBe(true);
     expect(drafts).toHaveLength(2);
@@ -316,7 +317,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-9',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-10',
       stageCounts: expect.objectContaining({ briefs: 4, ideasGenerated: 12, ideasSelected: 4, draftsGenerated: 8, draftsSelected: 2 }),
     });
   });
@@ -482,15 +483,16 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
-    expect(writerSystem).toContain("do not march through its claim, tension, and implication in order");
-    expect(writerSystem).toContain('Source-free opinions can be explicitly owned');
+    expect(writerSystem).toContain('choose one live beat rather than marching through its claim');
+    expect(writerSystem).toContain('Source-free opinions can be owned in first person');
     expect(writerSystem).toContain('Never turn them into generic third-person advice');
-    expect(writerSystem).toContain('Write three natural attempts, not three slots in a copy template');
-    expect(writerSystem).toContain('Do not force any attempt into one sentence, 8-24 words');
+    expect(writerSystem).toContain('Never invent a personal action, portfolio holding, diligence habit');
+    expect(writerSystem).toContain('Write three natural attempts, not three named slots');
+    expect(writerSystem).toContain('Do not force a balanced contrast, definition pair, checklist');
     expect(writerSystem).toContain('rough multi-paragraph thought');
     expect(writerSystem).toContain('Keep paragraph breaks and uneven rhythm');
     expect(writerSystem).toContain('Do not compress every idea into a 280-character aphorism');
-    expect(writerSystem).toContain('Reject symmetrical maxims');
+    expect(writerSystem).toContain('symmetrical maxims, definition pairs');
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, time period, and measurement type");
     expect(ideaSystem).toContain('never splice figures from different commodities, cohorts, or scopes');
@@ -959,7 +961,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(1);
   });
 
-  it('uses the one reserve retry when the first copy judgment finds no publishable draft', async () => {
+  it('runs one critic-informed rewrite and judges it again when the first copy pass fails', async () => {
     let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
@@ -968,8 +970,11 @@ describe('generateTweetBatchV2 integration', () => {
         writerCalls += 1;
         if (writerCalls <= 4) return writerResponse(options.prompt);
         const parsed = JSON.parse(options.prompt);
+        const content = parsed.idea.topic === 'health'
+          ? "i'd rather keep one boring health habit than build a perfect protocol i won't follow."
+          : "i'd take a customer deposit over another week of launch polish.";
         return result(JSON.stringify({ drafts: [{
-          content: `${parsed.idea.topic}: customer commitments before product polish deserve more weight than launch metrics.`,
+          content,
           format: 'observation',
           posture: 'reserve buyer commitment observation',
         }] }), 'anthropic');
@@ -977,9 +982,17 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'copy_judgment') {
         const judged = rankingResponse(options.prompt, 'candidates');
         const parsed = JSON.parse(judged.text);
+        const judgePrompt = JSON.parse(options.prompt);
+        const operatorIds = new Set(judgePrompt.candidates
+          .filter((candidate: any) => candidate.evidenceMode === 'operator_opinion')
+          .map((candidate: any) => candidate.id));
         const copyJudgeCalls = mocks.generateText.mock.calls.filter(([call]) => call.task === 'copy_judgment').length;
         if (copyJudgeCalls === 1) {
-          parsed.scores = parsed.scores.map((score: any) => ({ ...score, overall: 0.3, insight: 0.3 }));
+          parsed.scores = parsed.scores.map((score: any) => ({
+            ...score,
+            overall: operatorIds.has(score.id) ? 0.3 : 0.1,
+            insight: 0.3,
+          }));
         }
         return result(JSON.stringify(parsed));
       }
@@ -988,10 +1001,18 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+    const rescueWriterCalls = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt))
+      .filter((prompt) => prompt.failedAttempts.length > 0);
 
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(6);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
+    expect(rescueWriterCalls).toHaveLength(2);
+    expect(rescueWriterCalls.every((prompt) => prompt.failedAttempts.every((attempt: any) => attempt.issues.length > 0))).toBe(true);
     expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
+    expect(drafts.every((draft) => draft.judgeNotes?.includes('critic-informed rewrite'))).toBe(true);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({ retryUsed: 1, draftsSelected: 2 }),
