@@ -719,9 +719,35 @@ describe('generateTweetBatchV2 integration', () => {
     });
 
     await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'idea_judgment')).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'failed',
       error: 'Idea judgment returned malformed output.',
+    });
+  });
+
+  it('retries one incomplete idea tournament and still requires a complete second verdict', async () => {
+    let ideaJudgeAttempts = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') {
+        ideaJudgeAttempts += 1;
+        return ideaJudgeAttempts === 1
+          ? result(JSON.stringify({ ranking: [], scores: [] }))
+          : rankingResponse(options.prompt, 'ideas');
+      }
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+
+    expect(ideaJudgeAttempts).toBe(2);
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({ draftsSelected: expect.any(Number) }),
     });
   });
 
