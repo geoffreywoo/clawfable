@@ -1,5 +1,12 @@
-import type { Agent, AudienceVoiceComplaint, Tweet, VoiceCorpusEntry } from './types';
+import type {
+  Agent,
+  AudienceVoiceComplaint,
+  CandidateJudgeBreakdown,
+  Tweet,
+  VoiceCorpusEntry,
+} from './types';
 import type { TrendingTopic } from './trending';
+import { buildAgentIdentityAudit } from './agent-identity';
 import {
   PUBLISHING_V2_MODEL_STACK,
   getModelChainForTask,
@@ -23,10 +30,299 @@ import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 3;
+export const GENERATION_QUALITY_AUDIT_VERSION = 4;
+
+export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
+
+export interface GenerationAuditFinding {
+  code: string;
+  severity: GenerationAuditFindingSeverity;
+  scope: GenerationAuditFindingScope;
+  title: string;
+  evidence: Record<string, unknown>;
+  action: string;
+}
+
+const FINDING_SEVERITY_ORDER: Record<GenerationAuditFindingSeverity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN + 0.03;
+
+type AuditIdentity = ReturnType<typeof buildAgentIdentityAudit>;
+type AuditGenerationV2 = Awaited<ReturnType<typeof loadGenerationV2Metrics>>;
+
+interface AuditFindingInput {
+  identity: AuditIdentity;
+  autopost: {
+    enabled: boolean;
+    minQueueSize: number;
+  };
+  corpus: {
+    active: boolean;
+    anchorCount: number;
+    targetAnchorCount: number;
+    minimumAnchorCount: number;
+    corpusPurity: number | null;
+    knownGeneratedAnchorCount: number;
+  } | null;
+  queue: {
+    qualityEligibleCount: number;
+    items: Array<{
+      id: string;
+      qualityEligible: boolean;
+      scores: CandidateJudgeBreakdown | null;
+      content: string;
+    }>;
+  };
+  currentPolicyWindow: {
+    qualityPolicyVersion: string;
+    runCount: number;
+    runsWithSelectedDrafts: number;
+    selectedDraftCount: number;
+    selectionYield: number | null;
+  };
+  generationV2: AuditGenerationV2;
+  complaints: {
+    total: number;
+    affectedPostRate: number | null;
+  };
+}
+
+export function buildGenerationAuditFindings(input: AuditFindingInput): GenerationAuditFinding[] {
+  const findings: GenerationAuditFinding[] = [];
+  const add = (finding: GenerationAuditFinding) => findings.push(finding);
+
+  if (input.identity.status !== 'verified') {
+    add({
+      code: `identity_${input.identity.status}`,
+      severity: ['drifted', 'credentials_missing'].includes(input.identity.status) ? 'high' : 'medium',
+      scope: 'live_state',
+      title: 'Connected X identity is not currently verified',
+      evidence: {
+        status: input.identity.status,
+        storedHandle: input.identity.storedHandle,
+        verifiedHandle: input.identity.verifiedHandle,
+        connected: input.identity.connected,
+        credentialsPresent: input.identity.credentialsPresent,
+      },
+      action: 'Reconcile the agent against X API v2 /users/me before trusting handle-based routing.',
+    });
+  } else if ((input.identity.verificationAgeHours || 0) > 30 * 24) {
+    add({
+      code: 'identity_verification_stale',
+      severity: 'low',
+      scope: 'live_state',
+      title: 'Connected X identity verification is stale',
+      evidence: {
+        verifiedAt: input.identity.verifiedAt,
+        verificationAgeHours: input.identity.verificationAgeHours,
+      },
+      action: 'Run the protected identity reconciliation again.',
+    });
+  }
+
+  if (input.autopost.enabled && input.queue.qualityEligibleCount < input.autopost.minQueueSize) {
+    add({
+      code: 'queue_below_minimum',
+      severity: input.queue.qualityEligibleCount === 0 ? 'critical' : 'high',
+      scope: 'live_state',
+      title: 'Autopost queue is below its configured minimum',
+      evidence: {
+        eligibleDrafts: input.queue.qualityEligibleCount,
+        minimumQueueSize: input.autopost.minQueueSize,
+        deficit: input.autopost.minQueueSize - input.queue.qualityEligibleCount,
+      },
+      action: 'Fix current-policy generation yield; do not relax voice or anti-slop gates to fill the deficit.',
+    });
+  }
+
+  const eligibleWithMargins = input.queue.items
+    .filter((item) => item.qualityEligible && typeof item.scores?.qualityMargin === 'number')
+    .map((item) => ({
+      id: item.id,
+      content: item.content,
+      qualityMargin: item.scores!.qualityMargin as number,
+    }))
+    .sort((left, right) => left.qualityMargin - right.qualityMargin);
+  const thinnest = eligibleWithMargins[0];
+  if (thinnest && thinnest.qualityMargin < QUALITY_MARGIN_HEADROOM_FLOOR) {
+    add({
+      code: 'queue_quality_headroom_thin',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'An eligible draft barely clears the aggregate quality floor',
+      evidence: {
+        tweetId: thinnest.id,
+        qualityMargin: thinnest.qualityMargin,
+        hardFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
+        recommendedAuditHeadroom: QUALITY_MARGIN_HEADROOM_FLOOR,
+        content: thinnest.content,
+      },
+      action: 'Require manual review or replacement for threshold-hugging drafts while voice quality is under scrutiny.',
+    });
+  }
+
+  if (!input.corpus?.active) {
+    add({
+      code: 'voice_corpus_inactive',
+      severity: 'critical',
+      scope: 'live_state',
+      title: 'Native voice corpus is not active',
+      evidence: { corpusPresent: Boolean(input.corpus) },
+      action: 'Keep autonomous original posting paused until a pure minimum corpus is active.',
+    });
+  } else {
+    if (input.corpus.knownGeneratedAnchorCount > 0 || input.corpus.corpusPurity !== 1) {
+      add({
+        code: 'voice_corpus_contaminated',
+        severity: 'critical',
+        scope: 'live_state',
+        title: 'Native diction corpus contains generated or impure anchors',
+        evidence: {
+          corpusPurity: input.corpus.corpusPurity,
+          knownGeneratedAnchorCount: input.corpus.knownGeneratedAnchorCount,
+        },
+        action: 'Replace the snapshot atomically after excluding every generated or uncertain diction anchor.',
+      });
+    }
+    if (input.corpus.anchorCount < input.corpus.targetAnchorCount) {
+      add({
+        code: 'voice_corpus_below_target',
+        severity: input.corpus.anchorCount < input.corpus.minimumAnchorCount ? 'critical' : 'medium',
+        scope: 'live_state',
+        title: 'Native diction corpus has limited coverage',
+        evidence: {
+          anchorCount: input.corpus.anchorCount,
+          minimumAnchorCount: input.corpus.minimumAnchorCount,
+          targetAnchorCount: input.corpus.targetAnchorCount,
+        },
+        action: 'Classify more high-confidence operator posts across topics and rhythms without lowering authorship confidence.',
+      });
+    }
+  }
+
+  if (input.currentPolicyWindow.runCount >= 3 && (input.currentPolicyWindow.selectionYield || 0) < 0.25) {
+    add({
+      code: 'current_policy_generation_yield_low',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Current-policy generation rarely produces a selectable draft',
+      evidence: input.currentPolicyWindow,
+      action: 'Inspect stage rejection codes and improve brief quality or writer diversity before spending more critic calls.',
+    });
+  }
+
+  if (input.generationV2.quality.factualIncidentCount > 0) {
+    add({
+      code: 'historical_factual_incidents',
+      severity: 'high',
+      scope: 'historical_window',
+      title: 'The V2 learning window contains factual-risk incidents',
+      evidence: {
+        factualIncidentCount: input.generationV2.quality.factualIncidentCount,
+        terminalQueueDecisions: input.generationV2.sample.terminalQueueDecisions,
+      },
+      action: 'Review incident-linked drafts and confirm their source or claim failures are represented in current rejection memory.',
+    });
+  }
+
+  if (input.generationV2.gates.acceptanceSampleReady && !input.generationV2.gates.deleteRatePassed) {
+    add({
+      code: 'historical_delete_rate_high',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Operator deletion rate remains above target',
+      evidence: {
+        userDeleteRate: input.generationV2.quality.userDeleteRate,
+        targetMaximum: 0.2,
+        terminalQueueDecisions: input.generationV2.sample.terminalQueueDecisions,
+        deleteReasons: input.generationV2.quality.deleteReasons,
+      },
+      action: 'Turn the leading delete reasons into explicit brief and copy constraints, then measure only new-policy decisions.',
+    });
+  }
+
+  if (input.generationV2.gates.acceptanceSampleReady && !input.generationV2.gates.semanticRepeatPassed) {
+    add({
+      code: 'historical_semantic_repeat_rate_high',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Semantic repetition remains above target',
+      evidence: {
+        semanticRepeatRate: input.generationV2.quality.semanticRepeatRate,
+        targetMaximum: 0.05,
+        ideas: input.generationV2.sample.ideas,
+        drafts: input.generationV2.sample.drafts,
+      },
+      action: 'Tighten story memory and opening/premise diversity before drafting, where rejection is cheaper.',
+    });
+  }
+
+  if (
+    input.generationV2.gates.performanceSampleReady
+    && (
+      (input.generationV2.performance.reachVsOperator || 0) < 0.8
+      || (input.generationV2.performance.likesVsOperator || 0) < 0.8
+    )
+  ) {
+    add({
+      code: 'historical_performance_below_operator',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Generated posts trail the audited operator baseline',
+      evidence: {
+        maturePosts: input.generationV2.sample.maturePosts,
+        reachVsOperator: input.generationV2.performance.reachVsOperator,
+        likesVsOperator: input.generationV2.performance.likesVsOperator,
+      },
+      action: 'Use operator posts for diction and personal topic taste, then optimize spread mechanics only after native-voice gates pass.',
+    });
+  }
+
+  if (input.complaints.total > 0) {
+    add({
+      code: 'audience_voice_complaints_present',
+      severity: 'high',
+      scope: 'historical_window',
+      title: 'Stored audience replies contain high-confidence voice complaints',
+      evidence: {
+        complaintCount: input.complaints.total,
+        affectedPostRate: input.complaints.affectedPostRate,
+      },
+      action: 'Inspect affected parent drafts by model, source lane, and policy version; keep complaints out of diction and topic learning.',
+    });
+  }
+
+  if (input.generationV2.compute.costDataStatus !== 'complete') {
+    add({
+      code: 'generation_cost_attribution_incomplete',
+      severity: 'low',
+      scope: 'historical_window',
+      title: 'Model cost attribution is incomplete',
+      evidence: {
+        costDataStatus: input.generationV2.compute.costDataStatus,
+        modelCalls: input.generationV2.compute.modelCalls,
+        unknownCostCalls: input.generationV2.compute.unknownCostCalls,
+        estimatedCostUsd: input.generationV2.compute.estimatedCostUsd,
+      },
+      action: 'Add pricing metadata for every active and fallback model so quality gains can be compared with spend.',
+    });
+  }
+
+  return findings.sort((left, right) => (
+    FINDING_SEVERITY_ORDER[left.severity] - FINDING_SEVERITY_ORDER[right.severity]
+    || left.code.localeCompare(right.code)
+  ));
+}
 
 function countBy(values: Array<string | null | undefined>): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -192,12 +488,108 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const complaintParents = summarizeComplaintParents(complaints);
   const postedGenerated = generatedPostedTweets(allTweets);
   const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
+  const identity = buildAgentIdentityAudit(agent);
+  const autopostSummary = {
+    enabled: context.settings.enabled,
+    configuredPostsPerDay,
+    effectivePostsPerDay,
+    maxOriginalsPerRolling24Hours: 5,
+    minQueueSize: context.settings.minQueueSize,
+    refillBatchLimit: 2,
+  };
+  const corpusSummary = corpus ? {
+    snapshotId: corpus.snapshotId,
+    schemaVersion: corpus.version,
+    active: corpus.active,
+    generatedAt: corpus.generatedAt,
+    targetAnchorCount: corpus.targetAnchorCount,
+    minimumAnchorCount: corpus.minimumAnchorCount,
+    anchorCount: corpus.anchorCount,
+    corpusPurity: anchors.length > 0
+      ? Number(((anchors.length - generatedAnchors.length) / anchors.length).toFixed(4))
+      : null,
+    knownGeneratedAnchorCount: generatedAnchors.length,
+    dispositionCounts: countBy(corpus.entries.flatMap((entry) => entry.dispositions)),
+    provenanceCounts: countBy(corpus.entries.map((entry) => entry.provenance)),
+    topExclusionReasons: topCounts(corpus.entries.flatMap((entry) => entry.exclusionReasons)),
+    anchors: anchors.map(summarizeCorpusEntry),
+  } : null;
+  const queueSummary = {
+    depth: activeQueueItems.length,
+    artifactCount: queueItems.length,
+    quarantinedCount: queueItems.length - activeQueueItems.length,
+    qualityEligibleCount: activeQueueItems.filter((item) => item.qualityEligible).length,
+    skippedByQualityCount: queueItems.filter((item) => !item.qualityEligible).length,
+    policyVersionCounts: countBy(queueItems.map((item) => item.qualityPolicyVersion)),
+    corpusVersionCounts: countBy(queueItems.map((item) => item.voiceCorpusVersion)),
+    finalCriticVerdicts: countBy(queueItems.map((item) => item.finalCriticVerdict)),
+    items: queueItems,
+  };
+  const complaintSummary = {
+    total: complaints.length,
+    affectedParentCount: complaintParents.length,
+    generatedPostedDenominator: postedGenerated.length,
+    affectedPostRate: postedGenerated.length > 0
+      ? Number((complaintParents.length / postedGenerated.length).toFixed(4))
+      : null,
+    rateDefinition: 'unique parent posts with a high-confidence voice complaint / stored generated posts with an X id',
+    byModel: countBy(complaints.map((complaint) => modelKey(complaint.generationProvider, complaint.generationModel))),
+    bySourceLane: countBy(complaints.map((complaint) => complaint.sourceLane)),
+    byPolicyVersion: countBy(complaints.map((complaint) => complaint.qualityPolicyVersion)),
+    byTag: countBy(complaints.flatMap((complaint) => complaint.tags)),
+    affectedParents: complaintParents,
+    metricsOnly: true,
+  };
+  const currentPolicyRuns = generationV2.lineage.filter((run) => (
+    run.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+  ));
+  const runsWithSelectedDrafts = currentPolicyRuns.filter((run) => (
+    (run.stageCounts.draftsSelected || 0) > 0
+  )).length;
+  const currentPolicyWindow = {
+    qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    runCount: currentPolicyRuns.length,
+    runsWithSelectedDrafts,
+    emptySelectionRunCount: currentPolicyRuns.length - runsWithSelectedDrafts,
+    selectedDraftCount: currentPolicyRuns.reduce((sum, run) => sum + (run.stageCounts.draftsSelected || 0), 0),
+    selectionYield: currentPolicyRuns.length > 0
+      ? Number((runsWithSelectedDrafts / currentPolicyRuns.length).toFixed(4))
+      : null,
+    latestRunAt: currentPolicyRuns[0]?.startedAt || null,
+  };
+  const findingItems = buildGenerationAuditFindings({
+    identity,
+    autopost: autopostSummary,
+    corpus: corpusSummary,
+    queue: queueSummary,
+    currentPolicyWindow,
+    generationV2,
+    complaints: complaintSummary,
+  });
+  const findingCounts = {
+    critical: findingItems.filter((finding) => finding.severity === 'critical').length,
+    high: findingItems.filter((finding) => finding.severity === 'high').length,
+    medium: findingItems.filter((finding) => finding.severity === 'medium').length,
+    low: findingItems.filter((finding) => finding.severity === 'low').length,
+  };
 
   return {
     auditVersion: GENERATION_QUALITY_AUDIT_VERSION,
     generatedAt: new Date().toISOString(),
     agentId: agent.id,
     handle: `@${agent.handle}`,
+    identity,
+    findings: {
+      status: findingCounts.critical > 0
+        ? 'critical'
+        : findingCounts.high > 0
+          ? 'degraded'
+          : findingCounts.medium > 0
+            ? 'needs_attention'
+            : 'healthy',
+      counts: findingCounts,
+      items: findingItems,
+    },
     policy: {
       pipelineVersion,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
@@ -212,42 +604,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         requiresExplicitProductionActivation: false,
       },
     },
-    autopost: {
-      enabled: context.settings.enabled,
-      configuredPostsPerDay,
-      effectivePostsPerDay,
-      maxOriginalsPerRolling24Hours: 5,
-      minQueueSize: context.settings.minQueueSize,
-      refillBatchLimit: 2,
-    },
-    corpus: corpus ? {
-      snapshotId: corpus.snapshotId,
-      schemaVersion: corpus.version,
-      active: corpus.active,
-      generatedAt: corpus.generatedAt,
-      targetAnchorCount: corpus.targetAnchorCount,
-      minimumAnchorCount: corpus.minimumAnchorCount,
-      anchorCount: corpus.anchorCount,
-      corpusPurity: anchors.length > 0
-        ? Number(((anchors.length - generatedAnchors.length) / anchors.length).toFixed(4))
-        : null,
-      knownGeneratedAnchorCount: generatedAnchors.length,
-      dispositionCounts: countBy(corpus.entries.flatMap((entry) => entry.dispositions)),
-      provenanceCounts: countBy(corpus.entries.map((entry) => entry.provenance)),
-      topExclusionReasons: topCounts(corpus.entries.flatMap((entry) => entry.exclusionReasons)),
-      anchors: anchors.map(summarizeCorpusEntry),
-    } : null,
-    queue: {
-      depth: activeQueueItems.length,
-      artifactCount: queueItems.length,
-      quarantinedCount: queueItems.length - activeQueueItems.length,
-      qualityEligibleCount: activeQueueItems.filter((item) => item.qualityEligible).length,
-      skippedByQualityCount: queueItems.filter((item) => !item.qualityEligible).length,
-      policyVersionCounts: countBy(queueItems.map((item) => item.qualityPolicyVersion)),
-      corpusVersionCounts: countBy(queueItems.map((item) => item.voiceCorpusVersion)),
-      finalCriticVerdicts: countBy(queueItems.map((item) => item.finalCriticVerdict)),
-      items: queueItems,
-    },
+    autopost: autopostSummary,
+    corpus: corpusSummary,
+    queue: queueSummary,
     sources: {
       documentCount: sourceDocuments.length,
       storyCount: storyClusters.length,
@@ -323,21 +682,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         item.finalCriticProvider !== primaryCopyJudge?.provider || item.finalCriticModel !== primaryCopyJudge?.model
       )).length,
     },
-    generationV2,
-    complaints: {
-      total: complaints.length,
-      affectedParentCount: complaintParents.length,
-      generatedPostedDenominator: postedGenerated.length,
-      affectedPostRate: postedGenerated.length > 0
-        ? Number((complaintParents.length / postedGenerated.length).toFixed(4))
-        : null,
-      rateDefinition: 'unique parent posts with a high-confidence voice complaint / stored generated posts with an X id',
-      byModel: countBy(complaints.map((complaint) => modelKey(complaint.generationProvider, complaint.generationModel))),
-      bySourceLane: countBy(complaints.map((complaint) => complaint.sourceLane)),
-      byPolicyVersion: countBy(complaints.map((complaint) => complaint.qualityPolicyVersion)),
-      byTag: countBy(complaints.flatMap((complaint) => complaint.tags)),
-      affectedParents: complaintParents,
-      metricsOnly: true,
+    generationV2: {
+      ...generationV2,
+      currentPolicyWindow,
     },
+    complaints: complaintSummary,
   };
 }

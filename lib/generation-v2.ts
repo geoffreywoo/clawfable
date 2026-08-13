@@ -84,6 +84,7 @@ import { inferContentSpreadMechanics } from './winner-learning';
 import { pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 import {
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
@@ -101,7 +102,7 @@ export const V2_MIN_COPY_FACTUAL_SAFETY = 0.82;
 export const V2_MIN_COPY_OVERALL = 0.58;
 export const V2_MIN_COPY_INSIGHT = 0.5;
 export const V2_MIN_COPY_VOICE_FIT = 0.72;
-export const V2_MIN_FINAL_QUALITY_MARGIN = 0.82;
+export const V2_MIN_FINAL_QUALITY_MARGIN = PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN;
 const V2_MIN_STORY_IDENTITY_FIT = 0.55;
 const V2_MIN_STORY_CONSEQUENCE = 0.35;
 const V2_MIN_STORY_TOTAL = 0.58;

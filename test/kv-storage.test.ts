@@ -59,6 +59,25 @@ describe('kv-storage', () => {
       expect(updated.setupStep).toBe('ready');
     });
 
+    it('persists X identity verification provenance on creation', async () => {
+      const agent = await createAgent({
+        handle: 'verified-agent',
+        name: 'Verified Agent',
+        soulMd: '# Verified',
+        xIdentityVerifiedAt: '2026-08-14T03:00:00.000Z',
+        xIdentityVerifiedHandle: 'verified-agent',
+        xIdentityVerifiedUserId: 'x-user-verified',
+        xIdentityVerificationSource: 'oauth_exchange',
+      } as any);
+
+      expect(await getAgent(agent.id)).toMatchObject({
+        xIdentityVerifiedAt: '2026-08-14T03:00:00.000Z',
+        xIdentityVerifiedHandle: 'verified-agent',
+        xIdentityVerifiedUserId: 'x-user-verified',
+        xIdentityVerificationSource: 'oauth_exchange',
+      });
+    });
+
     it('rejects creating a second agent for the same handle regardless of casing', async () => {
       const agent = await createAgent({
         handle: 'CanonicalHandle',
@@ -92,6 +111,22 @@ describe('kv-storage', () => {
       await expect(updateAgent(agent.id, {
         handle: 'rename-target',
       })).rejects.toBeInstanceOf(AgentHandleConflictError);
+    });
+
+    it('moves the canonical handle index when an agent handle changes', async () => {
+      const agent = await createAgent({
+        handle: 'old-handle',
+        name: 'Renamed Agent',
+        soulMd: '# Rename me',
+      } as any);
+
+      await updateAgent(agent.id, { handle: '@new-handle' });
+
+      expect(await getAgentByHandle('old-handle')).toBeNull();
+      expect(await getAgentByHandle('NEW-HANDLE')).toMatchObject({
+        id: agent.id,
+        handle: 'new-handle',
+      });
     });
 
     it('deletes an agent and cascades', async () => {

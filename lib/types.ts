@@ -104,6 +104,10 @@ export interface Agent {
   accessSecret: string | null;
   isConnected: number; // 0 | 1
   xUserId: string | null;
+  xIdentityVerifiedAt?: string | null;
+  xIdentityVerifiedHandle?: string | null;
+  xIdentityVerifiedUserId?: string | null;
+  xIdentityVerificationSource?: 'oauth_exchange' | 'x_api_v2_me' | null;
   soulPublic: number; // 0 | 1, default 1 (open source)
   setupStep: SetupStep;
   createdAt: string;
