@@ -1057,7 +1057,7 @@ export function buildGenerationBriefsV2({
     voiceProfile,
     learnings,
     style.trendTolerance,
-    Math.min(1, Math.max(0, Math.floor(briefCount / 4))),
+    Math.min(2, Math.max(0, Math.floor(briefCount / 4))),
   );
   for (const signal of operatorTopicSignals) {
     if (briefs.length >= briefCount) break;

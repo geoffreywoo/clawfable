@@ -730,6 +730,15 @@ function buildHistoricalOperatorEvidence(cluster: ManualTopicCluster): SourcePla
   };
 }
 
+const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:coverage|intro|vcs?|venture capital|early-stage founders?|founders?|startups?|geoff(?:rey)? woo|anti fund)$/i;
+
+function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
+  return [...new Set((topic.entities || [])
+    .map((entity) => entity.replace(/\s+/g, ' ').trim())
+    .filter((entity) => entity && !OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY.test(entity)))]
+    .slice(0, 4);
+}
+
 function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean {
   const category = normalizeTopic(topic.category);
   const wordCount = category.split(/\s+/).filter(Boolean).length;
@@ -746,6 +755,7 @@ function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean 
       || topic.fitScores.manual >= 0.12
       || GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
     )
+    && operatorTopicSignalEntities(topic).length > 0
     && wordCount >= 2
     && !BROAD_IDENTITY_TOPICS.has(category);
 }
@@ -755,7 +765,7 @@ function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {
 }
 
 function operatorTopicSignalSubject(topic: EnrichedTrendingTopic): string {
-  const entities = [...new Set((topic.entities || []).map((entity) => entity.trim()).filter(Boolean))].slice(0, 4);
+  const entities = operatorTopicSignalEntities(topic);
   if (entities.length === 0) return topic.category;
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain)
     .replace(/_/g, ' ');
