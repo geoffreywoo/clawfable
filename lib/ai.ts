@@ -85,6 +85,10 @@ export interface AiFallbackAttempt {
   stopReason: string | null;
   statusCode: number | null;
   errorType: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  estimatedCostUsd: number | null;
+  durationMs: number;
 }
 
 class AiGenerationTimeoutError extends Error {
@@ -96,14 +100,22 @@ class AiGenerationTimeoutError extends Error {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, error: Error): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  error: Error,
+  onTimeout?: () => void,
+): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(error), timeoutMs);
+        timer = setTimeout(() => {
+          onTimeout?.();
+          reject(error);
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -122,6 +134,26 @@ const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL }
 const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
 const CLAUDE_FABLE: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_FABLE_MODEL };
 const CLAUDE_QUALITY: AiModelTarget = { provider: 'anthropic', model: ANTHROPIC_QUALITY_MODEL };
+
+const DEFAULT_TASK_TIMEOUT_MS: Record<AiTask, number> = {
+  source_enrichment: 90_000,
+  idea_generation: 120_000,
+  idea_judgment: 90_000,
+  tweet_writing: 120_000,
+  copy_judgment: 90_000,
+  tweet_generation: 120_000,
+  creative_variant: 120_000,
+  bulk_judgment: 90_000,
+  final_judgment: 90_000,
+  reply_generation: 90_000,
+  reply_scoring: 60_000,
+  learning: 120_000,
+  classification: 60_000,
+  soul_generation: 180_000,
+  exceptional: 180_000,
+  default_quality: 120_000,
+  default_fast: 60_000,
+};
 
 export const PUBLISHING_V2_MODEL_STACK: GenerationModelStackId = 'publishing_v2_quality';
 
@@ -288,14 +320,18 @@ function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
   return getModelChainForTask(options.tier === 'fast' ? 'default_fast' : 'default_quality', options.tier);
 }
 
-async function generateWithOpenAi(options: GenerateTextOptions, model: string): Promise<GenerateTextResult> {
+async function generateWithOpenAi(
+  options: GenerateTextOptions,
+  model: string,
+  signal?: AbortSignal,
+): Promise<GenerateTextResult> {
   const openai = process.env.OPENAI_API_KEY
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null;
   if (!openai) throw new Error('OPENAI_API_KEY is not configured');
   const reasoning = getOpenAiReasoning(options, model);
 
-  const response = await openai.responses.create({
+  const request = {
     model,
     instructions: options.system,
     input: getInputMessages(options),
@@ -312,7 +348,10 @@ async function generateWithOpenAi(options: GenerateTextOptions, model: string): 
     } : {}),
     ...(reasoning ? { reasoning } : {}),
     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
-  });
+  };
+  const response = signal
+    ? await openai.responses.create(request, { signal })
+    : await openai.responses.create(request);
 
   return {
     text: extractOpenAiText(response),
@@ -324,7 +363,11 @@ async function generateWithOpenAi(options: GenerateTextOptions, model: string): 
   };
 }
 
-async function generateWithAnthropic(options: GenerateTextOptions, model: string): Promise<GenerateTextResult> {
+async function generateWithAnthropic(
+  options: GenerateTextOptions,
+  model: string,
+  signal?: AbortSignal,
+): Promise<GenerateTextResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY || (IS_TEST_ENV ? 'test-key' : null);
   const anthropic = apiKey ? new Anthropic({ apiKey }) : null;
   if (!anthropic) throw new Error('ANTHROPIC_API_KEY is not configured');
@@ -348,7 +391,7 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
     } : {}),
   };
 
-  const response = await anthropic.messages.create({
+  const request = {
     model,
     max_tokens: options.maxTokens,
     system: options.system,
@@ -361,7 +404,10 @@ async function generateWithAnthropic(options: GenerateTextOptions, model: string
     ...(typeof options.temperature === 'number' && model !== ANTHROPIC_FABLE_MODEL
       ? { temperature: options.temperature }
       : {}),
-  });
+  };
+  const response = signal
+    ? await anthropic.messages.create(request, { signal })
+    : await anthropic.messages.create(request);
 
   return {
     text: response.content
@@ -415,26 +461,30 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
 
   let lastError: unknown = null;
   const fallbackAttempts: AiFallbackAttempt[] = [];
-  const deadlineAt = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
-    ? Date.now() + options.timeoutMs
-    : null;
+  const timeoutMs = typeof options.timeoutMs === 'number'
+    ? options.timeoutMs
+    : DEFAULT_TASK_TIMEOUT_MS[options.task || (options.tier === 'fast' ? 'default_fast' : 'default_quality')];
+  const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : null;
   for (let index = 0; index < modelChain.length; index++) {
     const target = modelChain[index];
+    const attemptStartedAt = Date.now();
     const remainingMs = deadlineAt === null ? null : deadlineAt - Date.now();
     if (remainingMs !== null && remainingMs <= 0) break;
     const attemptTimeoutMs = remainingMs === null
       ? null
       : remainingMs;
+    const abortController = attemptTimeoutMs === null ? null : new AbortController();
     try {
       const generation = target.provider === 'openai'
-        ? generateWithOpenAi(options, target.model)
-        : generateWithAnthropic(options, target.model);
+        ? generateWithOpenAi(options, target.model, abortController?.signal)
+        : generateWithAnthropic(options, target.model, abortController?.signal);
       const result = attemptTimeoutMs === null
         ? await generation
         : await withTimeout(
             generation,
             attemptTimeoutMs,
             new AiGenerationTimeoutError(target.provider, target.model, attemptTimeoutMs),
+            () => abortController?.abort(),
           );
       if (!result.text.trim()) {
         lastError = new Error(`${target.provider}:${target.model} returned empty text`);
@@ -445,6 +495,10 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
           stopReason: result.stopReason,
           statusCode: null,
           errorType: null,
+          inputTokens: result.inputTokens ?? null,
+          outputTokens: result.outputTokens ?? null,
+          estimatedCostUsd: estimateAiUsageCostUsd(target.model, result.inputTokens, result.outputTokens),
+          durationMs: Date.now() - attemptStartedAt,
         });
         continue;
       }
@@ -458,6 +512,10 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         reason: error instanceof AiGenerationTimeoutError ? 'timeout' : 'provider_error',
         stopReason: null,
         ...providerError,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        durationMs: Date.now() - attemptStartedAt,
       });
       if (!IS_TEST_ENV) {
         const detail = providerError.statusCode || providerError.errorType
@@ -469,7 +527,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   }
 
   if (deadlineAt !== null && Date.now() >= deadlineAt && !(lastError instanceof AiGenerationTimeoutError)) {
-    lastError = new Error(`AI generation exceeded the ${options.timeoutMs}ms stage deadline`);
+    lastError = new Error(`AI generation exceeded the ${timeoutMs}ms stage deadline`);
   }
 
   const failure = lastError instanceof Error ? lastError : new Error('AI generation failed');

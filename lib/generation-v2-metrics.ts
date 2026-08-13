@@ -7,6 +7,7 @@ import type {
   Tweet,
   TweetPerformance,
 } from './types';
+import { summarizeGenerationUsage } from './generation-usage';
 import {
   getDraftCandidates,
   getGenerationRuns,
@@ -153,11 +154,7 @@ export function buildGenerationV2Metrics({
     ...(researchState?.modelCalls || []),
     ...completedRuns.flatMap((run) => run.modelCalls),
   ];
-  const successfulModelCalls = modelCalls.filter((call) => call.succeeded);
-  const totalCost = successfulModelCalls.length > 0
-    && successfulModelCalls.every((call) => typeof call.estimatedCostUsd === 'number')
-    ? successfulModelCalls.reduce((sum, call) => sum + (call.estimatedCostUsd || 0), 0)
-    : null;
+  const usage = summarizeGenerationUsage(modelCalls);
   const sourceDocuments = sumStage(completedRuns, 'sourceDocuments');
   const qualifiedStories = sumStage(completedRuns, 'qualifiedStories');
   const researchBriefs = sumStage(completedRuns, 'researchBriefs');
@@ -225,9 +222,16 @@ export function buildGenerationV2Metrics({
     },
     compute: {
       modelCalls: modelCalls.length,
-      totalInputTokens: modelCalls.reduce((sum, call) => sum + (call.inputTokens || 0), 0),
-      totalOutputTokens: modelCalls.reduce((sum, call) => sum + (call.outputTokens || 0), 0),
-      estimatedCostUsd: totalCost === null ? null : Number(totalCost.toFixed(6)),
+      providerAttempts: usage.providerAttempts,
+      fallbackAttempts: usage.fallbackAttempts,
+      timeoutAttempts: usage.timeoutAttempts,
+      unknownTokenAttempts: usage.unknownTokenAttempts,
+      unknownCostAttempts: usage.unknownCostAttempts,
+      unknownCostCalls: usage.unknownCostCalls,
+      costDataStatus: usage.costDataStatus,
+      totalInputTokens: usage.totalInputTokens,
+      totalOutputTokens: usage.totalOutputTokens,
+      estimatedCostUsd: usage.estimatedCostUsd,
       averageRunLatencyMs: completedRuns.length > 0
         ? Math.round(completedRuns.reduce((sum, run) => sum + (run.durationMs || 0), 0) / completedRuns.length)
         : null,

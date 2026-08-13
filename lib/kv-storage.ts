@@ -628,6 +628,7 @@ const KEYS = {
   agentDraftCandidates: (id: string) => `agent:${id}:draft_candidates:v2`,
   agentGenerationRuns: (id: string) => `agent:${id}:generation_runs:v2`,
   agentGenerationOutcomes: (id: string) => `agent:${id}:generation_outcomes:v2`,
+  agentGenerationLock: (id: string, key: string) => `agent:${id}:generation_lock:v2:${key}`,
   agentSemanticBlocks: (id: string) => `agent:${id}:semantic_blocks:v2`,
   agentResearchRefresh: (id: string) => `agent:${id}:research_refresh:v2`,
   agentResearchLock: (id: string) => `agent:${id}:research_lock:v2`,
@@ -2985,6 +2986,45 @@ export async function acquireResearchRefreshLock(
 
 export async function releaseResearchRefreshLock(agentId: string, owner: string): Promise<boolean> {
   return kvCompareObjectFieldAndDelete(KEYS.agentResearchLock(agentId), 'owner', owner);
+}
+
+export interface GenerationRequestLock {
+  agentId: string;
+  idempotencyKey: string;
+  owner: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+export async function acquireGenerationRequestLock(
+  agentId: string,
+  idempotencyKey: string,
+  owner = `generation:${crypto.randomUUID()}`,
+  ttlSeconds = 6 * 60,
+): Promise<{ acquired: boolean; owner: string; lock: GenerationRequestLock | null }> {
+  const now = Date.now();
+  const lock: GenerationRequestLock = {
+    agentId,
+    idempotencyKey,
+    owner,
+    acquiredAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
+  };
+  const key = KEYS.agentGenerationLock(agentId, idempotencyKey);
+  const acquired = await kvSet(key, lock, { nx: true, ex: ttlSeconds });
+  return {
+    acquired,
+    owner,
+    lock: acquired ? lock : await kvGet<GenerationRequestLock>(key),
+  };
+}
+
+export async function releaseGenerationRequestLock(
+  agentId: string,
+  idempotencyKey: string,
+  owner: string,
+): Promise<boolean> {
+  return kvCompareObjectFieldAndDelete(KEYS.agentGenerationLock(agentId, idempotencyKey), 'owner', owner);
 }
 
 function buildCriticVerdict(tweet: Tweet): CriticVerdict {

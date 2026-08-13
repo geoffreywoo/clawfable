@@ -176,7 +176,7 @@ describe('AI model routing', () => {
         effort: 'medium',
         format: { type: 'json_schema', schema: jsonSchema },
       },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(anthropicCreate.mock.calls[0]?.[0]).not.toHaveProperty('temperature');
     expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -203,7 +203,7 @@ describe('AI model routing', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-5.5',
       reasoning: { effort: 'none' },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('forwards structured output schemas to OpenAI fallbacks', async () => {
@@ -236,7 +236,7 @@ describe('AI model routing', () => {
           strict: true,
         },
       },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('allows explicit OpenAI reasoning effort overrides', async () => {
@@ -257,7 +257,7 @@ describe('AI model routing', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-5.5',
       reasoning: { effort: 'high' },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('allows per-request OpenAI reasoning overrides', async () => {
@@ -279,7 +279,7 @@ describe('AI model routing', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-5.5',
       reasoning: { effort: 'minimal' },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('allows task-scoped OpenAI reasoning effort overrides', async () => {
@@ -302,7 +302,7 @@ describe('AI model routing', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-5.6',
       reasoning: { effort: 'high' },
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('omits unsupported reasoning efforts instead of sending invalid model parameters', async () => {
@@ -322,7 +322,7 @@ describe('AI model routing', () => {
 
     expect(create).toHaveBeenCalledWith(expect.not.objectContaining({
       reasoning: expect.anything(),
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('does not send reasoning settings to non-reasoning OpenAI models', async () => {
@@ -342,7 +342,7 @@ describe('AI model routing', () => {
 
     expect(create).toHaveBeenCalledWith(expect.not.objectContaining({
       reasoning: expect.anything(),
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('prefers OpenAI even when a task-scoped override lists Anthropic first', async () => {
@@ -364,7 +364,7 @@ describe('AI model routing', () => {
     expect(anthropicCreate).not.toHaveBeenCalled();
     expect(openAiCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-5.5',
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result).toEqual(expect.objectContaining({
       text: 'openai ok',
       provider: 'openai',
@@ -390,7 +390,7 @@ describe('AI model routing', () => {
     expect(openAiCreate).toHaveBeenCalledTimes(1);
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-sonnet-4-6',
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result).toEqual(expect.objectContaining({
       text: 'anthropic ok',
       provider: 'anthropic',
@@ -415,8 +415,8 @@ describe('AI model routing', () => {
       maxTokens: 64,
     });
 
-    expect(openAiCreate).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: 'gpt-5.6' }));
-    expect(openAiCreate).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: 'gpt-5.5' }));
+    expect(openAiCreate).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: 'gpt-5.6' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(openAiCreate).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: 'gpt-5.5' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(anthropicCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       text: 'gpt-5.5 fallback ok',
@@ -429,6 +429,10 @@ describe('AI model routing', () => {
         stopReason: null,
         statusCode: null,
         errorType: null,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        durationMs: expect.any(Number),
       }],
     }));
   });
@@ -465,6 +469,10 @@ describe('AI model routing', () => {
         stopReason: 'max_tokens',
         statusCode: null,
         errorType: null,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        durationMs: expect.any(Number),
       }],
     }));
   });
@@ -521,7 +529,34 @@ describe('AI model routing', () => {
     }));
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       output_config: expect.objectContaining({ effort: 'low' }),
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openAiCreate).not.toHaveBeenCalled();
+  });
+
+  it('aborts an in-flight provider request when its generation deadline expires', async () => {
+    let signal: AbortSignal | null = null;
+    const create = vi.fn((_request, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal = options.signal || null;
+      options.signal?.addEventListener('abort', () => reject(new Error('provider request aborted')), { once: true });
+    }));
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+
+    await expect(generateText({
+      modelChain: [{ provider: 'openai', model: 'gpt-5.5' }],
+      system: 'Return exactly: ok',
+      prompt: 'probe',
+      maxTokens: 64,
+      timeoutMs: 20,
+    })).rejects.toMatchObject({
+      name: 'AiGenerationTimeoutError',
+      fallbackAttempts: [expect.objectContaining({
+        provider: 'openai',
+        model: 'gpt-5.5',
+        reason: 'timeout',
+      })],
+    });
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(signal?.aborted).toBe(true);
   });
 });

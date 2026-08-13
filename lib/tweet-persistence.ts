@@ -1,4 +1,4 @@
-import { createTweet } from './kv-storage';
+import { createTweet, getTweets } from './kv-storage';
 import { withDecisionProvenanceSummary } from './decision-provenance';
 import type { CreateTweetInput, Tweet } from './types';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
@@ -16,6 +16,13 @@ export async function createTweetFromGeneratedCandidate(
     replyConversationId?: string | null;
   },
 ): Promise<Tweet> {
+  if (item.draftCandidateId) {
+    const existing = (await getTweets(agentId)).find((tweet) => (
+      tweet.draftCandidateId === item.draftCandidateId
+      && tweet.generationIdempotencyKey === (item.generationIdempotencyKey ?? null)
+    ));
+    if (existing) return withDecisionProvenanceSummary(existing);
+  }
   const data: CreateTweetInput = {
     agentId,
     content: item.content,

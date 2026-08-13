@@ -1,7 +1,7 @@
 import type { Tweet } from './types';
 import {
-  PUBLISHING_V2_FINAL_CRITIC_VERSION,
-  PUBLISHING_V2_QUALITY_POLICY_VERSION,
+  getPublishingV2FinalCriticVersion,
+  getPublishingV2QualityPolicyVersion,
 } from './publishing-quality-policy';
 
 type GenerationOriginTweet = Pick<
@@ -39,20 +39,22 @@ function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
 
 export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string | null {
   if (tweet.pipelineVersion === 'v2') {
+    const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(tweet.generationSurface);
+    const finalCriticVersion = getPublishingV2FinalCriticVersion(tweet.generationSurface);
     if (tweet.contentProvenance !== 'generated_v2') {
       return 'V2-generated posts require explicit generated_v2 provenance.';
     }
     if (!tweet.generationSurface || !tweet.generationRunId || !tweet.ideaId || !tweet.draftCandidateId) {
       return 'V2-generated posts require complete surface, generation, idea, and draft lineage.';
     }
-    if (tweet.qualityPolicyVersion !== PUBLISHING_V2_QUALITY_POLICY_VERSION) {
-      return `V2-generated posts require current quality policy ${PUBLISHING_V2_QUALITY_POLICY_VERSION}.`;
+    if (tweet.qualityPolicyVersion !== qualityPolicyVersion) {
+      return `V2-generated posts require current quality policy ${qualityPolicyVersion}.`;
     }
     if (!tweet.voiceCorpusVersion) {
       return 'V2-generated posts require voice-corpus provenance.';
     }
-    if (tweet.finalCriticVersion !== PUBLISHING_V2_FINAL_CRITIC_VERSION) {
-      return `V2-generated posts require current final critic ${PUBLISHING_V2_FINAL_CRITIC_VERSION}.`;
+    if (tweet.finalCriticVersion !== finalCriticVersion) {
+      return `V2-generated posts require current final critic ${finalCriticVersion}.`;
     }
     if (tweet.finalCriticVerdict !== 'allow' || !tweet.finalCriticProvider || !tweet.finalCriticModel) {
       return 'V2-generated posts require an explicit model-critic allow verdict.';

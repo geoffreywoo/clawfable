@@ -381,18 +381,25 @@ export async function enrichSourceDocuments(
       durationMs: Date.now() - startedAt,
       succeeded: true,
       error: null,
+      stopReason: result.stopReason,
+      fallbackAttempts: result.fallbackAttempts || [],
     });
   } catch (error) {
+    const fallbackAttempts = error && typeof error === 'object' && Array.isArray((error as { fallbackAttempts?: unknown }).fallbackAttempts)
+      ? (error as { fallbackAttempts: GenerationModelCallTrace['fallbackAttempts'] }).fallbackAttempts || []
+      : [];
+    const lastAttempt = fallbackAttempts.at(-1) || null;
     onModelCall?.({
       stage: 'source_enrichment',
-      provider: null,
-      model: null,
+      provider: lastAttempt?.provider || null,
+      model: lastAttempt?.model || null,
       inputTokens: null,
       outputTokens: null,
       estimatedCostUsd: null,
       durationMs: Date.now() - startedAt,
       succeeded: false,
       error: error instanceof Error ? error.message : String(error),
+      fallbackAttempts,
     });
     throw error;
   }

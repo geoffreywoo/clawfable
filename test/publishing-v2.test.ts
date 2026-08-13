@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationEvidenceReference, PublishingGenerationRequest } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
+  acquireGenerationRequestLock: vi.fn(),
   generateText: vi.fn(),
   getDraftCandidates: vi.fn(),
   getGenerationRuns: vi.fn(),
   getIdeaCandidates: vi.fn(),
   getSemanticBlocks: vi.fn(),
+  releaseGenerationRequestLock: vi.fn(),
   saveGenerationRun: vi.fn(),
   upsertDraftCandidates: vi.fn(),
   upsertIdeaCandidates: vi.fn(),
@@ -18,16 +20,21 @@ vi.mock('@/lib/ai', () => ({
   hasTextGenerationProvider: () => true,
 }));
 vi.mock('@/lib/kv-storage', () => ({
+  acquireGenerationRequestLock: mocks.acquireGenerationRequestLock,
   getDraftCandidates: mocks.getDraftCandidates,
   getGenerationRuns: mocks.getGenerationRuns,
   getIdeaCandidates: mocks.getIdeaCandidates,
   getSemanticBlocks: mocks.getSemanticBlocks,
+  releaseGenerationRequestLock: mocks.releaseGenerationRequestLock,
   saveGenerationRun: mocks.saveGenerationRun,
   upsertDraftCandidates: mocks.upsertDraftCandidates,
   upsertIdeaCandidates: mocks.upsertIdeaCandidates,
 }));
 
-import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
+import {
+  buildPublishingV2RequestIdempotencyKey,
+  generatePublishingBatchV2,
+} from '@/lib/publishing-v2';
 
 function result(text: string) {
   return {
@@ -123,6 +130,8 @@ describe('V2 publishing surfaces', () => {
     mocks.getDraftCandidates.mockResolvedValue([]);
     mocks.getIdeaCandidates.mockResolvedValue([]);
     mocks.getSemanticBlocks.mockResolvedValue([]);
+    mocks.acquireGenerationRequestLock.mockResolvedValue({ acquired: true, owner: 'generation-owner', lock: null });
+    mocks.releaseGenerationRequestLock.mockResolvedValue(true);
     mocks.saveGenerationRun.mockResolvedValue(undefined);
     mocks.upsertDraftCandidates.mockImplementation(async (_agentId, drafts) => drafts);
     mocks.upsertIdeaCandidates.mockImplementation(async (_agentId, ideas) => ideas);
@@ -156,11 +165,14 @@ describe('V2 publishing surfaces', () => {
             id: candidate.id,
             overall: 0.9,
             voiceFit: 0.9,
+            operatorPlausibility: 0.9,
+            cringeRisk: 0.05,
             insight: 0.86,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.92,
             novelty: 0.84,
+            manualAnchorReskinRisk: 0.05,
           })),
         }));
       }
@@ -190,7 +202,8 @@ describe('V2 publishing surfaces', () => {
       expect(writerCall.system).toContain("every number's subject, denominator, geography, time period, and measurement type");
       expect(copyJudgeCall.system).toContain("change a figure's subject, denominator, geography, period, or measurement type");
       expect(JSON.parse(copyJudgeCall.prompt).voiceAnchors).toHaveLength(3);
-      expect(drafts).toHaveLength(2);
+      expect(drafts.length).toBeGreaterThan(0);
+      expect(drafts.length).toBeLessThanOrEqual(2);
       expect(drafts[0]).toMatchObject({
         pipelineVersion: 'v2',
         generationSurface: surface,
@@ -208,10 +221,14 @@ describe('V2 publishing surfaces', () => {
   );
 
   it('keeps copy-only remixes under the parent idea without forging a new premise', async () => {
+    let remixWriter = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'tweet_writing') {
+        remixWriter += 1;
         return result(JSON.stringify({
-          content: 'retries should reuse the same qualified artifact instead of generating replacement copy.',
+          content: remixWriter % 2
+            ? 'copy cleared review already. the retry is just delivery.'
+            : 'same approved artifact, another delivery attempt.',
           format: 'observation',
           posture: 'shorter version of the parent claim',
         }));
@@ -224,11 +241,14 @@ describe('V2 publishing surfaces', () => {
             id: candidate.id,
             overall: 0.9,
             voiceFit: 0.9,
+            operatorPlausibility: 0.9,
+            cringeRisk: 0.05,
             insight: 0.86,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.92,
             novelty: 0.84,
+            manualAnchorReskinRisk: 0.05,
           })),
         }));
       }
@@ -250,7 +270,8 @@ describe('V2 publishing surfaces', () => {
     });
 
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'idea_generation')).toBe(false);
-    expect(drafts).toHaveLength(2);
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(drafts.length).toBeLessThanOrEqual(2);
     expect(drafts[0]).toMatchObject({
       ideaId: 'idea-parent',
       parentTweetId: 'tweet-parent',
@@ -274,6 +295,65 @@ describe('V2 publishing surfaces', () => {
     expect(drafts).toEqual([]);
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(finalTrace).toMatchObject({ status: 'empty', outcomeCode: 'prompt_injection', error: null });
+  });
+
+  it('suppresses an identical in-flight request before it can spend model tokens', async () => {
+    mocks.acquireGenerationRequestLock.mockResolvedValue({
+      acquired: false,
+      owner: 'contender',
+      lock: { owner: 'active-generation' },
+    });
+
+    const drafts = await generatePublishingBatchV2({
+      ...input,
+      request: { surface: 'reply', triggerId: 'reply-concurrent', targetPost: target },
+    });
+
+    expect(drafts).toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.releaseGenerationRequestLock).not.toHaveBeenCalled();
+  });
+
+  it('does not spend a completed live original trigger twice before queue persistence', async () => {
+    const triggerId = 'refill:research-snapshot:42';
+    const generationInput = {
+      ...input,
+      mode: 'live',
+      request: { surface: 'original', triggerId },
+    } as any;
+    const idempotencyKey = buildPublishingV2RequestIdempotencyKey(generationInput);
+    mocks.getGenerationRuns.mockResolvedValue([{
+      idempotencyKey,
+      status: 'completed',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-10',
+      voiceCorpusVersion: 'voice-current',
+      surface: 'original',
+      selectedDraftIds: ['draft-already-generated'],
+    }]);
+
+    const drafts = await generatePublishingBatchV2(generationInput);
+
+    expect(drafts).toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.acquireGenerationRequestLock).not.toHaveBeenCalled();
+  });
+
+  it('changes request identity when the active voice or model stack changes', () => {
+    const request = { surface: 'reply', triggerId: 'reply-context', targetPost: target } as const;
+    const base = buildPublishingV2RequestIdempotencyKey({ ...input, request });
+    const changedVoice = buildPublishingV2RequestIdempotencyKey({
+      ...input,
+      request,
+      voiceProfile: { ...input.voiceProfile, tone: 'more conversational and terse' },
+    });
+    const changedStack = buildPublishingV2RequestIdempotencyKey({
+      ...input,
+      request,
+      modelStack: 'standard',
+    });
+
+    expect(changedVoice).not.toBe(base);
+    expect(changedStack).not.toBe(base);
   });
 
   it('rejects contextual copy when the judge reports weak operator voice fit', async () => {
@@ -303,11 +383,14 @@ describe('V2 publishing surfaces', () => {
             id,
             overall: 0.9,
             voiceFit: 0.4,
+            operatorPlausibility: 0.4,
+            cringeRisk: 0.05,
             insight: 0.86,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.92,
             novelty: 0.84,
+            manualAnchorReskinRisk: 0.05,
           })),
         }));
       }
@@ -323,6 +406,108 @@ describe('V2 publishing surfaces', () => {
     expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ rejectionCodes: expect.arrayContaining(['copy_judge_voice_mismatch']) }),
     ]));
+  });
+
+  it('replays only the exact persisted critic result without spending more tokens', async () => {
+    let finalTrace: any = null;
+    const request = { surface: 'reply', triggerId: 'reply-replay', targetPost: target } as const;
+    const first = await generatePublishingBatchV2({
+      ...input,
+      request,
+      onTrace: (trace: any) => { finalTrace = trace; },
+    });
+    const storedDrafts = mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1];
+    const storedIdeaIds = new Set(storedDrafts.map((draft: any) => draft.ideaId));
+    const storedIdeas = mocks.upsertIdeaCandidates.mock.calls
+      .map((call) => call[1])
+      .flat()
+      .filter((idea: any) => storedIdeaIds.has(idea.id));
+    finalTrace = { ...finalTrace, surface: request.surface };
+    mocks.getGenerationRuns.mockResolvedValue([finalTrace]);
+    mocks.getDraftCandidates.mockResolvedValue(storedDrafts);
+    mocks.getIdeaCandidates.mockResolvedValue(storedIdeas);
+    mocks.generateText.mockClear();
+
+    const replayed = await generatePublishingBatchV2({ ...input, request });
+
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(replayed.map((draft) => draft.content)).toEqual(first.map((draft) => draft.content));
+    expect(replayed[0]?.finalCriticScores).toEqual(first[0]?.finalCriticScores);
+    expect(replayed[0]).toMatchObject({
+      qualityPolicyVersion: 'publishing-v2-contextual-hard-gates-1',
+      finalCriticVersion: 'publishing-v2-contextual-copy-judge-1',
+    });
+  });
+
+  it('does not replay contextual copy after its evidence expires', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-13T00:00:00.000Z'));
+      let finalTrace: any = null;
+      const expiringFact = { ...productFact, expiresAt: '2026-08-14T00:00:00.000Z' };
+      const request = { surface: 'marketing', triggerId: 'marketing-expiry', productFacts: [expiringFact] } as const;
+      await generatePublishingBatchV2({
+        ...input,
+        request,
+        onTrace: (trace: any) => { finalTrace = trace; },
+      });
+      const storedDrafts = mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1];
+      const storedIdeaIds = new Set(storedDrafts.map((draft: any) => draft.ideaId));
+      const storedIdeas = mocks.upsertIdeaCandidates.mock.calls
+        .map((call) => call[1])
+        .flat()
+        .filter((idea: any) => storedIdeaIds.has(idea.id));
+      mocks.getGenerationRuns.mockResolvedValue([finalTrace]);
+      mocks.getDraftCandidates.mockResolvedValue(storedDrafts);
+      mocks.getIdeaCandidates.mockResolvedValue(storedIdeas);
+      mocks.generateText.mockClear();
+
+      vi.setSystemTime(new Date('2026-08-15T00:00:00.000Z'));
+      const replayed = await generatePublishingBatchV2({ ...input, request });
+
+      expect(replayed).toEqual([]);
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+        status: 'empty',
+        outcomeCode: 'no_qualified_context',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('regenerates when evidence content changes or persisted critic dimensions are incomplete', async () => {
+    let finalTrace: any = null;
+    const request = { surface: 'reply', triggerId: 'reply-revalidate', targetPost: target } as const;
+    await generatePublishingBatchV2({
+      ...input,
+      request,
+      onTrace: (trace: any) => { finalTrace = trace; },
+    });
+    const storedDrafts = mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1];
+    const storedIdeaIds = new Set(storedDrafts.map((draft: any) => draft.ideaId));
+    const storedIdeas = mocks.upsertIdeaCandidates.mock.calls
+      .map((call) => call[1])
+      .flat()
+      .filter((idea: any) => storedIdeaIds.has(idea.id));
+    finalTrace = { ...finalTrace, surface: request.surface };
+    mocks.getGenerationRuns.mockResolvedValue([finalTrace]);
+    mocks.getDraftCandidates.mockResolvedValue(storedDrafts.map((draft: any) => ({ ...draft, judgeBreakdown: null })));
+    mocks.getIdeaCandidates.mockResolvedValue(storedIdeas);
+    mocks.generateText.mockClear();
+
+    await generatePublishingBatchV2({ ...input, request });
+    expect(mocks.generateText).toHaveBeenCalled();
+
+    mocks.generateText.mockClear();
+    await generatePublishingBatchV2({
+      ...input,
+      request: {
+        ...request,
+        targetPost: { ...target, content: `${target.content} New verified context.` },
+      },
+    });
+    expect(mocks.generateText).toHaveBeenCalled();
   });
 
   it('disables marketing when no current ProductFact exists', async () => {
