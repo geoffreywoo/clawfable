@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-11',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-12',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -47,6 +47,8 @@ function healthyInput() {
       sample: { terminalQueueDecisions: 40, ideas: 100, drafts: 100, maturePosts: 25 },
       quality: {
         factualIncidentCount: 0,
+        historicalFactualIncidentCount: 0,
+        currentPolicyFactualIncidentCount: 0,
         userDeleteRate: 0.1,
         semanticRepeatRate: 0.03,
         deleteReasons: {},
@@ -56,8 +58,15 @@ function healthyInput() {
         deleteRatePassed: true,
         semanticRepeatPassed: true,
         performanceSampleReady: true,
+        currentPolicyPerformanceSampleReady: true,
       },
-      performance: { reachVsOperator: 0.9, likesVsOperator: 0.9 },
+      performance: {
+        reachVsOperator: 0.9,
+        likesVsOperator: 0.9,
+        currentPolicyReachVsOperator: 0.9,
+        currentPolicyLikesVsOperator: 0.9,
+        operatorBaselineSource: 'audited_static',
+      },
       compute: {
         costDataStatus: 'complete',
         modelCalls: 20,
@@ -110,6 +119,8 @@ describe('generation quality audit findings', () => {
       selectionYield: 0,
     };
     input.generationV2.quality.factualIncidentCount = 4;
+    input.generationV2.quality.historicalFactualIncidentCount = 4;
+    input.generationV2.quality.currentPolicyFactualIncidentCount = 0;
     input.generationV2.quality.userDeleteRate = 0.26;
     input.generationV2.quality.semanticRepeatRate = 0.17;
     input.generationV2.gates.deleteRatePassed = false;
@@ -119,9 +130,24 @@ describe('generation quality audit findings', () => {
 
     expect(findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'current_policy_generation_yield_low', scope: 'current_policy' }),
-      expect.objectContaining({ code: 'historical_factual_incidents', scope: 'historical_window' }),
       expect.objectContaining({ code: 'historical_delete_rate_high', scope: 'historical_window' }),
       expect.objectContaining({ code: 'historical_semantic_repeat_rate_high', scope: 'historical_window' }),
+    ]));
+  });
+
+  it('raises factual incidents only when they belong to the active policy', () => {
+    const historicalOnly = healthyInput();
+    historicalOnly.generationV2.quality.factualIncidentCount = 4;
+    historicalOnly.generationV2.quality.historicalFactualIncidentCount = 4;
+    expect(buildGenerationAuditFindings(historicalOnly as any)
+      .some((finding) => finding.code.includes('factual_incidents'))).toBe(false);
+
+    const current = healthyInput();
+    current.generationV2.quality.factualIncidentCount = 5;
+    current.generationV2.quality.historicalFactualIncidentCount = 5;
+    current.generationV2.quality.currentPolicyFactualIncidentCount = 1;
+    expect(buildGenerationAuditFindings(current as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'current_policy_factual_incidents', scope: 'current_policy' }),
     ]));
   });
 });

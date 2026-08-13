@@ -125,6 +125,12 @@ describe('claim evidence', () => {
 });
 
 describe('generated writing patterns', () => {
+  it('blocks synthetic superlative verdict labels', () => {
+    expect(assessGeneratedWritingPatterns(
+      "hardest signal to fake in a startup: the customer renews and the founder wasn't in the building.",
+    )).toMatchObject({ primarySignature: 'superlative-colon-verdict', score: 0.52 });
+  });
+
   it('blocks the generic X is just Y with Z quip mold', () => {
     expect(assessGeneratedWritingPatterns(
       'hiring fast before product truth is just anxiety with a payroll attached.',

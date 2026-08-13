@@ -112,4 +112,6 @@ AUTOMATION_EXEMPT_AGENT_IDS=13
 
 All public X copy uses Publishing V2. Automation is fail-closed unless the owner has a reconciled, invoice-backed Stripe entitlement or the agent ID is explicitly exempted. Warm an entitled agent with `POST /api/internal/agents/:id/research/refresh`, then validate with a non-persisting `POST /api/internal/agents/:id/generation/preview` body containing `{"count":2}`. Both internal routes require `Authorization: Bearer $CRON_SECRET`.
 
-Optional research controls are `RESEARCH_V2_AGENT_HANDLES`, `RESEARCH_OFFICIAL_HOST_ALLOWLIST`, and `CLAWFABLE_RESEARCH_USER_AGENT`. Optional per-model cost rates can be supplied through `AI_MODEL_COSTS_USD_PER_MILLION_JSON` for the V2 evaluation report (`npm run eval:generation:v2`).
+Optional research controls are `RESEARCH_V2_AGENT_HANDLES`, `RESEARCH_OFFICIAL_HOST_ALLOWLIST`, and `CLAWFABLE_RESEARCH_USER_AGENT`. Active OpenAI and Anthropic models have built-in token-price metadata for V2 reporting. Override those rates or add fallback models with `AI_MODEL_COSTS_USD_PER_MILLION_JSON`, using `{\"model-name\":{\"input\":5,\"output\":30}}` in USD per million tokens (`npm run eval:generation:v2`).
+
+Run `npm run audit:geoffrey` for the protected-account generation readout, or `npm run audit:generation -- --agent-id <id>` for another account. Add `--json` for full queue, corpus, complaint, provenance, throughput, and finding details.

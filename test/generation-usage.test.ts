@@ -76,4 +76,26 @@ describe('generation usage accounting', () => {
       costDataStatus: 'partial',
     });
   });
+
+  it('backfills historical token costs for active models when traces lack a stored estimate', () => {
+    const calls: GenerationModelCallTrace[] = [{
+      stage: 'tweet_writing',
+      provider: 'openai',
+      model: 'gpt-5.6',
+      inputTokens: 100,
+      outputTokens: 50,
+      estimatedCostUsd: null,
+      durationMs: 200,
+      succeeded: true,
+      error: null,
+      fallbackAttempts: [],
+    }];
+
+    expect(summarizeGenerationUsage(calls)).toMatchObject({
+      unknownCostAttempts: 0,
+      unknownCostCalls: 0,
+      estimatedCostUsd: 0.002,
+      costDataStatus: 'complete',
+    });
+  });
 });

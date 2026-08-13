@@ -1071,13 +1071,17 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
+- The approved claim, tension, and implication are over-complete private notes. Keep only the thought Geoffrey would actually feel compelled to type; never summarize all three.
 - Native posts range from one blunt line to a rough multi-paragraph thought. Do not compress every idea into a 280-character aphorism.
 - Keep paragraph breaks and uneven rhythm when the thought has multiple beats. Let clauses pile up naturally instead of resolving them into a balanced slogan.
 - Source-free opinions can be owned in first person when that is the real posture. Never turn them into generic third-person advice.
+- Make the social posture legible: disbelief, annoyance, excitement, conviction, teasing, or a real preference. Do this through the thought itself, not by prefixing analyst prose with "i think."
 - Voice anchors demonstrate range, not reusable catchphrases. Never borrow an anchor opening such as "my philosophy on" or turn one post's slang into a house style.
 - Start with the actual reaction, named subject, bet, or decision. Skip the industry introduction, framework, and audience lesson.
 - Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
 - Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
+- Do not manufacture a neat equation or investment slogan from the notes. Avoid "give me X over Y," "i'd rather own X than Y," paired "X is replaceable / Y isn't," and "that's the whole game/trade/reason."
+- Drafts must be separately conceived reactions, not short, medium, and long paraphrases of one sentence. It is fine for one to be a fragment or leave the reason implicit.
 - Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
 }
 

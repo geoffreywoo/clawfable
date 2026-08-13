@@ -54,12 +54,25 @@ export async function POST(
 
   try {
     const queueBefore = await getQueuedTweets(id);
-    const added = await refillQueue(agent, requestedCount);
+    let added = 0;
+    let consecutiveEmptyAttempts = 0;
+    const attempts: Array<{ requested: number; added: number }> = [];
+    const maxAttempts = Math.min(10, Math.max(1, Math.ceil(requestedCount / 2) + 1));
+    while (added < requestedCount && attempts.length < maxAttempts) {
+      const remaining = requestedCount - added;
+      const attemptAdded = await refillQueue(agent, remaining);
+      attempts.push({ requested: remaining, added: attemptAdded });
+      added += attemptAdded;
+      consecutiveEmptyAttempts = attemptAdded > 0 ? 0 : consecutiveEmptyAttempts + 1;
+      if (consecutiveEmptyAttempts >= 2) break;
+      if (added < requestedCount) resetReadCache();
+    }
     const queueAfter = await getQueuedTweets(id);
     return NextResponse.json({
       agentId: id,
       requested: requestedCount,
       added,
+      attempts,
       queueDepthBefore: queueBefore.length,
       queueDepthAfter: queueAfter.length,
       generatedModels: [...new Set(queueAfter.slice(0, Math.max(added, 0)).map((tweet) => tweet.generationModel).filter(Boolean))],

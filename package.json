@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "audit:generation": "tsx scripts/audit-generation.ts",
+    "audit:geoffrey": "tsx scripts/audit-generation.ts --handle geoffwoo",
     "eval:generation:v2": "tsx scripts/eval-generation-v2.ts",
     "seeds:geoffrey": "tsx scripts/list-frontier-seeds.ts"
   },

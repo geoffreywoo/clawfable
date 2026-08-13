@@ -2,6 +2,7 @@ import type { Tweet } from './types';
 import {
   getPublishingV2FinalCriticVersion,
   getPublishingV2QualityPolicyVersion,
+  PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
 } from './publishing-quality-policy';
 
 type GenerationOriginTweet = Pick<
@@ -24,6 +25,7 @@ type GenerationOriginTweet = Pick<
   | 'finalCriticProvider'
   | 'finalCriticModel'
   | 'finalCriticVerdict'
+  | 'finalCriticScores'
   | 'finalCriticVersion'
 > & { type?: Tweet['type'] };
 
@@ -49,6 +51,15 @@ export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string |
     }
     if (tweet.qualityPolicyVersion !== qualityPolicyVersion) {
       return `V2-generated posts require current quality policy ${qualityPolicyVersion}.`;
+    }
+    if (
+      tweet.generationSurface === 'original'
+      && (
+        typeof tweet.finalCriticScores?.qualityMargin !== 'number'
+        || tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN
+      )
+    ) {
+      return `V2-generated original posts require final quality margin at least ${PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN.toFixed(2)}.`;
     }
     if (!tweet.voiceCorpusVersion) {
       return 'V2-generated posts require voice-corpus provenance.';

@@ -90,9 +90,19 @@ export async function POST(
     const refillRequested = refill && corpus?.active
       ? Math.max(0, targetQueueDepth - activeQueueAfterRefresh.length)
       : 0;
-    const refillAdded = refillRequested > 0
-      ? await refillQueue(agent, refillRequested)
-      : 0;
+    let refillAdded = 0;
+    let consecutiveEmptyAttempts = 0;
+    const refillAttempts: Array<{ requested: number; added: number }> = [];
+    const maxRefillAttempts = Math.min(5, Math.max(1, Math.ceil(refillRequested / 2) + 1));
+    while (refillRequested - refillAdded > 0 && refillAttempts.length < maxRefillAttempts) {
+      const remaining = refillRequested - refillAdded;
+      const attemptAdded = await refillQueue(agent, remaining);
+      refillAttempts.push({ requested: remaining, added: attemptAdded });
+      refillAdded += attemptAdded;
+      consecutiveEmptyAttempts = attemptAdded > 0 ? 0 : consecutiveEmptyAttempts + 1;
+      if (consecutiveEmptyAttempts >= 2) break;
+      if (refillRequested - refillAdded > 0) resetReadCache();
+    }
     const queueAfter = await getQueuedTweets(id);
     const activeQueueAfter = queueAfter.filter((tweet) => (
       tweet.status === 'queued' && !tweet.quarantinedAt
@@ -116,6 +126,7 @@ export async function POST(
         enabled: refill,
         requested: refillRequested,
         added: refillAdded,
+        attempts: refillAttempts,
         finalDepth: activeQueueAfter.length,
         artifactCount: queueAfter.length,
         tweetIds: activeQueueAfter.map((tweet) => tweet.id),

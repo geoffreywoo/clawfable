@@ -6,8 +6,10 @@ import type {
   ResearchRefreshState,
   Tweet,
   TweetPerformance,
+  VoiceCorpusSnapshot,
 } from './types';
 import { summarizeGenerationUsage } from './generation-usage';
+import { PUBLISHING_V2_QUALITY_POLICY_VERSION } from './publishing-quality-policy';
 import {
   getDraftCandidates,
   getGenerationRuns,
@@ -16,6 +18,7 @@ import {
   getPerformanceHistory,
   getResearchRefreshState,
   getTweets,
+  getVoiceCorpusSnapshot,
 } from './kv-storage';
 
 export const V1_AUDITED_BASELINE = { medianImpressions: 1117, medianLikes: 7 };
@@ -96,6 +99,7 @@ export function buildGenerationV2Metrics({
   tweets,
   signals,
   performance,
+  voiceCorpus = null,
   researchState = null,
   now = new Date(),
 }: {
@@ -105,6 +109,7 @@ export function buildGenerationV2Metrics({
   tweets: Tweet[];
   signals: LearningSignal[];
   performance: TweetPerformance[];
+  voiceCorpus?: VoiceCorpusSnapshot | null;
   researchState?: ResearchRefreshState | null;
   now?: Date;
 }) {
@@ -122,15 +127,28 @@ export function buildGenerationV2Metrics({
     || (signal.signalType === 'x_post_succeeded' && signal.tweetId && !editedTweetIds.has(signal.tweetId))
   ));
   const deletes = terminal.filter((signal) => signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x');
+  const v2TweetsById = new Map(tweets.filter((tweet) => tweet.pipelineVersion === 'v2').map((tweet) => [tweet.id, tweet]));
+  const signalPolicyVersion = (signal: LearningSignal): string | null => (
+    typeof signal.metadata?.qualityPolicyVersion === 'string'
+      ? signal.metadata.qualityPolicyVersion
+      : signal.tweetId
+        ? v2TweetsById.get(signal.tweetId)?.qualityPolicyVersion || null
+        : null
+  );
   const factualIncidents = v2Signals.filter((signal) => signal.metadata?.feedbackReasonCode === 'factual_risk');
+  const currentPolicyFactualIncidents = factualIncidents.filter((signal) => (
+    signalPolicyVersion(signal) === PUBLISHING_V2_QUALITY_POLICY_VERSION
+  ));
   const policyIncidents = v2Signals.filter((signal) => (
     signal.signalType === 'x_post_rejected' && signal.metadata?.errorClass === 'policy'
+  ));
+  const currentPolicyPolicyIncidents = policyIncidents.filter((signal) => (
+    signalPolicyVersion(signal) === PUBLISHING_V2_QUALITY_POLICY_VERSION
   ));
   const liveIdeas = ideas.filter((idea) => liveRunIds.has(idea.generationRunId));
   const liveDrafts = drafts.filter((draft) => liveRunIds.has(draft.generationRunId));
   const selectedDrafts = liveDrafts.filter((draft) => ['selected', 'queued', 'posted', 'edited', 'deleted'].includes(draft.status));
   const survivedDrafts = liveDrafts.filter((draft) => draft.status === 'queued' || draft.status === 'posted');
-  const v2TweetsById = new Map(tweets.filter((tweet) => tweet.pipelineVersion === 'v2').map((tweet) => [tweet.id, tweet]));
   const ideasById = new Map(ideas.map((idea) => [idea.id, idea]));
   const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
   const tweetsByDraftId = new Map(tweets
@@ -139,15 +157,30 @@ export function buildGenerationV2Metrics({
   const maturePerformance = maturePostSnapshots(performance.filter((entry) => (
     Boolean(entry.tweetId && v2TweetsById.has(entry.tweetId))
   )));
+  const currentPolicyMaturePerformance = maturePostSnapshots(performance.filter((entry) => {
+    const tweet = entry.tweetId ? v2TweetsById.get(entry.tweetId) : null;
+    return tweet?.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION;
+  }));
   const matureV1Performance = maturePostSnapshots(performance.filter((entry) => (
     entry.source === 'autopilot' && (!entry.tweetId || !v2TweetsById.has(entry.tweetId))
   )));
-  const rollingOperatorPerformance = maturePostSnapshots(performance.filter((entry) => (
-    entry.authorshipProvenance !== 'known_clawfable_generated'
-    && (entry.source === 'manual' || entry.authorshipProvenance === 'operator_composed')
-    && entry.hasMedia !== true
-    && entry.isTextComplete !== false
-  )))
+  const corpusByXId = new Map((voiceCorpus?.entries || []).map((entry) => [entry.xTweetId, entry]));
+  const rollingOperatorPerformance = maturePostSnapshots(performance.filter((entry) => {
+    const corpusEntry = corpusByXId.get(String(entry.xTweetId || ''));
+    const corpusQualified = Boolean(
+      corpusEntry
+      && corpusEntry.provenance !== 'known_clawfable_generated'
+      && corpusEntry.provenance !== 'unknown'
+      && corpusEntry.authorshipConfidence >= 0.8
+      && corpusEntry.dispositions.includes('topic_signal')
+      && !corpusEntry.dispositions.some((disposition) => ['mechanics_only', 'negative', 'excluded'].includes(disposition)),
+    );
+    const storedQualified = entry.authorshipProvenance !== 'known_clawfable_generated'
+      && (entry.source === 'manual' || entry.authorshipProvenance === 'operator_composed');
+    return (corpusQualified || storedQualified)
+      && entry.hasMedia !== true
+      && entry.isTextComplete !== false;
+  }))
     .sort((left, right) => Date.parse(right.postedAt) - Date.parse(left.postedAt))
     .slice(0, 50);
   const modelCalls = [
@@ -186,6 +219,16 @@ export function buildGenerationV2Metrics({
     : v2QualityAdjustedGrowth >= v1QualityAdjustedGrowth;
   const rollingOperatorMedianImpressions = median(rollingOperatorPerformance.map((entry) => entry.impressions));
   const rollingOperatorMedianLikes = median(rollingOperatorPerformance.map((entry) => entry.likes));
+  const operatorBaselineSource = rollingOperatorPerformance.length >= 20 ? 'rolling' : 'audited_static';
+  const operatorBaselineImpressions = operatorBaselineSource === 'rolling'
+    ? rollingOperatorMedianImpressions!
+    : OPERATOR_TEXT_AUDITED_BASELINE.medianImpressions;
+  const operatorBaselineLikes = operatorBaselineSource === 'rolling'
+    ? rollingOperatorMedianLikes!
+    : OPERATOR_TEXT_AUDITED_BASELINE.medianLikes;
+  const currentPolicyMedianImpressions = median(currentPolicyMaturePerformance.map((entry) => entry.impressions));
+  const currentPolicyMedianLikes = median(currentPolicyMaturePerformance.map((entry) => entry.likes));
+  const selectedDraftCount = Math.max(0, draftsSelected);
 
   return {
     schemaVersion: 2,
@@ -196,14 +239,19 @@ export function buildGenerationV2Metrics({
       drafts: liveDrafts.length,
       terminalQueueDecisions: terminal.length,
       maturePosts: maturePerformance.length,
+      currentPolicyMaturePosts: currentPolicyMaturePerformance.length,
       rollingOperatorPosts: rollingOperatorPerformance.length,
     },
     conversions: {
-      sourceToBrief: ratio(researchBriefs, qualifiedStories || sourceDocuments),
+      researchBriefsPerRun: ratio(researchBriefs, completedRuns.length),
+      sourceDocumentsAvailablePerRun: ratio(sourceDocuments, completedRuns.length),
+      qualifiedStoriesAvailablePerRun: ratio(qualifiedStories, completedRuns.length),
       briefToIdea: ratio(briefsWithEligibleIdeas, briefs),
       ideaToDraft: ratio(ideasWithEligibleDrafts, ideasSelected),
       draftToQueue: ratio(draftsSelected, draftsEligible),
       cleanQueueSurvival: ratio(survivedDrafts.length, selectedDrafts.length),
+      runsWithSelectionRate: ratio(completedRuns.filter((run) => (run.stageCounts.draftsSelected || 0) > 0).length, completedRuns.length),
+      selectedDraftsPerRun: ratio(draftsSelected, completedRuns.length),
     },
     quality: {
       cleanAcceptance,
@@ -211,7 +259,11 @@ export function buildGenerationV2Metrics({
       userDeleteRate: deleteRate,
       semanticRepeatRate: repeatRate,
       factualIncidentCount: factualIncidents.length,
+      historicalFactualIncidentCount: factualIncidents.length,
+      currentPolicyFactualIncidentCount: currentPolicyFactualIncidents.length,
+      unversionedFactualIncidentCount: factualIncidents.filter((signal) => !signalPolicyVersion(signal)).length,
       policyIncidentCount: policyIncidents.length,
+      currentPolicyPolicyIncidentCount: currentPolicyPolicyIncidents.length,
       deleteReasons: Object.fromEntries(v2Signals
         .filter((signal) => signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x')
         .reduce((counts, signal) => {
@@ -232,6 +284,9 @@ export function buildGenerationV2Metrics({
       totalInputTokens: usage.totalInputTokens,
       totalOutputTokens: usage.totalOutputTokens,
       estimatedCostUsd: usage.estimatedCostUsd,
+      modelCallsPerSelectedDraft: ratio(modelCalls.length, selectedDraftCount),
+      inputTokensPerSelectedDraft: ratio(usage.totalInputTokens, selectedDraftCount),
+      outputTokensPerSelectedDraft: ratio(usage.totalOutputTokens, selectedDraftCount),
       averageRunLatencyMs: completedRuns.length > 0
         ? Math.round(completedRuns.reduce((sum, run) => sum + (run.durationMs || 0), 0) / completedRuns.length)
         : null,
@@ -282,6 +337,17 @@ export function buildGenerationV2Metrics({
       likesVsV1: medianLikes === null ? null : Number((medianLikes / V1_AUDITED_BASELINE.medianLikes).toFixed(3)),
       reachVsOperator: medianImpressions === null ? null : Number((medianImpressions / OPERATOR_TEXT_AUDITED_BASELINE.medianImpressions).toFixed(3)),
       likesVsOperator: medianLikes === null ? null : Number((medianLikes / OPERATOR_TEXT_AUDITED_BASELINE.medianLikes).toFixed(3)),
+      currentPolicyMedianImpressions,
+      currentPolicyMedianLikes,
+      currentPolicyReachVsOperator: currentPolicyMedianImpressions === null
+        ? null
+        : Number((currentPolicyMedianImpressions / operatorBaselineImpressions).toFixed(3)),
+      currentPolicyLikesVsOperator: currentPolicyMedianLikes === null
+        ? null
+        : Number((currentPolicyMedianLikes / operatorBaselineLikes).toFixed(3)),
+      operatorBaselineSource,
+      operatorBaselineImpressions,
+      operatorBaselineLikes,
       v2QualityAdjustedGrowth,
       v1QualityAdjustedGrowth,
       qualityAdjustedGrowthNoRegression,
@@ -293,8 +359,9 @@ export function buildGenerationV2Metrics({
       cleanAcceptancePassed: cleanAcceptance !== null && cleanAcceptance >= 0.6,
       deleteRatePassed: deleteRate !== null && deleteRate <= 0.2,
       semanticRepeatPassed: repeatRate !== null && repeatRate <= 0.05,
-      incidentFree: factualIncidents.length === 0 && policyIncidents.length === 0,
+      incidentFree: currentPolicyFactualIncidents.length === 0 && currentPolicyPolicyIncidents.length === 0,
       performanceSampleReady: maturePerformance.length >= 20,
+      currentPolicyPerformanceSampleReady: currentPolicyMaturePerformance.length >= 20,
       performancePassed: maturePerformance.length >= 20
         && medianImpressions !== null
         && medianLikes !== null
@@ -314,14 +381,15 @@ export function buildGenerationV2Metrics({
 }
 
 export async function loadGenerationV2Metrics(agentId: string) {
-  const [runs, ideas, drafts, tweets, signals, performance, researchState] = await Promise.all([
+  const [runs, ideas, drafts, tweets, signals, performance, researchState, voiceCorpus] = await Promise.all([
     getGenerationRuns(agentId, 250),
     getIdeaCandidates(agentId, 2000),
     getDraftCandidates(agentId, 2000),
     getTweets(agentId),
     getLearningSignals(agentId, 250),
-    getPerformanceHistory(agentId, 1000),
+    getPerformanceHistory(agentId, 2000),
     getResearchRefreshState(agentId),
+    getVoiceCorpusSnapshot(agentId),
   ]);
-  return buildGenerationV2Metrics({ runs, ideas, drafts, tweets, signals, performance, researchState });
+  return buildGenerationV2Metrics({ runs, ideas, drafts, tweets, signals, performance, researchState, voiceCorpus });
 }

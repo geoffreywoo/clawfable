@@ -34,7 +34,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 4;
+export const GENERATION_QUALITY_AUDIT_VERSION = 5;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -221,17 +221,18 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     });
   }
 
-  if (input.generationV2.quality.factualIncidentCount > 0) {
+  if (input.generationV2.quality.currentPolicyFactualIncidentCount > 0) {
     add({
-      code: 'historical_factual_incidents',
+      code: 'current_policy_factual_incidents',
       severity: 'high',
-      scope: 'historical_window',
-      title: 'The V2 learning window contains factual-risk incidents',
+      scope: 'current_policy',
+      title: 'The active policy contains factual-risk incidents',
       evidence: {
-        factualIncidentCount: input.generationV2.quality.factualIncidentCount,
+        currentPolicyFactualIncidentCount: input.generationV2.quality.currentPolicyFactualIncidentCount,
+        historicalFactualIncidentCount: input.generationV2.quality.historicalFactualIncidentCount,
         terminalQueueDecisions: input.generationV2.sample.terminalQueueDecisions,
       },
-      action: 'Review incident-linked drafts and confirm their source or claim failures are represented in current rejection memory.',
+      action: 'Review incident-linked drafts and block the active source, premise, or claim failure before further autonomous posting.',
     });
   }
 
@@ -268,21 +269,22 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
   }
 
   if (
-    input.generationV2.gates.performanceSampleReady
+    input.generationV2.gates.currentPolicyPerformanceSampleReady
     && (
-      (input.generationV2.performance.reachVsOperator || 0) < 0.8
-      || (input.generationV2.performance.likesVsOperator || 0) < 0.8
+      (input.generationV2.performance.currentPolicyReachVsOperator || 0) < 0.8
+      || (input.generationV2.performance.currentPolicyLikesVsOperator || 0) < 0.8
     )
   ) {
     add({
-      code: 'historical_performance_below_operator',
+      code: 'current_policy_performance_below_operator',
       severity: 'medium',
-      scope: 'historical_window',
-      title: 'Generated posts trail the audited operator baseline',
+      scope: 'current_policy',
+      title: 'Active-policy posts trail the operator baseline',
       evidence: {
-        maturePosts: input.generationV2.sample.maturePosts,
-        reachVsOperator: input.generationV2.performance.reachVsOperator,
-        likesVsOperator: input.generationV2.performance.likesVsOperator,
+        maturePosts: input.generationV2.sample.currentPolicyMaturePosts,
+        reachVsOperator: input.generationV2.performance.currentPolicyReachVsOperator,
+        likesVsOperator: input.generationV2.performance.currentPolicyLikesVsOperator,
+        operatorBaselineSource: input.generationV2.performance.operatorBaselineSource,
       },
       action: 'Use operator posts for diction and personal topic taste, then optimize spread mechanics only after native-voice gates pass.',
     });
@@ -496,6 +498,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     maxOriginalsPerRolling24Hours: 5,
     minQueueSize: context.settings.minQueueSize,
     refillBatchLimit: 2,
+    refillCanIterateUntilMinimum: true,
   };
   const corpusSummary = corpus ? {
     snapshotId: corpus.snapshotId,
@@ -556,6 +559,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       ? Number((runsWithSelectedDrafts / currentPolicyRuns.length).toFixed(4))
       : null,
     latestRunAt: currentPolicyRuns[0]?.startedAt || null,
+    selectedDraftsPerRun: currentPolicyRuns.length > 0
+      ? Number((currentPolicyRuns.reduce((sum, run) => sum + (run.stageCounts.draftsSelected || 0), 0) / currentPolicyRuns.length).toFixed(4))
+      : null,
   };
   const findingItems = buildGenerationAuditFindings({
     identity,

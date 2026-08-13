@@ -1,4 +1,5 @@
 import type { GenerationModelCallTrace } from './types';
+import { estimateAiUsageCostUsd } from './ai-pricing';
 
 export interface GenerationUsageSummary {
   logicalCalls: number;
@@ -26,6 +27,7 @@ export function summarizeGenerationUsage(calls: GenerationModelCallTrace[]): Gen
   let unknownCostCalls = 0;
 
   const addAttempt = (attempt: {
+    model: string;
     inputTokens: number | null;
     outputTokens: number | null;
     estimatedCostUsd: number | null;
@@ -36,7 +38,10 @@ export function summarizeGenerationUsage(calls: GenerationModelCallTrace[]): Gen
     if (typeof attempt.inputTokens !== 'number' || typeof attempt.outputTokens !== 'number') {
       unknownTokenAttempts += 1;
     }
-    if (typeof attempt.estimatedCostUsd === 'number') knownCostUsd += attempt.estimatedCostUsd;
+    const estimatedCostUsd = typeof attempt.estimatedCostUsd === 'number'
+      ? attempt.estimatedCostUsd
+      : estimateAiUsageCostUsd(attempt.model, attempt.inputTokens, attempt.outputTokens);
+    if (typeof estimatedCostUsd === 'number') knownCostUsd += estimatedCostUsd;
     else unknownCostAttempts += 1;
   };
 
@@ -47,7 +52,10 @@ export function summarizeGenerationUsage(calls: GenerationModelCallTrace[]): Gen
       ...fallbacks,
       ...(countedFinalAttempt ? [call] : []),
     ];
-    if (attempts.length === 0 || attempts.some((attempt) => typeof attempt.estimatedCostUsd !== 'number')) {
+    if (attempts.length === 0 || attempts.some((attempt) => (
+      typeof attempt.estimatedCostUsd !== 'number'
+      && estimateAiUsageCostUsd(attempt.model, attempt.inputTokens, attempt.outputTokens) === null
+    ))) {
       unknownCostCalls += 1;
     }
     for (const attempt of fallbacks) {

@@ -18,7 +18,11 @@ import {
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
-import { classifyGeoffreyTopicDomain } from '@/lib/source-planner';
+import {
+  classifyGeoffreyTopicDomain,
+  isGeoffreyDeepTechnicalTopic,
+  isGeoffreyManufacturingMaterialsTopic,
+} from '@/lib/source-planner';
 import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
 
@@ -121,6 +125,55 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('uses an operator-engaged network post as a subject cue without exposing its prose as evidence', () => {
+    const headline = 'OpenAI launches a consumer agent with a secret checkout workflow';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 991,
+        networkTopicId: 'network-openai-consumer-agent',
+        headline,
+        source: '@builder',
+        relevanceScore: 92,
+        category: 'OpenAI consumer agent launch',
+        timestamp: new Date().toISOString(),
+        tweetCount: 2,
+        sourceType: 'x',
+        sourceCount: 2,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.9,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['OpenAI'],
+        isPrimarySource: false,
+        topTweet: { id: 'network-post-1', text: headline, likes: 900, author: 'builder' },
+      } as any],
+      allTweets: [],
+    });
+
+    const signal = briefs.find((entry) => entry.trendTopicId === 'network-openai-consumer-agent');
+    expect(signal).toMatchObject({
+      topic: 'OpenAI in ai compute',
+      evidenceMode: 'operator_opinion',
+      evidence: [],
+      sourceDocumentIds: [],
+    });
+    expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
+    expect(signal?.sourceBrief).toContain('Subject cue only');
+  });
+
   it('keeps most refill briefs in the native operator lane', () => {
     const stories = ['AI chips', 'robotics', 'energy', 'biotech'].map((topic, index) => ({
       schemaVersion: 2,
@@ -193,6 +246,49 @@ describe('Tweet Generation V2', () => {
     ].includes(classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`)));
     expect(coreBriefs).toHaveLength(3);
     expect(briefs.map((entry) => entry.topic)).toEqual(expect.arrayContaining(['AI', 'startups']));
+  });
+
+  it('keeps Geoffrey deep-technical subjects in a minority lane across V2 briefs', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 5,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        topics: ['AI', 'startups', 'investing', 'culture', 'sports', 'health', 'developer tools', 'fusion', 'robotics'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'culture', 'sports'] } } as any,
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'AI', angle: 'products and labs', weight: 10, sampleCount: 10, avgEngagement: 100, topTweets: [] },
+          { topic: 'startups', angle: 'founders and growth', weight: 9, sampleCount: 9, avgEngagement: 90, topTweets: [] },
+          { topic: 'investing', angle: 'capital and conviction', weight: 8, sampleCount: 8, avgEngagement: 80, topTweets: [] },
+          { topic: 'fusion tritium breeding', angle: 'first-wall survival', weight: 7, sampleCount: 7, avgEngagement: 70, topTweets: [] },
+          { topic: 'humanoid actuator duty cycles', angle: 'field service intervals', weight: 6, sampleCount: 6, avgEngagement: 60, topTweets: [] },
+          { topic: 'rare earth magnet sintering yield', angle: 'manufacturing constraints', weight: 5, sampleCount: 5, avgEngagement: 50, topTweets: [] },
+          { topic: 'culture', angle: 'status and ambition', weight: 4, sampleCount: 4, avgEngagement: 40, topTweets: [] },
+          { topic: 'sports', angle: 'competition', weight: 3, sampleCount: 3, avgEngagement: 30, topTweets: [] },
+          { topic: 'health', angle: 'personal experiments', weight: 2, sampleCount: 2, avgEngagement: 20, topTweets: [] },
+          { topic: 'developer tools', angle: 'software builders', weight: 1, sampleCount: 1, avgEngagement: 10, topTweets: [] },
+        ],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const subjects = briefs.map((entry) => `${entry.topic} ${entry.title}`);
+    expect(briefs).toHaveLength(8);
+    expect(subjects.filter(isGeoffreyDeepTechnicalTopic).length).toBeLessThanOrEqual(1);
+    expect(subjects.filter(isGeoffreyManufacturingMaterialsTopic).length).toBeLessThanOrEqual(1);
+    const domainCounts = subjects.reduce((counts, subject) => {
+      const domain = classifyGeoffreyTopicDomain(subject);
+      counts.set(domain, (counts.get(domain) || 0) + 1);
+      return counts;
+    }, new Map<string, number>());
+    expect(Math.max(...domainCounts.values())).toBeLessThanOrEqual(2);
   });
 
   it('lets an idea rejection block its premise without suppressing the whole native topic', () => {

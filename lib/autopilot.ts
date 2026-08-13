@@ -65,6 +65,7 @@ import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { PUBLISHING_V2_MODEL_STACK } from './ai';
+import { PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN } from './publishing-quality-policy';
 import { getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
 import { semanticIdeaSimilarity } from './tweet-features';
@@ -424,6 +425,27 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     quarantinedAt: new Date().toISOString(),
     quarantineReason: issue,
   })));
+  await Promise.all(invalid
+    .filter(({ tweet }) => (
+      typeof tweet.finalCriticScores?.qualityMargin === 'number'
+      && tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN
+    ))
+    .map(({ tweet, issue }) => addLearningSignal(agent.id, {
+      tweetId: tweet.id,
+      xTweetId: tweet.xTweetId || undefined,
+      signalType: 'x_post_rejected',
+      surface: 'queue',
+      rewardDelta: -0.7,
+      reason: issue,
+      inferred: true,
+      metadata: {
+        pipelineVersion: tweet.pipelineVersion || null,
+        qualityPolicyVersion: tweet.qualityPolicyVersion || null,
+        feedbackReasonCode: 'bad_writing',
+        policyGate: 'final_quality_margin',
+        qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
+      },
+    })));
   if (invalid.length > 0) {
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
@@ -2397,7 +2419,12 @@ export async function refillQueue(
       },
     };
 
-    const refillTrigger = `refill:${trendingSnapshot?.cachedAt || 'no-research'}:${Math.floor(Date.now() / (2 * 60 * 60 * 1000))}`;
+    const queueFingerprint = allTweets
+      .filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt)
+      .map((tweet) => tweet.id)
+      .sort()
+      .join(',') || 'empty';
+    const refillTrigger = `refill:${trendingSnapshot?.cachedAt || 'no-research'}:${Math.floor(Date.now() / (2 * 60 * 60 * 1000))}:queue:${queueFingerprint}`;
     const batch = organicCount <= 0
       ? []
       : await generatePublishingBatchV2({

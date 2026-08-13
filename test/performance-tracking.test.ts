@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   invalidateAgentConnection: vi.fn(),
   saveRelationshipOpportunities: vi.fn(),
   saveViralityPostmortems: vi.fn(),
+  backfillAudienceVoiceComplaints: vi.fn(),
   getUserTimeline: vi.fn(),
   decodeKeys: vi.fn(),
   getFollowing: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('@/lib/kv-storage', () => ({
   invalidateAgentConnection: mocks.invalidateAgentConnection,
   saveRelationshipOpportunities: mocks.saveRelationshipOpportunities,
   saveViralityPostmortems: mocks.saveViralityPostmortems,
+  backfillAudienceVoiceComplaints: mocks.backfillAudienceVoiceComplaints,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({

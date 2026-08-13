@@ -28,6 +28,7 @@ import {
   saveRelationshipOpportunities,
   saveViralityPostmortems,
   saveVoiceCorpusSnapshot,
+  backfillAudienceVoiceComplaints,
 } from './kv-storage';
 import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
@@ -677,7 +678,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   });
 
   // Get existing performance entries to avoid re-checking
-  const existing = await getPerformanceHistory(agent.id, 500);
+  const existing = await getPerformanceHistory(agent.id, 2000);
   const latestByXId = latestPerformanceByXId(existing);
   const [postLog, signals, settings] = await Promise.all([
     getPostLog(agent.id, 200),
@@ -693,7 +694,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // Fetch full recent timeline (all tweets, not just ours)
   let timeline;
   try {
-    timeline = await getUserTimeline(keys, String(agent.xUserId), 100);
+    timeline = await getUserTimeline(keys, String(agent.xUserId), 300);
   } catch (err) {
     const invalidCredentials = isInvalidTwitterCredentialError(err);
     if (invalidCredentials) {
@@ -762,7 +763,7 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // entries are re-written as fresh snapshots, so later runs naturally move
   // on instead of reclassifying the same first page forever.
   const checkedAtForRun = new Date().toISOString();
-  const classificationBacklog = selectTweetClassificationBacklog(timeline, latestByXId, ourXIds, 20);
+  const classificationBacklog = selectTweetClassificationBacklog(timeline, latestByXId, ourXIds, 60);
   const classificationBacklogIds = new Set(classificationBacklog.map((tweet) => String(tweet.id)));
   const newTweets = timeline.filter((tweet) => (
     classificationBacklogIds.has(String(tweet.id))
@@ -770,7 +771,12 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   ));
   if (newTweets.length === 0) return 0;
 
-  const classifications = await batchClassifyTweets(classificationBacklog);
+  const classificationChunks = Array.from(
+    { length: Math.ceil(classificationBacklog.length / 20) },
+    (_, index) => classificationBacklog.slice(index * 20, (index + 1) * 20),
+  );
+  const classificationResults = await Promise.all(classificationChunks.map(batchClassifyTweets));
+  const classifications = new Map(classificationResults.flatMap((result) => [...result.entries()]));
 
   let tracked = 0;
 
@@ -983,7 +989,8 @@ Output ONLY JSON objects, one per line, no other text.`,
  * and generates prescriptive rules for generation.
  */
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
-  const rawHistory = await getPerformanceHistory(agent.id, 500);
+  await backfillAudienceVoiceComplaints(agent.id, 1000);
+  const rawHistory = await getPerformanceHistory(agent.id, 2000);
   const [allTweets, manualExampleCuration, signals, mentions, postLog] = await Promise.all([
     getTweets(agent.id),
     getManualExampleCuration(agent.id),

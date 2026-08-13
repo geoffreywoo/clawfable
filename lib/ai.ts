@@ -1,6 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { GenerationModelStackId } from './types';
+import { estimateAiUsageCostUsd } from './ai-pricing';
+
+export { estimateAiUsageCostUsd } from './ai-pricing';
 
 export type AiProvider = 'openai' | 'anthropic';
 export type AiModelTier = 'quality' | 'fast';
@@ -58,24 +61,6 @@ export interface GenerateTextResult {
   inputTokens?: number | null;
   outputTokens?: number | null;
   fallbackAttempts?: AiFallbackAttempt[];
-}
-
-export function estimateAiUsageCostUsd(
-  model: string,
-  inputTokens: number | null | undefined,
-  outputTokens: number | null | undefined,
-): number | null {
-  if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') return null;
-  const raw = process.env.AI_MODEL_COSTS_USD_PER_MILLION_JSON;
-  if (!raw) return null;
-  try {
-    const config = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
-    const rates = config[model];
-    if (typeof rates?.input !== 'number' || typeof rates.output !== 'number') return null;
-    return Number((((inputTokens * rates.input) + (outputTokens * rates.output)) / 1_000_000).toFixed(6));
-  } catch {
-    return null;
-  }
 }
 
 export interface AiFallbackAttempt {
@@ -378,9 +363,11 @@ async function generateWithAnthropic(
     || options.task === 'idea_generation'
     || options.task === 'tweet_writing'
   );
-  const fableEffort = options.task === 'idea_generation' || options.task === 'tweet_writing'
+  const fableEffort = options.task === 'idea_generation'
     ? 'low' as const
-    : 'medium' as const;
+    : options.task === 'tweet_writing'
+      ? 'high' as const
+      : 'medium' as const;
   const outputConfig = {
     ...(useFableEffort ? { effort: fableEffort } : {}),
     ...(options.jsonSchema ? {

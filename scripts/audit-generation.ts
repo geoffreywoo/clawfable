@@ -31,8 +31,12 @@ async function main() {
   console.log(`identity=${audit.identity.status} verified=${audit.identity.verifiedHandle || 'none'} source=${audit.identity.verificationSource || 'none'}`);
   console.log(`queue=${audit.queue.depth} eligible=${audit.queue.qualityEligibleCount} quarantined=${audit.queue.skippedByQualityCount}`);
   console.log(`research documents=${audit.sources.documentCount} stories=${audit.sources.storyCount} qualified=${audit.sources.qualifiedStoryCount}`);
-  console.log(`voice corpus=${audit.corpus?.active ? 'ready' : 'not ready'} anchors=${audit.corpus?.anchorCount || 0}`);
-  console.log(`runs=${audit.generationV2.sample.runs} drafts=${audit.generationV2.sample.drafts} draft-to-queue=${audit.generationV2.conversions.draftToQueue ?? 'n/a'}`);
+  console.log(`voice corpus=${audit.corpus?.active ? 'ready' : 'not ready'} anchors=${audit.corpus?.anchorCount || 0}/${audit.corpus?.targetAnchorCount || 0} purity=${audit.corpus?.corpusPurity ?? 'n/a'}`);
+  console.log(`current policy=${audit.generationV2.currentPolicyWindow.qualityPolicyVersion} runs=${audit.generationV2.currentPolicyWindow.runCount} selection-rate=${audit.generationV2.currentPolicyWindow.selectionYield ?? 'n/a'} selected/run=${audit.generationV2.currentPolicyWindow.selectedDraftsPerRun ?? 'n/a'}`);
+  console.log(`throughput drafts=${audit.generationV2.sample.drafts} draft-to-queue=${audit.generationV2.conversions.draftToQueue ?? 'n/a'} calls/selected=${audit.generationV2.compute.modelCallsPerSelectedDraft ?? 'n/a'} input-tokens/selected=${audit.generationV2.compute.inputTokensPerSelectedDraft ?? 'n/a'}`);
+  console.log(`incidents current=${audit.generationV2.quality.currentPolicyFactualIncidentCount} historical=${audit.generationV2.quality.historicalFactualIncidentCount} complaints=${audit.complaints.total}`);
+  console.log(`operator baseline=${audit.generationV2.performance.operatorBaselineSource} posts=${audit.generationV2.sample.rollingOperatorPosts} median-impressions=${audit.generationV2.performance.operatorBaselineImpressions}`);
+  console.log(`cost status=${audit.generationV2.compute.costDataStatus} estimated-usd=${audit.generationV2.compute.estimatedCostUsd ?? 'n/a'}`);
   console.log(`audit status=${audit.findings.status} critical=${audit.findings.counts.critical} high=${audit.findings.counts.high} medium=${audit.findings.counts.medium} low=${audit.findings.counts.low}`);
   for (const finding of audit.findings.items) {
     console.log(`[${finding.severity.toUpperCase()}] ${finding.title} (${finding.scope}:${finding.code})`);

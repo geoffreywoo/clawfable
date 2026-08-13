@@ -434,13 +434,23 @@ export async function getUserTimeline(
   }>
 > {
   const client = createClient(keys);
+  const totalLimit = Math.max(1, Math.min(300, Math.floor(maxResults)));
   try {
     const result = await client.v2.userTimeline(userId, {
-      max_results: Math.min(maxResults, 100),
+      max_results: Math.max(5, Math.min(totalLimit, 100)),
       'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
       exclude: ['retweets', 'replies'],
     });
-    return (result.data.data || []).map((tweet) => ({
+    const initialTweets = Array.isArray((result as any).tweets)
+      ? (result as any).tweets
+      : (result.data.data || []);
+    if (initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
+      await (result as any).fetchLast(totalLimit - initialTweets.length);
+    }
+    const accumulatedTweets = Array.isArray((result as any).tweets)
+      ? (result as any).tweets
+      : (result.data.data || []);
+    return accumulatedTweets.slice(0, totalLimit).map((tweet: any) => ({
       id: tweet.id,
       text: completeTweetText(tweet),
       createdAt: tweet.created_at || new Date().toISOString(),

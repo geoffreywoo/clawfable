@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildGenerationV2Metrics } from '@/lib/generation-v2-metrics';
-import type { DraftCandidate, GenerationRunTrace, LearningSignal, Tweet, TweetPerformance } from '@/lib/types';
+import type { DraftCandidate, GenerationRunTrace, LearningSignal, Tweet, TweetPerformance, VoiceCorpusSnapshot } from '@/lib/types';
+import { PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
 
 const now = new Date('2026-08-01T12:00:00.000Z');
 
@@ -108,7 +109,16 @@ describe('Generation V2 metrics', () => {
 
     const report = buildGenerationV2Metrics({ runs: [run, previewRun], ideas: [], drafts, tweets, signals, performance, now });
 
-    expect(report.conversions).toMatchObject({ sourceToBrief: 1, briefToIdea: 0.75, ideaToDraft: 0.6667, draftToQueue: 0.3333 });
+    expect(report.conversions).toMatchObject({
+      researchBriefsPerRun: 4,
+      sourceDocumentsAvailablePerRun: 4,
+      qualifiedStoriesAvailablePerRun: 4,
+      briefToIdea: 0.75,
+      ideaToDraft: 0.6667,
+      draftToQueue: 0.3333,
+      runsWithSelectionRate: 1,
+      selectedDraftsPerRun: 2,
+    });
     expect(report.quality).toMatchObject({
       cleanAcceptance: 0.5,
       userDeleteRate: 0.5,
@@ -125,6 +135,9 @@ describe('Generation V2 metrics', () => {
       totalOutputTokens: 55,
       estimatedCostUsd: 0.012,
       averageRunLatencyMs: 2000,
+      modelCallsPerSelectedDraft: 0.5,
+      inputTokensPerSelectedDraft: 60,
+      outputTokensPerSelectedDraft: 27.5,
     });
     expect(report.sample.runs).toBe(1);
     expect(report.lineage[0]).toMatchObject({
@@ -133,5 +146,82 @@ describe('Generation V2 metrics', () => {
       voiceCorpusVersion: 'voice-corpus-test',
       storyClusterIds: ['story-1'],
     });
+  });
+
+  it('derives rolling operator baselines from the corpus and scopes incidents to the active policy', () => {
+    const currentTweet = {
+      id: 'tweet-current',
+      pipelineVersion: 'v2',
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    } as Tweet;
+    const oldTweet = {
+      id: 'tweet-old',
+      pipelineVersion: 'v2',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-old',
+    } as Tweet;
+    const operatorPerformance = {
+      tweetId: '',
+      xTweetId: 'operator-x-1',
+      source: 'timeline',
+      content: 'native operator post',
+      postedAt: '2026-07-28T00:00:00.000Z',
+      checkedAt: '2026-07-29T01:00:00.000Z',
+      performanceCheckpoint: 'full_24h',
+      impressions: 5000,
+      likes: 40,
+      hasMedia: false,
+      isTextComplete: true,
+    } as TweetPerformance;
+    const currentPerformance = {
+      ...operatorPerformance,
+      tweetId: 'tweet-current',
+      xTweetId: 'current-x-1',
+      source: 'autopilot',
+      content: 'current generated post',
+      impressions: 3000,
+      likes: 20,
+    } as TweetPerformance;
+    const voiceCorpus = {
+      entries: [{
+        xTweetId: 'operator-x-1',
+        provenance: 'timeline_unmatched',
+        authorshipConfidence: 0.82,
+        dispositions: ['topic_signal', 'diction_anchor'],
+      }],
+    } as VoiceCorpusSnapshot;
+    const signals = [
+      signal('tweet-current', 'x_post_rejected', '2026-07-30T10:00:00.000Z', {
+        qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+        feedbackReasonCode: 'factual_risk',
+      }),
+      signal('tweet-old', 'x_post_rejected', '2026-07-29T10:00:00.000Z', {
+        qualityPolicyVersion: 'publishing-v2-hard-gates-old',
+        feedbackReasonCode: 'factual_risk',
+      }),
+    ];
+
+    const report = buildGenerationV2Metrics({
+      runs: [],
+      ideas: [],
+      drafts: [],
+      tweets: [currentTweet, oldTweet],
+      signals,
+      performance: [operatorPerformance, currentPerformance],
+      voiceCorpus,
+      now,
+    });
+
+    expect(report.sample).toMatchObject({ rollingOperatorPosts: 1, currentPolicyMaturePosts: 1 });
+    expect(report.quality).toMatchObject({
+      historicalFactualIncidentCount: 2,
+      currentPolicyFactualIncidentCount: 1,
+    });
+    expect(report.performance).toMatchObject({
+      rollingOperatorMedianImpressions: 5000,
+      rollingOperatorMedianLikes: 40,
+      currentPolicyMedianImpressions: 3000,
+      currentPolicyMedianLikes: 20,
+    });
+    expect(report.gates.incidentFree).toBe(false);
   });
 });

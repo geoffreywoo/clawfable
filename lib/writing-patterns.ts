@@ -35,6 +35,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'typed-actor-setup', weight: 0.34, pattern: /^(?:normal|average|typical)\s+(?:vc|investor|founder|operator|engineer|team)\b[^.\n]{0,100}/i },
   { label: 'wrong-resolution-scaffold', weight: 0.34, pattern: /(?:^|\n)\s*(?:wrong|right)\s+(?:level|unit)\s+of\s+(?:resolution|abstraction|analysis)\s*[.!]?\s*(?:\n|$)/im },
   { label: 'superlative-may-be', weight: 0.28, pattern: /^(?:the\s+)?(?:strongest|best|most underrated|real)\s+[a-z][^.\n]{0,70}\s+(?:may|might)\s+be\b/i },
+  { label: 'superlative-colon-verdict', weight: 0.52, pattern: /^(?:the\s+)?(?:hardest|strongest|best|clearest|most important)\s+(?:signal|test|proof|metric|tell|thing|lesson|question|trait)s?\b[^:\n]{0,90}:/i },
   { label: 'happy-path-exception-closer', weight: 0.22, pattern: /\bhappy path\b[^.\n]{0,120}\bexception handling\b/i },
   { label: 'when-did-contrast-question', weight: 0.34, pattern: /\bwhen did\b[^?\n]{3,120}\b(?:less|more)\b[^?\n]{1,80}\bthan\b[^?\n]{1,80}\?/i },
   { label: 'staged-dialogue-line', weight: 0.34, pattern: /(?:^|\n)\s*["“][^"”\n]{8,180}["”]\s*(?:\n|$)/m },
