@@ -13,6 +13,7 @@ import {
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
   normalizeIdeaCandidatesV2,
+  normalizeDraftContentV2,
   orderV2IdsForPairwise,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
@@ -98,6 +99,10 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 }
 
 describe('Tweet Generation V2', () => {
+  it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
+    expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
+  });
+
   it('creates four distinct briefs for a normal two-post refill', () => {
     const briefs = buildGenerationBriefsV2({
       count: 2,

@@ -28,6 +28,8 @@ const SUPPORT_STOPWORDS = new Set([
   'with', 'would', 'your',
 ]);
 
+const NON_QUANTITATIVE_NUMBER_PREFIX_RE = /\b(?:hut|gpt|claude|llama|gemini|qwen|mistral|iphone|pixel|windows)\s*$/i;
+
 const EVIDENCE_LOCKED_CONCEPTS = [
   { name: 'processing or refining', pattern: /\b(?:process(?:ing|ed)?|refin(?:e|ed|ing|ery|eries)|smelt(?:ed|ing|er|ers))\b/i },
   { name: 'industrial infrastructure', pattern: /\b(?:industrial\s+(?:capacity|infrastructure)|manufacturing\s+(?:capacity|base)|logistics\s+(?:network|capacity))\b/i },
@@ -88,6 +90,8 @@ function numericClaims(content: string): string[] {
     const matchIndex = match.index || 0;
     const before = normalizedContent.slice(Math.max(0, matchIndex - 2), matchIndex);
     if (/[a-z0-9]-$/i.test(before) || /[a-z]$/i.test(before)) continue;
+    const namePrefix = normalizedContent.slice(Math.max(0, matchIndex - 24), matchIndex);
+    if (NON_QUANTITATIVE_NUMBER_PREFIX_RE.test(namePrefix)) continue;
 
     const raw = match[0].trim();
     if (!raw) continue;

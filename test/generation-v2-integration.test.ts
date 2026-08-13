@@ -30,7 +30,8 @@ vi.mock('@/lib/kv-storage', () => ({
   upsertIdeaCandidates: mocks.upsertIdeaCandidates,
 }));
 
-vi.mock('@/lib/account-taste', () => ({
+vi.mock('@/lib/account-taste', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/account-taste')>()),
   assessAccountTaste: () => ({
     nativeVoiceScore: 0.92,
     casualStartupScore: 0.9,
@@ -300,8 +301,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 3800, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall).toMatchObject({ maxTokens: 900, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(280);
+    expect(writerCall).toMatchObject({ maxTokens: 1600, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     expect(JSON.parse(copyJudgeCall.prompt).candidates.every((candidate: any) => candidate.voiceAnchors.length >= 3)).toBe(true);
     expect(drafts).toHaveLength(2);
@@ -315,7 +316,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-8',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-9',
       stageCounts: expect.objectContaining({ briefs: 4, ideasGenerated: 12, ideasSelected: 4, draftsGenerated: 8, draftsSelected: 2 }),
     });
   });
@@ -482,11 +483,13 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
     expect(writerSystem).toContain("do not march through its claim, tension, and implication in order");
-    expect(writerSystem).toContain('Use first person only when it adds real ownership');
-    expect(writerSystem).toContain('do not make "my bet" or "I\'d build" the default frame');
+    expect(writerSystem).toContain('Source-free opinions can be explicitly owned');
+    expect(writerSystem).toContain('Never turn them into generic third-person advice');
     expect(writerSystem).toContain('Write three natural attempts, not three slots in a copy template');
     expect(writerSystem).toContain('Do not force any attempt into one sentence, 8-24 words');
-    expect(writerSystem).toContain('uneven short paragraphs');
+    expect(writerSystem).toContain('rough multi-paragraph thought');
+    expect(writerSystem).toContain('Keep paragraph breaks and uneven rhythm');
+    expect(writerSystem).toContain('Do not compress every idea into a 280-character aphorism');
     expect(writerSystem).toContain('Reject symmetrical maxims');
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, time period, and measurement type");

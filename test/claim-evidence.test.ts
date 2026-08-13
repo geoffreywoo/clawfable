@@ -3,6 +3,14 @@ import { assessClaimEvidence } from '@/lib/claim-evidence';
 import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from '@/lib/writing-patterns';
 
 describe('claim evidence', () => {
+  it('does not treat the number in Hut 8 as a quantitative claim', () => {
+    expect(assessClaimEvidence(
+      'Hut 8 is supplying energy infrastructure beneath HighriseAi.',
+      ['HighriseAi is fueled by energy infrastructure leader Hut8Corp.'],
+      { lockEvidenceConcepts: true },
+    )).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
   it('requires support for invented first-person reading habits and capital-market mechanisms', () => {
     expect(assessClaimEvidence('i read seed decks backwards now.', [], { lockEvidenceConcepts: true })).toMatchObject({
       hasPersonalExperienceClaim: true,

@@ -1069,6 +1069,17 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - Never invent access, conversations, customers, quotes, measurements, benchmarks, names, numbers, or events.`;
 }
 
+export function buildGeoffreyNativeV2WriterContract(): string {
+  return `GEOFFREY-NATIVE COPY CONTRACT
+- Native posts range from one blunt line to a rough multi-paragraph thought. Do not compress every idea into a 280-character aphorism.
+- Keep paragraph breaks and uneven rhythm when the thought has multiple beats. Let clauses pile up naturally instead of resolving them into a balanced slogan.
+- Source-free opinions can be explicitly owned with "i think," "i would," or "my philosophy" when that is the real posture. Never turn them into generic third-person advice.
+- Start with the actual reaction, named subject, bet, or decision. Skip the industry introduction, framework, and audience lesson.
+- Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
+- Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
+- Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
+}
+
 export function buildGeoffreyNativeWritingBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
 For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.
