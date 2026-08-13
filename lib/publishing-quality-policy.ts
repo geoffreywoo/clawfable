@@ -1,7 +1,7 @@
 import type { GenerationSurface } from './types';
 
 export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-6';
-export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-10';
+export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-11';
 export const PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION = 'publishing-v2-contextual-copy-judge-1';
 export const PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION = 'publishing-v2-contextual-hard-gates-1';
 
