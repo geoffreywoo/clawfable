@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import {
+  PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from '@/lib/publishing-quality-policy';
@@ -160,5 +162,41 @@ describe('generated publishing origin gate', () => {
     };
     expect(getGeneratedPublishIssue(legacy)).toContain('retired');
     expect(getGeneratedPublishIssue({ ...legacy, type: 'reply' })).toContain('retired');
+  });
+
+  it('requires the contextual certification on non-original surfaces', () => {
+    const reply = {
+      type: 'reply' as const,
+      pipelineVersion: 'v2' as const,
+      contentProvenance: 'generated_v2' as const,
+      generationSurface: 'reply' as const,
+      generationRunId: 'run-reply',
+      ideaId: 'idea-reply',
+      draftCandidateId: 'draft-reply',
+      voiceCorpusVersion: 'voice-corpus-v1-current',
+      finalCriticProvider: 'openai' as const,
+      finalCriticModel: 'gpt-5.6',
+      finalCriticVerdict: 'allow' as const,
+      generationEvidenceReferences: [{
+        id: 'target-1',
+        kind: 'target_post' as const,
+        sourceDocumentId: null,
+        url: 'https://x.com/example/status/1',
+        title: 'Target post',
+        publisher: 'X',
+        content: 'A qualified target post.',
+        publishedAt: null,
+        verifiedAt: new Date().toISOString(),
+        expiresAt: null,
+        trustTier: 'community' as const,
+      }],
+    };
+
+    expect(getGeneratedPublishIssue({
+      ...reply,
+      qualityPolicyVersion: PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
+      finalCriticVersion: PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
+    })).toBeNull();
+    expect(getGeneratedPublishIssue({ ...reply, ...currentCertification })).toContain('contextual-hard-gates');
   });
 });

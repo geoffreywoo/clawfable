@@ -217,6 +217,10 @@ export interface CandidateJudgeBreakdown {
   novelty: number;
   audienceFit: number;
   policySafety: number;
+  insight?: number;
+  specificity?: number;
+  operatorPlausibility?: number;
+  modelCringeRisk?: number;
   nativeVoice?: number;
   casualStartupFit?: number;
   stiffnessRisk?: number;
@@ -843,6 +847,7 @@ export interface DraftCandidate {
   judgeProvider: 'openai' | 'anthropic' | null;
   judgeModel: string | null;
   judgeScore: number | null;
+  judgeBreakdown?: CandidateJudgeBreakdown | null;
   mutationRound?: number;
   status: GenerationCandidateStatus;
   rejectionCodes: string[];
@@ -956,6 +961,10 @@ export interface GenerationModelCallTrace {
     stopReason: string | null;
     statusCode: number | null;
     errorType: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    estimatedCostUsd: number | null;
+    durationMs: number;
   }>;
 }
 

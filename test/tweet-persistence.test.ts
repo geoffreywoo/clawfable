@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { updateTweet } from '@/lib/kv-storage';
+import { getTweets, updateTweet } from '@/lib/kv-storage';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 
 describe('generated tweet persistence', () => {
@@ -85,5 +85,27 @@ describe('generated tweet persistence', () => {
       ideaId: 'idea-v2-provenance',
       draftCandidateId: 'draft-v2-provenance',
     });
+  });
+
+  it('maps one generated draft candidate to one tweet across delivery retries', async () => {
+    const agentId = `agent-idempotent-${Date.now()}`;
+    const candidate = {
+      content: 'same qualified artifact',
+      format: 'observation',
+      targetTopic: 'publishing',
+      pipelineVersion: 'v2',
+      generationSurface: 'reply',
+      generationIdempotencyKey: 'publish-v2-same-request',
+      contentProvenance: 'generated_v2',
+      generationRunId: 'run-idempotent',
+      ideaId: 'idea-idempotent',
+      draftCandidateId: 'draft-idempotent',
+    } as any;
+
+    const first = await createTweetFromGeneratedCandidate(agentId, candidate, { status: 'draft', type: 'reply' });
+    const second = await createTweetFromGeneratedCandidate(agentId, candidate, { status: 'draft', type: 'reply' });
+
+    expect(second.id).toBe(first.id);
+    expect((await getTweets(agentId)).filter((tweet) => tweet.draftCandidateId === candidate.draftCandidateId)).toHaveLength(1);
   });
 });

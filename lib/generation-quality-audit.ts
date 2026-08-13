@@ -20,11 +20,13 @@ import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import { getGeneratedPublishIssue } from './generation-origin';
 import {
+  PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
-} from './generation-v2';
+} from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 2;
+export const GENERATION_QUALITY_AUDIT_VERSION = 3;
 
 function countBy(values: Array<string | null | undefined>): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -200,6 +202,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       pipelineVersion,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
+      contextualQualityPolicyVersion: PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
+      contextualFinalCriticVersion: PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
       autopostActivation: {
         activated: true,

@@ -305,7 +305,10 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
-    expect(JSON.parse(copyJudgeCall.prompt).candidates.every((candidate: any) => candidate.voiceAnchors.length >= 3)).toBe(true);
+    const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
+    expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
+    expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
+    expect(copyJudgePrompt.candidates.every((candidate: any) => !candidate.voiceAnchors && !candidate.approvedIdea && !candidate.evidence)).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts.filter((draft) => draft.sourceLane === 'trend_aligned_exploit').length).toBeLessThanOrEqual(1);
     expect(drafts[0]).toMatchObject({
@@ -600,10 +603,10 @@ describe('generateTweetBatchV2 integration', () => {
     expect(operatorIdeas.every((idea: any) => idea.evidence.length === 0)).toBe(true);
     expect(copyJudge.priorWritingRejections).toContain('The premise was usable, but the writing sounded like a consultant memo.');
     expect(copyJudge.evidenceScoringContract.operator_opinion).toContain('do not penalize empty evidence');
-    expect(copyJudge.candidates.every((candidate: any) => (
-      candidate.evidenceMode === 'verified_source'
-        ? candidate.evidence.some((entry: any) => entry.claim)
-        : candidate.evidence.length === 0
+    expect(copyJudge.ideaContexts.every((context: any) => (
+      context.evidenceMode === 'verified_source'
+        ? context.evidence.some((entry: any) => entry.claim)
+        : context.evidence.length === 0
     ))).toBe(true);
   });
 
@@ -983,8 +986,11 @@ describe('generateTweetBatchV2 integration', () => {
         const judged = rankingResponse(options.prompt, 'candidates');
         const parsed = JSON.parse(judged.text);
         const judgePrompt = JSON.parse(options.prompt);
+        const operatorIdeaIds = new Set(judgePrompt.ideaContexts
+          .filter((context: any) => context.evidenceMode === 'operator_opinion')
+          .map((context: any) => context.ideaId));
         const operatorIds = new Set(judgePrompt.candidates
-          .filter((candidate: any) => candidate.evidenceMode === 'operator_opinion')
+          .filter((candidate: any) => operatorIdeaIds.has(candidate.ideaId))
           .map((candidate: any) => candidate.id));
         const copyJudgeCalls = mocks.generateText.mock.calls.filter(([call]) => call.task === 'copy_judgment').length;
         if (copyJudgeCalls === 1) {

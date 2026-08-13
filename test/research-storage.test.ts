@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acquireGenerationRequestLock,
   acquireResearchRefreshLock,
   addSemanticBlock,
   getSemanticBlocks,
   getSourceDocuments,
   getStoryClusters,
   replaceLegacySemanticBackfillBlocks,
+  releaseGenerationRequestLock,
   releaseResearchRefreshLock,
   upsertSourceDocuments,
   upsertStoryClusters,
@@ -98,6 +100,20 @@ describe('research cache storage', () => {
     expect(second).toMatchObject({ acquired: false, owner: 'owner-b', lock: expect.objectContaining({ owner: 'owner-a' }) });
     await expect(releaseResearchRefreshLock(agentId, 'owner-b')).resolves.toBe(false);
     await expect(releaseResearchRefreshLock(agentId, 'owner-a')).resolves.toBe(true);
+  });
+
+  it('deduplicates generation requests by idempotency key and protects successor locks', async () => {
+    const agentId = `generation-lock-${Date.now()}`;
+    const key = 'request-key';
+    const first = await acquireGenerationRequestLock(agentId, key, 'owner-a', 60);
+    const second = await acquireGenerationRequestLock(agentId, key, 'owner-b', 60);
+
+    expect(first.acquired).toBe(true);
+    expect(second).toMatchObject({ acquired: false, owner: 'owner-b', lock: expect.objectContaining({ owner: 'owner-a' }) });
+    await expect(releaseGenerationRequestLock(agentId, key, 'owner-b')).resolves.toBe(false);
+    await expect(releaseGenerationRequestLock(agentId, key, 'owner-a')).resolves.toBe(true);
+    await expect(acquireGenerationRequestLock(agentId, key, 'owner-c', 60)).resolves.toMatchObject({ acquired: true, owner: 'owner-c' });
+    await expect(releaseGenerationRequestLock(agentId, key, 'owner-c')).resolves.toBe(true);
   });
 
   it('replaces only legacy backfill blocks while preserving structured feedback', async () => {

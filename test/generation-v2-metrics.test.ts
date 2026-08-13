@@ -47,10 +47,32 @@ describe('Generation V2 metrics', () => {
         draftsSelected: 2,
       },
       rejectionCounts: { recent_semantic_repeat: 1 },
-      modelCalls: [{ stage: 'idea_generation', provider: 'openai', model: 'test', inputTokens: 100, outputTokens: 50, estimatedCostUsd: 0.01, durationMs: 1000, succeeded: true, error: null }],
-      totalInputTokens: 100,
-      totalOutputTokens: 50,
-      estimatedCostUsd: 0.01,
+      modelCalls: [{
+        stage: 'idea_generation',
+        provider: 'openai',
+        model: 'test',
+        inputTokens: 100,
+        outputTokens: 50,
+        estimatedCostUsd: 0.01,
+        durationMs: 1000,
+        succeeded: true,
+        error: null,
+        fallbackAttempts: [{
+          provider: 'anthropic',
+          model: 'fallback-test',
+          reason: 'empty_text',
+          stopReason: 'max_tokens',
+          statusCode: null,
+          errorType: null,
+          inputTokens: 20,
+          outputTokens: 5,
+          estimatedCostUsd: 0.002,
+          durationMs: 250,
+        }],
+      }],
+      totalInputTokens: 120,
+      totalOutputTokens: 55,
+      estimatedCostUsd: 0.012,
       startedAt: '2026-07-30T10:00:00.000Z',
       completedAt: '2026-07-30T10:00:02.000Z',
       durationMs: 2000,
@@ -95,7 +117,15 @@ describe('Generation V2 metrics', () => {
       deleteReasons: { bad_premise: 1 },
     });
     expect(report.performance).toMatchObject({ medianImpressions: 1800, medianLikes: 12 });
-    expect(report.compute).toMatchObject({ estimatedCostUsd: 0.01, averageRunLatencyMs: 2000 });
+    expect(report.compute).toMatchObject({
+      modelCalls: 1,
+      providerAttempts: 2,
+      fallbackAttempts: 1,
+      totalInputTokens: 120,
+      totalOutputTokens: 55,
+      estimatedCostUsd: 0.012,
+      averageRunLatencyMs: 2000,
+    });
     expect(report.sample.runs).toBe(1);
     expect(report.lineage[0]).toMatchObject({
       generationRunId: 'run-1',
