@@ -366,7 +366,7 @@ async function generateWithAnthropic(
   const fableEffort = options.task === 'idea_generation'
     ? 'low' as const
     : options.task === 'tweet_writing'
-      ? 'high' as const
+      ? 'medium' as const
       : 'medium' as const;
   const outputConfig = {
     ...(useFableEffort ? { effort: fableEffort } : {}),

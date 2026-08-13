@@ -794,6 +794,8 @@ export interface IdeaJudgeBreakdown {
   authorFit: number;
   consequence: number;
   distinctiveness: number;
+  nativeReactionPotential: number;
+  sharePotential: number;
 }
 
 export interface IdeaCandidate {

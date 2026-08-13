@@ -528,7 +528,7 @@ describe('AI model routing', () => {
       model: 'claude-fable-5',
     }));
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
-      output_config: expect.objectContaining({ effort: 'high' }),
+      output_config: expect.objectContaining({ effort: 'medium' }),
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openAiCreate).not.toHaveBeenCalled();
   });

@@ -126,6 +126,8 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
       authorFit: 0.9,
       consequence: 0.88,
       distinctiveness: 0.86,
+      nativeReactionPotential: 0.9,
+      sharePotential: 0.84,
     }) : ({
       id,
       overall: 0.9,
@@ -324,6 +326,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
+    const writerPrompt = JSON.parse(writerCall.prompt);
+    expect(writerPrompt.variantCadenceAssignments).toHaveLength(3);
+    expect(new Set(writerPrompt.variantCadenceAssignments.map((entry: any) => entry.anchorId)).size).toBe(3);
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -339,7 +344,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-12',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-13',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -778,6 +783,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaJudge.author.worldview).toContain('founder and investor');
     expect(ideaJudge.priorIdeaRejections).toContain('Do not infer pricing or buyer behavior from a feature-only release.');
     expect(ideaJudge.evidenceScoringContract.operator_opinion).toContain('do not penalize empty evidence');
+    expect(ideaJudge.responseContract.requiredIds).toHaveLength(ideaJudge.ideas.length);
     const sourcedIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'verified_source');
     const operatorIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'operator_opinion');
     expect(sourcedIdeas.length).toBeGreaterThan(0);
@@ -811,6 +817,35 @@ describe('generateTweetBatchV2 integration', () => {
       expect.objectContaining({
         status: 'rejected',
         rejectionCodes: expect.arrayContaining(['idea_judge_evidence_mismatch']),
+      }),
+    ]));
+  });
+
+  it('does not pay a writer for ideas without native reaction or share potential', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') {
+        const judged = rankingResponse(options.prompt, 'ideas');
+        const parsed = JSON.parse(judged.text);
+        parsed.scores = parsed.scores.map((score: any) => ({
+          ...score,
+          nativeReactionPotential: 0.5,
+          sharePotential: 0.45,
+        }));
+        return result(JSON.stringify(parsed));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'tweet_writing')).toBe(false);
+    expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'rejected',
+        rejectionCodes: expect.arrayContaining([
+          'idea_judge_weak_native_reaction',
+          'idea_judge_low_share_potential',
+        ]),
       }),
     ]));
   });

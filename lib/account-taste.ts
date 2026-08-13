@@ -1081,6 +1081,8 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
 - Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
 - Do not manufacture a neat equation or investment slogan from the notes. Avoid "give me X over Y," "i'd rather own X than Y," paired "X is replaceable / Y isn't," and "that's the whole game/trade/reason."
+- Delete private-note residue before writing. "underwrite," "diligence question," "capability grounds," "deployment story/readiness," "workflow-level evidence," "product thesis," "timing signal," "operating lens," and "strategic relevance" usually turn a reaction into a memo. Use one only when it is literally the ordinary word the author would choose.
+- Do not make a metaphorical product command carry the whole idea, such as software "deleting the org chart" or "rewriting the company." State the actual belief unless the metaphor is already native to the supplied evidence.
 - Drafts must be separately conceived reactions, not short, medium, and long paraphrases of one sentence. It is fine for one to be a fragment or leave the reason implicit.
 - Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
 }
