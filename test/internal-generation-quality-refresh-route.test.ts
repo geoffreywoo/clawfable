@@ -85,8 +85,15 @@ describe('internal generation quality refresh route', () => {
       quarantined: 2,
     });
     mocks.getQueuedTweets
-      .mockResolvedValueOnce([{ id: 'kept' }])
-      .mockResolvedValueOnce([{ id: 'kept' }, { id: 'new' }]);
+      .mockResolvedValueOnce([
+        { id: 'kept', status: 'queued', quarantinedAt: null },
+        { id: 'stale', status: 'quarantined', quarantinedAt: '2026-07-31T12:00:00.000Z' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'kept', status: 'queued', quarantinedAt: null },
+        { id: 'new', status: 'queued', quarantinedAt: null },
+        { id: 'stale', status: 'quarantined', quarantinedAt: '2026-07-31T12:00:00.000Z' },
+      ]);
     mocks.refillQueue.mockResolvedValue(1);
     mocks.buildGenerationQualityAudit.mockResolvedValue({
       corpus: { active: true, corpusPurity: 1 },
@@ -129,7 +136,7 @@ describe('internal generation quality refresh route', () => {
       classificationRuns: [20, 20, 20],
       corpus: { active: true, eligibleAnchorCount: 18 },
       queueRefresh: { certified: 1, quarantined: 2 },
-      refill: { requested: 1, added: 1, finalDepth: 2 },
+      refill: { requested: 1, added: 1, finalDepth: 2, artifactCount: 3 },
       audit: { queue: { qualityEligibleCount: 2 } },
     });
   });

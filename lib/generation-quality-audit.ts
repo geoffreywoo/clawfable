@@ -176,8 +176,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       finalCriticProvider: tweet.finalCriticProvider || null,
       finalCriticModel: tweet.finalCriticModel || null,
       finalCriticVerdict: tweet.finalCriticVerdict || null,
+      finalCriticVersion: tweet.finalCriticVersion || null,
       qualityPolicyVersion: tweet.qualityPolicyVersion || null,
       voiceCorpusVersion: tweet.voiceCorpusVersion || null,
+      status: tweet.status,
       quarantinedAt: tweet.quarantinedAt || null,
       quarantineReason: tweet.quarantineReason || null,
       content: tweet.content,
@@ -187,6 +189,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const generatedAnchors = anchors.filter((entry) => entry.provenance === 'known_clawfable_generated');
   const complaintParents = summarizeComplaintParents(complaints);
   const postedGenerated = generatedPostedTweets(allTweets);
+  const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
 
   return {
     auditVersion: GENERATION_QUALITY_AUDIT_VERSION,
@@ -231,8 +234,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       anchors: anchors.map(summarizeCorpusEntry),
     } : null,
     queue: {
-      depth: queueItems.length,
-      qualityEligibleCount: queueItems.filter((item) => item.qualityEligible).length,
+      depth: activeQueueItems.length,
+      artifactCount: queueItems.length,
+      quarantinedCount: queueItems.length - activeQueueItems.length,
+      qualityEligibleCount: activeQueueItems.filter((item) => item.qualityEligible).length,
       skippedByQualityCount: queueItems.filter((item) => !item.qualityEligible).length,
       policyVersionCounts: countBy(queueItems.map((item) => item.qualityPolicyVersion)),
       corpusVersionCounts: countBy(queueItems.map((item) => item.voiceCorpusVersion)),
