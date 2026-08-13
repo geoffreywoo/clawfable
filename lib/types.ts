@@ -792,6 +792,7 @@ export interface IdeaCandidate {
   id: string;
   agentId: string;
   generationRunId: string;
+  qualityPolicyVersion?: string | null;
   surface?: GenerationSurface;
   triggerId?: string | null;
   idempotencyKey?: string | null;
@@ -962,6 +963,8 @@ export interface GenerationRunTrace {
   id: string;
   agentId: string;
   pipelineVersion: 'v2';
+  qualityPolicyVersion?: string | null;
+  voiceCorpusVersion?: string | null;
   mode?: 'live' | 'manual' | 'preview';
   surface?: GenerationSurface;
   triggerId?: string | null;

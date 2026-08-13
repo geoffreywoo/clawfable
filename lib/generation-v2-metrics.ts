@@ -240,6 +240,8 @@ export function buildGenerationV2Metrics({
       generationRunId: run.id,
       status: run.status,
       startedAt: run.startedAt,
+      qualityPolicyVersion: run.qualityPolicyVersion || null,
+      voiceCorpusVersion: run.voiceCorpusVersion || null,
       sourceDocumentIds: run.sourceDocumentIds,
       storyClusterIds: run.storyClusterIds,
       stageCounts: run.stageCounts,

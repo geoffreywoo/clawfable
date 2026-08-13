@@ -80,7 +80,7 @@ import { pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-see
 
 const PIPELINE_VERSION = 'v2' as const;
 export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-5';
-export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-7';
+export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-8';
 export const V2_MAX_GENERATED_SLOP_RISK = 0.32;
 export const V2_MAX_GENERATED_PATTERN_RISK = 0.28;
 export const V2_MAX_ANCHOR_RESKIN_RISK = 0.25;
@@ -772,10 +772,12 @@ export function isStoryAlreadyCommittedV2(
 export function buildFailedStoryAttemptsV2(
   ideas: IdeaCandidate[],
   now = new Date(),
+  qualityPolicyVersion?: string,
 ): FailedStoryAttemptV2[] {
   const cutoff = now.getTime() - STORY_FAILURE_COOLDOWN_MS;
   const groups = new Map<string, IdeaCandidate[]>();
   for (const idea of ideas) {
+    if (qualityPolicyVersion && idea.qualityPolicyVersion !== qualityPolicyVersion) continue;
     if (!idea.storyClusterId || Date.parse(idea.updatedAt || idea.createdAt) < cutoff) continue;
     const key = `${idea.generationRunId}:${idea.storyClusterId}`;
     groups.set(key, [...(groups.get(key) || []), idea]);
@@ -883,7 +885,7 @@ export function buildGenerationBriefsV2({
   // Failed copy must not consume its source. Only queue/post outcomes establish
   // that a story or trend has actually entered the account's publishing slate.
   const committedTweets = allTweets.filter(isCommittedTweet).slice(0, 80);
-  const failedStoryAttempts = buildFailedStoryAttemptsV2(recentIdeas, now);
+  const failedStoryAttempts = buildFailedStoryAttemptsV2(recentIdeas, now, PUBLISHING_V2_QUALITY_POLICY_VERSION);
   const storyCandidates = stories
     .filter((story) => (
       isStoryEditoriallyQualifiedV2(story)
@@ -956,10 +958,7 @@ export function buildGenerationBriefsV2({
   // ideation grounded in native topic taste while retaining sourced openings.
   const desiredStoryBriefs = storyCandidates.length === 0
     ? 0
-    : Math.max(
-      isGeoffreyVoiceProfile(voiceProfile) ? Math.min(2, briefCount - 1) : 1,
-      Math.min(briefCount - 1, Math.round(briefCount * (style.trendMixTarget / 100))),
-    );
+    : Math.max(1, Math.min(briefCount - 1, Math.round(briefCount * (style.trendMixTarget / 100))));
   for (const story of storyCandidates) {
     appendStory(story);
     if (briefs.filter((brief) => brief.evidenceMode === 'verified_source').length >= desiredStoryBriefs) break;
@@ -1396,6 +1395,7 @@ export function normalizeIdeaCandidatesV2({
       id: stableResearchId('idea', runId, brief.id, index, claim),
       agentId,
       generationRunId: runId,
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       surface,
       triggerId,
       idempotencyKey,
@@ -2718,6 +2718,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     id: runId,
     agentId: input.agentId,
     pipelineVersion: PIPELINE_VERSION,
+    qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    voiceCorpusVersion: input.learnings?.voiceCorpus?.snapshotId || null,
     mode: input.mode || (persistArtifacts ? 'live' : 'preview'),
     surface: input.surface || 'original',
     triggerId: input.triggerId || null,
@@ -2847,7 +2849,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       documents.map((document) => `${document.id}:${document.contentHash}`).sort().join(','),
       stories.map((story) => `${story.id}:${story.lastSeenAt}:${story.blockReason || ''}`).sort().join(','),
       blocks.map((block) => `${block.id}:${block.blockedUntil || ''}`).sort().join(','),
-      buildFailedStoryAttemptsV2(recentIdeas).map((attempt) => `${attempt.storyClusterId}:${attempt.failedAt}`).sort().join(','),
+      buildFailedStoryAttemptsV2(recentIdeas, new Date(), PUBLISHING_V2_QUALITY_POLICY_VERSION)
+        .map((attempt) => `${attempt.storyClusterId}:${attempt.failedAt}`).sort().join(','),
       briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}`).sort().join(','),
     );
     const qualityPauseUntil = getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);

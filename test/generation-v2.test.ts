@@ -558,6 +558,46 @@ describe('Tweet Generation V2', () => {
     expect(isStoryInEditorialCooldownV2(currentStory, attempts)).toBe(true);
   });
 
+  it('does not carry failed-story cooldown across quality policy versions', () => {
+    const failedIdeas = [0, 1, 2].map((index) => ({
+      schemaVersion: 2,
+      id: `idea-old-policy-${index}`,
+      agentId: 'agent-1',
+      generationRunId: 'run-old-policy',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-old',
+      briefId: 'brief-current-story',
+      storyClusterId: 'story-current',
+      topic: 'AI startups',
+      claim: 'A current sourced event happened.',
+      tension: 'The old policy rejected the evidence representation.',
+      implication: 'The repaired policy should be allowed to retry it.',
+      authorReason: 'The author follows AI company formation.',
+      evidenceIds: ['source-current'],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: `ai:startup:current:${index}`,
+      noveltyScore: 0.8,
+      evidenceScore: 0.9,
+      identityScore: 0.9,
+      judgeScore: 0.4,
+      status: 'rejected',
+      rejectionCodes: ['claim_not_grounded_in_evidence'],
+      createdAt: '2026-08-12T20:00:00.000Z',
+      updatedAt: '2026-08-12T20:01:00.000Z',
+    } satisfies IdeaCandidate));
+
+    expect(buildFailedStoryAttemptsV2(
+      failedIdeas,
+      new Date('2026-08-13T00:00:00.000Z'),
+      'publishing-v2-hard-gates-current',
+    )).toHaveLength(0);
+    expect(buildFailedStoryAttemptsV2(
+      failedIdeas,
+      new Date('2026-08-13T00:00:00.000Z'),
+      'publishing-v2-hard-gates-old',
+    )).toHaveLength(1);
+  });
+
   it('does not spend research brief slots on a permanently rejected subject', () => {
     const makeStory = (id: string, title: string, topic: string, total: number): StoryCluster => ({
       schemaVersion: 2,
