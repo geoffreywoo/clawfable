@@ -763,6 +763,46 @@ describe('Tweet Generation V2', () => {
     expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
   });
 
+  it('accepts a multi-number comparison explicitly stated together in the source excerpt', () => {
+    const sourcedBrief = {
+      ...brief('computer-use', 'computer-use agents', 'verified_source'),
+      qualifiedClaimIds: ['claim-before', 'claim-now', 'claim-human'],
+    } satisfies GenerationBriefV2;
+    const source = {
+      id: 'source-computer-use',
+      excerpt: 'A year ago, the best computer-use model scored 42% on the standard real-desktop benchmark. Today it scores 85%. Human testers score about 72% on the same tasks.',
+      claims: [{
+        id: 'claim-before',
+        text: 'A year ago, the best computer-use model scored 42% on the standard real-desktop benchmark.',
+        kind: 'measurement',
+      }, {
+        id: 'claim-now',
+        text: 'Today the best computer-use model scores 85% on the standard real-desktop benchmark.',
+        kind: 'measurement',
+      }, {
+        id: 'claim-human',
+        text: 'Human testers score about 72% on the same tasks.',
+        kind: 'measurement',
+      }],
+    } as SourceDocument;
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('computer-use', 'The best computer-use model moved from 42% to 85% on the cited real-desktop benchmark, compared with about 72% for human testers.'),
+        evidenceIds: ['source-computer-use'],
+      }],
+      agentId: 'agent-1',
+      runId: 'run-computer-use',
+      briefs: [sourcedBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      documents: [source],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
+  });
+
   it('rejects an idea that combines numbers from separately scoped evidence claims', () => {
     const sourcedBrief = {
       ...brief('minerals', 'critical minerals', 'verified_source'),
@@ -931,6 +971,24 @@ describe('Tweet Generation V2', () => {
       status: 'rejected',
       rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
     });
+  });
+
+  it('allows an explicit operator financing preference without pretending it is sourced fact', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'For a capital-intensive technology company with unresolved product risk, I would choose equity before project finance.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-capital-preference',
+      briefs: [brief('operator', 'finance')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
   });
 
   it('blocks paraphrases of a permanently rejected named angle before writing', () => {

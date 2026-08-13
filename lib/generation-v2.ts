@@ -80,7 +80,7 @@ import { pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-see
 
 const PIPELINE_VERSION = 'v2' as const;
 export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-5';
-export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-6';
+export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-7';
 export const V2_MAX_GENERATED_SLOP_RISK = 0.32;
 export const V2_MAX_GENERATED_PATTERN_RISK = 0.28;
 export const V2_MAX_ANCHOR_RESKIN_RISK = 0.25;
@@ -1200,13 +1200,16 @@ function unsupportedOperatorFact(text: string): boolean {
   return /\b(?:according to|announced|reported|signed|filed|merger|acquisition|this week|today|yesterday)\b|\b20\d{2}\b|\$\d|\b\d+(?:\.\d+)?(?:%|x)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b/i.test(text);
 }
 
+const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:'d| would| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| judge| rate| treat| believe| think)|my (?:rule|preference|preferred|test|view|default)|give me)\b/i;
+
 function unsupportedOperatorEvidence(text: string, lockEvidenceConcepts = true): boolean {
-  const assessment = assessClaimEvidence(text, [], { lockEvidenceConcepts });
+  const lockConcepts = lockEvidenceConcepts && !OPERATOR_JUDGMENT_POSTURE.test(text);
+  const assessment = assessClaimEvidence(text, [], { lockEvidenceConcepts: lockConcepts });
   return unsupportedOperatorFact(text)
     || (assessment.hasPersonalExperienceClaim && !assessment.personalExperienceSupported)
     || assessment.unsupportedNumbers.length > 0
     || assessment.unsupportedQuotes.length > 0
-    || (lockEvidenceConcepts && assessment.unsupportedEvidenceConcepts.length > 0);
+    || (lockConcepts && assessment.unsupportedEvidenceConcepts.length > 0);
 }
 
 const DURABLE_ANGLE_BOILERPLATE = new Set([
@@ -1430,10 +1433,14 @@ export function normalizeIdeaCandidatesV2({
       const claimTexts = citedEvidence.flatMap((document) => document.claims
         .filter((claim) => allowedClaims.has(claim.id))
         .map((claim) => claim.text));
+      const evidenceSupport = uniqueStrings([
+        ...claimTexts,
+        ...citedEvidence.map((document) => document.excerpt?.slice(0, 2400)),
+      ], 20);
       if (claimTexts.length === 0) candidate.rejectionCodes.push('unresolvable_verified_evidence');
       else if (assessClaimEvidence(
-        `${candidate.claim} ${candidate.tension} ${candidate.implication}`,
-        claimTexts,
+        candidate.claim,
+        evidenceSupport,
         { lockEvidenceConcepts: true },
       ).issue || (
         Math.max(...claimTexts.map((claim) => researchTokenSimilarity(candidate.claim, claim))) < 0.12
@@ -2031,6 +2038,13 @@ function sourceClaims(documents: SourceDocument[]): string[] {
   return uniqueStrings(documents.flatMap((document) => document.claims.map((claim) => claim.text)), 10);
 }
 
+function sourceEvidenceSupport(documents: SourceDocument[]): string[] {
+  return uniqueStrings([
+    ...sourceClaims(documents),
+    ...documents.map((document) => document.excerpt?.slice(0, 2400)),
+  ], 20);
+}
+
 function preflightDraft({
   draft,
   idea,
@@ -2051,7 +2065,7 @@ function preflightDraft({
   const codes: string[] = [];
   const content = draft.content.trim();
   const featureTags = extractCandidateFeatureTags(content, { topic: idea.topic, thesisHint: idea.claim });
-  const claims = sourceClaims(documents);
+  const claims = sourceEvidenceSupport(documents);
   const untrustedSourceTexts = documents.flatMap((document) => [document.title, document.excerpt]).filter(Boolean);
   const generatedIssue = getGeneratedTweetIssue(content);
   const generatedWritingIssue = getV2GeneratedWritingIssue(content);
