@@ -30,6 +30,34 @@ describe('account taste scoring', () => {
     })).toBe(false);
   });
 
+  it('calibrates casual register against known manual Geoffrey sentence shapes', () => {
+    const anchors = [
+      { content: 'google should buy @cognition for $200b and make @ScottWu46 ceo', topic: 'AI', source: 'timeline' },
+      { content: 'don’t pray on other people’s downfall.\n\nit simply reveals your own insecurity of never having your own meteoric rise.', topic: 'culture', source: 'timeline' },
+      { content: 'i’m going to cold turkey quit all caffeine (except tea) and nicotine for 2 weeks. who’s in?', topic: 'personal', source: 'timeline' },
+    ];
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: anchors,
+        startupRegisterExamples: [],
+        pinnedExamples: [],
+      },
+    } as any;
+
+    for (const anchor of anchors) {
+      const assessment = assessAccountTaste(anchor.content, { voiceProfile: geoffreyVoiceProfile, learnings });
+      expect(assessment.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    }
+    expect(assessAccountTaste(
+      "funny how founders who swear they’d never give up control suddenly eat a worse structure when a tier-1 term sheet lands",
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    ).casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(assessAccountTaste(
+      'most impressive thing a seed team can show me is the list of roles they refused to hire.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    ).casualStartupScore).toBeGreaterThanOrEqual(0.58);
+  });
+
   it('prefers Geoffrey-native technical anchors over topic-swapped AI advice', () => {
     const generic = assessAccountTaste(
       'The real edge in AI infrastructure is not more models, but better feedback loops. Most people miss that the winners will compound learning faster.',

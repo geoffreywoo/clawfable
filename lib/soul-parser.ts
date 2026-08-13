@@ -38,8 +38,15 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
     sections[currentSection.toLowerCase()] = currentContent.join('\n').trim();
   }
 
+  const sectionContaining = (...needles: string[]): string => (
+    Object.entries(sections).find(([key]) => needles.some((needle) => key.includes(needle)))?.[1] || ''
+  );
+  const identitySection = sectionContaining('identity');
+  const commsSection = sectionContaining('communication', 'protocol', 'style', 'voice');
+
   // ─── Determine tone ───────────────────────────────────────────────────────
   const allText = soulMd.toLowerCase();
+  const toneText = `${identitySection}\n${commsSection}`.trim().toLowerCase() || allText;
 
   const toneScores: Record<string, number> = {
     contrarian: 0,
@@ -49,37 +56,39 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
     educator: 0,
   };
 
-  if (allText.includes('contrarian')) toneScores.contrarian += 5;
-  if (allText.includes('skeptic')) toneScores.contrarian += 4;
-  if (allText.includes('challenge consensus')) toneScores.contrarian += 3;
-  if (allText.includes('anti-hype')) toneScores.contrarian += 3;
+  if (toneText.includes('contrarian')) toneScores.contrarian += 5;
+  if (toneText.includes('skeptic')) toneScores.contrarian += 4;
+  if (toneText.includes('challenge consensus')) toneScores.contrarian += 3;
+  if (toneText.includes('anti-hype')) toneScores.contrarian += 3;
 
-  if (allText.includes('optimis')) toneScores.optimist += 5;
-  if (allText.includes('bullish')) toneScores.optimist += 4;
-  if (allText.includes('forward-looking')) toneScores.optimist += 4;
-  if (allText.includes('positive')) toneScores.optimist += 3;
-  if (allText.includes('encouraging')) toneScores.optimist += 3;
-  if (allText.includes('enthusiastic')) toneScores.optimist += 4;
-  if (allText.includes('celebrate')) toneScores.optimist += 3;
+  if (toneText.includes('optimis')) toneScores.optimist += 5;
+  if (toneText.includes('bullish')) toneScores.optimist += 4;
+  if (toneText.includes('forward-looking')) toneScores.optimist += 4;
+  if (toneText.includes('positive')) toneScores.optimist += 3;
+  if (toneText.includes('encouraging')) toneScores.optimist += 3;
+  if (toneText.includes('enthusiastic')) toneScores.optimist += 4;
+  if (toneText.includes('celebrate')) toneScores.optimist += 3;
 
-  if (allText.includes('analyst')) toneScores.analyst += 5;
-  if (allText.includes('measured')) toneScores.analyst += 4;
-  if (allText.includes('nuanced')) toneScores.analyst += 4;
-  if (allText.includes('data-driven')) toneScores.analyst += 4;
-  if (allText.includes('evidence')) toneScores.analyst += 2;
+  if (/\banalyst\b/.test(toneText) && !/\b(?:not|never|avoid)\s+(?:an?\s+)?analyst\b/.test(toneText)) toneScores.analyst += 5;
+  if (toneText.includes('measured')) toneScores.analyst += 4;
+  if (toneText.includes('nuanced')) toneScores.analyst += 4;
+  if (toneText.includes('data-driven')) toneScores.analyst += 4;
+  if (toneText.includes('evidence')) toneScores.analyst += 2;
 
-  if (allText.includes('provocat')) toneScores.provocateur += 5;
-  if (allText.includes('controversial')) toneScores.provocateur += 4;
-  if (allText.includes('hot take')) toneScores.provocateur += 4;
+  if (toneText.includes('provocat')) toneScores.provocateur += 5;
+  if (toneText.includes('controversial')) toneScores.provocateur += 4;
+  if (toneText.includes('hot take')) toneScores.provocateur += 4;
+  if (toneText.includes('casual')) toneScores.provocateur += 3;
+  if (toneText.includes('high-context')) toneScores.provocateur += 2;
 
-  if (allText.includes('educat')) toneScores.educator += 5;
-  if (allText.includes('explain')) toneScores.educator += 3;
-  if (allText.includes('teach')) toneScores.educator += 4;
-  if (allText.includes('learn')) toneScores.educator += 2;
+  if (toneText.includes('educat')) toneScores.educator += 5;
+  if (toneText.includes('explain')) toneScores.educator += 3;
+  if (toneText.includes('teach')) toneScores.educator += 4;
+  if (toneText.includes('learn')) toneScores.educator += 2;
 
-  if (allText.includes('question') && !allText.includes('without question')) toneScores.contrarian += 1;
-  if (allText.includes('signal density')) toneScores.contrarian += 2;
-  if (allText.includes('no filler')) toneScores.contrarian += 2;
+  if (toneText.includes('question') && !toneText.includes('without question')) toneScores.contrarian += 1;
+  if (toneText.includes('signal density')) toneScores.contrarian += 2;
+  if (toneText.includes('no filler')) toneScores.contrarian += 2;
 
   let tone = 'contrarian';
   let maxScore = 0;
@@ -93,9 +102,11 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   // ─── Extract topics ───────────────────────────────────────────────────────
   const topics: string[] = [];
   const topicKeywords = [
-    'ai', 'machine learning', 'crypto', 'tech', 'startup', 'vc', 'funding',
-    'regulation', 'policy', 'agents', 'llm', 'openai', 'google', 'jobs',
-    'productivity', 'economics', 'software', 'engineering',
+    'ai', 'startup', 'vc', 'software', 'agents', 'openai', 'robotics', 'energy',
+    'hardware', 'manufacturing', 'compute', 'biotech', 'defense', 'space',
+    'nuclear', 'health', 'culture', 'investing', 'capital markets', 'tech',
+    'machine learning', 'crypto', 'funding', 'regulation', 'policy', 'google',
+    'jobs', 'productivity', 'economics', 'engineering', 'llm',
   ];
   for (const kw of topicKeywords) {
     if (allText.includes(kw)) {
@@ -127,10 +138,20 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   )?.[1] || '';
 
   if (antiSection) {
-    const items = antiSection
-      .split(/\n|,|\d+\.|[-–—]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 5 && s.length < 120);
+    const bulletItems = antiSection
+      .split('\n')
+      .map((line) => line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$/)?.[1]?.trim() || '')
+      .filter(Boolean);
+    const paragraphItems = antiSection
+      .split(/\n\s*\n/)
+      .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    const explicitNegativeParagraphs = paragraphItems.filter((item) => /^(?:do not|avoid|never)\b/i.test(item));
+    const items = (explicitNegativeParagraphs.length > 0
+      ? explicitNegativeParagraphs
+      : bulletItems.length > 0 ? bulletItems : paragraphItems)
+      .map((item) => item.slice(0, 320))
+      .filter((item) => item.length > 5);
     antiGoals.push(...items.slice(0, 5));
   }
 
@@ -143,10 +164,6 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
 
   // ─── Extract communication style ──────────────────────────────────────────
   let communicationStyle = 'direct and concise';
-  const commsSection = Object.entries(sections).find(([k]) =>
-    k.includes('communication') || k.includes('protocol') || k.includes('style') || k.includes('voice')
-  )?.[1] || '';
-
   if (commsSection) {
     const styleWords = [
       'terse', 'verbose', 'concise', 'detailed', 'brief', 'direct',
@@ -166,13 +183,16 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
 
   // ─── Build summary ────────────────────────────────────────────────────────
   const topicStr = topics.slice(0, 3).join(', ') || 'technology and AI';
-  const antiStr = antiGoals.length > 0
-    ? antiGoals[0].replace(/^(do not|avoid|never)\s+/i, '').slice(0, 60)
-    : 'optimizing for optics over outcomes';
+  const antiSummary = antiGoals.length > 0
+    ? antiGoals[0].split(/[.!?]/)[0].slice(0, 120)
+    : 'Avoid optimizing for optics over outcomes';
+  const communicationSummary = /^write\b/i.test(communicationStyle)
+    ? `You ${communicationStyle}`
+    : `Your communication style is ${communicationStyle}`;
 
   const summary =
     `You are ${agentName}. Your voice is ${tone}. You focus on ${topicStr}. ` +
-    `You communicate with ${communicationStyle}. You never ${antiStr}.`;
+    `${communicationSummary}. ${antiSummary}.`;
 
   return {
     tone,

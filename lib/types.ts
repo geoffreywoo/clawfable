@@ -223,6 +223,10 @@ export interface CandidateJudgeBreakdown {
   cringeRisk?: number;
   technicalCredibility?: number;
   manualAnchorReskinRisk?: number;
+  voiceDriftRisk?: number;
+  statusTextureRisk?: number;
+  generatedPatternRisk?: number;
+  sourceCopyRisk?: number;
 }
 
 export interface CandidateCriticScores {
@@ -795,6 +799,7 @@ export interface IdeaCandidate {
   parentDraftId?: string | null;
   briefId: string;
   storyClusterId: string | null;
+  creativeSeedId?: string | null;
   topic: string;
   claim: string;
   tension: string;
@@ -855,6 +860,7 @@ export interface TweetEvidenceReference {
 
 export type GenerationEvidenceKind =
   | 'research_source'
+  | 'operator_topic'
   | 'target_post'
   | 'thread_context'
   | 'original_post'
@@ -941,6 +947,14 @@ export interface GenerationModelCallTrace {
   succeeded: boolean;
   error: string | null;
   stopReason?: string | null;
+  fallbackAttempts?: Array<{
+    provider: 'openai' | 'anthropic';
+    model: string;
+    reason: 'empty_text' | 'provider_error' | 'timeout';
+    stopReason: string | null;
+    statusCode: number | null;
+    errorType: string | null;
+  }>;
 }
 
 export interface GenerationRunTrace {

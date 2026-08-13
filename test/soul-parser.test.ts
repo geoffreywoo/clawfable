@@ -53,6 +53,27 @@ Explain concepts clearly. Teach and help people learn.`;
       expect(profile.tone).toBe('educator');
     });
 
+    it('does not learn analyst tone from a negated anti-pattern', () => {
+      const soul = `# SOUL.md
+## 1) Identity
+Brutally honest contrarian allocator.
+
+## 2) Communication Style
+Write like a high-context venture insider. The voice is casual, provocative, analytical, and socially aware. It should feel like a smart operator texting, not an analyst publishing a note.
+
+## 5) Anti-Goals
+Do not become a generic AI commentator. Broad AI posts underperform when they lack company, capital, status, labor, or timing stakes.`;
+      const profile = parseSoulMd('Geoff', soul);
+
+      expect(profile.tone).toBe('provocateur');
+      expect(profile.antiGoals).toEqual([
+        'Do not become a generic AI commentator. Broad AI posts underperform when they lack company, capital, status, labor, or timing stakes.',
+      ]);
+      expect(profile.summary).not.toContain('You never capital');
+      expect(profile.summary).toContain('You write like a high-context venture insider');
+      expect(profile.summary).toContain('Do not become a generic AI commentator');
+    });
+
     it('defaults to contrarian when no tone signals', () => {
       const profile = parseSoulMd('EmptyBot', '# SOUL.md\nJust some text.');
       expect(profile.tone).toBe('contrarian');
@@ -113,6 +134,21 @@ I am a bot. Never use hashtags. Avoid corporate speak. Do not post memes.`;
 - emoji overuse`;
       const profile = parseSoulMd('ManyAnti', soul);
       expect(profile.antiGoals.length).toBeLessThanOrEqual(4);
+    });
+
+    it('does not replace anti-goals with a nested positive checklist', () => {
+      const soul = `# SOUL.md
+## Anti-Goals
+Do not publish generic commentary without a company or capital judgment.
+
+Do not publish low-conviction punchlines unchecked. Manually review for:
+- real stakes
+- clean factual support`;
+      const profile = parseSoulMd('AntiBot', soul);
+
+      expect(profile.antiGoals).toHaveLength(2);
+      expect(profile.antiGoals[0]).toContain('Do not publish generic commentary');
+      expect(profile.antiGoals).not.toContain('real stakes');
     });
   });
 

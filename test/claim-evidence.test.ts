@@ -3,6 +3,18 @@ import { assessClaimEvidence } from '@/lib/claim-evidence';
 import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from '@/lib/writing-patterns';
 
 describe('claim evidence', () => {
+  it('requires support for invented first-person reading habits and capital-market mechanisms', () => {
+    expect(assessClaimEvidence('i read seed decks backwards now.', [], { lockEvidenceConcepts: true })).toMatchObject({
+      hasPersonalExperienceClaim: true,
+      personalExperienceSupported: false,
+    });
+    expect(assessClaimEvidence(
+      'most private fund LPs are blindfolded until the redemption window opens.',
+      [],
+      { lockEvidenceConcepts: true },
+    ).unsupportedEvidenceConcepts).toContain('capital-market mechanism');
+  });
+
   it('blocks invented anonymous anecdotes even when they sound technically specific', () => {
     const result = assessClaimEvidence(
       'A machine shop owner showed me two carbide end mills. One ran 11 hours. One chipped after 47 minutes.',
@@ -105,6 +117,24 @@ describe('claim evidence', () => {
 });
 
 describe('generated writing patterns', () => {
+  it('blocks the generic X is just Y with Z quip mold', () => {
+    expect(assessGeneratedWritingPatterns(
+      'hiring fast before product truth is just anxiety with a payroll attached.',
+    )).toMatchObject({ primarySignature: 'just-y-with-z-reframe', score: 0.34 });
+  });
+
+  it('blocks the recycled pilot is a polite no startup aphorism', () => {
+    expect(assessGeneratedWritingPatterns(
+      'a pilot is an enterprise saying no politely. renewals are the only compliment a buyer ever pays you.',
+    )).toMatchObject({ primarySignature: 'pilot-polite-no-aphorism', score: 0.42 });
+  });
+
+  it('blocks neat one-versus-two aphorism scaffolding', () => {
+    expect(assessGeneratedWritingPatterns(
+      'one purchase is curiosity, two is a habit someone fought accounting for.',
+    )).toMatchObject({ primarySignature: 'one-two-aphorism', score: 0.34 });
+  });
+
   it('detects repeated anonymous-anecdote scaffolds', () => {
     const candidate = 'A founder showed me an inspection robot. The exception path preserved the labor.';
     const assessment = assessGeneratedWritingPatterns(candidate);

@@ -525,6 +525,66 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.createTweet).not.toHaveBeenCalled();
   });
 
+  it('queues a native operator-opinion draft with explicit topic provenance', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'sharp and direct', summary: 'startup investor' },
+      learnings: {
+        voiceCorpus: { ...activeGeoffreyCorpus },
+        operatorVoiceReference: {
+          pinnedExamples: [{ content: 'tiny teams can now attempt company-sized problems', source: 'manual', authorshipProvenance: 'operator_composed' }],
+          startupRegisterExamples: [],
+          bestPerformers: [],
+        },
+      },
+      settings: { ...baseSettings, minQueueSize: 5 },
+      style: { autonomyMode: 'balanced', trendMixTarget: 35, bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+    mocks.generateTweetBatchV2.mockResolvedValue([{
+      content: 'tiny teams are getting company-sized ambition before they get company-sized headcount.',
+      format: 'observation',
+      targetTopic: 'startups',
+      rationale: 'Native operator judgment about startup formation.',
+      pipelineVersion: 'v2',
+      generationSurface: 'original',
+      contentProvenance: 'generated_v2',
+      generationRunId: 'run-operator-topic',
+      ideaId: 'idea-operator-topic',
+      draftCandidateId: 'draft-operator-topic',
+      sourceLane: 'manual_core_exploit',
+      sourceBrief: 'OPERATOR-OWNED TOPIC [subject=startups]',
+      evidenceReferences: [],
+      generationEvidenceReferences: [{
+        id: 'operator-topic-startups',
+        kind: 'operator_topic',
+        sourceDocumentId: null,
+        url: null,
+        title: 'Operator topic signal: startups',
+        publisher: 'Clawfable operator corpus',
+        content: 'Aggregate operator topic preference for startups.',
+        publishedAt: null,
+        verifiedAt: activeGeoffreyCorpus.generatedAt,
+        expiresAt: null,
+        trustTier: 'primary',
+      }],
+      candidateScore: 91,
+      confidenceScore: 0.91,
+    } as any]);
+
+    expect(await refillQueue(agent as any, 2)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-operator-topic' }),
+      expect.objectContaining({ status: 'queued', topic: 'startups' }),
+    );
+  });
+
   it('ignores the retired Geoffrey pipeline switch and uses the V2-only publish path', async () => {
     process.env.VERCEL_ENV = 'production';
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });

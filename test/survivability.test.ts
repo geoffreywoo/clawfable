@@ -262,6 +262,12 @@ describe('getReplyRepetitionIssue', () => {
 // ─── Draft completeness detection ──────────────────────────────────────────
 
 describe('getTweetCompletenessIssue', () => {
+  it('allows complete sentences ending in short object pronouns', () => {
+    expect(getTweetCompletenessIssue(
+      "nobody remembers a model's eval scores a month later, they remember the first thing they shipped with it",
+    )).toBeNull();
+  });
+
   it('flags dangling trailing fragments like the production truncation case', () => {
     const issue = getTweetCompletenessIssue(
       'psa to every founder still raising pre-seed rounds:\n\nyour runway is compressing fast\n\nthe only'

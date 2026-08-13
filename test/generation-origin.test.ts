@@ -29,6 +29,29 @@ describe('generated publishing origin gate', () => {
       ideaId: null,
       draftCandidateId: null,
     })).toBeNull();
+    expect(getGeneratedPublishIssue({
+      type: 'original',
+      pipelineVersion: 'v2',
+      contentProvenance: 'generated_v2',
+      generationSurface: 'original',
+      generationRunId: 'run-operator',
+      ideaId: 'idea-operator',
+      draftCandidateId: 'draft-operator',
+      evidenceReferences: [],
+      generationEvidenceReferences: [{
+        id: 'operator-topic:startups',
+        kind: 'operator_topic',
+        sourceDocumentId: null,
+        url: null,
+        title: 'Operator topic signal: startups',
+        publisher: 'Clawfable operator corpus',
+        content: 'Aggregate topic preference only.',
+        publishedAt: null,
+        verifiedAt: new Date().toISOString(),
+        expiresAt: null,
+        trustTier: 'primary',
+      }],
+    })).toBeNull();
   });
 
   it('blocks explicit V1 output, inferred legacy generation, and incomplete V2 lineage', () => {

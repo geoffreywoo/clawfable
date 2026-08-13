@@ -768,6 +768,20 @@ describe('source planner', () => {
     expect(plan.slots.filter((slot) => slot.ideaSeed?.kind && slot.ideaSeed.kind !== 'frontier').length).toBeGreaterThanOrEqual(3);
   });
 
+  it('does not treat ordinary product launches as aerospace or deep technical', () => {
+    const productLaunch = 'OpenAI model launch killed a feature startup';
+
+    expect(classifyGeoffreyTopicDomain(productLaunch)).toBe('ai_compute');
+    expect(isGeoffreyDeepTechnicalTopic(productLaunch)).toBe(false);
+    expect(classifyGeoffreyTopicDomain('a startup product launch changed customer behavior')).toBe('startups_markets');
+    expect(isGeoffreyDeepTechnicalTopic('a startup product launch changed customer behavior')).toBe(false);
+  });
+
+  it('keeps aerospace launch language in the deep technical lane', () => {
+    expect(classifyGeoffreyTopicDomain('a rocket launch changed the payload economics')).toBe('space_defense');
+    expect(isGeoffreyDeepTechnicalTopic('a launch vehicle provider has a full manifest')).toBe(true);
+  });
+
   it('does not let a generic tech label bridge an unrelated Geoffrey trend', () => {
     const [topic] = enrichTrendingTopics([{
       id: 922,

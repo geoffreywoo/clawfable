@@ -275,7 +275,10 @@ const TRAILING_DELIMITER_RE = /(?:[,:;\/\\([{]|[-–—])$/;
 const INCOMPLETE_FRAGMENT_RE = /^(?:the|a|an)\s+(?:only|best|worst|first|last|next|real|whole|same|main|biggest|smallest|hardest|easiest|most|least|key|problem|point|reason|question|answer|difference)\b|^(?:because|while|if|when|unless|until|although|though|where|which|who|whose|that|than|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across)\b/i;
 const SHORT_TRAILING_TOKEN_RE = /^[a-z]{1,3}$/;
 const PRECEDING_CONNECTOR_RE = /^(?:than|because|while|if|when|unless|until|although|though|where|which|who|whose|that|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across|against|inside|outside|toward|towards|via|like)$/i;
-const ALLOWED_SHORT_TRAILING_TOKENS = new Set(['ai', 'vc', 'lp', 'gp', 'pm', 'am', 'gm', 'gn', 'us', 'uk', 'eu']);
+const ALLOWED_SHORT_TRAILING_TOKENS = new Set([
+  'ai', 'vc', 'lp', 'gp', 'pm', 'am', 'gm', 'gn', 'us', 'uk', 'eu',
+  'it', 'me', 'him', 'her',
+]);
 
 function hasUnbalancedOpeningDelimiters(text: string): boolean {
   const delimiterPairs: Array<[string, string]> = [

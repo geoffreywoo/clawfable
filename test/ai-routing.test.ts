@@ -351,7 +351,7 @@ describe('AI model routing', () => {
       status: 'completed',
       output: [{ content: [{ type: 'output_text', text: 'openai ok' }] }],
     });
-    const { generateText } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+    const { generateText, PUBLISHING_V2_MODEL_STACK } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
 
     const result = await generateText({
       task: 'reply_generation',
@@ -467,6 +467,26 @@ describe('AI model routing', () => {
         errorType: null,
       }],
     }));
+  });
+
+  it('preserves every attempted provider when the full model chain fails', async () => {
+    const openAiCreate = vi.fn().mockRejectedValue(new Error('openai unavailable'));
+    const anthropicCreate = vi.fn().mockRejectedValue(new Error('anthropic unavailable'));
+    const { generateText, PUBLISHING_V2_MODEL_STACK } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    await expect(generateText({
+      task: 'final_judgment',
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      system: 'Judge one draft.',
+      prompt: 'probe',
+      maxTokens: 64,
+    })).rejects.toMatchObject({
+      fallbackAttempts: [
+        expect.objectContaining({ provider: 'openai', model: 'gpt-5.6', reason: 'provider_error' }),
+        expect.objectContaining({ provider: 'openai', model: 'gpt-5.5', reason: 'provider_error' }),
+        expect.objectContaining({ provider: 'anthropic', model: 'claude-sonnet-4-6', reason: 'provider_error' }),
+      ],
+    });
   });
 
   it('gives the primary model the full stage deadline instead of dividing it across fallbacks', async () => {

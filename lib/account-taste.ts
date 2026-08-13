@@ -277,7 +277,7 @@ const CASUAL_NATIVE_TERMS = [
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
   'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
   'those guys', 'all seem', 'i think', "i'd rather", 'pretty', 'wild', 'insane', 'massive',
-  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'go vertical',
+  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'go vertical', 'funny',
   'good', 'bad', 'smart', 'dumb',
 ];
 
@@ -699,19 +699,20 @@ function assessCasualStartupRegister(
   const marketStakeHits = exactTermHits(content, MARKET_STAKE_TERMS);
   const stiffHits = countTerms(lower, STIFF_ANALYST_TERMS);
   const generatedPattern = assessGeneratedWritingPatterns(content);
-  const startupAnchors = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
-  const referenceScores = startupAnchors
+  const registerAnchors = operatorVoiceAnchors(learnings);
+  const referenceScores = registerAnchors
     .slice(0, 10)
     .map((anchor) => nativeStyleSimilarity(content, anchor.content))
     .sort((a, b) => b - a)
     .slice(0, 3);
+  const bestAnchorFit = referenceScores[0] ?? 0.5;
   const anchorFit = referenceScores.length > 0
     ? referenceScores.reduce((sum, score) => sum + score, 0) / referenceScores.length
     : 0.5;
   const lowerOpening = /^[a-z0-9]/.test(firstLine(content));
-  const firstOrSecondPerson = /\b(?:i|we|my|our|you|your)\b/i.test(content);
+  const firstOrSecondPerson = /\b(?:i|we|me|us|my|our|you|your)\b/i.test(content);
   const situated = /@\w+|https?:\/\//i.test(content);
-  const contraction = /\b(?:ain'?t|can'?t|don'?t|doesn'?t|isn'?t|you'?re|we'?re|i'?m|won'?t)\b/i.test(content);
+  const contraction = /\b(?:(?:ain|can|don|doesn|didn|isn|aren|wasn|weren|won|wouldn|shouldn|couldn|haven|hasn|hadn)['’]?t|(?:that|it)['’]?s|(?:they|you|we)['’]?(?:re|d|ve)|i['’]?(?:m|ve|d))\b/i.test(content);
   const commaCount = (content.match(/,/g) || []).length;
   const sentences = Math.max(1, (content.match(/[.!?](?:\s|$)/g) || []).length);
   const avgWordLength = words.length > 0
@@ -767,13 +768,30 @@ function assessCasualStartupRegister(
     - (neutralResearchSummary ? 0.12 : 0)
     - (polishedModelQuestion ? 0.12 : 0)
   );
-  const score = clamp(
+  const topicAwareScore = clamp(
     anchorFit * 0.34
     + relevance * 0.26
     + casualness * 0.24
     + directness * 0.16
     - stiffnessRisk * 0.3
   );
+  // This dimension measures the account's casual startup register, not whether
+  // every post literally contains startup nouns. Broad native posts should be
+  // able to clear the same register gate when their rhythm matches curated
+  // operator anchors; topic fit is enforced separately by the portfolio.
+  const styleRegisterScore = clamp(
+    anchorFit * 0.5
+    + casualness * 0.28
+    + directness * 0.22
+    - stiffnessRisk * 0.3
+  );
+  const hasCasualRegisterMarker = casualHits > 0
+    || firstOrSecondPerson
+    || situated
+    || contraction;
+  const score = !hasCasualRegisterMarker && bestAnchorFit < 0.98
+    ? Math.min(0.49, Math.max(topicAwareScore, styleRegisterScore))
+    : Math.max(topicAwareScore, styleRegisterScore);
 
   return {
     score: Number(score.toFixed(3)),

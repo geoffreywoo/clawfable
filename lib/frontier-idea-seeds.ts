@@ -253,6 +253,28 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     sourceQueries: [],
   },
   {
+    id: 'startup-headcount-ambition',
+    kind: 'startup',
+    topic: 'AI-native startup formation and team design',
+    technicalObject: 'a seed-stage founder deciding whether the next unit of ambition requires another hire, a narrower product, or better use of AI',
+    hiddenConstraint: 'headcount can add coordination and status before it adds a capability the company truly lacks',
+    nonConsensusImplication: 'take a concrete position on what a fundable early team should look like now without preaching generic efficiency',
+    startupBackingFact: '',
+    domains: ['startups', 'founders', 'ai', 'talent', 'companies'],
+    sourceQueries: [],
+  },
+  {
+    id: 'startup-customer-truth',
+    kind: 'startup',
+    topic: 'customer pull, fundraising, and company quality',
+    technicalObject: 'a technically strong startup getting praise, investor demand, pilots, and repeated paid customer use in different proportions',
+    hiddenConstraint: 'social proof is easier to manufacture than a customer repeatedly changing behavior or budget',
+    nonConsensusImplication: 'make one sharp company-quality judgment from revealed customer behavior without writing a founder checklist',
+    startupBackingFact: '',
+    domains: ['startups', 'customers', 'funding', 'products', 'companies'],
+    sourceQueries: [],
+  },
+  {
     id: 'ai-behavior-and-ambition',
     kind: 'ai_product',
     topic: 'AI products, research, and how ambitious people use them',
@@ -264,23 +286,67 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
     sourceQueries: [],
   },
   {
-    id: 'markets-thesis-versus-execution',
+    id: 'ai-incumbent-bundling',
+    kind: 'ai_product',
+    topic: 'AI products and incumbent distribution',
+    technicalObject: 'OpenAI or Google putting a new model capability directly inside a product people already use',
+    hiddenConstraint: 'bundling can erase a thin feature company while making an entirely new workflow worth building',
+    nonConsensusImplication: 'make a specific build, buy, or company-value judgment instead of recapping a model launch',
+    startupBackingFact: '',
+    domains: ['ai', 'software', 'products', 'startups', 'google', 'openai'],
+    sourceQueries: [],
+  },
+  {
+    id: 'ai-talent-company-formation',
+    kind: 'ai_product',
+    topic: 'AI talent and company formation',
+    technicalObject: 'an exceptional researcher or product builder choosing between a frontier lab, a scaled incumbent, and starting a company',
+    hiddenConstraint: 'models change how much one person can build, but distribution, capital, and ambition still determine which game is worth playing',
+    nonConsensusImplication: 'take a side on the talent or company choice in high-context startup language',
+    startupBackingFact: '',
+    domains: ['ai', 'talent', 'research', 'startups', 'companies'],
+    sourceQueries: [],
+  },
+  {
+    id: 'markets-ai-value-chain',
     kind: 'markets',
-    topic: 'investing, capital markets, and risk',
-    technicalObject: 'a correct technology thesis damaged by leverage, position sizing, timing, or forced selling',
-    hiddenConstraint: 'a directionally correct thesis can still lose through sizing, leverage, timing, incentives, or forced selling',
-    nonConsensusImplication: 'make one arguable market judgment and separate the idea from its execution',
+    topic: 'where AI investment returns accrue',
+    technicalObject: 'an investor choosing exposure across model labs, cloud platforms, chips, power, and application companies',
+    hiddenConstraint: 'revenue can grow at one layer while capex intensity, pricing competition, or supplier economics capture the return elsewhere',
+    nonConsensusImplication: 'make one company or security judgment without defaulting to a generic picks-and-shovels slogan',
     startupBackingFact: '',
     domains: ['investing', 'finance', 'capital markets'],
+    sourceQueries: [],
+  },
+  {
+    id: 'markets-public-private-risk',
+    kind: 'markets',
+    topic: 'public versus private AI exposure',
+    technicalObject: 'an investor choosing between a profitable public AI infrastructure company and a faster-growing private application startup',
+    hiddenConstraint: 'the exciting company and the attractive security can diverge once valuation, liquidity, dilution, and duration enter',
+    nonConsensusImplication: 'make one position-level judgment without turning it into generic valuation advice',
+    startupBackingFact: '',
+    domains: ['investing', 'finance', 'ai', 'public markets', 'venture'],
+    sourceQueries: [],
+  },
+  {
+    id: 'markets-capital-duration',
+    kind: 'markets',
+    topic: 'capital duration and technology timing',
+    technicalObject: 'a capital-intensive technology company choosing between expensive equity, project finance, customer funding, and waiting to scale',
+    hiddenConstraint: 'the financing instrument can shape what the company is able to build and who owns the upside before product risk clears',
+    nonConsensusImplication: 'make the narrow financing or ownership call Geoffrey would defend instead of explaining risk management',
+    startupBackingFact: '',
+    domains: ['investing', 'finance', 'capital markets', 'technology', 'venture'],
     sourceQueries: [],
   },
   {
     id: 'culture-status-revealed-preference',
     kind: 'culture',
     topic: 'culture, status, merit, ambition, and power',
-    technicalObject: 'how people react when a peer wins visibly, gains status, or receives another chance after failing',
-    hiddenConstraint: 'people reveal what they value through who they trust, reward, envy, copy, or exclude',
-    nonConsensusImplication: 'take a side in casual social language without turning the observation into generic life advice',
+    technicalObject: 'what ambitious people choose to build, display, attend, or decline once money and credentials stop differentiating them',
+    hiddenConstraint: 'scarce access and costly taste reveal status preferences more clearly than stated values do',
+    nonConsensusImplication: 'take a side on one concrete status choice in casual social language without turning it into generic life advice',
     startupBackingFact: '',
     domains: ['culture', 'status', 'merit', 'ambition'],
     sourceQueries: [],
@@ -452,9 +518,9 @@ export function pickGeoffreyIdeaSeed({
   const unusedAll = allSeeds.filter((seed) => !usedSeedIds.has(seed.id));
   const pool = unusedPreferred.length > 0
     ? unusedPreferred
-    : preferred.length > 0
-      ? preferred
-      : unusedAll.length > 0 ? unusedAll : allSeeds;
+    : unusedAll.length > 0
+      ? unusedAll
+      : preferred.length > 0 ? preferred : allSeeds;
   const ranked = pool
     .map((seed, index) => ({
       seed,

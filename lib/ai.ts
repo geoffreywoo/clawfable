@@ -472,5 +472,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     lastError = new Error(`AI generation exceeded the ${options.timeoutMs}ms stage deadline`);
   }
 
-  throw lastError instanceof Error ? lastError : new Error('AI generation failed');
+  const failure = lastError instanceof Error ? lastError : new Error('AI generation failed');
+  (failure as Error & { fallbackAttempts?: AiFallbackAttempt[] }).fallbackAttempts = fallbackAttempts;
+  throw failure;
 }
