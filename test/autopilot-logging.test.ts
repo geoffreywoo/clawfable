@@ -110,8 +110,8 @@ vi.mock('@/lib/generation-context', () => ({
 
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
-  PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-1',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-quality-1',
+  PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-6',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-10',
 }));
 
 vi.mock('@/lib/publishing-v2', () => ({
@@ -208,7 +208,7 @@ vi.mock('@/lib/ai', () => ({
 }));
 
 import { archiveStaleNetworkTopicQueue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
-import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/generation-v2';
+import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -327,6 +327,7 @@ function v2CandidateFromTweet(tweet: Tweet) {
     pipelineVersion: 'v2' as const,
     generationSurface: 'original' as const,
     contentProvenance: 'generated_v2' as const,
+    ...currentGeoffreyCertification,
     generationRunId: `run-${tweet.id}`,
     ideaId: `idea-${tweet.id}`,
     draftCandidateId: `draft-${tweet.id}`,
@@ -525,6 +526,67 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.createTweet).not.toHaveBeenCalled();
   });
 
+  it('queues a native operator-opinion draft with explicit topic provenance', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'sharp and direct', summary: 'startup investor' },
+      learnings: {
+        voiceCorpus: { ...activeGeoffreyCorpus },
+        operatorVoiceReference: {
+          pinnedExamples: [{ content: 'tiny teams can now attempt company-sized problems', source: 'manual', authorshipProvenance: 'operator_composed' }],
+          startupRegisterExamples: [],
+          bestPerformers: [],
+        },
+      },
+      settings: { ...baseSettings, minQueueSize: 5 },
+      style: { autonomyMode: 'balanced', trendMixTarget: 35, bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+    mocks.generateTweetBatchV2.mockResolvedValue([{
+      content: 'tiny teams are getting company-sized ambition before they get company-sized headcount.',
+      format: 'observation',
+      targetTopic: 'startups',
+      rationale: 'Native operator judgment about startup formation.',
+      pipelineVersion: 'v2',
+      generationSurface: 'original',
+      contentProvenance: 'generated_v2',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-operator-topic',
+      ideaId: 'idea-operator-topic',
+      draftCandidateId: 'draft-operator-topic',
+      sourceLane: 'manual_core_exploit',
+      sourceBrief: 'OPERATOR-OWNED TOPIC [subject=startups]',
+      evidenceReferences: [],
+      generationEvidenceReferences: [{
+        id: 'operator-topic-startups',
+        kind: 'operator_topic',
+        sourceDocumentId: null,
+        url: null,
+        title: 'Operator topic signal: startups',
+        publisher: 'Clawfable operator corpus',
+        content: 'Aggregate operator topic preference for startups.',
+        publishedAt: null,
+        verifiedAt: activeGeoffreyCorpus.generatedAt,
+        expiresAt: null,
+        trustTier: 'primary',
+      }],
+      candidateScore: 91,
+      confidenceScore: 0.91,
+    } as any]);
+
+    expect(await refillQueue(agent as any, 2)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-operator-topic' }),
+      expect.objectContaining({ status: 'queued', topic: 'startups' }),
+    );
+  });
+
   it('ignores the retired Geoffrey pipeline switch and uses the V2-only publish path', async () => {
     process.env.VERCEL_ENV = 'production';
     const result = await runAutopilot({ ...baseAgent, handle: 'geoffwoo' });
@@ -721,6 +783,29 @@ describe('autopilot remote debug logging', () => {
     expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.updateTweet).not.toHaveBeenCalled();
+  });
+
+  it('quarantines stale V2 policy artifacts instead of grandfathering them into autopost', async () => {
+    const stalePolicyDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-stale-policy',
+      pipelineVersion: 'v2' as const,
+      generationRunId: 'run-v2-stale-policy',
+      ideaId: 'idea-v2-stale-policy',
+      draftCandidateId: 'draft-v2-stale-policy',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-8',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([stalePolicyDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-policy', expect.objectContaining({
+      status: 'quarantined',
+      preQuarantineStatus: 'queued',
+      quarantineReason: expect.stringContaining('current quality policy'),
+    }));
   });
 
   it('does not invalidate immutable V2 lineage when the voice corpus later changes', async () => {

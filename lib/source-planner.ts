@@ -146,6 +146,8 @@ const CORE_GEOFFREY_DOMAINS = new Set<TopicSemanticDomain>([
 ]);
 const RESTRICTED_EXPLORATION_DOMAINS = new Set<TopicSemanticDomain>(['crypto', 'politics_geopolitics']);
 
+const AEROSPACE_LAUNCH_PATTERN = /\b(?:(?:rocket|space|orbital|satellite|payload) launch(?:es|ed|ing)?|launch(?:es|ed|ing)? (?:vehicle|provider|pad|manifest))\b/i;
+
 export function classifyGeoffreyTopicDomain(
   value: string,
   provided?: TopicSemanticDomain | null,
@@ -165,7 +167,8 @@ export function classifyGeoffreyTopicDomain(
   if (/\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy)\b/.test(text)) return 'materials_minerals';
   if (/\b(?:robot|robotics|humanoid|actuator|servo motor|machine vision)\b/.test(text)) return 'robotics_automation';
   if (/\b(?:factory|manufactur|machine tool|metrology|industrial automation|qualification)\b/.test(text)) return 'manufacturing_industrial';
-  if (/\b(?:space|rocket|launch|satellite|orbital|payload|defense|military systems?|anduril)\b/.test(text)) return 'space_defense';
+  if (/\b(?:space|rocket|satellite|orbital|payload|defense|military systems?|anduril)\b/.test(text)
+    || AEROSPACE_LAUNCH_PATTERN.test(text)) return 'space_defense';
   if (/\b(?:asic|gpu|hbm|chip|semiconductor|inference|model serving|data center|compute|openai|anthropic|claude|chatgpt|e2b|hugging face|nvidia|tsmc)\b/.test(text)) return 'ai_compute';
   if (provided) return provided;
   if (/\b(?:startups?|founders?|venture|funding|valuation|products?|customers?|companies|company|markets?|career|talent|job market|hiring)\b/.test(text)) return 'startups_markets';
@@ -178,7 +181,8 @@ export function isCoreGeoffreyTopicDomain(domain: TopicSemanticDomain): boolean 
 }
 
 export function isGeoffreyDeepTechnicalTopic(value: string): boolean {
-  return /\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|grid interconnect|transformer|power plant|rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|robot|robotics|humanoid|actuator|servo motor|machine vision|factory|manufactur|machine tool|metrology|industrial automation|space|rocket|launch|satellite|orbital|payload|defense|military systems?|asic|gpu|hbm|chip|semiconductor|inference hardware|data center|rack power|packag(?:e|ing)|foundry|wafer|interconnect)\b/i.test(value);
+  return /\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|grid interconnect|transformer|power plant|rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|robot|robotics|humanoid|actuator|servo motor|machine vision|factory|manufactur|machine tool|metrology|industrial automation|space|rocket|satellite|orbital|payload|defense|military systems?|asic|gpu|hbm|chip|semiconductor|inference hardware|data center|rack power|packag(?:e|ing)|foundry|wafer|interconnect)\b/i.test(value)
+    || AEROSPACE_LAUNCH_PATTERN.test(value);
 }
 
 export function isGeoffreyManufacturingMaterialsTopic(value: string): boolean {

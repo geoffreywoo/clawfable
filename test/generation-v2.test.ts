@@ -1,18 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFailedStoryAttemptsV2,
   buildGenerationBriefsV2,
   buildGenerationLearningBriefV2,
+  buildGenerationWritingConstraintsV2,
   buildIdeaGenerationPromptV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getV2GeneratedWritingIssue,
+  isQuestionDraftV2,
+  isStoryAlreadyCommittedV2,
+  isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
   normalizeIdeaCandidatesV2,
+  normalizeDraftContentV2,
   orderV2IdsForPairwise,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
-import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster } from '@/lib/types';
+import { classifyGeoffreyTopicDomain } from '@/lib/source-planner';
+import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
 
 const voiceProfile = {
@@ -92,6 +99,10 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 }
 
 describe('Tweet Generation V2', () => {
+  it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
+    expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
+  });
+
   it('creates four distinct briefs for a normal two-post refill', () => {
     const briefs = buildGenerationBriefsV2({
       count: 2,
@@ -108,6 +119,194 @@ describe('Tweet Generation V2', () => {
 
     expect(briefs.length).toBeGreaterThanOrEqual(4);
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
+  });
+
+  it('keeps most refill briefs in the native operator lane', () => {
+    const stories = ['AI chips', 'robotics', 'energy', 'biotech'].map((topic, index) => ({
+      schemaVersion: 2,
+      id: `story-mix-${index}`,
+      agentId: 'agent-1',
+      semanticKey: `${topic.replace(/\s+/g, ':')}:company:${index}`.toLowerCase(),
+      title: `${topic} company changes its operating model`,
+      summary: `A sourced ${topic} development with a concrete operating consequence.`,
+      topic,
+      entities: [`Company ${index}`],
+      sourceDocumentIds: [`source-mix-${index}`],
+      qualifiedClaimIds: [`claim-mix-${index}`],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0.5, total: 0.9 - index * 0.01 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster));
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories,
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'health', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: ['consumer AI'] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(briefs).toHaveLength(4);
+    expect(briefs.filter((entry) => entry.evidenceMode === 'verified_source')).toHaveLength(1);
+    expect(briefs.filter((entry) => entry.evidenceMode === 'operator_opinion')).toHaveLength(3);
+  });
+
+  it('keeps at least 70% of refill briefs in core topics without excluding recent proven lanes', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'culture', 'startups', 'personal', 'humor', 'sports'] } } as any,
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'culture', angle: 'status behavior', weight: 20, sampleCount: 8, avgEngagement: 60, topTweets: [] },
+          { topic: 'personal', angle: 'personal experiments', weight: 18, sampleCount: 6, avgEngagement: 55, topTweets: [] },
+          { topic: 'humor', angle: 'compressed joke', weight: 16, sampleCount: 5, avgEngagement: 50, topTweets: [] },
+          { topic: 'sports', angle: 'competition', weight: 14, sampleCount: 4, avgEngagement: 45, topTweets: [] },
+          { topic: 'AI', angle: 'model competition', weight: 12, sampleCount: 10, avgEngagement: 40, topTweets: [] },
+          { topic: 'startups', angle: 'company building', weight: 10, sampleCount: 10, avgEngagement: 38, topTweets: [] },
+        ],
+      } as any,
+      style: { autonomyMode: 'explore', trendMixTarget: 35, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [
+        { id: 'recent-ai', status: 'posted', topic: 'AI', content: 'recent ai post', createdAt: '2026-08-12T03:00:00.000Z' },
+        { id: 'recent-startup', status: 'posted', topic: 'startups', content: 'recent startup post', createdAt: '2026-08-12T02:00:00.000Z' },
+      ] as Tweet[],
+    });
+
+    expect(briefs).toHaveLength(4);
+    const coreBriefs = briefs.filter((entry) => [
+      'ai_compute',
+      'startups_markets',
+      'finance_investing',
+      'general_technology',
+    ].includes(classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`)));
+    expect(coreBriefs).toHaveLength(3);
+    expect(briefs.map((entry) => entry.topic)).toEqual(expect.arrayContaining(['AI', 'startups']));
+  });
+
+  it('lets an idea rejection block its premise without suppressing the whole native topic', () => {
+    const blocks: SemanticBlock[] = [{
+      schemaVersion: 2,
+      id: 'idea-startup-rejection',
+      agentId: 'agent-1',
+      scope: 'idea',
+      semanticKey: 'founder:startup:product:speed',
+      topic: 'startups',
+      storyClusterId: null,
+      ideaId: null,
+      reasonCode: 'bad_premise',
+      reason: 'Reject this one startup premise.',
+      permanent: false,
+      blockedUntil: '2026-10-01T00:00:00.000Z',
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }];
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'markets', 'health'] } } as any,
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'startups', angle: 'company building', weight: 20, sampleCount: 12, avgEngagement: 50, topTweets: [] },
+          { topic: 'markets', angle: 'capital allocation', weight: 18, sampleCount: 8, avgEngagement: 45, topTweets: [] },
+        ],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      blocks,
+    });
+
+    expect(briefs.some((entry) => entry.topic === 'startups')).toBe(true);
+  });
+
+  it('turns native question frequency into a rolling generation budget', () => {
+    const allTweets = Array.from({ length: 6 }, (_, index) => ({
+      id: `posted-${index}`,
+      agentId: 'agent-1',
+      content: index < 3 ? `why is this startup question ${index}?` : `startup observation ${index} lands plainly`,
+      status: 'posted',
+      createdAt: `2026-08-12T0${index}:00:00.000Z`,
+    } as Tweet));
+    const constraints = buildGenerationWritingConstraintsV2({
+      count: 2,
+      allTweets,
+      learnings: {
+        operatorVoiceReference: {
+          styleFingerprint: { questionRatio: 7 },
+        },
+      } as any,
+      memory: null,
+    });
+
+    expect(constraints.targetQuestionPercent).toBe(7);
+    expect(constraints.recentQuestionCount).toBe(3);
+    expect(constraints.maxQuestionDraftsInBatch).toBe(0);
+    expect(isQuestionDraftV2('is every exec departure a company verdict?')).toBe(true);
+    expect(isQuestionDraftV2('exec departures are not company verdicts.')).toBe(false);
+    expect(isQuestionDraftV2("when a levered fund blows up, that's the buy.")).toBe(false);
+    expect(isQuestionDraftV2('when will a levered fund blow up')).toBe(true);
+  });
+
+  it('turns broad Geoffrey topics into distinct creative objects without treating seeds as evidence', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      requestedTopic: null,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets', 'culture'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+    const operatorBriefs = briefs.filter((entry) => entry.evidenceMode === 'operator_opinion');
+    const prompt = JSON.parse(buildIdeaGenerationPromptV2(operatorBriefs, geoffreyVoiceProfile));
+
+    expect(operatorBriefs.every((entry) => entry.creativeSeed?.object && entry.evidence.length === 0)).toBe(true);
+    expect(new Set(operatorBriefs.map((entry) => entry.creativeSeed?.id)).size).toBe(operatorBriefs.length);
+    expect(prompt.requirements.creativeSeedContract).toContain('never evidence');
+    expect(prompt.briefs.every((entry: any) => entry.creativeSeed && entry.evidence.length === 0)).toBe(true);
+  });
+
+  it('rotates Geoffrey creative seeds across independent generation runs', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const build = (seedRotationKey: string) => buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets', 'culture'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey,
+    });
+    const first = build('run-a').map((entry) => entry.creativeSeed?.id);
+    const second = build('run-b').map((entry) => entry.creativeSeed?.id);
+
+    expect(second).not.toEqual(first);
   });
 
   it('uses operator history as topic-level strategy rather than replaying its premise', () => {
@@ -264,6 +463,146 @@ describe('Tweet Generation V2', () => {
       id: 'story-low-consequence',
       scores: { ...qualified.scores, consequence: 0.22 },
     })).toBe(false);
+  });
+
+  it('treats a re-clustered version of an already published story as consumed', () => {
+    const story = {
+      schemaVersion: 2,
+      id: 'story-lightcap-new-cluster',
+      agentId: 'agent-1',
+      semanticKey: 'brad:lightcap:openai:departure:new:company',
+      title: 'Brad Lightcap leaves OpenAI to start a new company',
+      summary: 'Lightcap is leaving OpenAI after eight years and plans to build something new.',
+      topic: 'Brad Lightcap leaves OpenAI',
+      entities: ['Brad Lightcap', 'OpenAI'],
+      sourceDocumentIds: ['source-lightcap'],
+      qualifiedClaimIds: ['claim-lightcap'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const published = [{
+      id: 'tweet-lightcap-old-cluster',
+      agentId: 'agent-1',
+      content: 'lightcap was at openai since 2018 and just announced he is out to build something new.',
+      topic: 'OpenAI leadership',
+      storyClusterId: 'story-lightcap-old-cluster',
+      status: 'posted',
+      createdAt: '2026-08-12T03:00:00.000Z',
+      postedAt: '2026-08-12T03:00:00.000Z',
+    } as Tweet];
+
+    expect(isStoryAlreadyCommittedV2(story, published, new Date('2026-08-13T00:00:00.000Z'))).toBe(true);
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [story],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 35, trendTolerance: 'adjacent', exploration: { underusedTopics: ['markets'] } } as any,
+      trending: null,
+      allTweets: published,
+      now: new Date('2026-08-13T00:00:00.000Z'),
+    });
+    expect(briefs.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+  });
+
+  it('cools down the same failed story even when research assigns a new cluster id', () => {
+    const currentStory = {
+      schemaVersion: 2,
+      id: 'story-lightcap-reclustered',
+      agentId: 'agent-1',
+      semanticKey: 'brad:lightcap:openai:departure:new:company',
+      title: 'Brad Lightcap departs OpenAI to build a new company',
+      summary: 'The executive said he is leaving OpenAI to start something new.',
+      topic: 'Brad Lightcap leaves OpenAI',
+      entities: ['Brad Lightcap', 'OpenAI'],
+      sourceDocumentIds: ['source-lightcap'],
+      qualifiedClaimIds: ['claim-lightcap'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const failedIdeas = [0, 1, 2].map((index) => ({
+      schemaVersion: 2,
+      id: `idea-lightcap-${index}`,
+      agentId: 'agent-1',
+      generationRunId: 'run-lightcap-rejected',
+      briefId: 'brief-lightcap',
+      storyClusterId: 'story-lightcap-original',
+      topic: 'Brad Lightcap leaves OpenAI',
+      claim: 'Brad Lightcap is leaving OpenAI to build something new',
+      tension: 'The internet is treating the executive departure as a company verdict',
+      implication: 'The same departure story is being stretched into another generic OpenAI take',
+      authorReason: 'The author invests in AI founders and company formation',
+      evidenceIds: ['source-lightcap'],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: `brad:lightcap:openai:departure:${index}`,
+      noveltyScore: 0.8,
+      evidenceScore: 0.9,
+      identityScore: 0.9,
+      judgeScore: 0.4,
+      status: 'rejected',
+      rejectionCodes: ['idea_judge_generic_premise'],
+      createdAt: '2026-08-12T20:00:00.000Z',
+      updatedAt: '2026-08-12T20:01:00.000Z',
+    } satisfies IdeaCandidate));
+    const attempts = buildFailedStoryAttemptsV2(failedIdeas, new Date('2026-08-13T00:00:00.000Z'));
+
+    expect(attempts).toHaveLength(1);
+    expect(isStoryInEditorialCooldownV2(currentStory, attempts)).toBe(true);
+  });
+
+  it('does not carry failed-story cooldown across quality policy versions', () => {
+    const failedIdeas = [0, 1, 2].map((index) => ({
+      schemaVersion: 2,
+      id: `idea-old-policy-${index}`,
+      agentId: 'agent-1',
+      generationRunId: 'run-old-policy',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-old',
+      briefId: 'brief-current-story',
+      storyClusterId: 'story-current',
+      topic: 'AI startups',
+      claim: 'A current sourced event happened.',
+      tension: 'The old policy rejected the evidence representation.',
+      implication: 'The repaired policy should be allowed to retry it.',
+      authorReason: 'The author follows AI company formation.',
+      evidenceIds: ['source-current'],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: `ai:startup:current:${index}`,
+      noveltyScore: 0.8,
+      evidenceScore: 0.9,
+      identityScore: 0.9,
+      judgeScore: 0.4,
+      status: 'rejected',
+      rejectionCodes: ['claim_not_grounded_in_evidence'],
+      createdAt: '2026-08-12T20:00:00.000Z',
+      updatedAt: '2026-08-12T20:01:00.000Z',
+    } satisfies IdeaCandidate));
+
+    expect(buildFailedStoryAttemptsV2(
+      failedIdeas,
+      new Date('2026-08-13T00:00:00.000Z'),
+      'publishing-v2-hard-gates-current',
+    )).toHaveLength(0);
+    expect(buildFailedStoryAttemptsV2(
+      failedIdeas,
+      new Date('2026-08-13T00:00:00.000Z'),
+      'publishing-v2-hard-gates-old',
+    )).toHaveLength(1);
   });
 
   it('does not spend research brief slots on a permanently rejected subject', () => {
@@ -471,6 +810,46 @@ describe('Tweet Generation V2', () => {
     expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
   });
 
+  it('accepts a multi-number comparison explicitly stated together in the source excerpt', () => {
+    const sourcedBrief = {
+      ...brief('computer-use', 'computer-use agents', 'verified_source'),
+      qualifiedClaimIds: ['claim-before', 'claim-now', 'claim-human'],
+    } satisfies GenerationBriefV2;
+    const source = {
+      id: 'source-computer-use',
+      excerpt: 'A year ago, the best computer-use model scored 42% on the standard real-desktop benchmark. Today it scores 85%. Human testers score about 72% on the same tasks.',
+      claims: [{
+        id: 'claim-before',
+        text: 'A year ago, the best computer-use model scored 42% on the standard real-desktop benchmark.',
+        kind: 'measurement',
+      }, {
+        id: 'claim-now',
+        text: 'Today the best computer-use model scores 85% on the standard real-desktop benchmark.',
+        kind: 'measurement',
+      }, {
+        id: 'claim-human',
+        text: 'Human testers score about 72% on the same tasks.',
+        kind: 'measurement',
+      }],
+    } as SourceDocument;
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('computer-use', 'The best computer-use model moved from 42% to 85% on the cited real-desktop benchmark, compared with about 72% for human testers.'),
+        evidenceIds: ['source-computer-use'],
+      }],
+      agentId: 'agent-1',
+      runId: 'run-computer-use',
+      briefs: [sourcedBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      documents: [source],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('claim_not_grounded_in_evidence');
+  });
+
   it('rejects an idea that combines numbers from separately scoped evidence claims', () => {
     const sourcedBrief = {
       ...brief('minerals', 'critical minerals', 'verified_source'),
@@ -564,6 +943,101 @@ describe('Tweet Generation V2', () => {
     expect(byBrief.get('valid')?.status).toBe('generated');
   });
 
+  it('blocks concept-level reskins of a manual premise even when the nouns change', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'finance',
+        'Most blown-up tech trades were killed by the margin agreement months before the market ever moved.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-concept-reskin',
+      briefs: [brief('finance', 'finance')],
+      voiceProfile,
+      recentPosts: [
+        'SALP is still directionally correct, but he scaled too fast with leverage and underestimated how savage Wall Street can be.',
+      ],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
+  it('blocks replaying the back-someone-after-failure premise', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('culture', 'I would rather back someone after a loud failure than a beige win.')],
+      agentId: 'agent-1',
+      runId: 'run-failure-reskin',
+      briefs: [brief('culture', 'culture')],
+      voiceProfile,
+      recentPosts: ['I am long Leopold. He will be back stronger and tougher than ever after the blow-up.'],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
+  it('keeps live operator briefs factual-claim free', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'OpenAI announced today that every founder gets a $25 million credit.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-fact',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
+  it('rejects source-free operator mechanisms before they consume writer slots', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'Private fund LP behavior changes when a redemption window opens.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-capital-mechanism',
+      briefs: [brief('operator', 'finance')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
+  it('allows an explicit operator financing preference without pretending it is sourced fact', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'For a capital-intensive technology company with unresolved product risk, I would choose equity before project finance.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-capital-preference',
+      briefs: [brief('operator', 'finance')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
   it('blocks paraphrases of a permanently rejected named angle before writing', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('pfl', "MVP's highest-value contribution to PFL is cultural distribution rather than fight operations.")],
@@ -625,6 +1099,8 @@ describe('Tweet Generation V2', () => {
 
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
+    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments or preferences');
+    expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
       evidenceId: 'source-sourced',
       claim: expect.any(String),
@@ -634,12 +1110,26 @@ describe('Tweet Generation V2', () => {
     expect(writingPrompt).toEqual(expect.objectContaining({
       idea: expect.objectContaining({ claim: idea.claim }),
       evidenceMode: 'verified_source',
+      subjectContext: expect.objectContaining({
+        title: 'AI infrastructure',
+        instruction: expect.stringContaining('reason to publish now'),
+      }),
+      factualWritingContract: expect.stringContaining('directly supported'),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
       voiceAnchors: [expect.objectContaining({
         id: 'operator-post-1',
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
       })],
     }));
+
+    const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
+      { ...idea, briefId: 'operator', storyClusterId: null, evidenceIds: [] },
+      brief('operator', 'startups'),
+      [],
+      [],
+    ));
+    expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, preference, taste, or recommendation');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('does not assert what founders');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
@@ -651,6 +1141,7 @@ describe('Tweet Generation V2', () => {
       "boardy giving away deck reviews and meeting prep for free tells you those aren't the product. the product is remembering what you're working toward across every conversation. tasks are commodity, accumulated context is the moat.",
       "how many agent builders are actually classifying calls by latency sensitivity now that there's a fast tier? most workflow steps are delay-tolerant. blasting every token through premium speed is just burning money for vibes.",
       'corollary for founders: treat licensing and exchange access as the product, not a back-office chore. build it, partner for it, or acquire it early. a slick front end without owned rails is just a customer acquisition funnel for whoever controls clearing.',
+      "if you want to diligence culture, skip the mission statement and ask about the last person who should've been let go and wasn't. founders reveal what they actually reward through who they keep. everything else is decoration.",
     ];
 
     expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);

@@ -228,6 +228,34 @@ describe('versioned voice corpus', () => {
     }
   });
 
+  it('does not let pinning override a diction-anchor exclusion', () => {
+    const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
+    const pinnedMedia = performance(110, {
+      xTweetId: 'x-pinned-media',
+      content: 'this is the whole strategy https://t.co/context',
+      hasMedia: true,
+    });
+    const snapshot = buildVoiceCorpusSnapshot({
+      agentId: 'agent-corpus-pinned-media',
+      history: [...history, pinnedMedia],
+      tweets: [],
+      postLog: [],
+      signals: [],
+      curation: {
+        pinnedXTweetIds: [pinnedMedia.xTweetId],
+        blockedXTweetIds: [],
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      generatedAt: '2026-07-31T00:00:00.000Z',
+    });
+    const entry = snapshot.entries.find((candidate) => candidate.xTweetId === pinnedMedia.xTweetId);
+
+    expect(entry?.selectionReasons).toContain('explicitly pinned');
+    expect(entry?.exclusionReasons).toContain('media-dependent caption');
+    expect(entry?.dispositions).toContain('excluded');
+    expect(entry?.dispositions).not.toContain('diction_anchor');
+  });
+
   it('atomically replaces the stored snapshot', async () => {
     const first = build(Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index)));
     const second = { ...first, snapshotId: 'voice-corpus-v1-replacement', generatedAt: '2026-08-01T00:00:00.000Z' };

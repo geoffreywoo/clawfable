@@ -24,6 +24,8 @@ describe('Generation V2 metrics', () => {
       id: 'run-1',
       agentId: 'agent-1',
       pipelineVersion: 'v2',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-test',
+      voiceCorpusVersion: 'voice-corpus-test',
       requestedCount: 2,
       sourceDocumentIds: ['source-1', 'source-2'],
       storyClusterIds: ['story-1'],
@@ -95,6 +97,11 @@ describe('Generation V2 metrics', () => {
     expect(report.performance).toMatchObject({ medianImpressions: 1800, medianLikes: 12 });
     expect(report.compute).toMatchObject({ estimatedCostUsd: 0.01, averageRunLatencyMs: 2000 });
     expect(report.sample.runs).toBe(1);
-    expect(report.lineage[0]).toMatchObject({ generationRunId: 'run-1', storyClusterIds: ['story-1'] });
+    expect(report.lineage[0]).toMatchObject({
+      generationRunId: 'run-1',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-test',
+      voiceCorpusVersion: 'voice-corpus-test',
+      storyClusterIds: ['story-1'],
+    });
   });
 });

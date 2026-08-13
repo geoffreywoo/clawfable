@@ -84,13 +84,19 @@ export async function POST(
     const corpus = learnings.voiceCorpus || null;
     const queueRefresh = await refreshQueuedTweetsForCurrentQualityPolicy(agent);
     const queueAfterRefresh = await getQueuedTweets(id);
+    const activeQueueAfterRefresh = queueAfterRefresh.filter((tweet) => (
+      tweet.status === 'queued' && !tweet.quarantinedAt
+    ));
     const refillRequested = refill && corpus?.active
-      ? Math.max(0, targetQueueDepth - queueAfterRefresh.length)
+      ? Math.max(0, targetQueueDepth - activeQueueAfterRefresh.length)
       : 0;
     const refillAdded = refillRequested > 0
       ? await refillQueue(agent, refillRequested)
       : 0;
     const queueAfter = await getQueuedTweets(id);
+    const activeQueueAfter = queueAfter.filter((tweet) => (
+      tweet.status === 'queued' && !tweet.quarantinedAt
+    ));
     const audit = await buildGenerationQualityAudit(agent);
 
     return NextResponse.json({
@@ -110,8 +116,9 @@ export async function POST(
         enabled: refill,
         requested: refillRequested,
         added: refillAdded,
-        finalDepth: queueAfter.length,
-        tweetIds: queueAfter.map((tweet) => tweet.id),
+        finalDepth: activeQueueAfter.length,
+        artifactCount: queueAfter.length,
+        tweetIds: activeQueueAfter.map((tweet) => tweet.id),
       },
       audit,
     });

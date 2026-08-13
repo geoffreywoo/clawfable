@@ -153,11 +153,21 @@ function entrySignature(entry: VoiceCorpusEntry): string {
   return `${entry.featureTags.hook}:${entry.featureTags.structure}:${entry.featureTags.tone}:${length}`;
 }
 
+function isPinnableHeuristicExclusion(reason: string): boolean {
+  return /^(?:slop risk|generated-pattern risk)\s/i.test(reason);
+}
+
+function hasPinnedHeuristicOverride(entry: VoiceCorpusEntry, pinnedIds: Set<string>): boolean {
+  return pinnedIds.has(entry.xTweetId)
+    && entry.exclusionReasons.length > 0
+    && entry.exclusionReasons.every(isPinnableHeuristicExclusion);
+}
+
 function selectDictionAnchors(entries: VoiceCorpusEntry[], pinnedIds: Set<string>): VoiceCorpusEntry[] {
   const eligible = entries
     .filter((entry) => (
       entry.dispositions.includes('topic_signal')
-      && (entry.exclusionReasons.length === 0 || pinnedIds.has(entry.xTweetId))
+      && (entry.exclusionReasons.length === 0 || hasPinnedHeuristicOverride(entry, pinnedIds))
     ))
     .sort((left, right) => (
       Number(pinnedIds.has(right.xTweetId)) - Number(pinnedIds.has(left.xTweetId))
@@ -282,10 +292,13 @@ export function buildVoiceCorpusSnapshot({
       + (pinnedIds.has(xTweetId) ? 0.1 : 0),
     );
     const dispositions: VoiceCorpusDisposition[] = [];
+    const pinnedHeuristicOverride = pinnedIds.has(xTweetId)
+      && exclusions.length > 0
+      && exclusions.every(isPinnableHeuristicExclusion);
     if (provenance === 'known_clawfable_generated') dispositions.push('mechanics_only');
     else if (provenance !== 'unknown' && !negative && !blocked) dispositions.push('topic_signal');
     if (negative || blocked) dispositions.push('negative');
-    if (exclusions.length > 0 && !dispositions.includes('mechanics_only')) dispositions.push('excluded');
+    if (exclusions.length > 0 && !pinnedHeuristicOverride && !dispositions.includes('mechanics_only')) dispositions.push('excluded');
 
     return {
       xTweetId,
@@ -303,7 +316,8 @@ export function buildVoiceCorpusSnapshot({
         `authorship ${provenance} (${confidence.toFixed(2)})`,
         `native quality ${nativeScore.toFixed(2)}`,
         pinnedIds.has(xTweetId) ? 'explicitly pinned' : 'automatic corpus candidate',
-      ],
+        pinnedHeuristicOverride ? 'manual pin overrides heuristic style-risk exclusion' : '',
+      ].filter(Boolean),
       exclusionReasons: exclusions,
       topic: performance.topic || 'general',
       featureTags,

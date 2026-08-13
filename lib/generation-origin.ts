@@ -1,4 +1,8 @@
 import type { Tweet } from './types';
+import {
+  PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_QUALITY_POLICY_VERSION,
+} from './publishing-quality-policy';
 
 type GenerationOriginTweet = Pick<
   Tweet,
@@ -15,6 +19,12 @@ type GenerationOriginTweet = Pick<
   | 'generationSurface'
   | 'evidenceReferences'
   | 'generationEvidenceReferences'
+  | 'qualityPolicyVersion'
+  | 'voiceCorpusVersion'
+  | 'finalCriticProvider'
+  | 'finalCriticModel'
+  | 'finalCriticVerdict'
+  | 'finalCriticVersion'
 > & { type?: Tweet['type'] };
 
 function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
@@ -34,6 +44,18 @@ export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string |
     }
     if (!tweet.generationSurface || !tweet.generationRunId || !tweet.ideaId || !tweet.draftCandidateId) {
       return 'V2-generated posts require complete surface, generation, idea, and draft lineage.';
+    }
+    if (tweet.qualityPolicyVersion !== PUBLISHING_V2_QUALITY_POLICY_VERSION) {
+      return `V2-generated posts require current quality policy ${PUBLISHING_V2_QUALITY_POLICY_VERSION}.`;
+    }
+    if (!tweet.voiceCorpusVersion) {
+      return 'V2-generated posts require voice-corpus provenance.';
+    }
+    if (tweet.finalCriticVersion !== PUBLISHING_V2_FINAL_CRITIC_VERSION) {
+      return `V2-generated posts require current final critic ${PUBLISHING_V2_FINAL_CRITIC_VERSION}.`;
+    }
+    if (tweet.finalCriticVerdict !== 'allow' || !tweet.finalCriticProvider || !tweet.finalCriticModel) {
+      return 'V2-generated posts require an explicit model-critic allow verdict.';
     }
     const evidenceCount = (tweet.generationEvidenceReferences || []).length
       + (tweet.evidenceReferences || []).length;

@@ -64,6 +64,7 @@ import {
   significantResearchTokens,
   stableResearchId,
 } from './research-utils';
+import { classifyGeoffreyTopicDomain } from './source-planner';
 
 const RESEARCH_INTERVAL_MS: Partial<Record<ResearchSourceType, number>> = {
   x: 4 * 60 * 60 * 1000,
@@ -78,9 +79,10 @@ const RESEARCH_INTERVAL_MS: Partial<Record<ResearchSourceType, number>> = {
 };
 
 const CONSEQUENCE_TERMS = new Set([
-  'capital', 'company', 'cost', 'customer', 'demand', 'economics', 'founder', 'funding',
-  'margin', 'market', 'price', 'product', 'revenue', 'scale', 'startup', 'supply', 'talent',
-  'timing', 'valuation', 'yield',
+  'acquisition', 'adoption', 'benchmark', 'capital', 'company', 'cost', 'customer',
+  'demand', 'deployment', 'distribution', 'economics', 'founder', 'funding', 'margin',
+  'market', 'performance', 'price', 'product', 'revenue', 'scale', 'startup', 'supply',
+  'talent', 'timing', 'users', 'valuation', 'workflow', 'yield',
 ]);
 
 const POLITICAL_TERMS = /\b(?:congress|democrat|election|geopolitic|government|minister|partisan|politic|president|putin|republican|senate|trump)\b/i;
@@ -164,6 +166,42 @@ function buildDomainWeights(values: string[]): Record<string, number> {
   );
 }
 
+const NATIVE_DISCOVERY_QUERIES: Record<string, string> = {
+  ai_compute: 'AI startups OpenAI Anthropic models products funding',
+  startups_markets: 'startup founders funding acquisitions products customers',
+  finance_investing: 'AI stocks capital markets earnings valuation companies',
+  general_technology: 'technology products software developers startups companies',
+  culture_status: 'technology founders culture talent ambition status',
+  health_performance: 'health performance longevity startups products research',
+  sports_competition: 'sports business athletes media technology investing',
+  energy_nuclear: 'energy startups nuclear power companies funding',
+  robotics_automation: 'robotics startups products funding deployments customers',
+  space_defense: 'space defense startups contracts funding products',
+};
+
+function nativeDiscoveryQueries(
+  profile: VoiceProfile,
+  learnings: AgentLearnings | null | undefined,
+): string[] {
+  const rankedTopics = [
+    ...(learnings?.manualTopicProfile || []).map((entry) => entry.topic),
+    ...profile.topics,
+  ];
+  return uniqueStrings(rankedTopics.map((topic) => {
+    const normalized = topic.trim().toLowerCase();
+    const directDomain = /^(?:ai|artificial intelligence)$/.test(normalized)
+      ? 'ai_compute'
+      : /^(?:startup|startups|vc|venture)$/.test(normalized)
+        ? 'startups_markets'
+        : /^(?:finance|investing|markets)$/.test(normalized)
+          ? 'finance_investing'
+          : /^(?:tech|technology|software|product)$/.test(normalized)
+            ? 'general_technology'
+            : null;
+    return NATIVE_DISCOVERY_QUERIES[directDomain || classifyGeoffreyTopicDomain(topic)] || null;
+  }), 4);
+}
+
 export function buildResearchAgenda({
   agent,
   voiceProfile,
@@ -217,19 +255,26 @@ export function buildResearchAgenda({
   const frontierQueries = [0, 1, 2].flatMap((queryIndex) => (
     frontierPlan.map((entry) => entry.researchQueries[queryIndex]).filter(Boolean)
   )).slice(0, 12);
+  const operatorDiscoveryQueries = nativeDiscoveryQueries(profile, learnings);
   const querySeeds = uniqueStrings([
     ...(current?.pinnedQuestions || []),
     ...(current?.operatorTopics || []),
-    ...frontierQueries,
+    ...operatorDiscoveryQueries,
+    ...frontierQueries.slice(0, 2),
     ...profile.topics,
     ...manualTopics,
     ...historicalTopics,
+    ...frontierQueries.slice(2),
   ], 28);
   const blockedTopics = uniqueStrings([
     ...(current?.blockedTopics || []),
     ...explicitBlockedTopics(feedback, tweets),
   ], 40);
-  const weightedValues = [...profile.topics, ...manualTopics, ...historicalTopics.slice(0, 30)];
+  const weightedValues = [
+    ...profile.topics,
+    ...manualTopics,
+    ...historicalTopics.slice(0, 30),
+  ];
 
   return {
     schemaVersion: 2,
@@ -410,16 +455,39 @@ function identityFit(document: SourceDocument, agenda: ResearchAgenda): number {
     weightedOverlap += 0.5 + (agenda.domainWeights[token] || 0.5);
   }
   const baseFit = clampResearchScore(weightedOverlap / 5);
-  if (document.sourceType !== 'arxiv' || !document.query) return baseFit;
+  const domain = classifyGeoffreyTopicDomain([
+    document.title,
+    document.excerpt,
+    document.topics.join(' '),
+    document.entities.join(' '),
+  ].join(' '));
+  const domainKeys: Record<string, string[]> = {
+    ai_compute: ['ai', 'openai', 'anthropic', 'agent', 'model', 'compute'],
+    startups_markets: ['startup', 'founder', 'venture', 'funding', 'company', 'product'],
+    finance_investing: ['finance', 'investing', 'market', 'stock', 'capital'],
+    general_technology: ['software', 'technology', 'developer', 'product'],
+    culture_status: ['culture', 'status', 'ambition', 'talent'],
+    health_performance: ['health', 'performance', 'longevity'],
+    sports_competition: ['sport', 'sports', 'boxing', 'football', 'tennis'],
+    energy_nuclear: ['energy', 'nuclear', 'power'],
+    materials_minerals: ['material', 'materials', 'mineral', 'minerals'],
+    robotics_automation: ['robotic', 'robotics', 'automation'],
+    manufacturing_industrial: ['manufacturing', 'industrial'],
+    space_defense: ['space', 'defense'],
+  };
+  const domainPreference = Math.max(0, ...(domainKeys[domain] || []).map((key) => agenda.domainWeights[key] || 0));
+  const semanticFloor = domainPreference >= 0.75 ? 0.68 : domainPreference >= 0.45 ? 0.58 : 0;
+  const identity = Math.max(baseFit, semanticFloor);
+  if (document.sourceType !== 'arxiv' || !document.query) return identity;
 
   const activeArxivQueries = agenda.queries.slice(0, 3).map((query) => query.toLowerCase());
-  if (!activeArxivQueries.includes(document.query.toLowerCase())) return Math.min(baseFit, 0.18);
+  if (!activeArxivQueries.includes(document.query.toLowerCase())) return Math.min(identity, 0.18);
   const requiredTokens = significantResearchTokens(document.query).slice(0, 3);
   const contentTokens = new Set(significantResearchTokens(`${document.title} ${document.excerpt}`));
   const matchedTokens = requiredTokens.filter((token) => contentTokens.has(token)).length;
-  if (matchedTokens < Math.min(2, requiredTokens.length)) return Math.min(baseFit, 0.24);
+  if (matchedTokens < Math.min(2, requiredTokens.length)) return Math.min(identity, 0.24);
   const queryCoverage = matchedTokens / Math.max(1, requiredTokens.length);
-  return clampResearchScore(baseFit * 0.7 + queryCoverage * 0.3);
+  return clampResearchScore(identity * 0.7 + queryCoverage * 0.3);
 }
 
 function consequenceScore(documents: SourceDocument[]): number {

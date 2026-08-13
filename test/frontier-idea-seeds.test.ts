@@ -5,6 +5,7 @@ import {
   getFrontierIdeaSeeds,
   getFrontierSeedSourceFamilies,
   pickFrontierIdeaSeed,
+  pickGeoffreyIdeaSeed,
 } from '@/lib/frontier-idea-seeds';
 
 const geoffreyVoiceProfile = {
@@ -61,5 +62,22 @@ describe('frontier idea seeds', () => {
     expect(getFrontierSeedSourceFamilies().map((family) => family.id)).toEqual(
       expect.arrayContaining(['mineral-surveys', 'technical-papers-patents', 'field-signals']),
     );
+  });
+
+  it('reuses a compatible broad seed instead of drifting software into frontier hardware', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'software',
+      slot: 4,
+      usedSeedIds: new Set([
+        'ai-behavior-and-ambition',
+        'ai-incumbent-bundling',
+        'ai-talent-company-formation',
+      ]),
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+    expect(seed?.id).not.toBe('robotics-field-uptime');
+    expect(seed?.id).not.toBe('neon-lithography-lasers');
   });
 });

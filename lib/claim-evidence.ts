@@ -14,7 +14,7 @@ export interface ClaimEvidenceOptions {
 }
 
 const PERSONAL_EXPERIENCE_PATTERNS = [
-  /\b(?:i|we)\s+(?:saw|watched|met|spoke|talked|visited|tested|measured|ran|built|bought|funded|invested|remember|learned|had a call|got a demo)\b/i,
+  /\b(?:i|we)\s+(?:saw|watched|met|spoke|talked|visited|tested|measured|ran|run|built|bought|sold|funded|invested|backed|read|used|tried|hired|fired|remember|learned|had a call|got a demo)\b/i,
   /\b(?:i|we)\s+(?:always|usually|never)\s+(?:ask|check|photograph|look|visit|tour|measure|test|write|save)\b/i,
   /\b(?:showed|told|sent|walked)\s+(?:me|us)\b/i,
   /\b(?:a|an|one|this)\s+(?:[a-z][a-z-]*\s+){0,3}(?:founder|owner|engineer|operator|customer|buyer|manager|technician|scientist|investor|machinist)\s+(?:showed|told|sent|walked|said|asked|called|emailed|replaced|ran|built)\b/i,
@@ -28,6 +28,8 @@ const SUPPORT_STOPWORDS = new Set([
   'with', 'would', 'your',
 ]);
 
+const NON_QUANTITATIVE_NUMBER_PREFIX_RE = /\b(?:hut|gpt|claude|llama|gemini|qwen|mistral|iphone|pixel|windows)\s*$/i;
+
 const EVIDENCE_LOCKED_CONCEPTS = [
   { name: 'processing or refining', pattern: /\b(?:process(?:ing|ed)?|refin(?:e|ed|ing|ery|eries)|smelt(?:ed|ing|er|ers))\b/i },
   { name: 'industrial infrastructure', pattern: /\b(?:industrial\s+(?:capacity|infrastructure)|manufacturing\s+(?:capacity|base)|logistics\s+(?:network|capacity))\b/i },
@@ -37,6 +39,7 @@ const EVIDENCE_LOCKED_CONCEPTS = [
   { name: 'downstream semiconductor or defense use', pattern: /\b(?:semiconductor(?:s)?|defen[cs]e|military|ai\s+hardware|clean[- ]energy)\b/i },
   { name: 'market demand or adoption', pattern: /\b(?:market\s+demand|buyer\s+behavior|customer\s+behavior|adoption\s+(?:rate|curve)|sales\s+growth)\b/i },
   { name: 'supply timeline', pattern: /\b(?:near[- ]term|longer[- ]duration|supply\s+timeline|time\s+to\s+(?:build|qualify|scale))\b/i },
+  { name: 'capital-market mechanism', pattern: /\b(?:redemption(?:s|\s+window)?|illiquidity|liquidity|mark[- ]to[- ]market|daily\s+mark|covenants?|duration|multiples?|dilution|cash\s*flow|capex|project\s+finance|return\s+profile|regulated\s+bonds?|securities)\b/i },
 ] as const;
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -87,6 +90,8 @@ function numericClaims(content: string): string[] {
     const matchIndex = match.index || 0;
     const before = normalizedContent.slice(Math.max(0, matchIndex - 2), matchIndex);
     if (/[a-z0-9]-$/i.test(before) || /[a-z]$/i.test(before)) continue;
+    const namePrefix = normalizedContent.slice(Math.max(0, matchIndex - 24), matchIndex);
+    if (NON_QUANTITATIVE_NUMBER_PREFIX_RE.test(namePrefix)) continue;
 
     const raw = match[0].trim();
     if (!raw) continue;

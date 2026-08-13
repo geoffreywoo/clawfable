@@ -277,7 +277,7 @@ const CASUAL_NATIVE_TERMS = [
   'cuz', 'yall', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombie', 'badass',
   'do damage', 'go hard', 'balls', 'chump change', 'gamechanger', 'way', 'way more',
   'those guys', 'all seem', 'i think', "i'd rather", 'pretty', 'wild', 'insane', 'massive',
-  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'go vertical',
+  'weird', 'rough', 'cooked', 'locked in', 'sounds about right', 'go vertical', 'funny',
   'good', 'bad', 'smart', 'dumb',
 ];
 
@@ -699,19 +699,20 @@ function assessCasualStartupRegister(
   const marketStakeHits = exactTermHits(content, MARKET_STAKE_TERMS);
   const stiffHits = countTerms(lower, STIFF_ANALYST_TERMS);
   const generatedPattern = assessGeneratedWritingPatterns(content);
-  const startupAnchors = learnings?.operatorVoiceReference?.startupRegisterExamples || [];
-  const referenceScores = startupAnchors
+  const registerAnchors = operatorVoiceAnchors(learnings);
+  const referenceScores = registerAnchors
     .slice(0, 10)
     .map((anchor) => nativeStyleSimilarity(content, anchor.content))
     .sort((a, b) => b - a)
     .slice(0, 3);
+  const bestAnchorFit = referenceScores[0] ?? 0.5;
   const anchorFit = referenceScores.length > 0
     ? referenceScores.reduce((sum, score) => sum + score, 0) / referenceScores.length
     : 0.5;
   const lowerOpening = /^[a-z0-9]/.test(firstLine(content));
-  const firstOrSecondPerson = /\b(?:i|we|my|our|you|your)\b/i.test(content);
+  const firstOrSecondPerson = /\b(?:i|we|me|us|my|our|you|your)\b/i.test(content);
   const situated = /@\w+|https?:\/\//i.test(content);
-  const contraction = /\b(?:ain'?t|can'?t|don'?t|doesn'?t|isn'?t|you'?re|we'?re|i'?m|won'?t)\b/i.test(content);
+  const contraction = /\b(?:(?:ain|can|don|doesn|didn|isn|aren|wasn|weren|won|wouldn|shouldn|couldn|haven|hasn|hadn)['’]?t|(?:that|it)['’]?s|(?:they|you|we)['’]?(?:re|d|ve)|i['’]?(?:m|ve|d))\b/i.test(content);
   const commaCount = (content.match(/,/g) || []).length;
   const sentences = Math.max(1, (content.match(/[.!?](?:\s|$)/g) || []).length);
   const avgWordLength = words.length > 0
@@ -767,13 +768,30 @@ function assessCasualStartupRegister(
     - (neutralResearchSummary ? 0.12 : 0)
     - (polishedModelQuestion ? 0.12 : 0)
   );
-  const score = clamp(
+  const topicAwareScore = clamp(
     anchorFit * 0.34
     + relevance * 0.26
     + casualness * 0.24
     + directness * 0.16
     - stiffnessRisk * 0.3
   );
+  // This dimension measures the account's casual startup register, not whether
+  // every post literally contains startup nouns. Broad native posts should be
+  // able to clear the same register gate when their rhythm matches curated
+  // operator anchors; topic fit is enforced separately by the portfolio.
+  const styleRegisterScore = clamp(
+    anchorFit * 0.5
+    + casualness * 0.28
+    + directness * 0.22
+    - stiffnessRisk * 0.3
+  );
+  const hasCasualRegisterMarker = casualHits > 0
+    || firstOrSecondPerson
+    || situated
+    || contraction;
+  const score = !hasCasualRegisterMarker && bestAnchorFit < 0.98
+    ? Math.min(0.49, Math.max(topicAwareScore, styleRegisterScore))
+    : Math.max(topicAwareScore, styleRegisterScore);
 
   return {
     score: Number(score.toFixed(3)),
@@ -1049,6 +1067,18 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - Stop before the lesson, slogan, balanced closer, or advice. If there is no sharp thought, do not inflate a fact into one.
 - Manual posts are diction evidence only. Never copy an anchor's premise, joke, named scene, opening, list, or sentence skeleton.
 - Never invent access, conversations, customers, quotes, measurements, benchmarks, names, numbers, or events.`;
+}
+
+export function buildGeoffreyNativeV2WriterContract(): string {
+  return `GEOFFREY-NATIVE COPY CONTRACT
+- Native posts range from one blunt line to a rough multi-paragraph thought. Do not compress every idea into a 280-character aphorism.
+- Keep paragraph breaks and uneven rhythm when the thought has multiple beats. Let clauses pile up naturally instead of resolving them into a balanced slogan.
+- Source-free opinions can be owned in first person when that is the real posture. Never turn them into generic third-person advice.
+- Voice anchors demonstrate range, not reusable catchphrases. Never borrow an anchor opening such as "my philosophy on" or turn one post's slang into a house style.
+- Start with the actual reaction, named subject, bet, or decision. Skip the industry introduction, framework, and audience lesson.
+- Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
+- Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
+- Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
 }
 
 export function buildGeoffreyNativeWritingBrief(): string {

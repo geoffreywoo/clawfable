@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   getGenerationRuns: vi.fn(),
+  getIdeaCandidates: vi.fn(),
   getSemanticBlocks: vi.fn(),
   getSourceDocuments: vi.fn(),
   getStoryClusters: vi.fn(),
   saveGenerationRun: vi.fn(),
   upsertDraftCandidates: vi.fn(),
   upsertIdeaCandidates: vi.fn(),
+  accountTasteOverride: null as Record<string, unknown> | null,
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -19,6 +21,7 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getGenerationRuns: mocks.getGenerationRuns,
+  getIdeaCandidates: mocks.getIdeaCandidates,
   getSemanticBlocks: mocks.getSemanticBlocks,
   getSourceDocuments: mocks.getSourceDocuments,
   getStoryClusters: mocks.getStoryClusters,
@@ -27,19 +30,23 @@ vi.mock('@/lib/kv-storage', () => ({
   upsertIdeaCandidates: mocks.upsertIdeaCandidates,
 }));
 
-vi.mock('@/lib/account-taste', () => ({
+vi.mock('@/lib/account-taste', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/account-taste')>()),
   assessAccountTaste: () => ({
     nativeVoiceScore: 0.92,
     casualStartupScore: 0.9,
     stiffnessRisk: 0.02,
+    voiceDriftRisk: 0.02,
     technicalCredibilityScore: 0.85,
     cringeRisk: 0.02,
+    statusTextureRisk: 0.02,
     generatedPatternRisk: 0.02,
     truthfulnessRisk: 0.02,
     sourceCopyRisk: 0,
     technical: { specificityScore: 0.86 },
     action: 'allow',
     notes: [],
+    ...(mocks.accountTasteOverride || {}),
   }),
   getAutonomousQueueTasteIssue: () => null,
   isGeoffreyVoiceProfile: () => true,
@@ -76,6 +83,36 @@ function ideaResponse(prompt: string) {
   return result(JSON.stringify({ ideas }), 'anthropic');
 }
 
+function ideaResponseWithReserve(prompt: string) {
+  const generated = ideaResponse(prompt);
+  const parsedPrompt = JSON.parse(prompt);
+  const payload = JSON.parse(generated.text);
+  const operatorBriefIds = new Set(parsedPrompt.briefs
+    .filter((brief: any) => brief.evidenceMode === 'operator_opinion')
+    .map((brief: any) => brief.id));
+  const seenByBrief = new Map<string, number>();
+  payload.ideas = payload.ideas.map((idea: any) => {
+    const variant = seenByBrief.get(idea.briefId) || 0;
+    seenByBrief.set(idea.briefId, variant + 1);
+    if (!operatorBriefIds.has(idea.briefId) || variant === 0) return idea;
+    if (variant === 1) return {
+      ...idea,
+      claim: 'founders should keep one consequential product decision deliberately unoptimized',
+      tension: 'optimization can erase the weird preference that makes a company legible',
+      implication: 'protect the choice customers remember instead of averaging it away',
+      authorReason: 'the author repeatedly prefers opinionated founders over consensus behavior',
+    };
+    return {
+      ...idea,
+      claim: 'the best startup update makes one uncomfortable tradeoff explicit',
+      tension: 'polished progress reports can hide which risk the founder is actually taking',
+      implication: 'back the founder who names the bet before the outcome makes it obvious',
+      authorReason: 'the author evaluates founders through decisions made under uncertainty',
+    };
+  });
+  return result(JSON.stringify(payload), 'anthropic');
+}
+
 function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
   const parsed = JSON.parse(prompt);
   const ids = parsed[key].map((entry: any) => entry.id);
@@ -92,11 +129,14 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
       id,
       overall: 0.9,
       voiceFit: 0.92,
+      operatorPlausibility: 0.9,
+      cringeRisk: 0.02,
       insight: 0.9,
       specificity: 0.86,
       factualSafety: 0.98,
       clarity: 0.9,
       novelty: 0.9,
+      manualAnchorReskinRisk: 0.02,
     })),
   }));
 }
@@ -231,7 +271,9 @@ const storyClusters = researchTopics.map(([topic, entity, title, summary], index
 describe('generateTweetBatchV2 integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.accountTasteOverride = null;
     mocks.getGenerationRuns.mockResolvedValue([]);
+    mocks.getIdeaCandidates.mockResolvedValue([]);
     mocks.getSemanticBlocks.mockResolvedValue([]);
     mocks.getSourceDocuments.mockResolvedValue(sourceDocuments);
     mocks.getStoryClusters.mockResolvedValue(storyClusters);
@@ -256,24 +298,27 @@ describe('generateTweetBatchV2 integration', () => {
 
     expect(tasks.filter((task) => task === 'idea_generation')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'idea_judgment')).toHaveLength(1);
-    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(3);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 3800, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall).toMatchObject({ maxTokens: 900, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(280);
+    expect(writerCall).toMatchObject({ maxTokens: 1600, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
+    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content']);
+    expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     expect(JSON.parse(copyJudgeCall.prompt).candidates.every((candidate: any) => candidate.voiceAnchors.length >= 3)).toBe(true);
     expect(drafts).toHaveLength(2);
+    expect(drafts.filter((draft) => draft.sourceLane === 'trend_aligned_exploit').length).toBeLessThanOrEqual(1);
     expect(drafts[0]).toMatchObject({
       pipelineVersion: 'v2',
       generationRunId: expect.any(String),
       ideaId: expect.any(String),
       draftCandidateId: expect.any(String),
-      evidenceReferences: expect.arrayContaining([expect.objectContaining({ sourceDocumentId: expect.any(String) })]),
-      generationEvidenceReferences: expect.arrayContaining([expect.objectContaining({ kind: 'research_source' })]),
+      sourceLane: expect.stringMatching(/manual_core_exploit|trend_aligned_exploit/),
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      stageCounts: expect.objectContaining({ briefs: 4, ideasGenerated: 12, ideasSelected: 3, draftsGenerated: 6, draftsSelected: 2 }),
+      qualityPolicyVersion: 'publishing-v2-hard-gates-10',
+      stageCounts: expect.objectContaining({ briefs: 4, ideasGenerated: 12, ideasSelected: 4, draftsGenerated: 8, draftsSelected: 2 }),
     });
   });
 
@@ -318,7 +363,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('does not turn unsourced operator topics into autonomous originals', async () => {
+  it('uses native operator topics for autonomous opinion without inventing factual evidence', async () => {
     mocks.getSourceDocuments.mockResolvedValue([]);
     mocks.getStoryClusters.mockResolvedValue([]);
 
@@ -327,16 +372,20 @@ describe('generateTweetBatchV2 integration', () => {
       mode: 'live',
     });
 
-    expect(drafts).toEqual([]);
-    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.sourceLane === 'manual_core_exploit')).toBe(true);
+    expect(drafts.every((draft) => draft.evidenceReferences.length === 0)).toBe(true);
+    expect(drafts.every((draft) => draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'operator_topic'))).toBe(true);
+    expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1].every((idea: any) => idea.creativeSeedId)).toBe(true);
+    expect(mocks.generateText).toHaveBeenCalled();
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
-      status: 'empty',
-      outcomeCode: 'no_qualified_context',
-      stageCounts: expect.objectContaining({ briefs: 0 }),
+      status: 'completed',
+      outcomeCode: 'completed',
+      stageCounts: expect.objectContaining({ operatorBriefs: 4 }),
     });
   });
 
-  it('keeps an ordinary dry preview source-backed just like live generation', async () => {
+  it('keeps an ordinary dry preview on the same native portfolio as live generation', async () => {
     mocks.getSourceDocuments.mockResolvedValue([]);
     mocks.getStoryClusters.mockResolvedValue([]);
     let finalTrace: any = null;
@@ -349,16 +398,16 @@ describe('generateTweetBatchV2 integration', () => {
       onTrace: (trace) => { finalTrace = trace; },
     });
 
-    expect(drafts).toEqual([]);
-    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(drafts).toHaveLength(2);
+    expect(mocks.generateText).toHaveBeenCalled();
     expect(finalTrace).toMatchObject({
-      status: 'empty',
-      outcomeCode: 'no_qualified_context',
-      stageCounts: expect.objectContaining({ briefs: 0 }),
+      status: 'completed',
+      outcomeCode: 'completed',
+      stageCounts: expect.objectContaining({ operatorBriefs: 4 }),
     });
   });
 
-  it('allows an explicit operator topic only in non-persisting preview mode', async () => {
+  it('allows an explicit operator topic in non-persisting preview mode', async () => {
     mocks.getSourceDocuments.mockResolvedValue([]);
     mocks.getStoryClusters.mockResolvedValue([]);
 
@@ -378,6 +427,19 @@ describe('generateTweetBatchV2 integration', () => {
       ...input,
       learnings: {
         voiceCorpus: { active: true },
+        manualTopicProfile: [{
+          topic: 'finance',
+          angle: 'manual finance premise',
+          weight: 1,
+          sampleCount: 1,
+          avgEngagement: 40,
+          topTweets: [{
+            content: 'manual topic winner is a premise boundary, never a diction anchor',
+            topic: 'finance',
+            source: 'manual',
+            authorshipProvenance: 'operator_composed',
+          }],
+        }],
         operatorVoiceReference: {
           pinnedExamples: [{
             xTweetId: 'operator-1',
@@ -415,23 +477,81 @@ describe('generateTweetBatchV2 integration', () => {
     const writerSystem = String(writerCall?.[0].system || '');
     const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation');
     const ideaSystem = String(ideaCall?.[0].system || '');
-    const previousPremises = JSON.parse(ideaCall?.[0].prompt || '{}').previousPremises;
+    const ideaPrompt = JSON.parse(ideaCall?.[0].prompt || '{}');
+    const operatorPremiseExclusions = ideaPrompt.operatorPremiseExclusions;
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
-    expect(writerSystem).toContain('express one defensible judgment in ordinary words');
-    expect(writerSystem).toContain('Use first person only when it adds real ownership');
-    expect(writerSystem).toContain('do not make "my bet" or "I\'d build" the default frame');
-    expect(writerSystem).toContain('under 280 characters and at most three sentences');
+    expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
+    expect(writerSystem).toContain('choose one live beat rather than marching through its claim');
+    expect(writerSystem).toContain('Source-free opinions can be owned in first person');
+    expect(writerSystem).toContain('Never turn them into generic third-person advice');
+    expect(writerSystem).toContain('Never invent a personal action, portfolio holding, diligence habit');
+    expect(writerSystem).toContain('Write three natural attempts, not three named slots');
+    expect(writerSystem).toContain('Do not force a balanced contrast, definition pair, checklist');
+    expect(writerSystem).toContain('rough multi-paragraph thought');
+    expect(writerSystem).toContain('Keep paragraph breaks and uneven rhythm');
+    expect(writerSystem).toContain('Do not compress every idea into a 280-character aphorism');
+    expect(writerSystem).toContain('symmetrical maxims, definition pairs');
+    expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, time period, and measurement type");
     expect(ideaSystem).toContain('never splice figures from different commodities, cohorts, or scopes');
     expect(ideaSystem).toContain('claim field of a verified-source idea must be directly entailed');
-    const ideaPrompt = JSON.parse(ideaCall?.[0].prompt || '{}');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
     expect(ideaPrompt.briefs.flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
-    expect(previousPremises).toContain('operator-written diction anchor');
-    expect(previousPremises).toContain('timeline diction from the curated voice corpus');
-    expect(previousPremises).not.toContain('generated diction must not return');
+    expect(operatorPremiseExclusions).toContain('operator-written diction anchor');
+    expect(operatorPremiseExclusions).toContain('timeline diction from the curated voice corpus');
+    expect(operatorPremiseExclusions).toContain('manual topic winner is a premise boundary, never a diction anchor');
+    expect(operatorPremiseExclusions).not.toContain('generated diction must not return');
+    const copyJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
+    expect(copyJudgePrompt.operatorPremiseExclusions).toContain('operator-written diction anchor');
+    expect(copyJudgePrompt.operatorPremiseExclusions).not.toContain('generated diction must not return');
+  });
+
+  it('keeps raw generated winners out of model premise memory', async () => {
+    const rawGeneratedWinner = 'RAW GENERATED WINNER WITH A VERY DISTINCTIVE SENTENCE SHAPE';
+    const rawViralWinner = 'RAW VIRAL WINNER THAT MUST ONLY TEACH SPREAD MECHANICS';
+    await generateTweetBatchV2({
+      ...input,
+      allTweets: [{
+        id: 'generated-winner',
+        agentId: input.agentId,
+        content: rawGeneratedWinner,
+        type: 'original',
+        status: 'posted',
+        format: 'observation',
+        topic: 'startups',
+        xTweetId: 'x-generated-winner',
+        quoteTweetId: null,
+        quoteTweetAuthor: null,
+        scheduledAt: null,
+        deletionReason: null,
+        contentProvenance: 'generated_v2',
+        coverageCluster: 'startup:decision',
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }],
+      analysis: {
+        ...input.analysis,
+        viralTweets: [{
+          id: 'viral-winner',
+          text: rawViralWinner,
+          likes: 100,
+          retweets: 30,
+          replies: 10,
+          impressions: 10_000,
+          engagementRate: 0.014,
+          createdAt: '2026-08-01T00:00:00.000Z',
+        }],
+      },
+    } as any);
+
+    const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation');
+    const ideaPrompt = JSON.parse(ideaCall?.[0].prompt || '{}');
+    const serializedPremises = JSON.stringify(ideaPrompt.previousPremises);
+    expect(serializedPremises).not.toContain(rawGeneratedWinner);
+    expect(serializedPremises).not.toContain(rawViralWinner);
+    expect(serializedPremises).toContain('generated_post');
+    expect(serializedPremises).toContain('performance_outcome');
   });
 
   it('shows both judges the actual evidence and stage-specific rejection lessons', async () => {
@@ -471,9 +591,20 @@ describe('generateTweetBatchV2 integration', () => {
     const copyJudge = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
     expect(ideaJudge.author.worldview).toContain('founder and investor');
     expect(ideaJudge.priorIdeaRejections).toContain('Do not infer pricing or buyer behavior from a feature-only release.');
-    expect(ideaJudge.ideas.every((idea: any) => idea.evidence.some((entry: any) => entry.claim))).toBe(true);
+    expect(ideaJudge.evidenceScoringContract.operator_opinion).toContain('do not penalize empty evidence');
+    const sourcedIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'verified_source');
+    const operatorIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'operator_opinion');
+    expect(sourcedIdeas.length).toBeGreaterThan(0);
+    expect(sourcedIdeas.every((idea: any) => idea.evidence.some((entry: any) => entry.claim))).toBe(true);
+    expect(operatorIdeas.length).toBeGreaterThan(0);
+    expect(operatorIdeas.every((idea: any) => idea.evidence.length === 0)).toBe(true);
     expect(copyJudge.priorWritingRejections).toContain('The premise was usable, but the writing sounded like a consultant memo.');
-    expect(copyJudge.candidates.every((candidate: any) => candidate.evidence.some((entry: any) => entry.claim))).toBe(true);
+    expect(copyJudge.evidenceScoringContract.operator_opinion).toContain('do not penalize empty evidence');
+    expect(copyJudge.candidates.every((candidate: any) => (
+      candidate.evidenceMode === 'verified_source'
+        ? candidate.evidence.some((entry: any) => entry.claim)
+        : candidate.evidence.length === 0
+    ))).toBe(true);
   });
 
   it('discards ideas with weak evidence fidelity before calling a writer', async () => {
@@ -495,6 +626,66 @@ describe('generateTweetBatchV2 integration', () => {
         status: 'rejected',
         rejectionCodes: expect.arrayContaining(['idea_judge_evidence_mismatch']),
       }),
+    ]));
+  });
+
+  it('enforces the learned rolling question budget before queue selection', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+        content: 'is every startup now just a race to reserve capacity before anyone knows what customers need?',
+        format: 'question',
+        posture: 'rhetorical question',
+      }] }), 'anthropic');
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+    const questionHistory = Array.from({ length: 6 }, (_, index) => ({
+      id: `question-history-${index}`,
+      agentId: 'agent-1',
+      content: index < 3 ? `why is every startup asking question ${index}?` : `plain startup observation ${index}`,
+      status: 'posted',
+      createdAt: `2026-08-01T0${index}:00:00.000Z`,
+    }));
+
+    const drafts = await generateTweetBatchV2({
+      ...input,
+      allTweets: questionHistory,
+      learnings: {
+        ...input.learnings,
+        operatorVoiceReference: {
+          ...input.learnings.operatorVoiceReference,
+          styleFingerprint: { questionRatio: 7 },
+        },
+      },
+    });
+
+    expect(drafts).toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      status: 'empty',
+      rejectionCounts: expect.objectContaining({ learned_question_budget: expect.any(Number) }),
+    });
+  });
+
+  it('requires evidence before a finished operator post asserts a capital-market mechanism', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+        content: 'private fund LPs become patient only because the redemption window stays closed.',
+        format: 'observation',
+        posture: 'capital market mechanism',
+      }] }), 'anthropic');
+      if (options.task === 'copy_judgment') throw new Error('preflight should reject every draft');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
     ]));
   });
 
@@ -535,9 +726,35 @@ describe('generateTweetBatchV2 integration', () => {
     });
 
     await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'idea_judgment')).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'failed',
       error: 'Idea judgment returned malformed output.',
+    });
+  });
+
+  it('retries one incomplete idea tournament and still requires a complete second verdict', async () => {
+    let ideaJudgeAttempts = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') {
+        ideaJudgeAttempts += 1;
+        return ideaJudgeAttempts === 1
+          ? result(JSON.stringify({ ranking: [], scores: [] }))
+          : rankingResponse(options.prompt, 'ideas');
+      }
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+
+    expect(ideaJudgeAttempts).toBe(2);
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({ draftsSelected: expect.any(Number) }),
     });
   });
 
@@ -592,11 +809,14 @@ describe('generateTweetBatchV2 integration', () => {
             id,
             overall: 0.9,
             voiceFit: 0.4,
+            operatorPlausibility: 0.4,
+            cringeRisk: 0.5,
             insight: 0.86,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.92,
             novelty: 0.84,
+            manualAnchorReskinRisk: 0.02,
           })),
         }));
       }
@@ -606,6 +826,60 @@ describe('generateTweetBatchV2 integration', () => {
     await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
     expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ rejectionCodes: expect.arrayContaining(['copy_judge_voice_mismatch']) }),
+    ]));
+  });
+
+  it('rejects copy that semantically reskins a native anchor even when other critic scores are high', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        const judged = rankingResponse(options.prompt, 'candidates');
+        const parsed = JSON.parse(judged.text);
+        parsed.scores = parsed.scores.map((score: any) => ({ ...score, manualAnchorReskinRisk: 0.82 }));
+        return result(JSON.stringify(parsed));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['copy_judge_anchor_reskin']) }),
+    ]));
+  });
+
+  it('enforces deterministic policy safety even when the model critic allows the copy', async () => {
+    mocks.accountTasteOverride = { truthfulnessRisk: 0.68 };
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['final_policy_safety_below_floor']) }),
+    ]));
+  });
+
+  it('blocks model-recognized cringe even when generic engagement scores are high', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        const judged = rankingResponse(options.prompt, 'candidates');
+        const parsed = JSON.parse(judged.text);
+        parsed.scores = parsed.scores.map((score: any) => ({
+          ...score,
+          overall: 0.98,
+          operatorPlausibility: 0.9,
+          cringeRisk: 0.8,
+        }));
+        return result(JSON.stringify(parsed));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['final_cringe_risk']) }),
     ]));
   });
 
@@ -624,11 +898,14 @@ describe('generateTweetBatchV2 integration', () => {
             id,
             overall: 92,
             voice_fit: '9.1',
+            operator_plausibility: 9,
+            cringe_risk: 2,
             insight: 88,
             specificity: 8.6,
             factual_safety: 98,
             clarity: '90',
             novelty: 0.89,
+            manual_anchor_reskin_risk: 2,
           })),
         }));
       }
@@ -667,11 +944,11 @@ describe('generateTweetBatchV2 integration', () => {
   it('retries once with the next-ranked idea only when every initial draft fails', async () => {
     let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
-      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') {
         writerCalls += 1;
-        return writerCalls <= 3 ? result(JSON.stringify({ drafts: [] })) : writerResponse(options.prompt);
+        return writerCalls <= 4 ? result(JSON.stringify({ drafts: [] })) : writerResponse(options.prompt);
       }
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
@@ -679,22 +956,43 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
 
-    expect(writerCalls).toBe(4);
+    expect(writerCalls).toBe(5);
     expect(drafts).toHaveLength(1);
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(1);
   });
 
-  it('uses the one reserve retry when the first copy judgment finds no publishable draft', async () => {
+  it('runs one critic-informed rewrite and judges it again when the first copy pass fails', async () => {
+    let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
-      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
-      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'tweet_writing') {
+        writerCalls += 1;
+        if (writerCalls <= 4) return writerResponse(options.prompt);
+        const parsed = JSON.parse(options.prompt);
+        const content = parsed.idea.topic === 'health'
+          ? "i'd rather keep one boring health habit than build a perfect protocol i won't follow."
+          : "i'd take a customer deposit over another week of launch polish.";
+        return result(JSON.stringify({ drafts: [{
+          content,
+          format: 'observation',
+          posture: 'reserve buyer commitment observation',
+        }] }), 'anthropic');
+      }
       if (options.task === 'copy_judgment') {
         const judged = rankingResponse(options.prompt, 'candidates');
         const parsed = JSON.parse(judged.text);
+        const judgePrompt = JSON.parse(options.prompt);
+        const operatorIds = new Set(judgePrompt.candidates
+          .filter((candidate: any) => candidate.evidenceMode === 'operator_opinion')
+          .map((candidate: any) => candidate.id));
         const copyJudgeCalls = mocks.generateText.mock.calls.filter(([call]) => call.task === 'copy_judgment').length;
         if (copyJudgeCalls === 1) {
-          parsed.scores = parsed.scores.map((score: any) => ({ ...score, overall: 0.3, insight: 0.3 }));
+          parsed.scores = parsed.scores.map((score: any) => ({
+            ...score,
+            overall: operatorIds.has(score.id) ? 0.3 : 0.1,
+            insight: 0.3,
+          }));
         }
         return result(JSON.stringify(parsed));
       }
@@ -703,13 +1001,21 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+    const rescueWriterCalls = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt))
+      .filter((prompt) => prompt.failedAttempts.length > 0);
 
-    expect(drafts).toHaveLength(1);
-    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(6);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
+    expect(rescueWriterCalls).toHaveLength(2);
+    expect(rescueWriterCalls.every((prompt) => prompt.failedAttempts.every((attempt: any) => attempt.issues.length > 0))).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
+    expect(drafts.every((draft) => draft.judgeNotes?.includes('critic-informed rewrite'))).toBe(true);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      stageCounts: expect.objectContaining({ retryUsed: 1, draftsSelected: 1 }),
+      stageCounts: expect.objectContaining({ retryUsed: 1, draftsSelected: 2 }),
     });
   });
 });

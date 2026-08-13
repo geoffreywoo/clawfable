@@ -223,6 +223,10 @@ export interface CandidateJudgeBreakdown {
   cringeRisk?: number;
   technicalCredibility?: number;
   manualAnchorReskinRisk?: number;
+  voiceDriftRisk?: number;
+  statusTextureRisk?: number;
+  generatedPatternRisk?: number;
+  sourceCopyRisk?: number;
 }
 
 export interface CandidateCriticScores {
@@ -788,6 +792,7 @@ export interface IdeaCandidate {
   id: string;
   agentId: string;
   generationRunId: string;
+  qualityPolicyVersion?: string | null;
   surface?: GenerationSurface;
   triggerId?: string | null;
   idempotencyKey?: string | null;
@@ -795,6 +800,7 @@ export interface IdeaCandidate {
   parentDraftId?: string | null;
   briefId: string;
   storyClusterId: string | null;
+  creativeSeedId?: string | null;
   topic: string;
   claim: string;
   tension: string;
@@ -837,6 +843,7 @@ export interface DraftCandidate {
   judgeProvider: 'openai' | 'anthropic' | null;
   judgeModel: string | null;
   judgeScore: number | null;
+  mutationRound?: number;
   status: GenerationCandidateStatus;
   rejectionCodes: string[];
   createdAt: string;
@@ -855,6 +862,7 @@ export interface TweetEvidenceReference {
 
 export type GenerationEvidenceKind =
   | 'research_source'
+  | 'operator_topic'
   | 'target_post'
   | 'thread_context'
   | 'original_post'
@@ -941,6 +949,14 @@ export interface GenerationModelCallTrace {
   succeeded: boolean;
   error: string | null;
   stopReason?: string | null;
+  fallbackAttempts?: Array<{
+    provider: 'openai' | 'anthropic';
+    model: string;
+    reason: 'empty_text' | 'provider_error' | 'timeout';
+    stopReason: string | null;
+    statusCode: number | null;
+    errorType: string | null;
+  }>;
 }
 
 export interface GenerationRunTrace {
@@ -948,6 +964,8 @@ export interface GenerationRunTrace {
   id: string;
   agentId: string;
   pipelineVersion: 'v2';
+  qualityPolicyVersion?: string | null;
+  voiceCorpusVersion?: string | null;
   mode?: 'live' | 'manual' | 'preview';
   surface?: GenerationSurface;
   triggerId?: string | null;

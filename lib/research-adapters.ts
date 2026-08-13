@@ -638,7 +638,11 @@ export async function fetchArxiv(
 ): Promise<ResearchAdapterResult> {
   const fetchImpl = context.fetchImpl || fetch;
   const now = context.now || new Date();
-  const queries = context.agenda.queries.slice(0, 3);
+  const technicalQuery = /\b(?:agent|ai|asic|battery|chip|compute|energy|fusion|inference|material|model|nuclear|robot|semiconductor|software|space)\b/i;
+  const queries = [
+    ...context.agenda.queries.filter((query) => technicalQuery.test(query)),
+    ...context.agenda.queries,
+  ].filter((query, index, entries) => entries.indexOf(query) === index).slice(0, 3);
   const feed = {
     publisher: 'arXiv',
     // The paper is the primary source for its own reported result; downstream
