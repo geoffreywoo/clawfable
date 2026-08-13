@@ -143,6 +143,18 @@ describe('generated writing patterns', () => {
     )).toMatchObject({ primarySignature: 'one-two-aphorism', score: 0.34 });
   });
 
+  it('blocks synthetic status replacement flexes', () => {
+    expect(assessGeneratedWritingPatterns(
+      'the patagonia vest is dead as a status symbol. steel toe boots and a hi-vis jacket in your pfp is the new flex',
+    )).toMatchObject({ primarySignature: 'status-replacement-flex', score: 0.42 });
+  });
+
+  it('blocks generic if-your-edge advice contrasts', () => {
+    expect(assessGeneratedWritingPatterns(
+      "if your edge is distribution, not research, i'd take the scaled incumbent every time.",
+    )).toMatchObject({ primarySignature: 'if-your-edge-is', score: 0.42 });
+  });
+
   it('detects repeated anonymous-anecdote scaffolds', () => {
     const candidate = 'A founder showed me an inspection robot. The exception path preserved the labor.';
     const assessment = assessGeneratedWritingPatterns(candidate);

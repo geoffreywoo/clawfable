@@ -231,6 +231,7 @@ export interface CandidateJudgeBreakdown {
   statusTextureRisk?: number;
   generatedPatternRisk?: number;
   sourceCopyRisk?: number;
+  qualityMargin?: number;
 }
 
 export interface CandidateCriticScores {
