@@ -101,6 +101,7 @@ export async function GET(request: NextRequest) {
     const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
 
     const agent = await getAgent(agentId);
+    const verifiedAt = new Date().toISOString();
     const updates: Record<string, unknown> = {
       handle: screenName,
       apiKey: Buffer.from(consumerKey).toString('base64'),
@@ -109,6 +110,10 @@ export async function GET(request: NextRequest) {
       accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
       isConnected: 1,
       xUserId: userId,
+      xIdentityVerifiedAt: verifiedAt,
+      xIdentityVerifiedHandle: screenName,
+      xIdentityVerifiedUserId: userId,
+      xIdentityVerificationSource: 'oauth_exchange',
     };
 
     if (agent && (agent.setupStep === 'oauth' || !agent.setupStep)) {

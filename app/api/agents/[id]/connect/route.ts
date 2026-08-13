@@ -50,6 +50,7 @@ export async function POST(
     }
 
     // Store encoded and advance setup step
+    const verifiedAt = new Date().toISOString();
     const updates: Record<string, unknown> = {
       handle: user.username,
       apiKey: Buffer.from(normalizedApiKey).toString('base64'),
@@ -58,6 +59,10 @@ export async function POST(
       accessSecret: Buffer.from(normalizedAccessSecret).toString('base64'),
       isConnected: 1,
       xUserId: user.id,
+      xIdentityVerifiedAt: verifiedAt,
+      xIdentityVerifiedHandle: user.username,
+      xIdentityVerifiedUserId: user.id,
+      xIdentityVerificationSource: 'x_api_v2_me',
     };
     // Advance setup if on oauth step
     if (agent.setupStep === 'oauth') {

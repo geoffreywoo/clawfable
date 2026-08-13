@@ -43,6 +43,7 @@ async function connectLoginAgent(agentId: string, screenName: string, userId: st
   const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
   const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
   const agent = await getAgent(agentId);
+  const verifiedAt = new Date().toISOString();
   const updates: Record<string, unknown> = {
     handle: screenName,
     apiKey: Buffer.from(consumerKey).toString('base64'),
@@ -51,6 +52,10 @@ async function connectLoginAgent(agentId: string, screenName: string, userId: st
     accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
     isConnected: 1,
     xUserId: userId,
+    xIdentityVerifiedAt: verifiedAt,
+    xIdentityVerifiedHandle: screenName,
+    xIdentityVerifiedUserId: userId,
+    xIdentityVerificationSource: 'oauth_exchange',
   };
 
   if (agent && (agent.setupStep === 'oauth' || !agent.setupStep)) {
@@ -144,6 +149,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      const verifiedAt = new Date().toISOString();
       const agent = await createAgent({
         handle: screenName,
         name: screenName,
@@ -155,6 +161,10 @@ export async function GET(request: NextRequest) {
         accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
         isConnected: 1,
         xUserId: userId,
+        xIdentityVerifiedAt: verifiedAt,
+        xIdentityVerifiedHandle: screenName,
+        xIdentityVerifiedUserId: userId,
+        xIdentityVerificationSource: 'oauth_exchange',
         setupStep,
       });
 
