@@ -9,9 +9,8 @@ import type {
 import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
-  PUBLISHING_V2_CONTROL_MODEL_STACK,
-  PUBLISHING_V2_MODEL_STACK,
   getModelChainForTask,
+  resolvePublishingV2ModelStacks,
 } from './ai';
 import { buildGenerationContext } from './generation-context';
 import {
@@ -53,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 19;
+export const GENERATION_QUALITY_AUDIT_VERSION = 20;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -747,7 +746,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getPostLog(agent.id, 200),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
-  const activeModelStack = PUBLISHING_V2_MODEL_STACK;
+  const modelStackAssignment = resolvePublishingV2ModelStacks(agent.handle);
+  const activeModelStack = modelStackAssignment.activeStack;
   const ideaGenerationChain = getModelChainForTask(
     'idea_generation',
     'quality',
@@ -771,7 +771,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const shadowControlWritingChain = getModelChainForTask(
     'tweet_writing',
     'quality',
-    PUBLISHING_V2_CONTROL_MODEL_STACK,
+    modelStackAssignment.shadowStack,
   );
   const primaryIdeaGeneration = ideaGenerationChain[0];
   const primaryIdeaJudge = ideaJudgeChain[0];
@@ -1234,7 +1234,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     models: {
       activeStack: activeModelStack,
       pipelineVersion,
-      shadowControlStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+      routingReason: modelStackAssignment.reason,
+      shadowControlStack: modelStackAssignment.shadowStack,
       shadowComparison: {
         isolatedVariable: 'primary_writer',
         defaultWriter: primaryWriting,

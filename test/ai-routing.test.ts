@@ -167,6 +167,41 @@ describe('AI model routing', () => {
     ]);
   });
 
+  it('routes Geoffrey copy to Fable with GPT as the isolated writer control', async () => {
+    const {
+      getModelChainForTask,
+      resolvePublishingV2ModelStacks,
+    } = await loadDefaultRouter();
+
+    const current = resolvePublishingV2ModelStacks('@geoffwoo');
+    const legacyHandle = resolvePublishingV2ModelStacks('geoffreywoo');
+    const generic = resolvePublishingV2ModelStacks('another-founder');
+
+    expect(current).toEqual({
+      activeStack: 'publishing_v2_fable_control',
+      shadowStack: 'publishing_v2_gpt_control',
+      reason: 'geoffrey_fable_primary',
+    });
+    expect(legacyHandle).toEqual(current);
+    expect(generic).toEqual({
+      activeStack: 'publishing_v2_quality',
+      shadowStack: 'publishing_v2_fable_control',
+      reason: 'default_gpt_primary',
+    });
+    expect(getModelChainForTask('tweet_writing', 'quality', current.activeStack)[0]).toEqual({
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+    });
+    expect(getModelChainForTask('copy_judgment', 'quality', current.activeStack)[0]).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6',
+    });
+    expect(getModelChainForTask('tweet_writing', 'quality', current.shadowStack)[0]).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6',
+    });
+  });
+
   it('dispatches active V2 copy to GPT-5.6 before provider failover', async () => {
     const openAiCreate = vi.fn().mockResolvedValue({
       status: 'completed',
