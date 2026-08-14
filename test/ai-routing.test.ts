@@ -117,7 +117,7 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses Fable 5 for active V2 copy with GPT-5.6 judgment and an isolated GPT writer control', async () => {
+  it('uses GPT-5.6 for active V2 copy and judgment with an isolated Fable writer control', async () => {
     const {
       PUBLISHING_V2_CONTROL_MODEL_STACK,
       PUBLISHING_V2_MODEL_STACK,
@@ -125,8 +125,8 @@ describe('AI model routing', () => {
     } = await loadDefaultRouter();
 
     expect(getModelChainForTask('tweet_generation', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
-      { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
@@ -152,14 +152,20 @@ describe('AI model routing', () => {
     expect(getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual(
       getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_MODEL_STACK),
     );
+    expect(getModelChainForTask('tweet_writing', 'quality', 'publishing_v2_fable_control')).toEqual([
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
   });
 
-  it('dispatches active V2 copy to Fable 5 before provider failover', async () => {
-    const openAiCreate = vi.fn();
-    const anthropicCreate = vi.fn().mockResolvedValue({
-      content: [{ type: 'text', text: 'fable copy' }],
-      stop_reason: 'end_turn',
+  it('dispatches active V2 copy to GPT-5.6 before provider failover', async () => {
+    const openAiCreate = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: '{"drafts":[]}' }] }],
     });
+    const anthropicCreate = vi.fn();
     const {
       PUBLISHING_V2_MODEL_STACK,
       generateText,
@@ -180,18 +186,15 @@ describe('AI model routing', () => {
       jsonSchema,
     });
 
-    expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'claude-fable-5',
-      output_config: {
-        effort: 'medium',
-        format: { type: 'json_schema', schema: jsonSchema },
-      },
+    expect(openAiCreate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.6',
+      text: { format: { type: 'json_schema', name: 'tweet_generation_response', strict: true, schema: jsonSchema } },
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(openAiCreate).not.toHaveBeenCalled();
+    expect(anthropicCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      text: 'fable copy',
-      provider: 'anthropic',
-      model: 'claude-fable-5',
+      text: '{"drafts":[]}',
+      provider: 'openai',
+      model: 'gpt-5.6',
     }));
   });
 
@@ -446,7 +449,7 @@ describe('AI model routing', () => {
     }));
   });
 
-  it('records an empty Fable response before using V2 OpenAI failover', async () => {
+  it('records an empty Fable-control response before using V2 OpenAI failover', async () => {
     const openAiCreate = vi.fn().mockResolvedValue({
       status: 'completed',
       output: [{ content: [{ type: 'output_text', text: 'fallback copy' }] }],
@@ -462,7 +465,7 @@ describe('AI model routing', () => {
 
     const result = await generateText({
       task: 'tweet_generation',
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: 'publishing_v2_fable_control',
       system: 'Write one post.',
       prompt: 'probe',
       maxTokens: 64,
@@ -524,7 +527,7 @@ describe('AI model routing', () => {
 
     const result = await generateText({
       task: 'tweet_writing',
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: 'publishing_v2_fable_control',
       system: 'Return the requested draft.',
       prompt: 'probe',
       maxTokens: 64,
