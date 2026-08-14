@@ -993,12 +993,11 @@ export function isEligibleOperatorTopicCueSourceV2(
     || (tweet.authorshipConfidence || 0) >= 0.8;
   const topicSignal = operatorComposed || dispositions.includes('topic_signal');
   if (!highConfidence || !topicSignal) return false;
-  if (!dispositions.includes('excluded')) return true;
-
-  // Excluded prose can never teach diction. An explicit handle is still a
-  // high-confidence subject identity, so retain only that structured cue and
-  // keep the source post itself as a negative premise-reskin boundary.
-  return /@[a-z0-9_]{2,15}\b/i.test(tweet.content);
+  // Media captions and other excluded posts may identify a real person or
+  // company, but they do not carry enough standalone context to justify a new
+  // premise. They still influence the broader topic profile and spread
+  // mechanics; exact subject reuse requires a clean standalone post.
+  return !dispositions.includes('excluded');
 }
 
 function rankOperatorTopicCandidates(
@@ -1722,7 +1721,7 @@ export function buildIdeaGenerationPromptV2(
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       geoffreyNativeMoveContract: isGeoffreyVoiceProfile(voiceProfile)
-        ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, status, competition, or company-quality bet; (2) a real first-person question, desire, or disagreement; and (3) a weird but coherent prediction about people, founders, or markets. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, or benchmark comparisons. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
+        ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, or disagreement; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Do not manufacture a status object, status asset, status signal, new status game, or flex to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, or benchmark comparisons. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
         : null,
       operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       operatorTopicRoleContract: 'When an operatorTopicContext is present, preserve every entity role literally. Roles identify the entities but do not prove a relationship. Never treat an investor, person, institution, or location as a product, model, repository, host, or technology. Never restore a stripped event term as a premise.',
@@ -1747,7 +1746,7 @@ export function buildIdeaGenerationPromptV2(
     })),
     previousPremises: semanticMemory.slice(0, 16).map((premise) => premise.slice(0, 240)),
     retry: retryFailures.length > 0 ? {
-      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one measured number while keeping an asserted mechanism is still a failure. For generic_product_ops_take, abandon the permission, authority, workflow, release-gate, or benchmark-test premise and choose a named valuation, timing, status, competition, real-question, or weird-prediction move instead. For operator_entity_role_violation, use each named entity only in its supplied role. For operator_stripped_event_reintroduced, remove the event premise entirely rather than hedging it. For personal_topic_subject_dropped, choose one supplied subject cue and keep a concrete cue object in publicMove without reusing the old premise. For abstract_comparative_public_move, state only the chosen side as a direct call, prediction, or decision; move the rejected alternative into tension or counterargument. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
+      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one measured number while keeping an asserted mechanism is still a failure. For generic_product_ops_take, abandon the permission, authority, workflow, release-gate, or benchmark-test premise and choose a named valuation, timing, company-quality call, real question, disagreement, or weird subject-specific prediction instead. Never rescue a thin idea by calling something a status object, status asset, status signal, new status game, or flex. For operator_entity_role_violation, use each named entity only in its supplied role. For operator_stripped_event_reintroduced, remove the event premise entirely rather than hedging it. For personal_topic_subject_dropped, choose one supplied subject cue and keep a concrete cue object in publicMove without reusing the old premise. For abstract_comparative_public_move, state only the chosen side as a direct call, prediction, or decision; move the rejected alternative into tension or counterargument. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
       failures: retryFailures,
     } : null,
     briefs: briefs.map((brief) => ({
@@ -1953,6 +1952,12 @@ const GEOFFREY_GENERIC_PRODUCT_OPS_FRAME = /\b(?:the first\b.{0,100}\bi(?:['’]
 export function isGenericGeoffreyProductOpsIdeaV2(text: string): boolean {
   return GEOFFREY_GENERIC_PRODUCT_OPS_OBJECT.test(text)
     && GEOFFREY_GENERIC_PRODUCT_OPS_FRAME.test(text);
+}
+
+const SYNTHETIC_GEOFFREY_STATUS_FRAME = /\b(?:status[- ](?:object|symbol|asset|signal|move|game|choice|credential|metric|cofounder|founder)|higher[- ]status(?:\s+(?:choice|move|signal))?|new\s+(?:status\s+game|flex)|the\s+(?:new\s+)?flex|become(?:s|ing)?\s+(?:a|the)\s+(?:flex|status[- ](?:object|symbol|asset|signal|move|metric)))\b/i;
+
+export function isSyntheticGeoffreyStatusFrameV2(text: string): boolean {
+  return SYNTHETIC_GEOFFREY_STATUS_FRAME.test(text);
 }
 
 const ABSTRACT_PUBLIC_MOVE_EVALUATION = /\b(?:gets?|becomes?|feels?|is|seems?|sounds?)\s+(?:(?:much|way)\s+)?(?:more\s+|less\s+)?(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b|\bworth\s+caring\s+about\b/i;
@@ -2310,6 +2315,13 @@ export function normalizeIdeaCandidatesV2({
       && isGenericGeoffreyProductOpsIdeaV2(ideaText(candidate))
     ) {
       candidate.rejectionCodes.push('generic_product_ops_take');
+    }
+    if (
+      brief.evidenceMode === 'operator_opinion'
+      && isGeoffreyVoiceProfile(voiceProfile)
+      && isSyntheticGeoffreyStatusFrameV2(ideaText(candidate))
+    ) {
+      candidate.rejectionCodes.push('synthetic_status_framing');
     }
     if (
       isGeoffreyVoiceProfile(voiceProfile)

@@ -34,6 +34,7 @@ import {
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
+  isSyntheticGeoffreyStatusFrameV2,
   normalizeIdeaCandidatesV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
@@ -475,6 +476,40 @@ describe('Tweet Generation V2', () => {
     })[0];
 
     expect(idea.rejectionCodes).toContain('generic_product_ops_take');
+  });
+
+  it('rejects manufactured status framing before Geoffrey copy generation', () => {
+    const syntheticMoves = [
+      'Persistent AI memory will become a status object inside the Tony Robbins crowd.',
+      'Factory-floor credibility will become a status asset for AI company formation.',
+      'Taking a lower seed valuation will be the higher-status move.',
+      'Repair time becomes the new flex in robotics.',
+    ];
+    const directMoves = [
+      'i think oai and ant are 5-10T before 2029.',
+      'Google should be willing to cannibalize Chrome for Gemini.',
+      'why does every robotics demo hide the repair log?',
+    ];
+
+    expect(syntheticMoves.every(isSyntheticGeoffreyStatusFrameV2)).toBe(true);
+    expect(directMoves.every((move) => !isSyntheticGeoffreyStatusFrameV2(move))).toBe(true);
+
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const idea = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', syntheticMoves[0])],
+      agentId: 'agent-1',
+      runId: 'run-synthetic-status-geoffrey',
+      briefs: [brief('operator', 'AI')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T06:00:00.000Z',
+    })[0];
+
+    expect(idea.rejectionCodes).toContain('synthetic_status_framing');
   });
 
   it('detects reusable category-level investor wrappers without blocking direct calls', () => {
@@ -965,7 +1000,7 @@ describe('Tweet Generation V2', () => {
     expect(startupBrief?.personalTopicSignalPremises).toHaveLength(1);
   });
 
-  it('uses a named high-confidence topic signal as subject evidence without teaching its prose', () => {
+  it('keeps excluded named topic signals out of exact subject reuse', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
@@ -1008,9 +1043,8 @@ describe('Tweet Generation V2', () => {
     });
 
     const aiBrief = briefs.find((entry) => entry.topic === 'AI');
-    expect(aiBrief?.personalTopicSignals?.join(' ')).toMatch(/etched|robertwachen/i);
-    expect(aiBrief?.personalTopicSignals?.join(' ')).not.toContain('openai');
-    expect(aiBrief?.personalTopicSignalPremises).toEqual([excludedTopicSignal]);
+    expect(aiBrief?.personalTopicSignals).toEqual([]);
+    expect(aiBrief?.personalTopicSignalPremises).toEqual([]);
     const prompt = buildIdeaGenerationPromptV2([aiBrief!], geoffreyVoiceProfile);
     expect(prompt).not.toContain(excludedTopicSignal);
     expect(prompt).not.toContain(generatedPost);

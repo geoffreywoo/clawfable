@@ -41,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-101',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-102',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -487,6 +487,33 @@ describe('generation quality audit findings', () => {
     const consequenceFindings = buildGenerationAuditFindings(input as any);
     expect(consequenceFindings.find((finding) => finding.code === 'current_policy_idea_to_copy_gap')?.action)
       .toContain('deletion-only tails');
+  });
+
+  it('flags heavy draft attrition before the critic', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      runCount: 2,
+      runsWithSelectedDrafts: 0,
+      selectedDraftCount: 0,
+      selectionYield: 0,
+      stageThroughput: {
+        ideasSelected: 6,
+        draftsGenerated: 24,
+        draftsEligible: 3,
+        draftsSelected: 0,
+        criticSelectionRate: 0,
+      },
+    } as any;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_precritic_attrition_high',
+        severity: 'high',
+        scope: 'current_policy',
+        evidence: expect.objectContaining({ precriticDraftYield: 0.125 }),
+      }),
+    ]));
   });
 
   it('reports repeated category-level investor wrappers in current-policy drafts', () => {
