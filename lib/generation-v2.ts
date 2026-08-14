@@ -1210,12 +1210,10 @@ export function isStoryAlreadyCommittedV2(
 export function buildFailedStoryAttemptsV2(
   ideas: IdeaCandidate[],
   now = new Date(),
-  qualityPolicyVersion?: string,
 ): FailedStoryAttemptV2[] {
   const cutoff = now.getTime() - STORY_FAILURE_COOLDOWN_MS;
   const groups = new Map<string, IdeaCandidate[]>();
   for (const idea of ideas) {
-    if (qualityPolicyVersion && idea.qualityPolicyVersion !== qualityPolicyVersion) continue;
     if (!idea.storyClusterId || Date.parse(idea.updatedAt || idea.createdAt) < cutoff) continue;
     const key = `${idea.generationRunId}:${idea.storyClusterId}`;
     groups.set(key, [...(groups.get(key) || []), idea]);
@@ -1311,7 +1309,6 @@ export function getStoryGenerationPlanningRejectionCodesV2(
     blocks?: SemanticBlock[];
     committedTweets?: Tweet[];
     recentIdeas?: IdeaCandidate[];
-    qualityPolicyVersion?: string;
     now?: Date;
   } = {},
 ): string[] {
@@ -1323,7 +1320,6 @@ export function getStoryGenerationPlanningRejectionCodesV2(
   const failedAttempts = buildFailedStoryAttemptsV2(
     options.recentIdeas || [],
     now,
-    options.qualityPolicyVersion,
   );
   return uniqueStrings([
     isStoryBlockedBySemanticMemory(story, options.blocks || []) ? 'semantic_memory_block' : null,
@@ -1377,7 +1373,6 @@ export function buildGenerationBriefsV2({
       blocks,
       committedTweets,
       recentIdeas,
-      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       now,
     }).length === 0)
     .sort((left, right) => right.scores.total - left.scores.total);
@@ -4663,7 +4658,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       documents.map((document) => `${document.id}:${document.contentHash}`).sort().join(','),
       stories.map((story) => `${story.id}:${story.lastSeenAt}:${story.blockReason || ''}`).sort().join(','),
       blocks.map((block) => `${block.id}:${block.blockedUntil || ''}`).sort().join(','),
-      buildFailedStoryAttemptsV2(recentIdeas, new Date(), PUBLISHING_V2_QUALITY_POLICY_VERSION)
+      buildFailedStoryAttemptsV2(recentIdeas, new Date())
         .map((attempt) => `${attempt.storyClusterId}:${attempt.failedAt}`).sort().join(','),
       briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}`).sort().join(','),
     );

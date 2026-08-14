@@ -764,7 +764,6 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       blocks: semanticBlocks,
       committedTweets: allTweets.filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)),
       recentIdeas,
-      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
     }),
   }));
   const enrichedOperatorTopics = enrichTrendingTopics(

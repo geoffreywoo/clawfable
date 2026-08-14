@@ -1863,7 +1863,7 @@ describe('Tweet Generation V2', () => {
     expect(isStoryInEditorialCooldownV2(currentStory, attempts)).toBe(true);
   });
 
-  it('does not carry failed-story cooldown across quality policy versions', () => {
+  it('carries failed-story cooldown across copy policy versions', () => {
     const failedIdeas = [0, 1, 2].map((index) => ({
       schemaVersion: 2,
       id: `idea-old-policy-${index}`,
@@ -1891,16 +1891,40 @@ describe('Tweet Generation V2', () => {
       updatedAt: '2026-08-12T20:01:00.000Z',
     } satisfies IdeaCandidate));
 
-    expect(buildFailedStoryAttemptsV2(
+    const attempts = buildFailedStoryAttemptsV2(
       failedIdeas,
       new Date('2026-08-13T00:00:00.000Z'),
-      'publishing-v2-hard-gates-current',
-    )).toHaveLength(0);
-    expect(buildFailedStoryAttemptsV2(
-      failedIdeas,
-      new Date('2026-08-13T00:00:00.000Z'),
-      'publishing-v2-hard-gates-old',
-    )).toHaveLength(1);
+    );
+    const makeStory = (id: string, title: string, topic: string, entities: string[]): StoryCluster => ({
+      schemaVersion: 2,
+      id,
+      agentId: 'agent-1',
+      semanticKey: buildResearchSemanticKey(title, entities),
+      title,
+      summary: title,
+      topic,
+      entities,
+      sourceDocumentIds: [`source-${id}`],
+      qualifiedClaimIds: [`claim-${id}`],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.8, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    });
+
+    expect(attempts).toHaveLength(1);
+    expect(isStoryInEditorialCooldownV2(
+      makeStory('story-current', 'Current AI startup event', 'AI startups', ['AI startup']),
+      attempts,
+    )).toBe(true);
+    expect(isStoryInEditorialCooldownV2(
+      makeStory('story-unrelated', 'A fusion startup reaches a new plasma milestone', 'fusion energy', ['fusion', 'plasma']),
+      attempts,
+    )).toBe(false);
   });
 
   it('does not spend research brief slots on a permanently rejected subject', () => {
