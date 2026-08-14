@@ -3056,7 +3056,7 @@ describe('Tweet Generation V2', () => {
     expect(writingPrompt.voiceTransferContract).toEqual(expect.objectContaining({
       primaryRegisterAnchorId: 'operator-post-1',
     }));
-    expect(writingPrompt.voiceAnchors[0]).toEqual(expect.objectContaining({ role: 'primary_register' }));
+    expect(writingPrompt.voiceAnchors[0]).toEqual(expect.objectContaining({ role: 'slot_1_register' }));
     expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(

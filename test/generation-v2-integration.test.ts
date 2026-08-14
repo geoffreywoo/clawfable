@@ -184,8 +184,8 @@ const input = {
     operatorVoiceReference: {
       pinnedExamples: [
         { xTweetId: 'anchor-1', content: 'tiny teams can now attempt company-sized problems', topic: 'startups', source: 'manual', authorshipProvenance: 'operator_composed' },
-        { xTweetId: 'anchor-2', content: 'the cost curve changed before the org chart did', topic: 'markets', source: 'manual', authorshipProvenance: 'operator_composed' },
-        { xTweetId: 'anchor-3', content: 'founders notice constraints before analysts name them', topic: 'founders', source: 'manual', authorshipProvenance: 'operator_composed' },
+        { xTweetId: 'anchor-2', content: 'the cost curve changed 10x before the org chart did', topic: 'markets', source: 'manual', authorshipProvenance: 'operator_composed' },
+        { xTweetId: 'anchor-3', content: 'i think founders notice constraints before analysts name them', topic: 'founders', source: 'manual', authorshipProvenance: 'operator_composed' },
       ],
       startupRegisterExamples: [],
       bestPerformers: [],
@@ -306,7 +306,10 @@ describe('generateTweetBatchV2 integration', () => {
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
     const ideaCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_generation')?.[0];
-    const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing')?.[0];
+    const writerCall = mocks.generateText.mock.calls.find(([options]) => (
+      options.task === 'tweet_writing'
+      && JSON.parse(options.prompt).responseContract.draftCount === 3
+    ))?.[0];
     const copyJudgeCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0];
 
     const ideaCalls = mocks.generateText.mock.calls
@@ -347,8 +350,21 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerPrompt.idea).toHaveProperty('factualBasis');
     expect(writerPrompt.idea).not.toHaveProperty('claim');
     expect(writerPrompt).not.toHaveProperty('variantCadenceAssignments');
+    const variantAnchorIds = writerPrompt.responseContract.variantMoves
+      .map((move: any) => move.voiceAnchorId);
+    expect(new Set(variantAnchorIds)).toEqual(new Set(['anchor-1', 'anchor-2', 'anchor-3']));
+    expect(new Set(writerPrompt.responseContract.variantMoves
+      .map((move: any) => move.nativeReactionMode)).size).toBeGreaterThan(1);
+    expect(writerPrompt.voiceTransferContract.slotRegisterAnchors
+      .map((anchor: any) => anchor.voiceAnchorId)).toEqual(variantAnchorIds);
+    expect(writerPrompt.voiceAnchors.map((anchor: any) => anchor.role)).toEqual([
+      'slot_1_register',
+      'slot_2_register',
+      'slot_3_register',
+    ]);
     expect(String(writerCall.system)).toContain('not short, medium, and long versions');
     expect(String(writerCall.system)).toContain('Begin with the thought itself');
+    expect(String(writerCall.system)).toContain("Each variant's assigned register anchor");
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -364,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-82',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-83',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,

@@ -1105,7 +1105,7 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."
 - Keep at most one finance or analyst term such as "terminal value," "comps," "probability surface," or "multiple" unless the term itself is the point. Say the rest the way a smart friend would say it aloud.
 - Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
-- The primary register anchor is the positive style target for this subject. Match how casual, blunt, or unfinished it feels. Do not average the anchors into cleaner English and never manufacture its slang or typos.
+- Each variant's assigned register anchor is its positive style target. Match how casual, blunt, or unfinished that anchor feels. Do not average the anchors into cleaner English and never manufacture slang or typos.
 - Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
 - Do not announce a generic investment persona with "the [category] startup/company/agent I would back, buy, or bet on." Name the actual entity when one exists; otherwise state the observable decision criterion directly.
 - Begin with the content of the thought. Do not announce a "take," "rule," "philosophy," "dream acquisition," "litmus test," or thing you keep coming back to; those become synthetic scaffolds when generated.
