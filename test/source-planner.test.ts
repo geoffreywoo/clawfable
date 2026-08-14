@@ -600,6 +600,11 @@ describe('source planner', () => {
       topicUncertainty: 'low' as const,
       semanticDomain: 'startups_markets' as const,
       entities: ['Trajectory', 'Sequoia', 'open source models'],
+      entityRoles: [
+        { name: 'Trajectory', role: 'company' as const },
+        { name: 'Sequoia', role: 'investor' as const },
+        { name: 'open source models', role: 'technology' as const },
+      ],
       isPrimarySource: false,
       topTweet: { id: 'trajectory-post', text: 'raw network prose', likes: 100, author: 'reporter' },
     };
@@ -613,6 +618,12 @@ describe('source planner', () => {
 
     expect(signal.subject).toBe('Trajectory Sequoia open source models');
     expect(signal.subject).not.toContain('funding');
+    expect(signal.entityRoles).toEqual([
+      { name: 'Trajectory', role: 'company' },
+      { name: 'Sequoia', role: 'investor' },
+      { name: 'open source models', role: 'technology' },
+    ]);
+    expect(signal.strippedEventTerms).toEqual(['funding']);
   });
 
   it('does not spend a new brief on a qualified trend already represented in the queue', () => {

@@ -33,6 +33,21 @@ export type TopicSemanticDomain =
   | 'general_technology'
   | 'other';
 
+export type TopicEntityRoleName =
+  | 'company'
+  | 'product'
+  | 'person'
+  | 'investor'
+  | 'technology'
+  | 'institution'
+  | 'location'
+  | 'other';
+
+export interface TopicEntityRole {
+  name: string;
+  role: TopicEntityRoleName;
+}
+
 export interface TrendingTopic {
   id: number;
   headline: string;
@@ -71,6 +86,7 @@ export interface TrendingTopic {
   observedAt?: string | null;
   evidence?: NetworkTopicEvidence[];
   entities?: string[];
+  entityRoles?: TopicEntityRole[];
   semanticDomain?: TopicSemanticDomain | null;
   topicUncertainty?: 'low' | 'medium' | 'high' | null;
 }

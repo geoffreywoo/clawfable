@@ -7,7 +7,12 @@ import type {
   TweetPerformance,
 } from './types';
 import type { VoiceProfile } from './soul-parser';
-import { getTrendingTopicStableId, type TopicSemanticDomain, type TrendingTopic } from './trending';
+import {
+  getTrendingTopicStableId,
+  type TopicEntityRole,
+  type TopicSemanticDomain,
+  type TrendingTopic,
+} from './trending';
 import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 import { isGeoffreyVoiceProfile } from './account-taste';
 import { inferContentSpreadMechanics } from './winner-learning';
@@ -66,6 +71,8 @@ export interface SourcePlannerBriefEvidence {
   historicalAvgEngagement: number | null;
   historicalSampleCount: number | null;
   spreadMechanics: string[];
+  entityRoles?: TopicEntityRole[];
+  strippedEventTerms?: string[];
   instruction: string;
 }
 
@@ -81,6 +88,8 @@ export interface OperatorTopicSignal {
   id: string;
   subject: string;
   semanticAliases: string[];
+  entityRoles: TopicEntityRole[];
+  strippedEventTerms: string[];
   domain: TopicSemanticDomain;
   identityScore: number;
   operatorEngagementScore: number;
@@ -743,6 +752,20 @@ function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
     .slice(0, 4);
 }
 
+function operatorTopicSignalEntityRoles(topic: EnrichedTrendingTopic): TopicEntityRole[] {
+  const allowed = new Map(operatorTopicSignalEntities(topic).map((entity) => [normalizeTopic(entity), entity]));
+  return (topic.entityRoles || []).flatMap((entry) => {
+    const name = allowed.get(normalizeTopic(entry.name));
+    return name ? [{ name, role: entry.role }] : [];
+  }).slice(0, 4);
+}
+
+function operatorTopicSignalStrippedEventTerms(topic: EnrichedTrendingTopic): string[] {
+  return [...new Set((topic.category.match(OPERATOR_TOPIC_SIGNAL_EVENT_TERMS) || [])
+    .map((term) => term.toLowerCase().replace(/\s+/g, ' ').trim())
+    .filter(Boolean))].slice(0, 4);
+}
+
 function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean {
   const category = normalizeTopic(topic.category);
   const wordCount = category.split(/\s+/).filter(Boolean).length;
@@ -846,6 +869,8 @@ export function selectOperatorTopicSignals(
         id: getTrendingTopicStableId(topic),
         subject,
         semanticAliases: entityDomainAlias && entityDomainAlias !== subject ? [entityDomainAlias] : [],
+        entityRoles: operatorTopicSignalEntityRoles(topic),
+        strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
         domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
         identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
         operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
@@ -865,7 +890,9 @@ function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourceP
     historicalAvgEngagement: null,
     historicalSampleCount: null,
     spreadMechanics: [],
-    instruction: 'Geoffrey recently engaged with this subject. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim.',
+    entityRoles: operatorTopicSignalEntityRoles(topic),
+    strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
+    instruction: 'Geoffrey recently engaged with this subject. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim. Entity roles prevent actor swaps but do not establish a relationship between entities.',
   };
 }
 
