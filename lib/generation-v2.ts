@@ -2383,6 +2383,46 @@ export function selectRankedIdeaPortfolioV2({
   return selected.slice(0, desired);
 }
 
+export function selectAlternateIdeasV2({
+  ideas,
+  evaluatedIdeaIds,
+  selectedBriefIds,
+  desired,
+}: {
+  ideas: IdeaCandidate[];
+  evaluatedIdeaIds: Set<string>;
+  selectedBriefIds: Set<string>;
+  desired: number;
+}): IdeaCandidate[] {
+  if (desired <= 0) return [];
+  const alternates = ideas
+    .filter((idea) => (
+      !evaluatedIdeaIds.has(idea.id)
+      && !selectedBriefIds.has(idea.briefId)
+      && idea.status === 'rejected'
+      && idea.rejectionCodes.length === 1
+      && idea.rejectionCodes[0] === 'idea_not_selected'
+      && typeof idea.judgeScore === 'number'
+      && idea.judgeBreakdown !== null
+    ))
+    .sort((left, right) => (
+      (right.judgeScore || 0) - (left.judgeScore || 0)
+      || (right.judgeBreakdown?.publicMoveStrength || 0) - (left.judgeBreakdown?.publicMoveStrength || 0)
+      || (right.judgeBreakdown?.nativeReactionPotential || 0) - (left.judgeBreakdown?.nativeReactionPotential || 0)
+      || (right.judgeBreakdown?.sharePotential || 0) - (left.judgeBreakdown?.sharePotential || 0)
+      || left.id.localeCompare(right.id)
+    ));
+  const selected: IdeaCandidate[] = [];
+  const usedBriefs = new Set(selectedBriefIds);
+  for (const idea of alternates) {
+    if (usedBriefs.has(idea.briefId)) continue;
+    selected.push(idea);
+    usedBriefs.add(idea.briefId);
+    if (selected.length >= desired) break;
+  }
+  return selected;
+}
+
 async function selectIdeas({
   ideas,
   briefs,
@@ -4380,6 +4420,93 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
             blocks,
           });
           selected = [...selected, ...retrySelected.slice(0, input.count - selected.length)];
+        }
+      }
+    }
+    const finalSelectedIdeaIds = new Set(selected
+      .map((tweet) => tweet.ideaId)
+      .filter((id): id is string => Boolean(id)));
+    const hasRewriteableNearMiss = rescueTargetsV2(
+      evaluations,
+      input.count,
+      input,
+      finalSelectedIdeaIds,
+    ).length > 0;
+    const copyJudgeUnavailable = evaluations.some((entry) => (
+      entry.draft.rejectionCodes.includes('copy_judge_unavailable')
+      || entry.draft.rejectionCodes.includes('malformed_copy_judgment')
+    ));
+    if (
+      selected.length < input.count
+      && hasRewriteableNearMiss
+      && !copyJudgeUnavailable
+      && Date.now() + 75_000 < runDeadlineAt
+    ) {
+      const evaluatedIdeaIds = new Set(evaluations.map((entry) => entry.idea.id));
+      const selectedBriefIds = new Set([...finalSelectedIdeaIds]
+        .map((ideaId) => ideas.find((idea) => idea.id === ideaId)?.briefId)
+        .filter((briefId): briefId is string => Boolean(briefId)));
+      const alternateIdeas = selectAlternateIdeasV2({
+        ideas,
+        evaluatedIdeaIds,
+        selectedBriefIds,
+        desired: input.count - selected.length,
+      });
+      trace.stageCounts.alternateIdeaTargets = alternateIdeas.length;
+      if (alternateIdeas.length > 0) {
+        retryUsed = true;
+        const now = new Date().toISOString();
+        for (const idea of alternateIdeas) {
+          idea.status = 'selected';
+          idea.rejectionCodes = idea.rejectionCodes.filter((code) => code !== 'idea_not_selected');
+          idea.updatedAt = now;
+        }
+        const alternateEvaluations = await generateDraftEvaluations({
+          ideas: alternateIdeas,
+          briefs,
+          documents,
+          input: {
+            ...input,
+            recentPosts: uniqueStrings([
+              ...selected.map((tweet) => tweet.content),
+              ...input.recentPosts,
+            ], 120),
+          },
+          runId,
+          calls: trace.modelCalls,
+          blocks,
+        });
+        evaluations.push(...alternateEvaluations);
+        const alternateEligible = alternateEvaluations.filter((entry) => entry.draft.status !== 'rejected');
+        trace.stageCounts.alternateDraftsGenerated = alternateEvaluations.length;
+        trace.stageCounts.alternateDraftsEligible = alternateEligible.length;
+        trace.stageCounts.draftsEligible = (trace.stageCounts.draftsEligible || 0) + alternateEligible.length;
+        trace.stageCounts.copyJudgeCandidates = (trace.stageCounts.copyJudgeCandidates || 0) + alternateEligible.length;
+        trace.stageCounts.precriticDraftsEligible = (trace.stageCounts.precriticDraftsEligible || 0) + alternateEligible.length;
+        trace.stageCounts.ideasWithEligibleDrafts = new Set([
+          ...evaluations
+            .filter((entry) => entry.draft.status !== 'rejected')
+            .map((entry) => entry.idea.id),
+          ...alternateEligible.map((entry) => entry.idea.id),
+        ]).size;
+        if (alternateEligible.length > 0) {
+          const alternateSelected = await selectFinalTweets({
+            evaluations: alternateEvaluations,
+            input: {
+              ...input,
+              count: input.count - selected.length,
+              recentPosts: uniqueStrings([
+                ...selected.map((tweet) => tweet.content),
+                ...input.recentPosts,
+              ], 120),
+            },
+            calls: trace.modelCalls,
+            blocks,
+          });
+          trace.stageCounts.alternateDraftsSelected = alternateSelected.length;
+          selected = [...selected, ...alternateSelected.slice(0, input.count - selected.length)];
+        } else {
+          trace.stageCounts.alternateDraftsSelected = 0;
         }
       }
     }

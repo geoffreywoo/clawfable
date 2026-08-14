@@ -361,7 +361,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-54',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-55',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1576,6 +1576,97 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({ retryUsed: 1, rescueTargets: 2, draftsSelected: 2 }),
+    });
+  });
+
+  it('rotates to judge-approved alternate premises after critic rewrites still fail', async () => {
+    let writerCalls = 0;
+    let criticCalls = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
+      if (options.task === 'idea_judgment') {
+        const parsed = JSON.parse(options.prompt);
+        const primary = parsed.ideas.filter((idea: any) => idea.publicMove.includes('named'));
+        const alternate = parsed.ideas.filter((idea: any) => !idea.publicMove.includes('named'));
+        const ordered = [...primary, ...alternate];
+        return result(JSON.stringify({
+          ranking: ordered.map((idea: any) => idea.id),
+          comparisons: [],
+          scores: ordered.map((idea: any) => {
+            const score = idea.publicMove.includes('named') ? 0.86 : 0.9;
+            return {
+              id: idea.id,
+              evidenceFidelity: 0.96,
+              authorFit: score,
+              consequence: score,
+              distinctiveness: score,
+              nativeReactionPotential: score,
+              publicMoveStrength: score,
+              sharePotential: score,
+            };
+          }),
+        }));
+      }
+      if (options.task === 'tweet_writing') {
+        writerCalls += 1;
+        const parsed = JSON.parse(options.prompt);
+        const alternate = !parsed.idea.publicMove.includes('named');
+        return result(JSON.stringify({ drafts: [{
+          content: alternate
+            ? `i'd take a ${parsed.idea.topic} customer deposit over another week of launch polish.`
+            : `${parsed.idea.topic}: prove the buyer decision before reserving the expensive capacity. the launch order matters more than the demo.`,
+          format: 'observation',
+          posture: alternate ? 'alternate owned preference' : 'selected premise attempt',
+        }] }), 'anthropic');
+      }
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        const parsed = JSON.parse(options.prompt);
+        return result(JSON.stringify({
+          ranking: parsed.candidates.map((candidate: any) => candidate.id),
+          comparisons: [],
+          scores: parsed.candidates.map((candidate: any) => {
+            const alternate = candidate.post.includes('customer deposit over');
+            const score = alternate ? 0.92 : 0.72;
+            return {
+              id: candidate.id,
+              overall: score,
+              voiceFit: score,
+              operatorPlausibility: score,
+              cringeRisk: alternate ? 0.02 : 0.12,
+              insight: score,
+              specificity: alternate ? 0.9 : 0.76,
+              factualSafety: 0.98,
+              clarity: 0.9,
+              novelty: alternate ? 0.9 : 0.76,
+              manualAnchorReskinRisk: 0.02,
+              diagnosis: alternate
+                ? 'The owned customer choice is direct and specific.'
+                : 'The draft turns the idea into a polished operating framework; choose a different premise instead.',
+            };
+          }),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+
+    expect(writerCalls).toBe(8);
+    expect(criticCalls).toBe(3);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.content.includes('customer deposit over'))).toBe(true);
+    expect(drafts.every((draft) => draft.mutationRound === 0)).toBe(true);
+    expect(finalRun).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({
+        alternateIdeaTargets: 2,
+        alternateDraftsGenerated: 2,
+        alternateDraftsEligible: 2,
+        alternateDraftsSelected: 2,
+        draftsSelected: 2,
+      }),
     });
   });
 
