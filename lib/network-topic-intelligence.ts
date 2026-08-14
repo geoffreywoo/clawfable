@@ -17,7 +17,9 @@ const DEFAULT_ACCOUNT_SAMPLE_LIMIT = 18;
 const FALLBACK_ACCOUNT_SAMPLE_LIMIT = 10;
 const TIMELINE_SAMPLE_SIZE = 20;
 const HOME_TIMELINE_SAMPLE_SIZE = 100;
+const OPERATOR_ENGAGEMENT_SAMPLE_SIZE = 300;
 const MAX_CLUSTER_INPUTS = 32;
+const MAX_OPERATOR_ENGAGED_CLUSTER_INPUTS = 12;
 const MAX_TRACKED_TWEETS = 160;
 const MAX_TRACKED_TOPICS = 48;
 const MAX_TRACKED_AUTHORS = 400;
@@ -660,7 +662,7 @@ export function scoreNetworkTweets(
   });
 }
 
-function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetObservation[] {
+export function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetObservation[] {
   const ranked = [...scored].sort((a, b) => (
     b.viralScore - a.viralScore
     || b.weightedEngagement - a.weightedEngagement
@@ -668,12 +670,24 @@ function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetO
   ));
   const selected: NetworkTweetObservation[] = [];
   const authorCounts = new Map<string, number>();
+  const add = (tweet: NetworkTweetObservation): boolean => {
+    if (selected.includes(tweet) || (authorCounts.get(tweet.authorId) || 0) >= 2) return false;
+    selected.push(tweet);
+    authorCounts.set(tweet.authorId, (authorCounts.get(tweet.authorId) || 0) + 1);
+    return true;
+  };
+
+  for (const tweet of ranked.filter((entry) => entry.operatorEngaged)) {
+    add(tweet);
+    if (
+      selected.length >= MAX_OPERATOR_ENGAGED_CLUSTER_INPUTS
+      || selected.length >= MAX_CLUSTER_INPUTS
+    ) break;
+  }
 
   for (const tweet of ranked) {
     if (tweet.viralScore < (tweet.operatorEngaged ? 0.38 : 0.5)) continue;
-    if ((authorCounts.get(tweet.authorId) || 0) >= 2) continue;
-    selected.push(tweet);
-    authorCounts.set(tweet.authorId, (authorCounts.get(tweet.authorId) || 0) + 1);
+    add(tweet);
     if (selected.length >= MAX_CLUSTER_INPUTS) break;
   }
 
@@ -685,10 +699,7 @@ function selectViralCandidates(scored: NetworkTweetObservation[]): NetworkTweetO
   ));
   if (selected.length < Math.min(8, fallbackPool.length)) {
     for (const tweet of fallbackPool) {
-      if (selected.includes(tweet)) continue;
-      if ((authorCounts.get(tweet.authorId) || 0) >= 2) continue;
-      selected.push(tweet);
-      authorCounts.set(tweet.authorId, (authorCounts.get(tweet.authorId) || 0) + 1);
+      if (!add(tweet)) continue;
       if (selected.length >= Math.min(8, fallbackPool.length) || selected.length >= MAX_CLUSTER_INPUTS) break;
     }
   }
@@ -775,7 +786,10 @@ export function buildFallbackNetworkTopics(
   candidates: NetworkTweetObservation[],
 ): ExtractedNetworkTopic[] {
   const groups: NetworkTweetObservation[][] = [];
-  for (const candidate of [...candidates].sort((a, b) => b.viralScore - a.viralScore)) {
+  for (const candidate of [...candidates].sort((a, b) => (
+    Number(b.operatorEngaged) - Number(a.operatorEngaged)
+    || b.viralScore - a.viralScore
+  ))) {
     const best = groups
       .map((group, index) => ({
         index,
@@ -917,6 +931,7 @@ Rules:
 - Merge posts only when they concern substantially the same subject. Do not merge merely because they share tone or industry.
 - Summaries must stay inside the evidence. Do not invent facts, numbers, causality, or consensus.
 - Ignore engagement-bait phrasing and extract the underlying subject, not the source author's writing style or opinion.
+- operatorLiked=1 is explicit subject-taste evidence. Preserve distinct, specific liked subjects in the output when they meet the other rules, but never treat a like or a single liked post as factual corroboration.
 - Classify semanticDomain as one of ai_compute, energy_nuclear, materials_minerals, robotics_automation, manufacturing_industrial, space_defense, browser_infrastructure, startups_markets, finance_investing, culture_status, health_performance, sports_competition, crypto, politics_geopolitics, general_technology, or other. Servo the browser engine is browser_infrastructure, never robotics.
 - Set uncertainty to low, medium, or high based on whether the evidence supports the exact subject and claimed event.
 - For every named entity, return one entityRoles item with the exact same name and one role: company, product, person, investor, technology, institution, location, or other. Roles identify what an entity is; they do not assert that the entities are related.
@@ -1274,7 +1289,7 @@ export async function discoverNetworkTopicIntelligence(
   }
   try {
     likedTimeline = normalizeLikedTimeline(
-      await getLikedTweets(keys, userId, HOME_TIMELINE_SAMPLE_SIZE),
+      await getLikedTweets(keys, userId, OPERATOR_ENGAGEMENT_SAMPLE_SIZE),
       userId,
     );
     operatorEngagementReadAvailable = true;

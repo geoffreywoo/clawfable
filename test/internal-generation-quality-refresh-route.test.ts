@@ -127,6 +127,11 @@ describe('internal generation quality refresh route', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.checkPerformance).toHaveBeenCalledTimes(3);
+    expect(mocks.checkPerformance).toHaveBeenNthCalledWith(1, agent, {
+      timelineLimit: 600,
+      classificationBacklogLimit: 300,
+    });
+    expect(mocks.checkPerformance).toHaveBeenNthCalledWith(2, agent, undefined);
     expect(mocks.buildLearnings).toHaveBeenCalledWith(agent);
     expect(mocks.refreshQueuedTweetsForCurrentQualityPolicy).toHaveBeenCalledWith(agent);
     expect(mocks.refillQueue).toHaveBeenCalledWith(agent, 1);
@@ -134,6 +139,12 @@ describe('internal generation quality refresh route', () => {
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'refresh-owner');
     expect(data).toMatchObject({
       classificationRuns: [20, 20, 20],
+      classificationScope: {
+        timelineLimit: 600,
+        firstPassBacklogLimit: 300,
+        batchSize: 20,
+        maxConcurrency: 3,
+      },
       corpus: { active: true, eligibleAnchorCount: 18 },
       queueRefresh: { certified: 1, quarantined: 2 },
       refill: { requested: 1, added: 1, finalDepth: 2, artifactCount: 3 },

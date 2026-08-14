@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 31;
+export const GENERATION_QUALITY_AUDIT_VERSION = 32;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -298,12 +298,15 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
   ));
   const finishedCriticNearMisses = entries.filter((entry) => (
     !entry.selected
-    && entry.rejectionCodes?.length === 1
-    && entry.rejectionCodes[0] === 'final_quality_margin'
+    && (
+      entry.rejectionCodes?.includes('copy_judge_diagnosis_conflict')
+      || (
+        entry.rejectionCodes?.length === 1
+        && entry.rejectionCodes[0] === 'final_quality_margin'
+      )
+    )
     && typeof entry.judgeScore === 'number'
-    && entry.judgeScore >= 0.88
     && typeof entry.judgeBreakdown?.qualityMargin === 'number'
-    && entry.judgeBreakdown.qualityMargin >= PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.02
     && /\b(?:no substantive rewrite is needed|no rewrite is needed|already fully formed)\b/i.test(entry.judgeNotes || '')
   ));
   return {
@@ -441,6 +444,10 @@ interface AuditFindingInput {
   modelPricing: {
     activeComplete: boolean;
     missingModels: string[];
+  };
+  modelShadow?: {
+    activeStack: string;
+    groups: ReturnType<typeof buildGenerationWriterOutcomeAudit>['groups'];
   };
   sources: {
     editorialEligibleCount: number;
@@ -672,6 +679,28 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     });
   }
 
+  const topicMix = input.currentPolicyWindow.writerOutcomes?.topicMix;
+  const concentratedDomain = topicMix?.domains.find((domain) => (
+    topicMix.generatedCount >= 20
+    && domain.generatedCount / Math.max(1, topicMix.generatedCount) > 0.5
+    && domain.selectedCount === 0
+  ));
+  if (concentratedDomain) {
+    add({
+      code: 'current_policy_zero_yield_topic_concentration',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Most writing capacity is concentrated in a topic domain with no selections',
+      evidence: {
+        generatedCount: topicMix?.generatedCount || 0,
+        selectedCount: topicMix?.selectedCount || 0,
+        concentratedDomain,
+        domains: topicMix?.domains || [],
+      },
+      action: 'Keep operator-engaged briefs distinct by semantic domain and rotate the remaining slots through proven startup, investing, culture, health, sports, and technology lanes before writing.',
+    });
+  }
+
   const rescueOutcomes = input.currentPolicyWindow.writerOutcomes?.rescue;
   if (
     input.currentPolicyWindow.runCount >= 2
@@ -702,6 +731,27 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'Final-critic language and aggregate eligibility disagree',
       evidence: criticCalibration || {},
       action: 'Evaluate the deterministic taste dimensions on the fixed native-versus-bad set; do not auto-pass, repeatedly rescore, or lower the quality floor.',
+    });
+  }
+
+  const fableShadow = input.modelShadow?.activeStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+    ? input.modelShadow.groups.find((group) => (
+      group.phase === 'initial'
+      && group.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+    ))
+    : null;
+  if (
+    fableShadow
+    && fableShadow.generatedCount >= 20
+    && fableShadow.selectedCount === 0
+  ) {
+    add({
+      code: 'historical_fable_shadow_yield_zero',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Fable shadow writing has not earned its prior sampling rate',
+      evidence: fableShadow,
+      action: 'Sample Fable only on the strongest matched idea in each batch; disable the lane if the next 20 matched shadows still produce no eligible selection.',
     });
   }
 
@@ -768,6 +818,22 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         topRejectionReasons: input.sources.operatorTopicSignalRejectionCounts || [],
       },
       action: 'Repair network subject extraction and semantic classification using stored source decisions; do not admit low-confidence or off-core prose as voice evidence.',
+    });
+  } else if (
+    (input.sources.warmedNetworkTopicCount || 0) >= 8
+    && (input.sources.operatorTopicSignalEligibleCount || 0) < 4
+  ) {
+    add({
+      code: 'network_operator_topic_pool_thin',
+      severity: 'medium',
+      scope: 'live_state',
+      title: 'Operator-engaged topic supply is too thin for repeated autonomous batches',
+      evidence: {
+        warmedNetworkTopicCount: input.sources.warmedNetworkTopicCount || 0,
+        operatorTopicSignalEligibleCount: input.sources.operatorTopicSignalEligibleCount || 0,
+        topRejectionReasons: input.sources.operatorTopicSignalRejectionCounts || [],
+      },
+      action: 'Refresh a deeper official liked-post window and reserve topic-classifier capacity for distinct engaged subjects; keep those posts out of diction and factual evidence.',
     });
   }
 
@@ -1354,6 +1420,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     modelPricing: {
       activeComplete: modelPricingCoverage.every((target) => target.priced),
       missingModels: modelPricingCoverage.filter((target) => !target.priced).map((target) => target.model),
+    },
+    modelShadow: {
+      activeStack: activeModelStack,
+      groups: writerShadowEvidence,
     },
     sources: {
       editorialEligibleCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,

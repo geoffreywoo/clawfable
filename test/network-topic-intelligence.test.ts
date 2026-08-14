@@ -27,6 +27,7 @@ import {
   isLikelyPrimaryNetworkEvidence,
   isUsableNetworkSourcePost,
   scoreNetworkTweets,
+  selectViralCandidates,
   selectNetworkAccounts,
   type NetworkTweetObservation,
 } from '@/lib/network-topic-intelligence';
@@ -74,6 +75,7 @@ function observation(overrides: Partial<NetworkTweetObservation> & { tweetId: st
     withinAuthorPercentile: overrides.withinAuthorPercentile ?? 1,
     engagementRatePerThousand: overrides.engagementRatePerThousand ?? 18,
     accelerationScore: overrides.accelerationScore ?? 0.7,
+    operatorEngaged: overrides.operatorEngaged === true,
   };
 }
 
@@ -261,7 +263,7 @@ describe('followed-network topic intelligence', () => {
       }],
     });
 
-    expect(mocks.getLikedTweets).toHaveBeenCalledWith(keys, 'geoff-user-id', 100);
+    expect(mocks.getLikedTweets).toHaveBeenCalledWith(keys, 'geoff-user-id', 300);
     expect(result.state.operatorEngagementReadAvailable).toBe(true);
     expect(result.state.operatorEngagedTweetCount).toBe(1);
     expect(result.state.viralTweets[0]).toMatchObject({ operatorEngaged: true });
@@ -272,6 +274,31 @@ describe('followed-network topic intelligence', () => {
       isPrimarySource: false,
     });
     expect(result.topics[0].operatorEngagementScore).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it('reserves clustering capacity for explicit operator-engagement subjects', () => {
+    const general = Array.from({ length: 36 }, (_, index) => observation({
+      tweetId: `general-${index}`,
+      text: `Breakout network subject ${index} has a concrete company update.`,
+      authorId: `general-author-${index}`,
+      viralScore: 0.95 - index * 0.005,
+      weightedEngagement: 1000 - index,
+    }));
+    const engaged = Array.from({ length: 5 }, (_, index) => observation({
+      tweetId: `liked-${index}`,
+      text: `Operator liked subject ${index} names a concrete startup product.`,
+      authorId: `liked-author-${index}`,
+      viralScore: 0.2,
+      weightedEngagement: 12,
+      operatorEngaged: true,
+    }));
+
+    const selected = selectViralCandidates([...general, ...engaged]);
+
+    expect(selected).toHaveLength(32);
+    expect(selected.filter((tweet) => tweet.operatorEngaged).map((tweet) => tweet.tweetId)).toEqual(
+      engaged.map((tweet) => tweet.tweetId),
+    );
   });
 
   it('never sends protected-account posts to the classifier or stores them as evidence', async () => {

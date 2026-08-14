@@ -57,7 +57,7 @@ vi.mock('@/lib/account-taste', async (importOriginal) => ({
   isGeoffreyVoiceProfile: () => mocks.geoffreyVoiceProfile,
 }));
 
-import { generateTweetBatchV2 } from '@/lib/generation-v2';
+import { generateTweetBatchV2, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/generation-v2';
 
 function result(text: string, provider: 'openai' | 'anthropic' = 'openai') {
   return {
@@ -344,6 +344,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCall.jsonSchema.properties.scores.items.required).toContain('diagnosis');
     expect(String(copyJudgeCall.system)).toContain('must never recommend only capitalization');
     expect(String(copyJudgeCall.system)).toContain('lowest substantive dimension');
+    expect(String(copyJudgeCall.system)).toContain('Diagnosis and scores must agree');
     expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt.idea.publicMove).toEqual(expect.any(String));
@@ -380,7 +381,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-104',
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -396,7 +397,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
-  it('generates three independent one-draft Fable variants plus one GPT shadow', async () => {
+  it('generates three independent one-draft Fable variants plus one matched GPT shadow per batch', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
@@ -456,7 +457,7 @@ describe('generateTweetBatchV2 integration', () => {
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
 
     expect(primaryCalls).toHaveLength(12);
-    expect(shadowCalls).toHaveLength(4);
+    expect(shadowCalls).toHaveLength(1);
     expect(primaryCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
     expect(primaryCalls.every((call) => String(call.system).includes('Write exactly one'))).toBe(true);
     expect(shadowCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
@@ -478,7 +479,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
         initialPrimaryWriterDrafts: 12,
-        initialShadowWriterDrafts: 4,
+        initialShadowWriterDrafts: 1,
         draftsSelected: 2,
       }),
     });

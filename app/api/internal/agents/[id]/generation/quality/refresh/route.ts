@@ -17,6 +17,8 @@ import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitleme
 
 const MAX_CLASSIFICATION_PASSES = 5;
 const MAX_TARGET_QUEUE_DEPTH = 8;
+const DEEP_TIMELINE_LIMIT = 600;
+const DEEP_CLASSIFICATION_BACKLOG_LIMIT = 300;
 
 export const maxDuration = 800;
 
@@ -77,7 +79,15 @@ export async function POST(
   try {
     const classificationRuns: number[] = [];
     for (let index = 0; index < classificationPasses; index++) {
-      classificationRuns.push(await checkPerformance(agent));
+      classificationRuns.push(await checkPerformance(
+        agent,
+        index === 0
+          ? {
+              timelineLimit: DEEP_TIMELINE_LIMIT,
+              classificationBacklogLimit: DEEP_CLASSIFICATION_BACKLOG_LIMIT,
+            }
+          : undefined,
+      ));
     }
 
     const learnings = await buildLearnings(agent);
@@ -112,6 +122,12 @@ export async function POST(
     return NextResponse.json({
       agentId: id,
       classificationRuns,
+      classificationScope: {
+        timelineLimit: DEEP_TIMELINE_LIMIT,
+        firstPassBacklogLimit: DEEP_CLASSIFICATION_BACKLOG_LIMIT,
+        batchSize: 20,
+        maxConcurrency: 3,
+      },
       corpus: corpus ? {
         version: corpus.version,
         snapshotId: corpus.snapshotId,
