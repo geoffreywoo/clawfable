@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-92',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-93',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -461,9 +461,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(primaryCalls).toHaveLength(4);
     expect(shadowCalls).toHaveLength(4);
     expect(primaryCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 3)).toBe(true);
-    expect(shadowCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 3)).toBe(true);
+    expect(shadowCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
     expect(shadowCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
-    expect(shadowCalls.every((call) => String(call.system).includes('Write exactly three separately conceived X posts'))).toBe(true);
+    expect(shadowCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
     expect(new Set(persistedDrafts.filter((draft) => (
       draft.generationModelStack === 'publishing_v2_gpt_control'
       && (draft.mutationRound || 0) === 0
@@ -474,7 +474,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
         initialPrimaryWriterDrafts: 12,
-        initialShadowWriterDrafts: 12,
+        initialShadowWriterDrafts: 4,
         draftsSelected: 2,
       }),
     });
