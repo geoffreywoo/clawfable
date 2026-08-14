@@ -3713,7 +3713,6 @@ function buildSubtractiveTailEvaluationsV2({
   desired: number;
 }): DraftEvaluation[] {
   if (desired <= 0 || !isGeoffreyVoiceProfile(input.voiceProfile)) return [];
-  const subtractiveDiagnosis = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported)\b/i;
   const eligibleTargets = evaluations
     .filter((entry) => (
       !selectedIdeaIds.has(entry.idea.id)
@@ -3721,7 +3720,7 @@ function buildSubtractiveTailEvaluationsV2({
       && entry.draft.rejectionCodes.length === 1
       && entry.draft.rejectionCodes[0] === 'final_quality_margin'
       && typeof entry.draft.judgeBreakdown?.qualityMargin === 'number'
-      && subtractiveDiagnosis.test(entry.draft.judgeNotes || '')
+      && V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(entry.draft.judgeNotes || '')
       && getSubtractiveTailCandidateContentsV2(entry.draft.content).length > 0
     ))
     .sort((left, right) => (
@@ -4526,6 +4525,28 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
 ]);
 
 const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
+const V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported)\b/i;
+const V2_ADDITIVE_CONSEQUENCE_DIAGNOSIS_PATTERN = /\b(?:operational task|concrete consequence|subject-specific (?:consequence|detail|mechanism)|named (?:consequence|task|detail)|name (?:one|the) (?:consequence|task|detail)|naming (?:one|the) (?:consequence|task|detail)|thin (?:call|claim|reaction)|otherwise thin)\b/i;
+const V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN = Math.max(
+  0.8,
+  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.06,
+);
+
+export function isV2MarginOnlyConsequenceRepairCandidate(
+  rejectionCodes: string[],
+  judgeNotes?: string | null,
+  qualityMargin?: number | null,
+): boolean {
+  const uniqueCodes = uniqueStrings(rejectionCodes);
+  const diagnosis = judgeNotes || '';
+  return uniqueCodes.length === 1
+    && uniqueCodes[0] === 'final_quality_margin'
+    && typeof qualityMargin === 'number'
+    && qualityMargin >= V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN
+    && !V2_RECONCEIVE_DIAGNOSIS_PATTERN.test(diagnosis)
+    && !V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(diagnosis)
+    && V2_ADDITIVE_CONSEQUENCE_DIAGNOSIS_PATTERN.test(diagnosis);
+}
 
 export function getV2RescueRevisionStrategy(
   rejectionCodes: string[],
@@ -4545,8 +4566,20 @@ export function getV2RescueRevisionStrategy(
     : 'critic_surgical';
 }
 
-export function shouldRunPostcriticRescueV2(voiceProfile: VoiceProfile): boolean {
-  return !isGeoffreyVoiceProfile(voiceProfile);
+export function shouldRunPostcriticRescueV2(
+  voiceProfile: VoiceProfile,
+  rejectionCodes: string[] = [],
+  judgeNotes?: string | null,
+  qualityMargin?: number | null,
+): boolean {
+  return !isGeoffreyVoiceProfile(voiceProfile)
+    || isV2MarginOnlyConsequenceRepairCandidate(rejectionCodes, judgeNotes, qualityMargin);
+}
+
+function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
+  if (modelStack === PUBLISHING_V2_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
+  if (modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK) return PUBLISHING_V2_GPT_CONTROL_MODEL_STACK;
+  return modelStack;
 }
 
 async function generateRescueDraftEvaluations({
@@ -5057,37 +5090,43 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       let retryEvaluations: DraftEvaluation[] = [];
       const selectedIdeaIds = new Set(selected.map((tweet) => tweet.ideaId).filter((id): id is string => Boolean(id)));
       const targets = rescueTargetsV2(evaluations, input.count - selected.length, input, selectedIdeaIds);
-      const postcriticRescueEnabled = shouldRunPostcriticRescueV2(input.voiceProfile);
+      const eligibleTargets = targets.filter((target) => shouldRunPostcriticRescueV2(
+        input.voiceProfile,
+        target.draft.rejectionCodes,
+        target.draft.judgeNotes,
+        target.draft.judgeBreakdown?.qualityMargin,
+      ));
+      const runnableTargets = isGeoffreyVoiceProfile(input.voiceProfile)
+        ? eligibleTargets.slice(0, 1)
+        : eligibleTargets;
+      const repairModelStack = getPostcriticRepairModelStackV2(input.modelStack);
       trace.stageCounts.postcriticRescueTargets = targets.length;
+      trace.stageCounts.postcriticRescueEligibleTargets = eligibleTargets.length;
+      trace.stageCounts.postcriticRescueRunnableTargets = runnableTargets.length;
       trace.stageCounts.postcriticSurgicalTargets = targets.filter((target) => (
         getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
       )).length;
       trace.stageCounts.postcriticReconceiveTargets = targets.filter((target) => (
         getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'reconceive'
       )).length;
-      trace.stageCounts.postcriticPairedWriterTargets = postcriticRescueEnabled
-        && input.modelStack === PUBLISHING_V2_MODEL_STACK
-        ? targets.filter((target) => (
+      trace.stageCounts.postcriticPairedWriterTargets = repairModelStack !== input.modelStack
+        ? runnableTargets.filter((target) => (
             getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
           )).length
         : 0;
-      trace.stageCounts.postcriticRescueSuppressedNegativeValue = postcriticRescueEnabled ? 0 : targets.length;
-      trace.stageCounts.rescueTargets = trace.stageCounts.rescueTargets || 0;
-      if (postcriticRescueEnabled) {
-        trace.stageCounts.rescueTargets += targets.length;
-      }
-      if (postcriticRescueEnabled && targets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
+      trace.stageCounts.postcriticRescueSuppressedNegativeValue = targets.length - eligibleTargets.length;
+      trace.stageCounts.postcriticRescueCapacityDeferredTargets = eligibleTargets.length - runnableTargets.length;
+      trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + runnableTargets.length;
+      if (runnableTargets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
         retryUsed = true;
         retryEvaluations = await generateRescueDraftEvaluations({
-          targets,
+          targets: runnableTargets,
           priorEvaluations: evaluations,
           input,
           runId,
           calls: trace.modelCalls,
           blocks,
-          modelStack: input.modelStack === PUBLISHING_V2_MODEL_STACK
-            ? PUBLISHING_V2_CONTROL_MODEL_STACK
-            : input.modelStack,
+          modelStack: repairModelStack,
           revisionStrategy: 'critic_adaptive',
         });
         trace.stageCounts.rescueDraftsGenerated = (trace.stageCounts.rescueDraftsGenerated || 0) + retryEvaluations.length;
