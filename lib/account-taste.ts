@@ -103,7 +103,9 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'copper', 'molybdenum', 'superalloy', 'single crystal', 'turbine blade', 'ndfeb',
       'magnet', 'coercivity', 'grain-boundary diffusion', 'separation chemistry',
       'solvent extraction', 'tailings', 'ore grade', 'byproduct', 'byproduct stream',
-      'side stream', 'refining', 'sintering',
+      'side stream', 'refining', 'sintering', 'battery cell', 'cell maker', 'cell manufacturer',
+      'anode', 'cathode', 'electrode', 'electrolyte', 'separator', 'active material',
+      'cell chemistry', 'battery-grade',
     ],
   },
   {
@@ -201,7 +203,15 @@ const MECHANISM_TERMS = [
   'after',
   'before',
   'qualify',
+  'qualified',
   'qualification',
+  'coat',
+  'coated',
+  'coating',
+  'validate',
+  'validated',
+  'validation',
+  'sign-off',
   'byproduct',
   'recover',
   'recovery',
@@ -390,6 +400,15 @@ export function assessExternalSourceCopyRisk(
 
 function countTerms(text: string, terms: string[]): number {
   return terms.filter((term) => text.includes(term)).length;
+}
+
+function countDelimitedTerms(text: string, terms: string[]): number {
+  return terms.filter((rawTerm) => {
+    const term = rawTerm.trim();
+    if (!term) return false;
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(text);
+  }).length;
 }
 
 function hasNumericTechnicalUnit(content: string): boolean {
@@ -833,10 +852,10 @@ export function assessTechnicalCredibility(content: string): TechnicalCredibilit
     }
   }
 
-  const mechanismHits = countTerms(lower, MECHANISM_TERMS);
+  const mechanismHits = countDelimitedTerms(lower, MECHANISM_TERMS);
   const hasUnit = hasNumericTechnicalUnit(content);
   const hasProperNoun = /\b[A-Z][A-Za-z0-9+.-]{2,}\b/.test(content);
-  const hasArtifact = /\b(chart|benchmark|spec|wafer|board|rack|line|test|failure log|qualification|yield data|power budget|tolerance stack)\b/i.test(content);
+  const hasArtifact = /\b(chart|benchmark|spec|specification|wafer|board|rack|pilot line|test|failure log|qualified|qualification|validation|sign-off|yield data|power budget|tolerance stack)\b/i.test(content);
   const implicationHits = countTerms(lower, [
     'means', 'so ', 'until', 'before', 'after', 'that turns', 'the weird', 'hidden',
     'bottleneck', 'constraint', 'decides', 'determines', 'caps', 'limits', 'worse off',

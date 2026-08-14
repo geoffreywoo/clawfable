@@ -520,6 +520,21 @@ describe('account taste scoring', () => {
     expect(assessment.score).toBeGreaterThanOrEqual(0.45);
   });
 
+  it('recognizes battery-material qualification without rewarding vague battery hype', () => {
+    const specific = assessTechnicalCredibility(
+      'coated anode material that no cell maker has qualified is just very expensive powder sitting in a warehouse',
+    );
+    const vague = assessTechnicalCredibility(
+      'battery independence is the future',
+    );
+
+    expect(specific.domains).toContain('materials');
+    expect(specific.mechanismScore).toBe(0.11);
+    expect(specific.specificityScore).toBeGreaterThanOrEqual(0.14);
+    expect(specific.score).toBeGreaterThanOrEqual(0.45);
+    expect(vague.score).toBeLessThan(0.45);
+  });
+
   it('recognizes confidential-computing control-plane mechanisms', () => {
     const assessment = assessTechnicalCredibility(
       'i’d fund the control plane for encrypted workloads before another gpu marketplace. my bet is TDX hosts become interchangeable. policy, failover, and auditability are where the software margin lives.',
