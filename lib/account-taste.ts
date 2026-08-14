@@ -77,7 +77,8 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'pcie', 'reticle', 'packaging', 'substrate', 'co-packaged optics', 'latency', 'throughput',
       'batch size', 'token', 'watts per token', 'confidential compute', 'confidential computing',
       'trusted execution environment', 'intel tdx', 'tdx', 'encrypted workload', 'encrypted cvm',
-      'attestation', 'key management', 'control plane', 'failover',
+      'attestation', 'key management', 'control plane', 'failover', 'chip', 'compiler',
+      'compiler stack', 'toolchain', 'kernel', 'runtime',
     ],
   },
   {
@@ -804,10 +805,17 @@ function assessCasualStartupRegister(
     + directness * 0.22
     - stiffnessRisk * 0.3
   );
+  const compactLowercaseAssertion = lowerOpening
+    && content.length <= 220
+    && sentences <= 3
+    && generatedPattern.score < 0.24
+    && avgWordLength < 6
+    && !neutralResearchSummary;
   const hasCasualRegisterMarker = casualHits > 0
     || firstOrSecondPerson
     || situated
-    || contraction;
+    || contraction
+    || compactLowercaseAssertion;
   const score = !hasCasualRegisterMarker && bestAnchorFit < 0.98
     ? Math.min(0.49, Math.max(topicAwareScore, styleRegisterScore))
     : Math.max(topicAwareScore, styleRegisterScore);
@@ -855,7 +863,7 @@ export function assessTechnicalCredibility(content: string): TechnicalCredibilit
   const mechanismHits = countDelimitedTerms(lower, MECHANISM_TERMS);
   const hasUnit = hasNumericTechnicalUnit(content);
   const hasProperNoun = /\b[A-Z][A-Za-z0-9+.-]{2,}\b/.test(content);
-  const hasArtifact = /\b(chart|benchmark|spec|specification|wafer|board|rack|pilot line|test|failure log|qualified|qualification|validation|sign-off|yield data|power budget|tolerance stack)\b/i.test(content);
+  const hasArtifact = /\b(chart|benchmark|spec|specification|wafer|board|rack|chip|compiler|toolchain|kernel|runtime|pilot line|test|failure log|qualified|qualification|validation|sign-off|yield data|power budget|tolerance stack)\b/i.test(content);
   const implicationHits = countTerms(lower, [
     'means', 'so ', 'until', 'before', 'after', 'that turns', 'the weird', 'hidden',
     'bottleneck', 'constraint', 'decides', 'determines', 'caps', 'limits', 'worse off',

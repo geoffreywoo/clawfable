@@ -577,7 +577,7 @@ function operatorTopicBrief(
     ? ` Proven spread mechanics for this topic: ${spreadMechanics.join(', ')}. Use the mechanics, never prior wording or subject matter.`
     : '';
   const personalSignals = personalTopicSignals.length > 0
-    ? ' Structured personal topic signals are supplied separately. Use one only to choose a concrete adjacent object; never reconstruct or extend the prior post.'
+    ? ' Structured personal topic signals are supplied separately. Use one to choose a concrete subject or an adjacent object; never reconstruct or extend the prior post.'
     : '';
   const summary = `${historyPrefix}Develop a fresh operator judgment about ${topic}. This subject comes from ${provenance}, not from a factual source.${personalSignals}${mechanics}`;
   return {
@@ -1247,7 +1247,7 @@ export function buildIdeaGenerationPromptV2(
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
-      personalTopicSignalContract: 'Structured personal topic signals are unordered semantic tokens, never prior prose or factual evidence. For a broad operator brief that supplies them, use one signal to choose a concrete adjacent object in at least two propositions. Do not reconstruct, paraphrase, or extend the historical post that produced the tokens.',
+      personalTopicSignalContract: 'Structured personal topic signals are unordered semantic tokens, never prior prose or factual evidence. For a broad operator brief that supplies them, use one signal to choose a concrete subject or one-hop adjacent object in at least two propositions. Reusing a named subject is allowed only for a genuinely different public claim. Do not reconstruct, paraphrase, or extend the historical post that produced the tokens.',
       nativeReactionContract: 'The native reaction anchors are positive evidence of what this author finds worth saying and how socially alive the underlying thought is. Match their directness, conviction, weirdness, incompleteness, and public posture only. Never reuse an anchor premise, named scene, joke, causal claim, or sentence skeleton.',
     },
     nativeReactionAnchors: nativeReactionAnchors.slice(0, 6).map((anchor) => ({
@@ -2627,6 +2627,7 @@ function preflightDraft({
       canonicalPremiseSimilarity(`${idea.claim} ${content}`, premise),
     )
   )));
+  const premiseReskinFloor = (brief.personalTopicSignals?.length || 0) > 0 ? 0.62 : 0.48;
   const sourceCopy = isNearDuplicate(content, untrustedSourceTexts, 0.72);
   const blockedCopy = blocks.some((block) => (
     block.scope === 'copy'
@@ -2653,7 +2654,7 @@ function preflightDraft({
   if (isGenericOperatorProductWishlistV2(content)) codes.push('generic_product_wishlist');
   if (recentDuplicate.isDuplicate) codes.push('recent_copy_duplicate');
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
-  if (premiseReskinRisk >= 0.48) codes.push('voice_anchor_semantic_reskin');
+  if (premiseReskinRisk >= premiseReskinFloor) codes.push('voice_anchor_semantic_reskin');
   if (sourceCopy.isDuplicate) codes.push('source_copy');
   if (blockedCopy) codes.push('blocked_copy_pattern');
   if (writingConstraints.maxQuestionDraftsInBatch === 0 && isQuestionDraftV2(content)) {

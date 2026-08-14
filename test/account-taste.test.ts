@@ -56,6 +56,12 @@ describe('account taste scoring', () => {
       'most impressive thing a seed team can show me is the list of roles they refused to hire.',
       { voiceProfile: geoffreyVoiceProfile, learnings },
     ).casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    const compactTechnicalCall = assessAccountTaste(
+      'etched should hire the compiler lead before the celebrity researcher.\n\nthe chip is the company and the compiler is how it becomes usable.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    expect(compactTechnicalCall.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(compactTechnicalCall.technicalCredibilityScore).toBeGreaterThanOrEqual(0.45);
   });
 
   it('prefers Geoffrey-native technical anchors over topic-swapped AI advice', () => {
