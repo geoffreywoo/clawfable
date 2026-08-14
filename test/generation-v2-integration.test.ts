@@ -347,7 +347,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-35',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-36',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -686,7 +686,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'idea_generation')).toBe(true);
   });
 
-  it('uses only operator-written posts as diction anchors', async () => {
+  it('keeps raw operator prose in diction and critic stages only', async () => {
     await generateTweetBatchV2({
       ...input,
       learnings: {
@@ -744,7 +744,8 @@ describe('generateTweetBatchV2 integration', () => {
     const ideaPrompts = ideaCalls.map(([options]) => JSON.parse(options.prompt || '{}'));
     const ideaPrompt = ideaPrompts[0];
     const ideaJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
-    const operatorPremiseExclusions = [...new Set(ideaPrompts.flatMap((prompt) => prompt.operatorPremiseExclusions || []))];
+    const ideaPayload = JSON.stringify(ideaPrompts);
+    const ideaJudgePayload = JSON.stringify(ideaJudgePrompt);
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
@@ -763,23 +764,23 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaSystem).toContain('preserve that attribution');
     expect(ideaSystem).toContain('claim must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
-    expect(ideaPrompt.requirements.nativeReactionContract).toContain('positive evidence');
-    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionAnchors).map((anchor: any) => anchor.text)).toEqual(expect.arrayContaining([
-      'operator-written diction anchor',
-      'timeline diction from the curated voice corpus',
-    ]));
-    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionAnchors).map((anchor: any) => anchor.text)).not.toContain('generated diction must not return');
-    expect(ideaJudgePrompt.nativeReactionAnchors.map((anchor: any) => anchor.text)).toEqual(expect.arrayContaining([
-      'operator-written diction anchor',
-      'timeline diction from the curated voice corpus',
-    ]));
-    expect(ideaJudgePrompt.nativeReactionAnchors.map((anchor: any) => anchor.text)).not.toContain('generated diction must not return');
+    expect(ideaPrompt.requirements.nativeReactionContract).toContain('Raw native prose is intentionally withheld');
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).length).toBeGreaterThan(0);
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).every((pattern: any) => (
+      pattern.reactionMode && pattern.lengthBand && pattern.paragraphBand && !('text' in pattern)
+    ))).toBe(true);
+    expect(ideaJudgePrompt.nativeReactionPatterns.length).toBeGreaterThan(0);
+    expect(ideaJudgePrompt.nativeReactionPatterns.every((pattern: any) => !('text' in pattern))).toBe(true);
+    expect(ideaPayload).not.toContain('operator-written diction anchor');
+    expect(ideaPayload).not.toContain('timeline diction from the curated voice corpus');
+    expect(ideaPayload).not.toContain('manual topic winner is a premise boundary');
+    expect(ideaPayload).not.toContain('generated diction must not return');
+    expect(ideaJudgePayload).not.toContain('operator-written diction anchor');
+    expect(ideaJudgePayload).not.toContain('timeline diction from the curated voice corpus');
+    expect(ideaJudgePayload).not.toContain('generated diction must not return');
     expect(ideaPrompts.flatMap((prompt) => prompt.briefs).flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
-    expect(operatorPremiseExclusions).toContain('operator-written diction anchor');
-    expect(operatorPremiseExclusions).toContain('timeline diction from the curated voice corpus');
-    expect(operatorPremiseExclusions).toContain('manual topic winner is a premise boundary, never a diction anchor');
-    expect(operatorPremiseExclusions).not.toContain('generated diction must not return');
     const copyJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
+    expect(copyJudgePrompt.voiceAnchors.map((anchor: any) => anchor.text)).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).not.toContain('generated diction must not return');
   });
