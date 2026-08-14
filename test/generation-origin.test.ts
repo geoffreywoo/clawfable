@@ -156,7 +156,7 @@ describe('generated publishing origin gate', () => {
     })).toContain('autonomous quality margin');
     expect(getGeneratedPublishIssue({
       ...complete,
-      finalCriticScores: { qualityMargin: 0.84 } as any,
+      finalCriticScores: { qualityMargin: 0.86 } as any,
     })).toBeNull();
   });
 

@@ -52,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 15;
+export const GENERATION_QUALITY_AUDIT_VERSION = 16;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -77,6 +77,39 @@ const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN 
 
 type AuditIdentity = ReturnType<typeof buildAgentIdentityAudit>;
 type AuditGenerationV2 = Awaited<ReturnType<typeof loadGenerationV2Metrics>>;
+type AuditGenerationLineage = AuditGenerationV2['lineage'];
+
+export function buildGenerationQueueHandoffAudit(runs: AuditGenerationLineage) {
+  const selectedDrafts = runs.flatMap((run) => {
+    const selectedDraftIds = new Set(run.selectedDraftIds || []);
+    return run.drafts
+      .filter((draft) => selectedDraftIds.has(draft.draftCandidateId))
+      .map((draft) => ({
+        generationRunId: run.generationRunId,
+        draftCandidateId: draft.draftCandidateId,
+        content: draft.content,
+        tweetId: draft.tweetId,
+      }));
+  });
+  const persistedSelectedDrafts = selectedDrafts.filter((draft) => Boolean(draft.tweetId));
+  const unpersistedSelectedDrafts = selectedDrafts.filter((draft) => !draft.tweetId);
+  const rejectionReasonCounts = runs.reduce<Record<string, number>>((counts, run) => {
+    for (const [code, count] of Object.entries(run.rejectionCounts || {})) {
+      if (!code.startsWith('queue_') || !Number.isFinite(count) || count <= 0) continue;
+      counts[code] = (counts[code] || 0) + count;
+    }
+    return counts;
+  }, {});
+  return {
+    selectedDrafts,
+    persistedSelectedDrafts,
+    unpersistedSelectedDrafts,
+    rejectionReasonCounts,
+    queueHandoffRate: selectedDrafts.length > 0
+      ? Number((persistedSelectedDrafts.length / selectedDrafts.length).toFixed(4))
+      : null,
+  };
+}
 
 interface AuditFindingInput {
   identity: AuditIdentity;
@@ -115,6 +148,7 @@ interface AuditFindingInput {
       draftCandidateId: string;
       content: string;
     }>;
+    queueRejectionReasonCounts?: Record<string, number>;
   };
   generationV2: AuditGenerationV2;
   complaints: {
@@ -266,9 +300,10 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         persistedSelectedDraftCount: input.currentPolicyWindow.persistedSelectedDraftCount || 0,
         unpersistedSelectedDraftCount: input.currentPolicyWindow.unpersistedSelectedDraftCount,
         queueHandoffRate: input.currentPolicyWindow.queueHandoffRate ?? null,
+        rejectionReasonCounts: input.currentPolicyWindow.queueRejectionReasonCounts || {},
         drafts: input.currentPolicyWindow.unpersistedDrafts || [],
       },
-      action: 'Inspect refill_candidate_rejected logs and repair the post-critic enqueue gate; do not spend more model calls until approved drafts can persist.',
+      action: 'Inspect queue rejection receipts in the generation trace and repair the post-critic enqueue gate; do not spend more model calls until approved drafts can persist.',
     });
   }
 
@@ -750,16 +785,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const currentDraftsEligible = sumCurrentStage('draftsEligible');
   const currentDraftsSelected = sumCurrentStage('draftsSelected');
   const currentProviderAttempts = sumCurrentStage('providerAttempts');
-  const currentSelectedDrafts = currentPolicyRuns.flatMap((run) => run.drafts
-    .filter((draft) => draft.status === 'selected')
-    .map((draft) => ({
-      generationRunId: run.generationRunId,
-      draftCandidateId: draft.draftCandidateId,
-      content: draft.content,
-      tweetId: draft.tweetId,
-    })));
-  const persistedSelectedDrafts = currentSelectedDrafts.filter((draft) => Boolean(draft.tweetId));
-  const unpersistedSelectedDrafts = currentSelectedDrafts.filter((draft) => !draft.tweetId);
+  const queueHandoff = buildGenerationQueueHandoffAudit(currentPolicyRuns);
   const refillCandidateRejections = postLog.filter((entry) => (
     entry.format === 'refill_candidate_rejected'
     && entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
@@ -777,12 +803,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     selectedDraftsPerRun: currentPolicyRuns.length > 0
       ? Number((currentDraftsSelected / currentPolicyRuns.length).toFixed(4))
       : null,
-    persistedSelectedDraftCount: persistedSelectedDrafts.length,
-    unpersistedSelectedDraftCount: unpersistedSelectedDrafts.length,
-    queueHandoffRate: currentSelectedDrafts.length > 0
-      ? Number((persistedSelectedDrafts.length / currentSelectedDrafts.length).toFixed(4))
-      : null,
-    unpersistedDrafts: unpersistedSelectedDrafts.slice(0, 10).map(({ tweetId: _tweetId, ...draft }) => draft),
+    persistedSelectedDraftCount: queueHandoff.persistedSelectedDrafts.length,
+    unpersistedSelectedDraftCount: queueHandoff.unpersistedSelectedDrafts.length,
+    queueHandoffRate: queueHandoff.queueHandoffRate,
+    unpersistedDrafts: queueHandoff.unpersistedSelectedDrafts.slice(0, 10).map(({ tweetId: _tweetId, ...draft }) => draft),
+    queueRejectionReasonCounts: queueHandoff.rejectionReasonCounts,
     refillCandidateRejections: {
       recentCount: refillCandidateRejections.length,
       reasonCounts: topCounts(refillCandidateRejections.map((entry) => String(entry.reason || 'unknown').split(':')[0])),

@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   getPerformanceHistory: vi.fn(),
   getRelationshipProfiles: vi.fn(),
   getProductFacts: vi.fn(),
+  getGenerationRuns: vi.fn(),
+  saveGenerationRun: vi.fn(),
   addLearningSignal: vi.fn(),
   invalidateAgentConnection: vi.fn(),
   upsertRelationshipProfile: vi.fn(),
@@ -99,6 +101,8 @@ vi.mock('@/lib/kv-storage', () => ({
   getPerformanceHistory: mocks.getPerformanceHistory,
   getRelationshipProfiles: mocks.getRelationshipProfiles,
   getProductFacts: mocks.getProductFacts,
+  getGenerationRuns: mocks.getGenerationRuns,
+  saveGenerationRun: mocks.saveGenerationRun,
   addLearningSignal: mocks.addLearningSignal,
   invalidateAgentConnection: mocks.invalidateAgentConnection,
   upsertRelationshipProfile: mocks.upsertRelationshipProfile,
@@ -111,7 +115,7 @@ vi.mock('@/lib/generation-context', () => ({
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
   PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-66',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-67',
   getCommittedTweetCopyMemoryV2: (tweets: Tweet[], options: { limit?: number } = {}) => tweets
     .filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status) && !tweet.quarantinedAt)
     .map((tweet) => tweet.content)
@@ -360,6 +364,8 @@ beforeEach(() => {
   mocks.getPerformanceHistory.mockResolvedValue([]);
   mocks.getRelationshipProfiles.mockResolvedValue([]);
   mocks.getProductFacts.mockResolvedValue([]);
+  mocks.getGenerationRuns.mockResolvedValue([]);
+  mocks.saveGenerationRun.mockResolvedValue(undefined);
   mocks.getTrendingCache.mockResolvedValue([]);
   mocks.getTrendingCacheSnapshot.mockResolvedValue({
     data: [],
@@ -640,6 +646,30 @@ describe('autopilot remote debug logging', () => {
       approvedCandidate,
       { ...approvedCandidate, draftCandidateId: 'draft-modal-databricks-duplicate' },
     ]);
+    mocks.getGenerationRuns.mockResolvedValue([{
+      schemaVersion: 2,
+      id: 'run-modal-databricks',
+      agentId: agent.id,
+      pipelineVersion: 'v2',
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      requestedCount: 2,
+      sourceDocumentIds: [],
+      storyClusterIds: [],
+      ideaCandidateIds: ['idea-modal-databricks'],
+      draftCandidateIds: ['draft-modal-databricks', 'draft-modal-databricks-duplicate'],
+      selectedDraftIds: ['draft-modal-databricks', 'draft-modal-databricks-duplicate'],
+      stageCounts: { draftsSelected: 2 },
+      rejectionCounts: {},
+      modelCalls: [],
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      estimatedCostUsd: 0,
+      startedAt: '2026-08-14T10:00:00.000Z',
+      completedAt: '2026-08-14T10:00:01.000Z',
+      durationMs: 1000,
+      status: 'completed',
+      error: null,
+    }]);
 
     expect(await refillQueue(agent as any, 2)).toBe(1);
     expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
@@ -654,6 +684,17 @@ describe('autopilot remote debug logging', () => {
         draftCandidateId: 'draft-modal-databricks-duplicate',
         reason: 'recent_semantic_duplicate',
         qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      }),
+    );
+    expect(mocks.saveGenerationRun).toHaveBeenLastCalledWith(
+      agent.id,
+      expect.objectContaining({
+        stageCounts: expect.objectContaining({
+          queueCandidatesEvaluated: 2,
+          queueCandidatesPersisted: 1,
+          queueCandidatesRejected: 1,
+        }),
+        rejectionCounts: expect.objectContaining({ queue_recent_semantic_duplicate: 1 }),
       }),
     );
   });
