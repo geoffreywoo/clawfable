@@ -41,6 +41,7 @@ import {
   selectNativeReactionAnchors,
   selectSubjectNativeReactionPatternV2,
   shouldRunPostcriticRescueV2,
+  shouldTryV2SubtractiveTailRepair,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
@@ -475,6 +476,33 @@ describe('Tweet Generation V2', () => {
       0.84,
     )).toBe(false);
     expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
+  });
+
+  it('tries deletion-only repair for a near-autopost margin miss without requiring magic critic wording', () => {
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'Clarify that serviceability makes the gross-margin claim credible.',
+      0.8497,
+      "publish the field-service interval. until then it's a video.",
+    )).toBe(true);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'Clarify the mechanism.',
+      0.8399,
+      "publish the field-service interval. until then it's a video.",
+    )).toBe(false);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'Cut the explanatory closer and stop.',
+      0.8,
+      'the concrete call. an ordinary tail.',
+    )).toBe(true);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_cringe_risk', 'final_quality_margin'],
+      'Cut the explanatory closer and stop.',
+      0.85,
+      "publish the field-service interval. until then it's a video.",
+    )).toBe(false);
   });
 
   it('leads voice transfer with a same-register native posture and keeps cross-topic range', () => {
