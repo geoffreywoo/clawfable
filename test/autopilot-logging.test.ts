@@ -115,7 +115,7 @@ vi.mock('@/lib/generation-context', () => ({
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
   PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-74',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-75',
   getCommittedTweetCopyMemoryV2: (tweets: Tweet[], options: { limit?: number } = {}) => tweets
     .filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status) && !tweet.quarantinedAt)
     .map((tweet) => tweet.content)
@@ -212,6 +212,16 @@ vi.mock('@/lib/queue-healing', () => ({
 vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
   PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
+  resolvePublishingV2ModelStacks: vi.fn((handle?: string | null) => {
+    const geoffrey = ['geoffwoo', 'geoffreywoo'].includes(
+      String(handle || '').replace(/^@/, '').toLowerCase(),
+    );
+    return {
+      activeStack: geoffrey ? 'publishing_v2_fable_control' : 'publishing_v2_quality',
+      shadowStack: geoffrey ? 'publishing_v2_gpt_control' : 'publishing_v2_fable_control',
+      reason: geoffrey ? 'geoffrey_fable_primary' : 'default_gpt_primary',
+    };
+  }),
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
@@ -511,7 +521,10 @@ describe('autopilot remote debug logging', () => {
     });
 
     await expect(refillQueue(agent as any, 2)).resolves.toBe(0);
-    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({ trending: null }));
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      trending: null,
+      modelStack: 'publishing_v2_fable_control',
+    }));
     expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
   });
 

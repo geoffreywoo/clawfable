@@ -67,7 +67,7 @@ import {
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { PUBLISHING_V2_MODEL_STACK } from './ai';
+import { PUBLISHING_V2_MODEL_STACK, resolvePublishingV2ModelStacks } from './ai';
 import { PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN } from './publishing-quality-policy';
 import { getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
@@ -2401,6 +2401,7 @@ export async function refillQueue(
       context.learnings = await buildLearnings(agent);
     }
     const { voiceProfile, learnings, settings, style, recentPosts, allTweets, memory, signals = [] } = context;
+    const publishingModelStack = resolvePublishingV2ModelStacks(agent.handle).activeStack;
     const trendingSnapshot = await getTrendingCacheSnapshot(agent.id).catch(() => null);
     const trending = trendingSnapshot?.isFresh && Array.isArray(trendingSnapshot.data)
       ? trendingSnapshot.data as TrendingTopic[]
@@ -2443,7 +2444,7 @@ export async function refillQueue(
           memory,
           signals,
           trending,
-          modelStack: PUBLISHING_V2_MODEL_STACK,
+          modelStack: publishingModelStack,
           mode: 'live',
           entitlement,
         });
@@ -2478,7 +2479,7 @@ export async function refillQueue(
           memory,
           signals,
           trending: null,
-          modelStack: PUBLISHING_V2_MODEL_STACK,
+          modelStack: publishingModelStack,
           mode: 'live',
           entitlement,
         })
