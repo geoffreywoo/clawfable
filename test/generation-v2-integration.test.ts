@@ -345,7 +345,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-17',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-18',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -519,29 +519,31 @@ describe('generateTweetBatchV2 integration', () => {
       }),
     });
     expect(rejected.judgeBreakdown.qualityMargin).toBeLessThan(0.85);
-    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'tweet_writing')).toHaveLength(6);
+    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'tweet_writing')).toHaveLength(4);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
-      stageCounts: expect.objectContaining({ retryUsed: 1, rescueTargets: 2 }),
+      stageCounts: expect.objectContaining({ retryUsed: 0, rescueTargets: 0 }),
     });
   });
 
   it('uses one targeted writer and critic round to fill a partial clean result', async () => {
+    let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') return writerResponse(options.prompt);
       if (options.task === 'copy_judgment') {
+        criticCalls += 1;
         const candidates = JSON.parse(options.prompt).candidates;
         const allowedIdea = candidates[0].ideaId;
         return result(JSON.stringify({
           ranking: candidates.map((candidate: any) => candidate.id),
           scores: candidates.map((candidate: any) => ({
             id: candidate.id,
-            overall: candidate.ideaId === allowedIdea ? 0.9 : 0.3,
-            voiceFit: candidate.ideaId === allowedIdea ? 0.9 : 0.4,
-            operatorPlausibility: candidate.ideaId === allowedIdea ? 0.9 : 0.4,
-            cringeRisk: candidate.ideaId === allowedIdea ? 0.05 : 0.6,
-            insight: candidate.ideaId === allowedIdea ? 0.86 : 0.3,
+            overall: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.78,
+            voiceFit: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            operatorPlausibility: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.18,
+            insight: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.86 : 0.78,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.9,
@@ -1372,11 +1374,11 @@ describe('generateTweetBatchV2 integration', () => {
           ranking: parsed.candidates.map((candidate: any) => candidate.id),
           scores: parsed.candidates.map((candidate: any) => ({
             id: candidate.id,
-            overall: 0.55,
-            voiceFit: 0.55,
-            operatorPlausibility: 0.55,
-            cringeRisk: 0.2,
-            insight: 0.72,
+            overall: 0.78,
+            voiceFit: 0.82,
+            operatorPlausibility: 0.82,
+            cringeRisk: 0.18,
+            insight: 0.78,
             specificity: 0.8,
             factualSafety: 0.98,
             clarity: 0.82,

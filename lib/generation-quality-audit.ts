@@ -26,6 +26,7 @@ import {
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
+import { getStoryEditorialRejectionCodesV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
@@ -35,7 +36,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 6;
+export const GENERATION_QUALITY_AUDIT_VERSION = 7;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -497,6 +498,13 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const postedGenerated = generatedPostedTweets(allTweets);
   const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
   const identity = buildAgentIdentityAudit(agent);
+  const storyEditorialOptions = {
+    minConsequence: agent.handle.replace(/^@/, '').toLowerCase() === 'geoffwoo' ? 0.55 : undefined,
+  };
+  const storyDecisions = storyClusters.map((story) => ({
+    story,
+    rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
+  }));
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -623,6 +631,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       documentCount: sourceDocuments.length,
       storyCount: storyClusters.length,
       qualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
+      evidenceQualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
+      generationEligibleStoryCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
       blockedStoryCount: storyClusters.filter((story) => Boolean(story.blockedUntil || story.blockReason)).length,
       sourceTypeCounts: countBy(sourceDocuments.map((document) => document.sourceType)),
       trustTierCounts: countBy(sourceDocuments.map((document) => document.trustTier)),
@@ -636,7 +646,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         feedCount: researchAgenda.rssFeeds.length,
         githubRepositoryCount: researchAgenda.githubRepositories.length,
       } : null,
-      accepted: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).map((story) => ({
+      accepted: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).map(({ story }) => ({
         id: story.id,
         headline: story.title,
         topic: story.topic,
@@ -646,7 +656,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         independentSourceCount: story.independentSourceCount,
         scores: story.scores,
       })),
-      rejected: storyClusters.filter((story) => !story.evidenceQualified || Boolean(story.blockedUntil)).map((story) => ({
+      rejected: storyDecisions.filter((decision) => decision.rejectionCodes.length > 0).map(({ story, rejectionCodes }) => ({
         id: story.id,
         headline: story.title,
         topic: story.topic,
@@ -655,6 +665,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         evidenceQualified: story.evidenceQualified,
         blockReason: story.blockReason,
         blockedUntil: story.blockedUntil,
+        rejectionCodes,
         primarySourceCount: story.primarySourceCount,
         independentSourceCount: story.independentSourceCount,
       })),

@@ -564,6 +564,27 @@ describe('Tweet Generation V2', () => {
       id: 'story-low-consequence',
       scores: { ...qualified.scores, consequence: 0.22 },
     })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-range-filing',
+      title: 'SCHEDULE 13G/A - Range Capital Management LP (Subject)',
+      scores: { ...qualified.scores, consequence: 0.48 },
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-form-four',
+      title: '4 - Example Corp (Issuer)',
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-sdk-version',
+      title: 'sdk: v0.117.1',
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-geoffrey-low-consequence',
+      scores: { ...qualified.scores, consequence: 0.48 },
+    }, { minConsequence: 0.55 })).toBe(false);
   });
 
   it('treats a re-clustered version of an already published story as consumed', () => {
@@ -1158,6 +1179,63 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
+  it('allows a clearly speculative valuation call with a number', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Google should buy @cognition for $200b and make @ScottWu46 ceo.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-valuation-opinion',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
+  it('rejects an unsourced measured numeric claim', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'OpenAI has 42% market share and the gap is widening.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-measured-number',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
+  it('does not let a valuation opinion launder a separate measured claim', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'OpenAI has 42% market share and should be worth $200b.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-mixed-number',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
   });
 
   it('blocks paraphrases of a permanently rejected named angle before writing', () => {

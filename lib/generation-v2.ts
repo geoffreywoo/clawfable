@@ -893,17 +893,31 @@ export function isStoryInEditorialCooldownV2(
   });
 }
 
-export function isStoryEditoriallyQualifiedV2(story: StoryCluster): boolean {
-  const lowSignalFilingStub = /^(?:\d+(?:-[a-z]+)?|d\/a|s-\d+|schedule\s+\w+)\s+-\s+/i.test(story.title)
-    && /\b(?:filer|issuer|reporting|subject)\b/i.test(story.title)
-    && story.scores.consequence < 0.48;
-  return story.evidenceQualified
-    && !story.blockReason
-    && !lowSignalFilingStub
-    && story.scores.identityFit >= V2_MIN_STORY_IDENTITY_FIT
-    && story.scores.consequence >= V2_MIN_STORY_CONSEQUENCE
-    && story.scores.freshness >= 0.12
-    && story.scores.total >= V2_MIN_STORY_TOTAL;
+export function getStoryEditorialRejectionCodesV2(
+  story: StoryCluster,
+  options: { minConsequence?: number } = {},
+): string[] {
+  const codes: string[] = [];
+  const lowSignalFilingStub = /^(?:\d+(?:-[a-z]+)?|d\/a|s-\d+|schedule\s+[\w/-]+)\s+-\s+/i.test(story.title)
+    && /\((?:filer|issuer|reporting|subject)\)\s*$/i.test(story.title);
+  const versionOnlyStub = /^(?:[a-z0-9._-]+:\s*)?v?\d+\.\d+(?:\.\d+)?(?:[-.a-z0-9]+)?$/i.test(story.title.trim());
+  const minConsequence = Math.max(V2_MIN_STORY_CONSEQUENCE, options.minConsequence ?? 0);
+  if (!story.evidenceQualified) codes.push('evidence_unqualified');
+  if (story.blockReason) codes.push('blocked');
+  if (lowSignalFilingStub) codes.push('filing_stub');
+  if (versionOnlyStub) codes.push('version_stub');
+  if (story.scores.identityFit < V2_MIN_STORY_IDENTITY_FIT) codes.push('identity_below_floor');
+  if (story.scores.consequence < minConsequence) codes.push('consequence_below_floor');
+  if (story.scores.freshness < 0.12) codes.push('freshness_below_floor');
+  if (story.scores.total < V2_MIN_STORY_TOTAL) codes.push('total_below_floor');
+  return codes;
+}
+
+export function isStoryEditoriallyQualifiedV2(
+  story: StoryCluster,
+  options: { minConsequence?: number } = {},
+): boolean {
+  return getStoryEditorialRejectionCodesV2(story, options).length === 0;
 }
 
 function isStoryBlockedBySemanticMemory(story: StoryCluster, blocks: SemanticBlock[]): boolean {
@@ -952,9 +966,10 @@ export function buildGenerationBriefsV2({
   // that a story or trend has actually entered the account's publishing slate.
   const committedTweets = allTweets.filter(isCommittedTweet).slice(0, 80);
   const failedStoryAttempts = buildFailedStoryAttemptsV2(recentIdeas, now, PUBLISHING_V2_QUALITY_POLICY_VERSION);
+  const geoffreyPortfolio = isGeoffreyVoiceProfile(voiceProfile);
   const storyCandidates = stories
     .filter((story) => (
-      isStoryEditoriallyQualifiedV2(story)
+      isStoryEditoriallyQualifiedV2(story, { minConsequence: geoffreyPortfolio ? 0.55 : undefined })
       && !isStoryBlockedBySemanticMemory(story, blocks)
       && !isStoryAlreadyCommittedV2(story, committedTweets, now)
       && !isStoryInEditorialCooldownV2(story, failedStoryAttempts)
@@ -966,7 +981,6 @@ export function buildGenerationBriefsV2({
   const maxDeepTechnicalBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 5));
   const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 8));
   const maxTopicDomainBriefs = Math.max(2, Math.ceil(briefCount / 4));
-  const geoffreyPortfolio = isGeoffreyVoiceProfile(voiceProfile);
   const briefTopicContext = (brief: GenerationBriefV2) => `${brief.topic} ${brief.title}`;
   const portfolioAllowsTopic = (value: string): boolean => {
     if (!geoffreyPortfolio) return true;
@@ -1355,18 +1369,35 @@ function ideaText(idea: Pick<IdeaCandidate, 'claim' | 'tension' | 'implication' 
   return `${idea.claim} ${idea.tension} ${idea.implication} ${idea.authorReason}`;
 }
 
-function unsupportedOperatorFact(text: string): boolean {
-  return /\b(?:according to|announced|reported|signed|filed|merger|acquisition|this week|today|yesterday)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b20\d{2}\b|\$\d|\b\d+(?:\.\d+)?(?:%|x)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
+const OPERATOR_SPECULATIVE_NUMBER_POSTURE = /\b(?:should\s+(?:buy|sell|pay|be\s+worth)|worth\s+[$£€]?\s*\d|will\s+be\s+worth|i(?:'d|\s+would)\s+(?:pay|value|buy|sell|bet)|first\s+[$£€]?\s*\d|before\s+20\d{2}|by\s+20\d{2}|prediction|price\s+target|valuation\s+target)\b/i;
+const OPERATOR_ASSERTED_NUMBER = /\b20\d{2}\b|[$£€]\s*\d|\b\d+(?:\.\d+)?(?:%|x)(?![a-z0-9_])/i;
+
+function hasUnsupportedOperatorNumber(text: string): boolean {
+  const withoutSpeculativeNumbers = text
+    .replace(/\b(?:worth|value(?:d)?\s+at|pay|bet)\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
+    .replace(/\b(?:buy|sell|acquire)\b.{0,60}?\bfor\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
+    .replace(/\bfirst\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
+    .replace(/\b(?:price|valuation)\s+target\b.{0,30}?[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
+    .replace(/\b(?:before|by)\s+20\d{2}\b/gi, ' ');
+  return OPERATOR_ASSERTED_NUMBER.test(withoutSpeculativeNumbers);
 }
 
-const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:'d| would|'ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| judge| rate| treat| believe| think)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me)\b/i;
+function unsupportedOperatorFact(text: string): boolean {
+  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|merger|acquisition|this week|today|yesterday)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
+  const assertedNumber = hasUnsupportedOperatorNumber(text);
+  return assertedEventOrExperience || assertedNumber;
+}
+
+const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:'d| would|'ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| judge| rate| treat| believe| think)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced))\b/i;
 
 function unsupportedOperatorEvidence(text: string, lockEvidenceConcepts = true): boolean {
   const lockConcepts = lockEvidenceConcepts && !OPERATOR_JUDGMENT_POSTURE.test(text);
   const assessment = assessClaimEvidence(text, [], { lockEvidenceConcepts: lockConcepts });
+  const speculativeNumbers = OPERATOR_SPECULATIVE_NUMBER_POSTURE.test(text)
+    && !hasUnsupportedOperatorNumber(text);
   return unsupportedOperatorFact(text)
     || (assessment.hasPersonalExperienceClaim && !assessment.personalExperienceSupported)
-    || assessment.unsupportedNumbers.length > 0
+    || (!speculativeNumbers && assessment.unsupportedNumbers.length > 0)
     || assessment.unsupportedQuotes.length > 0
     || (lockConcepts && assessment.unsupportedEvidenceConcepts.length > 0);
 }
@@ -3285,7 +3316,8 @@ function rescueTargetsV2(
     .filter((entry) => (
       entry.draft.status === 'rejected'
       && typeof entry.draft.judgeScore === 'number'
-      && entry.draft.judgeScore >= 0.28
+      && entry.draft.judgeScore >= 0.72
+      && (entry.draft.judgeBreakdown?.qualityMargin ?? 0) >= 0.82
       && entry.draft.rejectionCodes.length > 0
       && entry.draft.rejectionCodes.every((code) => V2_REWRITEABLE_RESCUE_CODES.has(code))
       && !entry.draft.rejectionCodes.includes('copy_judge_unavailable')
