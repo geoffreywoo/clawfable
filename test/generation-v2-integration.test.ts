@@ -20,6 +20,7 @@ vi.mock('@/lib/ai', () => ({
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,
   PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_fable_control',
+  PUBLISHING_V2_GPT_CONTROL_MODEL_STACK: 'publishing_v2_gpt_control',
   PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
 
@@ -363,7 +364,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-75',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-76',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -377,6 +378,131 @@ describe('generateTweetBatchV2 integration', () => {
     const copyJudgeCandidateCount = mocks.saveGenerationRun.mock.calls.at(-1)?.[1]?.stageCounts?.copyJudgeCandidates;
     expect(copyJudgeCandidateCount).toBeGreaterThanOrEqual(7);
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
+  });
+
+  it('pairs Geoffrey Fable drafts with one same-idea GPT control and preserves the winning stack', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        if (options.modelStack === 'publishing_v2_gpt_control') {
+          const controlCopy: Record<string, string> = {
+            'AI startups': 'ai startups get my first dollar.',
+            'biotech manufacturing': 'biotech manufacturing is my pick.',
+            'energy markets': "i'd start with energy markets.",
+            'founder financing': 'founder financing first for me.',
+          };
+          return result(JSON.stringify({ drafts: [{
+            content: controlCopy[parsed.idea.topic] || `${parsed.idea.topic} gets my first dollar.`,
+            format: 'short_punch',
+            posture: 'one direct decision',
+          }] }), 'openai');
+        }
+        return result(JSON.stringify({ drafts: [0, 1, 2].map((index) => ({
+          content: `${parsed.idea.topic} isn't about the visible launch. it's about the real edge ${index}.`,
+          format: 'hot_take',
+          posture: 'synthetic contrast',
+        })) }), 'anthropic');
+      }
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2({
+      ...input,
+      modelStack: 'publishing_v2_fable_control',
+    });
+    const writerCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing');
+    const primaryCalls = writerCalls.filter((call) => (
+      call.modelStack === 'publishing_v2_fable_control'
+      && JSON.parse(call.prompt).failedAttempts.length === 0
+    ));
+    const controlCalls = writerCalls.filter((call) => (
+      call.modelStack === 'publishing_v2_gpt_control'
+      && JSON.parse(call.prompt).failedAttempts.length === 0
+    ));
+    const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
+
+    expect(primaryCalls).toHaveLength(4);
+    expect(controlCalls).toHaveLength(4);
+    expect(controlCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(controlCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
+    expect(controlCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
+    expect(new Set(persistedDrafts.filter((draft) => (
+      draft.generationModelStack === 'publishing_v2_gpt_control'
+    )).map((draft) => draft.id)).size).toBe(4);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.generationProvider === 'openai')).toBe(true);
+    expect(drafts.every((draft) => draft.generationModelStack === 'publishing_v2_gpt_control')).toBe(true);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      stageCounts: expect.objectContaining({
+        initialPrimaryWriterDrafts: 12,
+        initialShadowWriterDrafts: 4,
+        draftsSelected: 2,
+      }),
+    });
+  });
+
+  it('rejudges a deletion-only tail trim instead of rewriting a Geoffrey near miss', async () => {
+    let criticCalls = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        return result(JSON.stringify({ drafts: [{
+          content: `i'd pick ${parsed.idea.topic} first. still feels obvious to me. extra explanation makes this worse.`,
+          format: 'observation',
+          posture: 'direct pick with an unnecessary tail',
+        }] }));
+      }
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        const candidates = JSON.parse(options.prompt).candidates;
+        const passing = criticCalls > 1;
+        return result(JSON.stringify({
+          ranking: candidates.map((candidate: any) => candidate.id),
+          scores: candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: passing ? 0.95 : 0.65,
+            voiceFit: 0.9,
+            operatorPlausibility: 0.9,
+            cringeRisk: 0.05,
+            insight: passing ? 0.95 : 0.65,
+            specificity: 0.9,
+            factualSafety: 0.98,
+            clarity: 0.92,
+            novelty: 0.82,
+            manualAnchorReskinRisk: 0.05,
+            diagnosis: passing ? 'publishable' : 'delete the explanatory last sentence',
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
+    const trims = persistedDrafts.filter((draft) => draft.mutationRound === 1);
+
+    expect(criticCalls).toBe(2);
+    expect(trims).toHaveLength(4);
+    expect(trims.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
+    expect(trims.every((draft) => !draft.content.includes('extra explanation'))).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      stageCounts: expect.objectContaining({
+        postcriticTrimTargets: 4,
+        postcriticTrimDraftsGenerated: 4,
+        postcriticTrimDraftsEligible: 4,
+        postcriticTrimDraftsSelected: 2,
+        draftsSelected: 2,
+      }),
+    });
   });
 
   it('rejects generic category-level investor wrappers before paying the copy critic', async () => {

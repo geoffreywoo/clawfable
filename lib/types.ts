@@ -853,6 +853,7 @@ export interface DraftCandidate {
   posture: string;
   voiceAnchorIds: string[];
   evidenceIds: string[];
+  generationModelStack?: GenerationModelStackId | null;
   generationProvider: 'openai' | 'anthropic' | null;
   generationModel: string | null;
   judgeProvider: 'openai' | 'anthropic' | null;

@@ -52,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 20;
+export const GENERATION_QUALITY_AUDIT_VERSION = 21;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -132,16 +132,21 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
   });
   const grouped = new Map<string, typeof entries>();
   for (const entry of entries) {
-    const key = `${entry.phase}:${modelKey(entry.generationProvider, entry.generationModel)}`;
+    const key = [
+      entry.phase,
+      entry.generationModelStack || 'unknown',
+      modelKey(entry.generationProvider, entry.generationModel),
+    ].join('|');
     grouped.set(key, [...(grouped.get(key) || []), entry]);
   }
   const groups = [...grouped.entries()].map(([key, candidates]) => {
-    const [phase, ...modelParts] = key.split(':');
+    const [phase, modelStack, model] = key.split('|');
     const judged = candidates.filter((candidate) => typeof candidate.judgeScore === 'number');
     const selected = candidates.filter((candidate) => candidate.selected);
     return {
       phase,
-      model: modelParts.join(':'),
+      modelStack,
+      model,
       generatedCount: candidates.length,
       finalCriticCount: judged.length,
       selectedCount: selected.length,
@@ -187,6 +192,7 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
       draftCandidateId: entry.draftCandidateId,
       parentDraftId: entry.parentDraftId || null,
       phase: entry.phase,
+      modelStack: entry.generationModelStack || null,
       model: modelKey(entry.generationProvider, entry.generationModel),
       judgeScore: entry.judgeScore,
       qualityMargin: entry.judgeBreakdown?.qualityMargin || null,
@@ -217,7 +223,8 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
     rescue: {
       targetCount: runs.reduce((sum, run) => sum
         + (run.stageCounts.preflightRescueTargets || 0)
-        + (run.stageCounts.postcriticRescueTargets || 0), 0),
+        + (run.stageCounts.postcriticRescueTargets || 0)
+        + (run.stageCounts.postcriticTrimTargets || 0), 0),
       generatedCount: rescueEntries.length,
       finalCriticCount: rescueEntries.filter((entry) => typeof entry.judgeScore === 'number').length,
       selectedCount: selectedRescues.length,
