@@ -127,6 +127,12 @@ const V2_MIN_IDEA_DISTINCTIVENESS = 0.58;
 const V2_MIN_IDEA_NATIVE_REACTION = 0.68;
 const V2_MIN_IDEA_PUBLIC_MOVE_STRENGTH = 0.68;
 const V2_MIN_IDEA_SHARE_POTENTIAL = 0.58;
+const V2_MIN_GEOFFREY_IDEA_AUTHOR_FIT = 0.76;
+const V2_MIN_GEOFFREY_IDEA_CONSEQUENCE = 0.7;
+const V2_MIN_GEOFFREY_IDEA_DISTINCTIVENESS = 0.7;
+const V2_MIN_GEOFFREY_IDEA_NATIVE_REACTION = 0.76;
+const V2_MIN_GEOFFREY_IDEA_PUBLIC_MOVE_STRENGTH = 0.76;
+const V2_MIN_GEOFFREY_IDEA_SHARE_POTENTIAL = 0.7;
 const MAX_IDEA_CANDIDATES_PER_BRIEF = 3;
 const MAX_DRAFTS_PER_IDEA = 3;
 const SYSTEM_ERROR_PAUSE_MS = 2 * 60 * 60 * 1000;
@@ -2645,6 +2651,28 @@ function rejectIdeasAfterJudgment(
   }
 }
 
+export function getV2IdeaJudgeRejectionCodes(
+  breakdown: IdeaJudgeBreakdown,
+  voiceProfile: VoiceProfile,
+): string[] {
+  const geoffrey = isGeoffreyVoiceProfile(voiceProfile);
+  const authorFitFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_AUTHOR_FIT : V2_MIN_IDEA_AUTHOR_FIT;
+  const consequenceFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_CONSEQUENCE : V2_MIN_IDEA_CONSEQUENCE;
+  const distinctivenessFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_DISTINCTIVENESS : V2_MIN_IDEA_DISTINCTIVENESS;
+  const nativeReactionFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_NATIVE_REACTION : V2_MIN_IDEA_NATIVE_REACTION;
+  const publicMoveFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_PUBLIC_MOVE_STRENGTH : V2_MIN_IDEA_PUBLIC_MOVE_STRENGTH;
+  const sharePotentialFloor = geoffrey ? V2_MIN_GEOFFREY_IDEA_SHARE_POTENTIAL : V2_MIN_IDEA_SHARE_POTENTIAL;
+  return uniqueStrings([
+    breakdown.evidenceFidelity < V2_MIN_IDEA_EVIDENCE_FIDELITY ? 'idea_judge_evidence_mismatch' : null,
+    breakdown.authorFit < authorFitFloor ? 'idea_judge_weak_author_fit' : null,
+    breakdown.consequence < consequenceFloor ? 'idea_judge_low_consequence' : null,
+    breakdown.distinctiveness < distinctivenessFloor ? 'idea_judge_generic_premise' : null,
+    breakdown.nativeReactionPotential < nativeReactionFloor ? 'idea_judge_weak_native_reaction' : null,
+    breakdown.publicMoveStrength < publicMoveFloor ? 'idea_judge_weak_public_move' : null,
+    breakdown.sharePotential < sharePotentialFloor ? 'idea_judge_low_share_potential' : null,
+  ]);
+}
+
 export function selectRankedIdeaPortfolioV2({
   ranking,
   eligible,
@@ -2873,13 +2901,7 @@ Score sharePotential for whether a relevant founder, investor, or operator would
       );
       idea.rejectionCodes = uniqueStrings([
         ...idea.rejectionCodes,
-        breakdown.evidenceFidelity < V2_MIN_IDEA_EVIDENCE_FIDELITY ? 'idea_judge_evidence_mismatch' : null,
-        breakdown.authorFit < V2_MIN_IDEA_AUTHOR_FIT ? 'idea_judge_weak_author_fit' : null,
-        breakdown.consequence < V2_MIN_IDEA_CONSEQUENCE ? 'idea_judge_low_consequence' : null,
-        breakdown.distinctiveness < V2_MIN_IDEA_DISTINCTIVENESS ? 'idea_judge_generic_premise' : null,
-        breakdown.nativeReactionPotential < V2_MIN_IDEA_NATIVE_REACTION ? 'idea_judge_weak_native_reaction' : null,
-        breakdown.publicMoveStrength < V2_MIN_IDEA_PUBLIC_MOVE_STRENGTH ? 'idea_judge_weak_public_move' : null,
-        breakdown.sharePotential < V2_MIN_IDEA_SHARE_POTENTIAL ? 'idea_judge_low_share_potential' : null,
+        ...getV2IdeaJudgeRejectionCodes(breakdown, input.voiceProfile),
       ]);
       if (idea.rejectionCodes.length > 0) idea.status = 'rejected';
     }
@@ -3261,6 +3283,7 @@ async function writeIdeaDrafts({
   revisionStrategy = 'reconceive',
   revisionDraftCount = 1,
   revisionParentDraftId = null,
+  candidateIdSalt = '',
 }: {
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -3273,6 +3296,7 @@ async function writeIdeaDrafts({
   revisionStrategy?: DraftRevisionStrategy;
   revisionDraftCount?: 1 | 2;
   revisionParentDraftId?: string | null;
+  candidateIdSalt?: string;
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
     ? buildGeoffreyNativeV2WriterContract()
@@ -3356,7 +3380,15 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
     if (content.length < 12) return [];
     return [{
       schemaVersion: 2 as const,
-      id: stableResearchId('draft', runId, idea.id, revisionContext.length > 0 ? 'rescue' : 'initial', index, content),
+      id: stableResearchId(
+        'draft',
+        runId,
+        idea.id,
+        revisionContext.length > 0 ? 'rescue' : 'initial',
+        candidateIdSalt,
+        index,
+        content,
+      ),
       agentId: input.agentId,
       generationRunId: runId,
       surface: input.surface || 'original',
@@ -4369,7 +4401,28 @@ async function generateRescueDraftEvaluations({
     const targetRevisionStrategy = revisionStrategy === 'critic_adaptive'
       ? getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes)
       : revisionStrategy;
-    const targetModelStack = modelStack;
+    const pairedWriterRepair = revisionStrategy === 'critic_adaptive'
+      && targetRevisionStrategy === 'critic_surgical'
+      && modelStack !== input.modelStack;
+    const writerPlans: Array<{
+      modelStack: GenerationModelStackId;
+      draftCount: 1 | 2;
+      candidateIdSalt: string;
+    }> = pairedWriterRepair
+      ? [{
+          modelStack,
+          draftCount: 1,
+          candidateIdSalt: 'control-repair',
+        }, {
+          modelStack: input.modelStack,
+          draftCount: 1,
+          candidateIdSalt: 'active-repair',
+        }]
+      : [{
+          modelStack,
+          draftCount: revisionStrategy === 'critic_adaptive' ? 2 : 1,
+          candidateIdSalt: targetRevisionStrategy,
+        }];
     const revisionCandidates = targetRevisionStrategy === 'critic_surgical'
       ? [target]
       : [
@@ -4386,21 +4439,28 @@ async function generateRescueDraftEvaluations({
             V2_RESCUE_ISSUE_LABELS[code] || code.replace(/_/g, ' ')
           )),
         ], 10),
-      }));
+    }));
     try {
-      const drafts = await writeIdeaDrafts({
-        idea: target.idea,
-        brief: target.brief,
-        documents: target.sourceDocuments,
-        anchors: target.anchors,
-        input: { ...input, modelStack: targetModelStack },
-        runId,
-        calls,
-        revisionContext,
-        revisionStrategy: targetRevisionStrategy,
-        revisionDraftCount: revisionStrategy === 'critic_adaptive' ? 2 : 1,
-        revisionParentDraftId: target.draft.id,
-      });
+      const drafts = (await Promise.all(writerPlans.map(async (plan) => {
+        try {
+          return await writeIdeaDrafts({
+            idea: target.idea,
+            brief: target.brief,
+            documents: target.sourceDocuments,
+            anchors: target.anchors,
+            input: { ...input, modelStack: plan.modelStack },
+            runId,
+            calls,
+            revisionContext,
+            revisionStrategy: targetRevisionStrategy,
+            revisionDraftCount: plan.draftCount,
+            revisionParentDraftId: target.draft.id,
+            candidateIdSalt: plan.candidateIdSalt,
+          });
+        } catch {
+          return [];
+        }
+      }))).flat();
       const repairLimit = targetRevisionStrategy === 'critic_surgical'
         ? getV2BoundedRepairCharacterLimit(target.draft.content)
         : null;
@@ -4786,6 +4846,11 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       trace.stageCounts.postcriticReconceiveTargets = targets.filter((target) => (
         getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'reconceive'
       )).length;
+      trace.stageCounts.postcriticPairedWriterTargets = input.modelStack === PUBLISHING_V2_MODEL_STACK
+        ? targets.filter((target) => (
+            getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
+          )).length
+        : 0;
       trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + targets.length;
       if (targets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
         retryUsed = true;

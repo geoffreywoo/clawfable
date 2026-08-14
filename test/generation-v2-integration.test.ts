@@ -361,7 +361,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-70',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-71',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -558,15 +558,14 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'tweet_writing') {
         const parsed = JSON.parse(options.prompt);
         if (parsed.failedAttempts.length > 0) {
+          const control = options.modelStack === 'publishing_v2_fable_control';
           return result(JSON.stringify({ drafts: [{
-            content: `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`,
-            format: 'observation',
-            posture: 'plain funding preference',
-          }, {
-            content: `${parsed.idea.topic}: first-time founder over the consensus team for me.`,
-            format: 'short_punch',
-            posture: 'subject-first funding preference',
-          }] }), 'anthropic');
+            content: control
+              ? `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`
+              : `${parsed.idea.topic}: first-time founder over the consensus team for me.`,
+            format: control ? 'observation' : 'short_punch',
+            posture: control ? 'plain funding preference' : 'subject-first funding preference',
+          }] }), control ? 'anthropic' : 'openai');
         }
         return result(JSON.stringify({ drafts: [{
           content: `i'd still fund a first-time founder in ${parsed.idea.topic}.`,
@@ -608,23 +607,19 @@ describe('generateTweetBatchV2 integration', () => {
       .map(([options]) => options)
       .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.length > 0);
 
-    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(5);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(6);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
-    expect(rescueWriterCalls).toHaveLength(1);
-    expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_fable_control');
-    expect(String(rescueWriterCalls[0].system)).toContain('Return exactly two candidate revisions');
-    expect(String(rescueWriterCalls[0].system)).toContain('BOUNDED REPAIR');
-    expect(rescueWriterCalls[0].temperature).toBe(0.58);
-    expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.draftCount).toBe(2);
-    expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.variantMoves.map((move: any) => move.move)).toEqual([
-      'critic_repair',
-      'subject_rewrite',
+    expect(rescueWriterCalls).toHaveLength(2);
+    expect(rescueWriterCalls.map((call) => call.modelStack).sort()).toEqual([
+      'publishing_v2_fable_control',
+      'publishing_v2_quality',
     ]);
-    expect(JSON.parse(rescueWriterCalls[0].prompt).failedAttempts).toHaveLength(1);
-    expect(JSON.parse(rescueWriterCalls[0].prompt).boundedRepair).toMatchObject({
-      sourceCharacters: expect.any(Number),
-      maxCharactersPerDraft: expect.any(Number),
-    });
+    expect(rescueWriterCalls.every((call) => String(call.system).includes('Return exactly one revised X post'))).toBe(true);
+    expect(rescueWriterCalls.every((call) => String(call.system).includes('BOUNDED REPAIR'))).toBe(true);
+    expect(rescueWriterCalls.every((call) => call.temperature === 0.58)).toBe(true);
+    expect(rescueWriterCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(rescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 1)).toBe(true);
+    expect(rescueWriterCalls.every((call) => JSON.parse(call.prompt).boundedRepair.maxCharactersPerDraft > 0)).toBe(true);
     const rescueDrafts = mocks.upsertDraftCandidates.mock.calls
       .flatMap((call) => call[1])
       .filter((draft) => draft.mutationRound === 1);
@@ -637,6 +632,7 @@ describe('generateTweetBatchV2 integration', () => {
         rescueTargets: 1,
         postcriticSurgicalTargets: 1,
         postcriticReconceiveTargets: 0,
+        postcriticPairedWriterTargets: 1,
         rescueDraftsGenerated: 2,
         draftsSelected: 2,
       }),
@@ -1666,7 +1662,7 @@ describe('generateTweetBatchV2 integration', () => {
     const drafts = await generateTweetBatchV2(input);
     const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
 
-    expect(writerCalls).toBe(8);
+    expect(writerCalls).toBe(10);
     expect(criticCalls).toBe(3);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.content.includes('customer deposit over'))).toBe(true);
