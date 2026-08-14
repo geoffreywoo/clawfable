@@ -1440,6 +1440,24 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('blocks a direct should-buy reskin even when the CEO clause is removed', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('ai', 'OpenAI should buy Linear because agents need to own the issue tracker.')],
+      agentId: 'agent-1',
+      runId: 'run-direct-acquisition-reskin',
+      briefs: [brief('ai', 'AI companies')],
+      voiceProfile,
+      recentPosts: ['google should buy @cognition for $200b and make @ScottWu46 ceo'],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
   it('blocks replaying the back-someone-after-failure premise', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('culture', 'I would rather back someone after a loud failure than a beige win.')],
@@ -1733,6 +1751,7 @@ describe('Tweet Generation V2', () => {
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
     expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments, questions, predictions');
     expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
+    expect(ideaPrompt.requirements.rarePremiseContract).toContain('rare premises');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
       evidenceId: 'source-sourced',
       claim: expect.any(String),
@@ -1781,6 +1800,9 @@ describe('Tweet Generation V2', () => {
       'computer-use agents hit 85%. i\'m officially retiring "cool demo" from my vocabulary for this category.',
       "i'm genuinely moved by how fast this benchmark crossed humans.",
       'the benchmark is the one i keep coming back to.',
+      'my take on openai: the valuation is the whole argument.',
+      'my dream acquisition right now: openai buys linear.',
+      'my litmus test for robotics companies going commercial: ask about reducers.',
     ];
 
     expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);

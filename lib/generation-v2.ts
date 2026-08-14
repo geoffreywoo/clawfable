@@ -1356,6 +1356,7 @@ export function buildIdeaGenerationPromptV2(
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
       personalTopicSignalContract: 'Personal post history may select and rank a brief topic, but no historical premise is supplied. Invent a fresh subject and public move inside that topic. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
       nativeReactionContract: 'The native reaction anchors are positive evidence of what this author finds worth saying and how socially alive the underlying thought is. Match their directness, conviction, weirdness, incompleteness, and public posture only. Never reuse an anchor premise, named scene, joke, causal claim, or sentence skeleton.',
+      rarePremiseContract: 'Acquisition calls and CEO-installation calls are rare premises, not reusable voice moves. If an operatorPremiseExclusion already contains a company-buying or CEO-installation call, generate no X-should-buy-Y or make-Z-CEO variant.',
     },
     nativeReactionAnchors: nativeReactionAnchors.slice(0, 6).map((anchor) => ({
       id: anchor.id,
@@ -1608,12 +1609,14 @@ const PREMISE_CONCEPT_RULES: Array<{ id: string; pattern: RegExp }> = [
   { id: 'acquisition_leadership', pattern: /\b(?:acquir(?:e|es|ed|ing)|buy [@a-z0-9]|make [@a-z0-9].{0,40} ceo|chief executive)\b/i },
 ];
 const ACQUISITION_CEO_SENTENCE_SKELETON = /\b(?:should\s+)?(?:buy|acquire)\b.{0,100}\b(?:make|name|install)\b.{0,60}\b(?:ceo|chief executive)\b/i;
+const DIRECT_ACQUISITION_RECOMMENDATION = /\bshould\s+(?:just\s+)?(?:buy|acquire)\b/i;
 
 function canonicalPremiseSimilarity(left: string, right: string): number {
   const leftConcepts = new Set(PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(left)).map((rule) => rule.id));
   const rightConcepts = new Set(PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(right)).map((rule) => rule.id));
   const shared = [...leftConcepts].filter((concept) => rightConcepts.has(concept)).length;
   if (ACQUISITION_CEO_SENTENCE_SKELETON.test(left) && ACQUISITION_CEO_SENTENCE_SKELETON.test(right)) return 0.64;
+  if (DIRECT_ACQUISITION_RECOMMENDATION.test(left) && DIRECT_ACQUISITION_RECOMMENDATION.test(right)) return 0.64;
   if (
     leftConcepts.has('failure_downfall')
     && rightConcepts.has('failure_downfall')
@@ -2007,7 +2010,10 @@ async function generateIdeas({
         title: batchSubject,
       });
       const batchReactionAnchors = selectNativeReactionAnchors(
-        operatorAnchors,
+        operatorAnchors.filter((anchor) => (
+          !DIRECT_ACQUISITION_RECOMMENDATION.test(anchor.content)
+          && !ACQUISITION_CEO_SENTENCE_SKELETON.test(anchor.content)
+        )),
         [batchSubject],
         6,
       );
@@ -2425,42 +2431,6 @@ function selectNativeReactionAnchors(
   return selected;
 }
 
-function cadenceAssignments(anchors: DictionAnchor[]): Array<Record<string, unknown>> {
-  if (anchors.length === 0) return [];
-  const byLength = [...anchors].sort((left, right) => left.content.length - right.content.length);
-  const cadenceAnchors = uniqueStrings([
-    byLength[0]?.id,
-    byLength[Math.floor((byLength.length - 1) / 2)]?.id,
-    byLength.at(-1)?.id,
-  ], 3)
-    .map((id) => anchors.find((anchor) => anchor.id === id))
-    .filter((anchor): anchor is DictionAnchor => Boolean(anchor));
-  for (const anchor of anchors) {
-    if (cadenceAnchors.length >= Math.min(3, anchors.length)) break;
-    if (!cadenceAnchors.some((entry) => entry.id === anchor.id)) cadenceAnchors.push(anchor);
-  }
-  return cadenceAnchors.slice(0, 3).map((anchor, index) => {
-    const paragraphs = anchor.content.split(/\n\s*\n/).filter(Boolean).length;
-    const firstPerson = /\b(?:i|i'm|i've|i'd|i'll|my|me)\b/i.test(anchor.content);
-    return {
-      slot: index + 1,
-      anchorId: anchor.id,
-      lengthBand: anchor.content.length <= 120 ? 'short' : anchor.content.length <= 360 ? 'medium' : 'long',
-      beatCount: paragraphs <= 1 ? 'single' : paragraphs === 2 ? 'two' : 'multi',
-      firstPerson,
-      question: anchor.content.includes('?'),
-      lowercaseOpening: /^[^A-Z]*[a-z]/.test(anchor.content),
-      reactionMode: nativeReactionMode(anchor.content),
-      variantIntent: index === 0
-        ? 'One-shot reaction: concrete subject plus owned verdict. Short is allowed; generic slogan is not.'
-        : index === 1
-          ? 'Two-beat thought: verdict, then one plain-language reason or consequence.'
-          : 'Rough full thought: preserve enough context to be credible, then stop before it becomes an essay.',
-      instruction: 'Make the same kind of public move and use a similar amount of context. Use a different opening, syntax, subject, and premise.',
-    };
-  });
-}
-
 interface DraftEvaluation {
   draft: DraftCandidate;
   idea: IdeaCandidate;
@@ -2552,7 +2522,6 @@ export function buildTweetWritingPromptV2(
     } : null,
     writingConstraints: writingConstraints || null,
     responseContract: { draftCount },
-    variantCadenceAssignments: cadenceAssignments(anchors).slice(0, draftCount),
     failedAttempts: revisionContext?.slice(0, 3).map((attempt) => ({
       post: attempt.content,
       issues: uniqueStrings(attempt.issues, 10),
@@ -2624,10 +2593,10 @@ async function writeIdeaDrafts({
   const draftCount = revisionContext.length > 0 ? 1 : MAX_DRAFTS_PER_IDEA;
   const variantInstruction = draftCount === 1
     ? 'Write exactly one new X post from the approved idea. It must be a fresh replacement, not an edit or paraphrase of the failed attempt.'
-    : 'Write exactly three genuinely different X posts from one approved idea. Do not summarize or reconcile all three.';
-  const cadenceInstruction = draftCount === 1
-    ? 'Follow the single variantCadenceAssignment. Make the same kind of public move while using a different opening, syntax, subject, and premise.'
-    : 'Follow variantCadenceAssignments in slot order. Conceive each variant separately with a different opening and amount of context; three polished paraphrases are invalid.';
+    : 'Write exactly three separately conceived X posts from one approved idea. They are not short, medium, and long versions of one sentence. Do not summarize or reconcile all three.';
+  const shapeInstruction = draftCount === 1
+    ? 'Choose the most natural shape for the replacement. Start from the subject again instead of preserving the failed draft\'s opening or length.'
+    : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
   const result = await trackedGenerate('tweet_writing', {
     task: 'tweet_writing',
     modelStack: input.modelStack,
@@ -2638,7 +2607,7 @@ async function writeIdeaDrafts({
 
 Obey the factualWritingContract exactly. For a source-free opinion, the approved claim is the concrete fact ceiling: do not add an event, number, quote, customer, measurement, external mechanism, or first-person behavior. For verified evidence, use only supplied claims and preserve every says, claims, reports, self-reported, or according-to qualifier. Never turn attributed evidence into an unqualified fact.
 
-${cadenceInstruction} Follow each cadence assignment's amount of context, but use a fresh opening and sentence skeleton. Keep the named object and the author's actual position visible. One variant may be a fragment; one may add a plain reason; a longer variant is valid only when the thought genuinely needs context. Do not teach an audience or resolve the take into a lesson. Follow the question budget. Preserve every number's subject, denominator, geography, period, and measurement type. Use up to ${V2_MAX_DRAFT_CHARACTERS} characters and stop where the human thought stops.
+${shapeInstruction} Keep the named object and the author's actual position visible. A fragment is valid. Add context only when the thought becomes more credible, not to fill a role. Begin with the thought itself, never a label such as "my take on," "my dream acquisition," or "the thing i keep coming back to." Do not teach an audience or resolve the thought into a lesson. Follow the question budget. Preserve every number's subject, denominator, geography, period, and measurement type. Use up to ${V2_MAX_DRAFT_CHARACTERS} characters and stop where the human thought stops.
 
 ${nativeVoiceContract}
 

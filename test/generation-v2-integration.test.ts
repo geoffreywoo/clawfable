@@ -328,10 +328,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
-    expect(writerPrompt.variantCadenceAssignments).toHaveLength(3);
-    expect(new Set(writerPrompt.variantCadenceAssignments.map((entry: any) => entry.anchorId)).size).toBe(3);
-    expect(writerPrompt.variantCadenceAssignments.every((entry: any) => entry.reactionMode)).toBe(true);
-    expect(writerPrompt.variantCadenceAssignments.every((entry: any) => entry.variantIntent)).toBe(true);
+    expect(writerPrompt).not.toHaveProperty('variantCadenceAssignments');
+    expect(String(writerCall.system)).toContain('not short, medium, and long versions');
+    expect(String(writerCall.system)).toContain('Begin with the thought itself');
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -347,7 +346,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-30',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-31',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,

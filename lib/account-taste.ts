@@ -1104,6 +1104,7 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."
 - Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
 - Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
+- Begin with the content of the thought. Do not announce a "take," "rule," "philosophy," "dream acquisition," "litmus test," or thing you keep coming back to; those become synthetic scaffolds when generated.
 - Stop before advice, a balanced contrast, a lesson, a slogan, or a synthetic mic drop. Deterministic gates will handle the blocklist; concentrate on making the thought worth posting.`;
 }
 

@@ -15,6 +15,8 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'label-open', weight: 0.2, pattern: /^(?:announcement|confession|prediction|data point|hot take|serious question):/i },
   { label: 'topic-question-label', weight: 0.24, pattern: /^[a-z][a-z0-9 &/-]{2,45}\s+question:\s*$/im },
   { label: 'synthetic-personal-rule', weight: 0.62, pattern: /^(?:personal|my|house)\s+rule\s*:/im },
+  { label: 'announced-take-open', weight: 0.52, pattern: /^(?:my take on|my dream (?:acquisition|deal)(?: right now)?)\b[^.!?\n]{0,100}:/im },
+  { label: 'synthetic-litmus-test', weight: 0.52, pattern: /^my (?:litmus )?test for\b/im },
   { label: 'ceremonial-first-person', weight: 0.62, pattern: /\bi(?:['’]m| am)\s+officially\s+(?:retiring|removing|adding|done|calling|declaring|promoting|demoting|banning|canceling|cancelling)\b|\bfrom my vocabulary\b/i },
   { label: 'performed-emotion', weight: 0.62, pattern: /\bi(?:['’]m| am)\s+genuinely\s+(?:moved|shocked|excited|surprised|obsessed|stunned|speechless|emotional)\b/i },
   { label: 'invented-attention-pattern', weight: 0.52, pattern: /\bthe (?:one|thing) i keep coming back to\b/i },
