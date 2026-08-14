@@ -364,7 +364,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-81',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-82',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -380,30 +380,38 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
-  it('pairs Geoffrey Fable drafts with one same-idea GPT control and preserves the winning stack', async () => {
+  it('pairs Geoffrey GPT drafts with one same-idea Fable shadow and preserves the winning stack', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') {
         const parsed = JSON.parse(options.prompt);
         if (options.modelStack === 'publishing_v2_gpt_control') {
-          const controlCopy: Record<string, string> = {
+          const primaryCopy: Record<string, string> = {
             'AI startups': 'ai startups get my first dollar.',
             'biotech manufacturing': 'biotech manufacturing is my pick.',
             'energy markets': "i'd start with energy markets.",
             'founder financing': 'founder financing first for me.',
           };
           return result(JSON.stringify({ drafts: [{
-            content: controlCopy[parsed.idea.topic] || `${parsed.idea.topic} gets my first dollar.`,
+            content: primaryCopy[parsed.idea.topic] || `${parsed.idea.topic} gets my first dollar.`,
             format: 'short_punch',
             posture: 'one direct decision',
+          }, {
+            content: `my pick is ${parsed.idea.topic}.`,
+            format: 'short_punch',
+            posture: 'first-person decision',
+          }, {
+            content: `i'd start with ${parsed.idea.topic}.`,
+            format: 'short_punch',
+            posture: 'capital allocation decision',
           }] }), 'openai');
         }
-        return result(JSON.stringify({ drafts: [0, 1, 2].map((index) => ({
-          content: `${parsed.idea.topic} isn't about the visible launch. it's about the real edge ${index}.`,
+        return result(JSON.stringify({ drafts: [{
+          content: `${parsed.idea.topic} isn't about the visible launch. it's about the real edge.`,
           format: 'hot_take',
           posture: 'synthetic contrast',
-        })) }), 'anthropic');
+        }] }), 'anthropic');
       }
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
@@ -411,29 +419,31 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2({
       ...input,
-      modelStack: 'publishing_v2_fable_control',
+      modelStack: 'publishing_v2_gpt_control',
     });
     const writerCalls = mocks.generateText.mock.calls
       .map(([options]) => options)
       .filter((options) => options.task === 'tweet_writing');
     const primaryCalls = writerCalls.filter((call) => (
-      call.modelStack === 'publishing_v2_fable_control'
+      call.modelStack === 'publishing_v2_gpt_control'
       && JSON.parse(call.prompt).failedAttempts.length === 0
     ));
-    const controlCalls = writerCalls.filter((call) => (
-      call.modelStack === 'publishing_v2_gpt_control'
+    const shadowCalls = writerCalls.filter((call) => (
+      call.modelStack === 'publishing_v2_fable_control'
       && JSON.parse(call.prompt).failedAttempts.length === 0
     ));
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
 
     expect(primaryCalls).toHaveLength(4);
-    expect(controlCalls).toHaveLength(4);
-    expect(controlCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
-    expect(controlCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
-    expect(controlCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
+    expect(shadowCalls).toHaveLength(4);
+    expect(primaryCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 3)).toBe(true);
+    expect(shadowCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(shadowCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
+    expect(shadowCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
     expect(new Set(persistedDrafts.filter((draft) => (
       draft.generationModelStack === 'publishing_v2_gpt_control'
-    )).map((draft) => draft.id)).size).toBe(4);
+      && (draft.mutationRound || 0) === 0
+    )).map((draft) => draft.id)).size).toBe(12);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.generationProvider === 'openai')).toBe(true);
     expect(drafts.every((draft) => draft.generationModelStack === 'publishing_v2_gpt_control')).toBe(true);
