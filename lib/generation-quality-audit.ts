@@ -52,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 16;
+export const GENERATION_QUALITY_AUDIT_VERSION = 17;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -111,6 +111,113 @@ export function buildGenerationQueueHandoffAudit(runs: AuditGenerationLineage) {
   };
 }
 
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4));
+}
+
+function ratio(numerator: number, denominator: number): number | null {
+  return denominator > 0 ? Number((numerator / denominator).toFixed(4)) : null;
+}
+
+export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) {
+  const entries = runs.flatMap((run) => {
+    const selectedIds = new Set(run.selectedDraftIds || []);
+    return run.drafts.map((draft) => ({
+      ...draft,
+      generationRunId: run.generationRunId,
+      phase: (draft.mutationRound || 0) > 0 ? 'rescue' as const : 'initial' as const,
+      selected: selectedIds.has(draft.draftCandidateId),
+    }));
+  });
+  const grouped = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    const key = `${entry.phase}:${modelKey(entry.generationProvider, entry.generationModel)}`;
+    grouped.set(key, [...(grouped.get(key) || []), entry]);
+  }
+  const groups = [...grouped.entries()].map(([key, candidates]) => {
+    const [phase, ...modelParts] = key.split(':');
+    const judged = candidates.filter((candidate) => typeof candidate.judgeScore === 'number');
+    const selected = candidates.filter((candidate) => candidate.selected);
+    return {
+      phase,
+      model: modelParts.join(':'),
+      generatedCount: candidates.length,
+      finalCriticCount: judged.length,
+      selectedCount: selected.length,
+      selectionRate: ratio(selected.length, candidates.length),
+      averageJudgeScore: average(judged.map((candidate) => candidate.judgeScore as number)),
+      averageQualityMargin: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.qualityMargin)
+        .filter((value): value is number => typeof value === 'number')),
+      averageNativeVoice: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.nativeVoice)
+        .filter((value): value is number => typeof value === 'number')),
+      averageCringeRisk: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.cringeRisk)
+        .filter((value): value is number => typeof value === 'number')),
+      topRejectionCodes: topCounts(candidates.flatMap((candidate) => candidate.rejectionCodes || []), 8),
+    };
+  }).sort((left, right) => (
+    left.phase.localeCompare(right.phase)
+    || right.generatedCount - left.generatedCount
+    || left.model.localeCompare(right.model)
+  ));
+  const byId = new Map(entries.map((entry) => [entry.draftCandidateId, entry]));
+  const pairedRescues = entries.flatMap((entry) => {
+    if (entry.phase !== 'rescue' || !entry.parentDraftId) return [];
+    const parent = byId.get(entry.parentDraftId);
+    const parentMargin = parent?.judgeBreakdown?.qualityMargin;
+    const rescueMargin = entry.judgeBreakdown?.qualityMargin;
+    if (typeof parentMargin !== 'number' || typeof rescueMargin !== 'number') return [];
+    return [{
+      parentDraftId: entry.parentDraftId,
+      rescueDraftId: entry.draftCandidateId,
+      qualityMarginDelta: Number((rescueMargin - parentMargin).toFixed(4)),
+    }];
+  });
+  const nearMisses = entries
+    .filter((entry) => !entry.selected && typeof entry.judgeBreakdown?.qualityMargin === 'number')
+    .sort((left, right) => (
+      (right.judgeBreakdown?.qualityMargin || 0) - (left.judgeBreakdown?.qualityMargin || 0)
+    ))
+    .slice(0, 8)
+    .map((entry) => ({
+      generationRunId: entry.generationRunId,
+      draftCandidateId: entry.draftCandidateId,
+      parentDraftId: entry.parentDraftId || null,
+      phase: entry.phase,
+      model: modelKey(entry.generationProvider, entry.generationModel),
+      judgeScore: entry.judgeScore,
+      qualityMargin: entry.judgeBreakdown?.qualityMargin || null,
+      nativeVoice: entry.judgeBreakdown?.nativeVoice || null,
+      casualStartupFit: entry.judgeBreakdown?.casualStartupFit || null,
+      novelty: entry.judgeBreakdown?.novelty || null,
+      cringeRisk: entry.judgeBreakdown?.cringeRisk || null,
+      rejectionCodes: entry.rejectionCodes,
+      judgeNotes: entry.judgeNotes || null,
+      content: entry.content,
+    }));
+  const rescueEntries = entries.filter((entry) => entry.phase === 'rescue');
+  const selectedRescues = rescueEntries.filter((entry) => entry.selected);
+  return {
+    groups,
+    rescue: {
+      targetCount: runs.reduce((sum, run) => sum
+        + (run.stageCounts.preflightRescueTargets || 0)
+        + (run.stageCounts.postcriticRescueTargets || 0), 0),
+      generatedCount: rescueEntries.length,
+      finalCriticCount: rescueEntries.filter((entry) => typeof entry.judgeScore === 'number').length,
+      selectedCount: selectedRescues.length,
+      selectionRate: ratio(selectedRescues.length, rescueEntries.length),
+      pairedComparisonCount: pairedRescues.length,
+      averageQualityMarginDelta: average(pairedRescues.map((entry) => entry.qualityMarginDelta)),
+      pairedComparisons: pairedRescues.slice(0, 20),
+    },
+    nearMisses,
+  };
+}
+
 interface AuditFindingInput {
   identity: AuditIdentity;
   autopost: {
@@ -149,6 +256,7 @@ interface AuditFindingInput {
       content: string;
     }>;
     queueRejectionReasonCounts?: Record<string, number>;
+    writerOutcomes?: ReturnType<typeof buildGenerationWriterOutcomeAudit>;
   };
   generationV2: AuditGenerationV2;
   complaints: {
@@ -286,6 +394,27 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'Current-policy generation rarely produces a selectable draft',
       evidence: input.currentPolicyWindow,
       action: 'Inspect stage rejection codes and improve brief quality or writer diversity before spending more critic calls.',
+    });
+  }
+
+  const rescueOutcomes = input.currentPolicyWindow.writerOutcomes?.rescue;
+  if (
+    input.currentPolicyWindow.runCount >= 2
+    && (rescueOutcomes?.generatedCount || 0) >= 4
+    && rescueOutcomes?.selectedCount === 0
+  ) {
+    add({
+      code: 'current_policy_rescue_yield_zero',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Current-policy rescue writing spends calls without saving drafts',
+      evidence: {
+        runCount: input.currentPolicyWindow.runCount,
+        ...rescueOutcomes,
+        writerGroups: input.currentPolicyWindow.writerOutcomes?.groups || [],
+        nearMisses: input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [],
+      },
+      action: 'Repair the writer from paired parent-to-rescue evidence; keep the final quality floor fixed and stop using a rewrite mode that expands concise near misses into new essays.',
     });
   }
 
@@ -786,6 +915,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const currentDraftsSelected = sumCurrentStage('draftsSelected');
   const currentProviderAttempts = sumCurrentStage('providerAttempts');
   const queueHandoff = buildGenerationQueueHandoffAudit(currentPolicyRuns);
+  const writerOutcomes = buildGenerationWriterOutcomeAudit(currentPolicyRuns);
   const refillCandidateRejections = postLog.filter((entry) => (
     entry.format === 'refill_candidate_rejected'
     && entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
@@ -808,6 +938,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     queueHandoffRate: queueHandoff.queueHandoffRate,
     unpersistedDrafts: queueHandoff.unpersistedSelectedDrafts.slice(0, 10).map(({ tweetId: _tweetId, ...draft }) => draft),
     queueRejectionReasonCounts: queueHandoff.rejectionReasonCounts,
+    writerOutcomes,
     refillCandidateRejections: {
       recentCount: refillCandidateRejections.length,
       reasonCounts: topCounts(refillCandidateRejections.map((entry) => String(entry.reason || 'unknown').split(':')[0])),
