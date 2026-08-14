@@ -1373,6 +1373,7 @@ export function buildIdeaGenerationPromptV2(
       rejectionCodes: string[];
     }>;
   }> = [],
+  subjectReactionPatterns: Record<string, NativeReactionPatternV2 | null> = {},
 ): string {
   return JSON.stringify({
     author: {
@@ -1395,6 +1396,7 @@ export function buildIdeaGenerationPromptV2(
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
       personalTopicSignalContract: 'Personal post history may select and rank a brief topic. Structured subject cues may contain unordered entities or objects from strong operator posts, but no historical prose, stance, or premise is supplied. Use at most one cue as a subject or adjacency prompt, then invent a fresh public move. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
       nativeReactionContract: 'The native reaction patterns are structured evidence of this author\'s public moves and cadence range. Use the modes to vary the proposition. Raw native prose is intentionally withheld from ideation so it cannot supply a premise.',
+      sameSubjectReactionContract: 'A brief may include a same-subject native reaction pattern. Use only its public-move shape when inventing the new proposition. The prior same-subject premise and wording are intentionally absent and must not be inferred.',
       rarePremiseContract: 'Acquisition calls and CEO-installation calls are rare premises, not reusable voice moves. If an operatorPremiseExclusion already contains a company-buying or CEO-installation call, generate no X-should-buy-Y or make-Z-CEO variant.',
     },
     nativeReactionPatterns: nativeReactionAnchors.slice(0, 6).map((anchor) => ({
@@ -1421,6 +1423,10 @@ export function buildIdeaGenerationPromptV2(
       summary: brief.summary,
       authorOpportunity: brief.authorOpportunity,
       evidenceMode: brief.evidenceMode,
+      sameSubjectNativeReactionPattern: subjectReactionPatterns[brief.id] ? {
+        ...subjectReactionPatterns[brief.id],
+        instruction: 'Positive public-move evidence only. Match the reaction mode and rough shape while inventing a genuinely new proposition. No prior premise, stance, or prose is supplied.',
+      } : null,
       personalTopicHistory: (brief.personalTopicSignals || []).length > 0
         ? {
             informedTopicSelection: true,
@@ -2071,6 +2077,15 @@ async function generateIdeas({
         [batchSubject],
         6,
       );
+      const subjectReactionPatterns = Object.fromEntries(briefBatch.map((brief) => [
+        brief.id,
+        selectSubjectNativeReactionPatternV2({
+          topic: brief.topic,
+          claim: brief.title,
+          tension: brief.summary,
+          implication: brief.authorOpportunity,
+        }, operatorAnchors),
+      ]));
       const result = await trackedGenerate('idea_generation', {
         task: 'idea_generation',
         modelStack: input.modelStack,
@@ -2086,6 +2101,7 @@ async function generateIdeas({
           batchExclusions,
           batchReactionAnchors,
           retryFailures,
+          subjectReactionPatterns,
         ),
       }, calls);
       const root = parseJsonRoot(result.text);
