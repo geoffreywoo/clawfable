@@ -93,6 +93,67 @@ describe('internal queue refill route', () => {
     });
   });
 
+  it('iterates bounded two-post batches until the requested refill is met', async () => {
+    mocks.refillQueue
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(1);
+    mocks.getQueuedTweets
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(Array.from({ length: 5 }, (_, index) => ({
+        id: `new-${index}`,
+        generationModel: 'claude-fable-5',
+      })));
+
+    const response = await POST(request({ count: 5 }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(mocks.refillQueue).toHaveBeenCalledTimes(3);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[1])).toEqual([5, 3, 1]);
+    expect(data).toMatchObject({
+      requested: 5,
+      added: 5,
+      queueDepthAfter: 5,
+      attempts: [
+        { requested: 5, added: 2 },
+        { requested: 3, added: 2 },
+        { requested: 1, added: 1 },
+      ],
+    });
+  });
+
+  it('retries once after an empty stochastic generation batch', async () => {
+    mocks.refillQueue
+      .mockReset()
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2);
+    mocks.getQueuedTweets
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'new-2', generationModel: 'claude-fable-5' },
+        { id: 'new-1', generationModel: 'claude-fable-5' },
+      ]);
+
+    const response = await POST(request({ count: 2 }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
+    expect(data).toMatchObject({
+      requested: 2,
+      added: 2,
+      attempts: [
+        { requested: 2, added: 0 },
+        { requested: 2, added: 2 },
+      ],
+    });
+  });
+
   it('returns a conflict instead of racing another autopilot run', async () => {
     mocks.acquireAutopilotLock.mockResolvedValue({
       acquired: false,

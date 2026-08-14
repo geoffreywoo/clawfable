@@ -4,6 +4,7 @@ import { filterLearningMentions } from '@/lib/performance';
 import {
   createMention,
   createTweet,
+  backfillAudienceVoiceComplaints,
   getAudienceVoiceComplaints,
   getLearningSignals,
 } from '@/lib/kv-storage';
@@ -99,5 +100,26 @@ describe('audience voice complaints', () => {
     ] as any);
 
     expect(filtered.map((mention) => mention.id)).toEqual(['mention-2']);
+  });
+
+  it('rescans stored mentions idempotently for complaint metrics', async () => {
+    const agentId = `agent-complaint-backfill-${Date.now()}`;
+    await createMention({
+      agentId,
+      author: 'Reader',
+      authorHandle: '@reader',
+      content: 'this reads like a bot and does not sound like you',
+      tweetId: `x-complaint-backfill-${Date.now()}`,
+      conversationId: 'x-parent-backfill',
+      inReplyToTweetId: 'x-parent-backfill',
+      engagementLikes: 0,
+      engagementRetweets: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    const backfill = await backfillAudienceVoiceComplaints(agentId);
+
+    expect(backfill).toMatchObject({ scanned: 1, matched: 1, added: 0, total: 1 });
+    await expect(getAudienceVoiceComplaints(agentId)).resolves.toHaveLength(1);
   });
 });

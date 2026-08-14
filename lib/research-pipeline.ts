@@ -64,7 +64,7 @@ import {
   significantResearchTokens,
   stableResearchId,
 } from './research-utils';
-import { classifyGeoffreyTopicDomain } from './source-planner';
+import { classifyGeoffreyTopicDomain, selectOperatorTopicSignals } from './source-planner';
 
 const RESEARCH_INTERVAL_MS: Partial<Record<ResearchSourceType, number>> = {
   x: 4 * 60 * 60 * 1000,
@@ -211,6 +211,7 @@ export function buildResearchAgenda({
   tweets,
   semanticBlocks = [],
   current,
+  operatorTopicSignals = [],
 }: {
   agent: Agent;
   voiceProfile?: VoiceProfile | null;
@@ -220,6 +221,7 @@ export function buildResearchAgenda({
   tweets: Tweet[];
   semanticBlocks?: SemanticBlock[];
   current?: ResearchAgenda | null;
+  operatorTopicSignals?: string[];
 }): ResearchAgenda {
   const profile = voiceProfile || parseSoulMd(agent.name || agent.handle, agent.soulMd || '');
   const historicalTopics = operatorTopics(performance);
@@ -256,9 +258,13 @@ export function buildResearchAgenda({
     frontierPlan.map((entry) => entry.researchQueries[queryIndex]).filter(Boolean)
   )).slice(0, 12);
   const operatorDiscoveryQueries = nativeDiscoveryQueries(profile, learnings);
+  const activeOperatorTopics = uniqueStrings([
+    ...(current?.operatorTopics || []),
+    ...operatorTopicSignals,
+  ], 12);
   const querySeeds = uniqueStrings([
     ...(current?.pinnedQuestions || []),
-    ...(current?.operatorTopics || []),
+    ...activeOperatorTopics,
     ...operatorDiscoveryQueries,
     ...frontierQueries.slice(0, 2),
     ...profile.topics,
@@ -280,7 +286,7 @@ export function buildResearchAgenda({
     schemaVersion: 2,
     agentId: agent.id,
     queries: querySeeds,
-    operatorTopics: current?.operatorTopics || [],
+    operatorTopics: activeOperatorTopics,
     pinnedQuestions: current?.pinnedQuestions || [],
     blockedTopics,
     blockedStoryKeys: current?.blockedStoryKeys || [],
@@ -757,17 +763,6 @@ export async function refreshAgentResearch(
       getTrendingCacheSnapshot(agent.id),
     ]);
     const voiceProfile = parseSoulMd(agent.name || agent.handle, agent.soulMd || '');
-    const agenda = buildResearchAgenda({
-      agent,
-      voiceProfile,
-      learnings,
-      performance,
-      feedback,
-      tweets,
-      semanticBlocks,
-      current: currentAgenda,
-    });
-    await saveResearchAgenda(agent.id, agenda);
     const needsSemanticBackfill = (previousState?.semanticBackfillVersion || 0) < GENERATION_V2_SEMANTIC_BACKFILL_VERSION;
     const backfilledBlocks = needsSemanticBackfill
       ? buildLegacyFeedbackSemanticBlocks({ agentId: agent.id, feedback, tweets, now })
@@ -789,6 +784,26 @@ export async function refreshAgentResearch(
         runningState.adapterRefreshedAt.hacker_news = now.toISOString();
       }
     }
+
+    const engagedOperatorTopics = selectOperatorTopicSignals(
+      trending,
+      voiceProfile,
+      learnings,
+      'moderate',
+      8,
+    ).map((signal) => signal.subject);
+    const agenda = buildResearchAgenda({
+      agent,
+      voiceProfile,
+      learnings,
+      performance,
+      feedback,
+      tweets,
+      semanticBlocks,
+      current: currentAgenda,
+      operatorTopicSignals: engagedOperatorTopics,
+    });
+    await saveResearchAgenda(agent.id, agenda);
 
     const adapterContext: ResearchAdapterContext = {
       agentId: agent.id,

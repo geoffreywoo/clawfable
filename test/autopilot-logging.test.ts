@@ -110,8 +110,8 @@ vi.mock('@/lib/generation-context', () => ({
 
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
-  PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-6',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-11',
+  PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-38',
 }));
 
 vi.mock('@/lib/publishing-v2', () => ({
@@ -300,6 +300,7 @@ const currentGeoffreyCertification = {
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
   finalCriticVerdict: 'allow' as const,
+  finalCriticScores: { qualityMargin: 0.9 },
   finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
 };
 
@@ -852,6 +853,7 @@ describe('autopilot remote debug logging', () => {
       candidateScore: 81,
       slopScore: 0.2,
       finalCriticScores: {
+        qualityMargin: 0.9,
         voiceFit: 0.82,
         nativeVoice: 0.78,
         casualStartupFit: 0.7,

@@ -1646,6 +1646,22 @@ export async function getAudienceVoiceComplaintCount(agentId: string): Promise<n
   return kvLlen(KEYS.agentAudienceVoiceComplaints(agentId));
 }
 
+export async function backfillAudienceVoiceComplaints(
+  agentId: string,
+  limit = 1000,
+): Promise<{ scanned: number; matched: number; added: number; total: number }> {
+  const before = await getAudienceVoiceComplaintCount(agentId);
+  const mentions = await getRecentMentions(agentId, limit);
+  const results = await Promise.all(mentions.map(maybeStoreAudienceVoiceComplaint));
+  const total = await getAudienceVoiceComplaintCount(agentId);
+  return {
+    scanned: mentions.length,
+    matched: results.filter(Boolean).length,
+    added: Math.max(0, total - before),
+    total,
+  };
+}
+
 export async function createMention(data: CreateMentionInput): Promise<Mention> {
   const counter = await kvIncr(KEYS.counterMention());
   const id = String(counter);

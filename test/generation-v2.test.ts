@@ -7,8 +7,13 @@ import {
   buildIdeaGenerationPromptV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
+  getRequiredFinalQualityMarginV2,
+  meetsV2RescueMarginFloor,
+  getSourceAttributionIssueV2,
+  getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
   isQuestionDraftV2,
+  isGenericOperatorProductWishlistV2,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -18,7 +23,11 @@ import {
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
-import { classifyGeoffreyTopicDomain } from '@/lib/source-planner';
+import {
+  classifyGeoffreyTopicDomain,
+  isGeoffreyDeepTechnicalTopic,
+  isGeoffreyManufacturingMaterialsTopic,
+} from '@/lib/source-planner';
 import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
 
@@ -99,8 +108,65 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 }
 
 describe('Tweet Generation V2', () => {
+  it('targets autonomous headroom for live and production-shadow generation only', () => {
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.84);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.84);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
+    expect(getRequiredFinalQualityMarginV2({})).toBe(0.84);
+  });
+
+  it('does not lose a critic rescue to one-basis-point score rounding', () => {
+    expect(meetsV2RescueMarginFloor(0.7799, 0.78)).toBe(true);
+    expect(meetsV2RescueMarginFloor(0.7798, 0.78)).toBe(false);
+  });
+
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
+  });
+
+  it('requires attributed source claims to stay attributed in public copy', () => {
+    const attributedSource = {
+      publisher: '@justindross',
+      entities: ['Coverage'],
+      claims: [{
+        text: 'The author says their company protects $50B in revenue across more than 1,000 clients.',
+      }],
+    } as SourceDocument;
+    const directSource = {
+      claims: [{
+        text: 'Coverage protects $50B in revenue across more than 1,000 clients.',
+      }],
+    } as SourceDocument;
+
+    expect(getSourceAttributionIssueV2(
+      'coverage protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toMatch(/attribution was dropped/i);
+    expect(getSourceAttributionIssueV2(
+      'coverage says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'its founder says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'coverage’s founder says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'the number says coverage protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toMatch(/attribution was dropped/i);
+    expect(getSourceAttributionIssueV2(
+      'according to coverage, it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'coverage protects $50B in revenue across more than 1,000 clients.',
+      [directSource],
+    )).toBeNull();
   });
 
   it('creates four distinct briefs for a normal two-post refill', () => {
@@ -119,6 +185,286 @@ describe('Tweet Generation V2', () => {
 
     expect(briefs.length).toBeGreaterThanOrEqual(4);
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
+  });
+
+  it('turns operator outcomes into structured subject signals without leaking prior prose', () => {
+    const priorPost = 'one gigawatt of rubins puts 300k gpus and 80 pb of hbm behind the same power constraint';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'health'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'AI',
+          angle: 'A prior premise that must not be copied',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{ content: priorPost, topic: 'AI', source: 'timeline' }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const aiBrief = briefs.find((entry) => entry.topic.toLowerCase() === 'ai');
+    expect(aiBrief?.personalTopicSignals).toEqual([
+      expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/),
+    ]);
+    expect(aiBrief?.personalTopicSignalPremises).toEqual([priorPost]);
+    const prompt = buildIdeaGenerationPromptV2([aiBrief!], voiceProfile);
+    expect(prompt).not.toContain(priorPost);
+    expect(prompt).not.toContain('A prior premise that must not be copied');
+    expect(prompt).not.toContain('personalTopicSignals');
+    expect(JSON.parse(prompt).briefs[0].personalTopicHistory).toEqual({
+      informedTopicSelection: true,
+      premiseSupplied: false,
+    });
+  });
+
+  it('blocks a personal topic signal from inverting the native premise that produced it', () => {
+    const operatorBrief = {
+      ...brief('operator', 'culture'),
+      personalTopicSignals: ['estate:woodside:host:dinner:parties:poker'],
+      personalTopicSignalPremises: [
+        'SF rich: estate in woodside, host dinner parties and poker with ai founders',
+      ],
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'A CEO treating a Woodside dinner invitation as more valuable than a stranger paying is optimizing for approval.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-reskin',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['voice_anchor_semantic_reskin']),
+    });
+    expect(buildIdeaGenerationPromptV2([operatorBrief], voiceProfile)).not.toContain('SF rich');
+
+    const adjacentIdeas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'OpenAI should ship an agent that can terminate paid SaaS subscriptions.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-adjacent',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+    expect(adjacentIdeas[0].rejectionCodes).not.toContain('voice_anchor_semantic_reskin');
+  });
+
+  it('normalizes a spaced name against its native handle when checking premise reuse', () => {
+    const operatorBrief = {
+      ...brief('operator', 'ai'),
+      personalTopicSignals: ['google:buy:cognition:200b:scottwu46'],
+      personalTopicSignalPremises: [
+        'google should buy @cognition for $200b and make @ScottWu46 ceo',
+      ],
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Google should hand Scott Wu control of a standalone AI software unit with its own equity.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-handle-alias',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).toContain('voice_anchor_semantic_reskin');
+  });
+
+  it('uses an operator-engaged network post as a subject cue without exposing its prose as evidence', () => {
+    const headline = 'OpenAI launches a consumer agent with a secret checkout workflow';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 991,
+        networkTopicId: 'network-openai-consumer-agent',
+        headline,
+        source: '@builder',
+        relevanceScore: 92,
+        category: 'OpenAI consumer agent launch',
+        timestamp: new Date().toISOString(),
+        tweetCount: 2,
+        sourceType: 'x',
+        sourceCount: 2,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.9,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['OpenAI'],
+        isPrimarySource: false,
+        topTweet: { id: 'network-post-1', text: headline, likes: 900, author: 'builder' },
+      } as any],
+      allTweets: [],
+    });
+
+    const signal = briefs.find((entry) => entry.trendTopicId === 'network-openai-consumer-agent');
+    expect(signal).toMatchObject({
+      topic: 'OpenAI in ai compute',
+      evidenceMode: 'operator_opinion',
+      evidence: [],
+      sourceDocumentIds: [],
+    });
+    expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
+    expect(signal?.sourceBrief).toContain('Subject cue only');
+  });
+
+  it('does not reintroduce a blocked premise through an operator-engaged subject cue', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 993,
+        networkTopicId: 'network-openai-blocked',
+        headline: 'OpenAI consumer agent discussion',
+        source: '@builder',
+        relevanceScore: 92,
+        category: 'OpenAI consumer agent',
+        timestamp: new Date().toISOString(),
+        tweetCount: 1,
+        sourceType: 'x',
+        sourceCount: 1,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.9,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['OpenAI'],
+        isPrimarySource: false,
+        topTweet: { id: 'network-post-blocked', text: 'raw source prose', likes: 900, author: 'builder' },
+      } as any],
+      allTweets: [],
+      blocks: [{
+        schemaVersion: 2,
+        id: 'blocked-openai-subject',
+        agentId: 'agent-1',
+        scope: 'topic',
+        semanticKey: 'openai:ai:compute',
+        topic: 'OpenAI in ai compute',
+        storyClusterId: null,
+        ideaId: null,
+        reasonCode: 'bad_premise',
+        reason: 'Do not revisit this subject.',
+        permanent: true,
+        blockedUntil: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }],
+    });
+
+    expect(briefs.some((entry) => entry.trendTopicId === 'network-openai-blocked')).toBe(false);
+  });
+
+  it('does not launder a consumed sourced story back into a source-free network brief', () => {
+    const headline = 'Brad Lightcap said he is leaving OpenAI to start something new.';
+    const story = {
+      schemaVersion: 2,
+      id: 'story-lightcap-source-backed',
+      agentId: 'agent-1',
+      semanticKey: 'brad:lightcap:openai:leaving:start:new',
+      title: headline,
+      summary: headline,
+      topic: 'OpenAI executive departure',
+      entities: ['Brad Lightcap', 'OpenAI'],
+      sourceDocumentIds: ['source-lightcap'],
+      qualifiedClaimIds: ['claim-lightcap'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.7, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [story],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 992,
+        networkTopicId: 'network-brad-lightcap',
+        headline,
+        source: '@bradlightcap',
+        relevanceScore: 95,
+        category: 'OpenAI executive departure',
+        timestamp: new Date().toISOString(),
+        tweetCount: 1,
+        sourceType: 'x',
+        sourceCount: 1,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.94,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['Brad Lightcap', 'OpenAI'],
+        isPrimarySource: true,
+        topTweet: { id: 'network-post-lightcap', text: headline, likes: 900, author: 'bradlightcap' },
+      } as any],
+      allTweets: [{
+        id: 'posted-lightcap',
+        status: 'posted',
+        storyClusterId: story.id,
+        content: 'Prior post about this story.',
+        createdAt: '2026-08-12T02:00:00.000Z',
+      } as Tweet],
+      now: new Date('2026-08-13T00:00:00.000Z'),
+    });
+
+    expect(briefs.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+    expect(briefs.some((entry) => entry.trendTopicId === 'network-brad-lightcap')).toBe(false);
   });
 
   it('keeps most refill briefs in the native operator lane', () => {
@@ -193,6 +539,49 @@ describe('Tweet Generation V2', () => {
     ].includes(classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`)));
     expect(coreBriefs).toHaveLength(3);
     expect(briefs.map((entry) => entry.topic)).toEqual(expect.arrayContaining(['AI', 'startups']));
+  });
+
+  it('keeps Geoffrey deep-technical subjects in a minority lane across V2 briefs', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 5,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        topics: ['AI', 'startups', 'investing', 'culture', 'sports', 'health', 'developer tools', 'fusion', 'robotics'],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'culture', 'sports'] } } as any,
+      learnings: {
+        manualTopicProfile: [
+          { topic: 'AI', angle: 'products and labs', weight: 10, sampleCount: 10, avgEngagement: 100, topTweets: [] },
+          { topic: 'startups', angle: 'founders and growth', weight: 9, sampleCount: 9, avgEngagement: 90, topTweets: [] },
+          { topic: 'investing', angle: 'capital and conviction', weight: 8, sampleCount: 8, avgEngagement: 80, topTweets: [] },
+          { topic: 'fusion tritium breeding', angle: 'first-wall survival', weight: 7, sampleCount: 7, avgEngagement: 70, topTweets: [] },
+          { topic: 'humanoid actuator duty cycles', angle: 'field service intervals', weight: 6, sampleCount: 6, avgEngagement: 60, topTweets: [] },
+          { topic: 'rare earth magnet sintering yield', angle: 'manufacturing constraints', weight: 5, sampleCount: 5, avgEngagement: 50, topTweets: [] },
+          { topic: 'culture', angle: 'status and ambition', weight: 4, sampleCount: 4, avgEngagement: 40, topTweets: [] },
+          { topic: 'sports', angle: 'competition', weight: 3, sampleCount: 3, avgEngagement: 30, topTweets: [] },
+          { topic: 'health', angle: 'personal experiments', weight: 2, sampleCount: 2, avgEngagement: 20, topTweets: [] },
+          { topic: 'developer tools', angle: 'software builders', weight: 1, sampleCount: 1, avgEngagement: 10, topTweets: [] },
+        ],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const subjects = briefs.map((entry) => `${entry.topic} ${entry.title}`);
+    expect(briefs).toHaveLength(8);
+    expect(subjects.filter(isGeoffreyDeepTechnicalTopic).length).toBeLessThanOrEqual(1);
+    expect(subjects.filter(isGeoffreyManufacturingMaterialsTopic).length).toBeLessThanOrEqual(1);
+    const domainCounts = subjects.reduce((counts, subject) => {
+      const domain = classifyGeoffreyTopicDomain(subject);
+      counts.set(domain, (counts.get(domain) || 0) + 1);
+      return counts;
+    }, new Map<string, number>());
+    expect(Math.max(...domainCounts.values())).toBeLessThanOrEqual(2);
   });
 
   it('lets an idea rejection block its premise without suppressing the whole native topic', () => {
@@ -284,6 +673,11 @@ describe('Tweet Generation V2', () => {
     expect(new Set(operatorBriefs.map((entry) => entry.creativeSeed?.id)).size).toBe(operatorBriefs.length);
     expect(prompt.requirements.creativeSeedContract).toContain('never evidence');
     expect(prompt.briefs.every((entry: any) => entry.creativeSeed && entry.evidence.length === 0)).toBe(true);
+    expect(prompt.briefs.every((entry: any) => (
+      entry.creativeSeed.publicReactionPrompt
+      && !entry.creativeSeed.hiddenConstraint
+      && !entry.creativeSeed.nonConsensusDirection
+    ))).toBe(true);
   });
 
   it('rotates Geoffrey creative seeds across independent generation runs', () => {
@@ -307,6 +701,49 @@ describe('Tweet Generation V2', () => {
     const second = build('run-b').map((entry) => entry.creativeSeed?.id);
 
     expect(second).not.toEqual(first);
+  });
+
+  it('rotates among proven Geoffrey topic lanes instead of replaying the same four briefs', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const manualTopicProfile = [
+      'AI',
+      'startups',
+      'finance',
+      'energy',
+      'robotics',
+      'space',
+      'culture',
+      'health',
+    ].map((topic) => ({
+      topic,
+      angle: '',
+      weight: 1,
+      sampleCount: 5,
+      avgEngagement: 50,
+      topTweets: [],
+    }));
+    const build = (seedRotationKey: string) => buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: [] } } as any,
+      learnings: { manualTopicProfile } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey,
+    }).map((entry) => entry.topic);
+
+    const first = build('topic-run-a');
+    const second = build('topic-run-b');
+    const third = build('topic-run-c');
+
+    expect(new Set(first).size).toBe(4);
+    expect(new Set([...first, ...second, ...third]).size).toBeGreaterThan(4);
   });
 
   it('uses operator history as topic-level strategy rather than replaying its premise', () => {
@@ -463,6 +900,27 @@ describe('Tweet Generation V2', () => {
       id: 'story-low-consequence',
       scores: { ...qualified.scores, consequence: 0.22 },
     })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-range-filing',
+      title: 'SCHEDULE 13G/A - Range Capital Management LP (Subject)',
+      scores: { ...qualified.scores, consequence: 0.48 },
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-form-four',
+      title: '4 - Example Corp (Issuer)',
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-sdk-version',
+      title: 'sdk: v0.117.1',
+    })).toBe(false);
+    expect(isStoryEditoriallyQualifiedV2({
+      ...qualified,
+      id: 'story-geoffrey-low-consequence',
+      scores: { ...qualified.scores, consequence: 0.48 },
+    }, { minConsequence: 0.55 })).toBe(false);
   });
 
   it('treats a re-clustered version of an already published story as consumed', () => {
@@ -498,6 +956,10 @@ describe('Tweet Generation V2', () => {
     } as Tweet];
 
     expect(isStoryAlreadyCommittedV2(story, published, new Date('2026-08-13T00:00:00.000Z'))).toBe(true);
+    expect(getStoryGenerationPlanningRejectionCodesV2(story, {
+      committedTweets: published,
+      now: new Date('2026-08-13T00:00:00.000Z'),
+    })).toContain('already_committed');
     const briefs = buildGenerationBriefsV2({
       count: 2,
       stories: [story],
@@ -966,6 +1428,42 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('blocks noun-swapped acquisition and CEO sentence skeletons', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('ai', 'OpenAI should buy Linear and make Karri Saarinen ceo.')],
+      agentId: 'agent-1',
+      runId: 'run-acquisition-skeleton-reskin',
+      briefs: [brief('ai', 'AI companies')],
+      voiceProfile,
+      recentPosts: ['google should buy @cognition for $200b and make @ScottWu46 ceo'],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
+  it('blocks a direct should-buy reskin even when the CEO clause is removed', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('ai', 'OpenAI should buy Linear because agents need to own the issue tracker.')],
+      agentId: 'agent-1',
+      runId: 'run-direct-acquisition-reskin',
+      briefs: [brief('ai', 'AI companies')],
+      voiceProfile,
+      recentPosts: ['google should buy @cognition for $200b and make @ScottWu46 ceo'],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
   it('blocks replaying the back-someone-after-failure premise', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('culture', 'I would rather back someone after a loud failure than a beige win.')],
@@ -989,6 +1487,27 @@ describe('Tweet Generation V2', () => {
       raw: [rawIdea('operator', 'OpenAI announced today that every founder gets a $25 million credit.')],
       agentId: 'agent-1',
       runId: 'run-operator-fact',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
+  it('blocks unsourced product-change phrasing even when it is wrapped in an opinion', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'I think Google putting frontier AI inside Workspace makes standalone email-writing startups worth less.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-product-change',
       briefs: [brief('operator', 'AI startups')],
       voiceProfile,
       recentPosts: [],
@@ -1036,6 +1555,143 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
+  it('allows a clearly speculative valuation call with a number', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Google should buy @cognition for $200b and make @ScottWu46 ceo.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-valuation-opinion',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
+  it('accepts curly-apostrophe market positions and modal acquisition desires as opinions', () => {
+    const operatorBrief = brief('operator', 'AI and markets');
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('operator', 'I’d rather own TSMC than a generic basket of public AI software stocks.'),
+        tension: 'Valuation and product risk can point to different ownership choices.',
+        implication: 'My capital would move toward TSMC unless the software price changed the trade.',
+      }, {
+        ...rawIdea('operator', 'I want OpenAI to buy Linear and make project execution native inside ChatGPT.'),
+        tension: 'The acquisition would connect generated work to the place where teams revise and ship it.',
+        implication: 'I would treat the deal as an application-software ambition signal.',
+      }, {
+        ...rawIdea('operator', 'NVIDIA at a price that needs permanent dominance sounds miserable.'),
+        tension: 'NVIDIA the company can remain incredible while the security gets less interesting.',
+        implication: 'Custom silicon only needs to become a credible threat for that price to get awkward.',
+      }],
+      agentId: 'agent-1',
+      runId: 'run-operator-modal-market-opinions',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas).toHaveLength(3);
+    expect(ideas.every((idea) => !idea.rejectionCodes.includes('unsupported_operator_fact'))).toBe(true);
+  });
+
+  it('still blocks an asserted completed acquisition without source evidence', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'The OpenAI acquisition of Linear closed and makes project execution native inside ChatGPT.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-asserted-acquisition',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).toContain('unsupported_operator_fact');
+  });
+
+  it('blocks a generic source-free product wishlist before writing', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'I want an AI model that can legally control a software company budget and be fired by the board.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-product-wishlist',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['generic_product_wishlist']),
+    });
+    expect(isGenericOperatorProductWishlistV2(
+      'i want to give an AI agent a corporate card and fire it when it misses budget.',
+    )).toBe(true);
+    expect(isGenericOperatorProductWishlistV2(
+      'i want OpenAI to buy Linear.',
+    )).toBe(false);
+    expect(isGenericOperatorProductWishlistV2(
+      'i want the agent with a corporate card and a painfully low spending limit.',
+    )).toBe(true);
+    expect(getV2GeneratedWritingIssue(
+      'google should stop treating the coding agent like another tab.\n\nmake it the default interface to the entire developer stack.',
+    )).toContain('stop-treating-make-default');
+    expect(getV2GeneratedWritingIssue(
+      'kill the Claude chatbot subscription.\n\nmake Claude Code the product the whole company answers to.',
+    )).toBeNull();
+  });
+
+  it('rejects an unsourced measured numeric claim', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'OpenAI has 42% market share and the gap is widening.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-measured-number',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
+  it('does not let a valuation opinion launder a separate measured claim', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'OpenAI has 42% market share and should be worth $200b.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-mixed-number',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
   });
 
   it('blocks paraphrases of a permanently rejected named angle before writing', () => {
@@ -1099,8 +1755,9 @@ describe('Tweet Generation V2', () => {
 
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
-    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments or preferences');
+    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments, questions, predictions');
     expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
+    expect(ideaPrompt.requirements.rarePremiseContract).toContain('rare premises');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
       evidenceId: 'source-sourced',
       claim: expect.any(String),
@@ -1121,6 +1778,11 @@ describe('Tweet Generation V2', () => {
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
       })],
     }));
+    expect(writingPrompt.idea).not.toHaveProperty('authorReason');
+    expect(writingPrompt.idea).not.toHaveProperty('counterargument');
+    expect(writingPrompt.idea).not.toHaveProperty('tension');
+    expect(writingPrompt.idea).not.toHaveProperty('implication');
+    expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
       { ...idea, briefId: 'operator', storyClusterId: null, evidenceIds: [] },
@@ -1128,8 +1790,9 @@ describe('Tweet Generation V2', () => {
       [],
       [],
     ));
-    expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, preference, taste, or recommendation');
-    expect(operatorWritingPrompt.factualWritingContract).toContain('does not assert what founders');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('approved claim');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
@@ -1142,10 +1805,19 @@ describe('Tweet Generation V2', () => {
       "how many agent builders are actually classifying calls by latency sensitivity now that there's a fast tier? most workflow steps are delay-tolerant. blasting every token through premium speed is just burning money for vibes.",
       'corollary for founders: treat licensing and exchange access as the product, not a back-office chore. build it, partner for it, or acquire it early. a slick front end without owned rails is just a customer acquisition funnel for whoever controls clearing.',
       "if you want to diligence culture, skip the mission statement and ask about the last person who should've been let go and wasn't. founders reveal what they actually reward through who they keep. everything else is decoration.",
+      'computer-use agents hit 85%. i\'m officially retiring "cool demo" from my vocabulary for this category.',
+      "i'm genuinely moved by how fast this benchmark crossed humans.",
+      'the benchmark is the one i keep coming back to.',
+      'my take on openai: the valuation is the whole argument.',
+      'my dream acquisition right now: openai buys linear.',
+      'my litmus test for robotics companies going commercial: ask about reducers.',
+      'owning OpenAI can be the status purchase and the investment at the same time. that is exactly when the price deserves more scrutiny, not less.',
     ];
 
     expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);
     expect(GEOFFREY_NATIVE_EVAL.every((anchor) => getV2GeneratedWritingIssue(anchor) === null)).toBe(true);
+    expect(getV2GeneratedWritingIssue('i think google should buy @cognition for $200b and make @ScottWu46 ceo')).toBeNull();
+    expect(getV2GeneratedWritingIssue("i'd bet @cognition is worth $200b before most public software companies catch up")).toBeNull();
   });
 
   it('turns prior outcomes into compact strategy without leaking winning post copy', () => {

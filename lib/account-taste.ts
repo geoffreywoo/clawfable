@@ -77,7 +77,8 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'pcie', 'reticle', 'packaging', 'substrate', 'co-packaged optics', 'latency', 'throughput',
       'batch size', 'token', 'watts per token', 'confidential compute', 'confidential computing',
       'trusted execution environment', 'intel tdx', 'tdx', 'encrypted workload', 'encrypted cvm',
-      'attestation', 'key management', 'control plane', 'failover',
+      'attestation', 'key management', 'control plane', 'failover', 'chip', 'compiler',
+      'compiler stack', 'toolchain', 'kernel', 'runtime',
     ],
   },
   {
@@ -103,7 +104,9 @@ const DOMAIN_TERMS: DomainDictionary[] = [
       'copper', 'molybdenum', 'superalloy', 'single crystal', 'turbine blade', 'ndfeb',
       'magnet', 'coercivity', 'grain-boundary diffusion', 'separation chemistry',
       'solvent extraction', 'tailings', 'ore grade', 'byproduct', 'byproduct stream',
-      'side stream', 'refining', 'sintering',
+      'side stream', 'refining', 'sintering', 'battery cell', 'cell maker', 'cell manufacturer',
+      'anode', 'cathode', 'electrode', 'electrolyte', 'separator', 'active material',
+      'cell chemistry', 'battery-grade',
     ],
   },
   {
@@ -201,7 +204,15 @@ const MECHANISM_TERMS = [
   'after',
   'before',
   'qualify',
+  'qualified',
   'qualification',
+  'coat',
+  'coated',
+  'coating',
+  'validate',
+  'validated',
+  'validation',
+  'sign-off',
   'byproduct',
   'recover',
   'recovery',
@@ -390,6 +401,15 @@ export function assessExternalSourceCopyRisk(
 
 function countTerms(text: string, terms: string[]): number {
   return terms.filter((term) => text.includes(term)).length;
+}
+
+function countDelimitedTerms(text: string, terms: string[]): number {
+  return terms.filter((rawTerm) => {
+    const term = rawTerm.trim();
+    if (!term) return false;
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(text);
+  }).length;
 }
 
 function hasNumericTechnicalUnit(content: string): boolean {
@@ -785,10 +805,17 @@ function assessCasualStartupRegister(
     + directness * 0.22
     - stiffnessRisk * 0.3
   );
+  const compactLowercaseAssertion = lowerOpening
+    && content.length <= 220
+    && sentences <= 3
+    && generatedPattern.score < 0.24
+    && avgWordLength < 6
+    && !neutralResearchSummary;
   const hasCasualRegisterMarker = casualHits > 0
     || firstOrSecondPerson
     || situated
-    || contraction;
+    || contraction
+    || compactLowercaseAssertion;
   const score = !hasCasualRegisterMarker && bestAnchorFit < 0.98
     ? Math.min(0.49, Math.max(topicAwareScore, styleRegisterScore))
     : Math.max(topicAwareScore, styleRegisterScore);
@@ -833,10 +860,10 @@ export function assessTechnicalCredibility(content: string): TechnicalCredibilit
     }
   }
 
-  const mechanismHits = countTerms(lower, MECHANISM_TERMS);
+  const mechanismHits = countDelimitedTerms(lower, MECHANISM_TERMS);
   const hasUnit = hasNumericTechnicalUnit(content);
   const hasProperNoun = /\b[A-Z][A-Za-z0-9+.-]{2,}\b/.test(content);
-  const hasArtifact = /\b(chart|benchmark|spec|wafer|board|rack|line|test|failure log|qualification|yield data|power budget|tolerance stack)\b/i.test(content);
+  const hasArtifact = /\b(chart|benchmark|spec|specification|wafer|board|rack|chip|compiler|toolchain|kernel|runtime|pilot line|test|failure log|qualified|qualification|validation|sign-off|yield data|power budget|tolerance stack)\b/i.test(content);
   const implicationHits = countTerms(lower, [
     'means', 'so ', 'until', 'before', 'after', 'that turns', 'the weird', 'hidden',
     'bottleneck', 'constraint', 'decides', 'determines', 'caps', 'limits', 'worse off',
@@ -1071,14 +1098,14 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
-- Native posts range from one blunt line to a rough multi-paragraph thought. Do not compress every idea into a 280-character aphorism.
-- Keep paragraph breaks and uneven rhythm when the thought has multiple beats. Let clauses pile up naturally instead of resolving them into a balanced slogan.
-- Source-free opinions can be owned in first person when that is the real posture. Never turn them into generic third-person advice.
-- Voice anchors demonstrate range, not reusable catchphrases. Never borrow an anchor opening such as "my philosophy on" or turn one post's slang into a house style.
-- Start with the actual reaction, named subject, bet, or decision. Skip the industry introduction, framework, and audience lesson.
-- Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
-- Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
-- Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
+- Write the thought Geoffrey would send to one smart founder or investor, then stop. It should feel high-context, casual, opinionated, and a little uneven, never like an analyst summarizing a brief.
+- Start with the named subject, reaction, bet, question, or desire. Let the position carry the personality; do not paste slang or "i think" onto formal prose.
+- Native range includes one blunt line, two uneven beats, and a rough multi-paragraph thought when the idea genuinely needs context. Do not force every take into an aphorism.
+- Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."
+- Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
+- Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
+- Begin with the content of the thought. Do not announce a "take," "rule," "philosophy," "dream acquisition," "litmus test," or thing you keep coming back to; those become synthetic scaffolds when generated.
+- Stop before advice, a balanced contrast, a lesson, a slogan, or a synthetic mic drop. Deterministic gates will handle the blocklist; concentrate on making the thought worth posting.`;
 }
 
 export function buildGeoffreyNativeWritingBrief(): string {

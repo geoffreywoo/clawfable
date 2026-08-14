@@ -9,6 +9,7 @@ import {
   isCoreGeoffreyTopicDomain,
   isGeoffreyDeepTechnicalTopic,
   isGeoffreyManufacturingMaterialsTopic,
+  selectOperatorTopicSignals,
 } from '@/lib/source-planner';
 import type { AgentLearnings, ManualExampleCuration, TweetPerformance } from '@/lib/types';
 
@@ -487,6 +488,49 @@ describe('source planner', () => {
       },
     });
     expect(signalSlot?.briefEvidence?.instruction).toContain('do not repeat or imply the source headline');
+  });
+
+  it('removes classifier debris and self-references from operator topic subjects', () => {
+    const topic = (id: number, networkTopicId: string, category: string, entities: string[]) => ({
+      id,
+      networkTopicId,
+      headline: category,
+      source: '@network',
+      relevanceScore: 90,
+      category,
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'startups_markets' as const,
+      entities,
+      isPrimarySource: false,
+      topTweet: { id: `${networkTopicId}-post`, text: category, likes: 100, author: 'network' },
+    });
+    const signals = selectOperatorTopicSignals([
+      topic(951, 'network-opendoor', 'Opendoor startup strategy', ['Coverage', 'Opendoor', 'Justin Ross']),
+      topic(952, 'network-self', 'Anti Fund founder introductions', ['Geoff Woo', 'Anti Fund', 'Intro']),
+      topic(953, 'network-generic', 'VCs discuss early-stage founders', ['VCs', 'early-stage founders']),
+    ], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['unsupported claims'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate', 4);
+
+    expect(signals).toEqual([
+      expect.objectContaining({
+        id: 'network-opendoor',
+        subject: 'Opendoor, Justin Ross in startups markets',
+      }),
+    ]);
   });
 
   it('does not spend a new brief on a qualified trend already represented in the queue', () => {

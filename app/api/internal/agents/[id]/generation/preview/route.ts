@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
 } from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
@@ -29,6 +30,7 @@ const MAX_PREVIEW_COUNT = 5;
 const GENERATION_SURFACES = new Set<GenerationSurface>(['original', 'reply', 'followup', 'remix', 'marketing', 'relationship']);
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
   PUBLISHING_V2_MODEL_STACK,
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
 ]);
 
 export const maxDuration = 800;
@@ -209,6 +211,7 @@ export async function POST(
           trending,
           modelStack: requestedModelStack,
           mode: 'preview',
+          requireAutopostQuality: true,
           persistArtifacts: false,
           entitlement: await getAgentAutomationEntitlement(id, { agent }),
           onTrace: (trace) => { generationTrace = trace; },
@@ -250,6 +253,12 @@ export async function POST(
               status: draft.status,
               rejectionCodes: draft.rejectionCodes,
               evidenceIds: draft.evidenceIds,
+              judgeProvider: draft.judgeProvider,
+              judgeModel: draft.judgeModel,
+              judgeScore: draft.judgeScore,
+              judgeBreakdown: draft.judgeBreakdown || null,
+              judgeNotes: draft.judgeNotes || null,
+              mutationRound: draft.mutationRound,
             })),
           }
         : null,

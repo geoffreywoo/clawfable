@@ -77,6 +77,16 @@ export interface SourcePlannerPlan {
   topicSignals?: EnrichedTrendingTopic[];
 }
 
+export interface OperatorTopicSignal {
+  id: string;
+  subject: string;
+  domain: TopicSemanticDomain;
+  identityScore: number;
+  operatorEngagementScore: number;
+  topicConfidence: number;
+  sourceCount: number;
+}
+
 const PROMO_PATTERNS = [
   'clawfable.com',
   'sign up',
@@ -720,33 +730,100 @@ function buildHistoricalOperatorEvidence(cluster: ManualTopicCluster): SourcePla
   };
 }
 
-function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {
+const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:coverage|intro|vcs?|venture capital|early-stage founders?|founders?|startups?|geoff(?:rey)? woo|anti fund)$/i;
+
+function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
+  return [...new Set((topic.entities || [])
+    .map((entity) => entity.replace(/\s+/g, ' ').trim())
+    .filter((entity) => entity && !OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY.test(entity)))]
+    .slice(0, 4);
+}
+
+function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean {
   const category = normalizeTopic(topic.category);
   const wordCount = category.split(/\s+/).filter(Boolean).length;
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
-  return topic.discoveryMethod === 'followed_network'
-    && topic.sourceLane === 'reject'
-    && Number(topic.operatorEngagementScore || 0) >= 0.7
-    && Number(topic.topicConfidence || 0) >= 0.55
-    && topic.topicUncertainty !== 'high'
-    && topic.fitScores.identityFit >= 0.45
-    && isCoreGeoffreyTopicDomain(domain)
-    && !RESTRICTED_EXPLORATION_DOMAINS.has(domain)
-    && (
-      domain !== 'culture_status'
-      || topic.fitScores.manual >= 0.12
-      || GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
-    )
-    && wordCount >= 2
-    && !BROAD_IDENTITY_TOPICS.has(category);
+  return getOperatorTopicSignalRejectionCodes(topic, { category, wordCount, domain }).length === 0;
+}
+
+export type OperatorTopicSignalRejectionCode =
+  | 'not_followed_network'
+  | 'operator_engagement_below_floor'
+  | 'topic_confidence_below_floor'
+  | 'topic_uncertainty_high'
+  | 'identity_below_floor'
+  | 'off_core_domain'
+  | 'restricted_domain'
+  | 'culture_bridge_missing'
+  | 'named_entity_missing'
+  | 'category_too_broad';
+
+export function getOperatorTopicSignalRejectionCodes(
+  topic: EnrichedTrendingTopic,
+  normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain },
+): OperatorTopicSignalRejectionCode[] {
+  const category = normalized?.category ?? normalizeTopic(topic.category);
+  const wordCount = normalized?.wordCount ?? category.split(/\s+/).filter(Boolean).length;
+  const domain = normalized?.domain
+    ?? classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
+  const codes: OperatorTopicSignalRejectionCode[] = [];
+  if (topic.discoveryMethod !== 'followed_network') codes.push('not_followed_network');
+  if (Number(topic.operatorEngagementScore || 0) < 0.7) codes.push('operator_engagement_below_floor');
+  if (Number(topic.topicConfidence || 0) < 0.55) codes.push('topic_confidence_below_floor');
+  if (topic.topicUncertainty === 'high') codes.push('topic_uncertainty_high');
+  if (topic.fitScores.identityFit < 0.45) codes.push('identity_below_floor');
+  if (!isCoreGeoffreyTopicDomain(domain)) codes.push('off_core_domain');
+  if (RESTRICTED_EXPLORATION_DOMAINS.has(domain)) codes.push('restricted_domain');
+  if (
+    domain === 'culture_status'
+    && topic.fitScores.manual < 0.12
+    && !GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
+  ) codes.push('culture_bridge_missing');
+  if (operatorTopicSignalEntities(topic).length === 0) codes.push('named_entity_missing');
+  if (wordCount < 2 || BROAD_IDENTITY_TOPICS.has(category)) codes.push('category_too_broad');
+  return codes;
+}
+
+function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {
+  return topic.sourceLane === 'reject' && isSpecificOperatorSubjectSignal(topic);
 }
 
 function operatorTopicSignalSubject(topic: EnrichedTrendingTopic): string {
-  const entities = [...new Set((topic.entities || []).map((entity) => entity.trim()).filter(Boolean))].slice(0, 4);
+  const entities = operatorTopicSignalEntities(topic);
   if (entities.length === 0) return topic.category;
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain)
     .replace(/_/g, ' ');
   return `${entities.join(', ')} in ${domain}`;
+}
+
+export function selectOperatorTopicSignals(
+  trending: TrendingTopic[],
+  voiceProfile: VoiceProfile,
+  learnings: AgentLearnings | null,
+  tolerance: TrendTolerance = 'moderate',
+  limit = 4,
+): OperatorTopicSignal[] {
+  const boundedLimit = Math.max(0, Math.min(12, Math.floor(limit)));
+  if (boundedLimit === 0) return [];
+  return enrichTrendingTopics(trending, voiceProfile, learnings, tolerance)
+    .filter(isSpecificOperatorSubjectSignal)
+    .sort((left, right) => (
+      Number(isGeoffreyDeepTechnicalTopic(`${left.category} ${left.headline}`))
+      - Number(isGeoffreyDeepTechnicalTopic(`${right.category} ${right.headline}`))
+      || Number(right.operatorEngagementScore || 0) - Number(left.operatorEngagementScore || 0)
+      || right.fitScores.identityFit - left.fitScores.identityFit
+      || right.fitScores.total - left.fitScores.total
+    ))
+    .slice(0, boundedLimit)
+    .map((topic) => ({
+      id: getTrendingTopicStableId(topic),
+      subject: operatorTopicSignalSubject(topic),
+      domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
+      identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
+      operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
+      topicConfidence: Number(topic.topicConfidence || 0),
+      sourceCount: Number(topic.sourceCount || 1),
+    }));
 }
 
 function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourcePlannerBriefEvidence {
@@ -795,7 +872,8 @@ export function buildSourcePlannerPlan({
   const acceptedAligned = accepted.filter((topic) => topic.sourceLane === 'trend_aligned_exploit');
   const acceptedAdjacent = accepted.filter((topic) => topic.sourceLane === 'trend_adjacent_explore');
   const rejectedTrends = classified.filter((topic) => topic.sourceLane === 'reject');
-  const operatorTopicSignals = accepted
+  const operatorTopicSignals = classified
+    .filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)))
     .filter(isSpecificOperatorTopicSignal)
     .sort((a, b) => (
       Number(isGeoffreyDeepTechnicalTopic(`${a.category} ${a.headline}`))

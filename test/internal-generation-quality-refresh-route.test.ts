@@ -166,4 +166,75 @@ describe('internal generation quality refresh route', () => {
     expect(response.status).toBe(200);
     expect(mocks.refillQueue).not.toHaveBeenCalled();
   });
+
+  it('uses multiple bounded generation attempts to reach a deeper queue target', async () => {
+    mocks.refreshQueuedTweetsForCurrentQualityPolicy.mockResolvedValue({
+      before: 1,
+      after: 1,
+      certified: 1,
+      quarantined: 0,
+    });
+    mocks.getQueuedTweets
+      .mockReset()
+      .mockResolvedValueOnce([{ id: 'kept', status: 'queued', quarantinedAt: null }])
+      .mockResolvedValueOnce(Array.from({ length: 5 }, (_, index) => ({
+        id: `queued-${index}`,
+        status: 'queued',
+        quarantinedAt: null,
+      })));
+    mocks.refillQueue
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2);
+
+    const response = await POST(request({
+      classificationPasses: 1,
+      targetQueueDepth: 5,
+      refill: true,
+    }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[1])).toEqual([4, 2]);
+    expect(data.refill).toMatchObject({
+      requested: 4,
+      added: 4,
+      finalDepth: 5,
+      attempts: [{ requested: 4, added: 2 }, { requested: 2, added: 2 }],
+    });
+  });
+
+  it('gives an empty refill batch one more bounded attempt', async () => {
+    mocks.getQueuedTweets
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'queued-1', status: 'queued', quarantinedAt: null },
+        { id: 'queued-2', status: 'queued', quarantinedAt: null },
+      ]);
+    mocks.refillQueue
+      .mockReset()
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2);
+
+    const response = await POST(request({
+      classificationPasses: 1,
+      targetQueueDepth: 2,
+      refill: true,
+    }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+    const data = await response.json();
+
+    expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
+    expect(data.refill).toMatchObject({
+      requested: 2,
+      added: 2,
+      attempts: [
+        { requested: 2, added: 0 },
+        { requested: 2, added: 2 },
+      ],
+    });
+  });
 });

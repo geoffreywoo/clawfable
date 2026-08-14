@@ -127,6 +127,35 @@ describe('research agenda and story qualification', () => {
     expect(built.queries.filter((query) => /(?:inference|bonding|robot|transformer|tungsten|antimony|gallium|graphite|fluorspar)/i.test(query)).length).toBeLessThanOrEqual(12);
   });
 
+  it('puts freshly engaged operator subjects into the live research agenda', () => {
+    const built = buildResearchAgenda({
+      agent: { id: 'agent-1', name: 'geoffwoo', handle: 'geoffwoo', soulMd: '' } as any,
+      voiceProfile: {
+        tone: 'direct',
+        topics: ['AI', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'short and direct',
+        summary: 'founder and investor',
+      },
+      learnings: null,
+      performance: [],
+      feedback: [],
+      tweets: [],
+      current: { ...agenda, operatorTopics: ['OpenAI, Brad Lightcap in ai compute'] },
+      operatorTopicSignals: [
+        'Cognition AI in ai compute',
+        'Trajectory, Sequoia in ai compute',
+      ],
+    });
+
+    expect(built.operatorTopics).toEqual([
+      'OpenAI, Brad Lightcap in ai compute',
+      'Cognition AI in ai compute',
+      'Trajectory, Sequoia in ai compute',
+    ]);
+    expect(built.queries.slice(0, 3)).toEqual(built.operatorTopics);
+  });
+
   it('removes a blocked frontier angle without suppressing the broader source portfolio', () => {
     const built = buildResearchAgenda({
       agent: { id: 'agent-1', name: 'geoffreywoo', handle: 'geoffreywoo', soulMd: '' } as any,

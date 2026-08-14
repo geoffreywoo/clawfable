@@ -173,6 +173,27 @@ describe('getLatestTwitterTweetIdCursor', () => {
 });
 
 describe('timeline source metadata', () => {
+  it('paginates the operator timeline up to the requested 300-post bound', async () => {
+    const tweets = [{
+      id: 'page-1',
+      text: 'first operator post',
+      created_at: '2026-07-31T12:00:00.000Z',
+      public_metrics: {},
+    }];
+    const fetchLast = vi.fn(async () => {
+      tweets.push(
+        { id: 'page-2', text: 'second operator post', created_at: '2026-07-30T12:00:00.000Z', public_metrics: {} },
+        { id: 'page-3', text: 'third operator post', created_at: '2026-07-29T12:00:00.000Z', public_metrics: {} },
+      );
+    });
+    mocks.userTimeline.mockResolvedValue({ tweets, data: { data: tweets, meta: {} }, done: false, fetchLast });
+
+    const timeline = await getUserTimeline(keys, 'user-1', 3);
+
+    expect(fetchLast).toHaveBeenCalledWith(2);
+    expect(timeline.map((tweet) => tweet.id)).toEqual(['page-1', 'page-2', 'page-3']);
+  });
+
   it('uses complete note-tweet text and preserves reference/media provenance', async () => {
     mocks.userTimeline.mockResolvedValue({
       data: {

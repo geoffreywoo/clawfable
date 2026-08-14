@@ -56,6 +56,12 @@ describe('account taste scoring', () => {
       'most impressive thing a seed team can show me is the list of roles they refused to hire.',
       { voiceProfile: geoffreyVoiceProfile, learnings },
     ).casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    const compactTechnicalCall = assessAccountTaste(
+      'etched should hire the compiler lead before the celebrity researcher.\n\nthe chip is the company and the compiler is how it becomes usable.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    expect(compactTechnicalCall.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(compactTechnicalCall.technicalCredibilityScore).toBeGreaterThanOrEqual(0.45);
   });
 
   it('prefers Geoffrey-native technical anchors over topic-swapped AI advice', () => {
@@ -518,6 +524,21 @@ describe('account taste scoring', () => {
     expect(assessment.domains).toContain('materials');
     expect(assessment.mechanismScore).toBeGreaterThanOrEqual(0.1);
     expect(assessment.score).toBeGreaterThanOrEqual(0.45);
+  });
+
+  it('recognizes battery-material qualification without rewarding vague battery hype', () => {
+    const specific = assessTechnicalCredibility(
+      'coated anode material that no cell maker has qualified is just very expensive powder sitting in a warehouse',
+    );
+    const vague = assessTechnicalCredibility(
+      'battery independence is the future',
+    );
+
+    expect(specific.domains).toContain('materials');
+    expect(specific.mechanismScore).toBe(0.11);
+    expect(specific.specificityScore).toBeGreaterThanOrEqual(0.14);
+    expect(specific.score).toBeGreaterThanOrEqual(0.45);
+    expect(vague.score).toBeLessThan(0.45);
   });
 
   it('recognizes confidential-computing control-plane mechanisms', () => {

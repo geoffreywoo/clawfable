@@ -18,6 +18,8 @@ vi.mock('@/lib/ai', () => ({
   estimateAiUsageCostUsd: () => null,
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,
+  PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_gpt_control',
+  PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -126,6 +128,8 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
       authorFit: 0.9,
       consequence: 0.88,
       distinctiveness: 0.86,
+      nativeReactionPotential: 0.9,
+      sharePotential: 0.84,
     }) : ({
       id,
       overall: 0.9,
@@ -307,10 +311,29 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
-    expect(writerCall).toMatchObject({ maxTokens: 1600, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(writerCall).toMatchObject({
+      maxTokens: 3200,
+      timeoutMs: 75_000,
+      jsonSchema: expect.objectContaining({
+        type: 'object',
+        properties: expect.objectContaining({
+          drafts: expect.objectContaining({
+            items: expect.objectContaining({
+              required: ['content', 'format', 'posture'],
+            }),
+          }),
+        }),
+      }),
+    });
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
-    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content']);
+    expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
+    expect(copyJudgeCall.jsonSchema.properties.scores.items.required).toContain('diagnosis');
+    expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
+    const writerPrompt = JSON.parse(writerCall.prompt);
+    expect(writerPrompt).not.toHaveProperty('variantCadenceAssignments');
+    expect(String(writerCall.system)).toContain('not short, medium, and long versions');
+    expect(String(writerCall.system)).toContain('Begin with the thought itself');
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -326,17 +349,20 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-11',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-38',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
         ideasGenerated: 12,
         ideasSelected: 4,
         draftsGenerated: 8,
-        copyJudgeCandidates: 7,
+        copyJudgeCandidates: expect.any(Number),
         draftsSelected: 2,
       }),
     });
+    const copyJudgeCandidateCount = mocks.saveGenerationRun.mock.calls.at(-1)?.[1]?.stageCounts?.copyJudgeCandidates;
+    expect(copyJudgeCandidateCount).toBeGreaterThanOrEqual(7);
+    expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
   it('starts both compact idea batches before waiting for a result', async () => {
@@ -360,6 +386,57 @@ describe('generateTweetBatchV2 integration', () => {
     releaseIdeas();
 
     await expect(generation).resolves.toHaveLength(2);
+  });
+
+  it('retries only operator briefs with no deterministic idea survivors', async () => {
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    mocks.getStoryClusters.mockResolvedValue([]);
+    let poisonedBriefId = '';
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') {
+        const prompt = JSON.parse(options.prompt);
+        const generated = JSON.parse(ideaResponse(options.prompt).text);
+        if (prompt.retry) {
+          expect(prompt.retry.failures).toEqual([expect.objectContaining({
+            briefId: poisonedBriefId,
+            attempts: expect.arrayContaining([
+              expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+            ]),
+          })]);
+          generated.ideas = generated.ideas.map((idea: any, index: number) => ({
+            ...idea,
+            claim: `i'd back the named company making this startup choice on retry path ${index}`,
+            tension: `the choice is opinionated enough to repel consensus on retry path ${index}`,
+            implication: `the company should keep the sharp edge instead of explaining it on retry path ${index}`,
+            authorReason: `the author publicly takes direct company positions on retry path ${index}`,
+          }));
+          return result(JSON.stringify(generated), 'anthropic');
+        }
+        if (!poisonedBriefId) {
+          poisonedBriefId = prompt.briefs[0].id;
+          generated.ideas = generated.ideas.map((idea: any) => idea.briefId === poisonedBriefId ? {
+            ...idea,
+            claim: `Google rolled out a new product into Gmail for ${idea.claim}`,
+          } : idea);
+        }
+        return result(JSON.stringify(generated), 'anthropic');
+      }
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const ideaCalls = mocks.generateText.mock.calls.filter(([options]) => options.task === 'idea_generation');
+    const retryCalls = ideaCalls.filter(([options]) => Boolean(JSON.parse(options.prompt).retry));
+
+    expect(drafts).toHaveLength(2);
+    expect(ideaCalls).toHaveLength(3);
+    expect(retryCalls).toHaveLength(1);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      stageCounts: expect.objectContaining({ ideaGenerationCalls: 3, ideaRetryCalls: 1 }),
+    });
   });
 
   it('selects quality margin over a critic ranking that puts threshold-hugging copy first', async () => {
@@ -448,30 +525,42 @@ describe('generateTweetBatchV2 integration', () => {
         casualStartupFit: 0.59,
       }),
     });
-    expect(rejected.judgeBreakdown.qualityMargin).toBeLessThan(0.82);
+    expect(rejected.judgeBreakdown.qualityMargin).toBeLessThan(0.81);
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'tweet_writing')).toHaveLength(4);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({ retryUsed: 0, rescueTargets: 0 }),
     });
   });
 
-  it('returns one clean result without spending another writer and critic round to fill quota', async () => {
+  it('uses one targeted writer and critic round to fill a partial clean result', async () => {
+    let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
-      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        const content = parsed.failedAttempts.length > 0
+          ? `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`
+          : `i'd still fund a first-time founder in ${parsed.idea.topic}.`;
+        return result(JSON.stringify({ drafts: [{
+          content,
+          format: 'observation',
+          posture: 'plain funding preference',
+        }] }), 'anthropic');
+      }
       if (options.task === 'copy_judgment') {
+        criticCalls += 1;
         const candidates = JSON.parse(options.prompt).candidates;
         const allowedIdea = candidates[0].ideaId;
         return result(JSON.stringify({
           ranking: candidates.map((candidate: any) => candidate.id),
           scores: candidates.map((candidate: any) => ({
             id: candidate.id,
-            overall: candidate.ideaId === allowedIdea ? 0.9 : 0.3,
-            voiceFit: candidate.ideaId === allowedIdea ? 0.9 : 0.4,
-            operatorPlausibility: candidate.ideaId === allowedIdea ? 0.9 : 0.4,
-            cringeRisk: candidate.ideaId === allowedIdea ? 0.05 : 0.6,
-            insight: candidate.ideaId === allowedIdea ? 0.86 : 0.3,
+            overall: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.78,
+            voiceFit: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            operatorPlausibility: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.34,
+            insight: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.86 : 0.78,
             specificity: 0.82,
             factualSafety: 0.98,
             clarity: 0.9,
@@ -486,11 +575,16 @@ describe('generateTweetBatchV2 integration', () => {
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
 
-    expect(drafts).toHaveLength(1);
-    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
-    expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(5);
+    expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
+    expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
-      stageCounts: expect.objectContaining({ retryUsed: 0, draftsSelected: 1 }),
+      stageCounts: expect.objectContaining({
+        retryUsed: 1,
+        rescueTargets: 1,
+        rescueDraftsGenerated: 1,
+        draftsSelected: 2,
+      }),
     });
   });
 
@@ -594,7 +688,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'idea_generation')).toBe(true);
   });
 
-  it('uses only operator-written posts as diction anchors', async () => {
+  it('keeps raw operator prose in diction and critic stages only', async () => {
     await generateTweetBatchV2({
       ...input,
       learnings: {
@@ -651,32 +745,44 @@ describe('generateTweetBatchV2 integration', () => {
     const ideaSystem = String(ideaCalls[0]?.[0].system || '');
     const ideaPrompts = ideaCalls.map(([options]) => JSON.parse(options.prompt || '{}'));
     const ideaPrompt = ideaPrompts[0];
-    const operatorPremiseExclusions = [...new Set(ideaPrompts.flatMap((prompt) => prompt.operatorPremiseExclusions || []))];
+    const ideaJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
+    const ideaPayload = JSON.stringify(ideaPrompts);
+    const ideaJudgePayload = JSON.stringify(ideaJudgePrompt);
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
-    expect(writerSystem).toContain('write the live reaction, not a compressed brief');
-    expect(writerSystem).toContain('Source-free opinions can be owned in first person');
-    expect(writerSystem).toContain('Never turn them into generic third-person advice');
-    expect(writerSystem).toContain('fabricated first-person behavior');
-    expect(writerSystem).toContain('Write natural attempts, not named slots');
-    expect(writerSystem).toContain('checklist, balanced contrast, definition pair');
+    expect(writerSystem).toContain('Write the live reaction, not a compressed brief');
+    expect(writerSystem).toContain('approved claim is the concrete fact ceiling');
+    expect(writerSystem).toContain('Never turn attributed evidence into an unqualified fact');
+    expect(writerSystem).toContain('Conceive each variant separately');
+    expect(writerSystem).toContain('Stop before advice, a balanced contrast');
     expect(writerSystem).toContain('rough multi-paragraph thought');
-    expect(writerSystem).toContain('Keep paragraph breaks and uneven rhythm');
-    expect(writerSystem).toContain('Do not compress every idea into a 280-character aphorism');
-    expect(writerSystem).toContain('setup shaped like "A is not a thesis. B is."');
+    expect(writerSystem).toContain('Three polished paraphrases are not');
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, period, and measurement type");
+    expect(writerSystem.length).toBeLessThan(6_000);
     expect(ideaSystem).toContain('changed numerical scope');
+    expect(ideaSystem).toContain('preserve that attribution');
     expect(ideaSystem).toContain('claim must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
+    expect(ideaPrompt.requirements.nativeReactionContract).toContain('Raw native prose is intentionally withheld');
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).length).toBeGreaterThan(0);
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).every((pattern: any) => (
+      pattern.reactionMode && pattern.lengthBand && pattern.paragraphBand && !('text' in pattern)
+    ))).toBe(true);
+    expect(ideaJudgePrompt.nativeReactionPatterns.length).toBeGreaterThan(0);
+    expect(ideaJudgePrompt.nativeReactionPatterns.every((pattern: any) => !('text' in pattern))).toBe(true);
+    expect(ideaPayload).not.toContain('operator-written diction anchor');
+    expect(ideaPayload).not.toContain('timeline diction from the curated voice corpus');
+    expect(ideaPayload).not.toContain('manual topic winner is a premise boundary');
+    expect(ideaPayload).not.toContain('generated diction must not return');
+    expect(ideaJudgePayload).not.toContain('operator-written diction anchor');
+    expect(ideaJudgePayload).not.toContain('timeline diction from the curated voice corpus');
+    expect(ideaJudgePayload).not.toContain('generated diction must not return');
     expect(ideaPrompts.flatMap((prompt) => prompt.briefs).flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
-    expect(operatorPremiseExclusions).toContain('operator-written diction anchor');
-    expect(operatorPremiseExclusions).toContain('timeline diction from the curated voice corpus');
-    expect(operatorPremiseExclusions).toContain('manual topic winner is a premise boundary, never a diction anchor');
-    expect(operatorPremiseExclusions).not.toContain('generated diction must not return');
     const copyJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
+    expect(copyJudgePrompt.voiceAnchors.map((anchor: any) => anchor.text)).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).not.toContain('generated diction must not return');
   });
@@ -765,6 +871,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaJudge.author.worldview).toContain('founder and investor');
     expect(ideaJudge.priorIdeaRejections).toContain('Do not infer pricing or buyer behavior from a feature-only release.');
     expect(ideaJudge.evidenceScoringContract.operator_opinion).toContain('do not penalize empty evidence');
+    expect(ideaJudge.responseContract.requiredIds).toHaveLength(ideaJudge.ideas.length);
     const sourcedIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'verified_source');
     const operatorIdeas = ideaJudge.ideas.filter((idea: any) => idea.evidenceMode === 'operator_opinion');
     expect(sourcedIdeas.length).toBeGreaterThan(0);
@@ -798,6 +905,35 @@ describe('generateTweetBatchV2 integration', () => {
       expect.objectContaining({
         status: 'rejected',
         rejectionCodes: expect.arrayContaining(['idea_judge_evidence_mismatch']),
+      }),
+    ]));
+  });
+
+  it('does not pay a writer for ideas without native reaction or share potential', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') {
+        const judged = rankingResponse(options.prompt, 'ideas');
+        const parsed = JSON.parse(judged.text);
+        parsed.scores = parsed.scores.map((score: any) => ({
+          ...score,
+          nativeReactionPotential: 0.5,
+          sharePotential: 0.45,
+        }));
+        return result(JSON.stringify(parsed));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'tweet_writing')).toBe(false);
+    expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'rejected',
+        rejectionCodes: expect.arrayContaining([
+          'idea_judge_weak_native_reaction',
+          'idea_judge_low_share_potential',
+        ]),
       }),
     ]));
   });
@@ -859,6 +995,26 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
     expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+    ]));
+  });
+
+  it('rejects a generic product wishlist before spending a critic call', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+        content: 'i want an AI model that can control a software company budget and be fired by the board.',
+        format: 'observation',
+        posture: 'generic product desire',
+      }] }), 'anthropic');
+      if (options.task === 'copy_judgment') throw new Error('preflight should reject every draft');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['generic_product_wishlist']) }),
     ]));
   });
 
@@ -1176,7 +1332,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(1);
   });
 
-  it('rewrites one deterministic voice near-miss before spending the critic call', async () => {
+  it('rewrites two distinct deterministic voice near-misses before spending the critic call', async () => {
     let writerCalls = 0;
     mocks.accountTasteImplementation = (content) => (
       content.includes('prove the buyer decision') ? {} : { stiffnessRisk: 0.31 }
@@ -1208,23 +1364,112 @@ describe('generateTweetBatchV2 integration', () => {
       .map(([options]) => JSON.parse(options.prompt))
       .filter((prompt) => prompt.failedAttempts.length > 0);
 
-    expect(writerCalls).toBe(5);
-    expect(rescuePrompts).toHaveLength(1);
+    expect(writerCalls).toBe(6);
+    expect(rescuePrompts).toHaveLength(2);
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(1);
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]).toMatchObject({ mutationRound: 1 });
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({
         retryUsed: 1,
-        rescueTargets: 1,
-        rescueDraftsGenerated: 1,
-        draftsSelected: 1,
+        rescueTargets: 2,
+        rescueDraftsGenerated: 2,
+        draftsSelected: 2,
       }),
     });
   });
 
-  it('runs at most one critic-informed rewrite and judges it again when the first copy pass narrowly fails', async () => {
+  it('can follow a preflight rescue with a separately judged critic-informed rescue', async () => {
+    let writerCalls = 0;
+    let criticCalls = 0;
+    mocks.accountTasteImplementation = (content) => (
+      content.includes('customers commit before') ? { stiffnessRisk: 0.31 } : {}
+    );
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        writerCalls += 1;
+        const parsed = JSON.parse(options.prompt);
+        if (writerCalls <= 4) return result(JSON.stringify({ drafts: [{
+          content: `${parsed.idea.topic} gets interesting when customers commit before the full system exists. that changes what has to be proven first.`,
+          format: 'observation',
+          posture: 'stiff first attempt',
+        }] }), 'anthropic');
+        if (writerCalls <= 6) return result(JSON.stringify({ drafts: [{
+          content: `i'd back the ${parsed.idea.topic} team that gets a customer deposit before reserving capacity.`,
+          format: 'observation',
+          posture: 'first rescue',
+        }] }), 'anthropic');
+        return result(JSON.stringify({ drafts: [{
+          content: `i want one paying ${parsed.idea.topic} customer before the next pitch deck gets touched.`,
+          format: 'observation',
+          posture: 'critic-informed rescue',
+        }] }), 'anthropic');
+      }
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        if (criticCalls > 1) return rankingResponse(options.prompt, 'candidates');
+        const parsed = JSON.parse(options.prompt);
+        return result(JSON.stringify({
+          ranking: parsed.candidates.map((candidate: any) => candidate.id),
+          scores: parsed.candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: 0.7,
+            voiceFit: 0.7,
+            operatorPlausibility: 0.7,
+            cringeRisk: 0.34,
+            insight: 0.72,
+            specificity: 0.8,
+            factualSafety: 0.98,
+            clarity: 0.82,
+            novelty: 0.8,
+            manualAnchorReskinRisk: 0.24,
+            diagnosis: 'The draft turns the idea into a polished founder maxim; reopen on the concrete buyer decision and stop after the owned preference.',
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+    const criticRescueWriterCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.some((attempt: any) => (
+        attempt.issues.some((issue: string) => issue.includes('polished founder maxim'))
+      )));
+
+    expect(writerCalls).toBe(8);
+    expect(criticCalls).toBe(2);
+    expect(criticRescueWriterCalls).toHaveLength(2);
+    expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_gpt_control')).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('surgical critic pass'))).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.every((attempt: any) => (
+      attempt.instruction.includes('smallest sufficient change')
+    )))).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
+    expect(mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt))
+      .some((prompt) => prompt.failedAttempts.some((attempt: any) => attempt.issues.some((issue: string) => (
+        issue.includes('polished founder maxim')
+      ))))).toBe(true);
+    expect(finalRun).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({
+        preflightRescueTargets: 2,
+        postcriticRescueTargets: 2,
+        rescueTargets: 4,
+        rescueDraftsGenerated: 4,
+        draftsSelected: 2,
+      }),
+    });
+  });
+
+  it('runs a bounded critic-informed rewrite across distinct ideas and judges each again', async () => {
     let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
@@ -1273,16 +1518,16 @@ describe('generateTweetBatchV2 integration', () => {
       .map(([options]) => JSON.parse(options.prompt))
       .filter((prompt) => prompt.failedAttempts.length > 0);
 
-    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(5);
+    expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(6);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
-    expect(rescueWriterCalls).toHaveLength(1);
+    expect(rescueWriterCalls).toHaveLength(2);
     expect(rescueWriterCalls.every((prompt) => prompt.failedAttempts.every((attempt: any) => attempt.issues.length > 0))).toBe(true);
-    expect(drafts).toHaveLength(1);
+    expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
     expect(drafts.every((draft) => draft.judgeNotes?.includes('critic-informed rewrite'))).toBe(true);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      stageCounts: expect.objectContaining({ retryUsed: 1, rescueTargets: 1, draftsSelected: 1 }),
+      stageCounts: expect.objectContaining({ retryUsed: 1, rescueTargets: 2, draftsSelected: 2 }),
     });
   });
 

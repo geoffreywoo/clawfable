@@ -69,6 +69,18 @@ describe('claim evidence', () => {
     expect(spliced.issue).toContain('combines separate evidence claims');
   });
 
+  it('normalizes equivalent compact and written magnitude notation', () => {
+    const support = ['The author says Coverage protects $50B in revenue across more than 1,000 clients.'];
+    const assessment = assessClaimEvidence(
+      'Coverage says it protects $50 billion in revenue across more than 1,000 clients.',
+      support,
+      { lockEvidenceConcepts: true },
+    );
+
+    expect(assessment.unsupportedNumbers).toEqual([]);
+    expect(assessment.issue).toBeNull();
+  });
+
   it('rejects concrete mechanisms that qualified evidence never establishes', () => {
     const result = assessClaimEvidence(
       'The leverage sits in processing and refining capacity, not geology.',
@@ -125,6 +137,12 @@ describe('claim evidence', () => {
 });
 
 describe('generated writing patterns', () => {
+  it('blocks synthetic superlative verdict labels', () => {
+    expect(assessGeneratedWritingPatterns(
+      "hardest signal to fake in a startup: the customer renews and the founder wasn't in the building.",
+    )).toMatchObject({ primarySignature: 'superlative-colon-verdict', score: 0.52 });
+  });
+
   it('blocks the generic X is just Y with Z quip mold', () => {
     expect(assessGeneratedWritingPatterns(
       'hiring fast before product truth is just anxiety with a payroll attached.',

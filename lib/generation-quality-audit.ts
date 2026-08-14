@@ -5,9 +5,10 @@ import type {
   Tweet,
   VoiceCorpusEntry,
 } from './types';
-import type { TrendingTopic } from './trending';
+import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
   getModelChainForTask,
 } from './ai';
@@ -22,19 +23,32 @@ import {
   getSourceDocuments,
   getStoryClusters,
   getResearchAgenda,
+  getSemanticBlocks,
+  getIdeaCandidates,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
+import {
+  getStoryEditorialRejectionCodesV2,
+  getStoryGenerationPlanningRejectionCodesV2,
+} from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
+import { hasAiModelPricing } from './ai-pricing';
+import {
+  enrichTrendingTopics,
+  getOperatorTopicSignalRejectionCodes,
+  selectOperatorTopicSignals,
+} from './source-planner';
 import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 4;
+export const GENERATION_QUALITY_AUDIT_VERSION = 10;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -55,7 +69,7 @@ const FINDING_SEVERITY_ORDER: Record<GenerationAuditFindingSeverity, number> = {
   low: 3,
 };
 
-const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN + 0.03;
+const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN + 0.02;
 
 type AuditIdentity = ReturnType<typeof buildAgentIdentityAudit>;
 type AuditGenerationV2 = Awaited<ReturnType<typeof loadGenerationV2Metrics>>;
@@ -94,6 +108,14 @@ interface AuditFindingInput {
   complaints: {
     total: number;
     affectedPostRate: number | null;
+  };
+  modelPricing: {
+    activeComplete: boolean;
+    missingModels: string[];
+  };
+  sources: {
+    editorialEligibleCount: number;
+    generationEligibleCount: number;
   };
 }
 
@@ -163,7 +185,7 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       evidence: {
         tweetId: thinnest.id,
         qualityMargin: thinnest.qualityMargin,
-        hardFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
+        hardFloor: PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
         recommendedAuditHeadroom: QUALITY_MARGIN_HEADROOM_FLOOR,
         content: thinnest.content,
       },
@@ -221,17 +243,29 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     });
   }
 
-  if (input.generationV2.quality.factualIncidentCount > 0) {
+  if (input.sources.editorialEligibleCount > 0 && input.sources.generationEligibleCount === 0) {
     add({
-      code: 'historical_factual_incidents',
+      code: 'source_briefs_exhausted',
       severity: 'high',
-      scope: 'historical_window',
-      title: 'The V2 learning window contains factual-risk incidents',
+      scope: 'live_state',
+      title: 'No editorially valid source story is currently available to generation',
+      evidence: input.sources,
+      action: 'Refresh qualified primary sources and inspect semantic-memory, commitment, and editorial-cooldown exclusions; keep source-free opinions inside factual-restraint gates.',
+    });
+  }
+
+  if (input.generationV2.quality.currentPolicyFactualIncidentCount > 0) {
+    add({
+      code: 'current_policy_factual_incidents',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'The active policy contains factual-risk incidents',
       evidence: {
-        factualIncidentCount: input.generationV2.quality.factualIncidentCount,
+        currentPolicyFactualIncidentCount: input.generationV2.quality.currentPolicyFactualIncidentCount,
+        historicalFactualIncidentCount: input.generationV2.quality.historicalFactualIncidentCount,
         terminalQueueDecisions: input.generationV2.sample.terminalQueueDecisions,
       },
-      action: 'Review incident-linked drafts and confirm their source or claim failures are represented in current rejection memory.',
+      action: 'Review incident-linked drafts and block the active source, premise, or claim failure before further autonomous posting.',
     });
   }
 
@@ -268,21 +302,22 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
   }
 
   if (
-    input.generationV2.gates.performanceSampleReady
+    input.generationV2.gates.currentPolicyPerformanceSampleReady
     && (
-      (input.generationV2.performance.reachVsOperator || 0) < 0.8
-      || (input.generationV2.performance.likesVsOperator || 0) < 0.8
+      (input.generationV2.performance.currentPolicyReachVsOperator || 0) < 0.8
+      || (input.generationV2.performance.currentPolicyLikesVsOperator || 0) < 0.8
     )
   ) {
     add({
-      code: 'historical_performance_below_operator',
+      code: 'current_policy_performance_below_operator',
       severity: 'medium',
-      scope: 'historical_window',
-      title: 'Generated posts trail the audited operator baseline',
+      scope: 'current_policy',
+      title: 'Active-policy posts trail the operator baseline',
       evidence: {
-        maturePosts: input.generationV2.sample.maturePosts,
-        reachVsOperator: input.generationV2.performance.reachVsOperator,
-        likesVsOperator: input.generationV2.performance.likesVsOperator,
+        maturePosts: input.generationV2.sample.currentPolicyMaturePosts,
+        reachVsOperator: input.generationV2.performance.currentPolicyReachVsOperator,
+        likesVsOperator: input.generationV2.performance.currentPolicyLikesVsOperator,
+        operatorBaselineSource: input.generationV2.performance.operatorBaselineSource,
       },
       action: 'Use operator posts for diction and personal topic taste, then optimize spread mechanics only after native-voice gates pass.',
     });
@@ -303,18 +338,26 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
   }
 
   if (input.generationV2.compute.costDataStatus !== 'complete') {
+    const activePricingMissing = input.modelPricing.missingModels.length > 0;
     add({
       code: 'generation_cost_attribution_incomplete',
       severity: 'low',
       scope: 'historical_window',
-      title: 'Model cost attribution is incomplete',
+      title: activePricingMissing
+        ? 'An active model is missing pricing metadata'
+        : 'Historical model usage lacks complete token accounting',
       evidence: {
         costDataStatus: input.generationV2.compute.costDataStatus,
         modelCalls: input.generationV2.compute.modelCalls,
+        unknownTokenAttempts: input.generationV2.compute.unknownTokenAttempts,
         unknownCostCalls: input.generationV2.compute.unknownCostCalls,
         estimatedCostUsd: input.generationV2.compute.estimatedCostUsd,
+        activeModelPricingComplete: input.modelPricing.activeComplete,
+        missingActiveModels: input.modelPricing.missingModels,
       },
-      action: 'Add pricing metadata for every active and fallback model so quality gains can be compared with spend.',
+      action: activePricingMissing
+        ? 'Add pricing metadata for every active and fallback model so quality gains can be compared with spend.'
+        : 'Keep historical totals marked partial; monitor current-policy calls, whose active and fallback models all have pricing metadata.',
     });
   }
 
@@ -416,7 +459,7 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda] = await Promise.all([
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -428,29 +471,54 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getSourceDocuments(agent.id, 300),
     getStoryClusters(agent.id, 200),
     getResearchAgenda(agent.id),
+    getSemanticBlocks(agent.id),
+    getIdeaCandidates(agent.id, 300),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const activeModelStack = PUBLISHING_V2_MODEL_STACK;
-  const primaryIdeaGeneration = getModelChainForTask(
+  const ideaGenerationChain = getModelChainForTask(
     'idea_generation',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryIdeaJudge = getModelChainForTask(
+  );
+  const ideaJudgeChain = getModelChainForTask(
     'idea_judgment',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryWriting = getModelChainForTask(
+  );
+  const writingChain = getModelChainForTask(
     'tweet_writing',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryCopyJudge = getModelChainForTask(
+  );
+  const copyJudgeChain = getModelChainForTask(
     'copy_judgment',
     'quality',
     activeModelStack,
-  )[0];
+  );
+  const shadowControlWritingChain = getModelChainForTask(
+    'tweet_writing',
+    'quality',
+    PUBLISHING_V2_CONTROL_MODEL_STACK,
+  );
+  const primaryIdeaGeneration = ideaGenerationChain[0];
+  const primaryIdeaJudge = ideaJudgeChain[0];
+  const primaryWriting = writingChain[0];
+  const primaryCopyJudge = copyJudgeChain[0];
+  const shadowControlWriting = shadowControlWritingChain[0];
+  const configuredModelTargets = [
+    ...ideaGenerationChain,
+    ...ideaJudgeChain,
+    ...writingChain,
+    ...copyJudgeChain,
+    ...shadowControlWritingChain,
+  ].filter((target, index, targets) => (
+    targets.findIndex((candidate) => candidate.provider === target.provider && candidate.model === target.model) === index
+  ));
+  const modelPricingCoverage = configuredModelTargets.map((target) => ({
+    ...target,
+    priced: hasAiModelPricing(target.model),
+  }));
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const queueItems = queue.map((tweet) => {
@@ -489,6 +557,38 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const postedGenerated = generatedPostedTweets(allTweets);
   const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
   const identity = buildAgentIdentityAudit(agent);
+  const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
+  const storyEditorialOptions = {
+    minConsequence: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle) ? 0.55 : undefined,
+  };
+  const storyDecisions = storyClusters.map((story) => ({
+    story,
+    rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
+    planningRejectionCodes: getStoryGenerationPlanningRejectionCodesV2(story, {
+      ...storyEditorialOptions,
+      blocks: semanticBlocks,
+      committedTweets: allTweets.filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)),
+      recentIdeas,
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    }),
+  }));
+  const enrichedOperatorTopics = enrichTrendingTopics(
+    trending,
+    context.voiceProfile,
+    context.learnings,
+    context.style.trendTolerance,
+  );
+  const operatorTopicSignalDecisions = enrichedOperatorTopics.map((topic) => ({
+    topic,
+    rejectionCodes: getOperatorTopicSignalRejectionCodes(topic),
+  }));
+  const selectedOperatorTopicSignals = selectOperatorTopicSignals(
+    trending,
+    context.voiceProfile,
+    context.learnings,
+    context.style.trendTolerance,
+    12,
+  );
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -496,6 +596,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     maxOriginalsPerRolling24Hours: 5,
     minQueueSize: context.settings.minQueueSize,
     refillBatchLimit: 2,
+    refillCanIterateUntilMinimum: true,
   };
   const corpusSummary = corpus ? {
     snapshotId: corpus.snapshotId,
@@ -546,16 +647,51 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const runsWithSelectedDrafts = currentPolicyRuns.filter((run) => (
     (run.stageCounts.draftsSelected || 0) > 0
   )).length;
+  const sumCurrentStage = (key: string) => currentPolicyRuns.reduce(
+    (sum, run) => sum + (run.stageCounts[key] || 0),
+    0,
+  );
+  const currentIdeasGenerated = sumCurrentStage('ideasGenerated');
+  const currentIdeasEligible = sumCurrentStage('ideasEligible');
+  const currentIdeasSelected = sumCurrentStage('ideasSelected');
+  const currentDraftsGenerated = sumCurrentStage('draftsGenerated');
+  const currentDraftsEligible = sumCurrentStage('draftsEligible');
+  const currentDraftsSelected = sumCurrentStage('draftsSelected');
+  const currentProviderAttempts = sumCurrentStage('providerAttempts');
   const currentPolicyWindow = {
     qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
     runCount: currentPolicyRuns.length,
     runsWithSelectedDrafts,
     emptySelectionRunCount: currentPolicyRuns.length - runsWithSelectedDrafts,
-    selectedDraftCount: currentPolicyRuns.reduce((sum, run) => sum + (run.stageCounts.draftsSelected || 0), 0),
+    selectedDraftCount: currentDraftsSelected,
     selectionYield: currentPolicyRuns.length > 0
       ? Number((runsWithSelectedDrafts / currentPolicyRuns.length).toFixed(4))
       : null,
     latestRunAt: currentPolicyRuns[0]?.startedAt || null,
+    selectedDraftsPerRun: currentPolicyRuns.length > 0
+      ? Number((currentDraftsSelected / currentPolicyRuns.length).toFixed(4))
+      : null,
+    stageThroughput: {
+      ideasGenerated: currentIdeasGenerated,
+      ideasEligible: currentIdeasEligible,
+      ideasSelected: currentIdeasSelected,
+      draftsGenerated: currentDraftsGenerated,
+      draftsEligible: currentDraftsEligible,
+      draftsSelected: currentDraftsSelected,
+      providerAttempts: currentProviderAttempts,
+      ideaEligibilityRate: currentIdeasGenerated > 0
+        ? Number((currentIdeasEligible / currentIdeasGenerated).toFixed(4))
+        : null,
+      selectedIdeaToEligibleDraftRate: currentIdeasSelected > 0
+        ? Number((currentDraftsEligible / currentIdeasSelected).toFixed(4))
+        : null,
+      criticSelectionRate: currentDraftsEligible > 0
+        ? Number((currentDraftsSelected / currentDraftsEligible).toFixed(4))
+        : null,
+      providerAttemptsPerSelectedDraft: currentDraftsSelected > 0
+        ? Number((currentProviderAttempts / currentDraftsSelected).toFixed(4))
+        : null,
+    },
   };
   const findingItems = buildGenerationAuditFindings({
     identity,
@@ -565,6 +701,14 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     currentPolicyWindow,
     generationV2,
     complaints: complaintSummary,
+    modelPricing: {
+      activeComplete: modelPricingCoverage.every((target) => target.priced),
+      missingModels: modelPricingCoverage.filter((target) => !target.priced).map((target) => target.model),
+    },
+    sources: {
+      editorialEligibleCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+      generationEligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+    },
   });
   const findingCounts = {
     critical: findingItems.filter((finding) => finding.severity === 'critical').length,
@@ -594,6 +738,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       pipelineVersion,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
+      generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
+      autopostQualityMarginFloor: PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
+      recommendedAuditHeadroom: QUALITY_MARGIN_HEADROOM_FLOOR,
       contextualQualityPolicyVersion: PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
       contextualFinalCriticVersion: PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
@@ -611,6 +758,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       documentCount: sourceDocuments.length,
       storyCount: storyClusters.length,
       qualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
+      evidenceQualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
+      generationEligibleStoryCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
       blockedStoryCount: storyClusters.filter((story) => Boolean(story.blockedUntil || story.blockReason)).length,
       sourceTypeCounts: countBy(sourceDocuments.map((document) => document.sourceType)),
       trustTierCounts: countBy(sourceDocuments.map((document) => document.trustTier)),
@@ -624,7 +773,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         feedCount: researchAgenda.rssFeeds.length,
         githubRepositoryCount: researchAgenda.githubRepositories.length,
       } : null,
-      accepted: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).map((story) => ({
+      accepted: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).map(({ story }) => ({
         id: story.id,
         headline: story.title,
         topic: story.topic,
@@ -634,7 +783,29 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         independentSourceCount: story.independentSourceCount,
         scores: story.scores,
       })),
-      rejected: storyClusters.filter((story) => !story.evidenceQualified || Boolean(story.blockedUntil)).map((story) => ({
+      generationPlanning: {
+        eligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+        rejectionReasonCounts: topCounts(storyDecisions
+          .filter((decision) => decision.rejectionCodes.length === 0)
+          .flatMap((decision) => decision.planningRejectionCodes)),
+        eligible: storyDecisions
+          .filter((decision) => decision.planningRejectionCodes.length === 0)
+          .map(({ story }) => ({
+            id: story.id,
+            headline: story.title,
+            topic: story.topic,
+            scores: story.scores,
+          })),
+        unavailableAfterEditorialQualification: storyDecisions
+          .filter((decision) => decision.rejectionCodes.length === 0 && decision.planningRejectionCodes.length > 0)
+          .map(({ story, planningRejectionCodes }) => ({
+            id: story.id,
+            headline: story.title,
+            topic: story.topic,
+            rejectionCodes: planningRejectionCodes,
+          })),
+      },
+      rejected: storyDecisions.filter((decision) => decision.rejectionCodes.length > 0).map(({ story, rejectionCodes }) => ({
         id: story.id,
         headline: story.title,
         topic: story.topic,
@@ -643,10 +814,31 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         evidenceQualified: story.evidenceQualified,
         blockReason: story.blockReason,
         blockedUntil: story.blockedUntil,
+        rejectionCodes,
         primarySourceCount: story.primarySourceCount,
         independentSourceCount: story.independentSourceCount,
       })),
       warmedNetworkTopicCount: trending.length,
+      operatorTopicSignals: {
+        eligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+        selectedCount: selectedOperatorTopicSignals.length,
+        selected: selectedOperatorTopicSignals,
+        rejectedReasonCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
+        rejected: operatorTopicSignalDecisions
+          .filter((decision) => decision.rejectionCodes.length > 0)
+          .slice(0, 40)
+          .map(({ topic, rejectionCodes }) => ({
+            id: getTrendingTopicStableId(topic),
+            category: topic.category,
+            headline: topic.headline,
+            semanticDomain: topic.semanticDomain,
+            entities: topic.entities || [],
+            operatorEngagementScore: topic.operatorEngagementScore || 0,
+            topicConfidence: topic.topicConfidence || 0,
+            identityFit: topic.fitScores.identityFit,
+            rejectionCodes,
+          })),
+      },
       intelligence: topicIntelligence ? {
         observedAt: topicIntelligence.observedAt,
         sourceComplete: topicIntelligence.sourceComplete !== false,
@@ -659,7 +851,19 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     models: {
       activeStack: activeModelStack,
       pipelineVersion,
-      shadowControlStack: null,
+      shadowControlStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+      shadowComparison: {
+        isolatedVariable: 'primary_writer',
+        defaultWriter: primaryWriting,
+        controlWriter: shadowControlWriting,
+        sharedIdeaGenerator: primaryIdeaGeneration,
+        sharedIdeaJudge: primaryIdeaJudge,
+        sharedCopyJudge: primaryCopyJudge,
+      },
+      pricingCoverage: {
+        complete: modelPricingCoverage.every((target) => target.priced),
+        targets: modelPricingCoverage,
+      },
       strictFallbackStack: null,
       preferred: {
         ideaGeneration: primaryIdeaGeneration,

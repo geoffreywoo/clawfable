@@ -424,7 +424,9 @@ export type DraftExperimentStatus =
 
 export type GenerationModelStackId =
   | 'standard'
-  | 'publishing_v2_quality';
+  | 'publishing_v2_quality'
+  | 'publishing_v2_gpt_control'
+  | 'publishing_v2_fable_control';
 
 export type GenerationPipelineVersion = 'v1' | 'v2';
 
@@ -794,6 +796,8 @@ export interface IdeaJudgeBreakdown {
   authorFit: number;
   consequence: number;
   distinctiveness: number;
+  nativeReactionPotential: number;
+  sharePotential: number;
 }
 
 export interface IdeaCandidate {
@@ -853,6 +857,7 @@ export interface DraftCandidate {
   judgeModel: string | null;
   judgeScore: number | null;
   judgeBreakdown?: CandidateJudgeBreakdown | null;
+  judgeNotes?: string | null;
   mutationRound?: number;
   status: GenerationCandidateStatus;
   rejectionCodes: string[];

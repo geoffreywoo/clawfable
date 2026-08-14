@@ -13,6 +13,7 @@ const currentCertification = {
   finalCriticProvider: 'openai' as const,
   finalCriticModel: 'gpt-5.6',
   finalCriticVerdict: 'allow' as const,
+  finalCriticScores: { qualityMargin: 0.9 } as any,
   finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
 };
 
@@ -149,6 +150,14 @@ describe('generated publishing origin gate', () => {
       ...complete,
       finalCriticVerdict: 'review',
     })).toContain('model-critic allow verdict');
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      finalCriticScores: { qualityMargin: 0.81 } as any,
+    })).toContain('autonomous quality margin');
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      finalCriticScores: { qualityMargin: 0.84 } as any,
+    })).toBeNull();
   });
 
   it('applies to every account and reply surface', () => {

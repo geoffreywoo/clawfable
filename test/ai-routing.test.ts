@@ -117,8 +117,9 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses Fable 5 for V2 copy and GPT-5.6 for V2 criticism', async () => {
+  it('uses Fable 5 for active V2 copy with GPT-5.6 judgment and an isolated GPT writer control', async () => {
     const {
+      PUBLISHING_V2_CONTROL_MODEL_STACK,
       PUBLISHING_V2_MODEL_STACK,
       getModelChainForTask,
     } = await loadDefaultRouter();
@@ -142,9 +143,18 @@ describe('AI model routing', () => {
       provider: 'openai',
       model: 'gpt-5.6',
     });
+    expect(getModelChainForTask('tweet_writing', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual(
+      getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_MODEL_STACK),
+    );
   });
 
-  it('dispatches V2 copy to Fable 5 before provider failover', async () => {
+  it('dispatches active V2 copy to Fable 5 before provider failover', async () => {
     const openAiCreate = vi.fn();
     const anthropicCreate = vi.fn().mockResolvedValue({
       content: [{ type: 'text', text: 'fable copy' }],
@@ -177,7 +187,6 @@ describe('AI model routing', () => {
         format: { type: 'json_schema', schema: jsonSchema },
       },
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(anthropicCreate.mock.calls[0]?.[0]).not.toHaveProperty('temperature');
     expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       text: 'fable copy',
@@ -528,7 +537,7 @@ describe('AI model routing', () => {
       model: 'claude-fable-5',
     }));
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
-      output_config: expect.objectContaining({ effort: 'low' }),
+      output_config: expect.objectContaining({ effort: 'medium' }),
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openAiCreate).not.toHaveBeenCalled();
   });

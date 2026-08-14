@@ -22,6 +22,7 @@ export const GEOFFREY_KNOWN_BAD_EVAL = [
   'The winners in rare earths will build a feedback loop, create leverage, and compound their moat.',
   'Three rules for fusion founders: start with customers, build a playbook, and move with velocity.',
   'AI infrastructure can be extremely capital intensive and still extremely capital efficient.',
+  "hardest signal to fake in a startup: the customer renews and the founder wasn't in the building.",
 ] as const;
 
 export const GEOFFREY_NEAR_MISS_EVAL = [
