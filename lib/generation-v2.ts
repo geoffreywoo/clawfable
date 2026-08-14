@@ -636,8 +636,12 @@ const PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS = new Set([
 
 const PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS = new Set([
   ...PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS,
-  'agent', 'agents', 'ai', 'ceo', 'code', 'coding', 'developer', 'developers',
-  'model', 'models', 'software', 'team', 'teams', 'tech', 'technology',
+  'action', 'actions', 'agent', 'agents', 'ai', 'and', 'but', 'can', 'ceo',
+  'chip', 'chips', 'cloud', 'cluster', 'code', 'coding', 'control', 'developer',
+  'developers', 'every', 'for', 'frontier', 'hardware', 'inference', 'make',
+  'making', 'market', 'model', 'models', 'move', 'only', 'operator', 'own',
+  'platform', 'see', 'should', 'silicon', 'software', 'status', 'team', 'teams',
+  'tech', 'technical', 'technology', 'the', 'think', 'who',
 ]);
 
 function structuredPersonalTopicSignals(topic: string, tweets: TweetPerformance[]): string[] {
@@ -663,15 +667,20 @@ function personalTopicSignalPremises(topic: string, tweets: TweetPerformance[]):
 }
 
 function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = []): boolean {
-  const candidateTokens = new Set(significantResearchTokens(text).filter((token) => (
-    !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)
-  )));
+  const distinctiveTokens = (value: string): Set<string> => {
+    const tokens = significantResearchTokens(value)
+      .map((token) => token.replace(/\d+$/g, ''))
+      .filter((token) => token.length >= 3 && !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token));
+    const properNames = (value.match(/\b[A-Z][A-Za-z0-9]{2,}\s+[A-Z][A-Za-z0-9]{1,}\b/g) || [])
+      .map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/g, ''))
+      .filter((name) => name.length >= 5);
+    return new Set([...tokens, ...properNames]);
+  };
+  const candidateTokens = distinctiveTokens(text);
   if (candidateTokens.size < 2) return false;
   return premises.some((premise) => {
-    const premiseTokens = significantResearchTokens(premise).filter((token) => (
-      !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)
-    ));
-    return sharedTokenCount(premiseTokens, candidateTokens) >= 2;
+    const premiseTokens = distinctiveTokens(premise);
+    return sharedTokenCount([...premiseTokens], candidateTokens) >= 2;
   });
 }
 
@@ -1278,7 +1287,7 @@ export function buildIdeaGenerationPromptV2(
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
-      personalTopicSignalContract: 'Structured personal topic signals are unordered semantic tokens, never prior prose or factual evidence. For a broad operator brief that supplies them, use one signal to choose a concrete subject or one-hop adjacent object in at least two propositions. Reusing a named subject is allowed only for a genuinely different public claim. Do not reconstruct, paraphrase, or extend the historical post that produced the tokens.',
+      personalTopicSignalContract: 'Structured personal topic signals are unordered semantic tokens, never prior prose or factual evidence. At most one proposition per brief may reuse one named subject for a genuinely different public claim; the other propositions must move to one-hop adjacent objects and may not carry over a second distinctive scene or object token. Do not reconstruct, invert, criticize, paraphrase, or extend the historical post that produced the tokens.',
       nativeReactionContract: 'The native reaction anchors are positive evidence of what this author finds worth saying and how socially alive the underlying thought is. Match their directness, conviction, weirdness, incompleteness, and public posture only. Never reuse an anchor premise, named scene, joke, causal claim, or sentence skeleton.',
     },
     nativeReactionAnchors: nativeReactionAnchors.slice(0, 6).map((anchor) => ({
@@ -1734,7 +1743,10 @@ export function normalizeIdeaCandidatesV2({
     if (isGenericOperatorProductWishlistV2(ideaText(candidate))) {
       candidate.rejectionCodes.push('generic_product_wishlist');
     }
-    if (isPersonalTopicSignalPremiseReskin(ideaText(candidate), brief.personalTopicSignalPremises)) {
+    if (isPersonalTopicSignalPremiseReskin(
+      `${candidate.claim} ${candidate.tension} ${candidate.implication}`,
+      brief.personalTopicSignalPremises,
+    )) {
       candidate.rejectionCodes.push('voice_anchor_semantic_reskin');
     }
     if (candidate.factualRisk === 'high') candidate.rejectionCodes.push('high_factual_risk');
@@ -2688,7 +2700,13 @@ function preflightDraft({
   if (isGenericOperatorProductWishlistV2(content)) codes.push('generic_product_wishlist');
   if (recentDuplicate.isDuplicate) codes.push('recent_copy_duplicate');
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
-  if (isPersonalTopicSignalPremiseReskin(`${idea.claim} ${content}`, brief.personalTopicSignalPremises)) {
+  if (isPersonalTopicSignalPremiseReskin(
+    `${idea.claim} ${content}`,
+    uniqueStrings([
+      ...(brief.personalTopicSignalPremises || []),
+      ...operatorPremiseExclusions(input, [idea.topic]),
+    ], 60),
+  )) {
     codes.push('voice_anchor_semantic_reskin');
   }
   if (premiseReskinRisk >= premiseReskinFloor) codes.push('voice_anchor_semantic_reskin');

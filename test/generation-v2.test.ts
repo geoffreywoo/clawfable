@@ -187,6 +187,46 @@ describe('Tweet Generation V2', () => {
       rejectionCodes: expect.arrayContaining(['voice_anchor_semantic_reskin']),
     });
     expect(buildIdeaGenerationPromptV2([operatorBrief], voiceProfile)).not.toContain('SF rich');
+
+    const adjacentIdeas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'OpenAI should ship an agent that can terminate paid SaaS subscriptions.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-adjacent',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+    expect(adjacentIdeas[0].rejectionCodes).not.toContain('voice_anchor_semantic_reskin');
+  });
+
+  it('normalizes a spaced name against its native handle when checking premise reuse', () => {
+    const operatorBrief = {
+      ...brief('operator', 'ai'),
+      personalTopicSignals: ['google:buy:cognition:200b:scottwu46'],
+      personalTopicSignalPremises: [
+        'google should buy @cognition for $200b and make @ScottWu46 ceo',
+      ],
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Google should hand Scott Wu control of a standalone AI software unit with its own equity.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-handle-alias',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).toContain('voice_anchor_semantic_reskin');
   });
 
   it('uses an operator-engaged network post as a subject cue without exposing its prose as evidence', () => {
