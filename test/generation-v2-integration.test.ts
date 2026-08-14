@@ -351,7 +351,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-43',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-44',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -565,7 +565,7 @@ describe('generateTweetBatchV2 integration', () => {
             overall: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.78,
             voiceFit: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
             operatorPlausibility: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
-            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.34,
+            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.1,
             insight: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.86 : 0.78,
             specificity: 0.82,
             factualSafety: 0.98,
@@ -580,9 +580,15 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
     const tasks = mocks.generateText.mock.calls.map(([options]) => options.task);
+    const rescueWriterCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.length > 0);
 
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(5);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
+    expect(rescueWriterCalls).toHaveLength(1);
+    expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_quality');
+    expect(String(rescueWriterCalls[0].system)).toContain('surgical critic pass');
     expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
