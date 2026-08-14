@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-75',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-76',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -135,6 +135,7 @@ describe('generation quality audit findings', () => {
         draftCandidateId: 'draft-parent',
         parentDraftId: null,
         mutationRound: 0,
+        generationModelStack: 'publishing_v2_gpt_control',
         generationProvider: 'openai',
         generationModel: 'gpt-5.6',
         judgeScore: 0.82,
@@ -145,6 +146,7 @@ describe('generation quality audit findings', () => {
         draftCandidateId: 'draft-rescue',
         parentDraftId: 'draft-parent',
         mutationRound: 1,
+        generationModelStack: 'publishing_v2_fable_control',
         generationProvider: 'anthropic',
         generationModel: 'claude-fable-5',
         judgeScore: 0.91,
@@ -155,8 +157,8 @@ describe('generation quality audit findings', () => {
     } as any]);
 
     expect(outcome.groups).toEqual(expect.arrayContaining([
-      expect.objectContaining({ phase: 'initial', model: 'openai:gpt-5.6', generatedCount: 1, selectedCount: 0 }),
-      expect.objectContaining({ phase: 'rescue', model: 'anthropic:claude-fable-5', generatedCount: 1, selectedCount: 1 }),
+      expect.objectContaining({ phase: 'initial', modelStack: 'publishing_v2_gpt_control', model: 'openai:gpt-5.6', generatedCount: 1, selectedCount: 0 }),
+      expect.objectContaining({ phase: 'rescue', modelStack: 'publishing_v2_fable_control', model: 'anthropic:claude-fable-5', generatedCount: 1, selectedCount: 1 }),
     ]));
     expect(outcome.rescue).toMatchObject({
       targetCount: 1,

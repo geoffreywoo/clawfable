@@ -20,6 +20,7 @@ import {
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
+  getSubtractiveTailCandidateContentV2,
   getV2GeneratedWritingIssue,
   isAbstractComparativePublicMoveV2,
   isGenericInvestorSelectionTemplateV2,
@@ -357,6 +358,22 @@ describe('Tweet Generation V2', () => {
     } as IdeaCandidate, brief('robotics', 'robotics'), [], []));
     expect(prompt.responseContract.variantMoves[1].instruction).toContain('never wrap a category');
     expect(prompt.responseContract.diversityContract).toContain('one consequence from stakes');
+
+    const singleWriterPrompt = JSON.parse(buildTweetWritingPromptV2(
+      rawIdea('operator', 'ChatGPT is the OpenAI asset I would bet on.') as IdeaCandidate,
+      brief('operator', 'OpenAI'),
+      [],
+      [],
+      undefined,
+      undefined,
+      undefined,
+      'reconceive',
+      1,
+    ));
+    expect(singleWriterPrompt.responseContract.variantMoves).toEqual([
+      expect.objectContaining({ move: 'blunt_reaction' }),
+    ]);
+    expect(singleWriterPrompt.factualWritingContract).toContain('millions or billions');
   });
 
   it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {
@@ -406,6 +423,14 @@ describe('Tweet Generation V2', () => {
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
+  });
+
+  it('builds only deletion-based tail candidates from multi-sentence near misses', () => {
+    expect(getSubtractiveTailCandidateContentV2(
+      "openai doesn't need the best model to get way bigger. chatgpt is the bet. billions of people know one name for ai.",
+    )).toBe("openai doesn't need the best model to get way bigger. chatgpt is the bet.");
+    expect(getSubtractiveTailCandidateContentV2('chatgpt is the bet.')).toBeNull();
+    expect(getSubtractiveTailCandidateContentV2('too short. no.')).toBeNull();
   });
 
   it('requires attributed source claims to stay attributed in public copy', () => {

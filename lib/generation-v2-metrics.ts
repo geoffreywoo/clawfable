@@ -332,6 +332,7 @@ export function buildGenerationV2Metrics({
           status: draft.status,
           rejectionCodes: draft.rejectionCodes,
           mutationRound: draft.mutationRound || 0,
+          generationModelStack: draft.generationModelStack || null,
           generationProvider: draft.generationProvider,
           generationModel: draft.generationModel,
           judgeProvider: draft.judgeProvider,
