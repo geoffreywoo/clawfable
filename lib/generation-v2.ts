@@ -31,6 +31,8 @@ import {
   estimateAiUsageCostUsd,
   generateText,
   hasTextGenerationProvider,
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
+  PUBLISHING_V2_MODEL_STACK,
   type GenerateTextOptions,
   type GenerateTextResult,
 } from './ai';
@@ -3588,6 +3590,7 @@ async function generateRescueDraftEvaluations({
   runId,
   calls,
   blocks,
+  modelStack = input.modelStack,
 }: {
   targets: DraftEvaluation[];
   priorEvaluations: DraftEvaluation[];
@@ -3595,6 +3598,7 @@ async function generateRescueDraftEvaluations({
   runId: string;
   calls: GenerationModelCallTrace[];
   blocks: SemanticBlock[];
+  modelStack?: GenerationModelStackId;
 }): Promise<DraftEvaluation[]> {
   const outputs = await Promise.all(targets.map(async (target) => {
     const revisionContext = [
@@ -3617,7 +3621,7 @@ async function generateRescueDraftEvaluations({
         brief: target.brief,
         documents: target.sourceDocuments,
         anchors: target.anchors,
-        input,
+        input: { ...input, modelStack },
         runId,
         calls,
         revisionContext,
@@ -3994,6 +3998,9 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
           runId,
           calls: trace.modelCalls,
           blocks,
+          modelStack: input.modelStack === PUBLISHING_V2_MODEL_STACK
+            ? PUBLISHING_V2_CONTROL_MODEL_STACK
+            : input.modelStack,
         });
         trace.stageCounts.rescueDraftsGenerated = (trace.stageCounts.rescueDraftsGenerated || 0) + retryEvaluations.length;
       }

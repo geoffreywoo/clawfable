@@ -18,6 +18,8 @@ vi.mock('@/lib/ai', () => ({
   estimateAiUsageCostUsd: () => null,
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,
+  PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_gpt_control',
+  PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -347,7 +349,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-36',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-37',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1433,9 +1435,16 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
     const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+    const criticRescueWriterCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.some((attempt: any) => (
+        attempt.issues.some((issue: string) => issue.includes('polished founder maxim'))
+      )));
 
     expect(writerCalls).toBe(8);
     expect(criticCalls).toBe(2);
+    expect(criticRescueWriterCalls).toHaveLength(2);
+    expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_gpt_control')).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
     expect(mocks.generateText.mock.calls
