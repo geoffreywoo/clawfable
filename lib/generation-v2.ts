@@ -1048,6 +1048,17 @@ function isCommittedTweet(tweet: Tweet): boolean {
   return COMMITTED_TWEET_STATUSES.has(tweet.status);
 }
 
+export function getCommittedTweetCopyMemoryV2(
+  tweets: Tweet[],
+  options: { excludeTweetId?: string | null; limit?: number } = {},
+): string[] {
+  const limit = Math.max(1, options.limit ?? 80);
+  return uniqueStrings(tweets
+    .filter(isCommittedTweet)
+    .filter((tweet) => !options.excludeTweetId || String(tweet.id) !== String(options.excludeTweetId))
+    .map((tweet) => tweet.content), limit);
+}
+
 function storySubject(story: StoryCluster): string {
   return `${story.semanticKey.replace(/:/g, ' ')} ${story.topic} ${story.title} ${story.summary} ${story.entities.join(' ')}`;
 }
@@ -3274,7 +3285,7 @@ function preflightDraft({
     : null;
   const recentDuplicate = isNearDuplicate(content, [
     ...input.recentPosts,
-    ...input.allTweets.slice(0, 80).map((tweet) => tweet.content),
+    ...getCommittedTweetCopyMemoryV2(input.allTweets),
   ], 0.55);
   const anchorReskin = isNearDuplicate(content, anchors.map((anchor) => anchor.content), 0.68);
   const premiseReskinRisk = Math.max(0, ...operatorPremiseExclusions(input, [idea.topic]).map((premise) => (
