@@ -2776,30 +2776,52 @@ export function selectRankedIdeaPortfolioV2({
   briefs,
   voiceProfile,
   desired,
+  existingPortfolio = [],
+  excludedBriefIds = new Set<string>(),
+  allowExistingBriefReuse = false,
 }: {
   ranking: string[];
   eligible: IdeaCandidate[];
   briefs: GenerationBriefV2[];
   voiceProfile: VoiceProfile;
   desired: number;
+  existingPortfolio?: IdeaCandidate[];
+  excludedBriefIds?: Set<string>;
+  allowExistingBriefReuse?: boolean;
 }): IdeaCandidate[] {
   if (desired <= 0) return [];
   const ideasById = new Map(eligible.map((idea) => [idea.id, idea]));
   const briefsById = new Map(briefs.map((brief) => [brief.id, brief]));
   const selected: IdeaCandidate[] = [];
-  const selectedBriefs = new Set<string>();
+  const selectedBriefs = new Set(excludedBriefIds);
+  if (!allowExistingBriefReuse) {
+    for (const idea of existingPortfolio) selectedBriefs.add(idea.briefId);
+  }
   const geoffreyPortfolio = isGeoffreyVoiceProfile(voiceProfile);
   let selectedVerifiedSources = 0;
   let selectedDeepTechnical = 0;
   let selectedManufacturingMaterials = 0;
 
-  const add = (idea: IdeaCandidate): boolean => {
-    if (selectedBriefs.has(idea.briefId)) return false;
+  const portfolioTraits = (idea: IdeaCandidate) => {
     const brief = briefsById.get(idea.briefId);
     const topicContext = `${idea.topic} ${ideaPublicMove(idea)} ${idea.claim} ${brief?.title || ''}`;
-    const verifiedSource = brief?.evidenceMode === 'verified_source';
-    const deepTechnical = isGeoffreyDeepTechnicalTopic(topicContext);
-    const manufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topicContext);
+    return {
+      verifiedSource: brief?.evidenceMode === 'verified_source',
+      deepTechnical: isGeoffreyDeepTechnicalTopic(topicContext),
+      manufacturingMaterials: isGeoffreyManufacturingMaterialsTopic(topicContext),
+    };
+  };
+
+  for (const idea of existingPortfolio) {
+    const traits = portfolioTraits(idea);
+    if (traits.verifiedSource) selectedVerifiedSources += 1;
+    if (traits.deepTechnical) selectedDeepTechnical += 1;
+    if (traits.manufacturingMaterials) selectedManufacturingMaterials += 1;
+  }
+
+  const add = (idea: IdeaCandidate): boolean => {
+    if (selectedBriefs.has(idea.briefId)) return false;
+    const { verifiedSource, deepTechnical, manufacturingMaterials } = portfolioTraits(idea);
     if (geoffreyPortfolio && (
       (verifiedSource && selectedVerifiedSources >= 1)
       || (deepTechnical && selectedDeepTechnical >= 1)
@@ -2836,18 +2858,21 @@ export function selectAlternateIdeasV2({
   ideas,
   evaluatedIdeaIds,
   selectedBriefIds,
+  briefs,
+  voiceProfile,
   desired,
 }: {
   ideas: IdeaCandidate[];
   evaluatedIdeaIds: Set<string>;
   selectedBriefIds: Set<string>;
+  briefs: GenerationBriefV2[];
+  voiceProfile: VoiceProfile;
   desired: number;
 }): IdeaCandidate[] {
   if (desired <= 0) return [];
   const alternates = ideas
     .filter((idea) => (
       !evaluatedIdeaIds.has(idea.id)
-      && !selectedBriefIds.has(idea.briefId)
       && idea.status === 'rejected'
       && idea.rejectionCodes.length === 1
       && idea.rejectionCodes[0] === 'idea_not_selected'
@@ -2861,15 +2886,19 @@ export function selectAlternateIdeasV2({
       || (right.judgeBreakdown?.sharePotential || 0) - (left.judgeBreakdown?.sharePotential || 0)
       || left.id.localeCompare(right.id)
     ));
-  const selected: IdeaCandidate[] = [];
-  const usedBriefs = new Set(selectedBriefIds);
-  for (const idea of alternates) {
-    if (usedBriefs.has(idea.briefId)) continue;
-    selected.push(idea);
-    usedBriefs.add(idea.briefId);
-    if (selected.length >= desired) break;
-  }
-  return selected;
+  const existingPortfolio = [...new Map(ideas
+    .filter((idea) => evaluatedIdeaIds.has(idea.id))
+    .map((idea) => [idea.id, idea])).values()];
+  return selectRankedIdeaPortfolioV2({
+    ranking: alternates.map((idea) => idea.id),
+    eligible: alternates,
+    briefs,
+    voiceProfile,
+    desired,
+    existingPortfolio,
+    excludedBriefIds: selectedBriefIds,
+    allowExistingBriefReuse: true,
+  });
 }
 
 async function selectIdeas({
@@ -5241,11 +5270,28 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       }
     }
     if (eligibleDrafts.length === 0) {
-      const reserve = ideas
-        .filter((idea) => idea.status === 'rejected' && idea.rejectionCodes.length === 1 && idea.rejectionCodes[0] === 'idea_not_selected')
-        .sort((left, right) => (right.judgeScore ?? 0) - (left.judgeScore ?? 0))[0];
+      const evaluatedIdeaIds = new Set(evaluations.map((entry) => entry.idea.id));
+      const reservePoolSize = ideas.filter((idea) => (
+        !evaluatedIdeaIds.has(idea.id)
+        && idea.status === 'rejected'
+        && idea.rejectionCodes.length === 1
+        && idea.rejectionCodes[0] === 'idea_not_selected'
+      )).length;
+      const safeReserves = selectAlternateIdeasV2({
+        ideas,
+        evaluatedIdeaIds,
+        selectedBriefIds: new Set(),
+        briefs,
+        voiceProfile: input.voiceProfile,
+        desired: reservePoolSize,
+      });
+      const reserve = safeReserves[0];
+      trace.stageCounts.reserveIdeaCandidates = reservePoolSize;
+      trace.stageCounts.reserveIdeaPortfolioRejected = reservePoolSize - safeReserves.length;
+      trace.stageCounts.reserveIdeaSelected = 0;
       if (reserve && Date.now() + 30_000 < runDeadlineAt) {
         retryUsed = true;
+        trace.stageCounts.reserveIdeaSelected = 1;
         reserve.status = 'selected';
         reserve.rejectionCodes = [];
         const retry = await generateDraftEvaluations({
@@ -5411,12 +5457,23 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const selectedBriefIds = new Set([...finalSelectedIdeaIds]
         .map((ideaId) => ideas.find((idea) => idea.id === ideaId)?.briefId)
         .filter((briefId): briefId is string => Boolean(briefId)));
-      const alternateIdeas = selectAlternateIdeasV2({
+      const alternatePoolSize = ideas.filter((idea) => (
+        !evaluatedIdeaIds.has(idea.id)
+        && idea.status === 'rejected'
+        && idea.rejectionCodes.length === 1
+        && idea.rejectionCodes[0] === 'idea_not_selected'
+      )).length;
+      const safeAlternateIdeas = selectAlternateIdeasV2({
         ideas,
         evaluatedIdeaIds,
         selectedBriefIds,
-        desired: input.count - selected.length,
+        briefs,
+        voiceProfile: input.voiceProfile,
+        desired: alternatePoolSize,
       });
+      const alternateIdeas = safeAlternateIdeas.slice(0, input.count - selected.length);
+      trace.stageCounts.alternateIdeaCandidates = alternatePoolSize;
+      trace.stageCounts.alternateIdeaPortfolioRejected = alternatePoolSize - safeAlternateIdeas.length;
       trace.stageCounts.alternateIdeaTargets = alternateIdeas.length;
       if (alternateIdeas.length > 0) {
         retryUsed = true;
