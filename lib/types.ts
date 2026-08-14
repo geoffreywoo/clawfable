@@ -797,6 +797,7 @@ export interface IdeaJudgeBreakdown {
   consequence: number;
   distinctiveness: number;
   nativeReactionPotential: number;
+  publicMoveStrength: number;
   sharePotential: number;
 }
 
@@ -815,6 +816,7 @@ export interface IdeaCandidate {
   storyClusterId: string | null;
   creativeSeedId?: string | null;
   topic: string;
+  publicMove?: string;
   claim: string;
   tension: string;
   implication: string;
