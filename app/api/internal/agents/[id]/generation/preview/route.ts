@@ -234,6 +234,7 @@ export async function POST(
               briefId: idea.briefId,
               storyClusterId: idea.storyClusterId,
               topic: idea.topic,
+              publicMove: idea.publicMove || idea.claim,
               claim: idea.claim,
               tension: idea.tension,
               implication: idea.implication,
