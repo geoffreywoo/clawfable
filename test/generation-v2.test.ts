@@ -7,6 +7,7 @@ import {
   buildIdeaGenerationPromptV2,
   buildPersonalTopicSubjectCuesV2,
   buildTweetWritingPromptV2,
+  calculateV2FinalQualityMargin,
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
   getGeoffreyFinalNoveltyIssueV2,
@@ -226,6 +227,38 @@ describe('Tweet Generation V2', () => {
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({})).toBe(0.86);
+  });
+
+  it('weights literal operator plausibility above extra casual texture in final margin calibration', () => {
+    const observed = calculateV2FinalQualityMargin({
+      overall: 0.88,
+      insight: 0.84,
+      operatorPlausibility: 0.91,
+    }, {
+      nativeVoice: 0.817,
+      casualStartupFit: 0.758,
+      cringeRisk: 0.2336,
+      stiffnessRisk: 0.01,
+      voiceDriftRisk: 0,
+      generatedPatternRisk: 0,
+      manualAnchorReskinRisk: 0.03,
+    } as any);
+    const lowPlausibility = calculateV2FinalQualityMargin({
+      overall: 0.88,
+      insight: 0.84,
+      operatorPlausibility: 0.55,
+    }, {
+      nativeVoice: 0.55,
+      casualStartupFit: 0.9,
+      cringeRisk: 0.2336,
+      stiffnessRisk: 0.01,
+      voiceDriftRisk: 0,
+      generatedPatternRisk: 0,
+      manualAnchorReskinRisk: 0.03,
+    } as any);
+
+    expect(observed).toBeGreaterThanOrEqual(0.86);
+    expect(lowPlausibility).toBeLessThan(0.86);
   });
 
   it('blocks obvious low-novelty Geoffrey copy without applying the account gate globally', () => {

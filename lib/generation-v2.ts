@@ -4138,7 +4138,7 @@ function finalQualityRejectionCodes(
 ): string[] {
   const finalScores = providedFinalScores || finalCriticBreakdown(score, evaluation, input);
   const qualityMargin = finalScores.qualityMargin
-    ?? finalQualityPriorityFromBreakdown(score, finalScores);
+    ?? calculateV2FinalQualityMargin(score, finalScores);
   const confidenceFloor = Math.max(0.62, getAutonomyConfidenceThreshold(input.style.autonomyMode));
   const technicalLane = isGeoffreyDeepTechnicalTopic(
     `${evaluation.idea.topic} ${ideaPublicMove(evaluation.idea)} ${evaluation.idea.claim} ${evaluation.draft.content}`,
@@ -4185,18 +4185,19 @@ function finalQualityPriority(
   const finalScores = evaluation.draft.judgeBreakdown
     || finalCriticBreakdown(score, evaluation, input);
   return finalScores.qualityMargin
-    ?? finalQualityPriorityFromBreakdown(score, finalScores);
+    ?? calculateV2FinalQualityMargin(score, finalScores);
 }
 
-function finalQualityPriorityFromBreakdown(
-  score: CopyJudgeScore,
+export function calculateV2FinalQualityMargin(
+  score: Pick<CopyJudgeScore, 'overall' | 'insight' | 'operatorPlausibility'>,
   finalScores: CandidateJudgeBreakdown,
 ): number {
   return clampResearchScore(
     score.overall * 0.2
     + score.insight * 0.15
     + (finalScores.nativeVoice ?? 0) * 0.22
-    + (finalScores.casualStartupFit ?? 0) * 0.1
+    + score.operatorPlausibility * 0.03
+    + (finalScores.casualStartupFit ?? 0) * 0.07
     + (1 - (finalScores.cringeRisk ?? 1)) * 0.12
     + (1 - (finalScores.stiffnessRisk ?? 1)) * 0.06
     + (1 - (finalScores.voiceDriftRisk ?? 1)) * 0.05
@@ -4218,7 +4219,7 @@ function toRankedTweet(
   const finalScores = {
     ...baseFinalScores,
     qualityMargin: baseFinalScores.qualityMargin
-      ?? finalQualityPriorityFromBreakdown(score, baseFinalScores),
+      ?? calculateV2FinalQualityMargin(score, baseFinalScores),
   };
   draft.judgeBreakdown = finalScores;
   const slopScore = scoreSlopRisk(draft.content, featureTags);
@@ -4370,7 +4371,7 @@ async function selectFinalTweets({
     const baseFinalScores = finalCriticBreakdown(score, evaluation, input);
     const finalScores = {
       ...baseFinalScores,
-      qualityMargin: finalQualityPriorityFromBreakdown(score, baseFinalScores),
+      qualityMargin: calculateV2FinalQualityMargin(score, baseFinalScores),
     };
     evaluation.draft.judgeBreakdown = finalScores;
     const finalQualityCodes = finalQualityRejectionCodes(score, evaluation, input, finalScores);
