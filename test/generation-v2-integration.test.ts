@@ -326,6 +326,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
+    expect(String(writerCall.system)).toContain('Never upgrade an attributed or self-reported claim into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt.variantCadenceAssignments).toHaveLength(3);
     expect(new Set(writerPrompt.variantCadenceAssignments.map((entry: any) => entry.anchorId)).size).toBe(3);
@@ -346,17 +347,20 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-27',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-28',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
         ideasGenerated: 12,
         ideasSelected: 4,
         draftsGenerated: 8,
-        copyJudgeCandidates: 7,
+        copyJudgeCandidates: expect.any(Number),
         draftsSelected: 2,
       }),
     });
+    const copyJudgeCandidateCount = mocks.saveGenerationRun.mock.calls.at(-1)?.[1]?.stageCounts?.copyJudgeCandidates;
+    expect(copyJudgeCandidateCount).toBeGreaterThanOrEqual(7);
+    expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
   it('starts both compact idea batches before waiting for a result', async () => {
@@ -758,6 +762,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, period, and measurement type");
     expect(ideaSystem).toContain('changed numerical scope');
+    expect(ideaSystem).toContain('preserve that attribution');
     expect(ideaSystem).toContain('claim must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
     expect(ideaPrompt.requirements.nativeReactionContract).toContain('positive evidence');

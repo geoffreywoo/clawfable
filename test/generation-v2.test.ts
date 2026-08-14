@@ -8,6 +8,7 @@ import {
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getRequiredFinalQualityMarginV2,
+  getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
   isQuestionDraftV2,
@@ -116,6 +117,42 @@ describe('Tweet Generation V2', () => {
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
+  });
+
+  it('requires attributed source claims to stay attributed in public copy', () => {
+    const attributedSource = {
+      publisher: '@justindross',
+      entities: ['Coverage'],
+      claims: [{
+        text: 'The author says their company protects $50B in revenue across more than 1,000 clients.',
+      }],
+    } as SourceDocument;
+    const directSource = {
+      claims: [{
+        text: 'Coverage protects $50B in revenue across more than 1,000 clients.',
+      }],
+    } as SourceDocument;
+
+    expect(getSourceAttributionIssueV2(
+      'coverage protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toMatch(/attribution was dropped/i);
+    expect(getSourceAttributionIssueV2(
+      'coverage says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'the number says coverage protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toMatch(/attribution was dropped/i);
+    expect(getSourceAttributionIssueV2(
+      'according to coverage, it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'coverage protects $50B in revenue across more than 1,000 clients.',
+      [directSource],
+    )).toBeNull();
   });
 
   it('creates four distinct briefs for a normal two-post refill', () => {
