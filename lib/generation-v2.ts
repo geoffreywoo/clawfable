@@ -3720,6 +3720,9 @@ async function generateRescueDraftEvaluations({
     const targetRevisionStrategy = revisionStrategy === 'critic_adaptive'
       ? getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes)
       : revisionStrategy;
+    const targetModelStack = targetRevisionStrategy === 'critic_surgical'
+      ? input.modelStack
+      : modelStack;
     const revisionContext = [
       target,
       ...priorEvaluations.filter((entry) => entry.idea.id === target.idea.id && entry.draft.id !== target.draft.id),
@@ -3740,7 +3743,7 @@ async function generateRescueDraftEvaluations({
         brief: target.brief,
         documents: target.sourceDocuments,
         anchors: target.anchors,
-        input: { ...input, modelStack },
+        input: { ...input, modelStack: targetModelStack },
         runId,
         calls,
         revisionContext,
