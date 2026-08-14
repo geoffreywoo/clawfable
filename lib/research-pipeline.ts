@@ -145,7 +145,8 @@ function mergeOperatorTopics(fresh: string[], prior: string[], limit: number): s
   // behind a fresh batch consumes the bounded news-search budget before broad
   // startup and technology discovery can run. Keep prior subjects only as an
   // outage fallback when the current network refresh found nothing usable.
-  const candidates = fresh.length > 0 ? fresh : prior;
+  // One fallback subject preserves continuity without monopolizing discovery.
+  const candidates = fresh.length > 0 ? fresh : prior.slice(0, 1);
   const merged: string[] = [];
   for (const candidate of uniqueStrings(candidates, candidates.length)) {
     const subject = operatorTopicSubject(candidate);
