@@ -1117,6 +1117,7 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Write what Geoffrey would send one smart founder or investor: high-context, casual, opinionated, a little uneven, never an analyst summary.
 - Preserve the publicMove's judgment, not its metadata or memo nouns.
 - Start with the named subject, reaction, bet, question, or desire. Do not paste slang or "i think" onto formal prose.
+- Use the verb Geoffrey would say out loud. Prefer "goes public," "buys," "wins," "ships," or "gets worse" over nominalized phrases such as "IPO timing," "reaching the public market," "distribution position," or "as the rounds accumulate." If a sentence sounds like a panel answer, rewrite it as the ten-second text-message version.
 - Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought. Do not force an aphorism.
 - Use ordinary startup and market language. Keep one technical, finance, or analyst term only when it sharpens the point.
 - Anchors are cadence evidence only. Match compression, capitalization, rhythm, and explanation without borrowing a premise, joke, scene, opening, skeleton, or phrase.
