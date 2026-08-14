@@ -65,7 +65,7 @@ import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { PUBLISHING_V2_MODEL_STACK } from './ai';
-import { PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN } from './publishing-quality-policy';
+import { PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN } from './publishing-quality-policy';
 import { getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
 import { semanticIdeaSimilarity } from './tweet-features';
@@ -428,7 +428,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   await Promise.all(invalid
     .filter(({ tweet }) => (
       typeof tweet.finalCriticScores?.qualityMargin === 'number'
-      && tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN
+      && tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN
     ))
     .map(({ tweet, issue }) => addLearningSignal(agent.id, {
       tweetId: tweet.id,
@@ -442,7 +442,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
         pipelineVersion: tweet.pipelineVersion || null,
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
         feedbackReasonCode: 'bad_writing',
-        policyGate: 'final_quality_margin',
+        policyGate: 'autopost_quality_margin',
         qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
       },
     })));

@@ -2,7 +2,7 @@ import type { Tweet } from './types';
 import {
   getPublishingV2FinalCriticVersion,
   getPublishingV2QualityPolicyVersion,
-  PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
+  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
 } from './publishing-quality-policy';
 
 type GenerationOriginTweet = Pick<
@@ -56,10 +56,10 @@ export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string |
       tweet.generationSurface === 'original'
       && (
         typeof tweet.finalCriticScores?.qualityMargin !== 'number'
-        || tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN
+        || tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN
       )
     ) {
-      return `V2-generated original posts require final quality margin at least ${PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN.toFixed(2)}.`;
+      return `V2-generated original posts require autonomous quality margin at least ${PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN.toFixed(2)}.`;
     }
     if (!tweet.voiceCorpusVersion) {
       return 'V2-generated posts require voice-corpus provenance.';

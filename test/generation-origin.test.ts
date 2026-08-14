@@ -152,11 +152,11 @@ describe('generated publishing origin gate', () => {
     })).toContain('model-critic allow verdict');
     expect(getGeneratedPublishIssue({
       ...complete,
-      finalCriticScores: { qualityMargin: 0.8 } as any,
-    })).toContain('final quality margin');
+      finalCriticScores: { qualityMargin: 0.81 } as any,
+    })).toContain('autonomous quality margin');
     expect(getGeneratedPublishIssue({
       ...complete,
-      finalCriticScores: { qualityMargin: 0.81 } as any,
+      finalCriticScores: { qualityMargin: 0.82 } as any,
     })).toBeNull();
   });
 

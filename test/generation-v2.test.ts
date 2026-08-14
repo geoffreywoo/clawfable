@@ -153,10 +153,40 @@ describe('Tweet Generation V2', () => {
     expect(aiBrief?.personalTopicSignals).toEqual([
       expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/),
     ]);
+    expect(aiBrief?.personalTopicSignalPremises).toEqual([priorPost]);
     const prompt = buildIdeaGenerationPromptV2([aiBrief!], voiceProfile);
     expect(prompt).not.toContain(priorPost);
     expect(prompt).not.toContain('A prior premise that must not be copied');
     expect(prompt).toContain('personalTopicSignals');
+  });
+
+  it('blocks a personal topic signal from inverting the native premise that produced it', () => {
+    const operatorBrief = {
+      ...brief('operator', 'culture'),
+      personalTopicSignals: ['estate:woodside:host:dinner:parties:poker'],
+      personalTopicSignalPremises: [
+        'SF rich: estate in woodside, host dinner parties and poker with ai founders',
+      ],
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'A CEO treating a Woodside dinner invitation as more valuable than a stranger paying is optimizing for approval.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-personal-premise-reskin',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['voice_anchor_semantic_reskin']),
+    });
+    expect(buildIdeaGenerationPromptV2([operatorBrief], voiceProfile)).not.toContain('SF rich');
   });
 
   it('uses an operator-engaged network post as a subject cue without exposing its prose as evidence', () => {
@@ -1400,6 +1430,12 @@ describe('Tweet Generation V2', () => {
     expect(isGenericOperatorProductWishlistV2(
       'i want OpenAI to buy Linear.',
     )).toBe(false);
+    expect(getV2GeneratedWritingIssue(
+      'google should stop treating the coding agent like another tab.\n\nmake it the default interface to the entire developer stack.',
+    )).toContain('stop-treating-make-default');
+    expect(getV2GeneratedWritingIssue(
+      'kill the Claude chatbot subscription.\n\nmake Claude Code the product the whole company answers to.',
+    )).toBeNull();
   });
 
   it('rejects an unsourced measured numeric claim', () => {

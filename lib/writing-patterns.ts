@@ -48,6 +48,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'x-not-just-y', weight: 0.42, pattern: /,\s*not\s+(?:just|jus)\s+(?:a|an|the)\b/i },
   { label: 'reverse-not-a-contrast', weight: 0.28, pattern: /,\s*not\s+(?:a|an|the)\b/i },
   { label: 'looks-like-actually', weight: 0.42, pattern: /\b(?:looks?|sounds?) like\b[^.!?\n]{2,100}[.!?]\s*(?:\n\s*)*(?:it|this|that|they|the [a-z][a-z -]{0,30})\s*(?:is|are|has|have|['’]s|['’]re)\s+actually\b/i },
+  { label: 'stop-treating-make-default', weight: 0.52, pattern: /\bstop treating\b[^.!?\n]{2,120}\blike (?:a|an|another)\b[\s\S]{0,180}\bmake (?:it|the [a-z][a-z -]{0,40})\s+(?:the\s+)?(?:default|primary|main)\s+(?:interface|front door|entry point)\b/i },
   { label: 'everyone-building-fewer', weight: 0.36, pattern: /\beveryone(?:['’]s| is)\s+building\b[^.!?\n]{2,100}[.!?]\s*(?:\n\s*)*fewer\b/i },
   { label: 'abstract-is-the-product', weight: 0.42, pattern: /\b(?:attention|brand|context|data|distribution|interface|judgment|network|speed|taste|trust|workflow)\s+is\s+the\s+product(?:\s+again)?\.?$/i },
   { label: 'startup-live-or-die', weight: 0.34, pattern: /\b(?:companies|company|founders|products|startups?)\s+(?:live|lives)\s+or\s+(?:die|dies)\s+on\b/i },

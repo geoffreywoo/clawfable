@@ -328,6 +328,7 @@ export interface GenerationBriefV2 {
   evidenceScore: number;
   freshnessScore: number;
   personalTopicSignals?: string[];
+  personalTopicSignalPremises?: string[];
   creativeSeed?: {
     id: string;
     kind: FrontierIdeaSeed['kind'];
@@ -569,6 +570,7 @@ function operatorTopicBrief(
   spreadMechanics: string[] = [],
   creativeSeed: FrontierIdeaSeed | null = null,
   personalTopicSignals: string[] = [],
+  personalTopicSignalPremises: string[] = [],
 ): GenerationBriefV2 {
   const historyPrefix = sampleCount
     ? `Topic-level history: ${sampleCount} operator-written posts. `
@@ -601,6 +603,7 @@ function operatorTopicBrief(
     evidenceScore: 0.5,
     freshnessScore: 0.45,
     personalTopicSignals,
+    personalTopicSignalPremises,
     creativeSeed: creativeSeed ? {
       id: creativeSeed.id,
       kind: creativeSeed.kind,
@@ -619,6 +622,7 @@ interface OperatorTopicCandidateV2 {
   sampleCount?: number;
   historicalAngle?: string;
   personalTopicSignals?: string[];
+  personalTopicSignalPremises?: string[];
   spreadMechanics: string[];
   priorityScore: number;
 }
@@ -628,6 +632,12 @@ const PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS = new Set([
   'founder', 'founders', 'good', 'great', 'investor', 'investors', 'people',
   'product', 'products', 'startup', 'startups', 'thing', 'things', 'today',
   'venture', 'world',
+]);
+
+const PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS = new Set([
+  ...PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS,
+  'agent', 'agents', 'ai', 'ceo', 'code', 'coding', 'developer', 'developers',
+  'model', 'models', 'software', 'team', 'teams', 'tech', 'technology',
 ]);
 
 function structuredPersonalTopicSignals(topic: string, tweets: TweetPerformance[]): string[] {
@@ -644,6 +654,25 @@ function structuredPersonalTopicSignals(topic: string, tweets: TweetPerformance[
     ));
     return tokens.length >= 2 ? [tokens.slice(0, 7).join(':')] : [];
   }), 3);
+}
+
+function personalTopicSignalPremises(topic: string, tweets: TweetPerformance[]): string[] {
+  return tweets.slice(0, 3)
+    .filter((tweet) => structuredPersonalTopicSignals(topic, [tweet]).length > 0)
+    .map((tweet) => tweet.content);
+}
+
+function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = []): boolean {
+  const candidateTokens = new Set(significantResearchTokens(text).filter((token) => (
+    !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)
+  )));
+  if (candidateTokens.size < 2) return false;
+  return premises.some((premise) => {
+    const premiseTokens = significantResearchTokens(premise).filter((token) => (
+      !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)
+    ));
+    return sharedTokenCount(premiseTokens, candidateTokens) >= 2;
+  });
 }
 
 function operatorTopicCandidates({
@@ -665,6 +694,7 @@ function operatorTopicCandidates({
         sampleCount: entry.sampleCount,
         historicalAngle: entry.angle || undefined,
         personalTopicSignals: structuredPersonalTopicSignals(entry.topic, entry.topTweets || []),
+        personalTopicSignalPremises: personalTopicSignalPremises(entry.topic, entry.topTweets || []),
         priorityScore: Number((
           0.56
           + (Math.min(1, entry.avgEngagement / maxManualEngagement) * 0.3)
@@ -1181,6 +1211,7 @@ export function buildGenerationBriefsV2({
       candidate.spreadMechanics,
       seed,
       candidate.personalTopicSignals,
+      candidate.personalTopicSignalPremises,
     );
     briefs.push(brief);
     usedTopics.add(key);
@@ -1702,6 +1733,9 @@ export function normalizeIdeaCandidatesV2({
     }
     if (isGenericOperatorProductWishlistV2(ideaText(candidate))) {
       candidate.rejectionCodes.push('generic_product_wishlist');
+    }
+    if (isPersonalTopicSignalPremiseReskin(ideaText(candidate), brief.personalTopicSignalPremises)) {
+      candidate.rejectionCodes.push('voice_anchor_semantic_reskin');
     }
     if (candidate.factualRisk === 'high') candidate.rejectionCodes.push('high_factual_risk');
     if (candidate.noveltyScore < 0.38) candidate.rejectionCodes.push('recent_semantic_repeat');
@@ -2654,6 +2688,9 @@ function preflightDraft({
   if (isGenericOperatorProductWishlistV2(content)) codes.push('generic_product_wishlist');
   if (recentDuplicate.isDuplicate) codes.push('recent_copy_duplicate');
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
+  if (isPersonalTopicSignalPremiseReskin(`${idea.claim} ${content}`, brief.personalTopicSignalPremises)) {
+    codes.push('voice_anchor_semantic_reskin');
+  }
   if (premiseReskinRisk >= premiseReskinFloor) codes.push('voice_anchor_semantic_reskin');
   if (sourceCopy.isDuplicate) codes.push('source_copy');
   if (blockedCopy) codes.push('blocked_copy_pattern');
