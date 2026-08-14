@@ -1991,7 +1991,23 @@ describe('Tweet Generation V2', () => {
       id: 'source-sourced', publisher: 'Acme', publishedAt: '2026-08-01T10:00:00.000Z',
       claims: [{ id: 'claim-1', text: 'Acme cut serving cost in its published release.', kind: 'measurement' }],
     } as SourceDocument;
-    const ideaPrompt = JSON.parse(buildIdeaGenerationPromptV2([currentBrief], voiceProfile));
+    const ideaPrompt = JSON.parse(buildIdeaGenerationPromptV2(
+      [currentBrief],
+      voiceProfile,
+      [],
+      undefined,
+      [],
+      [],
+      [],
+      {
+        [currentBrief.id]: {
+          reactionMode: 'named_call',
+          lengthBand: 'short',
+          paragraphBand: 'single',
+          usesFirstPerson: false,
+        },
+      },
+    ));
     const writingPrompt = JSON.parse(buildTweetWritingPromptV2(idea, currentBrief, [source], [{
       id: 'operator-post-1', content: 'the market usually tells you where the bottleneck moved', topic: 'markets',
     }], undefined, undefined, undefined, 'reconceive', 3, {
@@ -2012,6 +2028,14 @@ describe('Tweet Generation V2', () => {
     })]);
     expect(ideaPrompt.briefs[0].evidence[0]).not.toHaveProperty('claimId');
     expect(ideaPrompt.briefs[0].evidence[0]).not.toHaveProperty('sourceDocumentId');
+    expect(ideaPrompt.requirements.sameSubjectReactionContract).toContain('prior same-subject premise');
+    expect(ideaPrompt.briefs[0].sameSubjectNativeReactionPattern).toEqual(expect.objectContaining({
+      reactionMode: 'named_call',
+      lengthBand: 'short',
+      paragraphBand: 'single',
+      usesFirstPerson: false,
+      instruction: expect.stringContaining('No prior premise'),
+    }));
     expect(writingPrompt).toEqual(expect.objectContaining({
       idea: expect.objectContaining({ claim: idea.claim }),
       evidenceMode: 'verified_source',
