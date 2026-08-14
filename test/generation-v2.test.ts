@@ -21,6 +21,7 @@ import {
   normalizeIdeaCandidatesV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
+  selectNativeReactionAnchors,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
@@ -127,6 +128,35 @@ describe('Tweet Generation V2', () => {
     expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('critic_surgical');
     expect(getV2RescueRevisionStrategy(['copy_judge_voice_mismatch', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['final_cringe_risk', 'final_quality_margin'])).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy(
+      ['final_quality_margin'],
+      'The middle reads like a constructed reveal from an analyst account.',
+    )).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy(
+      ['final_quality_margin'],
+      'The native position is sound; cut one hedge and stop.',
+    )).toBe('critic_surgical');
+  });
+
+  it('leads voice transfer with a same-register native posture and keeps cross-topic range', () => {
+    const anchors = [
+      { id: 'personal-question', topic: 'personal', content: 'quitting caffeine for two weeks. who is in?' },
+      { id: 'ai-rough', topic: 'AI', content: 'ai will rule the world. the action surface is different. human shells.' },
+      { id: 'crypto-number', topic: 'crypto', content: 'he margin called 5% of the country with 4x leverage' },
+      { id: 'market-position', topic: 'investing', content: 'i bought more $MU today but did not have enough courage to swing big' },
+    ];
+
+    const selected = selectNativeReactionAnchors(
+      anchors,
+      ['Opendoor in startups markets', 'I distrust growth and would want to own it after shrinking.'],
+      3,
+    );
+
+    expect(selected.map((anchor) => anchor.id)).toEqual([
+      'market-position',
+      'personal-question',
+      'ai-rough',
+    ]);
   });
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
@@ -1508,6 +1538,29 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('derives idea provenance from the brief instead of model-authored voice rationale', () => {
+    const operatorBrief = {
+      ...brief('operator', 'startups'),
+      authorOpportunity: 'The operator topic profile supports a fresh startup judgment.',
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('operator', 'I would rather own the startup with one painful customer than ten polite pilots.'),
+        authorReason: 'Provocateur mode: compressed memo exactly matching the requested persona.',
+      }],
+      agentId: 'agent-1',
+      runId: 'run-derived-author-provenance',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].authorReason).toBe(operatorBrief.authorOpportunity);
+    expect(ideas[0].authorReason).not.toContain('Provocateur mode');
+  });
+
   it('blocks unsourced product-change phrasing even when it is wrapped in an opinion', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea(
@@ -1795,11 +1848,15 @@ describe('Tweet Generation V2', () => {
       instruction: expect.stringContaining('private thought packet'),
     }));
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
-      'direct_position',
-      'concrete_tension',
-      'consequence',
+      'blunt_reaction',
+      'owned_bet_or_call',
+      'rough_two_beat',
     ]);
     expect(writingPrompt.responseContract.diversityContract).toContain('must not share');
+    expect(writingPrompt.voiceTransferContract).toEqual(expect.objectContaining({
+      primaryRegisterAnchorId: 'operator-post-1',
+    }));
+    expect(writingPrompt.voiceAnchors[0]).toEqual(expect.objectContaining({ role: 'primary_register' }));
     expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(

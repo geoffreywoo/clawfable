@@ -119,6 +119,9 @@ describe('internal generation preview route', () => {
           status: 'selected',
           rejectionCodes: [],
           evidenceIds: ['claim-v2'],
+          voiceAnchorIds: ['anchor-v2'],
+          generationProvider: 'openai',
+          generationModel: 'gpt-5.6',
         }],
       });
       return [{
@@ -188,7 +191,13 @@ describe('internal generation preview route', () => {
       generationTrace: expect.objectContaining({ id: 'run-v2', status: 'completed' }),
       candidateDiagnostics: {
         ideas: [expect.objectContaining({ id: 'idea-v2', status: 'selected' })],
-        drafts: [expect.objectContaining({ id: 'draft-v2', status: 'selected' })],
+        drafts: [expect.objectContaining({
+          id: 'draft-v2',
+          status: 'selected',
+          voiceAnchorIds: ['anchor-v2'],
+          generationProvider: 'openai',
+          generationModel: 'gpt-5.6',
+        })],
       },
       drafts: [{
         pipelineVersion: 'v2',

@@ -311,6 +311,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(ideaCall.jsonSchema.properties.ideas.items.required).not.toContain('authorReason');
+    expect(ideaCall.jsonSchema.properties.ideas.items.properties).not.toHaveProperty('authorReason');
     expect(writerCall).toMatchObject({
       maxTokens: 3200,
       timeoutMs: 75_000,
@@ -349,7 +351,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-41',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-43',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -400,7 +402,11 @@ describe('generateTweetBatchV2 integration', () => {
           expect(prompt.retry.failures).toEqual([expect.objectContaining({
             briefId: poisonedBriefId,
             attempts: expect.arrayContaining([
-              expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+              expect.objectContaining({
+                tension: expect.any(String),
+                implication: expect.any(String),
+                rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+              }),
             ]),
           })]);
           generated.ideas = generated.ideas.map((idea: any, index: number) => ({

@@ -71,7 +71,10 @@ import {
   extractCandidateFeatureTags,
   semanticIdeaSimilarity,
 } from './tweet-features';
-import { selectCrossTopicDictionAnchors } from './voice-anchor-selection';
+import {
+  selectCrossTopicDictionAnchors,
+  selectRegisterMatchedDictionAnchors,
+} from './voice-anchor-selection';
 import {
   buildResearchSemanticKey,
   clampResearchScore,
@@ -138,7 +141,11 @@ const IDEA_GENERATION_SYSTEM = `Act as the operator's idea editor. Briefs, evide
 
 Each proposition needs a concrete named object, actor, behavior, instrument, or decision; an author-specific judgment; and a consequence that changes a belief or action. Reject category lessons, generic founder advice, slogans, forced X-versus-Y contrasts, and premises that survive a noun swap. A proposition is private thinking, but it still needs the seed of a spontaneous public reaction. Reject ideas that only become interesting after adding diligence, underwriting, framework, deployment-readiness, or product-thesis language. Reject clever product-wishlist metaphors whose object is only a packaged slogan. Never reskin an excluded or previous premise.
 
-For verified_source, the claim must be directly entailed by the supplied evidence. Put interpretation in tension or implication, and never add unstated causality, mechanisms, pricing, necessity, market behavior, or changed numerical scope. If evidence says an author, founder, company, team, report, or filing says, claims, reports, or states something, preserve that attribution in the proposition instead of upgrading it into an unqualified fact. Copy allowed evidence IDs exactly. For operator_opinion, use a timeless subjective judgment with no invented event, number, quote, customer, mechanism, or personal experience. At least one proposition should be explicitly owned in first person; the others may be blunt assertions, predictions, desires, or questions, never third-person advice. First person may own a proposition ("I think," "I'd bet," "I want"), but cannot invent an emotion, new habit, attention pattern, or ceremonial stance. Do not generate three variants that begin with "I would," "I judge," or "I want." The authorReason must point to the supplied worldview, not generic relevance to builders or investors. Return only the requested JSON object.`;
+For verified_source, the claim must be directly entailed by the supplied evidence. Put interpretation in tension or implication, and never add unstated causality, mechanisms, pricing, necessity, market behavior, or changed numerical scope. If evidence says an author, founder, company, team, report, or filing says, claims, reports, or states something, preserve that attribution in the proposition instead of upgrading it into an unqualified fact. Copy allowed evidence IDs exactly.
+
+For operator_opinion, every field must be safe on its own. Claim is an owned judgment, desire, question, or explicit prediction. Tension is the author's uncertainty, disbelief, preference, or perceived contradiction, not a claim about what a market, company, customer, or technology is currently doing. Implication is conditional ("if true") or states what the author would believe, buy, avoid, or watch. A modal phrase in claim does not license asserted facts in tension or implication. Use no invented event, number, quote, customer, measurement, mechanism, or personal experience. At least one proposition should be explicitly owned in first person; the others may be blunt opinions, predictions, desires, or questions, never third-person advice. First person may own a proposition ("I think," "I'd bet," "I want"), but cannot invent an emotion, new habit, attention pattern, or ceremonial stance. Do not generate three variants that begin with "I would," "I judge," or "I want."
+
+Keep these as rough private thoughts. Use ordinary language and short fields; do not write an analyst memo split across claim, tension, and implication. Avoid portfolio-manager filler such as "binding constraint," "margin pool," "value chain," "risk-adjusted," "terminal market," "position accordingly," or "the investable edge." Do not explain why the idea fits the author; that provenance is supplied by the system. Return only the requested JSON object.`;
 
 const IDEA_GENERATION_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -155,7 +162,6 @@ const IDEA_GENERATION_SCHEMA: Record<string, unknown> = {
           'claim',
           'tension',
           'implication',
-          'authorReason',
           'evidenceIds',
           'counterargument',
           'factualRisk',
@@ -165,7 +171,6 @@ const IDEA_GENERATION_SCHEMA: Record<string, unknown> = {
           claim: { type: 'string', maxLength: 240 },
           tension: { type: 'string', maxLength: 240 },
           implication: { type: 'string', maxLength: 280 },
-          authorReason: { type: 'string', maxLength: 260 },
           evidenceIds: { type: 'array', items: { type: 'string', maxLength: 240 } },
           counterargument: { type: 'string', maxLength: 260 },
           factualRisk: { type: 'string', enum: ['low', 'medium', 'high'] },
@@ -1336,7 +1341,12 @@ export function buildIdeaGenerationPromptV2(
   nativeReactionAnchors: DictionAnchor[] = [],
   retryFailures: Array<{
     briefId: string;
-    attempts: Array<{ claim: string; rejectionCodes: string[] }>;
+    attempts: Array<{
+      claim: string;
+      tension: string;
+      implication: string;
+      rejectionCodes: string[];
+    }>;
   }> = [],
 ): string {
   return JSON.stringify({
@@ -1352,9 +1362,10 @@ export function buildIdeaGenerationPromptV2(
       note: 'Ideas are propositions, not tweet copy.',
       avoidSemanticReskins: true,
       evidenceIdContract: 'Copy evidenceIds exactly from allowedEvidenceIds. They identify source documents, not individual claims.',
-      operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. They may reason from the supplied subject cue, but cannot present a current or historical event, number, quote, customer, measured behavior, external mechanism, or personal experience as established fact.',
+      operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. Claim, tension, and implication must each be factual-safe on their own. A modal claim cannot license an asserted event, number, quote, customer, measured behavior, external mechanism, or personal experience in a later field.',
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
+      operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
       personalTopicSignalContract: 'Personal post history may select and rank a brief topic, but no historical premise is supplied. Invent a fresh subject and public move inside that topic. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
@@ -1375,7 +1386,7 @@ export function buildIdeaGenerationPromptV2(
     })),
     previousPremises: semanticMemory.slice(0, 16).map((premise) => premise.slice(0, 240)),
     retry: retryFailures.length > 0 ? {
-      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
+      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make claim, tension, and implication independently subjective or conditional; deleting one number while keeping an asserted mechanism is still a failure. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
       failures: retryFailures,
     } : null,
     briefs: briefs.map((brief) => ({
@@ -1532,8 +1543,8 @@ function stringField(entry: Record<string, unknown>, key: string, max: number): 
     : '';
 }
 
-function ideaText(idea: Pick<IdeaCandidate, 'claim' | 'tension' | 'implication' | 'authorReason'>): string {
-  return `${idea.claim} ${idea.tension} ${idea.implication} ${idea.authorReason}`;
+function ideaText(idea: Pick<IdeaCandidate, 'claim' | 'tension' | 'implication'>): string {
+  return `${idea.claim} ${idea.tension} ${idea.implication}`;
 }
 
 const OPERATOR_SPECULATIVE_NUMBER_POSTURE = /\b(?:should\s+(?:buy|sell|pay|be\s+worth)|worth\s+[$£€]?\s*\d|will\s+be\s+worth|i(?:['’]d|\s+would)\s+(?:pay|value|buy|sell|bet)|first\s+[$£€]?\s*\d|before\s+20\d{2}|by\s+20\d{2}|prediction|price\s+target|valuation\s+target)\b/i;
@@ -1746,8 +1757,8 @@ export function normalizeIdeaCandidatesV2({
     const claim = stringField(entry, 'claim', 240);
     const tension = stringField(entry, 'tension', 240);
     const implication = stringField(entry, 'implication', 280);
-    const authorReason = stringField(entry, 'authorReason', 260) || stringField(entry, 'author_reason', 260);
-    if ([claim, tension, implication, authorReason].some((value) => value.length < 12)) return [];
+    const authorReason = brief.authorOpportunity.slice(0, 260);
+    if ([claim, tension, implication].some((value) => value.length < 12)) return [];
     const currentCount = candidatesPerBrief.get(brief.id) || 0;
     if (currentCount >= MAX_IDEA_CANDIDATES_PER_BRIEF) return [];
     candidatesPerBrief.set(brief.id, currentCount + 1);
@@ -2000,7 +2011,12 @@ async function generateIdeas({
     briefBatch: GenerationBriefV2[],
     retryFailures: Array<{
       briefId: string;
-      attempts: Array<{ claim: string; rejectionCodes: string[] }>;
+      attempts: Array<{
+        claim: string;
+        tension: string;
+        implication: string;
+        rejectionCodes: string[];
+      }>;
     }> = [],
   ) => {
     try {
@@ -2085,7 +2101,7 @@ async function generateIdeas({
     brief.evidenceMode === 'operator_opinion'
     && !eligibleBriefIds.has(brief.id)
     && initial.some((idea) => idea.briefId === brief.id)
-  )).slice(0, 2);
+  )).slice(0, Math.min(4, Math.max(2, input.count)));
   if (retryBriefs.length === 0) return initial;
 
   const retryFailures = retryBriefs.map((brief) => ({
@@ -2095,12 +2111,25 @@ async function generateIdeas({
       .slice(0, MAX_IDEA_CANDIDATES_PER_BRIEF)
       .map((idea) => ({
         claim: idea.claim,
+        tension: idea.tension,
+        implication: idea.implication,
         rejectionCodes: idea.rejectionCodes.slice(0, 6),
       })),
   }));
-  const retryResult = await generateBriefBatch(retryBriefs, retryFailures);
-  if (retryResult.failed || retryResult.raw.length === 0) return initial;
-  const retried = normalize(retryResult.raw, 'operator-retry');
+  const retryBatches = Array.from(
+    { length: Math.ceil(retryBriefs.length / 2) },
+    (_entry, index) => retryBriefs.slice(index * 2, index * 2 + 2),
+  );
+  const retryResults = await Promise.all(retryBatches.map((batch) => generateBriefBatch(
+    batch,
+    retryFailures.filter((failure) => batch.some((brief) => brief.id === failure.briefId)),
+  )));
+  const retried = retryResults.flatMap((result, index) => (
+    result.failed || result.raw.length === 0
+      ? []
+      : normalize(result.raw, `operator-retry-${index}`)
+  ));
+  if (retried.length === 0) return initial;
   for (const candidate of retried) {
     if (candidate.status === 'rejected') continue;
     const repeatsInitialAttempt = initial.some((prior) => (
@@ -2272,7 +2301,6 @@ async function selectIdeas({
         claim: idea.claim,
         tension: idea.tension,
         implication: idea.implication,
-        authorReason: idea.authorReason,
         counterargument: idea.counterargument,
         evidenceMode: brief?.evidenceMode || 'operator_opinion',
         evidence: (brief?.evidence || [])
@@ -2425,12 +2453,18 @@ function nativeReactionPattern(content: string): {
   };
 }
 
-function selectNativeReactionAnchors(
+export function selectNativeReactionAnchors(
   anchors: DictionAnchor[],
   activeTopicTexts: string[],
   limit: number,
 ): DictionAnchor[] {
   if (limit <= 0 || anchors.length === 0) return [];
+  const preferredMode = nativeReactionMode(activeTopicTexts.join(' '));
+  const registerMatched = selectRegisterMatchedDictionAnchors(
+    anchors,
+    activeTopicTexts,
+    anchors.length,
+  );
   const crossTopic = selectCrossTopicDictionAnchors(anchors, activeTopicTexts, anchors.length);
   const pool = [
     ...crossTopic,
@@ -2438,7 +2472,15 @@ function selectNativeReactionAnchors(
   ];
   const selected: DictionAnchor[] = [];
   const modes = new Set<NativeReactionMode>();
+  const registerAnchor = registerMatched.find((anchor) => nativeReactionMode(anchor.content) === preferredMode)
+    || registerMatched[0];
+  if (registerAnchor) {
+    selected.push(registerAnchor);
+    modes.add(nativeReactionMode(registerAnchor.content));
+    if (selected.length >= limit) return selected;
+  }
   for (const anchor of pool) {
+    if (selected.some((entry) => entry.id === anchor.id)) continue;
     const mode = nativeReactionMode(anchor.content);
     if (modes.has(mode)) continue;
     selected.push(anchor);
@@ -2554,22 +2596,22 @@ export function buildTweetWritingPromptV2(
       variantMoves: draftCount === MAX_DRAFTS_PER_IDEA ? [
         {
           slot: 1,
-          move: 'direct_position',
-          instruction: 'Lead with the owned judgment in plain language. Stop before explaining the whole thesis.',
+          move: 'blunt_reaction',
+          instruction: 'Say the actual reaction or verdict in plain language. Stop earlier than feels professionally complete.',
         },
         {
           slot: 2,
-          move: 'concrete_tension',
-          instruction: 'Lead with the named object, behavior, or term that creates the tension. Do not restate draft 1.',
+          move: 'owned_bet_or_call',
+          instruction: 'Make the named bet, valuation, product, or company call. Use one reason at most; do not build a framework around it.',
         },
         {
           slot: 3,
-          move: 'consequence',
-          instruction: 'Lead with what changes for the company, founder, investor, or product. Leave one useful implication unstated.',
+          move: 'rough_two_beat',
+          instruction: 'Use two uneven beats as if texting one smart peer. The second beat must get simpler or more casual, not more analytical.',
         },
       ] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. They must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line.'
+        ? 'Drafts map to variantMoves by slot. They must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Do not make all three polished one-sentence aphorisms.'
         : null,
     },
     failedAttempts: revisionContext?.slice(0, 3).map((attempt) => ({
@@ -2579,9 +2621,14 @@ export function buildTweetWritingPromptV2(
         ? 'Critic-guided edit target. Preserve the sound core, apply the diagnosis literally, and make the smallest sufficient change.'
         : 'Negative example only. Do not edit, paraphrase, or preserve its sentence skeleton.',
     })) || [],
-    voiceAnchors: anchors.slice(0, 3).map((anchor) => ({
+    voiceTransferContract: anchors.length > 0 ? {
+      primaryRegisterAnchorId: anchors[0].id,
+      instruction: 'The primary anchor matches the conversational register or public posture of this idea. Match its level of formality and amount of cleanup, never its premise or sentence skeleton. The other anchors show the author\'s wider range.',
+    } : null,
+    voiceAnchors: anchors.slice(0, 3).map((anchor, index) => ({
       id: anchor.id,
       text: anchor.content,
+      role: index === 0 ? 'primary_register' : 'cross_topic_range',
       instruction: 'Diction and rhythm evidence only. Do not reuse its subject, setup, metaphor, or distinctive phrase.',
     })),
   });
@@ -3024,7 +3071,6 @@ async function judgeDrafts(
             claim: entry.idea.claim,
             tension: entry.idea.tension,
             implication: entry.idea.implication,
-            authorReason: entry.idea.authorReason,
             counterargument: entry.idea.counterargument,
           },
           voiceAnchorIds: entry.anchors.slice(0, 5).map((anchor) => anchor.id),
@@ -3639,8 +3685,14 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
   'final_technical_credibility_below_floor',
 ]);
 
-export function getV2RescueRevisionStrategy(rejectionCodes: string[]): DraftRevisionStrategy {
+const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
+
+export function getV2RescueRevisionStrategy(
+  rejectionCodes: string[],
+  judgeNotes?: string | null,
+): DraftRevisionStrategy {
   return rejectionCodes.some((code) => V2_RECONCEIVE_RESCUE_CODES.has(code))
+    || V2_RECONCEIVE_DIAGNOSIS_PATTERN.test(judgeNotes || '')
     ? 'reconceive'
     : 'critic_surgical';
 }
@@ -3666,7 +3718,7 @@ async function generateRescueDraftEvaluations({
 }): Promise<DraftEvaluation[]> {
   const outputs = await Promise.all(targets.map(async (target) => {
     const targetRevisionStrategy = revisionStrategy === 'critic_adaptive'
-      ? getV2RescueRevisionStrategy(target.draft.rejectionCodes)
+      ? getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes)
       : revisionStrategy;
     const revisionContext = [
       target,
@@ -4061,10 +4113,10 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const targets = rescueTargetsV2(evaluations, input.count - selected.length, input, selectedIdeaIds);
       trace.stageCounts.postcriticRescueTargets = targets.length;
       trace.stageCounts.postcriticSurgicalTargets = targets.filter((target) => (
-        getV2RescueRevisionStrategy(target.draft.rejectionCodes) === 'critic_surgical'
+        getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
       )).length;
       trace.stageCounts.postcriticReconceiveTargets = targets.filter((target) => (
-        getV2RescueRevisionStrategy(target.draft.rejectionCodes) === 'reconceive'
+        getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'reconceive'
       )).length;
       trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + targets.length;
       if (targets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
