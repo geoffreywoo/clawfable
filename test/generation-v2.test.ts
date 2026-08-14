@@ -28,7 +28,7 @@ import {
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
-  isV2MarginOnlyConsequenceRepairCandidate,
+  isV2MarginOnlyBoundedRepairCandidate,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -393,13 +393,13 @@ describe('Tweet Generation V2', () => {
     )).toBe('critic_surgical');
   });
 
-  it('repairs only high-margin Geoffrey misses with one permitted concrete consequence', () => {
+  it('repairs only high-margin Geoffrey misses with one bounded critic request', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
     };
     expect(shouldRunPostcriticRescueV2(geoffreyVoice)).toBe(false);
-    expect(isV2MarginOnlyConsequenceRepairCandidate(
+    expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'The smallest improvement would be naming the operational task this control would unlock.',
       0.832,
@@ -410,17 +410,37 @@ describe('Tweet Generation V2', () => {
       'Strengthen the otherwise thin call with one concrete consequence already permitted by the idea.',
       0.816,
     )).toBe(true);
-    expect(isV2MarginOnlyConsequenceRepairCandidate(
+    expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'Name one concrete consequence.',
       0.79,
     )).toBe(false);
-    expect(isV2MarginOnlyConsequenceRepairCandidate(
+    expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'Cut the explanatory closer and stop.',
       0.84,
     )).toBe(false);
-    expect(isV2MarginOnlyConsequenceRepairCandidate(
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The smallest improvement is to name one permitted system constraint behind deployed economics.',
+      0.852,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The smallest improvement is to acknowledge the product cost of excessive refusals.',
+      0.827,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The categorical claim should be made less absolute.',
+      0.825,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The ending drifts toward a familiar startup maxim.',
+      0.84,
+    )).toBe(false);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
       ['copy_judge_voice_mismatch', 'final_quality_margin'],
       'Name one concrete consequence.',
       0.84,

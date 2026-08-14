@@ -314,6 +314,8 @@ export function buildGenerationV2Metrics({
         return idea ? [{
           ideaId: idea.id,
           storyClusterId: idea.storyClusterId,
+          topic: idea.topic,
+          creativeSeedId: idea.creativeSeedId || null,
           claim: idea.claim,
           evidenceIds: idea.evidenceIds,
           status: idea.status,
