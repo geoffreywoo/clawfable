@@ -3269,6 +3269,7 @@ export function buildTweetWritingPromptV2(
   revisionStrategy: DraftRevisionStrategy = 'reconceive',
   draftCount = MAX_DRAFTS_PER_IDEA,
   subjectNativeReactionPattern: NativeReactionPatternV2 | null = null,
+  initialSingleMoveFromAnchor = false,
 ): string {
   const repairSource = revisionStrategy === 'critic_surgical'
     ? revisionContext?.[0]?.content || ''
@@ -3276,6 +3277,15 @@ export function buildTweetWritingPromptV2(
   const repairMaxCharacters = repairSource
     ? getV2BoundedRepairCharacterLimit(repairSource)
     : null;
+  const initialSingleVariantMove = initialSingleMoveFromAnchor
+    ? initialVariantMoveForAnchor(anchors[0], 1)
+    : {
+        slot: 1,
+        move: 'blunt_reaction',
+        voiceAnchorId: anchors[0]?.id || null,
+        nativeReactionMode: anchors[0] ? nativeReactionMode(anchors[0].content) : 'blunt_observation',
+        instruction: 'State the named subject and actual position in one or two short sentences. Stop before evidence, an explanatory consequence, a second argument, or a concluding slogan.',
+      };
   return JSON.stringify({
     idea: {
       id: idea.id,
@@ -3354,11 +3364,7 @@ export function buildTweetWritingPromptV2(
           move: 'subject_rewrite',
           instruction: 'Return to the named subject and approved publicMove, then solve the same diagnosis with a different opening and sentence skeleton.',
         },
-      ] : (revisionContext?.length || 0) === 0 ? [{
-        slot: 1,
-        move: 'blunt_reaction',
-        instruction: 'State the named subject and actual position in one or two short sentences. Stop before evidence, an explanatory consequence, a second argument, or a concluding slogan.',
-      }] : [],
+      ] : (revisionContext?.length || 0) === 0 ? [initialSingleVariantMove] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
         ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Exactly one draft may make one consequence from stakes legible without adding a new mechanism or lesson; the other two stop at the reaction. Compression means no filler, not that every thought must become a slogan.'
         : draftCount === 2
@@ -3467,6 +3473,7 @@ async function writeIdeaDrafts({
   revisionParentDraftId = null,
   candidateIdSalt = '',
   initialDraftCount = MAX_DRAFTS_PER_IDEA,
+  initialSingleMoveFromAnchor = false,
 }: {
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -3481,6 +3488,7 @@ async function writeIdeaDrafts({
   revisionParentDraftId?: string | null;
   candidateIdSalt?: string;
   initialDraftCount?: 1 | typeof MAX_DRAFTS_PER_IDEA;
+  initialSingleMoveFromAnchor?: boolean;
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
     ? buildGeoffreyNativeV2WriterContract()
@@ -3509,7 +3517,9 @@ async function writeIdeaDrafts({
   );
   const variantInstruction = draftCount === 1
     ? initialSingleDraft
-      ? 'Write exactly one blunt X post from the approved idea. State the actual reaction in one or two short sentences and stop before proof, explanation, or a concluding line.'
+      ? initialSingleMoveFromAnchor
+        ? `Write exactly one X post from the approved idea. ${initialVariantMoveForAnchor(anchors[0], 1).instruction}`
+        : 'Write exactly one blunt X post from the approved idea. State the actual reaction in one or two short sentences and stop before proof, explanation, or a concluding line.'
       : revisionStrategy === 'critic_surgical'
       ? 'Return exactly one revised X post. Make only the smallest change required by the critic diagnosis.'
       : 'Write exactly one new X post from the approved idea. It must be a fresh replacement, not an edit or paraphrase of the failed attempt.'
@@ -3562,6 +3572,7 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       revisionStrategy,
       draftCount,
       subjectNativeReactionPattern,
+      initialSingleMoveFromAnchor,
     ),
   }, calls);
   const root = parseJsonRoot(result.text);
@@ -3788,11 +3799,24 @@ async function generateDraftEvaluations({
       modelStack: GenerationModelStackId;
       initialDraftCount: 1 | typeof MAX_DRAFTS_PER_IDEA;
       candidateIdSalt: string;
-    }> = [{
-      modelStack: input.modelStack,
-      initialDraftCount: MAX_DRAFTS_PER_IDEA,
-      candidateIdSalt: '',
-    }];
+      anchorOffset: number;
+      initialSingleMoveFromAnchor: boolean;
+    }> = isGeoffreyVoiceProfile(input.voiceProfile)
+      && input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+      ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => ({
+          modelStack: input.modelStack,
+          initialDraftCount: 1 as const,
+          candidateIdSalt: `fable-single-${index + 1}`,
+          anchorOffset: index,
+          initialSingleMoveFromAnchor: index > 0,
+        }))
+      : [{
+          modelStack: input.modelStack,
+          initialDraftCount: MAX_DRAFTS_PER_IDEA,
+          candidateIdSalt: '',
+          anchorOffset: 0,
+          initialSingleMoveFromAnchor: false,
+        }];
     const geoffreyShadowStack = input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
       ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
       : input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
@@ -3803,31 +3827,38 @@ async function generateDraftEvaluations({
         modelStack: geoffreyShadowStack,
         initialDraftCount: 1,
         candidateIdSalt: geoffreyShadowStack,
+        anchorOffset: 0,
+        initialSingleMoveFromAnchor: false,
       });
     }
     const draftGroups = await Promise.all(writerPlans.map(async (plan) => {
+      const planAnchors = anchors.length > 1
+        ? anchors.map((_, index) => anchors[(index + plan.anchorOffset) % anchors.length])
+        : anchors;
       try {
-        return await writeIdeaDrafts({
+        const drafts = await writeIdeaDrafts({
           idea,
           brief,
           documents: sourceDocuments,
-          anchors,
+          anchors: planAnchors,
           input: { ...input, modelStack: plan.modelStack },
           runId,
           calls,
           initialDraftCount: plan.initialDraftCount,
           candidateIdSalt: plan.candidateIdSalt,
+          initialSingleMoveFromAnchor: plan.initialSingleMoveFromAnchor,
         });
+        return drafts.map((draft) => ({ draft, anchors: planAnchors }));
       } catch {
         return [];
       }
     }));
-    return draftGroups.flat().map((draft) => preflightDraft({
-      draft,
+    return draftGroups.flat().map((entry) => preflightDraft({
+      draft: entry.draft,
       idea,
       brief,
       documents: sourceDocuments,
-      anchors,
+      anchors: entry.anchors,
       input,
       blocks,
     }));
