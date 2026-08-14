@@ -21,6 +21,7 @@ import {
   getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
   getSubtractiveTailCandidateContentV2,
+  getSubtractiveTailCandidateContentsV2,
   getV2GeneratedWritingIssue,
   isAbstractComparativePublicMoveV2,
   isGenericInvestorSelectionTemplateV2,
@@ -429,6 +430,12 @@ describe('Tweet Generation V2', () => {
     expect(getSubtractiveTailCandidateContentV2(
       "openai doesn't need the best model to get way bigger. chatgpt is the bet. billions of people know one name for ai.",
     )).toBe("openai doesn't need the best model to get way bigger. chatgpt is the bet.");
+    expect(getSubtractiveTailCandidateContentsV2(
+      'i would pay for refusals as good as code gen. implementation is table stakes. this closer should go.',
+    )).toEqual([
+      'i would pay for refusals as good as code gen. implementation is table stakes.',
+      'i would pay for refusals as good as code gen.',
+    ]);
     expect(getSubtractiveTailCandidateContentV2('chatgpt is the bet.')).toBeNull();
     expect(getSubtractiveTailCandidateContentV2('too short. no.')).toBeNull();
   });
