@@ -1181,13 +1181,30 @@ const STORY_EDITORIAL_FAILURE_CODES = new Set([
   'recent_semantic_repeat',
 ]);
 
-interface FailedStoryAttemptV2 {
+export interface FailedStoryAttemptV2 {
   storyClusterId: string;
   generationRunId: string;
+  qualityPolicyVersion: string | null;
   topic: string;
   subject: string;
   failedAt: string;
+  failureCodes: string[];
 }
+
+export interface FailedStoryAttemptDiagnosticsV2 {
+  cooldownMs: number;
+  activeAttempts: FailedStoryAttemptV2[];
+  suppressedByViablePremise: Array<FailedStoryAttemptV2 & { viableIdeaIds: string[] }>;
+}
+
+const VIABLE_STORY_PREMISE_STATUSES = new Set([
+  'selected',
+  'queued',
+  'quarantined',
+  'posted',
+  'edited',
+  'deleted',
+]);
 
 function sharedTokenCount(left: string[], right: Set<string>): number {
   return new Set(left).size === 0
@@ -1239,19 +1256,32 @@ export function isStoryAlreadyCommittedV2(
   });
 }
 
-export function buildFailedStoryAttemptsV2(
+export function buildFailedStoryAttemptDiagnosticsV2(
   ideas: IdeaCandidate[],
   now = new Date(),
-): FailedStoryAttemptV2[] {
+): FailedStoryAttemptDiagnosticsV2 {
   const cutoff = now.getTime() - STORY_FAILURE_COOLDOWN_MS;
+  const recentIdeas = ideas.filter((idea) => (
+    Boolean(idea.storyClusterId)
+    && Date.parse(idea.updatedAt || idea.createdAt) >= cutoff
+  ));
+  const viableIdeaIdsByStory = new Map<string, string[]>();
+  for (const idea of recentIdeas) {
+    if (!VIABLE_STORY_PREMISE_STATUSES.has(idea.status)) continue;
+    const storyClusterId = idea.storyClusterId!;
+    viableIdeaIdsByStory.set(
+      storyClusterId,
+      [...(viableIdeaIdsByStory.get(storyClusterId) || []), idea.id],
+    );
+  }
+
   const groups = new Map<string, IdeaCandidate[]>();
-  for (const idea of ideas) {
-    if (!idea.storyClusterId || Date.parse(idea.updatedAt || idea.createdAt) < cutoff) continue;
+  for (const idea of recentIdeas) {
     const key = `${idea.generationRunId}:${idea.storyClusterId}`;
     groups.set(key, [...(groups.get(key) || []), idea]);
   }
 
-  return [...groups.values()].flatMap((group) => {
+  const failedAttempts = [...groups.values()].flatMap((group) => {
     if (group.length < 2) return [];
     const editorialFailure = group.every((idea) => (
       idea.status === 'rejected'
@@ -1264,6 +1294,7 @@ export function buildFailedStoryAttemptsV2(
     return [{
       storyClusterId: group[0].storyClusterId!,
       generationRunId: group[0].generationRunId,
+      qualityPolicyVersion: group[0].qualityPolicyVersion || null,
       topic: group[0].topic,
       subject: uniqueStrings(group.flatMap((idea) => [
         idea.semanticKey.replace(/:/g, ' '),
@@ -1273,8 +1304,31 @@ export function buildFailedStoryAttemptsV2(
         idea.implication,
       ]), 12).join(' '),
       failedAt,
+      failureCodes: uniqueStrings(group.flatMap((idea) => idea.rejectionCodes)
+        .filter((code) => STORY_EDITORIAL_FAILURE_CODES.has(code))),
     }];
   });
+
+  return failedAttempts.reduce<FailedStoryAttemptDiagnosticsV2>((result, attempt) => {
+    const viableIdeaIds = viableIdeaIdsByStory.get(attempt.storyClusterId) || [];
+    if (viableIdeaIds.length > 0) {
+      result.suppressedByViablePremise.push({ ...attempt, viableIdeaIds });
+    } else {
+      result.activeAttempts.push(attempt);
+    }
+    return result;
+  }, {
+    cooldownMs: STORY_FAILURE_COOLDOWN_MS,
+    activeAttempts: [],
+    suppressedByViablePremise: [],
+  });
+}
+
+export function buildFailedStoryAttemptsV2(
+  ideas: IdeaCandidate[],
+  now = new Date(),
+): FailedStoryAttemptV2[] {
+  return buildFailedStoryAttemptDiagnosticsV2(ideas, now).activeAttempts;
 }
 
 export function isStoryInEditorialCooldownV2(
