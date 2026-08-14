@@ -142,6 +142,14 @@ describe('Tweet Generation V2', () => {
       [attributedSource],
     )).toBeNull();
     expect(getSourceAttributionIssueV2(
+      'its founder says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
+      'coverage’s founder says it protects $50B in revenue across more than 1,000 clients.',
+      [attributedSource],
+    )).toBeNull();
+    expect(getSourceAttributionIssueV2(
       'the number says coverage protects $50B in revenue across more than 1,000 clients.',
       [attributedSource],
     )).toMatch(/attribution was dropped/i);
@@ -1554,6 +1562,10 @@ describe('Tweet Generation V2', () => {
         ...rawIdea('operator', 'I want OpenAI to buy Linear and make project execution native inside ChatGPT.'),
         tension: 'The acquisition would connect generated work to the place where teams revise and ship it.',
         implication: 'I would treat the deal as an application-software ambition signal.',
+      }, {
+        ...rawIdea('operator', 'NVIDIA at a price that needs permanent dominance sounds miserable.'),
+        tension: 'NVIDIA the company can remain incredible while the security gets less interesting.',
+        implication: 'Custom silicon only needs to become a credible threat for that price to get awkward.',
       }],
       agentId: 'agent-1',
       runId: 'run-operator-modal-market-opinions',
@@ -1564,7 +1576,7 @@ describe('Tweet Generation V2', () => {
       now: '2026-08-01T12:00:00.000Z',
     });
 
-    expect(ideas).toHaveLength(2);
+    expect(ideas).toHaveLength(3);
     expect(ideas.every((idea) => !idea.rejectionCodes.includes('unsupported_operator_fact'))).toBe(true);
   });
 

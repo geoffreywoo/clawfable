@@ -1546,7 +1546,7 @@ function unsupportedOperatorFact(text: string): boolean {
   return assertedEventOrExperience || assertedNumber;
 }
 
-const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:['’]d| would|['’]ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| refuse| own| buy| sell| long| short| judge| rate| treat| believe| think)|i(?:['’]m|\s+am)\s+(?:in|out|long|short)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced))\b/i;
+const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:['’]d| would|['’]ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| refuse| own| buy| sell| long| short| judge| rate| treat| believe| think)|i(?:['’]m|\s+am)\s+(?:in|out|long|short)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced)|(?:more|less)\s+interesting|(?:sounds?|feels?|looks?)\s+(?:miserable|great|terrible|good|bad|expensive|cheap|interesting|boring|awkward)|worth\s+(?:caring|buying|owning|watching|backing|funding))\b/i;
 
 export function isGenericOperatorProductWishlistV2(text: string): boolean {
   return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
@@ -2708,7 +2708,7 @@ function sourceEvidenceSupport(documents: SourceDocument[]): string[] {
 }
 
 const ATTRIBUTED_SOURCE_CLAIM = /\b(?:author|founder|company|team|report|filing)\s+(?:says?|claims?|reports?|states?)\b|\baccording\s+to\b/i;
-const GENERIC_COPY_ATTRIBUTION = /\b(?:according\s+to|self[- ]reported|company[- ]reported|reported\s+by|the\s+(?:author|founder|company|team|report|filing)\s+(?:says?|claims?|reports?|states?))\b/iu;
+const GENERIC_COPY_ATTRIBUTION = /\b(?:according\s+to|self[- ]reported|company[- ]reported|reported\s+by|(?:(?:the|its|their)\s+|[\p{L}\p{N}@._'-]+['’]s\s+)(?:author|founder|company|team|report|filing)\s+(?:says?|claims?|reports?|states?))\b/iu;
 const NAMED_COPY_ATTRIBUTION = /(?:^|[^\p{L}\p{N}@])(@?[\p{L}\p{N}][\p{L}\p{N}@._'-]{1,63})\s+(?:says?|claims?|reports?|states?)\b/giu;
 
 function sourceAttributionTokens(documents: SourceDocument[]): Set<string> {
