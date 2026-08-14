@@ -61,7 +61,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 27;
+export const GENERATION_QUALITY_AUDIT_VERSION = 28;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1198,6 +1198,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const currentDraftsEligible = sumCurrentStage('draftsEligible');
   const currentDraftsSelected = sumCurrentStage('draftsSelected');
   const currentProviderAttempts = sumCurrentStage('providerAttempts');
+  const currentReserveIdeaCandidates = sumCurrentStage('reserveIdeaCandidates');
+  const currentReserveIdeaPortfolioRejected = sumCurrentStage('reserveIdeaPortfolioRejected');
+  const currentReserveIdeaSelected = sumCurrentStage('reserveIdeaSelected');
+  const currentAlternateIdeaCandidates = sumCurrentStage('alternateIdeaCandidates');
+  const currentAlternateIdeaPortfolioRejected = sumCurrentStage('alternateIdeaPortfolioRejected');
+  const currentAlternateIdeaTargets = sumCurrentStage('alternateIdeaTargets');
   const queueHandoff = buildGenerationQueueHandoffAudit(currentPolicyRuns);
   const writerOutcomes = buildGenerationWriterOutcomeAudit(currentPolicyRuns);
   const refillCandidateRejections = postLog.filter((entry) => (
@@ -1245,6 +1251,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       draftsEligible: currentDraftsEligible,
       draftsSelected: currentDraftsSelected,
       providerAttempts: currentProviderAttempts,
+      reserveIdeaCandidates: currentReserveIdeaCandidates,
+      reserveIdeaPortfolioRejected: currentReserveIdeaPortfolioRejected,
+      reserveIdeaSelected: currentReserveIdeaSelected,
+      alternateIdeaCandidates: currentAlternateIdeaCandidates,
+      alternateIdeaPortfolioRejected: currentAlternateIdeaPortfolioRejected,
+      alternateIdeaTargets: currentAlternateIdeaTargets,
       ideaEligibilityRate: currentIdeasGenerated > 0
         ? Number((currentIdeasEligible / currentIdeasGenerated).toFixed(4))
         : null,
@@ -1329,6 +1341,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     sources: {
       nextBriefPlan: {
         deterministicSeedPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+        previewKind: 'representative_deterministic',
+        predictsExactNextLiveRun: false,
+        liveRunSeedSource: 'generation_run_id',
         requestedDraftCount: 2,
         briefCount: nextBriefPlan.length,
         laneCounts: nextBriefLaneCounts,

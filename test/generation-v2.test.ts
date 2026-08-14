@@ -191,10 +191,66 @@ describe('Tweet Generation V2', () => {
       ],
       evaluatedIdeaIds: new Set(['already-tried']),
       selectedBriefIds: new Set(['brief-b']),
+      briefs: [
+        brief('brief-a', 'startups'),
+        brief('brief-b', 'venture'),
+        brief('brief-c', 'culture'),
+        brief('brief-d', 'health'),
+      ],
+      voiceProfile,
       desired: 2,
     });
 
     expect(selected.map((entry) => entry.id)).toEqual(['best-a', 'best-c']);
+  });
+
+  it('carries Geoffrey technical-lane caps into alternate idea selection', () => {
+    const idea = (
+      id: string,
+      briefId: string,
+      topic: string,
+      claim: string,
+      judgeScore: number,
+      status: IdeaCandidate['status'] = 'rejected',
+      rejectionCodes = ['idea_not_selected'],
+    ) => ({
+      id,
+      briefId,
+      topic,
+      claim,
+      tension: claim,
+      implication: claim,
+      publicMove: claim,
+      status,
+      rejectionCodes,
+      judgeScore,
+      judgeBreakdown: {
+        publicMoveStrength: judgeScore,
+        nativeReactionPotential: judgeScore,
+        sharePotential: judgeScore,
+      },
+    }) as IdeaCandidate;
+    const ideas = [
+      idea('fusion-tried', 'brief-fusion', 'energy', 'fusion tritium breeding plan', 0.9, 'selected', []),
+      idea('robotics-alternate', 'brief-robotics', 'robotics', 'home robotics hardware', 0.96),
+      idea('fusion-alternate', 'brief-fusion', 'energy', 'fusion first-wall materials', 0.94),
+      idea('culture-alternate', 'brief-culture', 'culture', 'founder status and taste', 0.84),
+    ];
+
+    const selected = selectAlternateIdeasV2({
+      ideas,
+      evaluatedIdeaIds: new Set(['fusion-tried']),
+      selectedBriefIds: new Set(),
+      briefs: [
+        brief('brief-fusion', 'fusion energy'),
+        brief('brief-robotics', 'home robotics'),
+        brief('brief-culture', 'founder culture'),
+      ],
+      voiceProfile: { ...voiceProfile, summary: 'You are @geoffwoo, a founder and investor.' },
+      desired: 3,
+    });
+
+    expect(selected.map((entry) => entry.id)).toEqual(['culture-alternate']);
   });
 
   it('uses same-subject native posts as structured reaction evidence without exposing prose', () => {
