@@ -314,10 +314,28 @@ function newsSearchQueries(agenda: ResearchAgenda): string[] {
     .map((entry) => entry.query);
 }
 
+const OPERATOR_QUERY_DOMAIN_PATTERN = new RegExp(
+  '\\s+in\\s+(?:ai compute|energy nuclear|materials minerals|robotics automation|manufacturing industrial|space defense|browser infrastructure|startups markets|finance investing|culture status|health performance|sports competition|crypto|politics geopolitics|general technology|other)$',
+  'i',
+);
+
+function googleNewsSearchText(query: string): string {
+  const subject = query.replace(OPERATOR_QUERY_DOMAIN_PATTERN, '').trim();
+  if (subject === query.trim()) return significantResearchTokens(query).slice(0, 5).join(' ');
+
+  const namedSubjects = subject
+    .split(',')
+    .map((entry) => entry.replace(/["\\]/g, '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  return namedSubjects.length > 0
+    ? namedSubjects.map((entry) => `"${entry}"`).join(' ')
+    : significantResearchTokens(query).slice(0, 5).join(' ');
+}
+
 function googleNewsQueryUrl(query: string): string {
-  const tokens = significantResearchTokens(query).slice(0, 5).join(' ');
   const url = new URL('https://news.google.com/rss/search');
-  url.searchParams.set('q', `${tokens} when:14d`);
+  url.searchParams.set('q', `${googleNewsSearchText(query)} when:14d`);
   url.searchParams.set('hl', 'en-US');
   url.searchParams.set('gl', 'US');
   url.searchParams.set('ceid', 'US:en');

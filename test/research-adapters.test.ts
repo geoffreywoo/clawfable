@@ -236,6 +236,31 @@ describe('research adapters', () => {
     ]);
   });
 
+  it('quotes engaged named subjects instead of diluting company searches with domain labels', async () => {
+    const xml = `<rss><channel>
+      <item><title>Cognition AI discusses a new financing round - Startup Ledger</title><link>https://news.google.com/rss/articles/cognition-story</link><pubDate>Fri, 31 Jul 2026 10:00:00 GMT</pubDate><description>Cognition AI is discussing a new financing round. Startup Ledger</description></item>
+    </channel></rss>`;
+    const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(xml, { status: 200 }));
+    const query = 'Cognition AI in ai compute';
+    const result = await fetchNewsSearch({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: [query] },
+      trending: [],
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      now,
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(requestUrl.searchParams.get('q')).toBe('"Cognition AI" when:14d');
+    expect(result.documents).toEqual([
+      expect.objectContaining({
+        title: 'Cognition AI discusses a new financing round',
+        publisher: 'Startup Ledger',
+        query,
+      }),
+    ]);
+  });
+
   it('retrieves canonical primary records from the USGS publications API', async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({
       records: [{
