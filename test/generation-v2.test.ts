@@ -17,6 +17,7 @@ import {
   getV2GeneratedWritingIssue,
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
+  isOperatorPremiseReskinV2,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -564,7 +565,64 @@ describe('Tweet Generation V2', () => {
       'the next great robotics company should obsess over actuator cost',
       signals,
     )).toBe(false);
+    expect(retainsPersonalTopicSubjectV2(
+      'QQQ is where an AI thesis goes to become an interest-rate bet',
+      ['leopoldasch:salp:leverage', 'qqq'],
+    )).toBe(true);
     expect(retainsPersonalTopicSubjectV2('any subject is valid', ['capital:market'])).toBe(true);
+  });
+
+  it('allows a new premise on the same native subject while preserving rare-premise blocks', () => {
+    const cognitionHistory = 'i had a call to invest in @cognition while @ScottWu46 visited a founder\'s parents';
+    const salpHistory = 'SALP @leopoldasch scaled too fast with leverage. i am long Leopold.';
+    const investorUpdateHistory = 'investor updates are easier when customers already give you context';
+
+    expect(isOperatorPremiseReskinV2(
+      'Cognition should become the default software factory.',
+      [cognitionHistory],
+      ['cognition', 'Cognition funding', 'cognition:scottwu46'],
+    )).toBe(false);
+    expect(isOperatorPremiseReskinV2(
+      'SALP customers should fund the next scale-up before Leopold sells more equity.',
+      [salpHistory],
+      ['finance', 'salp:leopoldasch:leopold'],
+    )).toBe(false);
+    expect(isOperatorPremiseReskinV2(
+      'Trajectory should make switching open-source models easier without becoming disposable.',
+      [investorUpdateHistory],
+      ['Trajectory', 'open-source models'],
+    )).toBe(false);
+    expect(isOperatorPremiseReskinV2(
+      'Google should hand Scott Wu control of a standalone AI software unit.',
+      ['google should buy @cognition and make @ScottWu46 ceo'],
+      ['google:cognition:scottwu46'],
+    )).toBe(true);
+  });
+
+  it('does not turn a historical subject cue into an unsupported launch event', () => {
+    const operatorBrief = {
+      ...brief('operator', 'startups'),
+      personalTopicSignals: ['jakepaul:antifund'],
+      personalTopicSignalPremises: ['day 1 with @jakepaul on our journey with @antifund'],
+    };
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Jake Paul launching AntiFund is less interesting than whether AntiFund can tell him no.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-historical-launch-event',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
   });
 
   it('keeps concrete native subjects and drops abstract token debris from topic cues', () => {
