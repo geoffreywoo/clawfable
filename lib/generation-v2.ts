@@ -3723,10 +3723,13 @@ async function generateRescueDraftEvaluations({
     const targetModelStack = targetRevisionStrategy === 'critic_surgical'
       ? input.modelStack
       : modelStack;
-    const revisionContext = [
-      target,
-      ...priorEvaluations.filter((entry) => entry.idea.id === target.idea.id && entry.draft.id !== target.draft.id),
-    ]
+    const revisionCandidates = targetRevisionStrategy === 'critic_surgical'
+      ? [target]
+      : [
+          target,
+          ...priorEvaluations.filter((entry) => entry.idea.id === target.idea.id && entry.draft.id !== target.draft.id),
+        ];
+    const revisionContext = revisionCandidates
       .slice(0, 3)
       .map((entry) => ({
         content: entry.draft.content,

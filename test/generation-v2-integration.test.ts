@@ -351,7 +351,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-44',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-45',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -545,13 +545,21 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') {
         const parsed = JSON.parse(options.prompt);
-        const content = parsed.failedAttempts.length > 0
-          ? `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`
-          : `i'd still fund a first-time founder in ${parsed.idea.topic}.`;
+        if (parsed.failedAttempts.length > 0) {
+          return result(JSON.stringify({ drafts: [{
+            content: `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`,
+            format: 'observation',
+            posture: 'plain funding preference',
+          }] }), 'anthropic');
+        }
         return result(JSON.stringify({ drafts: [{
-          content,
+          content: `i'd still fund a first-time founder in ${parsed.idea.topic}.`,
           format: 'observation',
           posture: 'plain funding preference',
+        }, {
+          content: `a first-time founder in ${parsed.idea.topic} can still be the right bet for me.`,
+          format: 'observation',
+          posture: 'alternate funding preference',
         }] }), 'anthropic');
       }
       if (options.task === 'copy_judgment') {
@@ -589,6 +597,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(rescueWriterCalls).toHaveLength(1);
     expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_quality');
     expect(String(rescueWriterCalls[0].system)).toContain('surgical critic pass');
+    expect(JSON.parse(rescueWriterCalls[0].prompt).failedAttempts).toHaveLength(1);
     expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
