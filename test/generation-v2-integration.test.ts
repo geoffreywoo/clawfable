@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-95',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-96',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -396,13 +396,13 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
-  it('gives Geoffrey GPT and Fable equal same-idea diversity and preserves the winning stack', async () => {
+  it('gives Geoffrey three Fable variants and one GPT shadow while preserving the winning stack', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') {
         const parsed = JSON.parse(options.prompt);
-        if (options.modelStack === 'publishing_v2_gpt_control') {
+        if (options.modelStack === 'publishing_v2_fable_control') {
           const primaryCopy: Record<string, string> = {
             'AI startups': 'ai startups get my first dollar.',
             'biotech manufacturing': 'biotech manufacturing is my pick.',
@@ -421,7 +421,7 @@ describe('generateTweetBatchV2 integration', () => {
             content: `i'd start with ${parsed.idea.topic}.`,
             format: 'short_punch',
             posture: 'capital allocation decision',
-          }] }), 'openai');
+          }] }), 'anthropic');
         }
         return result(JSON.stringify({ drafts: [{
           content: `${parsed.idea.topic} isn't about the visible launch. it's about the real edge.`,
@@ -435,7 +435,7 @@ describe('generateTweetBatchV2 integration', () => {
           content: `the real edge in ${parsed.idea.topic} is not the launch. it is the customer.`,
           format: 'hot_take',
           posture: 'synthetic contrast',
-        }] }), 'anthropic');
+        }] }), 'openai');
       }
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
@@ -443,17 +443,17 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2({
       ...input,
-      modelStack: 'publishing_v2_gpt_control',
+      modelStack: 'publishing_v2_fable_control',
     });
     const writerCalls = mocks.generateText.mock.calls
       .map(([options]) => options)
       .filter((options) => options.task === 'tweet_writing');
     const primaryCalls = writerCalls.filter((call) => (
-      call.modelStack === 'publishing_v2_gpt_control'
+      call.modelStack === 'publishing_v2_fable_control'
       && JSON.parse(call.prompt).failedAttempts.length === 0
     ));
     const shadowCalls = writerCalls.filter((call) => (
-      call.modelStack === 'publishing_v2_fable_control'
+      call.modelStack === 'publishing_v2_gpt_control'
       && JSON.parse(call.prompt).failedAttempts.length === 0
     ));
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
@@ -465,12 +465,12 @@ describe('generateTweetBatchV2 integration', () => {
     expect(shadowCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
     expect(shadowCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
     expect(new Set(persistedDrafts.filter((draft) => (
-      draft.generationModelStack === 'publishing_v2_gpt_control'
+      draft.generationModelStack === 'publishing_v2_fable_control'
       && (draft.mutationRound || 0) === 0
     )).map((draft) => draft.id)).size).toBe(12);
     expect(drafts).toHaveLength(2);
-    expect(drafts.every((draft) => draft.generationProvider === 'openai')).toBe(true);
-    expect(drafts.every((draft) => draft.generationModelStack === 'publishing_v2_gpt_control')).toBe(true);
+    expect(drafts.every((draft) => draft.generationProvider === 'anthropic')).toBe(true);
+    expect(drafts.every((draft) => draft.generationModelStack === 'publishing_v2_fable_control')).toBe(true);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
         initialPrimaryWriterDrafts: 12,
@@ -832,7 +832,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('pairs Fable and GPT when GPT is primary on a high-margin Geoffrey repair', async () => {
+  it('suppresses generative Geoffrey repair even when the critic gives actionable instructions', async () => {
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -890,30 +890,24 @@ describe('generateTweetBatchV2 integration', () => {
       .filter((draft) => draft.mutationRound === 1);
     const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
 
-    expect(criticCalls).toBe(2);
-    expect(rescueWriterCalls).toHaveLength(2);
-    expect(rescueWriterCalls.map((call) => call.modelStack).sort()).toEqual([
-      'publishing_v2_fable_control',
-      'publishing_v2_gpt_control',
-    ]);
-    expect(rescueWriterCalls.every((call) => String(call.system).includes('BOUNDED REPAIR'))).toBe(true);
-    expect(rescueDrafts).toHaveLength(2);
-    expect(rescueDrafts.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
-    expect(drafts).toHaveLength(2);
-    expect(drafts.some((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
+    expect(criticCalls).toBe(1);
+    expect(rescueWriterCalls).toHaveLength(0);
+    expect(rescueDrafts).toHaveLength(0);
+    expect(drafts).toHaveLength(1);
+    expect(drafts.every((draft) => !draft.parentDraftCandidateId)).toBe(true);
     expect(finalRun).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({
         postcriticRescueTargets: 1,
-        postcriticRescueEligibleTargets: 1,
-        postcriticRescueRunnableTargets: 1,
+        postcriticRescueEligibleTargets: 0,
+        postcriticRescueRunnableTargets: 0,
         postcriticSurgicalTargets: 1,
-        postcriticPairedWriterTargets: 1,
-        postcriticRescueSuppressedNegativeValue: 0,
-        rescueDraftsGenerated: 2,
-        draftsSelected: 2,
+        postcriticPairedWriterTargets: 0,
+        postcriticRescueSuppressedNegativeValue: 1,
+        draftsSelected: 1,
       }),
     });
+    expect(finalRun.stageCounts.rescueDraftsGenerated || 0).toBe(0);
   });
 
   it('spends Geoffrey post-critic capacity on fresh alternate ideas instead of rewrites', async () => {

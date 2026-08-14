@@ -35,8 +35,8 @@ import {
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
   isEligibleOperatorTopicCueSourceV2,
-  isV2MarginOnlyBoundedRepairCandidate,
   isGenericInvestorSelectionTemplateV2,
+  shouldTryV2SubtractiveTailRepair,
 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { hasAiModelPricing } from './ai-pricing';
@@ -594,11 +594,12 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     && stageThroughput?.draftsSelected === 0
   ) {
     const nearMisses = input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [];
-    const hasBoundedRepair = nearMisses.some((nearMiss) => (
-      isV2MarginOnlyBoundedRepairCandidate(
+    const hasSubtractiveTrim = nearMisses.some((nearMiss) => (
+      shouldTryV2SubtractiveTailRepair(
         nearMiss.rejectionCodes,
         nearMiss.judgeNotes,
         nearMiss.qualityMargin,
+        nearMiss.content,
       )
     ));
     add({
@@ -612,8 +613,8 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         initialWriterGroups: input.currentPolicyWindow.writerOutcomes?.groups.filter((group) => group.phase === 'initial') || [],
         nearMisses,
       },
-      action: hasBoundedRepair
-        ? 'Run one bounded, critic-directed repair on the strongest margin-only draft, rejudge every revision, then rotate to a fresh idea; keep the final quality floor fixed.'
+      action: hasSubtractiveTrim
+        ? 'Rejudge deletion-only tails from the strongest margin-only draft, then spend writing capacity on fresh primary variants rather than generative repair; keep the final quality floor fixed.'
         : 'Tighten public-move eligibility and replace abstract comparison theses before writing; keep the final quality floor fixed.',
     });
   }
