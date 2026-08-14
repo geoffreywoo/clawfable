@@ -1,4 +1,5 @@
 import type {
+  AccountAnalysis,
   Agent,
   AudienceVoiceComplaint,
   CandidateJudgeBreakdown,
@@ -15,6 +16,7 @@ import {
 import { buildGenerationContext } from './generation-context';
 import {
   getAudienceVoiceComplaints,
+  getAnalysis,
   getQueuedTweets,
   getTopicIntelligenceState,
   getTrendingCache,
@@ -29,6 +31,7 @@ import {
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import {
+  buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
 } from './generation-v2';
@@ -48,7 +51,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 10;
+export const GENERATION_QUALITY_AUDIT_VERSION = 11;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -459,7 +462,7 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas] = await Promise.all([
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas, analysis] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -473,6 +476,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getResearchAgenda(agent.id),
     getSemanticBlocks(agent.id),
     getIdeaCandidates(agent.id, 300),
+    getAnalysis(agent.id),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const activeModelStack = PUBLISHING_V2_MODEL_STACK;
@@ -589,6 +593,65 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     context.style.trendTolerance,
     12,
   );
+  const auditAnalysis: AccountAnalysis = analysis || {
+    agentId: agent.id,
+    analyzedAt: '',
+    tweetCount: 0,
+    viralTweets: [],
+    engagementPatterns: {
+      avgLikes: 0,
+      avgRetweets: 0,
+      avgReplies: 0,
+      avgImpressions: 0,
+      topHours: [],
+      topFormats: [],
+      topTopics: [],
+      viralThreshold: 0,
+    },
+    followingProfile: {
+      totalFollowing: 0,
+      topAccounts: [],
+      categories: [],
+    },
+    contentFingerprint: '',
+    warnings: ['No saved account analysis was available for the predictive brief audit.'],
+  };
+  const nextBriefPlan = buildGenerationBriefsV2({
+    count: 2,
+    stories: storyClusters,
+    documents: sourceDocuments,
+    voiceProfile: context.voiceProfile,
+    analysis: auditAnalysis,
+    learnings: context.learnings,
+    style: context.style,
+    trending,
+    allTweets,
+    blocks: semanticBlocks,
+    recentIdeas,
+    seedRotationKey: `audit:${agent.id}:${PUBLISHING_V2_QUALITY_POLICY_VERSION}`,
+  });
+  const nextBriefLaneCounts = countBy(nextBriefPlan.map((brief) => (
+    brief.evidenceMode === 'verified_source'
+      ? 'verified_source'
+      : brief.trendTopicId
+        ? 'operator_engaged_subject'
+        : 'durable_operator_topic'
+  )));
+  const operatorTopicTaste = (context.learnings?.manualTopicProfile || []).map((cluster) => {
+    const topTweets = cluster.topTweets || [];
+    const cleanSubjectCueSources = topTweets.filter((tweet) => (
+      tweet.authorshipProvenance !== 'known_clawfable_generated'
+      && tweet.voiceCorpusDispositions?.includes('diction_anchor')
+    ));
+    return {
+      topic: cluster.topic,
+      sampleCount: cluster.sampleCount,
+      averageEngagement: cluster.avgEngagement,
+      topTweetCount: topTweets.length,
+      cleanSubjectCueSourceCount: cleanSubjectCueSources.length,
+      excludedFromExactSubjectReuseCount: topTweets.length - cleanSubjectCueSources.length,
+    };
+  });
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -755,6 +818,26 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     corpus: corpusSummary,
     queue: queueSummary,
     sources: {
+      nextBriefPlan: {
+        deterministicSeedPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+        requestedDraftCount: 2,
+        briefCount: nextBriefPlan.length,
+        laneCounts: nextBriefLaneCounts,
+        briefs: nextBriefPlan.map((brief) => ({
+          id: brief.id,
+          topic: brief.topic,
+          sourceLane: brief.sourceLane,
+          evidenceMode: brief.evidenceMode,
+          storyClusterId: brief.storyClusterId,
+          trendTopicId: brief.trendTopicId,
+          exactSubjectCueCount: brief.personalTopicSignals?.length || 0,
+          exactSubjectCueProvenance: (brief.personalTopicSignals?.length || 0) > 0
+            ? 'clean_diction_anchors'
+            : null,
+          creativeSeedId: brief.creativeSeed?.id || null,
+        })),
+      },
+      operatorTopicTaste,
       documentCount: sourceDocuments.length,
       storyCount: storyClusters.length,
       qualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,

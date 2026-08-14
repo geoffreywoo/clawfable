@@ -852,29 +852,40 @@ function operatorTopicCandidates({
   const manualTopics = [...(learnings?.manualTopicProfile || [])]
     .filter((entry) => entry.sampleCount > 0);
   const maxManualEngagement = Math.max(1, ...manualTopics.map((entry) => entry.avgEngagement));
+  const cleanSubjectSignalTweets = (tweets: TweetPerformance[]): TweetPerformance[] => (
+    !isGeoffreyVoiceProfile(voiceProfile)
+      ? tweets
+      : tweets.filter((tweet) => (
+        tweet.authorshipProvenance !== 'known_clawfable_generated'
+        && tweet.voiceCorpusDispositions?.includes('diction_anchor')
+      ))
+  );
   const candidates = [
     ...manualTopics
       .sort((left, right) => right.avgEngagement - left.avgEngagement || right.sampleCount - left.sampleCount)
-      .map((entry) => ({
-        topic: entry.topic,
-        identityScore: 0.94,
-        provenance: 'operator-written topic outcomes',
-        sampleCount: entry.sampleCount,
-        historicalAngle: entry.angle || undefined,
-        personalTopicSignals: buildPersonalTopicSubjectCuesV2(entry.topic, entry.topTweets || []),
-        personalTopicSignalPremises: personalTopicSignalPremises(entry.topic, entry.topTweets || []),
-        priorityScore: Number((
-          0.56
-          + (Math.min(1, entry.avgEngagement / maxManualEngagement) * 0.3)
-          + (Math.min(1, entry.sampleCount / 10) * 0.14)
-        ).toFixed(4)),
-        spreadMechanics: uniqueStrings((entry.topTweets || []).flatMap((tweet) => inferContentSpreadMechanics(tweet.content, {
-          topic: tweet.topic,
-          thesis: tweet.thesis,
-          replies: tweet.replies,
-          retweets: tweet.retweets,
-        })), 5),
-      })),
+      .map((entry) => {
+        const subjectSignalTweets = cleanSubjectSignalTweets(entry.topTweets || []);
+        return {
+          topic: entry.topic,
+          identityScore: 0.94,
+          provenance: 'operator-written topic outcomes',
+          sampleCount: entry.sampleCount,
+          historicalAngle: entry.angle || undefined,
+          personalTopicSignals: buildPersonalTopicSubjectCuesV2(entry.topic, subjectSignalTweets),
+          personalTopicSignalPremises: personalTopicSignalPremises(entry.topic, subjectSignalTweets),
+          priorityScore: Number((
+            0.56
+            + (Math.min(1, entry.avgEngagement / maxManualEngagement) * 0.3)
+            + (Math.min(1, entry.sampleCount / 10) * 0.14)
+          ).toFixed(4)),
+          spreadMechanics: uniqueStrings((entry.topTweets || []).flatMap((tweet) => inferContentSpreadMechanics(tweet.content, {
+            topic: tweet.topic,
+            thesis: tweet.thesis,
+            replies: tweet.replies,
+            retweets: tweet.retweets,
+          })), 5),
+        };
+      }),
     ...voiceProfile.topics.map((topic) => ({ topic, identityScore: 0.86, provenance: 'the active SOUL topic agenda', spreadMechanics: [], priorityScore: 0.66 })),
     ...analysis.engagementPatterns.topTopics.map((topic) => ({ topic, identityScore: 0.78, provenance: 'mature account performance', spreadMechanics: [], priorityScore: 0.58 })),
     ...style.exploration.underusedTopics.map((topic) => ({ topic, identityScore: 0.68, provenance: 'an underused operator topic', spreadMechanics: [], priorityScore: 0.42 })),
@@ -1376,9 +1387,11 @@ export function buildGenerationBriefsV2({
   }
 
   // Followed-network engagement can choose a subject, never wording or facts.
-  // Keep this lane small so it broadens the account without displacing the
-  // operator's durable topic history or contaminating diction evidence.
-  const maxOperatorTopicSignalBriefs = Math.min(2, Math.max(0, Math.floor(briefCount / 4)));
+  // Geoffrey gets two current-interest briefs in a four-brief batch; the
+  // remaining source and durable-topic lanes still preserve portfolio taste.
+  const maxOperatorTopicSignalBriefs = geoffreyPortfolio
+    ? Math.min(2, Math.max(0, Math.ceil(briefCount / 3)))
+    : Math.min(2, Math.max(0, Math.floor(briefCount / 4)));
   const recentOperatorAttempts = recentOperatorAttemptIdeas(recentIdeas, now);
   const operatorTopicSignals = selectOperatorTopicSignals(
     trending || [],
