@@ -22,6 +22,7 @@ import {
   getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
   isAbstractComparativePublicMoveV2,
+  isGenericInvestorSelectionTemplateV2,
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
@@ -283,7 +284,7 @@ describe('Tweet Generation V2', () => {
       'i think oai and ant are 5-10T before 2029.',
     ];
     expect(rejectedMoves.every(isAbstractComparativePublicMoveV2)).toBe(true);
-    expect(directMoves.some(isAbstractComparativePublicMoveV2)).toBe(false);
+    expect(directMoves.every((move) => !isAbstractComparativePublicMoveV2(move))).toBe(true);
 
     const geoffreyVoice = {
       ...voiceProfile,
@@ -313,6 +314,49 @@ describe('Tweet Generation V2', () => {
 
     expect(geoffreyIdea.rejectionCodes).toContain('abstract_comparative_public_move');
     expect(genericIdea.rejectionCodes).not.toContain('abstract_comparative_public_move');
+
+    const comparativeClaim = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('operator', 'Google should make Gemini the Workspace interface.'),
+        publicMove: 'Google should make Gemini the Workspace interface.',
+        claim: 'Gemini is more interesting as the product than another Workspace sidebar.',
+      }],
+      agentId: 'agent-1',
+      runId: 'run-one-sided-claim',
+      briefs: [brief('operator', 'AI')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T06:00:00.000Z',
+    })[0];
+    expect(comparativeClaim.rejectionCodes).toContain('abstract_comparative_public_move');
+  });
+
+  it('detects reusable category-level investor wrappers without blocking direct calls', () => {
+    expect(isGenericInvestorSelectionTemplateV2(
+      'the robotics reliability company i’d back is a thermal-cycling lab with software attached.',
+    )).toBe(true);
+    expect(isGenericInvestorSelectionTemplateV2(
+      'the inference ASIC startup i’d bet on publishes useful tokens per rack.',
+    )).toBe(true);
+    expect(isGenericInvestorSelectionTemplateV2(
+      'google should make gemini the workspace interface.',
+    )).toBe(false);
+    expect(isGenericInvestorSelectionTemplateV2(
+      'useful tokens per rack is the benchmark i care about.',
+    )).toBe(false);
+
+    const prompt = JSON.parse(buildTweetWritingPromptV2({
+      id: 'idea-direct-criterion',
+      topic: 'robotics',
+      publicMove: 'Robotics companies should publish actuator replacement intervals.',
+      claim: 'Replacement intervals are the decision criterion.',
+      tension: 'Demo dexterity does not establish production-duty uptime.',
+      implication: 'I would change which company I back based on repair frequency.',
+      counterargument: 'Dexterity can still determine whether the robot is useful.',
+    } as IdeaCandidate, brief('robotics', 'robotics'), [], []));
+    expect(prompt.responseContract.variantMoves[1].instruction).toContain('never wrap a category');
+    expect(prompt.responseContract.diversityContract).toContain('one consequence from stakes');
   });
 
   it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {
@@ -2897,7 +2941,7 @@ describe('Tweet Generation V2', () => {
     }));
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
       'blunt_reaction',
-      'owned_bet_or_call',
+      'named_decision_or_consequence',
       'thought_in_motion',
     ]);
     expect(writingPrompt.responseContract.diversityContract).toContain('must not share');

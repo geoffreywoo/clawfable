@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-73',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-74',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -91,7 +91,13 @@ function healthyInput() {
     },
     complaints: { total: 0, affectedPostRate: 0 },
     modelPricing: { activeComplete: true, missingModels: [] },
-    sources: { editorialEligibleCount: 3, generationEligibleCount: 1 },
+    sources: {
+      editorialEligibleCount: 3,
+      generationEligibleCount: 1,
+      warmedNetworkTopicCount: 48,
+      operatorTopicSignalEligibleCount: 2,
+      operatorTopicSignalRejectionCounts: [],
+    },
   };
 }
 
@@ -327,6 +333,64 @@ describe('generation quality audit findings', () => {
         evidence: expect.objectContaining({
           stageThroughput: expect.objectContaining({ ideasSelected: 9, draftsEligible: 22, draftsSelected: 0 }),
         }),
+      }),
+    ]));
+  });
+
+  it('reports repeated category-level investor wrappers in current-policy drafts', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow.runCount = 2;
+    (input.currentPolicyWindow as any).writerOutcomes = buildGenerationWriterOutcomeAudit([{
+      generationRunId: 'run-template',
+      selectedDraftIds: [],
+      stageCounts: {},
+      drafts: [{
+        draftCandidateId: 'draft-template-one',
+        content: 'the robotics company i’d back publishes actuator replacement intervals.',
+        mutationRound: 0,
+        rejectionCodes: ['final_quality_margin'],
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+        judgeScore: 0.84,
+        judgeBreakdown: { qualityMargin: 0.84 },
+      }, {
+        draftCandidateId: 'draft-template-two',
+        content: 'the inference ASIC startup i’d bet on publishes useful tokens per rack.',
+        mutationRound: 0,
+        rejectionCodes: ['final_quality_margin'],
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+        judgeScore: 0.83,
+        judgeBreakdown: { qualityMargin: 0.83 },
+      }],
+    } as any]);
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_investor_template_repeated',
+        severity: 'high',
+        evidence: expect.objectContaining({ genericInvestorSelectionCount: 2 }),
+      }),
+    ]));
+  });
+
+  it('reports when warmed network subjects all fail topic eligibility', () => {
+    const input = healthyInput();
+    input.sources = {
+      ...input.sources,
+      warmedNetworkTopicCount: 48,
+      operatorTopicSignalEligibleCount: 0,
+      operatorTopicSignalRejectionCounts: [
+        { value: 'topic_confidence_below_floor', count: 11 },
+        { value: 'operator_engagement_below_floor', count: 8 },
+      ],
+    };
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'network_idea_lane_empty',
+        severity: 'high',
+        evidence: expect.objectContaining({ warmedNetworkTopicCount: 48 }),
       }),
     ]));
   });

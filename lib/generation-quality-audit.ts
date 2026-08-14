@@ -35,6 +35,7 @@ import {
   buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
+  isGenericInvestorSelectionTemplateV2,
 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { hasAiModelPricing } from './ai-pricing';
@@ -52,7 +53,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 18;
+export const GENERATION_QUALITY_AUDIT_VERSION = 19;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -200,8 +201,20 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
     }));
   const rescueEntries = entries.filter((entry) => entry.phase === 'rescue');
   const selectedRescues = rescueEntries.filter((entry) => entry.selected);
+  const genericInvestorTemplates = entries.filter((entry) => (
+    isGenericInvestorSelectionTemplateV2(entry.content)
+  ));
   return {
     groups,
+    templateRisks: {
+      genericInvestorSelectionCount: genericInvestorTemplates.length,
+      genericInvestorSelectionRate: ratio(genericInvestorTemplates.length, entries.length),
+      examples: genericInvestorTemplates.slice(0, 6).map((entry) => ({
+        generationRunId: entry.generationRunId,
+        draftCandidateId: entry.draftCandidateId,
+        content: entry.content,
+      })),
+    },
     rescue: {
       targetCount: runs.reduce((sum, run) => sum
         + (run.stageCounts.preflightRescueTargets || 0)
@@ -276,6 +289,9 @@ interface AuditFindingInput {
   sources: {
     editorialEligibleCount: number;
     generationEligibleCount: number;
+    warmedNetworkTopicCount?: number;
+    operatorTopicSignalEligibleCount?: number;
+    operatorTopicSignalRejectionCounts?: Array<{ value: string; count: number }>;
   };
 }
 
@@ -425,6 +441,21 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     });
   }
 
+  const templateRisks = input.currentPolicyWindow.writerOutcomes?.templateRisks;
+  if (
+    input.currentPolicyWindow.runCount >= 2
+    && (templateRisks?.genericInvestorSelectionCount || 0) >= 2
+  ) {
+    add({
+      code: 'current_policy_investor_template_repeated',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Current-policy drafts repeat a generic investor-selection wrapper',
+      evidence: templateRisks || {},
+      action: 'Reject category-level "the startup/company I would back" openings before judgment and state the actual decision criterion directly.',
+    });
+  }
+
   const rescueOutcomes = input.currentPolicyWindow.writerOutcomes?.rescue;
   if (
     input.currentPolicyWindow.runCount >= 2
@@ -472,6 +503,24 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'No editorially valid source story is currently available to generation',
       evidence: input.sources,
       action: 'Refresh qualified primary sources and inspect semantic-memory, commitment, and editorial-cooldown exclusions; keep source-free opinions inside factual-restraint gates.',
+    });
+  }
+
+  if (
+    (input.sources.warmedNetworkTopicCount || 0) >= 20
+    && (input.sources.operatorTopicSignalEligibleCount || 0) === 0
+  ) {
+    add({
+      code: 'network_idea_lane_empty',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'The warmed network feed is not producing any eligible idea subjects',
+      evidence: {
+        warmedNetworkTopicCount: input.sources.warmedNetworkTopicCount || 0,
+        operatorTopicSignalEligibleCount: input.sources.operatorTopicSignalEligibleCount || 0,
+        topRejectionReasons: input.sources.operatorTopicSignalRejectionCounts || [],
+      },
+      action: 'Repair network subject extraction and semantic classification using stored source decisions; do not admit low-confidence or off-core prose as voice evidence.',
     });
   }
 
@@ -1017,6 +1066,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     sources: {
       editorialEligibleCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
       generationEligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+      warmedNetworkTopicCount: trending.length,
+      operatorTopicSignalEligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+      operatorTopicSignalRejectionCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
     },
   });
   const findingCounts = {

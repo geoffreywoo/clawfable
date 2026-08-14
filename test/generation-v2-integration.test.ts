@@ -363,7 +363,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-73',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-74',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -377,6 +377,32 @@ describe('generateTweetBatchV2 integration', () => {
     const copyJudgeCandidateCount = mocks.saveGenerationRun.mock.calls.at(-1)?.[1]?.stageCounts?.copyJudgeCandidates;
     expect(copyJudgeCandidateCount).toBeGreaterThanOrEqual(7);
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
+  });
+
+  it('rejects generic category-level investor wrappers before paying the copy critic', async () => {
+    mocks.getStoryClusters.mockResolvedValue([]);
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        return result(JSON.stringify({ drafts: [{
+          content: 'the robotics company i’d back publishes actuator replacement intervals.',
+          format: 'observation',
+          posture: 'category-level investor wrapper',
+        }] }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
+
+    expect(drafts).toHaveLength(0);
+    expect(persistedDrafts.length).toBeGreaterThan(0);
+    expect(persistedDrafts.every((draft) => (
+      draft.rejectionCodes.includes('generic_investor_selection_template')
+    ))).toBe(true);
+    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(0);
   });
 
   it('starts both compact idea batches before waiting for a result', async () => {
