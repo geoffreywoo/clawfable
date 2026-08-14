@@ -234,9 +234,9 @@ describe('Tweet Generation V2', () => {
     expect(meetsV2RescueMarginFloor(0.7798, 0.78)).toBe(false);
   });
 
-  it('reconceives structural voice failures while keeping clean near misses surgical', () => {
-    expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('critic_surgical');
-    expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('critic_surgical');
+  it('reconceives margin failures instead of polishing the same weak construction', () => {
+    expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['copy_judge_voice_mismatch', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['final_cringe_risk', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(
@@ -246,7 +246,7 @@ describe('Tweet Generation V2', () => {
     expect(getV2RescueRevisionStrategy(
       ['final_quality_margin'],
       'The native position is sound; cut one hedge and stop.',
-    )).toBe('critic_surgical');
+    )).toBe('reconceive');
   });
 
   it('leads voice transfer with a same-register native posture and keeps cross-topic range', () => {
