@@ -681,13 +681,15 @@ const PERSONAL_TOPIC_SIGNAL_CONCRETE_TOKENS = new Set([
 ]);
 
 const PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS = new Set([
-  ...PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS,
+  ...PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS,
   'action', 'actions', 'agent', 'agents', 'ai', 'and', 'but', 'can', 'ceo',
-  'chip', 'chips', 'cloud', 'cluster', 'code', 'coding', 'control', 'developer',
-  'developers', 'every', 'for', 'frontier', 'hardware', 'inference', 'make',
+  'become', 'bet', 'betting', 'chip', 'chips', 'cloud', 'cluster', 'code',
+  'coding', 'control', 'customer', 'developer', 'developers', 'easier', 'every',
+  'for', 'frontier', 'hardware', 'inference', 'keep', 'least', 'make',
   'making', 'market', 'model', 'models', 'move', 'only', 'operator', 'own',
-  'platform', 'see', 'should', 'silicon', 'software', 'status', 'team', 'teams',
-  'tech', 'technical', 'technology', 'the', 'think', 'who',
+  'one', 'per', 'platform', 'pretty', 'see', 'should', 'silicon', 'software',
+  'status', 'team', 'teams', 'tech', 'technical', 'technology', 'the', 'think',
+  'too', 'who', 'will',
 ]);
 
 function normalizePersonalTopicSignalToken(token: string): string {
@@ -767,14 +769,26 @@ function personalTopicSignalPremises(topic: string, tweets: TweetPerformance[]):
     .map((tweet) => tweet.content);
 }
 
-function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = []): boolean {
+function isPersonalTopicSignalPremiseReskin(
+  text: string,
+  premises: string[] = [],
+  allowedSubjectContext: string[] = [],
+): boolean {
+  const normalizeToken = (token: string) => token.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/g, '');
+  const extractProperNames = (value: string) => (value.match(/\b[A-Z][A-Za-z0-9]{2,}\s+[A-Z][A-Za-z0-9]{1,}\b/g) || [])
+    .map(normalizeToken)
+    .filter((name) => name.length >= 5);
+  const ignoredSubjectTokens = new Set([
+    ...significantResearchTokens(allowedSubjectContext.join(' ')).map(normalizeToken),
+    ...extractProperNames(allowedSubjectContext.join(' ')),
+  ]);
   const distinctiveTokens = (value: string): { tokens: Set<string>; properNames: Set<string> } => {
     const tokens = significantResearchTokens(value)
-      .map((token) => token.replace(/\d+$/g, ''))
-      .filter((token) => token.length >= 3 && !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token));
-    const properNames = (value.match(/\b[A-Z][A-Za-z0-9]{2,}\s+[A-Z][A-Za-z0-9]{1,}\b/g) || [])
-      .map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/g, ''))
-      .filter((name) => name.length >= 5);
+      .map(normalizeToken)
+      .filter((token) => token.length >= 3
+        && !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)
+        && !ignoredSubjectTokens.has(token));
+    const properNames = extractProperNames(value).filter((name) => !ignoredSubjectTokens.has(name));
     return {
       tokens: new Set([...tokens, ...properNames]),
       properNames: new Set(properNames),
@@ -796,11 +810,32 @@ function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = [
   });
 }
 
+export function isOperatorPremiseReskinV2(
+  text: string,
+  premises: string[] = [],
+  allowedSubjectContext: string[] = [],
+): boolean {
+  const allowedTokens = new Set(significantResearchTokens(allowedSubjectContext.join(' '))
+    .filter((token) => token.length >= 3 && !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token)));
+  const candidateTokens = new Set(significantResearchTokens(text));
+  return isPersonalTopicSignalPremiseReskin(text, premises, allowedSubjectContext)
+    || premises.some((premise) => {
+      if (canonicalPremiseSimilarity(text, premise) >= 0.64) return true;
+      const premiseTokens = new Set(significantResearchTokens(premise));
+      const sharesExpectedSubject = [...allowedTokens].some((token) => (
+        candidateTokens.has(token) && premiseTokens.has(token)
+      ));
+      if (!sharesExpectedSubject) return false;
+      const candidateConcepts = premiseConceptIds(text);
+      return premiseConceptIds(premise).some((concept) => candidateConcepts.includes(concept));
+    });
+}
+
 export function retainsPersonalTopicSubjectV2(text: string, signals: string[] = []): boolean {
   const candidateTokens = new Set(significantResearchTokens(text).map(normalizePersonalTopicSignalToken));
   const usableSignals = signals.map((signal) => significantResearchTokens(signal.replace(/:/g, ' '))
     .map(normalizePersonalTopicSignalToken)
-    .filter((token) => token.length >= 4 && !PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS.has(token)))
+    .filter((token) => token.length >= 3 && !PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS.has(token)))
     .filter((tokens) => tokens.length > 0);
   if (usableSignals.length === 0) return true;
   return usableSignals.some((tokens) => tokens.some((token) => candidateTokens.has(token)));
@@ -1720,7 +1755,7 @@ function hasUnsupportedOperatorNumber(text: string): boolean {
 }
 
 function unsupportedOperatorFact(text: string): boolean {
-  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|acquired|merged\s+with|this week|today|yesterday)\b|\b(?:merger|acquisition)(?:\s+of\s+[a-z0-9@._-]+){0,3}\s+(?:is|has|puts?|makes?|created|closed)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
+  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|acquired|launched|launching|merged\s+with|this week|today|yesterday)\b|\b(?:merger|acquisition)(?:\s+of\s+[a-z0-9@._-]+){0,3}\s+(?:is|has|puts?|makes?|created|closed)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
   const assertedNumber = hasUnsupportedOperatorNumber(text);
   return assertedEventOrExperience || assertedNumber;
 }
@@ -1777,9 +1812,9 @@ const PREMISE_CONCEPT_RULES: Array<{ id: string; pattern: RegExp }> = [
   { id: 'timing_survival', pattern: /\b(?:too early|too late|timing|duration|holding period|wait|surviv(?:e|al)|scaled too fast|before the market|market moved|different clocks?)\b/i },
   { id: 'thesis_correctness', pattern: /\b(?:thesis|directionally|right idea|wrong idea|view was (?:right|wrong)|being right|being wrong)\b/i },
   { id: 'failure_downfall', pattern: /\b(?:blow[- ]?up|blown up|crater(?:ed)?|downfall|fail(?:ed|ure)?|killed|dead|dies?)\b/i },
-  { id: 'status_prestige', pattern: /\b(?:status|prestige|prestigious|brand[- ]name|tier[- ]?1|social proof|aura)\b/i },
+  { id: 'status_prestige', pattern: /\b(?:status|prestige|prestigious|brand[- ]name|tier[- ]?1|social proof|aura|approval|rich|wealth|wealthy|status[- ]seek(?:ing|er))\b/i },
   { id: 'control_ownership', pattern: /\b(?:control|ownership|dilution|cap table|term sheet|give up|gave up)\b/i },
-  { id: 'customer_pull', pattern: /\b(?:customer pull|paid customer|paying customer|repeat(?:ed)? purchase|second purchase|renew(?:al|ed)?|budget)\b/i },
+  { id: 'customer_pull', pattern: /\b(?:customer pull|paid customer|paying customer|customers? (?:fund|finance|pay for)|customer[- ]funded|repeat(?:ed)? purchase|second purchase|renew(?:al|ed)?|budget)\b/i },
   { id: 'team_headcount', pattern: /\b(?:headcount|hiring|hire|team|engineers?|one person|one builder|solo founder|tiny team)\b/i },
   { id: 'benchmark_shipping', pattern: /\b(?:benchmark|evals?|leaderboard|ship(?:ped|ping)?|build(?:er|ing)?|model quality)\b/i },
   { id: 'envy_insecurity', pattern: /\b(?:envy|jealous|insecurity|pray on|rooting against|complainer)\b/i },
@@ -1788,12 +1823,18 @@ const PREMISE_CONCEPT_RULES: Array<{ id: string; pattern: RegExp }> = [
 ];
 const ACQUISITION_CEO_SENTENCE_SKELETON = /\b(?:should\s+)?(?:buy|acquire)\b.{0,100}\b(?:make|name|install)\b.{0,60}\b(?:ceo|chief executive)\b/i;
 const DIRECT_ACQUISITION_RECOMMENDATION = /\bshould\s+(?:just\s+)?(?:buy|acquire)\b/i;
+const LEADERSHIP_INSTALLATION_CALL = /\b(?:make|name|install|hand|give|put)\b.{0,80}\b(?:ceo|chief executive|control|in charge|run(?:ning)?)\b/i;
+
+function premiseConceptIds(value: string): string[] {
+  return PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(value)).map((rule) => rule.id);
+}
 
 function canonicalPremiseSimilarity(left: string, right: string): number {
-  const leftConcepts = new Set(PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(left)).map((rule) => rule.id));
-  const rightConcepts = new Set(PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(right)).map((rule) => rule.id));
+  const leftConcepts = new Set(premiseConceptIds(left));
+  const rightConcepts = new Set(premiseConceptIds(right));
   const shared = [...leftConcepts].filter((concept) => rightConcepts.has(concept)).length;
   if (ACQUISITION_CEO_SENTENCE_SKELETON.test(left) && ACQUISITION_CEO_SENTENCE_SKELETON.test(right)) return 0.64;
+  if (LEADERSHIP_INSTALLATION_CALL.test(left) && LEADERSHIP_INSTALLATION_CALL.test(right)) return 0.64;
   if (DIRECT_ACQUISITION_RECOMMENDATION.test(left) && DIRECT_ACQUISITION_RECOMMENDATION.test(right)) return 0.64;
   if (
     leftConcepts.has('failure_downfall')
@@ -2006,9 +2047,10 @@ export function normalizeIdeaCandidatesV2({
     if (isGenericOperatorProductWishlistV2(ideaText(candidate))) {
       candidate.rejectionCodes.push('generic_product_wishlist');
     }
-    if (isPersonalTopicSignalPremiseReskin(
+    if (isOperatorPremiseReskinV2(
       ideaText(candidate),
       brief.personalTopicSignalPremises,
+      [brief.topic, brief.title, ...(brief.personalTopicSignals || [])],
     )) {
       candidate.rejectionCodes.push('voice_anchor_semantic_reskin');
     }
@@ -3254,12 +3296,10 @@ function preflightDraft({
   if (isGenericOperatorProductWishlistV2(content)) codes.push('generic_product_wishlist');
   if (recentDuplicate.isDuplicate) codes.push('recent_copy_duplicate');
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
-  if (isPersonalTopicSignalPremiseReskin(
+  if (isOperatorPremiseReskinV2(
     `${ideaPublicMove(idea)} ${idea.claim} ${content}`,
-    uniqueStrings([
-      ...(brief.personalTopicSignalPremises || []),
-      ...operatorPremiseExclusions(input, [idea.topic]),
-    ], 60),
+    brief.personalTopicSignalPremises || [],
+    [brief.topic, brief.title, ...(brief.personalTopicSignals || [])],
   )) {
     codes.push('voice_anchor_semantic_reskin');
   }

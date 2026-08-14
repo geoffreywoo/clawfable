@@ -191,8 +191,9 @@ export function isCoreGeoffreyTopicDomain(domain: TopicSemanticDomain): boolean 
 }
 
 export function isGeoffreyDeepTechnicalTopic(value: string): boolean {
-  return /\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|grid interconnect|transformer|power plant|rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|robot|robotics|humanoid|actuator|servo motor|machine vision|factory|manufactur|machine tool|metrology|industrial automation|space|rocket|satellite|orbital|payload|defense|military systems?|asic|gpu|hbm|chip|semiconductor|inference hardware|data center|rack power|packag(?:e|ing)|foundry|wafer|interconnect)\b/i.test(value)
-    || AEROSPACE_LAUNCH_PATTERN.test(value);
+  const literalContext = value.replace(/\b(?:software|code|coding|content|idea|talent) factor(?:y|ies)\b/gi, '');
+  return /\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|grid interconnect|transformer|power plant|rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|robot|robotics|humanoid|actuator|servo motor|machine vision|factory|manufactur|machine tool|metrology|industrial automation|space|rocket|satellite|orbital|payload|defense|military systems?|asic|gpu|hbm|chip|semiconductor|inference hardware|data center|rack power|packag(?:e|ing)|foundry|wafer|interconnect)\b/i.test(literalContext)
+    || AEROSPACE_LAUNCH_PATTERN.test(literalContext);
 }
 
 export function isGeoffreyManufacturingMaterialsTopic(value: string): boolean {

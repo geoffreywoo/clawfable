@@ -821,6 +821,15 @@ describe('source planner', () => {
     expect(isGeoffreyDeepTechnicalTopic('a startup product launch changed customer behavior')).toBe(false);
   });
 
+  it('does not interpret software-factory metaphors as literal manufacturing', () => {
+    expect(isGeoffreyDeepTechnicalTopic(
+      'Cognition should become the default software factory',
+    )).toBe(false);
+    expect(isGeoffreyDeepTechnicalTopic(
+      'a robotics factory is bottlenecked by actuator qualification',
+    )).toBe(true);
+  });
+
   it('keeps aerospace launch language in the deep technical lane', () => {
     expect(classifyGeoffreyTopicDomain('a rocket launch changed the payload economics')).toBe('space_defense');
     expect(isGeoffreyDeepTechnicalTopic('a launch vehicle provider has a full manifest')).toBe(true);
