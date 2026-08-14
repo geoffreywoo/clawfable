@@ -8,6 +8,7 @@ import {
   buildPersonalTopicSubjectCuesV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
+  getCommittedTweetCopyMemoryV2,
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
   getV2RescueRevisionStrategy,
@@ -1716,6 +1717,27 @@ describe('Tweet Generation V2', () => {
 
     expect(afterWritingRejection.some((entry) => entry.storyClusterId === story.id)).toBe(true);
     expect(whileQueued.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+  });
+
+  it('keeps quarantined and uncommitted drafts out of published-copy duplicate memory', () => {
+    const tweets = [
+      { id: 'quarantined', status: 'quarantined', content: 'Rejected copy.' },
+      { id: 'draft', status: 'draft', content: 'Unreviewed copy.' },
+      { id: 'preview', status: 'preview', content: 'Preview copy.' },
+      { id: 'queued', status: 'queued', content: 'Queued copy.' },
+      { id: 'posted', status: 'posted', content: 'Posted copy.' },
+      { id: 'deleted', status: 'deleted_from_x', content: 'Deleted live copy.' },
+    ] as Tweet[];
+
+    expect(getCommittedTweetCopyMemoryV2(tweets)).toEqual([
+      'Queued copy.',
+      'Posted copy.',
+      'Deleted live copy.',
+    ]);
+    expect(getCommittedTweetCopyMemoryV2(tweets, { excludeTweetId: 'queued' })).toEqual([
+      'Posted copy.',
+      'Deleted live copy.',
+    ]);
   });
 
   it('rejects a cited idea when its claim is unrelated to the qualified evidence', () => {

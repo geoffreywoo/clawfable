@@ -15,6 +15,7 @@ import type {
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import {
   generateTweetBatchV2,
+  getCommittedTweetCopyMemoryV2,
   getV2EditorialFeedbackLessons,
   getV2GeneratedWritingIssue,
   isV2VoiceReady,
@@ -841,9 +842,9 @@ async function generateContextualBatchV2(
     const sourceComparisonTexts = copyOnlyRemix
       ? evidence.filter((entry) => entry.kind !== 'remix_parent').map((entry) => entry.content)
       : evidenceTexts;
-    const recentComparisonTweets = copyOnlyRemix
-      ? input.allTweets.filter((tweet) => String(tweet.id) !== String(request.parentTweetId))
-      : input.allTweets;
+    const recentComparisonTexts = getCommittedTweetCopyMemoryV2(input.allTweets, {
+      excludeTweetId: copyOnlyRemix ? request.parentTweetId : null,
+    });
     const allowedMentions = request.surface === 'relationship' ? [request.targetHandle] : [];
     for (const draft of drafts) {
       const rejections: string[] = [];
@@ -853,7 +854,7 @@ async function generateContextualBatchV2(
       if (getAutopostPolicyIssue(draft.content, { allowMentions: allowedMentions.length > 0, allowedMentions })) rejections.push('autopost_policy');
       if (getAuthorityProofIssue(draft.content)) rejections.push('unearned_authority');
       if (assessClaimEvidence(draft.content, evidenceTexts, { lockEvidenceConcepts: true }).issue) rejections.push('claim_evidence');
-      if (isNearDuplicate(draft.content, recentComparisonTweets.map((tweet) => tweet.content), 0.55).isDuplicate) rejections.push('recent_copy_duplicate');
+      if (isNearDuplicate(draft.content, recentComparisonTexts, 0.55).isDuplicate) rejections.push('recent_copy_duplicate');
       if (isNearDuplicate(draft.content, sourceComparisonTexts, 0.72).isDuplicate) rejections.push('source_copy');
       if (blocks.some((block) => block.scope === 'copy' && researchTokenSimilarity(draft.content, block.semanticKey.replace(/:/g, ' ')) >= 0.56)) rejections.push('blocked_copy_pattern');
       if (rejections.length > 0) {
