@@ -41,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-95',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-96',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -481,9 +481,12 @@ describe('generation quality audit findings', () => {
 
     (input.currentPolicyWindow as any).writerOutcomes.nearMisses[0].judgeNotes =
       'The smallest improvement would be naming the operational task this control would unlock.';
+    (input.currentPolicyWindow as any).writerOutcomes.nearMisses[0].qualityMargin = 0.859;
+    (input.currentPolicyWindow as any).writerOutcomes.nearMisses[0].content =
+      'the named decision is already sharp. the explanatory tail makes it worse.';
     const consequenceFindings = buildGenerationAuditFindings(input as any);
     expect(consequenceFindings.find((finding) => finding.code === 'current_policy_idea_to_copy_gap')?.action)
-      .toContain('bounded, critic-directed repair');
+      .toContain('deletion-only tails');
   });
 
   it('reports repeated category-level investor wrappers in current-policy drafts', () => {

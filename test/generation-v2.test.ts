@@ -31,7 +31,6 @@ import {
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
-  isV2MarginOnlyBoundedRepairCandidate,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -467,107 +466,17 @@ describe('Tweet Generation V2', () => {
     )).toBe('critic_surgical');
   });
 
-  it('repairs only high-margin Geoffrey misses with one bounded critic request', () => {
+  it('suppresses generative Geoffrey repair after live negative-value evidence', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
     };
     expect(shouldRunPostcriticRescueV2(geoffreyVoice)).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The smallest improvement would be naming the operational task this control would unlock.',
-      0.832,
-    )).toBe(true);
     expect(shouldRunPostcriticRescueV2(
       geoffreyVoice,
       ['final_quality_margin'],
-      'Strengthen the otherwise thin call with one concrete consequence already permitted by the idea.',
-      0.816,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Name one concrete consequence.',
-      0.79,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Cut the explanatory closer and stop.',
-      0.84,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The smallest improvement is to name one permitted system constraint behind deployed economics.',
-      0.852,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The smallest improvement is to acknowledge the product cost of excessive refusals.',
-      0.827,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The categorical claim should be made less absolute.',
-      0.825,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The smallest improvement is to add the approved tension around whether live-product complexity outruns model gains.',
-      0.8408,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Avoid the universal none-of-them claim while preserving the actuator, reducer, and seal test.',
-      0.8317,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Sharpen the thin claim by naming the approved strategic-importance dimension.',
-      0.83861,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The only useful improvement is one Anthropic-specific distribution consequence.',
-      0.83781,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The smallest improvement is to sharpen what default interface means.',
-      0.8354,
-    )).toBe(true);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'This draft needs another pass.',
-      0.83861,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Sharpen the thin claim by naming the approved strategic-importance dimension.',
-      0.829,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'Preserve the distinction between public badging and recruiter-only visibility.',
-      0.822,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The draft needs another pass.',
-      0.81,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      '',
-      0.84,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['final_quality_margin'],
-      'The ending drifts toward a familiar startup maxim.',
-      0.84,
-    )).toBe(false);
-    expect(isV2MarginOnlyBoundedRepairCandidate(
-      ['copy_judge_voice_mismatch', 'final_quality_margin'],
-      'Name one concrete consequence.',
-      0.84,
+      'The smallest improvement would be naming the operational task this control would unlock.',
+      0.859,
     )).toBe(false);
     expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
   });
@@ -584,6 +493,18 @@ describe('Tweet Generation V2', () => {
       'Clarify the mechanism.',
       0.8399,
       "publish the field-service interval. until then it's a video.",
+    )).toBe(false);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'Make the final claim slightly less absolute.',
+      0.85938,
+      "anthropic could be the best company of this cycle. quality does not win that fight.",
+    )).toBe(true);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'Make the final claim slightly less absolute.',
+      0.8499,
+      "anthropic could be the best company of this cycle. quality does not win that fight.",
     )).toBe(false);
     expect(shouldTryV2SubtractiveTailRepair(
       ['final_quality_margin'],

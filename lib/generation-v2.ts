@@ -3801,9 +3801,7 @@ async function generateDraftEvaluations({
     if (isGeoffreyVoiceProfile(input.voiceProfile) && geoffreyShadowStack) {
       writerPlans.push({
         modelStack: geoffreyShadowStack,
-        initialDraftCount: geoffreyShadowStack === PUBLISHING_V2_CONTROL_MODEL_STACK
-          ? 1
-          : MAX_DRAFTS_PER_IDEA,
+        initialDraftCount: 1,
         candidateIdSalt: geoffreyShadowStack,
       });
     }
@@ -4668,18 +4666,13 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
 const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|abstract comparison|comparison thesis|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
 const V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported|familiar startup maxim|drifts? toward (?:a )?familiar maxim)\b/i;
 const V2_OBVIOUS_SUBTRACTIVE_TAIL_PATTERN = /(?:^|[.!?]\s+)(?:until then (?:it|this)['’]s (?:a |just )?(?:video|demo|theater)|that['’]s (?:the|my) call|that['’]s it|we['’]ll see|full stop|end of story|enough said)[.!?]?$/i;
-const V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN = /\b(?:operational task|concrete consequence|(?:subject|company|product|[a-z0-9]+)-specific (?:distribution )?(?:consequence|constraint|detail|mechanism)|named (?:consequence|constraint|task|detail|dimension)|name (?:one|the) (?:(?:approved|permitted) )?(?:system )?(?:consequence|constraint|task|detail|dimension|mechanism|cost|tradeoff)|naming (?:one|the) (?:(?:approved|permitted) )?(?:system )?(?:consequence|constraint|task|detail|dimension|mechanism|cost|tradeoff)|sharpen what .{1,80} means|avoid (?:the )?(?:universal|absolute|categorical) .{0,30}claim|acknowledge (?:the )?(?:product|user|operational) (?:cost|tradeoff|consequence)|thin (?:call|claim|reaction)|otherwise thin|made? less absolute|make (?:the )?(?:categorical )?claim less absolute|qualify (?:the )?(?:categorical )?claim)\b/i;
-const V2_MIN_GEOFFREY_EXPLICIT_REPAIR_MARGIN = Math.max(
-  0.83,
-  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.03,
-);
-const V2_MIN_GEOFFREY_HIGH_MARGIN_REPAIR = Math.max(
-  0.84,
-  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.02,
-);
 const V2_MIN_GEOFFREY_SUBTRACTIVE_REPAIR_MARGIN = Math.max(
   0.82,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.02,
+);
+const V2_MIN_GEOFFREY_HIGH_MARGIN_TRIM = Math.max(
+  0.85,
+  PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.01,
 );
 
 export function shouldTryV2SubtractiveTailRepair(
@@ -4698,27 +4691,9 @@ export function shouldTryV2SubtractiveTailRepair(
         && V2_OBVIOUS_SUBTRACTIVE_TAIL_PATTERN.test(normalizeDraftContentV2(content))
       )
       || V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(judgeNotes || '')
-    );
-}
-
-export function isV2MarginOnlyBoundedRepairCandidate(
-  rejectionCodes: string[],
-  judgeNotes?: string | null,
-  qualityMargin?: number | null,
-): boolean {
-  const uniqueCodes = uniqueStrings(rejectionCodes);
-  const diagnosis = (judgeNotes || '').trim();
-  return uniqueCodes.length === 1
-    && uniqueCodes[0] === 'final_quality_margin'
-    && typeof qualityMargin === 'number'
-    && diagnosis.length > 0
-    && !V2_RECONCEIVE_DIAGNOSIS_PATTERN.test(diagnosis)
-    && !V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(diagnosis)
-    && (
-      qualityMargin >= V2_MIN_GEOFFREY_HIGH_MARGIN_REPAIR
       || (
-        qualityMargin >= V2_MIN_GEOFFREY_EXPLICIT_REPAIR_MARGIN
-        && V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN.test(diagnosis)
+        qualityMargin >= V2_MIN_GEOFFREY_HIGH_MARGIN_TRIM
+        && getSubtractiveTailCandidateContentsV2(content).length > 0
       )
     );
 }
@@ -4743,12 +4718,11 @@ export function getV2RescueRevisionStrategy(
 
 export function shouldRunPostcriticRescueV2(
   voiceProfile: VoiceProfile,
-  rejectionCodes: string[] = [],
-  judgeNotes?: string | null,
-  qualityMargin?: number | null,
+  _rejectionCodes: string[] = [],
+  _judgeNotes?: string | null,
+  _qualityMargin?: number | null,
 ): boolean {
-  return !isGeoffreyVoiceProfile(voiceProfile)
-    || isV2MarginOnlyBoundedRepairCandidate(rejectionCodes, judgeNotes, qualityMargin);
+  return !isGeoffreyVoiceProfile(voiceProfile);
 }
 
 function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
