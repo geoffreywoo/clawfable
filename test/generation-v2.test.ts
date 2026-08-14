@@ -15,6 +15,7 @@ import {
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
   getV2BoundedRepairCharacterLimit,
+  getV2IdeaJudgeRejectionCodes,
   getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
@@ -239,6 +240,32 @@ describe('Tweet Generation V2', () => {
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(50))).toBe(98);
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(300))).toBe(360);
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(1100))).toBe(1200);
+  });
+
+  it('requires stronger idea consequence and native reaction before spending Geoffrey copy calls', () => {
+    const borderline = {
+      evidenceFidelity: 0.95,
+      authorFit: 0.72,
+      consequence: 0.68,
+      distinctiveness: 0.68,
+      nativeReactionPotential: 0.72,
+      publicMoveStrength: 0.72,
+      sharePotential: 0.68,
+    };
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+
+    expect(getV2IdeaJudgeRejectionCodes(borderline, voiceProfile)).toEqual([]);
+    expect(getV2IdeaJudgeRejectionCodes(borderline, geoffreyVoice)).toEqual(expect.arrayContaining([
+      'idea_judge_weak_author_fit',
+      'idea_judge_low_consequence',
+      'idea_judge_generic_premise',
+      'idea_judge_weak_native_reaction',
+      'idea_judge_weak_public_move',
+      'idea_judge_low_share_potential',
+    ]));
   });
 
   it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {
