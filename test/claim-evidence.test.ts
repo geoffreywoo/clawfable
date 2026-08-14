@@ -137,6 +137,24 @@ describe('claim evidence', () => {
 });
 
 describe('generated writing patterns', () => {
+  it('blocks the reusable product and valuation skeletons observed in live shadows', () => {
+    const cases: Array<[string, string]> = [
+      ['my bar for Cognition at $40b: Devin has to become the workflow.', 'synthetic-bar-open'],
+      ['my call on Trajectory: model choice should disappear.', 'announced-call-open'],
+      ['Trajectory wins when nobody thinks about which model ran the job.', 'named-subject-wins-when'],
+      ['if users still pick models, the product stopped one layer too early.', 'one-layer-too-early'],
+      ['Cognition no longer gets graded on demos. It gets graded on adoption.', 'graded-reframe'],
+      ['Cognition has no room left to be merely a coding startup.', 'no-room-left-merely'],
+      ['been chewing on Trajectory. model choice is plumbing.', 'invented-chewing-on'],
+    ];
+
+    for (const [content, signature] of cases) {
+      const assessment = assessGeneratedWritingPatterns(content);
+      expect(assessment.hits).toContain(signature);
+      expect(assessment.score).toBeGreaterThanOrEqual(0.28);
+    }
+  });
+
   it('blocks synthetic superlative verdict labels', () => {
     expect(assessGeneratedWritingPatterns(
       "hardest signal to fake in a startup: the customer renews and the founder wasn't in the building.",
