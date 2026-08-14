@@ -18,7 +18,7 @@ vi.mock('@/lib/ai', () => ({
   estimateAiUsageCostUsd: () => null,
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,
-  PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_gpt_control',
+  PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_fable_control',
   PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
 
@@ -349,7 +349,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-39',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-40',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1444,7 +1444,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCalls).toBe(8);
     expect(criticCalls).toBe(2);
     expect(criticRescueWriterCalls).toHaveLength(2);
-    expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_gpt_control')).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_fable_control')).toBe(true);
     expect(criticRescueWriterCalls.every((call) => String(call.system).includes('surgical critic pass'))).toBe(true);
     expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.every((attempt: any) => (
       attempt.instruction.includes('smallest sufficient change')
