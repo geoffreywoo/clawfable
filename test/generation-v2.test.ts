@@ -389,6 +389,10 @@ describe('Tweet Generation V2', () => {
     )).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(
       ['final_quality_margin'],
+      'The public move is still an abstract comparison thesis.',
+    )).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy(
+      ['final_quality_margin'],
       'The native position is sound; cut one hedge and stop.',
     )).toBe('critic_surgical');
   });
@@ -435,6 +439,31 @@ describe('Tweet Generation V2', () => {
       'The categorical claim should be made less absolute.',
       0.825,
     )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The smallest improvement is to add the approved tension around whether live-product complexity outruns model gains.',
+      0.8408,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'Avoid the universal none-of-them claim while preserving the actuator, reducer, and seal test.',
+      0.8317,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'Preserve the distinction between public badging and recruiter-only visibility.',
+      0.822,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The draft needs another pass.',
+      0.81,
+    )).toBe(false);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      '',
+      0.84,
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'The ending drifts toward a familiar startup maxim.',
