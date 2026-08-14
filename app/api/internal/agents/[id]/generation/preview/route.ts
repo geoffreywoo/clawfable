@@ -257,6 +257,7 @@ export async function POST(
               judgeModel: draft.judgeModel,
               judgeScore: draft.judgeScore,
               judgeBreakdown: draft.judgeBreakdown || null,
+              judgeNotes: draft.judgeNotes || null,
               mutationRound: draft.mutationRound,
             })),
           }

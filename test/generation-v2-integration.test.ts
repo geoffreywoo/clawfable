@@ -326,6 +326,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
+    expect(copyJudgeCall.jsonSchema.properties.scores.items.required).toContain('diagnosis');
     expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt).not.toHaveProperty('variantCadenceAssignments');
@@ -346,7 +347,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-32',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-33',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1422,6 +1423,7 @@ describe('generateTweetBatchV2 integration', () => {
             clarity: 0.82,
             novelty: 0.8,
             manualAnchorReskinRisk: 0.05,
+            diagnosis: 'The draft turns the idea into a polished founder maxim; reopen on the concrete buyer decision and stop after the owned preference.',
           })),
         }));
       }
@@ -1435,6 +1437,12 @@ describe('generateTweetBatchV2 integration', () => {
     expect(criticCalls).toBe(2);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
+    expect(mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt))
+      .some((prompt) => prompt.failedAttempts.some((attempt: any) => attempt.issues.some((issue: string) => (
+        issue.includes('polished founder maxim')
+      ))))).toBe(true);
     expect(finalRun).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({
