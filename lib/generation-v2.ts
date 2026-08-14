@@ -3113,8 +3113,12 @@ export function selectNativeReactionAnchors(
   ));
   const selected: DictionAnchor[] = [];
   const modes = new Set<NativeReactionMode>();
-  const preferredAnchor = registerMatched.find((anchor) => nativeReactionMode(anchor.content) === preferredMode)
-    || crossTopic.find((anchor) => nativeReactionMode(anchor.content) === preferredMode);
+  const localPreferredAnchor = registerMatched.find((anchor) => nativeReactionMode(anchor.content) === preferredMode);
+  const crossTopicPreferredAnchor = crossTopic.find((anchor) => nativeReactionMode(anchor.content) === preferredMode);
+  const preferredAnchor = localPreferredAnchor
+    || (preferredMode === 'direct_question' ? crossTopicPreferredAnchor : null)
+    || registerMatched[0]
+    || crossTopicPreferredAnchor;
   if (preferredAnchor) {
     selected.push(preferredAnchor);
     modes.add(nativeReactionMode(preferredAnchor.content));

@@ -318,6 +318,31 @@ describe('research agenda and story qualification', () => {
     expect(unrelated.scores.identityFit).toBeLessThan(0.55);
   });
 
+  it('recognizes a measured causal market outcome as a concrete consequence', () => {
+    const [batteryStory] = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda: {
+        ...agenda,
+        queries: ['energy startups', ...agenda.queries],
+        domainWeights: { ...agenda.domainWeights, energy: 1 },
+      },
+      now,
+      documents: [source({
+        id: 'australia-home-battery',
+        title: 'Australia home battery boom helped cut wholesale power prices in half',
+        excerpt: 'A rapid increase in home batteries helped cut wholesale power prices in half.',
+        publisher: 'Energy Institute',
+        trustTier: 'primary',
+        isPrimary: true,
+        topics: ['energy'],
+        entities: ['Australia', 'home batteries', 'wholesale power'],
+      })],
+    });
+
+    expect(batteryStory.evidenceQualified).toBe(true);
+    expect(batteryStory.scores.consequence).toBeGreaterThanOrEqual(0.61);
+  });
+
   it('does not treat stale or one-token arXiv matches as current identity evidence', () => {
     const arxivAgenda = {
       ...agenda,
