@@ -151,9 +151,8 @@ describe('research agenda and story qualification', () => {
     expect(built.operatorTopics).toEqual([
       'Cognition AI in ai compute',
       'Trajectory, Sequoia in ai compute',
-      'OpenAI, Brad Lightcap in ai compute',
     ]);
-    expect(built.queries.slice(0, 3)).toEqual(built.operatorTopics);
+    expect(built.queries.slice(0, 2)).toEqual(built.operatorTopics);
   });
 
   it('deduplicates stale operator subjects before they consume bounded search capacity', () => {
@@ -189,9 +188,33 @@ describe('research agenda and story qualification', () => {
       'Polymarket, Modal, Databricks in startups markets',
       'Trajectory, Sequoia in ai compute',
       'Cognition AI in ai compute',
-      'OpenAI, Brad Lightcap in ai compute',
     ]);
-    expect(built.queries.slice(0, 4)).toEqual(built.operatorTopics);
+    expect(built.queries.slice(0, 3)).toEqual(built.operatorTopics);
+  });
+
+  it('keeps prior operator subjects only when the fresh network lane is empty', () => {
+    const built = buildResearchAgenda({
+      agent: { id: 'agent-1', name: 'geoffwoo', handle: 'geoffwoo', soulMd: '' } as any,
+      voiceProfile: {
+        tone: 'direct',
+        topics: ['AI', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'short and direct',
+        summary: 'founder and investor',
+      },
+      learnings: null,
+      performance: [],
+      feedback: [],
+      tweets: [],
+      current: {
+        ...agenda,
+        operatorTopics: ['OpenAI, Brad Lightcap in ai compute'],
+      },
+      operatorTopicSignals: [],
+    });
+
+    expect(built.operatorTopics).toEqual(['OpenAI, Brad Lightcap in ai compute']);
+    expect(built.queries[0]).toBe('OpenAI, Brad Lightcap in ai compute');
   });
 
   it('removes a blocked frontier angle without suppressing the broader source portfolio', () => {

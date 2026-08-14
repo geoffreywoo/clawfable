@@ -3741,7 +3741,7 @@ async function generateDraftEvaluations({
     if (isGeoffreyVoiceProfile(input.voiceProfile) && geoffreyShadowStack) {
       writerPlans.push({
         modelStack: geoffreyShadowStack,
-        initialDraftCount: 1,
+        initialDraftCount: MAX_DRAFTS_PER_IDEA,
         candidateIdSalt: geoffreyShadowStack,
       });
     }
