@@ -64,6 +64,32 @@ describe('account taste scoring', () => {
     expect(compactTechnicalCall.technicalCredibilityScore).toBeGreaterThanOrEqual(0.45);
   });
 
+  it('treats a compressed named IPO timing call as high-context diction, not a generic placeholder', () => {
+    const anchors = [
+      { content: 'google should buy @cognition for $200b and make @ScottWu46 ceo', topic: 'AI', source: 'timeline' },
+      { content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.', topic: 'finance', source: 'timeline' },
+    ];
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: anchors,
+        startupRegisterExamples: anchors,
+        pinnedExamples: [],
+      },
+    } as any;
+    const named = assessAccountTaste(
+      'modal goes public before databricks.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    const generic = assessAccountTaste(
+      'a company goes public before another company.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+
+    expect(named.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(named.casualStartupScore).toBeGreaterThan(generic.casualStartupScore);
+    expect(generic.casualStartupScore).toBeLessThan(0.58);
+  });
+
   it('prefers Geoffrey-native technical anchors over topic-swapped AI advice', () => {
     const generic = assessAccountTaste(
       'The real edge in AI infrastructure is not more models, but better feedback loops. Most people miss that the winners will compound learning faster.',

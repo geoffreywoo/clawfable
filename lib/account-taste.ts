@@ -746,6 +746,17 @@ function assessCasualStartupRegister(
     && casualHits === 0
     && !situated
     && !firstOrSecondPerson;
+  const timingCall = lower.match(/^(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})\s+(?:goes public|ipos?)\s+(?:before|after)\s+(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})[.!?]?$/);
+  const genericTimingSubject = (value: string) => /^(?:(?:a|an|the|another|one|some)\s+)?(?:company|startup|team|founder|business|product|model)$/.test(value);
+  const compressedNamedTimingCall = Boolean(
+    timingCall
+    && !genericTimingSubject(timingCall[1])
+    && !genericTimingSubject(timingCall[2]),
+  );
+  const genericPlaceholderTimingCall = Boolean(
+    timingCall
+    && (genericTimingSubject(timingCall[1]) || genericTimingSubject(timingCall[2])),
+  );
 
   const stiffnessRisk = clamp(
     0.05
@@ -803,6 +814,7 @@ function assessCasualStartupRegister(
     anchorFit * 0.5
     + casualness * 0.28
     + directness * 0.22
+    + (compressedNamedTimingCall ? 0.1 : 0)
     - stiffnessRisk * 0.3
   );
   const compactLowercaseAssertion = lowerOpening
@@ -815,10 +827,14 @@ function assessCasualStartupRegister(
     || firstOrSecondPerson
     || situated
     || contraction
-    || compactLowercaseAssertion;
-  const score = !hasCasualRegisterMarker && bestAnchorFit < 0.98
-    ? Math.min(0.49, Math.max(topicAwareScore, styleRegisterScore))
-    : Math.max(topicAwareScore, styleRegisterScore);
+    || compactLowercaseAssertion
+    || compressedNamedTimingCall;
+  const rawScore = Math.max(topicAwareScore, styleRegisterScore);
+  const score = genericPlaceholderTimingCall
+    ? Math.min(0.49, rawScore)
+    : !hasCasualRegisterMarker && bestAnchorFit < 0.98
+      ? Math.min(0.49, rawScore)
+      : rawScore;
 
   return {
     score: Number(score.toFixed(3)),
