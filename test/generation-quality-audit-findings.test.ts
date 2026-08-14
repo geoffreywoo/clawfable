@@ -20,12 +20,16 @@ function healthyInput() {
     },
     autopost: { enabled: true, minQueueSize: 5 },
     corpus: {
+      schemaVersion: 2,
+      expectedSchemaVersion: 2,
       active: true,
       anchorCount: 40,
       targetAnchorCount: 40,
       minimumAnchorCount: 12,
       corpusPurity: 1,
       knownGeneratedAnchorCount: 0,
+      surfaceRiskAnchorCount: 0,
+      surfaceRiskAnchors: [],
     },
     queue: {
       qualityEligibleCount: 5,
@@ -37,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-80',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-81',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -183,6 +187,10 @@ describe('generation quality audit findings', () => {
       deepTechnicalGeneratedShare: 1,
       deepTechnicalFinalCriticShare: 1,
       domains: [expect.objectContaining({ domain: 'ai_compute', generatedCount: 1 })],
+      ideaCount: 1,
+      deepTechnicalIdeaCount: 1,
+      deepTechnicalIdeaShare: 1,
+      ideaDomains: [expect.objectContaining({ domain: 'ai_compute', ideaCount: 1 })],
     });
     expect(outcome.nearMisses[0]).toMatchObject({
       topic: 'inference ASIC rack economics',
@@ -192,8 +200,115 @@ describe('generation quality audit findings', () => {
     });
   });
 
+  it('separates unique idea mix from draft volume and detects a finished critic near-miss', () => {
+    const outcome = buildGenerationWriterOutcomeAudit([{
+      generationRunId: 'run-mix',
+      selectedDraftIds: [],
+      stageCounts: {},
+      ideas: [{
+        ideaId: 'idea-asic',
+        topic: 'inference ASIC rack economics',
+      }, {
+        ideaId: 'idea-ipo',
+        topic: 'Modal Databricks IPO timing',
+      }],
+      drafts: [{
+        draftCandidateId: 'draft-asic-one',
+        ideaId: 'idea-asic',
+        content: 'an inference chip draft',
+        mutationRound: 0,
+        rejectionCodes: ['final_technical_credibility_below_floor'],
+      }, {
+        draftCandidateId: 'draft-asic-two',
+        ideaId: 'idea-asic',
+        content: 'another inference chip draft',
+        mutationRound: 0,
+        rejectionCodes: ['final_cringe_risk'],
+      }, {
+        draftCandidateId: 'draft-asic-three',
+        ideaId: 'idea-asic',
+        content: 'third inference chip draft',
+        mutationRound: 0,
+        rejectionCodes: ['final_native_voice_below_floor'],
+      }, {
+        draftCandidateId: 'draft-ipo',
+        ideaId: 'idea-ipo',
+        content: 'modal is on the public markets before databricks. i am serious.',
+        mutationRound: 0,
+        judgeScore: 0.91,
+        judgeBreakdown: { qualityMargin: 0.8589, nativeVoice: 0.799, casualStartupFit: 0.723, cringeRisk: 0.255 },
+        judgeNotes: 'The named timing pick is native; no substantive rewrite is needed.',
+        rejectionCodes: ['final_quality_margin'],
+      }],
+    } as any]);
+
+    expect(outcome.topicMix).toMatchObject({
+      generatedCount: 4,
+      ideaCount: 2,
+      deepTechnicalIdeaCount: 1,
+      deepTechnicalIdeaShare: 0.5,
+      ideaDomains: expect.arrayContaining([
+        expect.objectContaining({ domain: 'ai_compute', ideaCount: 1 }),
+        expect.objectContaining({ domain: 'finance_investing', ideaCount: 1 }),
+      ]),
+    });
+    expect(outcome.criticCalibration).toMatchObject({
+      finishedNearMissCount: 1,
+      examples: [expect.objectContaining({ draftCandidateId: 'draft-ipo', qualityMargin: 0.8589 })],
+    });
+  });
+
   it('returns no findings for a healthy current state and historical window', () => {
     expect(buildGenerationAuditFindings(healthyInput() as any)).toEqual([]);
+  });
+
+  it('flags a stale corpus policy and active anchors that are promotional or media-dependent', () => {
+    const input = healthyInput();
+    input.corpus = {
+      ...input.corpus,
+      schemaVersion: 1,
+      surfaceRiskAnchorCount: 2,
+      surfaceRiskAnchors: [{
+        xTweetId: 'x-risky',
+        reasons: ['promotional post'],
+        content: 'would love to invest and amplify your work https://t.co/promo',
+      }],
+    };
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'voice_corpus_surface_policy_stale',
+        severity: 'high',
+        evidence: expect.objectContaining({
+          schemaVersion: 1,
+          expectedSchemaVersion: 2,
+          surfaceRiskAnchorCount: 2,
+        }),
+      }),
+    ]));
+  });
+
+  it('reports when critic prose calls a draft finished but the aggregate gate rejects it', () => {
+    const input = healthyInput();
+    (input.currentPolicyWindow as any).writerOutcomes = {
+      criticCalibration: {
+        finishedNearMissCount: 1,
+        examples: [{
+          draftCandidateId: 'draft-conflict',
+          judgeScore: 0.91,
+          qualityMargin: 0.8589,
+          judgeNotes: 'The named timing pick is native; no substantive rewrite is needed.',
+          content: 'modal is on the public markets before databricks. i am serious.',
+        }],
+      },
+    };
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_critic_score_conflict',
+        severity: 'medium',
+      }),
+    ]));
   });
 
   it('prioritizes queue starvation and thin quality headroom', () => {

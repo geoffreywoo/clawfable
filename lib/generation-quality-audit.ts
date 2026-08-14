@@ -54,8 +54,12 @@ import {
   PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
+import {
+  getVoiceCorpusTextSurfaceExclusions,
+  VOICE_CORPUS_SCHEMA_VERSION,
+} from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 24;
+export const GENERATION_QUALITY_AUDIT_VERSION = 25;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -145,6 +149,8 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
         creativeSeedId: ideaContext?.creativeSeedId || null,
         topicDomain: classifyGeoffreyTopicDomain(topicText),
         deepTechnical: isGeoffreyDeepTechnicalTopic(topicText),
+        ideaTopicDomain: classifyGeoffreyTopicDomain(ideaContext?.topic || topicText),
+        ideaDeepTechnical: isGeoffreyDeepTechnicalTopic(ideaContext?.topic || topicText),
       };
     });
   });
@@ -188,6 +194,13 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
   ));
   const byId = new Map(entries.map((entry) => [entry.draftCandidateId, entry]));
   const initialEntries = entries.filter((entry) => entry.phase === 'initial');
+  const initialIdeas = [...new Map(initialEntries.map((entry) => [entry.ideaId, entry])).values()];
+  const finalCriticIdeas = [...new Map(initialEntries
+    .filter((entry) => typeof entry.judgeScore === 'number')
+    .map((entry) => [entry.ideaId, entry])).values()];
+  const selectedInitialIdeas = [...new Map(initialEntries
+    .filter((entry) => entry.selected)
+    .map((entry) => [entry.ideaId, entry])).values()];
   const topicGroups = new Map<string, typeof initialEntries>();
   for (const entry of initialEntries) {
     topicGroups.set(entry.topicDomain, [...(topicGroups.get(entry.topicDomain) || []), entry]);
@@ -209,11 +222,30 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
     || right.finalCriticCount - left.finalCriticCount
     || left.domain.localeCompare(right.domain)
   ));
+  const finalCriticIdeaIds = new Set(finalCriticIdeas.map((entry) => entry.ideaId));
+  const selectedInitialIdeaIds = new Set(selectedInitialIdeas.map((entry) => entry.ideaId));
+  const ideaTopicGroups = new Map<string, typeof initialIdeas>();
+  for (const entry of initialIdeas) {
+    ideaTopicGroups.set(entry.ideaTopicDomain, [...(ideaTopicGroups.get(entry.ideaTopicDomain) || []), entry]);
+  }
+  const ideaTopicDomains = [...ideaTopicGroups.entries()].map(([domain, candidates]) => ({
+    domain,
+    ideaCount: candidates.length,
+    finalCriticIdeaCount: candidates.filter((candidate) => finalCriticIdeaIds.has(candidate.ideaId)).length,
+    selectedIdeaCount: candidates.filter((candidate) => selectedInitialIdeaIds.has(candidate.ideaId)).length,
+  })).sort((left, right) => (
+    right.ideaCount - left.ideaCount
+    || right.finalCriticIdeaCount - left.finalCriticIdeaCount
+    || left.domain.localeCompare(right.domain)
+  ));
   const deepTechnicalGenerated = initialEntries.filter((entry) => entry.deepTechnical);
   const finalCriticEntries = initialEntries.filter((entry) => typeof entry.judgeScore === 'number');
   const deepTechnicalFinalCritic = finalCriticEntries.filter((entry) => entry.deepTechnical);
   const selectedInitialEntries = initialEntries.filter((entry) => entry.selected);
   const deepTechnicalSelected = selectedInitialEntries.filter((entry) => entry.deepTechnical);
+  const deepTechnicalIdeas = initialIdeas.filter((entry) => entry.ideaDeepTechnical);
+  const deepTechnicalFinalCriticIdeas = finalCriticIdeas.filter((entry) => entry.ideaDeepTechnical);
+  const deepTechnicalSelectedIdeas = selectedInitialIdeas.filter((entry) => entry.ideaDeepTechnical);
   const pairedRescues = entries.flatMap((entry) => {
     if (entry.phase !== 'rescue' || !entry.parentDraftId) return [];
     const parent = byId.get(entry.parentDraftId);
@@ -258,6 +290,16 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
   const genericInvestorTemplates = entries.filter((entry) => (
     isGenericInvestorSelectionTemplateV2(entry.content)
   ));
+  const finishedCriticNearMisses = entries.filter((entry) => (
+    !entry.selected
+    && entry.rejectionCodes?.length === 1
+    && entry.rejectionCodes[0] === 'final_quality_margin'
+    && typeof entry.judgeScore === 'number'
+    && entry.judgeScore >= 0.88
+    && typeof entry.judgeBreakdown?.qualityMargin === 'number'
+    && entry.judgeBreakdown.qualityMargin >= PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.02
+    && /\b(?:no substantive rewrite is needed|no rewrite is needed|already fully formed)\b/i.test(entry.judgeNotes || '')
+  ));
   return {
     groups,
     topicMix: {
@@ -271,6 +313,16 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
       deepTechnicalFinalCriticShare: ratio(deepTechnicalFinalCritic.length, finalCriticEntries.length),
       deepTechnicalSelectedShare: ratio(deepTechnicalSelected.length, selectedInitialEntries.length),
       domains: topicDomains,
+      ideaCount: initialIdeas.length,
+      finalCriticIdeaCount: finalCriticIdeas.length,
+      selectedIdeaCount: selectedInitialIdeas.length,
+      deepTechnicalIdeaCount: deepTechnicalIdeas.length,
+      deepTechnicalFinalCriticIdeaCount: deepTechnicalFinalCriticIdeas.length,
+      deepTechnicalSelectedIdeaCount: deepTechnicalSelectedIdeas.length,
+      deepTechnicalIdeaShare: ratio(deepTechnicalIdeas.length, initialIdeas.length),
+      deepTechnicalFinalCriticIdeaShare: ratio(deepTechnicalFinalCriticIdeas.length, finalCriticIdeas.length),
+      deepTechnicalSelectedIdeaShare: ratio(deepTechnicalSelectedIdeas.length, selectedInitialIdeas.length),
+      ideaDomains: ideaTopicDomains,
     },
     templateRisks: {
       genericInvestorSelectionCount: genericInvestorTemplates.length,
@@ -301,6 +353,20 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
       averageQualityMarginDelta: average(pairedRescues.map((entry) => entry.qualityMarginDelta)),
       pairedComparisons: pairedRescues.slice(0, 20),
     },
+    criticCalibration: {
+      finishedNearMissCount: finishedCriticNearMisses.length,
+      examples: finishedCriticNearMisses.slice(0, 6).map((entry) => ({
+        generationRunId: entry.generationRunId,
+        draftCandidateId: entry.draftCandidateId,
+        judgeScore: entry.judgeScore,
+        qualityMargin: entry.judgeBreakdown?.qualityMargin || null,
+        nativeVoice: entry.judgeBreakdown?.nativeVoice || null,
+        casualStartupFit: entry.judgeBreakdown?.casualStartupFit || null,
+        cringeRisk: entry.judgeBreakdown?.cringeRisk || null,
+        judgeNotes: entry.judgeNotes || null,
+        content: entry.content,
+      })),
+    },
     nearMisses,
   };
 }
@@ -312,12 +378,20 @@ interface AuditFindingInput {
     minQueueSize: number;
   };
   corpus: {
+    schemaVersion: number;
+    expectedSchemaVersion: number;
     active: boolean;
     anchorCount: number;
     targetAnchorCount: number;
     minimumAnchorCount: number;
     corpusPurity: number | null;
     knownGeneratedAnchorCount: number;
+    surfaceRiskAnchorCount: number;
+    surfaceRiskAnchors: Array<{
+      xTweetId: string;
+      reasons: string[];
+      content: string;
+    }>;
   } | null;
   queue: {
     qualityEligibleCount: number;
@@ -453,6 +527,24 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       action: 'Keep autonomous original posting paused until a pure minimum corpus is active.',
     });
   } else {
+    if (
+      input.corpus.schemaVersion < input.corpus.expectedSchemaVersion
+      || input.corpus.surfaceRiskAnchorCount > 0
+    ) {
+      add({
+        code: 'voice_corpus_surface_policy_stale',
+        severity: 'high',
+        scope: 'live_state',
+        title: 'Native diction corpus contains weak standalone writing evidence',
+        evidence: {
+          schemaVersion: input.corpus.schemaVersion,
+          expectedSchemaVersion: input.corpus.expectedSchemaVersion,
+          surfaceRiskAnchorCount: input.corpus.surfaceRiskAnchorCount,
+          examples: input.corpus.surfaceRiskAnchors.slice(0, 6),
+        },
+        action: 'Rebuild the corpus with current standalone-text rules before using it for diction scoring or generation.',
+      });
+    }
     if (input.corpus.knownGeneratedAnchorCount > 0 || input.corpus.corpusPurity !== 1) {
       add({
         code: 'voice_corpus_contaminated',
@@ -558,6 +650,18 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         nearMisses: input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [],
       },
       action: 'Use paired evidence to stop negative-value rewrites; spend the next call on a new one-sided idea or initial draft while keeping the final quality floor fixed.',
+    });
+  }
+
+  const criticCalibration = input.currentPolicyWindow.writerOutcomes?.criticCalibration;
+  if ((criticCalibration?.finishedNearMissCount || 0) > 0) {
+    add({
+      code: 'current_policy_critic_score_conflict',
+      severity: 'medium',
+      scope: 'current_policy',
+      title: 'Final-critic language and aggregate eligibility disagree',
+      evidence: criticCalibration || {},
+      action: 'Evaluate the deterministic taste dimensions on the fixed native-versus-bad set; do not auto-pass, repeatedly rescore, or lower the quality floor.',
     });
   }
 
@@ -1013,9 +1117,18 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     refillBatchLimit: 2,
     refillCanIterateUntilMinimum: true,
   };
+  const corpusSurfaceRiskAnchors = anchors.flatMap((entry) => {
+    const reasons = getVoiceCorpusTextSurfaceExclusions(entry.content);
+    return reasons.length > 0 ? [{
+      xTweetId: entry.xTweetId,
+      reasons,
+      content: entry.content,
+    }] : [];
+  });
   const corpusSummary = corpus ? {
     snapshotId: corpus.snapshotId,
     schemaVersion: corpus.version,
+    expectedSchemaVersion: VOICE_CORPUS_SCHEMA_VERSION,
     active: corpus.active,
     generatedAt: corpus.generatedAt,
     targetAnchorCount: corpus.targetAnchorCount,
@@ -1025,6 +1138,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       ? Number(((anchors.length - generatedAnchors.length) / anchors.length).toFixed(4))
       : null,
     knownGeneratedAnchorCount: generatedAnchors.length,
+    surfaceRiskAnchorCount: corpusSurfaceRiskAnchors.length,
+    surfaceRiskAnchors: corpusSurfaceRiskAnchors.slice(0, 12),
     dispositionCounts: countBy(corpus.entries.flatMap((entry) => entry.dispositions)),
     provenanceCounts: countBy(corpus.entries.map((entry) => entry.provenance)),
     topExclusionReasons: topCounts(corpus.entries.flatMap((entry) => entry.exclusionReasons)),

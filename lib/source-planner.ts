@@ -181,7 +181,7 @@ export function classifyGeoffreyTopicDomain(
   if (/\b(?:election|president|congress|white house|democrat|republican|putin|russia|iran|israel|ukraine|geopolitic|military intelligence)\b/.test(text)) return 'politics_geopolitics';
   if (/\b(?:boxing|boxer|mma|ufc|fight(?:er|ing)?|nfl|nba|football|basketball|soccer|tennis|padel|world cup|athlete|sports?)\b/.test(text)) return 'sports_competition';
   if (/\b(?:longevity|lifespan|healthspan|ketone|metabolic|fitness|workout|exercise|sleep|biohacking|human performance)\b/.test(text)) return 'health_performance';
-  if (/\b(?:capital markets?|stock market|public markets?|investing|investor returns?|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(text)) return 'finance_investing';
+  if (/\b(?:capital markets?|stock market|public markets?|ipo|initial public offering|go(?:es|ing)? public|public listing|investing|investor returns?|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(text)) return 'finance_investing';
   if (/\b(?:status|culture|merit|nepotis|social climb|ambition|aura|college|education|elite|will to power|taste|city life|san francisco|burning man)\b/.test(text)) return 'culture_status';
   if (/\b(?:energy|fusion|fission|nuclear|reactors?|tritium|tokamak|grid|transformer|power plant)\b/.test(text)) return 'energy_nuclear';
   if (/\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy)\b/.test(text)) return 'materials_minerals';
