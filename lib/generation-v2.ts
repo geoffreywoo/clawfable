@@ -1425,12 +1425,13 @@ export function buildGenerationBriefsV2({
     if (briefs.length >= briefCount || operatorTopicSignalBriefs >= maxOperatorTopicSignalBriefs) break;
     const key = topicKey(signal.subject);
     if (usedTopics.has(key)) continue;
+    const signalSubjects = [signal.subject, ...signal.semanticAliases];
     if (blocks.some((block) => (
       block.scope !== 'copy'
-      && (
-        (block.scope === 'topic' && researchTokenSimilarity(signal.subject, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62)
-        || matchesDurableRejectedSubject(block, signal.subject)
-      )
+      && signalSubjects.some((subject) => (
+        (block.scope === 'topic' && researchTokenSimilarity(subject, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62)
+        || matchesDurableRejectedSubject(block, subject)
+      ))
     ))) continue;
     const signalTokens = new Set(significantResearchTokens(signal.subject));
     if (editorialStories.some((story) => (
@@ -1439,12 +1440,6 @@ export function buildGenerationBriefsV2({
     ))) continue;
     if (usedStorySubjects.some((subject) => researchTokenSimilarity(subject, signal.subject) >= 0.38)) continue;
     if (!portfolioAllowsTopic(signal.subject)) continue;
-    const seed = pickGeoffreyIdeaSeed({
-      voiceProfile,
-      targetTopic: signal.subject,
-      slot: seedRotation + briefs.length,
-      usedSeedIds: usedIdeaSeedIds,
-    });
     const brief = operatorTopicBrief(
       signal.subject,
       briefs.length,
@@ -1452,17 +1447,17 @@ export function buildGenerationBriefsV2({
       `recent operator engagement topic signal ${signal.id}`,
       signal.sourceCount,
       [],
-      seed,
+      null,
     );
     briefs.push({
       ...brief,
       id: stableResearchId('brief', 'operator-topic-signal', signal.id),
       trendTopicId: signal.id,
+      authorOpportunity: 'React to the exact classified subject as a personal question, prediction, disagreement, or company/product judgment. Preserve relationships such as timing, strategy, product, or competition. Do not turn them into an unrelated ownership, valuation, or portfolio call.',
       sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}] Subject cue only. It cannot support a headline, action, number, quote, or factual claim.`,
     });
     usedTopics.add(key);
     operatorTopicSignalBriefs += 1;
-    if (seed) usedIdeaSeedIds.add(seed.id);
   }
 
   const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));

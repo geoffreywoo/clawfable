@@ -80,6 +80,7 @@ export interface SourcePlannerPlan {
 export interface OperatorTopicSignal {
   id: string;
   subject: string;
+  semanticAliases: string[];
   domain: TopicSemanticDomain;
   identityScore: number;
   operatorEngagementScore: number;
@@ -731,7 +732,9 @@ function buildHistoricalOperatorEvidence(cluster: ManualTopicCluster): SourcePla
   };
 }
 
-const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:coverage|intro|vcs?|venture capital|early-stage founders?|founders?|startups?|geoff(?:rey)? woo|anti fund)$/i;
+const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:intro|vcs?|venture capital|early-stage founders?|founders?|startups?|geoff(?:rey)? woo|anti fund)$/i;
+const OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO = /\b(?:sign up|join (?:the )?waitlist|book a demo|try it here|apply now|dm me|email me|contact me|personally show|we can help)\b|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
+const OPERATOR_TOPIC_SIGNAL_EVENT_TERMS = /\b(?:announc(?:e|ed|es|ing)|appoint(?:ed|s|ing)?|acquir(?:e|ed|es|ing)|bought|buys?|challeng(?:e|ed|es|ing)|depart(?:ed|s|ing)?|filed?|fund(?:ed|ing)|hir(?:e|ed|es|ing)|join(?:ed|s|ing)?|launch(?:ed|es|ing)?|leav(?:e|es|ing)|left|merg(?:e|ed|es|ing)|pitch(?:ed|es|ing)?|promot(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|resign(?:ed|s|ing)?|sign(?:ed|s|ing)?|steps?\s+down)\b/gi;
 
 function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
   return [...new Set((topic.entities || [])
@@ -757,7 +760,8 @@ export type OperatorTopicSignalRejectionCode =
   | 'restricted_domain'
   | 'culture_bridge_missing'
   | 'named_entity_missing'
-  | 'category_too_broad';
+  | 'category_too_broad'
+  | 'promotional_source';
 
 export function getOperatorTopicSignalRejectionCodes(
   topic: EnrichedTrendingTopic,
@@ -782,6 +786,9 @@ export function getOperatorTopicSignalRejectionCodes(
   ) codes.push('culture_bridge_missing');
   if (operatorTopicSignalEntities(topic).length === 0) codes.push('named_entity_missing');
   if (wordCount < 2 || BROAD_IDENTITY_TOPICS.has(category)) codes.push('category_too_broad');
+  if (OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO.test(`${topic.headline} ${topic.topTweet?.text || ''}`)) {
+    codes.push('promotional_source');
+  }
   return codes;
 }
 
@@ -790,8 +797,24 @@ function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {
 }
 
 function operatorTopicSignalSubject(topic: EnrichedTrendingTopic): string {
+  const classifiedSubject = topic.category
+    .replace(OPERATOR_TOPIC_SIGNAL_EVENT_TERMS, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const entities = operatorTopicSignalEntities(topic);
-  if (entities.length === 0) return topic.category;
+  if (classifiedSubject) {
+    const descriptiveEntities = entities.filter((entity) => (
+      entity === entity.toLowerCase()
+      && !classifiedSubject.toLowerCase().includes(entity.toLowerCase())
+    ));
+    return [classifiedSubject, ...descriptiveEntities].join(' ');
+  }
+  return entities.join(', ');
+}
+
+function operatorTopicSignalEntityDomainAlias(topic: EnrichedTrendingTopic): string {
+  const entities = operatorTopicSignalEntities(topic);
+  if (entities.length === 0) return '';
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain)
     .replace(/_/g, ' ');
   return `${entities.join(', ')} in ${domain}`;
@@ -816,15 +839,20 @@ export function selectOperatorTopicSignals(
       || right.fitScores.total - left.fitScores.total
     ))
     .slice(0, boundedLimit)
-    .map((topic) => ({
-      id: getTrendingTopicStableId(topic),
-      subject: operatorTopicSignalSubject(topic),
-      domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
-      identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
-      operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
-      topicConfidence: Number(topic.topicConfidence || 0),
-      sourceCount: Number(topic.sourceCount || 1),
-    }));
+    .map((topic) => {
+      const subject = operatorTopicSignalSubject(topic);
+      const entityDomainAlias = operatorTopicSignalEntityDomainAlias(topic);
+      return {
+        id: getTrendingTopicStableId(topic),
+        subject,
+        semanticAliases: entityDomainAlias && entityDomainAlias !== subject ? [entityDomainAlias] : [],
+        domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
+        identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
+        operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
+        topicConfidence: Number(topic.topicConfidence || 0),
+        sourceCount: Number(topic.sourceCount || 1),
+      };
+    });
 }
 
 function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourcePlannerBriefEvidence {

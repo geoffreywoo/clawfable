@@ -768,13 +768,15 @@ describe('Tweet Generation V2', () => {
 
     const signal = briefs.find((entry) => entry.trendTopicId === 'network-openai-consumer-agent');
     expect(signal).toMatchObject({
-      topic: 'OpenAI in ai compute',
+      topic: 'OpenAI consumer agent',
       evidenceMode: 'operator_opinion',
       evidence: [],
       sourceDocumentIds: [],
+      creativeSeed: null,
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
+    expect(signal?.authorOpportunity).toContain('Preserve relationships such as timing, strategy, product, or competition');
   });
 
   it('allocates two of four Geoffrey briefs to fresh operator-engaged subjects', () => {
@@ -831,7 +833,12 @@ describe('Tweet Generation V2', () => {
       entry.evidenceMode === 'operator_opinion'
       && entry.evidence.length === 0
       && entry.sourceDocumentIds.length === 0
+      && entry.creativeSeed === null
     ))).toBe(true);
+    expect(signalBriefs.map((entry) => entry.topic)).toEqual(expect.arrayContaining([
+      'Cognition product strategy',
+      'Opendoor startup strategy',
+    ]));
   });
 
   it('does not reintroduce a blocked premise through an operator-engaged subject cue', () => {
