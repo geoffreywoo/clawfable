@@ -1612,9 +1612,14 @@ export function buildGenerationBriefsV2({
     const personalTopicSignalPremises = (candidate.personalTopicSignalPremises || []).filter((premise) => (
       personalTopicSignals.some((signal) => retainsPersonalTopicSubjectV2(premise, [signal]))
     ));
+    const seedTarget = [
+      candidate.topic,
+      candidate.historicalAngle,
+      ...personalTopicSignals.map((signal) => signal.replace(/:/g, ' ')),
+    ].filter(Boolean).join(' ');
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile,
-      targetTopic: candidate.topic,
+      targetTopic: seedTarget,
       slot: index + seedRotation,
       usedSeedIds: usedIdeaSeedIds,
     });
