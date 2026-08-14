@@ -293,11 +293,11 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'ai-incumbent-bundling',
     kind: 'ai_product',
-    reactionPrompt: 'Keep the exact named company or person from the subject cue. Make an audacious build, buy, leadership, valuation, or product desire. Do not invent a launch or explain incumbent distribution.',
+    reactionPrompt: 'Keep the exact named company, person, or product from the subject cue. Make one audacious product, valuation, capability, or company-quality call. Do not default to an acquisition or CEO-installation fantasy and do not invent a launch.',
     topic: 'AI products and incumbent distribution',
     technicalObject: 'OpenAI, Google, Anthropic, or the exact named AI company, person, or product in the subject cue',
     hiddenConstraint: 'bundling can erase a thin feature company while making an entirely new workflow worth building',
-    nonConsensusImplication: 'make a specific build, buy, or company-value judgment instead of recapping a model launch',
+    nonConsensusImplication: 'make a specific product or company-value judgment instead of recapping a model launch',
     startupBackingFact: '',
     domains: ['ai', 'software', 'products', 'startups', 'google', 'openai'],
     sourceQueries: [],
@@ -305,7 +305,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'ai-talent-company-formation',
     kind: 'ai_product',
-    reactionPrompt: 'Keep the named person or company when one is supplied. Make a direct should-start, should-join, should-buy, or should-lead call. Do not turn talent into generic career advice.',
+    reactionPrompt: 'Keep the named person or company when one is supplied. Take a direct position on what the builder should attempt, where the talent belongs, or which game is worth playing. Do not default to an acquisition or CEO-installation call and do not turn talent into generic career advice.',
     topic: 'AI talent and company formation',
     technicalObject: 'the exact researcher, builder, lab, company, or talent choice in the subject cue',
     hiddenConstraint: 'models change how much one person can build, but distribution, capital, and ambition still determine which game is worth playing',

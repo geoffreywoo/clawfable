@@ -76,6 +76,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'x-meets-y-y-wins', weight: 0.52, pattern: /\b[^.\n]{2,80}\bmeets?\s+([a-z][a-z0-9 -]{1,35})\.\s*\1\s+wins?\.?$/i },
   { label: 'congrats-technical-micdrop', weight: 0.52, pattern: /\bcongrats(?:ulations)?(?:\s+on)?\b[^.!?\n]{2,100}[.!?]\s*(?:the|your|it|that)\b[^.!?\n]{2,100}(?:\bstill\b|\bstandards?\b|\bdoesn['’]?t care\b|\bwins?\b)/i },
   { label: 'can-be-and-still', weight: 0.18, pattern: /\bcan be\b[^.!?\n]{2,100}\band still\b/i },
+  { label: 'simultaneous-balanced-reframe', weight: 0.52, pattern: /\bcan be\b[^.!?\n]{2,100}\band\b[^.!?\n]{2,100}\bat the same time[.!?]\s*(?:that|this)(?:['’]s| is) exactly when\b/i },
   { label: 'can-do-and-still', weight: 0.26, pattern: /\b(?:can|could)\s+(?!be\b)[a-z][^.!?\n]{1,100}\band still\b/i },
   { label: 'mirrored-adverb-contrast', weight: 0.26, pattern: /\b(?:is|are|remains?|stays?)\s+([a-z]+ly)\s+[a-z-]+\s+and\s+\1\s+[a-z-]+/i },
   { label: 'typed-group-meets-physics', weight: 0.34, pattern: /\b(?:finance|mining|policy|software|capital|vc|pe)\s+(?:guys|people|teams)?[^.!?\n]{0,45}\bmeets?\s+(?:(?:process|mechanical|chemical)\s+)?(?:atoms|chemistry|engineering|manufacturing|physics|reality)\b/i },

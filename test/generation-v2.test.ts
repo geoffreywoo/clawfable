@@ -108,11 +108,11 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 
 describe('Tweet Generation V2', () => {
   it('targets autonomous headroom for live and production-shadow generation only', () => {
-    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.82);
-    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.82);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.84);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.84);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
-    expect(getRequiredFinalQualityMarginV2({})).toBe(0.82);
+    expect(getRequiredFinalQualityMarginV2({})).toBe(0.84);
   });
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
@@ -1774,6 +1774,8 @@ describe('Tweet Generation V2', () => {
     }));
     expect(writingPrompt.idea).not.toHaveProperty('authorReason');
     expect(writingPrompt.idea).not.toHaveProperty('counterargument');
+    expect(writingPrompt.idea).not.toHaveProperty('tension');
+    expect(writingPrompt.idea).not.toHaveProperty('implication');
     expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
@@ -1803,6 +1805,7 @@ describe('Tweet Generation V2', () => {
       'my take on openai: the valuation is the whole argument.',
       'my dream acquisition right now: openai buys linear.',
       'my litmus test for robotics companies going commercial: ask about reducers.',
+      'owning OpenAI can be the status purchase and the investment at the same time. that is exactly when the price deserves more scrutiny, not less.',
     ];
 
     expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);

@@ -346,7 +346,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-31',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-32',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,

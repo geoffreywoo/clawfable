@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-31',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-32',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -109,7 +109,7 @@ describe('generation quality audit findings', () => {
     });
     expect(findings.find((finding) => finding.code === 'queue_quality_headroom_thin')).toMatchObject({
       severity: 'high',
-      evidence: { tweetId: 'tweet-thin', qualityMargin: 0.8285, hardFloor: 0.82 },
+      evidence: { tweetId: 'tweet-thin', qualityMargin: 0.8285, hardFloor: 0.84 },
     });
   });
 
