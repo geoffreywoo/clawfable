@@ -97,6 +97,7 @@ import { inferContentSpreadMechanics } from './winner-learning';
 import { pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 import {
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
@@ -4260,12 +4261,15 @@ function finalQualityRejectionCodes(
 }
 
 export function getRequiredFinalQualityMarginV2(
-  input: Pick<GenerateTweetBatchV2Input, 'mode' | 'persistArtifacts' | 'requireAutopostQuality'>,
+  input: Pick<GenerateTweetBatchV2Input, 'mode' | 'persistArtifacts' | 'requireAutopostQuality'> & {
+    voiceProfile?: VoiceProfile | null;
+  },
 ): number {
   const mode = input.mode || (input.persistArtifacts === false ? 'preview' : 'live');
-  return mode === 'live' || input.requireAutopostQuality
-    ? PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN
-    : V2_MIN_FINAL_QUALITY_MARGIN;
+  if (mode !== 'live' && !input.requireAutopostQuality) return V2_MIN_FINAL_QUALITY_MARGIN;
+  return isGeoffreyVoiceProfile(input.voiceProfile)
+    ? PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN
+    : PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN;
 }
 
 function finalQualityPriority(

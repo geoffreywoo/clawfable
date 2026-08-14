@@ -51,6 +51,7 @@ import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
@@ -81,7 +82,7 @@ const FINDING_SEVERITY_ORDER: Record<GenerationAuditFindingSeverity, number> = {
   low: 3,
 };
 
-const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN + 0.02;
+const QUALITY_MARGIN_HEADROOM_FLOOR = PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN;
 
 type AuditIdentity = ReturnType<typeof buildAgentIdentityAudit>;
 type AuditGenerationV2 = Awaited<ReturnType<typeof loadGenerationV2Metrics>>;
@@ -1307,7 +1308,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
-      autopostQualityMarginFloor: PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
+      autopostQualityMarginFloor: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle)
+        ? PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN
+        : PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
+      baseAutopostQualityMarginFloor: PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
       recommendedAuditHeadroom: QUALITY_MARGIN_HEADROOM_FLOOR,
       contextualQualityPolicyVersion: PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
       contextualFinalCriticVersion: PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,

@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-98',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-99',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -484,8 +484,21 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('rejudges a deletion-only tail trim instead of rewriting a Geoffrey near miss', async () => {
+  it('rejudges a deletion-only tail trim instead of autoposting a Geoffrey headroom draft', async () => {
     let criticCalls = 0;
+    mocks.accountTasteImplementation = (content) => (
+      content.includes('extra explanation')
+        ? {
+            nativeVoiceScore: 0.89,
+            casualStartupScore: 0.75,
+            stiffnessRisk: 0.01,
+            voiceDriftRisk: 0,
+            cringeRisk: 0.137,
+            generatedPatternRisk: 0,
+            technicalCredibilityScore: 0.615,
+          }
+        : {}
+    );
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
@@ -505,16 +518,16 @@ describe('generateTweetBatchV2 integration', () => {
           ranking: candidates.map((candidate: any) => candidate.id),
           scores: candidates.map((candidate: any) => ({
             id: candidate.id,
-            overall: passing ? 0.95 : 0.65,
+            overall: passing ? 0.95 : 0.88,
             voiceFit: 0.9,
-            operatorPlausibility: 0.9,
-            cringeRisk: 0.05,
-            insight: passing ? 0.95 : 0.65,
-            specificity: 0.9,
-            factualSafety: 0.98,
-            clarity: 0.92,
-            novelty: 0.82,
-            manualAnchorReskinRisk: 0.05,
+            operatorPlausibility: passing ? 0.95 : 0.91,
+            cringeRisk: passing ? 0.05 : 0.08,
+            insight: passing ? 0.95 : 0.9,
+            specificity: 0.94,
+            factualSafety: 1,
+            clarity: 0.93,
+            novelty: 0.84,
+            manualAnchorReskinRisk: passing ? 0.05 : 0.12,
             diagnosis: passing ? 'publishable' : 'delete the explanatory last sentence',
           })),
         }));
@@ -524,11 +537,20 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2(input);
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
+    const judgedOriginals = persistedDrafts.filter((draft) => (
+      draft.mutationRound === 0 && typeof draft.judgeScore === 'number'
+    ));
     const trims = persistedDrafts.filter((draft) => draft.mutationRound === 1);
     const trimCount = new Set(trims.map((draft) => draft.id)).size;
     const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
 
     expect(criticCalls).toBe(2);
+    expect(judgedOriginals.length).toBeGreaterThan(0);
+    expect(judgedOriginals.every((draft) => draft.rejectionCodes.includes('final_quality_margin'))).toBe(true);
+    expect(judgedOriginals.every((draft) => (
+      (draft.judgeBreakdown?.qualityMargin || 0) >= 0.86
+      && (draft.judgeBreakdown?.qualityMargin || 0) < 0.88
+    ))).toBe(true);
     expect(trimCount).toBeGreaterThan(4);
     expect(trims.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
     expect(trims.every((draft) => !draft.content.includes('extra explanation'))).toBe(true);

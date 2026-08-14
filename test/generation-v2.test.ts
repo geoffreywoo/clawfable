@@ -222,10 +222,27 @@ describe('Tweet Generation V2', () => {
     expect(pattern).not.toHaveProperty('content');
   });
 
-  it('targets autonomous headroom for live and production-shadow generation only', () => {
+  it('targets account-specific autonomous headroom for live and production-shadow generation only', () => {
+    const geoffreyVoiceProfile = {
+      communicationStyle: 'You are @geoffwoo. Write in the operator voice.',
+      summary: 'Founder and investor.',
+      tone: 'direct',
+      topics: ['startups'],
+      antiGoals: [],
+    } as any;
     expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.86);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.86);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live', voiceProfile: geoffreyVoiceProfile })).toBe(0.88);
+    expect(getRequiredFinalQualityMarginV2({
+      mode: 'preview',
+      requireAutopostQuality: true,
+      voiceProfile: geoffreyVoiceProfile,
+    })).toBe(0.88);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
+    expect(getRequiredFinalQualityMarginV2({
+      mode: 'manual',
+      voiceProfile: geoffreyVoiceProfile,
+    })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({})).toBe(0.86);
   });
