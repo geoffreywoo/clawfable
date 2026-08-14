@@ -361,7 +361,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-67',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-68',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -611,14 +611,14 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(5);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
     expect(rescueWriterCalls).toHaveLength(1);
-    expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_quality');
-    expect(String(rescueWriterCalls[0].system)).toContain('two-path critic pass');
+    expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_fable_control');
+    expect(String(rescueWriterCalls[0].system)).toContain('Return exactly two newly conceived X posts');
     expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.draftCount).toBe(2);
     expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.variantMoves.map((move: any) => move.move)).toEqual([
       'critic_repair',
       'subject_rewrite',
     ]);
-    expect(JSON.parse(rescueWriterCalls[0].prompt).failedAttempts).toHaveLength(1);
+    expect(JSON.parse(rescueWriterCalls[0].prompt).failedAttempts).toHaveLength(2);
     expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({

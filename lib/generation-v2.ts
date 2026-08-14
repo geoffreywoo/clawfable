@@ -4218,6 +4218,7 @@ const V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES = new Set([
   'final_voice_drift',
   'final_technical_credibility_below_floor',
   'final_novelty_below_floor',
+  'final_quality_margin',
 ]);
 
 function preflightRescueTargetsV2(evaluations: DraftEvaluation[], limit: number): DraftEvaluation[] {
@@ -4289,6 +4290,7 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
   'final_voice_drift',
   'final_technical_credibility_below_floor',
   'final_novelty_below_floor',
+  'final_quality_margin',
 ]);
 
 const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
