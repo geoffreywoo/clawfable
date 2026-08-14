@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-83',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-84',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -824,7 +824,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('pairs Fable and GPT on one high-margin Geoffrey consequence repair', async () => {
+  it('pairs Fable and GPT when GPT is primary on a high-margin Geoffrey repair', async () => {
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -872,7 +872,7 @@ describe('generateTweetBatchV2 integration', () => {
 
     const drafts = await generateTweetBatchV2({
       ...input,
-      modelStack: 'publishing_v2_fable_control',
+      modelStack: 'publishing_v2_gpt_control',
     });
     const rescueWriterCalls = mocks.generateText.mock.calls
       .map(([options]) => options)

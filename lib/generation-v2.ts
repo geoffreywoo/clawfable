@@ -4615,6 +4615,7 @@ export function shouldRunPostcriticRescueV2(
 function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
   if (modelStack === PUBLISHING_V2_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
   if (modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK) return PUBLISHING_V2_GPT_CONTROL_MODEL_STACK;
+  if (modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
   return modelStack;
 }
 
