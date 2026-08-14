@@ -5,7 +5,7 @@ import type {
   Tweet,
   VoiceCorpusEntry,
 } from './types';
-import type { TrendingTopic } from './trending';
+import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
   PUBLISHING_V2_CONTROL_MODEL_STACK,
@@ -28,6 +28,12 @@ import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import { getStoryEditorialRejectionCodesV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
+import { hasAiModelPricing } from './ai-pricing';
+import {
+  enrichTrendingTopics,
+  getOperatorTopicSignalRejectionCodes,
+  selectOperatorTopicSignals,
+} from './source-planner';
 import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
@@ -36,7 +42,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 7;
+export const GENERATION_QUALITY_AUDIT_VERSION = 8;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -96,6 +102,10 @@ interface AuditFindingInput {
   complaints: {
     total: number;
     affectedPostRate: number | null;
+  };
+  modelPricing: {
+    activeComplete: boolean;
+    missingModels: string[];
   };
 }
 
@@ -307,18 +317,26 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
   }
 
   if (input.generationV2.compute.costDataStatus !== 'complete') {
+    const activePricingMissing = input.modelPricing.missingModels.length > 0;
     add({
       code: 'generation_cost_attribution_incomplete',
       severity: 'low',
       scope: 'historical_window',
-      title: 'Model cost attribution is incomplete',
+      title: activePricingMissing
+        ? 'An active model is missing pricing metadata'
+        : 'Historical model usage lacks complete token accounting',
       evidence: {
         costDataStatus: input.generationV2.compute.costDataStatus,
         modelCalls: input.generationV2.compute.modelCalls,
+        unknownTokenAttempts: input.generationV2.compute.unknownTokenAttempts,
         unknownCostCalls: input.generationV2.compute.unknownCostCalls,
         estimatedCostUsd: input.generationV2.compute.estimatedCostUsd,
+        activeModelPricingComplete: input.modelPricing.activeComplete,
+        missingActiveModels: input.modelPricing.missingModels,
       },
-      action: 'Add pricing metadata for every active and fallback model so quality gains can be compared with spend.',
+      action: activePricingMissing
+        ? 'Add pricing metadata for every active and fallback model so quality gains can be compared with spend.'
+        : 'Keep historical totals marked partial; monitor current-policy calls, whose active and fallback models all have pricing metadata.',
     });
   }
 
@@ -435,31 +453,49 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const activeModelStack = PUBLISHING_V2_MODEL_STACK;
-  const primaryIdeaGeneration = getModelChainForTask(
+  const ideaGenerationChain = getModelChainForTask(
     'idea_generation',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryIdeaJudge = getModelChainForTask(
+  );
+  const ideaJudgeChain = getModelChainForTask(
     'idea_judgment',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryWriting = getModelChainForTask(
+  );
+  const writingChain = getModelChainForTask(
     'tweet_writing',
     'quality',
     activeModelStack,
-  )[0];
-  const primaryCopyJudge = getModelChainForTask(
+  );
+  const copyJudgeChain = getModelChainForTask(
     'copy_judgment',
     'quality',
     activeModelStack,
-  )[0];
-  const shadowControlWriting = getModelChainForTask(
+  );
+  const shadowControlWritingChain = getModelChainForTask(
     'tweet_writing',
     'quality',
     PUBLISHING_V2_CONTROL_MODEL_STACK,
-  )[0];
+  );
+  const primaryIdeaGeneration = ideaGenerationChain[0];
+  const primaryIdeaJudge = ideaJudgeChain[0];
+  const primaryWriting = writingChain[0];
+  const primaryCopyJudge = copyJudgeChain[0];
+  const shadowControlWriting = shadowControlWritingChain[0];
+  const configuredModelTargets = [
+    ...ideaGenerationChain,
+    ...ideaJudgeChain,
+    ...writingChain,
+    ...copyJudgeChain,
+    ...shadowControlWritingChain,
+  ].filter((target, index, targets) => (
+    targets.findIndex((candidate) => candidate.provider === target.provider && candidate.model === target.model) === index
+  ));
+  const modelPricingCoverage = configuredModelTargets.map((target) => ({
+    ...target,
+    priced: hasAiModelPricing(target.model),
+  }));
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const queueItems = queue.map((tweet) => {
@@ -506,6 +542,23 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     story,
     rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
   }));
+  const enrichedOperatorTopics = enrichTrendingTopics(
+    trending,
+    context.voiceProfile,
+    context.learnings,
+    context.style.trendTolerance,
+  );
+  const operatorTopicSignalDecisions = enrichedOperatorTopics.map((topic) => ({
+    topic,
+    rejectionCodes: getOperatorTopicSignalRejectionCodes(topic),
+  }));
+  const selectedOperatorTopicSignals = selectOperatorTopicSignals(
+    trending,
+    context.voiceProfile,
+    context.learnings,
+    context.style.trendTolerance,
+    12,
+  );
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -564,19 +617,51 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const runsWithSelectedDrafts = currentPolicyRuns.filter((run) => (
     (run.stageCounts.draftsSelected || 0) > 0
   )).length;
+  const sumCurrentStage = (key: string) => currentPolicyRuns.reduce(
+    (sum, run) => sum + (run.stageCounts[key] || 0),
+    0,
+  );
+  const currentIdeasGenerated = sumCurrentStage('ideasGenerated');
+  const currentIdeasEligible = sumCurrentStage('ideasEligible');
+  const currentIdeasSelected = sumCurrentStage('ideasSelected');
+  const currentDraftsGenerated = sumCurrentStage('draftsGenerated');
+  const currentDraftsEligible = sumCurrentStage('draftsEligible');
+  const currentDraftsSelected = sumCurrentStage('draftsSelected');
+  const currentProviderAttempts = sumCurrentStage('providerAttempts');
   const currentPolicyWindow = {
     qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
     runCount: currentPolicyRuns.length,
     runsWithSelectedDrafts,
     emptySelectionRunCount: currentPolicyRuns.length - runsWithSelectedDrafts,
-    selectedDraftCount: currentPolicyRuns.reduce((sum, run) => sum + (run.stageCounts.draftsSelected || 0), 0),
+    selectedDraftCount: currentDraftsSelected,
     selectionYield: currentPolicyRuns.length > 0
       ? Number((runsWithSelectedDrafts / currentPolicyRuns.length).toFixed(4))
       : null,
     latestRunAt: currentPolicyRuns[0]?.startedAt || null,
     selectedDraftsPerRun: currentPolicyRuns.length > 0
-      ? Number((currentPolicyRuns.reduce((sum, run) => sum + (run.stageCounts.draftsSelected || 0), 0) / currentPolicyRuns.length).toFixed(4))
+      ? Number((currentDraftsSelected / currentPolicyRuns.length).toFixed(4))
       : null,
+    stageThroughput: {
+      ideasGenerated: currentIdeasGenerated,
+      ideasEligible: currentIdeasEligible,
+      ideasSelected: currentIdeasSelected,
+      draftsGenerated: currentDraftsGenerated,
+      draftsEligible: currentDraftsEligible,
+      draftsSelected: currentDraftsSelected,
+      providerAttempts: currentProviderAttempts,
+      ideaEligibilityRate: currentIdeasGenerated > 0
+        ? Number((currentIdeasEligible / currentIdeasGenerated).toFixed(4))
+        : null,
+      selectedIdeaToEligibleDraftRate: currentIdeasSelected > 0
+        ? Number((currentDraftsEligible / currentIdeasSelected).toFixed(4))
+        : null,
+      criticSelectionRate: currentDraftsEligible > 0
+        ? Number((currentDraftsSelected / currentDraftsEligible).toFixed(4))
+        : null,
+      providerAttemptsPerSelectedDraft: currentDraftsSelected > 0
+        ? Number((currentProviderAttempts / currentDraftsSelected).toFixed(4))
+        : null,
+    },
   };
   const findingItems = buildGenerationAuditFindings({
     identity,
@@ -586,6 +671,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     currentPolicyWindow,
     generationV2,
     complaints: complaintSummary,
+    modelPricing: {
+      activeComplete: modelPricingCoverage.every((target) => target.priced),
+      missingModels: modelPricingCoverage.filter((target) => !target.priced).map((target) => target.model),
+    },
   });
   const findingCounts = {
     critical: findingItems.filter((finding) => finding.severity === 'critical').length,
@@ -671,6 +760,26 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         independentSourceCount: story.independentSourceCount,
       })),
       warmedNetworkTopicCount: trending.length,
+      operatorTopicSignals: {
+        eligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+        selectedCount: selectedOperatorTopicSignals.length,
+        selected: selectedOperatorTopicSignals,
+        rejectedReasonCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
+        rejected: operatorTopicSignalDecisions
+          .filter((decision) => decision.rejectionCodes.length > 0)
+          .slice(0, 40)
+          .map(({ topic, rejectionCodes }) => ({
+            id: getTrendingTopicStableId(topic),
+            category: topic.category,
+            headline: topic.headline,
+            semanticDomain: topic.semanticDomain,
+            entities: topic.entities || [],
+            operatorEngagementScore: topic.operatorEngagementScore || 0,
+            topicConfidence: topic.topicConfidence || 0,
+            identityFit: topic.fitScores.identityFit,
+            rejectionCodes,
+          })),
+      },
       intelligence: topicIntelligence ? {
         observedAt: topicIntelligence.observedAt,
         sourceComplete: topicIntelligence.sourceComplete !== false,
@@ -691,6 +800,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         sharedIdeaGenerator: primaryIdeaGeneration,
         sharedIdeaJudge: primaryIdeaJudge,
         sharedCopyJudge: primaryCopyJudge,
+      },
+      pricingCoverage: {
+        complete: modelPricingCoverage.every((target) => target.priced),
+        targets: modelPricingCoverage,
       },
       strictFallbackStack: null,
       preferred: {

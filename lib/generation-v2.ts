@@ -327,6 +327,7 @@ export interface GenerationBriefV2 {
   identityScore: number;
   evidenceScore: number;
   freshnessScore: number;
+  personalTopicSignals?: string[];
   creativeSeed?: {
     id: string;
     kind: FrontierIdeaSeed['kind'];
@@ -567,6 +568,7 @@ function operatorTopicBrief(
   sampleCount?: number,
   spreadMechanics: string[] = [],
   creativeSeed: FrontierIdeaSeed | null = null,
+  personalTopicSignals: string[] = [],
 ): GenerationBriefV2 {
   const historyPrefix = sampleCount
     ? `Topic-level history: ${sampleCount} operator-written posts. `
@@ -574,7 +576,10 @@ function operatorTopicBrief(
   const mechanics = spreadMechanics.length > 0
     ? ` Proven spread mechanics for this topic: ${spreadMechanics.join(', ')}. Use the mechanics, never prior wording or subject matter.`
     : '';
-  const summary = `${historyPrefix}Develop a fresh operator judgment about ${topic}. This subject comes from ${provenance}, not from a factual source.${mechanics}`;
+  const personalSignals = personalTopicSignals.length > 0
+    ? ' Structured personal topic signals are supplied separately. Use one only to choose a concrete adjacent object; never reconstruct or extend the prior post.'
+    : '';
+  const summary = `${historyPrefix}Develop a fresh operator judgment about ${topic}. This subject comes from ${provenance}, not from a factual source.${personalSignals}${mechanics}`;
   return {
     id: stableResearchId('brief', 'operator', index, topic, provenance),
     topic,
@@ -595,6 +600,7 @@ function operatorTopicBrief(
     identityScore,
     evidenceScore: 0.5,
     freshnessScore: 0.45,
+    personalTopicSignals,
     creativeSeed: creativeSeed ? {
       id: creativeSeed.id,
       kind: creativeSeed.kind,
@@ -612,8 +618,32 @@ interface OperatorTopicCandidateV2 {
   provenance: string;
   sampleCount?: number;
   historicalAngle?: string;
+  personalTopicSignals?: string[];
   spreadMechanics: string[];
   priorityScore: number;
+}
+
+const PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS = new Set([
+  'advice', 'better', 'build', 'building', 'business', 'company', 'companies',
+  'founder', 'founders', 'good', 'great', 'investor', 'investors', 'people',
+  'product', 'products', 'startup', 'startups', 'thing', 'things', 'today',
+  'venture', 'world',
+]);
+
+function structuredPersonalTopicSignals(topic: string, tweets: TweetPerformance[]): string[] {
+  const topicTokens = new Set(significantResearchTokens(topic));
+  return uniqueStrings(tweets.slice(0, 3).flatMap((tweet) => {
+    const semanticKey = buildResearchSemanticKey(
+      tweet.thesis || tweet.content,
+      [tweet.topic || topic],
+    );
+    const tokens = semanticKey.split(':').filter((token) => (
+      token
+      && !topicTokens.has(token)
+      && !PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS.has(token)
+    ));
+    return tokens.length >= 2 ? [tokens.slice(0, 7).join(':')] : [];
+  }), 3);
 }
 
 function operatorTopicCandidates({
@@ -634,6 +664,7 @@ function operatorTopicCandidates({
         provenance: 'operator-written topic outcomes',
         sampleCount: entry.sampleCount,
         historicalAngle: entry.angle || undefined,
+        personalTopicSignals: structuredPersonalTopicSignals(entry.topic, entry.topTweets || []),
         priorityScore: Number((
           0.56
           + (Math.min(1, entry.avgEngagement / maxManualEngagement) * 0.3)
@@ -1084,6 +1115,13 @@ export function buildGenerationBriefsV2({
     if (briefs.length >= briefCount) break;
     const key = topicKey(signal.subject);
     if (usedTopics.has(key)) continue;
+    if (blocks.some((block) => (
+      block.scope !== 'copy'
+      && (
+        (block.scope === 'topic' && researchTokenSimilarity(signal.subject, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62)
+        || matchesDurableRejectedSubject(block, signal.subject)
+      )
+    ))) continue;
     const signalTokens = new Set(significantResearchTokens(signal.subject));
     if (editorialStories.some((story) => (
       sharedTokenCount(meaningfulStoryEntityTokens(story), signalTokens) >= 1
@@ -1142,6 +1180,7 @@ export function buildGenerationBriefsV2({
       candidate.sampleCount,
       candidate.spreadMechanics,
       seed,
+      candidate.personalTopicSignals,
     );
     briefs.push(brief);
     usedTopics.add(key);
@@ -1208,6 +1247,7 @@ export function buildIdeaGenerationPromptV2(
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
+      personalTopicSignalContract: 'Structured personal topic signals are unordered semantic tokens, never prior prose or factual evidence. For a broad operator brief that supplies them, use one signal to choose a concrete adjacent object in at least two propositions. Do not reconstruct, paraphrase, or extend the historical post that produced the tokens.',
       nativeReactionContract: 'The native reaction anchors are positive evidence of what this author finds worth saying and how socially alive the underlying thought is. Match their directness, conviction, weirdness, incompleteness, and public posture only. Never reuse an anchor premise, named scene, joke, causal claim, or sentence skeleton.',
     },
     nativeReactionAnchors: nativeReactionAnchors.slice(0, 6).map((anchor) => ({
@@ -1229,6 +1269,7 @@ export function buildIdeaGenerationPromptV2(
       summary: brief.summary,
       authorOpportunity: brief.authorOpportunity,
       evidenceMode: brief.evidenceMode,
+      personalTopicSignals: brief.personalTopicSignals || [],
       creativeSeed: brief.creativeSeed
         ? brief.creativeSeed.kind === 'frontier'
           ? {
@@ -2372,10 +2413,11 @@ export function buildTweetWritingPromptV2(
     subjectContext: {
       topic: brief.topic,
       title: brief.title,
+      personalTopicSignals: brief.personalTopicSignals || [],
       creativeSeed: brief.creativeSeed || null,
       instruction: brief.evidenceMode === 'verified_source'
         ? 'Keep the named sourced subject in the post. It is the reason to publish now.'
-        : 'Use this only to keep the thought concrete. It is not evidence and its conclusion is not required.',
+        : 'Use this only to keep the thought concrete. Structured personal topic signals are unordered subject tokens, not prose, a prior premise, or factual evidence. Do not reconstruct the historical post. The creative seed is also optional and its conclusion is not required.',
     },
     factualWritingContract: brief.evidenceMode === 'operator_opinion'
       ? 'There is no external evidence. Write a personal judgment, question, prediction, or explicitly modal speculation. It may reason from the supplied subject cue, but cannot present a current or historical event, number, quote, customer, measured behavior, external mechanism, or personal behavior as established fact.'

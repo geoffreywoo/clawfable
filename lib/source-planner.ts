@@ -743,21 +743,45 @@ function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean 
   const category = normalizeTopic(topic.category);
   const wordCount = category.split(/\s+/).filter(Boolean).length;
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
-  return topic.discoveryMethod === 'followed_network'
-    && Number(topic.operatorEngagementScore || 0) >= 0.7
-    && Number(topic.topicConfidence || 0) >= 0.55
-    && topic.topicUncertainty !== 'high'
-    && topic.fitScores.identityFit >= 0.45
-    && isCoreGeoffreyTopicDomain(domain)
-    && !RESTRICTED_EXPLORATION_DOMAINS.has(domain)
-    && (
-      domain !== 'culture_status'
-      || topic.fitScores.manual >= 0.12
-      || GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
-    )
-    && operatorTopicSignalEntities(topic).length > 0
-    && wordCount >= 2
-    && !BROAD_IDENTITY_TOPICS.has(category);
+  return getOperatorTopicSignalRejectionCodes(topic, { category, wordCount, domain }).length === 0;
+}
+
+export type OperatorTopicSignalRejectionCode =
+  | 'not_followed_network'
+  | 'operator_engagement_below_floor'
+  | 'topic_confidence_below_floor'
+  | 'topic_uncertainty_high'
+  | 'identity_below_floor'
+  | 'off_core_domain'
+  | 'restricted_domain'
+  | 'culture_bridge_missing'
+  | 'named_entity_missing'
+  | 'category_too_broad';
+
+export function getOperatorTopicSignalRejectionCodes(
+  topic: EnrichedTrendingTopic,
+  normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain },
+): OperatorTopicSignalRejectionCode[] {
+  const category = normalized?.category ?? normalizeTopic(topic.category);
+  const wordCount = normalized?.wordCount ?? category.split(/\s+/).filter(Boolean).length;
+  const domain = normalized?.domain
+    ?? classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
+  const codes: OperatorTopicSignalRejectionCode[] = [];
+  if (topic.discoveryMethod !== 'followed_network') codes.push('not_followed_network');
+  if (Number(topic.operatorEngagementScore || 0) < 0.7) codes.push('operator_engagement_below_floor');
+  if (Number(topic.topicConfidence || 0) < 0.55) codes.push('topic_confidence_below_floor');
+  if (topic.topicUncertainty === 'high') codes.push('topic_uncertainty_high');
+  if (topic.fitScores.identityFit < 0.45) codes.push('identity_below_floor');
+  if (!isCoreGeoffreyTopicDomain(domain)) codes.push('off_core_domain');
+  if (RESTRICTED_EXPLORATION_DOMAINS.has(domain)) codes.push('restricted_domain');
+  if (
+    domain === 'culture_status'
+    && topic.fitScores.manual < 0.12
+    && !GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
+  ) codes.push('culture_bridge_missing');
+  if (operatorTopicSignalEntities(topic).length === 0) codes.push('named_entity_missing');
+  if (wordCount < 2 || BROAD_IDENTITY_TOPICS.has(category)) codes.push('category_too_broad');
+  return codes;
 }
 
 function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {

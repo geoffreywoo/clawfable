@@ -126,6 +126,39 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('turns operator outcomes into structured subject signals without leaking prior prose', () => {
+    const priorPost = 'one gigawatt of rubins puts 300k gpus and 80 pb of hbm behind the same power constraint';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'health'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'AI',
+          angle: 'A prior premise that must not be copied',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{ content: priorPost, topic: 'AI', source: 'timeline' }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const aiBrief = briefs.find((entry) => entry.topic.toLowerCase() === 'ai');
+    expect(aiBrief?.personalTopicSignals).toEqual([
+      expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/),
+    ]);
+    const prompt = buildIdeaGenerationPromptV2([aiBrief!], voiceProfile);
+    expect(prompt).not.toContain(priorPost);
+    expect(prompt).not.toContain('A prior premise that must not be copied');
+    expect(prompt).toContain('personalTopicSignals');
+  });
+
   it('uses an operator-engaged network post as a subject cue without exposing its prose as evidence', () => {
     const headline = 'OpenAI launches a consumer agent with a secret checkout workflow';
     const briefs = buildGenerationBriefsV2({
@@ -173,6 +206,61 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
+  });
+
+  it('does not reintroduce a blocked premise through an operator-engaged subject cue', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 993,
+        networkTopicId: 'network-openai-blocked',
+        headline: 'OpenAI consumer agent discussion',
+        source: '@builder',
+        relevanceScore: 92,
+        category: 'OpenAI consumer agent',
+        timestamp: new Date().toISOString(),
+        tweetCount: 1,
+        sourceType: 'x',
+        sourceCount: 1,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.9,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['OpenAI'],
+        isPrimarySource: false,
+        topTweet: { id: 'network-post-blocked', text: 'raw source prose', likes: 900, author: 'builder' },
+      } as any],
+      allTweets: [],
+      blocks: [{
+        schemaVersion: 2,
+        id: 'blocked-openai-subject',
+        agentId: 'agent-1',
+        scope: 'topic',
+        semanticKey: 'openai:ai:compute',
+        topic: 'OpenAI in ai compute',
+        storyClusterId: null,
+        ideaId: null,
+        reasonCode: 'bad_premise',
+        reason: 'Do not revisit this subject.',
+        permanent: true,
+        blockedUntil: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }],
+    });
+
+    expect(briefs.some((entry) => entry.trendTopicId === 'network-openai-blocked')).toBe(false);
   });
 
   it('does not launder a consumed sourced story back into a source-free network brief', () => {

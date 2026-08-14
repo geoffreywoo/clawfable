@@ -26,6 +26,10 @@ function configuredRates(): Record<string, AiModelTokenRates> {
   }
 }
 
+export function hasAiModelPricing(model: string | null | undefined): boolean {
+  return Boolean(model && configuredRates()[model]);
+}
+
 export function estimateAiUsageCostUsd(
   model: string,
   inputTokens: number | null | undefined,

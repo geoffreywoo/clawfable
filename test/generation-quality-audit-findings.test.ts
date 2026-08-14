@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-19',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-20',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -70,11 +70,13 @@ function healthyInput() {
       compute: {
         costDataStatus: 'complete',
         modelCalls: 20,
+        unknownTokenAttempts: 0,
         unknownCostCalls: 0,
-        estimatedCostUsd: 2.5,
+        estimatedCostUsd: 2.5 as number | null,
       },
     },
     complaints: { total: 0, affectedPostRate: 0 },
+    modelPricing: { activeComplete: true, missingModels: [] },
   };
 }
 
@@ -148,6 +150,22 @@ describe('generation quality audit findings', () => {
     current.generationV2.quality.currentPolicyFactualIncidentCount = 1;
     expect(buildGenerationAuditFindings(current as any)).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'current_policy_factual_incidents', scope: 'current_policy' }),
+    ]));
+  });
+
+  it('distinguishes historical missing usage from active pricing gaps', () => {
+    const input = healthyInput();
+    input.generationV2.compute.costDataStatus = 'partial';
+    input.generationV2.compute.unknownTokenAttempts = 7;
+    input.generationV2.compute.unknownCostCalls = 3;
+    input.generationV2.compute.estimatedCostUsd = null;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'generation_cost_attribution_incomplete',
+        title: 'Historical model usage lacks complete token accounting',
+        evidence: expect.objectContaining({ activeModelPricingComplete: true }),
+      }),
     ]));
   });
 });
