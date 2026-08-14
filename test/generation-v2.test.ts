@@ -21,6 +21,7 @@ import {
   normalizeIdeaCandidatesV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
+  selectRankedIdeaPortfolioV2,
   selectNativeReactionAnchors,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
@@ -110,6 +111,35 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 }
 
 describe('Tweet Generation V2', () => {
+  it('reserves one verified live story in Geoffrey ranked idea portfolios', () => {
+    const briefs = [
+      brief('operator-one', 'startup pricing'),
+      brief('operator-two', 'AI products'),
+      brief('operator-three', 'venture funds'),
+      brief('live-story', 'Cognition funding', 'verified_source'),
+    ];
+    const ideas = [
+      { id: 'operator-one', briefId: 'operator-one', topic: 'startups', claim: 'Operator idea one.' },
+      { id: 'operator-two', briefId: 'operator-two', topic: 'AI', claim: 'Operator idea two.' },
+      { id: 'operator-three', briefId: 'operator-three', topic: 'VC', claim: 'Operator idea three.' },
+      { id: 'live-story', briefId: 'live-story', topic: 'Cognition', claim: 'Cognition is discussing a new round.' },
+    ] as IdeaCandidate[];
+
+    const selected = selectRankedIdeaPortfolioV2({
+      ranking: ['operator-one', 'operator-two', 'operator-three', 'live-story'],
+      eligible: ideas,
+      briefs,
+      voiceProfile: { ...voiceProfile, summary: 'You are @geoffwoo, a founder and investor.' },
+      desired: 3,
+    });
+
+    expect(selected.map((idea) => idea.id)).toEqual([
+      'live-story',
+      'operator-one',
+      'operator-two',
+    ]);
+  });
+
   it('targets autonomous headroom for live and production-shadow generation only', () => {
     expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.84);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.84);
