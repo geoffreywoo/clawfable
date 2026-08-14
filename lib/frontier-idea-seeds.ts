@@ -542,7 +542,13 @@ export function pickGeoffreyIdeaSeed({
       index,
     }));
   const relevant = scored.filter((entry) => entry.relevance >= 1);
-  const ranked = (relevant.length > 0 ? relevant : scored)
+  const broadSeedRotation = !preferredKinds.includes('frontier');
+  const unusedRelevant = relevant.filter((entry) => !entry.used);
+  const unusedScored = scored.filter((entry) => !entry.used);
+  const rankedPool = relevant.length > 0
+    ? broadSeedRotation && unusedRelevant.length > 0 ? unusedRelevant : relevant
+    : broadSeedRotation && unusedScored.length > 0 ? unusedScored : scored;
+  const ranked = rankedPool
     .sort((a, b) => (
       b.relevance - a.relevance
       || Number(a.used) - Number(b.used)
