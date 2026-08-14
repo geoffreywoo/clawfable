@@ -100,6 +100,7 @@ describe('internal generation preview route', () => {
           briefId: 'brief-v2',
           storyClusterId: 'story-v2',
           topic: 'AI startups',
+          publicMove: 'google should make the model itself less important',
           claim: 'Model access is no longer the differentiator.',
           tension: 'Operator judgment remains scarce.',
           implication: 'Small teams need taste more than another model wrapper.',
@@ -190,7 +191,11 @@ describe('internal generation preview route', () => {
       generated: 1,
       generationTrace: expect.objectContaining({ id: 'run-v2', status: 'completed' }),
       candidateDiagnostics: {
-        ideas: [expect.objectContaining({ id: 'idea-v2', status: 'selected' })],
+        ideas: [expect.objectContaining({
+          id: 'idea-v2',
+          publicMove: 'google should make the model itself less important',
+          status: 'selected',
+        })],
         drafts: [expect.objectContaining({
           id: 'draft-v2',
           status: 'selected',
