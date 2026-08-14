@@ -797,6 +797,45 @@ describe('Tweet Generation V2', () => {
     expect(prompt).not.toContain(generatedPost);
   });
 
+  it('uses structured subject cues to keep a broad personal lane on-topic', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['personal', 'AI', 'startups', 'culture'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['personal', 'AI', 'startups', 'culture'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'personal',
+          angle: 'personal experiments',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{
+            content: 'ketone is still interesting to me',
+            topic: 'personal',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            authorshipConfidence: 0.9,
+            voiceCorpusDispositions: ['diction_anchor', 'topic_signal'],
+          }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const personalBrief = briefs.find((entry) => entry.topic === 'personal');
+    expect(personalBrief?.personalTopicSignals?.join(' ')).toContain('ketone');
+    expect(personalBrief?.creativeSeed?.kind).toBe('health');
+  });
+
   it('does not reuse a sourced story subject through a durable personal cue', () => {
     expect(hasCrossBriefSubjectCollisionV2('cognition scottwu46', 'Cognition valuation talks')).toBe(true);
     expect(hasCrossBriefSubjectCollisionV2('tonyrobbins storytelling', 'Tony Robbins crowd intervention')).toBe(true);

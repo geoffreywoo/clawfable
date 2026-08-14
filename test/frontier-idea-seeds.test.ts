@@ -91,6 +91,16 @@ describe('frontier idea seeds', () => {
     expect(seed?.kind).toBe('culture');
   });
 
+  it('maps engineering topics to AI-product reactions instead of arbitrary market seeds', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'Engineering',
+      slot: 2,
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+  });
+
   it('keeps exact frontier relevance ahead of novelty after the matching seed was used', () => {
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile: geoffreyVoiceProfile,

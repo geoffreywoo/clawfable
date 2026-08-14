@@ -117,7 +117,7 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses GPT-5.6 for active V2 copy and judgment with an isolated Fable writer control', async () => {
+  it('keeps GPT-5.6 judgment while isolating Fable and GPT writer stacks', async () => {
     const {
       PUBLISHING_V2_CONTROL_MODEL_STACK,
       PUBLISHING_V2_MODEL_STACK,
@@ -167,7 +167,7 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('promotes Geoffrey copy to GPT after the Fable shadow underperforms', async () => {
+  it('uses Fable for Geoffrey copy after production audits and keeps GPT as the shadow', async () => {
     const {
       getModelChainForTask,
       resolvePublishingV2ModelStacks,
@@ -178,9 +178,9 @@ describe('AI model routing', () => {
     const generic = resolvePublishingV2ModelStacks('another-founder');
 
     expect(current).toEqual({
-      activeStack: 'publishing_v2_gpt_control',
-      shadowStack: 'publishing_v2_fable_control',
-      reason: 'geoffrey_gpt_primary_after_shadow',
+      activeStack: 'publishing_v2_fable_control',
+      shadowStack: 'publishing_v2_gpt_control',
+      reason: 'geoffrey_fable_primary_after_production_audit',
     });
     expect(legacyHandle).toEqual(current);
     expect(generic).toEqual({
@@ -189,16 +189,16 @@ describe('AI model routing', () => {
       reason: 'default_gpt_primary',
     });
     expect(getModelChainForTask('tweet_writing', 'quality', current.activeStack)[0]).toEqual({
-      provider: 'openai',
-      model: 'gpt-5.6',
+      provider: 'anthropic',
+      model: 'claude-fable-5',
     });
     expect(getModelChainForTask('copy_judgment', 'quality', current.activeStack)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
     expect(getModelChainForTask('tweet_writing', 'quality', current.shadowStack)[0]).toEqual({
-      provider: 'anthropic',
-      model: 'claude-fable-5',
+      provider: 'openai',
+      model: 'gpt-5.6',
     });
   });
 
