@@ -3213,16 +3213,30 @@ export function buildTweetWritingPromptV2(
         {
           slot: 1,
           move: 'blunt_reaction',
+          voiceAnchorId: anchors[0]?.id || null,
+          nativeReactionMode: anchors[0] ? nativeReactionMode(anchors[0].content) : null,
           instruction: 'Say the actual reaction or verdict in plain language. Stop earlier than feels professionally complete.',
         },
         {
           slot: 2,
           move: 'named_decision_or_consequence',
+          voiceAnchorId: anchors[1]?.id || anchors[0]?.id || null,
+          nativeReactionMode: anchors[1]
+            ? nativeReactionMode(anchors[1].content)
+            : anchors[0]
+              ? nativeReactionMode(anchors[0].content)
+              : null,
           instruction: 'Make the named product, company, valuation, or decision call and carry one concrete consequence already present in stakes. When there is no actual named entity, state the decision criterion directly; never wrap a category in "the X startup/company I would back, buy, or bet on." Use one reason at most.',
         },
         {
           slot: 3,
           move: 'thought_in_motion',
+          voiceAnchorId: anchors[2]?.id || anchors[0]?.id || null,
+          nativeReactionMode: anchors[2]
+            ? nativeReactionMode(anchors[2].content)
+            : anchors[0]
+              ? nativeReactionMode(anchors[0].content)
+              : null,
           instruction: 'Think aloud to one smart peer who already knows the context. Allow an uneven two-to-four sentence progression, fragment, aside, self-correction, slang, or real question when the primary anchor supports it. Do not tidy the ending into a lesson or mic drop.',
         },
       ] : draftCount === 2 ? [
@@ -3242,7 +3256,7 @@ export function buildTweetWritingPromptV2(
         instruction: 'State the named subject and actual position in one or two short sentences. Stop before evidence, an explanatory consequence, a second argument, or a concluding slogan.',
       }] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. They must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. At least one draft must make exactly one consequence from stakes legible without adding a new mechanism or lesson. Compression means no filler, not that every thought must become a slogan. Do not make all three polished one-sentence aphorisms.'
+        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; use only that anchor as the primary evidence for cleanup level, roughness, line breaks, and public posture in that slot. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. At least one draft must make exactly one consequence from stakes legible without adding a new mechanism or lesson. Compression means no filler, not that every thought must become a slogan. Do not make all three polished one-sentence aphorisms.'
         : draftCount === 2
           ? 'The two revisions must be materially different. Capitalization, punctuation, or grammar changes do not satisfy the second move.'
           : null,
@@ -3263,12 +3277,25 @@ export function buildTweetWritingPromptV2(
     })) || [],
     voiceTransferContract: anchors.length > 0 ? {
       primaryRegisterAnchorId: anchors[0].id,
-      instruction: 'The primary anchor matches the conversational register or public posture of this idea. Match its level of formality and amount of cleanup, never its premise or sentence skeleton. The other anchors show the author\'s wider range.',
+      slotRegisterAnchors: (revisionContext?.length || 0) > 0 || draftCount !== MAX_DRAFTS_PER_IDEA
+        ? []
+        : anchors.slice(0, draftCount).map((anchor, index) => ({
+            slot: index + 1,
+            voiceAnchorId: anchor.id,
+            nativeReactionMode: nativeReactionMode(anchor.content),
+          })),
+      instruction: draftCount === MAX_DRAFTS_PER_IDEA && !(revisionContext?.length || 0)
+        ? 'Each initial slot has its own primary register anchor. Match that slot anchor\'s level of formality, cleanup, roughness, line breaks, and public posture, never its premise, names, metaphor, distinctive phrase, or sentence skeleton. Do not blend the anchors.'
+        : 'The primary anchor matches the conversational register or public posture of this idea. Match its level of formality and amount of cleanup, never its premise or sentence skeleton. The other anchors show the author\'s wider range.',
     } : null,
     voiceAnchors: anchors.slice(0, 3).map((anchor, index) => ({
       id: anchor.id,
       text: anchor.content,
-      role: index === 0 ? 'primary_register' : 'cross_topic_range',
+      role: draftCount === MAX_DRAFTS_PER_IDEA && !(revisionContext?.length || 0)
+        ? `slot_${index + 1}_register`
+        : index === 0
+          ? 'primary_register'
+          : 'cross_topic_range',
       instruction: 'Diction and rhythm evidence only. Do not reuse its subject, setup, metaphor, or distinctive phrase.',
     })),
   });
