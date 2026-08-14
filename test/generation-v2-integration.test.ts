@@ -349,7 +349,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-37',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-38',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1445,6 +1445,10 @@ describe('generateTweetBatchV2 integration', () => {
     expect(criticCalls).toBe(2);
     expect(criticRescueWriterCalls).toHaveLength(2);
     expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_gpt_control')).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('surgical critic pass'))).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.every((attempt: any) => (
+      attempt.instruction.includes('smallest sufficient change')
+    )))).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
     expect(mocks.generateText.mock.calls

@@ -2461,6 +2461,8 @@ interface DraftEvaluation {
   anchors: DictionAnchor[];
 }
 
+type DraftRevisionStrategy = 'reconceive' | 'critic_surgical';
+
 function collectOperatorAnchors(input: GenerateTweetBatchV2Input): DictionAnchor[] {
   const reference = input.learnings?.operatorVoiceReference;
   const performanceAnchors: TweetPerformance[] = [
@@ -2509,6 +2511,7 @@ export function buildTweetWritingPromptV2(
   learningBrief?: GenerationLearningBriefV2,
   writingConstraints?: GenerationWritingConstraintsV2,
   revisionContext?: Array<{ content: string; issues: string[] }>,
+  revisionStrategy: DraftRevisionStrategy = 'reconceive',
   draftCount = MAX_DRAFTS_PER_IDEA,
 ): string {
   return JSON.stringify({
@@ -2545,7 +2548,9 @@ export function buildTweetWritingPromptV2(
     failedAttempts: revisionContext?.slice(0, 3).map((attempt) => ({
       post: attempt.content,
       issues: uniqueStrings(attempt.issues, 10),
-      instruction: 'Negative example only. Do not edit, paraphrase, or preserve its sentence skeleton.',
+      instruction: revisionStrategy === 'critic_surgical'
+        ? 'Critic-guided edit target. Preserve the sound core, apply the diagnosis literally, and make the smallest sufficient change.'
+        : 'Negative example only. Do not edit, paraphrase, or preserve its sentence skeleton.',
     })) || [],
     voiceAnchors: anchors.slice(0, 3).map((anchor) => ({
       id: anchor.id,
@@ -2594,6 +2599,7 @@ async function writeIdeaDrafts({
   runId,
   calls,
   revisionContext = [],
+  revisionStrategy = 'reconceive',
 }: {
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -2603,19 +2609,26 @@ async function writeIdeaDrafts({
   runId: string;
   calls: GenerationModelCallTrace[];
   revisionContext?: Array<{ content: string; issues: string[] }>;
+  revisionStrategy?: DraftRevisionStrategy;
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
     ? buildGeoffreyNativeV2WriterContract()
     : '';
   const revisionInstruction = revisionContext.length > 0
-    ? `\n\nTreat failed attempts as negative examples. Start over from the approved idea, remove every named issue, and use a fresh opening that is specific to this subject. Changing nouns or polishing the same thesis is not a rewrite. Change the social posture, sentence skeleton, and amount of explanation; do not paraphrase the failed attempt.`
+    ? revisionStrategy === 'critic_surgical'
+      ? `\n\nThis is a surgical critic pass. Preserve the sound factual core and strongest native phrase from the edit target. Apply the diagnosis literally with the smallest sufficient deletion or repair. Do not introduce a new metaphor, aphorism, closer, premise, or explanatory framework.`
+      : `\n\nTreat failed attempts as negative examples. Start over from the approved idea, remove every named issue, and use a fresh opening that is specific to this subject. Changing nouns or polishing the same thesis is not a rewrite. Change the social posture, sentence skeleton, and amount of explanation; do not paraphrase the failed attempt.`
     : '';
   const draftCount = revisionContext.length > 0 ? 1 : MAX_DRAFTS_PER_IDEA;
   const variantInstruction = draftCount === 1
-    ? 'Write exactly one new X post from the approved idea. It must be a fresh replacement, not an edit or paraphrase of the failed attempt.'
+    ? revisionStrategy === 'critic_surgical'
+      ? 'Return exactly one revised X post. Make only the smallest change required by the critic diagnosis.'
+      : 'Write exactly one new X post from the approved idea. It must be a fresh replacement, not an edit or paraphrase of the failed attempt.'
     : 'Write exactly three separately conceived X posts from one approved idea. They are not short, medium, and long versions of one sentence. Do not summarize or reconcile all three.';
   const shapeInstruction = draftCount === 1
-    ? 'Choose the most natural shape for the replacement. Start from the subject again instead of preserving the failed draft\'s opening or length.'
+    ? revisionStrategy === 'critic_surgical'
+      ? 'Keep the edit target\'s natural shape unless the diagnosis explicitly identifies that shape as the problem.'
+      : 'Choose the most natural shape for the replacement. Start from the subject again instead of preserving the failed draft\'s opening or length.'
     : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
   const result = await trackedGenerate('tweet_writing', {
     task: 'tweet_writing',
@@ -2640,6 +2653,7 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       buildGenerationLearningBriefV2(input.learnings, input.memory),
       buildGenerationWritingConstraintsV2(input),
       revisionContext,
+      revisionStrategy,
       draftCount,
     ),
   }, calls);
@@ -3591,6 +3605,7 @@ async function generateRescueDraftEvaluations({
   calls,
   blocks,
   modelStack = input.modelStack,
+  revisionStrategy = 'reconceive',
 }: {
   targets: DraftEvaluation[];
   priorEvaluations: DraftEvaluation[];
@@ -3599,6 +3614,7 @@ async function generateRescueDraftEvaluations({
   calls: GenerationModelCallTrace[];
   blocks: SemanticBlock[];
   modelStack?: GenerationModelStackId;
+  revisionStrategy?: DraftRevisionStrategy;
 }): Promise<DraftEvaluation[]> {
   const outputs = await Promise.all(targets.map(async (target) => {
     const revisionContext = [
@@ -3625,6 +3641,7 @@ async function generateRescueDraftEvaluations({
         runId,
         calls,
         revisionContext,
+        revisionStrategy,
       });
       return drafts.map((draft) => preflightDraft({
         draft,
@@ -4001,6 +4018,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
           modelStack: input.modelStack === PUBLISHING_V2_MODEL_STACK
             ? PUBLISHING_V2_CONTROL_MODEL_STACK
             : input.modelStack,
+          revisionStrategy: 'critic_surgical',
         });
         trace.stageCounts.rescueDraftsGenerated = (trace.stageCounts.rescueDraftsGenerated || 0) + retryEvaluations.length;
       }
