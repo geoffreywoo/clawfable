@@ -4524,13 +4524,14 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
   'final_quality_margin',
 ]);
 
-const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
+const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|abstract comparison|comparison thesis|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
 const V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported|familiar startup maxim|drifts? toward (?:a )?familiar maxim)\b/i;
 const V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN = /\b(?:operational task|concrete consequence|subject-specific (?:consequence|constraint|detail|mechanism)|named (?:consequence|constraint|task|detail)|name (?:one|the) (?:permitted )?(?:system )?(?:consequence|constraint|task|detail|mechanism|cost|tradeoff)|naming (?:one|the) (?:permitted )?(?:system )?(?:consequence|constraint|task|detail|mechanism|cost|tradeoff)|acknowledge (?:the )?(?:product|user|operational) (?:cost|tradeoff|consequence)|thin (?:call|claim|reaction)|otherwise thin|made? less absolute|make (?:the )?(?:categorical )?claim less absolute|qualify (?:the )?(?:categorical )?claim)\b/i;
-const V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN = Math.max(
+const V2_MIN_GEOFFREY_EXPLICIT_REPAIR_MARGIN = Math.max(
   0.8,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.06,
 );
+const V2_MIN_GEOFFREY_HIGH_MARGIN_REPAIR = 0.82;
 
 export function isV2MarginOnlyBoundedRepairCandidate(
   rejectionCodes: string[],
@@ -4538,14 +4539,20 @@ export function isV2MarginOnlyBoundedRepairCandidate(
   qualityMargin?: number | null,
 ): boolean {
   const uniqueCodes = uniqueStrings(rejectionCodes);
-  const diagnosis = judgeNotes || '';
+  const diagnosis = (judgeNotes || '').trim();
   return uniqueCodes.length === 1
     && uniqueCodes[0] === 'final_quality_margin'
     && typeof qualityMargin === 'number'
-    && qualityMargin >= V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN
+    && diagnosis.length > 0
     && !V2_RECONCEIVE_DIAGNOSIS_PATTERN.test(diagnosis)
     && !V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(diagnosis)
-    && V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN.test(diagnosis);
+    && (
+      qualityMargin >= V2_MIN_GEOFFREY_HIGH_MARGIN_REPAIR
+      || (
+        qualityMargin >= V2_MIN_GEOFFREY_EXPLICIT_REPAIR_MARGIN
+        && V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN.test(diagnosis)
+      )
+    );
 }
 
 export function getV2RescueRevisionStrategy(
