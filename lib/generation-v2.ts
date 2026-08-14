@@ -1303,7 +1303,7 @@ export function getStoryEditorialRejectionCodesV2(
 ): string[] {
   const codes: string[] = [];
   const lowSignalFilingStub = /^(?:\d+(?:-[a-z]+)?|d\/a|s-\d+|schedule\s+[\w/-]+)\s+-\s+/i.test(story.title)
-    && /\((?:filer|issuer|reporting|subject)\)\s*$/i.test(story.title);
+    && /\((?:filed by|filer|issuer|reporting|subject)\)\s*$/i.test(story.title);
   const versionOnlyStub = /^(?:[a-z0-9._-]+:\s*)?v?\d+\.\d+(?:\.\d+)?(?:[-.a-z0-9]+)?$/i.test(story.title.trim());
   const minConsequence = Math.max(V2_MIN_STORY_CONSEQUENCE, options.minConsequence ?? 0);
   if (!story.evidenceQualified) codes.push('evidence_unqualified');

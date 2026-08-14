@@ -20,6 +20,7 @@ import {
   getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
+  getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
   getSubtractiveTailCandidateContentV2,
   getSubtractiveTailCandidateContentsV2,
@@ -2163,12 +2164,13 @@ describe('Tweet Generation V2', () => {
       id: 'story-low-consequence',
       scores: { ...qualified.scores, consequence: 0.22 },
     })).toBe(false);
-    expect(isStoryEditoriallyQualifiedV2({
+    const filingStub = {
       ...qualified,
       id: 'story-range-filing',
-      title: 'SCHEDULE 13G/A - Range Capital Management LP (Subject)',
-      scores: { ...qualified.scores, consequence: 0.48 },
-    })).toBe(false);
+      title: 'SCHEDULE 13G/A - Magnolia Capital Fund, LP (Filed by)',
+    };
+    expect(getStoryEditorialRejectionCodesV2(filingStub)).toContain('filing_stub');
+    expect(isStoryEditoriallyQualifiedV2(filingStub)).toBe(false);
     expect(isStoryEditoriallyQualifiedV2({
       ...qualified,
       id: 'story-form-four',

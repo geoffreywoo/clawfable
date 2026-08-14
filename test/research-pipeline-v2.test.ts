@@ -208,7 +208,10 @@ describe('research agenda and story qualification', () => {
       tweets: [],
       current: {
         ...agenda,
-        operatorTopics: ['OpenAI, Brad Lightcap in ai compute'],
+        operatorTopics: [
+          'OpenAI, Brad Lightcap in ai compute',
+          'Cognition AI in ai compute',
+        ],
       },
       operatorTopicSignals: [],
     });
