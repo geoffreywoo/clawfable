@@ -345,7 +345,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-18',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-19',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -530,7 +530,17 @@ describe('generateTweetBatchV2 integration', () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
-      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        const content = parsed.failedAttempts.length > 0
+          ? `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`
+          : `i'd still fund a first-time founder in ${parsed.idea.topic}.`;
+        return result(JSON.stringify({ drafts: [{
+          content,
+          format: 'observation',
+          posture: 'plain funding preference',
+        }] }), 'anthropic');
+      }
       if (options.task === 'copy_judgment') {
         criticCalls += 1;
         const candidates = JSON.parse(options.prompt).candidates;
@@ -562,7 +572,12 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
     expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
-      stageCounts: expect.objectContaining({ retryUsed: 1, rescueTargets: 1, draftsSelected: 2 }),
+      stageCounts: expect.objectContaining({
+        retryUsed: 1,
+        rescueTargets: 1,
+        rescueDraftsGenerated: 1,
+        draftsSelected: 2,
+      }),
     });
   });
 
@@ -973,6 +988,26 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
     expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+    ]));
+  });
+
+  it('rejects a generic product wishlist before spending a critic call', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+        content: 'i want an AI model that can control a software company budget and be fired by the board.',
+        format: 'observation',
+        posture: 'generic product desire',
+      }] }), 'anthropic');
+      if (options.task === 'copy_judgment') throw new Error('preflight should reject every draft');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['generic_product_wishlist']) }),
     ]));
   });
 

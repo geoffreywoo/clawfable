@@ -498,8 +498,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const postedGenerated = generatedPostedTweets(allTweets);
   const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
   const identity = buildAgentIdentityAudit(agent);
+  const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
   const storyEditorialOptions = {
-    minConsequence: agent.handle.replace(/^@/, '').toLowerCase() === 'geoffwoo' ? 0.55 : undefined,
+    minConsequence: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle) ? 0.55 : undefined,
   };
   const storyDecisions = storyClusters.map((story) => ({
     story,

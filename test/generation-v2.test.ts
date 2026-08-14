@@ -9,6 +9,7 @@ import {
   getGenerationV2CircuitPauseUntil,
   getV2GeneratedWritingIssue,
   isQuestionDraftV2,
+  isGenericOperatorProductWishlistV2,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -172,6 +173,75 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
+  });
+
+  it('does not launder a consumed sourced story back into a source-free network brief', () => {
+    const headline = 'Brad Lightcap said he is leaving OpenAI to start something new.';
+    const story = {
+      schemaVersion: 2,
+      id: 'story-lightcap-source-backed',
+      agentId: 'agent-1',
+      semanticKey: 'brad:lightcap:openai:leaving:start:new',
+      title: headline,
+      summary: headline,
+      topic: 'OpenAI executive departure',
+      entities: ['Brad Lightcap', 'OpenAI'],
+      sourceDocumentIds: ['source-lightcap'],
+      qualifiedClaimIds: ['claim-lightcap'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.9, evidenceStrength: 0.9, consequence: 0.7, freshness: 0.9, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-12T00:00:00.000Z',
+      lastSeenAt: '2026-08-12T01:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    } satisfies StoryCluster;
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [story],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 992,
+        networkTopicId: 'network-brad-lightcap',
+        headline,
+        source: '@bradlightcap',
+        relevanceScore: 95,
+        category: 'OpenAI executive departure',
+        timestamp: new Date().toISOString(),
+        tweetCount: 1,
+        sourceType: 'x',
+        sourceCount: 1,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.94,
+        topicUncertainty: 'low',
+        semanticDomain: 'ai_compute',
+        entities: ['Brad Lightcap', 'OpenAI'],
+        isPrimarySource: true,
+        topTweet: { id: 'network-post-lightcap', text: headline, likes: 900, author: 'bradlightcap' },
+      } as any],
+      allTweets: [{
+        id: 'posted-lightcap',
+        status: 'posted',
+        storyClusterId: story.id,
+        content: 'Prior post about this story.',
+        createdAt: '2026-08-12T02:00:00.000Z',
+      } as Tweet],
+      now: new Date('2026-08-13T00:00:00.000Z'),
+    });
+
+    expect(briefs.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+    expect(briefs.some((entry) => entry.trendTopicId === 'network-brad-lightcap')).toBe(false);
   });
 
   it('keeps most refill briefs in the native operator lane', () => {
@@ -1088,6 +1158,24 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('blocks noun-swapped acquisition and CEO sentence skeletons', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('ai', 'OpenAI should buy Linear and make Karri Saarinen ceo.')],
+      agentId: 'agent-1',
+      runId: 'run-acquisition-skeleton-reskin',
+      briefs: [brief('ai', 'AI companies')],
+      voiceProfile,
+      recentPosts: ['google should buy @cognition for $200b and make @ScottWu46 ceo'],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['recent_semantic_repeat']),
+    });
+  });
+
   it('blocks replaying the back-someone-after-failure premise', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('culture', 'I would rather back someone after a loud failure than a beige win.')],
@@ -1197,6 +1285,33 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
+  it('blocks a generic source-free product wishlist before writing', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'I want an AI model that can legally control a software company budget and be fired by the board.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-product-wishlist',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['generic_product_wishlist']),
+    });
+    expect(isGenericOperatorProductWishlistV2(
+      'i want to give an AI agent a corporate card and fire it when it misses budget.',
+    )).toBe(true);
+    expect(isGenericOperatorProductWishlistV2(
+      'i want OpenAI to buy Linear.',
+    )).toBe(false);
   });
 
   it('rejects an unsourced measured numeric claim', () => {

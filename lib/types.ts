@@ -425,7 +425,8 @@ export type DraftExperimentStatus =
 export type GenerationModelStackId =
   | 'standard'
   | 'publishing_v2_quality'
-  | 'publishing_v2_gpt_control';
+  | 'publishing_v2_gpt_control'
+  | 'publishing_v2_fable_control';
 
 export type GenerationPipelineVersion = 'v1' | 'v2';
 
