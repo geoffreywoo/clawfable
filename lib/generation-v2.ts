@@ -1012,11 +1012,18 @@ export function getOperatorTopicAttemptPenaltyV2(
 
 function recentOperatorAttemptIdeas(recentIdeas: IdeaCandidate[], now: Date): IdeaCandidate[] {
   const cutoff = now.getTime() - (12 * 60 * 60 * 1000);
+  const seenBriefRuns = new Set<string>();
   return [...recentIdeas]
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .filter((idea) => {
       const createdAt = Date.parse(idea.createdAt);
       return !Number.isFinite(createdAt) || createdAt >= cutoff;
+    })
+    .filter((idea) => {
+      const key = `${idea.briefId}:${idea.generationRunId || idea.id}`;
+      if (seenBriefRuns.has(key)) return false;
+      seenBriefRuns.add(key);
+      return true;
     })
     .slice(0, 96);
 }
