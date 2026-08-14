@@ -3292,15 +3292,22 @@ export function normalizeDraftContentV2(value: unknown, maxLength = V2_MAX_DRAFT
     .slice(0, maxLength);
 }
 
-export function getSubtractiveTailCandidateContentV2(content: string): string | null {
+export function getSubtractiveTailCandidateContentsV2(content: string, limit = 2): string[] {
   const normalized = normalizeDraftContentV2(content);
   const sentenceEnds = [...normalized.matchAll(/[.!?](?=\s|$)/g)]
     .map((match) => (match.index || 0) + match[0].length);
   if ((sentenceEnds.at(-1) || 0) < normalized.length) sentenceEnds.push(normalized.length);
-  if (sentenceEnds.length < 2) return null;
-  const candidate = normalized.slice(0, sentenceEnds[sentenceEnds.length - 2]).trim();
-  if (candidate.length < 24 || candidate.length >= normalized.length - 8) return null;
-  return candidate;
+  if (sentenceEnds.length < 2 || limit <= 0) return [];
+  return sentenceEnds
+    .slice(0, -1)
+    .reverse()
+    .map((end) => normalized.slice(0, end).trim())
+    .filter((candidate) => candidate.length >= 24 && candidate.length < normalized.length - 8)
+    .slice(0, limit);
+}
+
+export function getSubtractiveTailCandidateContentV2(content: string): string | null {
+  return getSubtractiveTailCandidateContentsV2(content, 1)[0] || null;
 }
 
 export function getV2GeneratedWritingIssue(content: string): string | null {
@@ -3706,7 +3713,7 @@ function buildSubtractiveTailEvaluationsV2({
   desired: number;
 }): DraftEvaluation[] {
   if (desired <= 0 || !isGeoffreyVoiceProfile(input.voiceProfile)) return [];
-  const subtractiveDiagnosis = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported)\b/i;
+  const subtractiveDiagnosis = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported)\b/i;
   const eligibleTargets = evaluations
     .filter((entry) => (
       !selectedIdeaIds.has(entry.idea.id)
@@ -3715,7 +3722,7 @@ function buildSubtractiveTailEvaluationsV2({
       && entry.draft.rejectionCodes[0] === 'final_quality_margin'
       && typeof entry.draft.judgeBreakdown?.qualityMargin === 'number'
       && subtractiveDiagnosis.test(entry.draft.judgeNotes || '')
-      && getSubtractiveTailCandidateContentV2(entry.draft.content) !== null
+      && getSubtractiveTailCandidateContentsV2(entry.draft.content).length > 0
     ))
     .sort((left, right) => (
       (right.draft.judgeBreakdown?.qualityMargin || 0)
@@ -3730,8 +3737,7 @@ function buildSubtractiveTailEvaluationsV2({
     if (targets.length >= Math.max(1, desired * 2)) break;
   }
   const now = new Date().toISOString();
-  return targets.map((entry) => {
-    const content = getSubtractiveTailCandidateContentV2(entry.draft.content)!;
+  return targets.flatMap((entry) => getSubtractiveTailCandidateContentsV2(entry.draft.content).map((content, index) => {
     const draft: DraftCandidate = {
       ...entry.draft,
       id: stableResearchId(
@@ -3740,6 +3746,7 @@ function buildSubtractiveTailEvaluationsV2({
         entry.idea.id,
         'subtractive-tail',
         entry.draft.id,
+        index,
         content,
       ),
       content,
@@ -3764,7 +3771,7 @@ function buildSubtractiveTailEvaluationsV2({
       input,
       blocks,
     });
-  });
+  }));
 }
 
 interface CopyJudgeScore {
@@ -5013,7 +5020,9 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         selectedIdeaIds,
         desired: input.count - selected.length,
       });
-      trace.stageCounts.postcriticTrimTargets = trimEvaluations.length;
+      trace.stageCounts.postcriticTrimTargets = new Set(trimEvaluations
+        .map((entry) => entry.draft.parentDraftId)
+        .filter((id): id is string => Boolean(id))).size;
       if (trimEvaluations.length > 0 && Date.now() + 45_000 < runDeadlineAt) {
         retryUsed = true;
         evaluations.push(...trimEvaluations);

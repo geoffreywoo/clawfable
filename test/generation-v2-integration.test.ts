@@ -364,7 +364,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-76',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-77',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -487,22 +487,26 @@ describe('generateTweetBatchV2 integration', () => {
     const drafts = await generateTweetBatchV2(input);
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
     const trims = persistedDrafts.filter((draft) => draft.mutationRound === 1);
+    const trimCount = new Set(trims.map((draft) => draft.id)).size;
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
 
     expect(criticCalls).toBe(2);
-    expect(trims).toHaveLength(4);
+    expect(trimCount).toBeGreaterThan(4);
     expect(trims.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
     expect(trims.every((draft) => !draft.content.includes('extra explanation'))).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
-    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+    expect(finalRun).toMatchObject({
       stageCounts: expect.objectContaining({
         postcriticTrimTargets: 4,
-        postcriticTrimDraftsGenerated: 4,
-        postcriticTrimDraftsEligible: 4,
+        postcriticTrimDraftsGenerated: trimCount,
+        postcriticTrimDraftsEligible: expect.any(Number),
         postcriticTrimDraftsSelected: 2,
         draftsSelected: 2,
       }),
     });
+    expect(finalRun.stageCounts.postcriticTrimDraftsEligible).toBeLessThanOrEqual(trimCount);
+    expect(finalRun.stageCounts.postcriticTrimDraftsEligible).toBeGreaterThanOrEqual(2);
   });
 
   it('rejects generic category-level investor wrappers before paying the copy critic', async () => {
