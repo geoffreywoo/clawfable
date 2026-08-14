@@ -872,6 +872,25 @@ export function retainsPersonalTopicSubjectV2(text: string, signals: string[] = 
   return usableSignals.some((tokens) => tokens.some((token) => candidateTokens.has(token)));
 }
 
+const CROSS_BRIEF_SUBJECT_GENERIC_TOKENS = new Set([
+  'agent', 'agents', 'ai', 'company', 'companies', 'founder', 'founders',
+  'investor', 'investors', 'market', 'markets', 'model', 'models', 'product',
+  'software', 'startup', 'startups', 'technology', 'valuation',
+]);
+
+function concreteBriefSubjectTokens(value: string): Set<string> {
+  return new Set(significantResearchTokens(value.replace(/:/g, ' ')).filter((token) => (
+    token.length >= 4 && !CROSS_BRIEF_SUBJECT_GENERIC_TOKENS.has(token)
+  )));
+}
+
+export function hasCrossBriefSubjectCollisionV2(left: string, right: string): boolean {
+  const leftTokens = concreteBriefSubjectTokens(left);
+  const rightTokens = concreteBriefSubjectTokens(right);
+  const shared = [...leftTokens].filter((token) => rightTokens.has(token));
+  return shared.length >= 2 || shared.some((token) => token.length >= 6);
+}
+
 function operatorTopicCandidates({
   voiceProfile,
   analysis,
@@ -1337,6 +1356,7 @@ export function buildGenerationBriefsV2({
   const briefs: GenerationBriefV2[] = [];
   const usedTopics = new Set<string>();
   const usedStorySubjects: string[] = [];
+  const reservedConcreteSubjects: string[] = [];
   const maxDeepTechnicalBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 5));
   const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 8));
   const maxTopicDomainBriefs = Math.max(2, Math.ceil(briefCount / 4));
@@ -1409,6 +1429,7 @@ export function buildGenerationBriefsV2({
     briefs.push(storyBrief(story, documents));
     usedTopics.add(key);
     usedStorySubjects.push(subject);
+    reservedConcreteSubjects.push(subject);
     return true;
   };
 
@@ -1491,6 +1512,7 @@ export function buildGenerationBriefsV2({
       sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
     });
     usedTopics.add(key);
+    reservedConcreteSubjects.push(signal.subject);
     operatorTopicSignalBriefs += 1;
   }
 
@@ -1512,6 +1534,16 @@ export function buildGenerationBriefsV2({
       block.scope === 'topic'
       && researchTokenSimilarity(candidate.topic, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62
     ))) return false;
+    const personalTopicSignals = (candidate.personalTopicSignals || []).filter((signal) => (
+      !reservedConcreteSubjects.some((subject) => hasCrossBriefSubjectCollisionV2(
+        signal.replace(/:/g, ' '),
+        subject,
+      ))
+    ));
+    if ((candidate.personalTopicSignals?.length || 0) > 0 && personalTopicSignals.length === 0) return false;
+    const personalTopicSignalPremises = (candidate.personalTopicSignalPremises || []).filter((premise) => (
+      personalTopicSignals.some((signal) => retainsPersonalTopicSubjectV2(premise, [signal]))
+    ));
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile,
       targetTopic: candidate.topic,
@@ -1526,11 +1558,12 @@ export function buildGenerationBriefsV2({
       candidate.sampleCount,
       candidate.spreadMechanics,
       seed,
-      candidate.personalTopicSignals,
-      candidate.personalTopicSignalPremises,
+      personalTopicSignals,
+      personalTopicSignalPremises,
     );
     briefs.push(brief);
     usedTopics.add(key);
+    reservedConcreteSubjects.push(...personalTopicSignals.map((signal) => signal.replace(/:/g, ' ')));
     if (seed) usedIdeaSeedIds.add(seed.id);
     return true;
   };

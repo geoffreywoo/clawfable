@@ -10,6 +10,7 @@ import {
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
   getOperatorTopicConstraintIssuesV2,
+  hasCrossBriefSubjectCollisionV2,
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
   getV2RescueRevisionStrategy,
@@ -490,6 +491,108 @@ describe('Tweet Generation V2', () => {
     expect(startupBrief?.personalTopicSignals?.join(' ')).toContain('cognition');
     expect(startupBrief?.personalTopicSignals?.join(' ')).not.toContain('woodside');
     expect(startupBrief?.personalTopicSignalPremises).toHaveLength(1);
+  });
+
+  it('does not reuse a sourced story subject through a durable personal cue', () => {
+    expect(hasCrossBriefSubjectCollisionV2('cognition scottwu46', 'Cognition valuation talks')).toBe(true);
+    expect(hasCrossBriefSubjectCollisionV2('tonyrobbins storytelling', 'Cognition valuation talks')).toBe(false);
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['startups', 'AI', 'markets', 'culture'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const source: SourceDocument = {
+      schemaVersion: 2,
+      id: 'source-cognition-valuation',
+      agentId: '13',
+      sourceType: 'official',
+      canonicalUrl: 'https://example.com/cognition',
+      title: 'Cognition valuation talks',
+      publisher: 'Example',
+      publishedAt: '2026-08-14T05:00:00.000Z',
+      fetchedAt: '2026-08-14T05:05:00.000Z',
+      trustTier: 'primary',
+      isPrimary: true,
+      excerpt: 'Cognition is discussing a new financing at a $40 billion valuation.',
+      contentHash: 'cognition-source',
+      entities: ['Cognition'],
+      claims: [{
+        id: 'claim-cognition-valuation',
+        text: 'Cognition is discussing a new financing at a $40 billion valuation.',
+        kind: 'announcement',
+        confidence: 0.92,
+        entities: ['Cognition'],
+      }],
+      topics: ['cognition'],
+      query: null,
+      metadata: {},
+    };
+    const story: StoryCluster = {
+      schemaVersion: 2,
+      id: 'story-cognition-valuation',
+      agentId: '13',
+      semanticKey: 'cognition:valuation:talks',
+      title: 'Cognition valuation talks',
+      summary: 'Cognition is discussing a new financing at a $40 billion valuation.',
+      topic: 'cognition',
+      entities: ['Cognition'],
+      sourceDocumentIds: [source.id],
+      qualifiedClaimIds: ['claim-cognition-valuation'],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: {
+        identityFit: 0.92,
+        evidenceStrength: 0.92,
+        consequence: 0.82,
+        freshness: 0.9,
+        novelty: 0.8,
+        networkMomentum: 0.7,
+        total: 0.88,
+      },
+      firstSeenAt: '2026-08-14T05:00:00.000Z',
+      lastSeenAt: '2026-08-14T05:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [story],
+      documents: [source],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'markets'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: 'operator startup outcomes',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{
+            content: 'google should buy @cognition for $200b and make @ScottWu46 ceo',
+            topic: 'startups',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            voiceCorpusDispositions: ['diction_anchor', 'topic_signal'],
+          }, {
+            content: '@TonyRobbins is the best bullshitter in the game',
+            topic: 'startups',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            voiceCorpusDispositions: ['diction_anchor', 'topic_signal'],
+          }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(briefs.some((entry) => entry.storyClusterId === story.id)).toBe(true);
+    const startupBrief = briefs.find((entry) => entry.topic === 'startups');
+    expect(startupBrief?.personalTopicSignals?.join(' ')).toContain('tonyrobbins');
+    expect(startupBrief?.personalTopicSignals?.join(' ')).not.toContain('cognition');
+    expect(startupBrief?.personalTopicSignalPremises?.join(' ')).not.toContain('@cognition');
   });
 
   it('rotates away from operator subjects already attempted in recent generation runs', () => {
