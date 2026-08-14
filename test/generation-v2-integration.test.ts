@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-96',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-97',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -396,13 +396,14 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
-  it('gives Geoffrey three Fable variants and one GPT shadow while preserving the winning stack', async () => {
+  it('generates three independent one-draft Fable variants plus one GPT shadow', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
       if (options.task === 'tweet_writing') {
         const parsed = JSON.parse(options.prompt);
         if (options.modelStack === 'publishing_v2_fable_control') {
+          const move = parsed.responseContract.variantMoves[0]?.move;
           const primaryCopy: Record<string, string> = {
             'AI startups': 'ai startups get my first dollar.',
             'biotech manufacturing': 'biotech manufacturing is my pick.',
@@ -410,17 +411,13 @@ describe('generateTweetBatchV2 integration', () => {
             'founder financing': 'founder financing first for me.',
           };
           return result(JSON.stringify({ drafts: [{
-            content: primaryCopy[parsed.idea.topic] || `${parsed.idea.topic} gets my first dollar.`,
+            content: move === 'blunt_reaction'
+              ? primaryCopy[parsed.idea.topic] || `${parsed.idea.topic} gets my first dollar.`
+              : move === 'first_person_position'
+                ? `i'd start with ${parsed.idea.topic}.`
+                : `${parsed.idea.topic} is still my pick.`,
             format: 'short_punch',
-            posture: 'one direct decision',
-          }, {
-            content: `my pick is ${parsed.idea.topic}.`,
-            format: 'short_punch',
-            posture: 'first-person decision',
-          }, {
-            content: `i'd start with ${parsed.idea.topic}.`,
-            format: 'short_punch',
-            posture: 'capital allocation decision',
+            posture: move || 'one direct decision',
           }] }), 'anthropic');
         }
         return result(JSON.stringify({ drafts: [{
@@ -458,12 +455,19 @@ describe('generateTweetBatchV2 integration', () => {
     ));
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
 
-    expect(primaryCalls).toHaveLength(4);
+    expect(primaryCalls).toHaveLength(12);
     expect(shadowCalls).toHaveLength(4);
-    expect(primaryCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 3)).toBe(true);
+    expect(primaryCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(primaryCalls.every((call) => String(call.system).includes('Write exactly one'))).toBe(true);
     expect(shadowCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
     expect(shadowCalls.every((call) => JSON.parse(call.prompt).failedAttempts.length === 0)).toBe(true);
     expect(shadowCalls.every((call) => String(call.system).includes('Write exactly one blunt X post'))).toBe(true);
+    expect(new Set(primaryCalls.slice(0, 3).map((call) => (
+      JSON.parse(call.prompt).voiceTransferContract.primaryRegisterAnchorId
+    ))).size).toBe(3);
+    expect(new Set(primaryCalls.slice(0, 3).map((call) => (
+      JSON.parse(call.prompt).responseContract.variantMoves[0].move
+    ))).size).toBeGreaterThanOrEqual(2);
     expect(new Set(persistedDrafts.filter((draft) => (
       draft.generationModelStack === 'publishing_v2_fable_control'
       && (draft.mutationRound || 0) === 0

@@ -41,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-96',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-97',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
