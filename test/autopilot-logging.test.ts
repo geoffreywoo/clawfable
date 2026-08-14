@@ -111,7 +111,7 @@ vi.mock('@/lib/generation-context', () => ({
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
   PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-33',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-34',
 }));
 
 vi.mock('@/lib/publishing-v2', () => ({

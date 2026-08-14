@@ -8,6 +8,7 @@ import {
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getRequiredFinalQualityMarginV2,
+  meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
@@ -113,6 +114,11 @@ describe('Tweet Generation V2', () => {
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({})).toBe(0.84);
+  });
+
+  it('does not lose a critic rescue to one-basis-point score rounding', () => {
+    expect(meetsV2RescueMarginFloor(0.7799, 0.78)).toBe(true);
+    expect(meetsV2RescueMarginFloor(0.7798, 0.78)).toBe(false);
   });
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {

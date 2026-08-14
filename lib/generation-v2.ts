@@ -3539,7 +3539,7 @@ function rescueTargetsV2(
       entry.draft.status === 'rejected'
       && typeof entry.draft.judgeScore === 'number'
       && entry.draft.judgeScore >= 0.68
-      && (entry.draft.judgeBreakdown?.qualityMargin ?? 0) >= nearMissFloor
+      && meetsV2RescueMarginFloor(entry.draft.judgeBreakdown?.qualityMargin ?? 0, nearMissFloor)
       && entry.draft.rejectionCodes.length > 0
       && entry.draft.rejectionCodes.every((code) => V2_REWRITEABLE_RESCUE_CODES.has(code))
       && !entry.draft.rejectionCodes.includes('copy_judge_unavailable')
@@ -3556,6 +3556,10 @@ function rescueTargetsV2(
     seenIdeas.add(entry.idea.id);
     return true;
   }).slice(0, Math.min(2, limit));
+}
+
+export function meetsV2RescueMarginFloor(score: number, floor: number): boolean {
+  return Number.isFinite(score) && Number.isFinite(floor) && score + 0.0001 >= floor;
 }
 
 async function generateRescueDraftEvaluations({
