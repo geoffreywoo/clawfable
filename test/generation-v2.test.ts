@@ -667,7 +667,14 @@ describe('Tweet Generation V2', () => {
       generationRunId: 'generation-recent',
       createdAt: '2026-08-14T05:30:00.000Z',
     })) as any;
-    const second = buildGenerationBriefsV2({ ...common, recentIdeas });
+    const newerNoise = Array.from({ length: 120 }, (_, index) => ({
+      id: `idea-noise-${index}`,
+      briefId: `brief-noise-${index % 4}`,
+      topic: `noise ${index % 4}`,
+      generationRunId: `generation-noise-${Math.floor(index / 12)}`,
+      createdAt: '2026-08-14T05:45:00.000Z',
+    })) as any;
+    const second = buildGenerationBriefsV2({ ...common, recentIdeas: [...newerNoise, ...recentIdeas] });
     const secondSignal = second.find((entry) => entry.trendTopicId?.startsWith('network-'))!;
 
     expect(secondSignal.trendTopicId).not.toBe(firstSignal.trendTopicId);
