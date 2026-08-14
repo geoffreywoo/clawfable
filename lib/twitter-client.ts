@@ -576,14 +576,17 @@ export async function getLikedTweets(
   }>
 > {
   const client = createClient(keys);
-  const totalLimit = Math.max(5, Math.min(maxResults, 100));
+  const totalLimit = Math.max(5, Math.min(maxResults, 300));
   try {
     const result = await client.v2.userLikedTweets(userId, {
-      max_results: totalLimit,
+      max_results: Math.min(totalLimit, 100),
       'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
       expansions: ['author_id'],
       'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
     });
+    if (result.tweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
+      await (result as any).fetchLast(totalLimit - result.tweets.length);
+    }
     return result.tweets.slice(0, totalLimit).map((tweet) => {
       const author = result.includes.author(tweet);
       return {

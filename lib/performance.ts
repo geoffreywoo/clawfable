@@ -30,7 +30,7 @@ import {
   saveVoiceCorpusSnapshot,
   backfillAudienceVoiceComplaints,
 } from './kv-storage';
-import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
+import { getDeepTimeline, getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
 import { generateText, PUBLISHING_V2_MODEL_STACK } from './ai';
@@ -664,7 +664,15 @@ async function createVelocityFollowupDraft(
  * Manually written tweets are the richest training signal — they show
  * what the human operator writes when they want maximum engagement.
  */
-export async function checkPerformance(agent: Agent): Promise<number> {
+export interface CheckPerformanceOptions {
+  timelineLimit?: number;
+  classificationBacklogLimit?: number;
+}
+
+export async function checkPerformance(
+  agent: Agent,
+  options: CheckPerformanceOptions = {},
+): Promise<number> {
   await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
     return 0;
@@ -691,10 +699,19 @@ export async function checkPerformance(agent: Agent): Promise<number> {
     return 0;
   }
 
-  // Fetch full recent timeline (all tweets, not just ours)
+  const timelineLimit = Math.max(1, Math.min(1000, Math.floor(options.timelineLimit || 300)));
+  const classificationBacklogLimit = Math.max(
+    1,
+    Math.min(300, Math.floor(options.classificationBacklogLimit || 60)),
+  );
+
+  // Fetch full recent timeline (all tweets, not just ours). Protected quality
+  // refreshes can page deeper without increasing every cron read.
   let timeline;
   try {
-    timeline = await getUserTimeline(keys, String(agent.xUserId), 300);
+    timeline = timelineLimit > 300
+      ? await getDeepTimeline(keys, String(agent.xUserId), timelineLimit)
+      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit);
   } catch (err) {
     const invalidCredentials = isInvalidTwitterCredentialError(err);
     if (invalidCredentials) {
@@ -763,7 +780,12 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   // entries are re-written as fresh snapshots, so later runs naturally move
   // on instead of reclassifying the same first page forever.
   const checkedAtForRun = new Date().toISOString();
-  const classificationBacklog = selectTweetClassificationBacklog(timeline, latestByXId, ourXIds, 60);
+  const classificationBacklog = selectTweetClassificationBacklog(
+    timeline,
+    latestByXId,
+    ourXIds,
+    classificationBacklogLimit,
+  );
   const classificationBacklogIds = new Set(classificationBacklog.map((tweet) => String(tweet.id)));
   const newTweets = timeline.filter((tweet) => (
     classificationBacklogIds.has(String(tweet.id))
@@ -775,7 +797,13 @@ export async function checkPerformance(agent: Agent): Promise<number> {
     { length: Math.ceil(classificationBacklog.length / 20) },
     (_, index) => classificationBacklog.slice(index * 20, (index + 1) * 20),
   );
-  const classificationResults = await Promise.all(classificationChunks.map(batchClassifyTweets));
+  const classificationResults: Array<Awaited<ReturnType<typeof batchClassifyTweets>>> = [];
+  const classificationConcurrency = 3;
+  for (let index = 0; index < classificationChunks.length; index += classificationConcurrency) {
+    classificationResults.push(...await Promise.all(
+      classificationChunks.slice(index, index + classificationConcurrency).map(batchClassifyTweets),
+    ));
+  }
   const classifications = new Map(classificationResults.flatMap((result) => [...result.entries()]));
 
   let tracked = 0;

@@ -36,6 +36,7 @@ import {
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
   isSyntheticGeoffreyStatusFrameV2,
+  hasFinishedCriticDiagnosisV2,
   normalizeIdeaCandidatesV2,
   normalizeDirectComparisonPublicMoveV2,
   normalizeDraftContentV2,
@@ -601,6 +602,15 @@ describe('Tweet Generation V2', () => {
   });
 
   it('tries deletion-only repair for a near-autopost margin miss without requiring magic critic wording', () => {
+    expect(hasFinishedCriticDiagnosisV2(
+      'The named timing pick is native; no substantive rewrite is needed.',
+    )).toBe(true);
+    expect(shouldTryV2SubtractiveTailRepair(
+      ['final_quality_margin'],
+      'The named timing pick is native; no substantive rewrite is needed.',
+      0.867,
+      'Databricks goes public before Modal. Modal is still the company i would rather own.',
+    )).toBe(false);
     expect(shouldTryV2SubtractiveTailRepair(
       ['final_quality_margin'],
       'Clarify that serviceability makes the gross-margin claim credible.',

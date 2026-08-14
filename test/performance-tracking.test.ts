@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   saveViralityPostmortems: vi.fn(),
   backfillAudienceVoiceComplaints: vi.fn(),
   getUserTimeline: vi.fn(),
+  getDeepTimeline: vi.fn(),
   decodeKeys: vi.fn(),
   getFollowing: vi.fn(),
   analyzeAccount: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('@/lib/kv-storage', () => ({
 
 vi.mock('@/lib/twitter-client', () => ({
   getUserTimeline: mocks.getUserTimeline,
+  getDeepTimeline: mocks.getDeepTimeline,
   decodeKeys: mocks.decodeKeys,
   getFollowing: mocks.getFollowing,
 }));
@@ -167,6 +169,23 @@ describe('performance tracking X API failures', () => {
         reason: expect.stringContaining('X performance timeline read rate limited until 2026-04-07T12:20:00.000Z'),
       }),
     );
+  });
+
+  it('uses the official deep timeline only for an explicit corpus refresh', async () => {
+    mocks.getDeepTimeline.mockResolvedValue([]);
+
+    const tracked = await checkPerformance(agent as any, {
+      timelineLimit: 600,
+      classificationBacklogLimit: 300,
+    });
+
+    expect(tracked).toBe(0);
+    expect(mocks.getDeepTimeline).toHaveBeenCalledWith(
+      expect.any(Object),
+      agent.xUserId,
+      600,
+    );
+    expect(mocks.getUserTimeline).not.toHaveBeenCalled();
   });
 
   it('logs reset-aware rate limits when auto re-analysis cannot read X', async () => {

@@ -266,6 +266,43 @@ describe('timeline source metadata', () => {
       expansions: ['author_id'],
     }));
   });
+
+  it('paginates the official liked-post feed for a deeper topic-taste window', async () => {
+    const author = {
+      id: 'author-page',
+      username: 'pagebuilder',
+      name: 'Page Builder',
+      protected: false,
+      verified: false,
+      public_metrics: { followers_count: 1000 },
+    };
+    const likedTweet = (index: number) => ({
+      id: `liked-page-${index}`,
+      text: `Complete liked post ${index} about a distinct startup subject.`,
+      author_id: author.id,
+      created_at: '2026-07-31T12:00:00.000Z',
+      lang: 'en',
+      public_metrics: {},
+    });
+    const paginator: any = {
+      tweets: Array.from({ length: 100 }, (_, index) => likedTweet(index)),
+      includes: { author: vi.fn(() => author) },
+      done: false,
+      fetchLast: vi.fn(async (count: number) => {
+        paginator.tweets.push(...Array.from({ length: count }, (_, index) => likedTweet(100 + index)));
+        paginator.done = true;
+      }),
+    };
+    mocks.userLikedTweets.mockResolvedValue(paginator);
+
+    const liked = await getLikedTweets(keys, 'user-1', 150);
+
+    expect(liked).toHaveLength(150);
+    expect(paginator.fetchLast).toHaveBeenCalledWith(50);
+    expect(mocks.userLikedTweets).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      max_results: 100,
+    }));
+  });
 });
 
 describe('getMentionsFromTwitter', () => {

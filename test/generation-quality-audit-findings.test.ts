@@ -99,7 +99,7 @@ function healthyInput() {
       editorialEligibleCount: 3,
       generationEligibleCount: 1,
       warmedNetworkTopicCount: 48,
-      operatorTopicSignalEligibleCount: 2,
+      operatorTopicSignalEligibleCount: 4,
       operatorTopicSignalRejectionCounts: [],
     },
   };
@@ -307,6 +307,72 @@ describe('generation quality audit findings', () => {
       expect.objectContaining({
         code: 'current_policy_critic_score_conflict',
         severity: 'medium',
+      }),
+    ]));
+  });
+
+  it('flags a zero-yield Fable shadow lane without changing the active quality floor', () => {
+    const input = healthyInput() as any;
+    input.modelShadow = {
+      activeStack: 'publishing_v2_gpt_control',
+      groups: [{
+        phase: 'initial',
+        modelStack: 'publishing_v2_fable_control',
+        model: 'anthropic:claude-fable-5',
+        generatedCount: 24,
+        finalCriticCount: 12,
+        selectedCount: 0,
+        selectionRate: 0,
+        averageJudgeScore: 0.77,
+        averageQualityMargin: 0.8,
+        averageNativeVoice: 0.75,
+        averageCringeRisk: 0.31,
+        topRejectionCodes: [{ value: 'final_quality_margin', count: 12 }],
+      }],
+    };
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'historical_fable_shadow_yield_zero',
+        scope: 'historical_window',
+        action: expect.stringContaining('strongest matched idea'),
+      }),
+    ]));
+  });
+
+  it('reports a thin operator-engagement topic pool before it becomes empty', () => {
+    const input = healthyInput() as any;
+    input.sources.warmedNetworkTopicCount = 12;
+    input.sources.operatorTopicSignalEligibleCount = 2;
+    input.sources.operatorTopicSignalRejectionCounts = [
+      { value: 'operator_engagement_below_floor', count: 8 },
+    ];
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'network_operator_topic_pool_thin',
+        evidence: expect.objectContaining({ operatorTopicSignalEligibleCount: 2 }),
+      }),
+    ]));
+  });
+
+  it('flags a dominant topic domain that consumes drafts without selections', () => {
+    const input = healthyInput() as any;
+    input.currentPolicyWindow.writerOutcomes = {
+      topicMix: {
+        generatedCount: 40,
+        selectedCount: 1,
+        domains: [
+          { domain: 'ai_compute', generatedCount: 24, finalCriticCount: 8, selectedCount: 0 },
+          { domain: 'startups_markets', generatedCount: 16, finalCriticCount: 6, selectedCount: 1 },
+        ],
+      },
+    };
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_zero_yield_topic_concentration',
+        severity: 'high',
       }),
     ]));
   });
