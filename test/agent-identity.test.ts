@@ -92,6 +92,7 @@ describe('agent X identity reconciliation', () => {
 
     expect(mocks.updateAgent).toHaveBeenNthCalledWith(1, '13', expect.objectContaining({
       handle: 'geoffwoo',
+      name: 'Geoffrey Woo',
       xUserId: 'x-user-13',
       xIdentityVerifiedAt: null,
       xIdentityVerifiedHandle: null,
@@ -108,6 +109,7 @@ describe('agent X identity reconciliation', () => {
       status: 'updated',
       previousHandle: '@geoffreywoo',
       officialHandle: '@geoffwoo',
+      officialName: 'Geoffrey Woo',
       canonicalIndexes: {
         currentHandleAgentId: '13',
         previousHandleAgentId: null,
@@ -123,6 +125,38 @@ describe('agent X identity reconciliation', () => {
     expect(mocks.addPostLogEntry).toHaveBeenCalledWith('13', expect.objectContaining({
       format: 'x_identity_reconciled',
       reason: expect.stringContaining('@geoffreywoo to @geoffwoo'),
+    }));
+  });
+
+  it('refreshes the internal display name even when the canonical handle is unchanged', async () => {
+    const current = connectedAgent({
+      handle: 'geoffwoo',
+      name: 'Geoff Woo',
+      xIdentityVerifiedAt: '2026-08-14T02:00:00.000Z',
+      xIdentityVerifiedHandle: 'geoffwoo',
+      xIdentityVerifiedUserId: 'x-user-13',
+      xIdentityVerificationSource: 'x_api_v2_me',
+    });
+    mocks.getAgentByHandle.mockResolvedValueOnce(current).mockResolvedValueOnce(current);
+    mocks.updateAgent.mockResolvedValue(current);
+
+    const result = await reconcileAgentXIdentity(connectedAgent({
+      handle: 'geoffwoo',
+      name: 'geoffreywoo',
+    }), new Date('2026-08-14T03:00:00.000Z'));
+
+    expect(mocks.updateAgent).toHaveBeenNthCalledWith(1, '13', expect.objectContaining({
+      handle: 'geoffwoo',
+      name: 'Geoffrey Woo',
+      xUserId: 'x-user-13',
+    }));
+    expect(result).toMatchObject({
+      status: 'verified',
+      officialHandle: '@geoffwoo',
+      officialName: 'Geoffrey Woo',
+    });
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith('13', expect.objectContaining({
+      reason: expect.stringContaining('updated the internal display name'),
     }));
   });
 

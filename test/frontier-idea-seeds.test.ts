@@ -80,4 +80,14 @@ describe('frontier idea seeds', () => {
     expect(seed?.id).not.toBe('robotics-field-uptime');
     expect(seed?.id).not.toBe('neon-lithography-lasers');
   });
+
+  it('maps humor topics to cultural reactions instead of arbitrary AI or market seeds', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'humor',
+      slot: 2,
+    });
+
+    expect(seed?.kind).toBe('culture');
+  });
 });

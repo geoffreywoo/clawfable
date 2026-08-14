@@ -5,8 +5,10 @@ import {
   buildGenerationLearningBriefV2,
   buildGenerationWritingConstraintsV2,
   buildIdeaGenerationPromptV2,
+  buildPersonalTopicSubjectCuesV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
+  getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
   getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
@@ -21,6 +23,7 @@ import {
   normalizeIdeaCandidatesV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
+  retainsPersonalTopicSubjectV2,
   selectAlternateIdeasV2,
   selectRankedIdeaPortfolioV2,
   selectNativeReactionAnchors,
@@ -318,6 +321,74 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('does not interpret repeated writing failures as loss of native topic taste', () => {
+    expect(getOperatorTopicAttemptPenaltyV2('operator-written topic outcomes', 1)).toBe(0.03);
+    expect(getOperatorTopicAttemptPenaltyV2('operator-written topic outcomes', 12)).toBe(0.18);
+    expect(getOperatorTopicAttemptPenaltyV2('the active SOUL topic agenda', 12)).toBe(0.24);
+    expect(getOperatorTopicAttemptPenaltyV2('mature account performance', 12)).toBe(0.36);
+    expect(getOperatorTopicAttemptPenaltyV2('an underused operator topic', 12)).toBe(0.54);
+  });
+
+  it('retains proven startup taste after failed runs instead of drifting to generic categories', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['ai', 'startup', 'vc', 'software', 'agents'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const manualTopicProfile = [
+      ['startups', 32, 68],
+      ['ai', 36, 55],
+      ['culture', 24, 44],
+      ['personal', 14, 33],
+      ['humor', 5, 51],
+      ['finance', 3, 57],
+    ].map(([topic, sampleCount, avgEngagement]) => ({
+      topic,
+      angle: '',
+      weight: 1,
+      sampleCount,
+      avgEngagement,
+      topTweets: [],
+    }));
+    const recentRunCounts: Record<string, number> = {
+      startups: 12,
+      ai: 9,
+      culture: 6,
+      personal: 4,
+      humor: 3,
+      finance: 4,
+      Engineering: 1,
+    };
+    const recentIdeas = Object.entries(recentRunCounts).flatMap(([topic, count]) => (
+      Array.from({ length: count }, (_, index) => ({
+        id: `idea-${topic}-${index}`,
+        briefId: `brief-${topic}`,
+        topic,
+        generationRunId: `run-${topic}-${index}`,
+        createdAt: '2026-08-14T05:30:00.000Z',
+      }))
+    )) as any;
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['Engineering', 'AI', 'startups'] } } as any,
+      learnings: { manualTopicProfile } as any,
+      style: { autonomyMode: 'explore', trendMixTarget: 35, trendTolerance: 'moderate', exploration: { underusedTopics: ['ai', 'startup', 'vc', 'agents'] } } as any,
+      trending: null,
+      allTweets: [],
+      recentIdeas,
+      seedRotationKey: 'production-shaped-topic-retention',
+      now: new Date('2026-08-14T06:00:00.000Z'),
+    });
+    const topics = briefs.map((entry) => entry.topic);
+
+    expect(topics).toContain('startups');
+    expect(topics).not.toContain('Engineering');
+    expect(topics.some((topic) => ['culture', 'personal', 'humor'].includes(topic))).toBe(true);
+  });
+
   it('turns operator outcomes into structured subject signals without leaking prior prose', () => {
     const priorPost = 'one gigawatt of rubins puts 300k gpus and 80 pb of hbm behind the same power constraint';
     const briefs = buildGenerationBriefsV2({
@@ -354,8 +425,9 @@ describe('Tweet Generation V2', () => {
       informedTopicSelection: true,
       premiseSupplied: false,
       subjectCues: [expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/)],
-      instruction: expect.stringContaining('subject'),
+      instruction: expect.stringContaining('Every proposition must use exactly one cue'),
     });
+    expect(JSON.parse(prompt).requirements.personalTopicSignalContract).toContain('retain at least one');
     const writingPrompt = buildTweetWritingPromptV2({
       id: 'idea-ai-subject-cue',
       topic: 'AI',
@@ -475,6 +547,57 @@ describe('Tweet Generation V2', () => {
       now: '2026-08-01T12:00:00.000Z',
     });
     expect(adjacentIdeas[0].rejectionCodes).not.toContain('voice_anchor_semantic_reskin');
+    expect(adjacentIdeas[0].rejectionCodes).toContain('personal_topic_subject_dropped');
+  });
+
+  it('requires a historical topic cue object without requiring the old premise', () => {
+    const signals = [
+      'dinner:estate:host:partie:poker:rich:woodside',
+      'antifund:comma:jakepaul:journey:march',
+    ];
+
+    expect(retainsPersonalTopicSubjectV2(
+      'woodside is a better startup recruiting surface than another founder conference',
+      signals,
+    )).toBe(true);
+    expect(retainsPersonalTopicSubjectV2(
+      'the next great robotics company should obsess over actuator cost',
+      signals,
+    )).toBe(false);
+    expect(retainsPersonalTopicSubjectV2('any subject is valid', ['capital:market'])).toBe(true);
+  });
+
+  it('keeps concrete native subjects and drops abstract token debris from topic cues', () => {
+    const startupCues = buildPersonalTopicSubjectCuesV2('startups', [{
+      content: 'SF rich:\n- estate in woodside\n- host dinner parties and poker\n- play padel on your home court',
+      topic: 'startups',
+    }]);
+    const abstractCues = buildPersonalTopicSubjectCuesV2('culture', [{
+      content: "don't pray on other people's downfall. it simply reveals your own insecurity",
+      topic: 'culture',
+    }]);
+    const humorCues = buildPersonalTopicSubjectCuesV2('humor', [{
+      content: "what is your profession? i'm an aura farmer.",
+      topic: 'humor',
+    }]);
+    const entityCues = buildPersonalTopicSubjectCuesV2('humor', [{
+      content: 'only venues that could possibly beat White House: Roman Colosseum, Moon, Mars',
+      topic: 'humor',
+    }]);
+    const mentionCues = buildPersonalTopicSubjectCuesV2('ai', [{
+      content: '@TonyRobbins cannot bullshit AI twitter https://t.co/9uHK7dM98j',
+      topic: 'ai',
+    }]);
+
+    expect(startupCues).toHaveLength(1);
+    expect(startupCues[0]).toContain('woodside');
+    expect(startupCues[0]).not.toContain('rich');
+    expect(abstractCues).toEqual([]);
+    expect(humorCues).toEqual([expect.stringMatching(/aura.*farmer|farmer.*aura/)]);
+    expect(entityCues).toEqual([expect.stringContaining('white')]);
+    expect(entityCues[0]).toContain('colosseum');
+    expect(mentionCues[0].split(':')).toContain('tonyrobbins');
+    expect(mentionCues[0]).not.toContain('9uhk7dm98j');
   });
 
   it('normalizes a spaced name against its native handle when checking premise reuse', () => {
@@ -954,7 +1077,7 @@ describe('Tweet Generation V2', () => {
     expect(new Set([...first, ...second, ...third]).size).toBeGreaterThan(4);
   });
 
-  it('prioritizes unattempted operator topic lanes during repeated refills', () => {
+  it('rotates one failed topic lane without discarding the proven portfolio', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
@@ -1000,7 +1123,9 @@ describe('Tweet Generation V2', () => {
     const second = buildGenerationBriefsV2({ ...common, recentIdeas });
 
     const freshTopics = second.filter((brief) => !first.some((prior) => prior.topic === brief.topic));
-    expect(freshTopics.length).toBeGreaterThanOrEqual(2);
+    const retainedTopics = second.filter((brief) => first.some((prior) => prior.topic === brief.topic));
+    expect(freshTopics.length).toBeGreaterThanOrEqual(1);
+    expect(retainedTopics.length).toBeGreaterThanOrEqual(2);
   });
 
   it('uses operator history as topic-level strategy rather than replaying its premise', () => {

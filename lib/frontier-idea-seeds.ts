@@ -505,7 +505,7 @@ function preferredGeoffreySeedKinds(targetTopic: string): Array<NonNullable<Fron
   if (/\b(?:boxing|mma|ufc|fight|nfl|nba|football|basketball|soccer|tennis|padel|sports?|athlete)\b/.test(target)) return ['sports'];
   if (/\b(?:health|longevity|lifespan|healthspan|ketone|fitness|exercise|sleep|biohack|human performance|athletic performance)\b/.test(target)) return ['health'];
   if (/\b(?:career|talent|job market|jobs|hiring|credential|education|agency)\b/.test(target)) return ['career'];
-  if (/\b(?:culture|status|merit|nepotis|social|ambition|aura|college|education|elite|power|taste)\b/.test(target)) return ['culture'];
+  if (/\b(?:culture|humor|funny|meme|status|merit|nepotis|social|ambition|aura|college|education|elite|power|taste)\b/.test(target)) return ['culture'];
   if (/\b(?:finance|investing|capital market|stock|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(target)) return ['markets'];
   if (/\b(?:ai|model|openai|anthropic|claude|codex|software|developer|research|math|science)\b/.test(target)) return ['ai_product'];
   if (/\b(?:startups?|founders?|venture|vc|funding|companies|company|products?|customers?|talent|career|jobs?)\b/.test(target)) return ['startup'];
