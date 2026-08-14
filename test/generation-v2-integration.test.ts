@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   upsertIdeaCandidates: vi.fn(),
   accountTasteOverride: null as Record<string, unknown> | null,
   accountTasteImplementation: null as ((content: string) => Record<string, unknown>) | null,
+  geoffreyVoiceProfile: true,
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -52,7 +53,7 @@ vi.mock('@/lib/account-taste', async (importOriginal) => ({
     ...(mocks.accountTasteImplementation?.(content) || mocks.accountTasteOverride || {}),
   }),
   getAutonomousQueueTasteIssue: () => null,
-  isGeoffreyVoiceProfile: () => true,
+  isGeoffreyVoiceProfile: () => mocks.geoffreyVoiceProfile,
 }));
 
 import { generateTweetBatchV2 } from '@/lib/generation-v2';
@@ -282,6 +283,7 @@ describe('generateTweetBatchV2 integration', () => {
     vi.clearAllMocks();
     mocks.accountTasteOverride = null;
     mocks.accountTasteImplementation = null;
+    mocks.geoffreyVoiceProfile = true;
     mocks.getGenerationRuns.mockResolvedValue([]);
     mocks.getIdeaCandidates.mockResolvedValue([]);
     mocks.getSemanticBlocks.mockResolvedValue([]);
@@ -361,7 +363,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-72',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-73',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -551,6 +553,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it('uses one targeted writer and critic round to fill a partial clean result', async () => {
+    mocks.geoffreyVoiceProfile = false;
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -637,6 +640,66 @@ describe('generateTweetBatchV2 integration', () => {
         draftsSelected: 2,
       }),
     });
+  });
+
+  it('spends Geoffrey post-critic capacity on fresh alternate ideas instead of rewrites', async () => {
+    let criticCalls = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        const parsed = JSON.parse(options.prompt);
+        const score = criticCalls === 1 ? 0.78 : 0.92;
+        return result(JSON.stringify({
+          ranking: parsed.candidates.map((candidate: any) => candidate.id),
+          scores: parsed.candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: score,
+            voiceFit: criticCalls === 1 ? 0.82 : 0.92,
+            operatorPlausibility: criticCalls === 1 ? 0.82 : 0.92,
+            cringeRisk: criticCalls === 1 ? 0.1 : 0.02,
+            insight: score,
+            specificity: 0.86,
+            factualSafety: 0.98,
+            clarity: 0.9,
+            novelty: criticCalls === 1 ? 0.82 : 0.9,
+            manualAnchorReskinRisk: 0.02,
+            diagnosis: criticCalls === 1
+              ? 'The core is plausible but still reads like an abstract comparison thesis.'
+              : 'The alternate idea is direct and concrete.',
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const writerPrompts = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt));
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+
+    expect(criticCalls).toBe(2);
+    expect(writerPrompts.every((prompt) => prompt.failedAttempts.length === 0)).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.every((draft) => draft.mutationRound === 0)).toBe(true);
+    expect(finalRun).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({
+        postcriticRescueTargets: expect.any(Number),
+        postcriticPairedWriterTargets: 0,
+        postcriticRescueSuppressedNegativeValue: expect.any(Number),
+        alternateIdeaTargets: 2,
+        alternateDraftsSelected: 2,
+        draftsSelected: 2,
+      }),
+    });
+    expect(finalRun.stageCounts.postcriticRescueTargets).toBeGreaterThan(0);
+    expect(finalRun.stageCounts.postcriticRescueSuppressedNegativeValue).toBe(
+      finalRun.stageCounts.postcriticRescueTargets,
+    );
   });
 
   it('runs a dry preview without persisting traces or candidate memory', async () => {
@@ -1430,6 +1493,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it('can follow a preflight rescue with a separately judged critic-informed rescue', async () => {
+    mocks.geoffreyVoiceProfile = false;
     let writerCalls = 0;
     let criticCalls = 0;
     mocks.accountTasteImplementation = (content) => (
@@ -1527,6 +1591,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it('runs a bounded critic-informed rewrite across distinct ideas and judges each again', async () => {
+    mocks.geoffreyVoiceProfile = false;
     let writerCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
@@ -1589,6 +1654,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it('rotates to judge-approved alternate premises after critic rewrites still fail', async () => {
+    mocks.geoffreyVoiceProfile = false;
     let writerCalls = 0;
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {

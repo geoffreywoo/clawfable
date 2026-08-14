@@ -21,6 +21,7 @@ import {
   getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
+  isAbstractComparativePublicMoveV2,
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
@@ -35,6 +36,7 @@ import {
   selectRankedIdeaPortfolioV2,
   selectNativeReactionAnchors,
   selectSubjectNativeReactionPatternV2,
+  shouldRunPostcriticRescueV2,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
@@ -268,6 +270,51 @@ describe('Tweet Generation V2', () => {
     ]));
   });
 
+  it('rejects abstract comparison theses for Geoffrey before copy generation', () => {
+    const rejectedMoves = [
+      'ChatGPT could become more valuable as a runtime than as a model showcase.',
+      'Cognition gets more interesting as a founder-shaped company instead of a polished one.',
+      'I prefer selective forgetting to exhaustive memory in ChatGPT.',
+      'AI self-help becomes compelling when it punctures grand narratives rather than manufacturing them.',
+    ];
+    const directMoves = [
+      'Google should be willing to cannibalize Chrome for Gemini.',
+      'ChatGPT should default to forgetting most memories.',
+      'i think oai and ant are 5-10T before 2029.',
+    ];
+    expect(rejectedMoves.every(isAbstractComparativePublicMoveV2)).toBe(true);
+    expect(directMoves.some(isAbstractComparativePublicMoveV2)).toBe(false);
+
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const badMove = rejectedMoves[0];
+    const geoffreyIdea = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', badMove)],
+      agentId: 'agent-1',
+      runId: 'run-one-sided-geoffrey',
+      briefs: [brief('operator', 'AI')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T06:00:00.000Z',
+    })[0];
+    const genericIdea = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', badMove)],
+      agentId: 'agent-1',
+      runId: 'run-one-sided-generic',
+      briefs: [brief('operator', 'AI')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T06:00:00.000Z',
+    })[0];
+
+    expect(geoffreyIdea.rejectionCodes).toContain('abstract_comparative_public_move');
+    expect(genericIdea.rejectionCodes).not.toContain('abstract_comparative_public_move');
+  });
+
   it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {
     expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('critic_surgical');
     expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('reconceive');
@@ -281,6 +328,15 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'The native position is sound; cut one hedge and stop.',
     )).toBe('critic_surgical');
+  });
+
+  it('spends Geoffrey close-miss calls on fresh ideas instead of negative-value rewrites', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    expect(shouldRunPostcriticRescueV2(geoffreyVoice)).toBe(false);
+    expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
   });
 
   it('leads voice transfer with a same-register native posture and keeps cross-topic range', () => {
@@ -540,6 +596,7 @@ describe('Tweet Generation V2', () => {
 
   it('does not reuse a sourced story subject through a durable personal cue', () => {
     expect(hasCrossBriefSubjectCollisionV2('cognition scottwu46', 'Cognition valuation talks')).toBe(true);
+    expect(hasCrossBriefSubjectCollisionV2('tonyrobbins storytelling', 'Tony Robbins crowd intervention')).toBe(true);
     expect(hasCrossBriefSubjectCollisionV2('tonyrobbins storytelling', 'Cognition valuation talks')).toBe(false);
     const geoffreyVoiceProfile = {
       ...voiceProfile,
@@ -638,6 +695,68 @@ describe('Tweet Generation V2', () => {
     expect(startupBrief?.personalTopicSignals?.join(' ')).toContain('tonyrobbins');
     expect(startupBrief?.personalTopicSignals?.join(' ')).not.toContain('cognition');
     expect(startupBrief?.personalTopicSignalPremises?.join(' ')).not.toContain('@cognition');
+  });
+
+  it('cools exact native subject cues after a recent failed generation attempt', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['startups', 'AI', 'software', 'markets', 'culture', 'personal'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const nativeTweet = (content: string, topic: string) => ({
+      content,
+      topic,
+      source: 'timeline',
+      authorshipProvenance: 'timeline_unmatched',
+      voiceCorpusDispositions: ['diction_anchor', 'topic_signal'],
+    });
+    const recentIdea = (id: string, topic: string, publicMove: string) => ({
+      id,
+      briefId: `brief-${topic}`,
+      topic,
+      publicMove,
+      claim: publicMove,
+      tension: 'The prior run could not turn this subject into a native post.',
+      implication: 'The exact subject should rotate before another writer call.',
+      generationRunId: `run-${id}`,
+      createdAt: '2026-08-14T05:30:00.000Z',
+    });
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'software', 'markets', 'culture'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: '',
+          weight: 20,
+          sampleCount: 12,
+          avgEngagement: 80,
+          topTweets: [nativeTweet('google should buy @cognition for $200b and make @ScottWu46 ceo', 'startups')],
+        }, {
+          topic: 'AI',
+          angle: '',
+          weight: 20,
+          sampleCount: 12,
+          avgEngagement: 75,
+          topTweets: [nativeTweet('@TonyRobbins is the best bullshitter in the game', 'AI')],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      recentIdeas: [
+        recentIdea('cognition', 'startups', 'Cognition should stay founder-shaped.'),
+        recentIdea('tony', 'AI', 'Tony Robbins needs an AI skeptic in the crowd.'),
+      ] as any,
+      seedRotationKey: 'native-subject-cooldown',
+      now: new Date('2026-08-14T06:00:00.000Z'),
+    });
+
+    const activeSignals = briefs.flatMap((entry) => entry.personalTopicSignals || []).join(' ');
+    expect(activeSignals).not.toMatch(/cognition|tonyrobbins/i);
   });
 
   it('rotates away from operator subjects already attempted in recent generation runs', () => {
