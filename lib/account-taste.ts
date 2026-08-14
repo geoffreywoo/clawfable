@@ -1123,7 +1123,7 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Each variant's assigned register anchor is the style target; match its bluntness or unfinished quality without averaging anchors or faking slang and typos.
 - Conceive each variant separately. Three polished paraphrases are not variants.
 - Never announce "the [category] startup/company/agent I would back, buy, or bet on." Name the entity or state the criterion.
-- For source-free AI, avoid permission, authority, workflow, release-gate, task-continuity, and benchmark-test product specs. Prefer a named valuation, timing, status, or competition bet, real question, or weird prediction.
+- For source-free AI, avoid permission, authority, workflow, release-gate, task-continuity, and benchmark-test product specs. Prefer a named valuation or timing call with one real reason, a company-quality judgment, a real question, or a weird subject-specific prediction. Never manufacture a status object, status asset, status signal, new status game, or flex.
 - Begin with the thought, not "my take," a rule, philosophy, dream acquisition, litmus test, or thing you keep returning to.
 - Stop before advice, a balanced contrast, a lesson, slogan, or synthetic mic drop. Make the thought worth posting.`;
 }

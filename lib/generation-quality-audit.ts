@@ -10,6 +10,8 @@ import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
   getModelChainForTask,
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
+  PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
   resolvePublishingV2ModelStacks,
 } from './ai';
 import { buildGenerationContext } from './generation-context';
@@ -61,7 +63,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 28;
+export const GENERATION_QUALITY_AUDIT_VERSION = 29;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -423,6 +425,7 @@ interface AuditFindingInput {
     writerOutcomes?: ReturnType<typeof buildGenerationWriterOutcomeAudit>;
     stageThroughput?: {
       ideasSelected: number;
+      draftsGenerated?: number;
       draftsEligible: number;
       draftsSelected: number;
       criticSelectionRate: number | null;
@@ -589,6 +592,30 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
   }
 
   const stageThroughput = input.currentPolicyWindow.stageThroughput;
+  const precriticDraftYield = (stageThroughput?.draftsGenerated || 0) > 0
+    ? (stageThroughput?.draftsEligible || 0) / (stageThroughput?.draftsGenerated || 1)
+    : null;
+  if (
+    input.currentPolicyWindow.runCount >= 2
+    && (stageThroughput?.draftsGenerated || 0) >= 16
+    && precriticDraftYield !== null
+    && precriticDraftYield < 0.2
+  ) {
+    add({
+      code: 'current_policy_precritic_attrition_high',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Most current-policy drafts fail before model judgment',
+      evidence: {
+        runCount: input.currentPolicyWindow.runCount,
+        draftsGenerated: stageThroughput?.draftsGenerated || 0,
+        draftsEligible: stageThroughput?.draftsEligible || 0,
+        precriticDraftYield: Number(precriticDraftYield.toFixed(4)),
+        initialWriterGroups: input.currentPolicyWindow.writerOutcomes?.groups.filter((group) => group.phase === 'initial') || [],
+      },
+      action: 'Repair subject selection, approved public moves, and primary-writer allocation before increasing generation volume; keep deterministic voice gates fixed.',
+    });
+  }
   if (
     input.currentPolicyWindow.runCount >= 2
     && (stageThroughput?.ideasSelected || 0) >= 4
@@ -941,6 +968,16 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const modelStackAssignment = resolvePublishingV2ModelStacks(agent.handle);
   const activeModelStack = modelStackAssignment.activeStack;
+  const writerShadowRuns = generationV2.lineage.filter((run) => {
+    if (run.mode !== 'live' || (run.surface || 'original') !== 'original') return false;
+    const stacks = new Set(run.drafts
+      .filter((draft) => (draft.mutationRound || 0) === 0)
+      .map((draft) => draft.generationModelStack));
+    return stacks.has(PUBLISHING_V2_CONTROL_MODEL_STACK)
+      && stacks.has(PUBLISHING_V2_GPT_CONTROL_MODEL_STACK);
+  }).slice(0, 12);
+  const writerShadowEvidence = buildGenerationWriterOutcomeAudit(writerShadowRuns).groups
+    .filter((group) => group.phase === 'initial');
   const ideaGenerationChain = getModelChainForTask(
     'idea_generation',
     'quality',
@@ -1472,6 +1509,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         sharedIdeaGenerator: primaryIdeaGeneration,
         sharedIdeaJudge: primaryIdeaJudge,
         sharedCopyJudge: primaryCopyJudge,
+      },
+      shadowEvidence: {
+        runCount: writerShadowRuns.length,
+        policyVersions: [...new Set(writerShadowRuns.map((run) => run.qualityPolicyVersion))].slice(0, 12),
+        groups: writerShadowEvidence,
+        caveat: 'Observational production comparison. Writer variants did not have identical shapes or sample sizes; judge scores cover only drafts that passed deterministic preflight.',
       },
       pricingCoverage: {
         complete: modelPricingCoverage.every((target) => target.priced),
