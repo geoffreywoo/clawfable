@@ -6,6 +6,7 @@ import {
   classifyGeoffreyTopicDomain,
   enrichTrendingTopics,
   formatTrendEvidence,
+  getOperatorTopicSignalRejectionCodes,
   isCoreGeoffreyTopicDomain,
   isGeoffreyDeepTechnicalTopic,
   isGeoffreyManufacturingMaterialsTopic,
@@ -476,13 +477,13 @@ describe('source planner', () => {
     const signalSlot = plan.slots.find((slot) => slot.briefEvidence?.mode === 'operator_topic_signal');
     expect(plan.topicSignals?.map((topic) => topic.networkTopicId)).toContain('network-liked-boxing');
     expect(signalSlot).toMatchObject({
-      targetTopic: 'Jake Paul, NFL in sports competition',
+      targetTopic: 'Jake Paul NFL boxing',
       trendTopicId: null,
       trendHeadline: null,
       ideaSeed: null,
       briefEvidence: {
         mode: 'operator_topic_signal',
-        subject: 'Jake Paul, NFL in sports competition',
+        subject: 'Jake Paul NFL boxing',
         factualClaimAllowed: false,
         provenanceId: 'network-liked-boxing',
       },
@@ -528,9 +529,90 @@ describe('source planner', () => {
     expect(signals).toEqual([
       expect.objectContaining({
         id: 'network-opendoor',
-        subject: 'Opendoor, Justin Ross in startups markets',
+        subject: 'Opendoor startup strategy',
       }),
     ]);
+  });
+
+  it('rejects a direct sales pitch from the operator-engaged subject lane', () => {
+    const topic = {
+      id: 954,
+      networkTopicId: 'network-coverage-pitch',
+      headline: 'Justin Dross promotes Coverage as taking on insurance brokers.',
+      source: '@justindross',
+      relevanceScore: 90,
+      category: 'Coverage insurance broker pitch',
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'medium' as const,
+      semanticDomain: 'startups_markets' as const,
+      entities: ['Coverage', 'Justin Dross', 'insurance brokers'],
+      isPrimarySource: false,
+      topTweet: {
+        id: 'coverage-pitch-post',
+        text: 'I will personally show how we can help: founder@withcoverage.com',
+        likes: 900,
+        author: 'justindross',
+      },
+    };
+    const [enriched] = enrichTrendingTopics([topic], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['promotional posts'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate');
+
+    expect(getOperatorTopicSignalRejectionCodes(enriched)).toContain('promotional_source');
+    expect(selectOperatorTopicSignals([topic], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['promotional posts'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate')).toEqual([]);
+  });
+
+  it('retains a classified technical object without retaining an unverified event', () => {
+    const topic = {
+      id: 955,
+      networkTopicId: 'network-trajectory-funding',
+      headline: 'Trajectory reportedly raised funding from Sequoia for open-source model work.',
+      source: '@reporter',
+      relevanceScore: 90,
+      category: 'Trajectory Sequoia funding',
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'startups_markets' as const,
+      entities: ['Trajectory', 'Sequoia', 'open source models'],
+      isPrimarySource: false,
+      topTweet: { id: 'trajectory-post', text: 'raw network prose', likes: 100, author: 'reporter' },
+    };
+    const [signal] = selectOperatorTopicSignals([topic], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['unsupported events'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate');
+
+    expect(signal.subject).toBe('Trajectory Sequoia open source models');
+    expect(signal.subject).not.toContain('funding');
   });
 
   it('does not spend a new brief on a qualified trend already represented in the queue', () => {
