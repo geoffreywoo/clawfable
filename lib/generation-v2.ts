@@ -667,20 +667,31 @@ function personalTopicSignalPremises(topic: string, tweets: TweetPerformance[]):
 }
 
 function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = []): boolean {
-  const distinctiveTokens = (value: string): Set<string> => {
+  const distinctiveTokens = (value: string): { tokens: Set<string>; properNames: Set<string> } => {
     const tokens = significantResearchTokens(value)
       .map((token) => token.replace(/\d+$/g, ''))
       .filter((token) => token.length >= 3 && !PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS.has(token));
     const properNames = (value.match(/\b[A-Z][A-Za-z0-9]{2,}\s+[A-Z][A-Za-z0-9]{1,}\b/g) || [])
       .map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/g, ''))
       .filter((name) => name.length >= 5);
-    return new Set([...tokens, ...properNames]);
+    return {
+      tokens: new Set([...tokens, ...properNames]),
+      properNames: new Set(properNames),
+    };
   };
-  const candidateTokens = distinctiveTokens(text);
-  if (candidateTokens.size < 2) return false;
+  const candidate = distinctiveTokens(text);
+  if (candidate.tokens.size < 2) return false;
   return premises.some((premise) => {
-    const premiseTokens = distinctiveTokens(premise);
-    return sharedTokenCount([...premiseTokens], candidateTokens) >= 2;
+    const source = distinctiveTokens(premise);
+    const shared = [...source.tokens].filter((token) => candidate.tokens.has(token));
+    if (shared.length < 2) return false;
+    const sharedNamedIdentity = shared.some((token) => (
+      candidate.properNames.has(token) || source.properNames.has(token)
+    ));
+    const sharedRareObject = shared.some((token) => token.length >= 8);
+    return sharedNamedIdentity || sharedRareObject || (
+      shared.length >= 3 && shared.some((token) => token.length >= 6)
+    );
   });
 }
 
@@ -1480,7 +1491,7 @@ function unsupportedOperatorFact(text: string): boolean {
 const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:'d| would|'ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| judge| rate| treat| believe| think)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced))\b/i;
 
 export function isGenericOperatorProductWishlistV2(text: string): boolean {
-  return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the\s+first|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
+  return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
 }
 
 function unsupportedOperatorEvidence(text: string, lockEvidenceConcepts = true): boolean {

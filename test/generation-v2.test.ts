@@ -1470,6 +1470,9 @@ describe('Tweet Generation V2', () => {
     expect(isGenericOperatorProductWishlistV2(
       'i want OpenAI to buy Linear.',
     )).toBe(false);
+    expect(isGenericOperatorProductWishlistV2(
+      'i want the agent with a corporate card and a painfully low spending limit.',
+    )).toBe(true);
     expect(getV2GeneratedWritingIssue(
       'google should stop treating the coding agent like another tab.\n\nmake it the default interface to the entire developer stack.',
     )).toContain('stop-treating-make-default');
