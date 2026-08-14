@@ -776,7 +776,61 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
-    expect(signal?.authorOpportunity).toContain('Preserve relationships such as timing, strategy, product, or competition');
+    expect(signal?.authorOpportunity).toContain('Preserve relationships such as strategy, product, or competition');
+  });
+
+  it('treats a named IPO timing comparison as a complete direct-prediction brief', () => {
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [{
+        id: 992,
+        networkTopicId: 'network-modal-databricks-ipo',
+        headline: 'A network post asks which company will IPO first.',
+        source: '@builder',
+        relevanceScore: 92,
+        category: 'Modal Databricks IPO timing',
+        timestamp: new Date().toISOString(),
+        tweetCount: 1,
+        sourceType: 'x',
+        sourceCount: 1,
+        discoveryMethod: 'followed_network',
+        networkMomentumScore: 0.86,
+        operatorEngagementScore: 0.94,
+        topicConfidence: 0.9,
+        topicUncertainty: 'low',
+        semanticDomain: 'finance_investing',
+        entities: ['Modal', 'Databricks'],
+        isPrimarySource: false,
+        topTweet: { id: 'network-post-ipo', text: 'raw network prose', likes: 900, author: 'builder' },
+      } as any],
+      allTweets: [],
+    });
+
+    const timingBrief = briefs.find((entry) => entry.trendTopicId === 'network-modal-databricks-ipo')!;
+    expect(timingBrief.authorOpportunity).toContain('say who happens first');
+    expect(timingBrief.authorOpportunity).toContain('One compressed line can be complete');
+    expect(timingBrief.authorOpportunity).toContain('Do not invent');
+
+    const writingPrompt = JSON.parse(buildTweetWritingPromptV2({
+      id: 'idea-ipo-timing',
+      publicMove: 'i think Modal IPOs before Databricks.',
+      claim: 'My prediction is that Modal goes public first.',
+      tension: 'I could be wrong.',
+      implication: 'The comparison is the point.',
+      counterargument: 'Databricks may move first.',
+      topic: timingBrief.topic,
+    } as IdeaCandidate, timingBrief, [], []));
+    expect(writingPrompt.subjectContext.briefIntent).toBe(timingBrief.authorOpportunity);
   });
 
   it('allocates two of four Geoffrey briefs to fresh operator-engaged subjects', () => {
