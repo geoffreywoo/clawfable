@@ -12,6 +12,7 @@ import {
   getCommittedTweetCopyMemoryV2,
   getGeoffreyFinalNoveltyIssueV2,
   getOperatorTopicConstraintIssuesV2,
+  getOperatorTopicSignalAttemptDecisionV2,
   hasCrossBriefSubjectCollisionV2,
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
@@ -36,6 +37,7 @@ import {
   isStoryEditoriallyQualifiedV2,
   isSyntheticGeoffreyStatusFrameV2,
   normalizeIdeaCandidatesV2,
+  normalizeDirectComparisonPublicMoveV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
   retainsPersonalTopicSubjectV2,
@@ -46,8 +48,9 @@ import {
   shouldRunPostcriticRescueV2,
   shouldTryV2SubtractiveTailRepair,
   type GenerationBriefV2,
+  PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from '@/lib/generation-v2';
-import { buildResearchSemanticKey } from '@/lib/research-utils';
+import { buildResearchSemanticKey, stableResearchId } from '@/lib/research-utils';
 import {
   classifyGeoffreyTopicDomain,
   isGeoffreyDeepTechnicalTopic,
@@ -536,7 +539,15 @@ describe('Tweet Generation V2', () => {
       counterargument: 'Dexterity can still determine whether the robot is useful.',
     } as IdeaCandidate, brief('robotics', 'robotics'), [], []));
     expect(prompt.responseContract.variantMoves[1].instruction).toContain('never wrap a category');
-    expect(prompt.responseContract.diversityContract).toContain('one consequence from stakes');
+    expect(prompt.responseContract.variantMoves[0]).toEqual(expect.objectContaining({
+      consequenceRole: 'approved_consequence',
+      instruction: expect.stringContaining('same casual thought'),
+    }));
+    expect(prompt.responseContract.variantMoves[1]).toEqual(expect.objectContaining({
+      consequenceRole: 'reaction_only',
+      instruction: expect.stringContaining('Stop at the direct reaction'),
+    }));
+    expect(prompt.responseContract.diversityContract).toContain('Slot 1 must make one approved consequence');
 
     const singleWriterPrompt = JSON.parse(buildTweetWritingPromptV2(
       rawIdea('operator', 'ChatGPT is the OpenAI asset I would bet on.') as IdeaCandidate,
@@ -785,6 +796,51 @@ describe('Tweet Generation V2', () => {
     expect(getOperatorTopicAttemptPenaltyV2('the active SOUL topic agenda', 12)).toBe(0.24);
     expect(getOperatorTopicAttemptPenaltyV2('mature account performance', 12)).toBe(0.36);
     expect(getOperatorTopicAttemptPenaltyV2('an underused operator topic', 12)).toBe(0.54);
+  });
+
+  it('releases failed network subjects quickly while retaining viable-premise cooldowns', () => {
+    const signalId = 'network-modal-retry';
+    const idea = {
+      id: 'idea-modal-retry',
+      briefId: stableResearchId('brief', 'operator-topic-signal', signalId),
+      generationRunId: 'run-modal-retry',
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      status: 'rejected',
+      createdAt: '2026-08-14T04:30:00.000Z',
+    } as IdeaCandidate;
+    const now = new Date('2026-08-14T06:00:00.000Z');
+
+    expect(getOperatorTopicSignalAttemptDecisionV2(signalId, [idea], now)).toMatchObject({
+      eligible: true,
+      disposition: 'failed_attempt_released',
+      attemptedRunCount: 1,
+      viableRunCount: 0,
+    });
+    expect(getOperatorTopicSignalAttemptDecisionV2(signalId, [{
+      ...idea,
+      status: 'selected',
+    }], now)).toMatchObject({
+      eligible: false,
+      disposition: 'viable_attempt_cooldown',
+      attemptedRunCount: 1,
+      viableRunCount: 1,
+    });
+    expect(getOperatorTopicSignalAttemptDecisionV2(signalId, [{
+      ...idea,
+      status: 'quarantined',
+    }], now)).toMatchObject({
+      eligible: true,
+      disposition: 'failed_attempt_released',
+      viableRunCount: 0,
+    });
+    expect(getOperatorTopicSignalAttemptDecisionV2(signalId, [{
+      ...idea,
+      qualityPolicyVersion: 'publishing-v2-hard-gates-103',
+    }], now)).toMatchObject({
+      eligible: true,
+      disposition: 'prior_policy_only',
+      priorPolicyRunCount: 1,
+    });
   });
 
   it('retains proven startup taste after failed runs instead of drifting to generic categories', () => {
@@ -1319,8 +1375,17 @@ describe('Tweet Generation V2', () => {
     })) as any;
     const second = buildGenerationBriefsV2({ ...common, recentIdeas: [...newerNoise, ...recentIdeas] });
     const secondSignal = second.find((entry) => entry.trendTopicId?.startsWith('network-'))!;
+    const afterPolicyUpgrade = buildGenerationBriefsV2({
+      ...common,
+      recentIdeas: recentIdeas.map((idea) => ({
+        ...idea,
+        qualityPolicyVersion: 'publishing-v2-hard-gates-103',
+      })),
+    });
+    const upgradedSignal = afterPolicyUpgrade.find((entry) => entry.trendTopicId?.startsWith('network-'))!;
 
     expect(secondSignal.trendTopicId).not.toBe(firstSignal.trendTopicId);
+    expect(upgradedSignal.trendTopicId).toBe(firstSignal.trendTopicId);
   });
 
   it('blocks a personal topic signal from inverting the native premise that produced it', () => {
@@ -1604,6 +1669,10 @@ describe('Tweet Generation V2', () => {
     expect(timingBrief.authorOpportunity).toContain('say who happens first');
     expect(timingBrief.authorOpportunity).toContain('One compressed line can be complete');
     expect(timingBrief.authorOpportunity).toContain('Do not invent');
+    expect(normalizeDirectComparisonPublicMoveV2(
+      'Databricks rings the bell before Modal even files. Modal is still in the phase where staying private compounds faster.',
+      timingBrief,
+    )).toBe('Databricks rings the bell before Modal even files.');
 
     const writingPrompt = JSON.parse(buildTweetWritingPromptV2({
       id: 'idea-ipo-timing',
@@ -3433,6 +3502,7 @@ describe('Tweet Generation V2', () => {
         publicMove: expect.stringContaining('reason to react now'),
         opening: expect.stringContaining('author\'s verdict'),
         factSelection: expect.stringContaining('exactly one decisive factual atom'),
+        sourceWording: expect.stringContaining('four consecutive words'),
         attribution: expect.stringContaining('shortest accurate trailing'),
       }),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
@@ -3460,6 +3530,7 @@ describe('Tweet Generation V2', () => {
       'named_call',
       'thought_in_motion',
     ]);
+    expect(writingPrompt.responseContract.variantMoves[2].instruction).toContain('Never stage isolated noun fragments');
     expect(writingPrompt.responseContract.diversityContract).toContain('must not share');
     expect(writingPrompt.voiceTransferContract).toEqual(expect.objectContaining({
       primaryRegisterAnchorId: 'operator-post-1',

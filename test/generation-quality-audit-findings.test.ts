@@ -41,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-103',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-104',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -640,6 +640,39 @@ describe('generation quality audit findings', () => {
         code: 'source_briefs_exhausted',
         severity: 'high',
         scope: 'live_state',
+      }),
+    ]));
+  });
+
+  it('identifies repeated source-copy failures as a writer collision rather than weak evidence', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      runsWithSelectedDrafts: 0,
+      selectedDraftCount: 0,
+      selectionYield: 0,
+      writerOutcomes: {
+        groups: [{
+          phase: 'initial',
+          model: 'openai:gpt-5.6',
+          generatedCount: 12,
+          finalCriticCount: 0,
+          selectedCount: 0,
+          selectionRate: 0,
+          averageJudgeScore: null,
+          averageQualityMargin: null,
+          averageNativeVoice: null,
+          averageCringeRisk: null,
+          topRejectionCodes: [{ value: 'final_source_copy_risk', count: 4 }],
+        }],
+      },
+    } as any;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_source_wording_collision',
+        severity: 'high',
+        evidence: expect.objectContaining({ sourceCopyRejectionCount: 4 }),
       }),
     ]));
   });

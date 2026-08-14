@@ -35,6 +35,7 @@ import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import {
   buildFailedStoryAttemptDiagnosticsV2,
   buildGenerationBriefsV2,
+  getOperatorTopicSignalAttemptDecisionV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
   isEligibleOperatorTopicCueSourceV2,
@@ -64,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 30;
+export const GENERATION_QUALITY_AUDIT_VERSION = 31;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -455,6 +456,11 @@ interface AuditFindingInput {
 export function buildGenerationAuditFindings(input: AuditFindingInput): GenerationAuditFinding[] {
   const findings: GenerationAuditFinding[] = [];
   const add = (finding: GenerationAuditFinding) => findings.push(finding);
+  const sourceCopyRejectionCount = input.currentPolicyWindow.writerOutcomes?.groups
+    ?.filter((group) => group.phase === 'initial')
+    .flatMap((group) => group.topRejectionCodes || [])
+    .filter((entry) => entry.value === 'final_source_copy_risk')
+    .reduce((sum, entry) => sum + entry.count, 0) || 0;
 
   if (input.identity.status !== 'verified') {
     add({
@@ -725,6 +731,25 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'No editorially valid source story is currently available to generation',
       evidence: input.sources,
       action: 'Refresh qualified primary sources and inspect semantic-memory, commitment, and editorial-cooldown exclusions; keep source-free opinions inside factual-restraint gates.',
+    });
+  }
+
+  if (
+    input.currentPolicyWindow.runCount > 0
+    && sourceCopyRejectionCount >= 3
+    && input.currentPolicyWindow.selectedDraftCount === 0
+  ) {
+    add({
+      code: 'current_policy_source_wording_collision',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Verified-source drafts are echoing source prose before criticism',
+      evidence: {
+        qualityPolicyVersion: input.currentPolicyWindow.qualityPolicyVersion,
+        sourceCopyRejectionCount,
+        selectedDraftCount: input.currentPolicyWindow.selectedDraftCount,
+      },
+      action: 'Keep the source-copy gate. Make idea and writer prompts paraphrase the approved factual atom in independent syntax before attribution.',
     });
   }
 
@@ -1094,6 +1119,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     context.style.trendTolerance,
     12,
   );
+  const operatorTopicSignalPlanningDecisions = selectedOperatorTopicSignals.map((signal) => ({
+    id: signal.id,
+    subject: signal.subject,
+    domain: signal.domain,
+    attempt: getOperatorTopicSignalAttemptDecisionV2(signal.id, recentIdeas),
+  }));
   const auditAnalysis: AccountAnalysis = analysis || {
     agentId: agent.id,
     analyzedAt: '',
@@ -1500,6 +1531,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         eligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
         selectedCount: selectedOperatorTopicSignals.length,
         selected: selectedOperatorTopicSignals,
+        planningEligibleCount: operatorTopicSignalPlanningDecisions.filter((decision) => decision.attempt.eligible).length,
+        attemptDispositionCounts: countBy(operatorTopicSignalPlanningDecisions.map((decision) => (
+          decision.attempt.disposition
+        ))),
+        planningDecisions: operatorTopicSignalPlanningDecisions,
         rejectedReasonCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
         rejected: operatorTopicSignalDecisions
           .filter((decision) => decision.rejectionCodes.length > 0)
