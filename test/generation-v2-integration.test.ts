@@ -311,6 +311,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(ideaCall.jsonSchema.properties.ideas.items.required).not.toContain('authorReason');
+    expect(ideaCall.jsonSchema.properties.ideas.items.properties).not.toHaveProperty('authorReason');
     expect(writerCall).toMatchObject({
       maxTokens: 3200,
       timeoutMs: 75_000,
@@ -349,7 +351,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-40',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-43',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -400,7 +402,11 @@ describe('generateTweetBatchV2 integration', () => {
           expect(prompt.retry.failures).toEqual([expect.objectContaining({
             briefId: poisonedBriefId,
             attempts: expect.arrayContaining([
-              expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+              expect.objectContaining({
+                tension: expect.any(String),
+                implication: expect.any(String),
+                rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+              }),
             ]),
           })]);
           generated.ideas = generated.ideas.map((idea: any, index: number) => ({
@@ -753,7 +759,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
     expect(writerSystem).toContain('Write the live reaction, not a compressed brief');
-    expect(writerSystem).toContain('approved claim is the concrete fact ceiling');
+    expect(writerSystem).toContain('approved thought packet is the concrete fact ceiling');
     expect(writerSystem).toContain('Never turn attributed evidence into an unqualified fact');
     expect(writerSystem).toContain('Conceive each variant separately');
     expect(writerSystem).toContain('Stop before advice, a balanced contrast');
@@ -1445,9 +1451,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(criticCalls).toBe(2);
     expect(criticRescueWriterCalls).toHaveLength(2);
     expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_fable_control')).toBe(true);
-    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('surgical critic pass'))).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('Treat failed attempts as negative examples'))).toBe(true);
     expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.every((attempt: any) => (
-      attempt.instruction.includes('smallest sufficient change')
+      attempt.instruction.includes('Negative example only')
     )))).toBe(true);
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
@@ -1462,6 +1468,8 @@ describe('generateTweetBatchV2 integration', () => {
       stageCounts: expect.objectContaining({
         preflightRescueTargets: 2,
         postcriticRescueTargets: 2,
+        postcriticSurgicalTargets: 0,
+        postcriticReconceiveTargets: 2,
         rescueTargets: 4,
         rescueDraftsGenerated: 4,
         draftsSelected: 2,

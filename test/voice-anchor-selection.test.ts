@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { selectCrossTopicDictionAnchors } from '@/lib/voice-anchor-selection';
+import {
+  selectCrossTopicDictionAnchors,
+  selectRegisterMatchedDictionAnchors,
+} from '@/lib/voice-anchor-selection';
 
 describe('selectCrossTopicDictionAnchors', () => {
   it('keeps raw diction examples outside the active brief domains', () => {
@@ -28,5 +31,33 @@ describe('selectCrossTopicDictionAnchors', () => {
     ];
 
     expect(selectCrossTopicDictionAnchors(anchors, [], 1)).toEqual([anchors[0]]);
+  });
+});
+
+describe('selectRegisterMatchedDictionAnchors', () => {
+  it('finds a local conversational register without using unrelated personal diction', () => {
+    const anchors = [
+      { topic: 'personal', content: 'quitting caffeine for two weeks. who is in?' },
+      { topic: 'AI', content: 'ai will rule the world through human shells' },
+      { topic: 'investing', content: 'i bought more memory stocks but did not have enough courage to swing big' },
+      { topic: 'startups', content: 'founder updates are useful when they contain the actual bad news' },
+    ];
+
+    expect(selectRegisterMatchedDictionAnchors(
+      anchors,
+      ['Opendoor in startups and markets', 'I would want to own it after deliberate shrinking.'],
+      3,
+    )).toEqual([anchors[2], anchors[3]]);
+  });
+
+  it('excludes a same-register anchor when it is already the active premise', () => {
+    const copied = { topic: 'AI', content: 'openai is bundling models browsers hardware and agents' };
+    const distinct = { topic: 'AI', content: 'did anyone get more utility out of the new model?' };
+
+    expect(selectRegisterMatchedDictionAnchors(
+      [copied, distinct],
+      ['openai', copied.content],
+      2,
+    )).toEqual([distinct]);
   });
 });

@@ -1099,10 +1099,13 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
 - Write the thought Geoffrey would send to one smart founder or investor, then stop. It should feel high-context, casual, opinionated, and a little uneven, never like an analyst summarizing a brief.
+- The approved thought packet is intentionally more explicit and formal than the public post. Translate it down into Geoffrey's spoken startup/market register; do not preserve memo nouns just because they passed idea judgment.
 - Start with the named subject, reaction, bet, question, or desire. Let the position carry the personality; do not paste slang or "i think" onto formal prose.
 - Native range includes one blunt line, two uneven beats, and a rough multi-paragraph thought when the idea genuinely needs context. Do not force every take into an aphorism.
 - Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."
+- Keep at most one finance or analyst term such as "terminal value," "comps," "probability surface," or "multiple" unless the term itself is the point. Say the rest the way a smart friend would say it aloud.
 - Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
+- The primary register anchor is the positive style target for this subject. Match how casual, blunt, or unfinished it feels. Do not average the anchors into cleaner English and never manufacture its slang or typos.
 - Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
 - Begin with the content of the thought. Do not announce a "take," "rule," "philosophy," "dream acquisition," "litmus test," or thing you keep coming back to; those become synthetic scaffolds when generated.
 - Stop before advice, a balanced contrast, a lesson, a slogan, or a synthetic mic drop. Deterministic gates will handle the blocklist; concentrate on making the thought worth posting.`;
