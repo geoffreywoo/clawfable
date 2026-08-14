@@ -1989,6 +1989,11 @@ describe('Tweet Generation V2', () => {
         instruction: expect.stringContaining('reason to publish now'),
       }),
       factualWritingContract: expect.stringContaining('directly supported'),
+      verifiedSourceReactionContract: expect.objectContaining({
+        publicMove: expect.stringContaining('reason to react now'),
+        opening: expect.stringContaining('author\'s verdict'),
+        attribution: expect.stringContaining('trailing'),
+      }),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
       voiceAnchors: [expect.objectContaining({
         id: 'operator-post-1',
@@ -2024,6 +2029,11 @@ describe('Tweet Generation V2', () => {
     expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
     expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
     expect(operatorWritingPrompt.factualWritingContract).toContain('approved thought packet');
+    expect(operatorWritingPrompt.verifiedSourceReactionContract).toBeNull();
+    expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
+      expect.stringContaining('private capital'),
+      expect.stringContaining('category leadership'),
+    ]));
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
