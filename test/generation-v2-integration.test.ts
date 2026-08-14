@@ -345,7 +345,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-21',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-22',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -518,7 +518,7 @@ describe('generateTweetBatchV2 integration', () => {
         casualStartupFit: 0.59,
       }),
     });
-    expect(rejected.judgeBreakdown.qualityMargin).toBeLessThan(0.85);
+    expect(rejected.judgeBreakdown.qualityMargin).toBeLessThan(0.81);
     expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'tweet_writing')).toHaveLength(4);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({ retryUsed: 0, rescueTargets: 0 }),
@@ -552,7 +552,7 @@ describe('generateTweetBatchV2 integration', () => {
             overall: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.78,
             voiceFit: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
             operatorPlausibility: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
-            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.18,
+            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.34,
             insight: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.86 : 0.78,
             specificity: 0.82,
             factualSafety: 0.98,
@@ -1412,7 +1412,7 @@ describe('generateTweetBatchV2 integration', () => {
             overall: 0.78,
             voiceFit: 0.82,
             operatorPlausibility: 0.82,
-            cringeRisk: 0.18,
+            cringeRisk: 0.34,
             insight: 0.78,
             specificity: 0.8,
             factualSafety: 0.98,

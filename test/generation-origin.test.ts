@@ -152,8 +152,12 @@ describe('generated publishing origin gate', () => {
     })).toContain('model-critic allow verdict');
     expect(getGeneratedPublishIssue({
       ...complete,
-      finalCriticScores: { qualityMargin: 0.84 } as any,
+      finalCriticScores: { qualityMargin: 0.8 } as any,
     })).toContain('final quality margin');
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      finalCriticScores: { qualityMargin: 0.81 } as any,
+    })).toBeNull();
   });
 
   it('applies to every account and reply surface', () => {
