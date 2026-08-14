@@ -1099,7 +1099,7 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
 - Write the thought Geoffrey would send to one smart founder or investor, then stop. It should feel high-context, casual, opinionated, and a little uneven, never like an analyst summarizing a brief.
-- The approved thought packet is intentionally more explicit and formal than the public post. Translate it down into Geoffrey's spoken startup/market register; do not preserve memo nouns just because they passed idea judgment.
+- Preserve the approved publicMove's actual judgment. Use its supporting fields only to keep the post accurate; do not serialize them or preserve memo nouns just because they passed idea judgment.
 - Start with the named subject, reaction, bet, question, or desire. Let the position carry the personality; do not paste slang or "i think" onto formal prose.
 - Native range includes one blunt line, two uneven beats, and a rough multi-paragraph thought when the idea genuinely needs context. Do not force every take into an aphorism.
 - Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."

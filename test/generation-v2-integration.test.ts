@@ -74,6 +74,7 @@ function ideaResponse(prompt: string) {
     const path = `${String.fromCharCode(97 + briefIndex)}${String.fromCharCode(97 + variant)}`;
     return {
       briefId: brief.id,
+      publicMove: `i'd make the named ${brief.topic} decision before the obvious path ${path}`,
       claim: `${brief.topic} changes which proof must exist before a team commits capacity on path ${path}`,
       tension: `The visible launch on path ${path} arrives before buyers know which operating promise will hold`,
       implication: `Sequence the proof, capacity commitment, and buyer decision differently for path ${path}`,
@@ -100,6 +101,7 @@ function ideaResponseWithReserve(prompt: string) {
     if (!operatorBriefIds.has(idea.briefId) || variant === 0) return idea;
     if (variant === 1) return {
       ...idea,
+      publicMove: 'founders should keep one consequential product decision deliberately unoptimized',
       claim: 'founders should keep one consequential product decision deliberately unoptimized',
       tension: 'optimization can erase the weird preference that makes a company legible',
       implication: 'protect the choice customers remember instead of averaging it away',
@@ -107,6 +109,7 @@ function ideaResponseWithReserve(prompt: string) {
     };
     return {
       ...idea,
+      publicMove: 'the best startup update makes one uncomfortable tradeoff explicit',
       claim: 'the best startup update makes one uncomfortable tradeoff explicit',
       tension: 'polished progress reports can hide which risk the founder is actually taking',
       implication: 'back the founder who names the bet before the outcome makes it obvious',
@@ -129,6 +132,7 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
       consequence: 0.88,
       distinctiveness: 0.86,
       nativeReactionPotential: 0.9,
+      publicMoveStrength: 0.9,
       sharePotential: 0.84,
     }) : ({
       id,
@@ -311,6 +315,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
     expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(ideaCall.jsonSchema.properties.ideas.items.required).toContain('publicMove');
     expect(ideaCall.jsonSchema.properties.ideas.items.required).not.toContain('authorReason');
     expect(ideaCall.jsonSchema.properties.ideas.items.properties).not.toHaveProperty('authorReason');
     expect(writerCall).toMatchObject({
@@ -333,6 +338,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCall.jsonSchema.properties.scores.items.required).toContain('diagnosis');
     expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
+    expect(writerPrompt.idea.publicMove).toEqual(expect.any(String));
+    expect(writerPrompt.idea).toHaveProperty('factualBasis');
+    expect(writerPrompt.idea).not.toHaveProperty('claim');
     expect(writerPrompt).not.toHaveProperty('variantCadenceAssignments');
     expect(String(writerCall.system)).toContain('not short, medium, and long versions');
     expect(String(writerCall.system)).toContain('Begin with the thought itself');
@@ -351,7 +359,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-52',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-53',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -411,6 +419,7 @@ describe('generateTweetBatchV2 integration', () => {
           })]);
           generated.ideas = generated.ideas.map((idea: any, index: number) => ({
             ...idea,
+            publicMove: `i'd back the named company making this startup choice on retry path ${index}`,
             claim: `i'd back the named company making this startup choice on retry path ${index}`,
             tension: `the choice is opinionated enough to repel consensus on retry path ${index}`,
             implication: `the company should keep the sharp edge instead of explaining it on retry path ${index}`,
@@ -422,6 +431,7 @@ describe('generateTweetBatchV2 integration', () => {
           poisonedBriefId = prompt.briefs[0].id;
           generated.ideas = generated.ideas.map((idea: any) => idea.briefId === poisonedBriefId ? {
             ...idea,
+            publicMove: `Google rolled out a new product into Gmail for ${idea.publicMove}`,
             claim: `Google rolled out a new product into Gmail for ${idea.claim}`,
           } : idea);
         }
@@ -774,7 +784,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
     expect(writerSystem).toContain('Write the live reaction, not a compressed brief');
-    expect(writerSystem).toContain('approved thought packet is the concrete fact ceiling');
+    expect(writerSystem).toContain('approved idea packet is the concrete fact ceiling');
     expect(writerSystem).toContain('Never turn attributed evidence into an unqualified fact');
     expect(writerSystem).toContain('Conceive each variant separately');
     expect(writerSystem).toContain('Stop before advice, a balanced contrast');
@@ -785,7 +795,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem.length).toBeLessThan(6_000);
     expect(ideaSystem).toContain('changed numerical scope');
     expect(ideaSystem).toContain('preserve that attribution');
-    expect(ideaSystem).toContain('claim must be directly entailed');
+    expect(ideaSystem).toContain('claim is the one factual basis and must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
     expect(ideaPrompt.requirements.nativeReactionContract).toContain('Raw native prose is intentionally withheld');
     expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).length).toBeGreaterThan(0);
@@ -930,7 +940,7 @@ describe('generateTweetBatchV2 integration', () => {
     ]));
   });
 
-  it('does not pay a writer for ideas without native reaction or share potential', async () => {
+  it('does not pay a writer for ideas without a strong standalone public move', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') {
@@ -938,8 +948,7 @@ describe('generateTweetBatchV2 integration', () => {
         const parsed = JSON.parse(judged.text);
         parsed.scores = parsed.scores.map((score: any) => ({
           ...score,
-          nativeReactionPotential: 0.5,
-          sharePotential: 0.45,
+          publicMoveStrength: 0.45,
         }));
         return result(JSON.stringify(parsed));
       }
@@ -952,8 +961,7 @@ describe('generateTweetBatchV2 integration', () => {
       expect.objectContaining({
         status: 'rejected',
         rejectionCodes: expect.arrayContaining([
-          'idea_judge_weak_native_reaction',
-          'idea_judge_low_share_potential',
+          'idea_judge_weak_public_move',
         ]),
       }),
     ]));

@@ -75,6 +75,7 @@ function brief(id: string, topic: string, evidenceMode: GenerationBriefV2['evide
 function rawIdea(briefId: string, claim: string) {
   return {
     briefId,
+    publicMove: claim,
     claim,
     tension: 'The visible story conflicts with the operating constraint underneath it.',
     implication: 'Founders should change what they build, measure, or finance next.',
@@ -2037,7 +2038,10 @@ describe('Tweet Generation V2', () => {
       instruction: expect.stringContaining('No prior premise'),
     }));
     expect(writingPrompt).toEqual(expect.objectContaining({
-      idea: expect.objectContaining({ claim: idea.claim }),
+      idea: expect.objectContaining({
+        publicMove: idea.publicMove,
+        factualBasis: idea.claim,
+      }),
       evidenceMode: 'verified_source',
       subjectContext: expect.objectContaining({
         title: 'AI infrastructure',
@@ -2063,11 +2067,12 @@ describe('Tweet Generation V2', () => {
     }));
     expect(writingPrompt.idea).not.toHaveProperty('authorReason');
     expect(writingPrompt.idea).toEqual(expect.objectContaining({
-      claim: idea.claim,
-      tension: idea.tension,
-      implication: idea.implication,
+      publicMove: idea.publicMove,
+      factualBasis: idea.claim,
+      pressure: idea.tension,
+      stakes: idea.implication,
       counterargument: idea.counterargument,
-      instruction: expect.stringContaining('private thought packet'),
+      instruction: expect.stringContaining('approved center'),
     }));
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
       'blunt_reaction',
@@ -2089,7 +2094,7 @@ describe('Tweet Generation V2', () => {
     ));
     expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
     expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
-    expect(operatorWritingPrompt.factualWritingContract).toContain('approved thought packet');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('approved idea packet');
     expect(operatorWritingPrompt.verifiedSourceReactionContract).toBeNull();
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
