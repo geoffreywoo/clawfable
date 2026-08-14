@@ -31,6 +31,7 @@ const GENERATION_SURFACES = new Set<GenerationSurface>(['original', 'reply', 'fo
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
   PUBLISHING_V2_MODEL_STACK,
   PUBLISHING_V2_CONTROL_MODEL_STACK,
+  'publishing_v2_gpt_control',
 ]);
 
 export const maxDuration = 800;
