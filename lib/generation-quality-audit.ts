@@ -51,7 +51,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 11;
+export const GENERATION_QUALITY_AUDIT_VERSION = 12;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -830,6 +830,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
           evidenceMode: brief.evidenceMode,
           storyClusterId: brief.storyClusterId,
           trendTopicId: brief.trendTopicId,
+          operatorTopicContext: brief.operatorTopicContext || null,
           exactSubjectCueCount: brief.personalTopicSignals?.length || 0,
           exactSubjectCueProvenance: (brief.personalTopicSignals?.length || 0) > 0
             ? 'clean_diction_anchors'

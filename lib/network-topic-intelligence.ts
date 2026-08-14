@@ -7,7 +7,7 @@
  */
 
 import { generateText } from './ai';
-import type { TopicSemanticDomain, TrendingTopic } from './trending';
+import type { TopicEntityRole, TopicEntityRoleName, TopicSemanticDomain, TrendingTopic } from './trending';
 import type { TwitterKeys } from './twitter-client';
 import { getFollowing, getHomeTimeline, getLikedTweets, getUserTimeline } from './twitter-client';
 import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -81,6 +81,7 @@ export interface NetworkTopicHistoryEntry {
   label: string;
   summary: string;
   entities: string[];
+  entityRoles?: TopicEntityRole[];
   firstSeenAt: string;
   lastSeenAt: string;
   observationCount: number;
@@ -156,6 +157,7 @@ export interface ExtractedNetworkTopic {
   summary: string;
   tweetIds: string[];
   entities: string[];
+  entityRoles?: TopicEntityRole[];
   whyNow: string;
   confidence: number;
   semanticDomain?: TopicSemanticDomain;
@@ -790,17 +792,46 @@ export function buildFallbackNetworkTopics(
       const label = buildFallbackLabel(group);
       const semanticDomain = inferNetworkSemanticDomain(`${label} ${group.map((tweet) => tweet.text).join(' ')}`);
       const confidence = Number(clamp(0.46 + (group.length - 1) * 0.08).toFixed(3));
+      const entities = [...new Set(group.flatMap((tweet) => extractVisibleEntities(tweet.text)))].slice(0, 8);
       return {
         label,
         summary: `Breakout followed-network discussion about ${label}.`,
         tweetIds: group.map((tweet) => tweet.tweetId),
-        entities: [...new Set(group.flatMap((tweet) => extractVisibleEntities(tweet.text)))].slice(0, 8),
+        entities,
+        entityRoles: entities.map((name) => ({ name, role: 'other' as const })),
         whyNow: group.length > 1 ? `${group.length} followed-network posts are breaking out on the same subject.` : 'A followed-network post is outperforming its author baseline.',
         confidence,
         semanticDomain,
         uncertainty: normalizedUncertainty(null, confidence),
       };
     });
+}
+
+const TOPIC_ENTITY_ROLES = new Set<TopicEntityRoleName>([
+  'company',
+  'product',
+  'person',
+  'investor',
+  'technology',
+  'institution',
+  'location',
+  'other',
+]);
+
+function normalizeEntityRoles(value: unknown, entities: string[]): TopicEntityRole[] {
+  if (!Array.isArray(value) || entities.length === 0) return [];
+  const entityByKey = new Map(entities.map((entity) => [normalizeLabel(entity), entity]));
+  const roles = new Map<string, TopicEntityRole>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const key = normalizeLabel(compact(String(item.name || ''), 60));
+    const role = String(item.role || '') as TopicEntityRoleName;
+    const name = entityByKey.get(key);
+    if (!name || !TOPIC_ENTITY_ROLES.has(role)) continue;
+    roles.set(key, { name, role });
+  }
+  return [...roles.values()].slice(0, 8);
 }
 
 function parseJsonObject(text: string): unknown {
@@ -845,13 +876,15 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
         : 'other';
     const confidence = Number(clamp(finite(item.confidence)).toFixed(3));
     tweetIds.forEach((id) => usedIds.add(id));
+    const entities = Array.isArray(item.entities)
+      ? [...new Set(item.entities.map((entity) => compact(String(entity), 60)).filter(Boolean))].slice(0, 8)
+      : [];
     normalized.push({
       label,
       summary,
       tweetIds,
-      entities: Array.isArray(item.entities)
-        ? [...new Set(item.entities.map((entity) => compact(String(entity), 60)).filter(Boolean))].slice(0, 8)
-        : [],
+      entities,
+      entityRoles: normalizeEntityRoles(item.entityRoles, entities),
       whyNow: compact(String(item.whyNow || 'Breaking out across the followed network.'), 180),
       confidence,
       semanticDomain,
@@ -886,7 +919,8 @@ Rules:
 - Ignore engagement-bait phrasing and extract the underlying subject, not the source author's writing style or opinion.
 - Classify semanticDomain as one of ai_compute, energy_nuclear, materials_minerals, robotics_automation, manufacturing_industrial, space_defense, browser_infrastructure, startups_markets, finance_investing, culture_status, health_performance, sports_competition, crypto, politics_geopolitics, general_technology, or other. Servo the browser engine is browser_infrastructure, never robotics.
 - Set uncertainty to low, medium, or high based on whether the evidence supports the exact subject and claimed event.
-- Return JSON only: {"topics":[{"label":"...","summary":"...","tweetIds":["..."],"entities":["..."],"whyNow":"...","confidence":0.0,"semanticDomain":"...","uncertainty":"..."}]}.
+- For every named entity, return one entityRoles item with the exact same name and one role: company, product, person, investor, technology, institution, location, or other. Roles identify what an entity is; they do not assert that the entities are related.
+- Return JSON only: {"topics":[{"label":"...","summary":"...","tweetIds":["..."],"entities":["..."],"entityRoles":[{"name":"...","role":"company"}],"whyNow":"...","confidence":0.0,"semanticDomain":"...","uncertainty":"..."}]}.
 - Use only tweetId values supplied in the input. Assign a tweet to at most one topic. Omit noise rather than forcing it into a cluster.`,
     prompt: `Cluster these followed-network breakout posts into current subjects:\n\n${sourceRows}`,
   });
@@ -930,6 +964,22 @@ function buildTopicId(label: string, entities: string[]): string {
   const basis = normalizeLabel(entities[0] || label) || 'topic';
   const slug = basis.split(' ').slice(0, 5).join('-').slice(0, 52) || 'topic';
   return `network-${slug}-${stableHash(normalizeLabel(label)).toString(36).slice(0, 6)}`;
+}
+
+function mergeEntityRoles(
+  historical: TopicEntityRole[] | undefined,
+  current: TopicEntityRole[] | undefined,
+  entities: string[],
+): TopicEntityRole[] {
+  const allowed = new Set(entities.map(normalizeLabel));
+  const merged = new Map<string, TopicEntityRole>();
+  for (const entry of [...(historical || []), ...(current || [])]) {
+    const key = normalizeLabel(entry.name);
+    if (!allowed.has(key)) continue;
+    const previous = merged.get(key);
+    if (!previous || previous.role === 'other' || entry.role !== 'other') merged.set(key, entry);
+  }
+  return [...merged.values()].slice(0, 12);
 }
 
 function mergeTopicHistory(
@@ -989,11 +1039,14 @@ function mergeTopicHistory(
       tweetCount: evidence.length,
       weightedEngagement: Number(weightedTotal.toFixed(2)),
     };
+    const mergedEntities = [...new Set([...(historical?.entities || []), ...cluster.entities])].slice(0, 12);
+    const mergedEntityRoles = mergeEntityRoles(historical?.entityRoles, cluster.entityRoles, mergedEntities);
     const history: NetworkTopicHistoryEntry = {
       id: topicId,
       label: cluster.label,
       summary: cluster.summary,
-      entities: [...new Set([...(historical?.entities || []), ...cluster.entities])].slice(0, 12),
+      entities: mergedEntities,
+      entityRoles: mergedEntityRoles,
       firstSeenAt: historical?.firstSeenAt || observedAt,
       lastSeenAt: observedAt,
       observationCount: (historical?.observationCount || 0) + 1,
@@ -1056,6 +1109,7 @@ function mergeTopicHistory(
       topicWhyNow: cluster.whyNow,
       observedAt,
       entities: cluster.entities,
+      entityRoles: mergedEntityRoles,
       semanticDomain: cluster.semanticDomain,
       topicUncertainty: cluster.uncertainty,
       evidence: evidence.map((tweet): NetworkTopicEvidence => ({

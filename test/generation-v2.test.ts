@@ -9,6 +9,7 @@ import {
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
+  getOperatorTopicConstraintIssuesV2,
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
   getV2RescueRevisionStrategy,
@@ -760,6 +761,7 @@ describe('Tweet Generation V2', () => {
         topicUncertainty: 'low',
         semanticDomain: 'ai_compute',
         entities: ['OpenAI'],
+        entityRoles: [{ name: 'OpenAI', role: 'company' }],
         isPrimarySource: false,
         topTweet: { id: 'network-post-1', text: headline, likes: 900, author: 'builder' },
       } as any],
@@ -776,7 +778,12 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
-    expect(signal?.authorOpportunity).toContain('Preserve relationships such as strategy, product, or competition');
+    expect(signal?.authorOpportunity).toContain('Roles do not prove any relationship');
+    expect(signal?.operatorTopicContext).toEqual({
+      entityRoles: [{ name: 'OpenAI', role: 'company' }],
+      strippedEventTerms: ['launch'],
+      relationshipStatus: 'unverified',
+    });
   });
 
   it('treats a named IPO timing comparison as a complete direct-prediction brief', () => {
@@ -810,6 +817,10 @@ describe('Tweet Generation V2', () => {
         topicUncertainty: 'low',
         semanticDomain: 'finance_investing',
         entities: ['Modal', 'Databricks'],
+        entityRoles: [
+          { name: 'Modal', role: 'company' },
+          { name: 'Databricks', role: 'company' },
+        ],
         isPrimarySource: false,
         topTweet: { id: 'network-post-ipo', text: 'raw network prose', likes: 900, author: 'builder' },
       } as any],
@@ -831,6 +842,59 @@ describe('Tweet Generation V2', () => {
       topic: timingBrief.topic,
     } as IdeaCandidate, timingBrief, [], []));
     expect(writingPrompt.subjectContext.briefIntent).toBe(timingBrief.authorOpportunity);
+    expect(writingPrompt.subjectContext.operatorTopicContext.entityRoles).toEqual([
+      { name: 'Modal', role: 'company' },
+      { name: 'Databricks', role: 'company' },
+    ]);
+  });
+
+  it('blocks operator-topic role swaps and stripped event premises before judgment', () => {
+    const roleContext = {
+      entityRoles: [
+        { name: 'Trajectory', role: 'company' as const },
+        { name: 'Sequoia', role: 'investor' as const },
+        { name: 'open source models', role: 'technology' as const },
+      ],
+      strippedEventTerms: [],
+      relationshipStatus: 'unverified' as const,
+    };
+    expect(getOperatorTopicConstraintIssuesV2(
+      'Trajectory gets interesting if model forks are tied to Sequoia, not just hosted there.',
+      roleContext,
+    )).toContain('operator_entity_role_violation');
+    expect(getOperatorTopicConstraintIssuesV2(
+      'Sequoia can get used a lot without anyone caring about Trajectory.',
+      roleContext,
+    )).toContain('operator_entity_role_violation');
+    expect(getOperatorTopicConstraintIssuesV2(
+      'Sequoia should back more open source model companies.',
+      roleContext,
+    )).not.toContain('operator_entity_role_violation');
+
+    const eventContext = { ...roleContext, strippedEventTerms: ['funding'] };
+    expect(getOperatorTopicConstraintIssuesV2(
+      'Trajectory raised funding from Sequoia for open source models.',
+      eventContext,
+    )).toContain('operator_stripped_event_reintroduced');
+
+    const operatorBrief = {
+      ...brief('operator-role', 'Trajectory Sequoia open source models'),
+      operatorTopicContext: roleContext,
+    };
+    const [idea] = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator-role',
+        'Trajectory gets interesting if model forks are tied to Sequoia, not just hosted there.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-role',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T12:00:00.000Z',
+    });
+    expect(idea.rejectionCodes).toContain('operator_entity_role_violation');
   });
 
   it('allocates two of four Geoffrey briefs to fresh operator-engaged subjects', () => {
