@@ -73,6 +73,7 @@ describe('Geoffrey semantic topic identity', () => {
   it('recognizes the broad native finance, culture, health, and sports lanes', () => {
     expect(classifyGeoffreyTopicDomain('AI/ML')).toBe('ai_compute');
     expect(classifyGeoffreyTopicDomain('QQQ and public market investing')).toBe('finance_investing');
+    expect(classifyGeoffreyTopicDomain('Modal Databricks IPO timing')).toBe('finance_investing');
     expect(classifyGeoffreyTopicDomain('Burning Man status and city culture')).toBe('culture_status');
     expect(classifyGeoffreyTopicDomain('longevity, sleep, and human performance')).toBe('health_performance');
     expect(classifyGeoffreyTopicDomain('Jake Paul boxing an NFL athlete')).toBe('sports_competition');

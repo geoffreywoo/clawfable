@@ -213,6 +213,26 @@ describe('versioned voice corpus', () => {
         xTweetId: 'x-full-pod',
         content: 'do more provocative things because everyone is too afraid of being canceled. full pod here https://t.co/pod',
       }),
+      performance(99, {
+        xTweetId: 'x-invest-promo',
+        content: 'living legend. would love to invest and amplify your work with @antifund https://t.co/promo',
+      }),
+      performance(100, {
+        xTweetId: 'x-investor-customer-promo',
+        content: '@antifund very happy investor and customer. ultra strong team with a dope roadmap https://t.co/promo',
+      }),
+      performance(101, {
+        xTweetId: 'x-in-action-caption',
+        content: 'bro.. best bullshitter in the game in action. you cannot fake this level of confidence https://t.co/clip',
+      }),
+      performance(102, {
+        xTweetId: 'x-trip-caption',
+        content: 'i remember this trip. the founder was still meeting users every night after the team went home https://t.co/clip',
+      }),
+      performance(103, {
+        xTweetId: 'x-model-output',
+        content: 'i asked @ChatGPT to rate my startup pitch:\n\nOverall: 8.1/10\nStyle: 8.7\n\nThe assessment: unusually polished with a strong narrative and confident posture.',
+      }),
     ];
     const snapshot = build([...history, ...questionable]);
 
@@ -225,6 +245,11 @@ describe('versioned voice corpus', () => {
     const unresolved = snapshot.entries.find((entry) => entry.xTweetId === 'x-unresolved-pronoun-link');
     const merch = snapshot.entries.find((entry) => entry.xTweetId === 'x-merch-promo');
     const fullPod = snapshot.entries.find((entry) => entry.xTweetId === 'x-full-pod');
+    const investPromo = snapshot.entries.find((entry) => entry.xTweetId === 'x-invest-promo');
+    const investorCustomerPromo = snapshot.entries.find((entry) => entry.xTweetId === 'x-investor-customer-promo');
+    const inAction = snapshot.entries.find((entry) => entry.xTweetId === 'x-in-action-caption');
+    const tripCaption = snapshot.entries.find((entry) => entry.xTweetId === 'x-trip-caption');
+    const modelOutput = snapshot.entries.find((entry) => entry.xTweetId === 'x-model-output');
 
     expect(promo?.exclusionReasons).toContain('promotional post');
     expect(media?.exclusionReasons).toContain('media-dependent caption');
@@ -235,7 +260,27 @@ describe('versioned voice corpus', () => {
     expect(unresolved?.exclusionReasons).toContain('media-dependent caption');
     expect(merch?.exclusionReasons).toContain('promotional post');
     expect(fullPod?.exclusionReasons).toContain('media-dependent caption');
-    for (const entry of [promo, media, truncated, clipped, contextual, attachment, unresolved, merch, fullPod]) {
+    expect(investPromo?.exclusionReasons).toContain('promotional post');
+    expect(investorCustomerPromo?.exclusionReasons).toContain('promotional post');
+    expect(inAction?.exclusionReasons).toContain('media-dependent caption');
+    expect(tripCaption?.exclusionReasons).toContain('media-dependent caption');
+    expect(modelOutput?.exclusionReasons).toContain('quoted model output rather than native prose');
+    for (const entry of [
+      promo,
+      media,
+      truncated,
+      clipped,
+      contextual,
+      attachment,
+      unresolved,
+      merch,
+      fullPod,
+      investPromo,
+      investorCustomerPromo,
+      inAction,
+      tripCaption,
+      modelOutput,
+    ]) {
       expect(entry?.dispositions).not.toContain('diction_anchor');
     }
   });
