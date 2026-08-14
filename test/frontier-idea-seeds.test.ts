@@ -81,6 +81,18 @@ describe('frontier idea seeds', () => {
     expect(seed?.id).not.toBe('neon-lithography-lasers');
   });
 
+  it('rotates to an unused broad seed before repeating the same software premise', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'software',
+      slot: 4,
+      usedSeedIds: new Set(['ai-incumbent-bundling']),
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+    expect(seed?.id).not.toBe('ai-incumbent-bundling');
+  });
+
   it('maps humor topics to cultural reactions instead of arbitrary AI or market seeds', () => {
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile: geoffreyVoiceProfile,

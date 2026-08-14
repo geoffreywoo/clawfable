@@ -756,6 +756,59 @@ describe('Tweet Generation V2', () => {
     expect(topics.some((topic) => ['culture', 'personal', 'humor'].includes(topic))).toBe(true);
   });
 
+  it('keeps a proven topic after its stored subject cues are exhausted', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['software', 'robotics', 'openai'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const exhaustedPremise = 'google should buy @cognition for $200b and make the founder ceo';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['software', 'robotics', 'openai'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: 'operator startup outcomes',
+          weight: 20,
+          sampleCount: 32,
+          avgEngagement: 68,
+          topTweets: [{
+            content: exhaustedPremise,
+            topic: 'startups',
+            source: 'manual',
+            authorshipProvenance: 'operator_composed',
+          }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      recentIdeas: [{
+        id: 'idea-exhausted-startup-cue',
+        briefId: 'brief-startups',
+        generationRunId: 'run-exhausted-startup-cue',
+        topic: 'startups',
+        publicMove: exhaustedPremise,
+        claim: exhaustedPremise,
+        tension: 'the acquisition call is the premise',
+        implication: 'the premise has already been tried',
+        createdAt: '2026-08-14T05:30:00.000Z',
+      }] as any,
+      seedRotationKey: 'preserve-topic-after-cue-exhaustion',
+      now: new Date('2026-08-14T06:00:00.000Z'),
+    });
+    const startupBrief = briefs.find((entry) => entry.topic === 'startups');
+
+    expect(startupBrief).toBeDefined();
+    expect(startupBrief?.personalTopicSignals).toEqual([]);
+    expect(startupBrief?.personalTopicSignalPremises).toEqual([]);
+    expect(startupBrief?.creativeSeed?.id).toEqual(expect.any(String));
+  });
+
   it('turns operator outcomes into structured subject signals without leaking prior prose', () => {
     const priorPost = 'one gigawatt of rubins puts 300k gpus and 80 pb of hbm behind the same power constraint';
     const briefs = buildGenerationBriefsV2({

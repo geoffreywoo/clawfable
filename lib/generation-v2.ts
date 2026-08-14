@@ -1609,7 +1609,9 @@ export function buildGenerationBriefsV2({
         subject,
       ))
     ));
-    if ((candidate.personalTopicSignals?.length || 0) > 0 && personalTopicSignals.length === 0) return false;
+    // Exhausted subject cues remove only those premises. The operator's proven
+    // topic remains eligible and receives a fresh seed instead of disappearing
+    // behind lower-confidence SOUL or exploration labels.
     const personalTopicSignalPremises = (candidate.personalTopicSignalPremises || []).filter((premise) => (
       personalTopicSignals.some((signal) => retainsPersonalTopicSubjectV2(premise, [signal]))
     ));
