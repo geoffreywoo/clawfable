@@ -2659,6 +2659,20 @@ export function buildTweetWritingPromptV2(
     factualWritingContract: brief.evidenceMode === 'operator_opinion'
       ? 'The approved thought packet is the concrete fact ceiling. Write a personal judgment, question, prediction, or explicitly modal speculation. Do not add a current or historical event, number, quote, customer, measured behavior, external mechanism, or personal behavior that is not already in the approved thought packet.'
       : 'Every factual premise and mechanism in the post must be directly supported by the supplied evidence. Preserve any says, claims, reports, or according-to qualifier.',
+    verifiedSourceReactionContract: brief.evidenceMode === 'verified_source' ? {
+      publicMove: 'Use the source as the reason to react now, not as the prose or outline of the post. Keep one sourced fact and one actual company, product, person, price, capital, or timing reaction.',
+      opening: 'Lead with the named subject and the author\'s verdict, bet, surprise, desire, or question. Do not lead with attribution, a news recap, or an interpretation of what investors collectively believe.',
+      attribution: 'Put any required uncertainty or attribution in one short trailing clause, sentence, or parenthetical. Preserve it exactly without letting it dominate the post.',
+      forbiddenAnalystMoves: [
+        'private capital is saying, betting, pricing, or waiting',
+        'the market is saying, betting, pricing, or waiting',
+        'category leadership before the category settles',
+        'a live test of whether investors will price something',
+        'the timing is louder than the number',
+        'this is kind of the whole thing',
+      ],
+      stopRule: 'Do not explain the whole market. Stop after the reaction becomes legible to a smart peer who already knows the category.',
+    } : null,
     evidence: documents.flatMap((document) => document.claims.map((claim) => ({
       sourceDocumentId: document.id,
       publisher: document.publisher,
@@ -2782,6 +2796,9 @@ async function writeIdeaDrafts({
       ? 'Keep the edit target\'s natural shape unless the diagnosis explicitly identifies that shape as the problem.'
       : 'Choose the most natural shape for the replacement. Start from the subject again instead of preserving the failed draft\'s opening or length.'
     : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
+  const verifiedSourceInstruction = brief.evidenceMode === 'verified_source'
+    ? `\n\nVERIFIED-SOURCE PUBLIC MOVE: The evidence is the factual ceiling and the reason to react now, not the voice or structure of the post. Write one sourced fact plus one actual reaction to the named company, product, person, price, capital decision, or timing. Lead with the reaction. Put any required "reported," "early talks," or attribution language in one short trailing clause, sentence, or parenthetical. Never translate the event into analyst scaffolding about what "private capital" or "the market" is saying, betting, pricing, or waiting for. Do not write about category leadership before a category settles, a live test of investor willingness, timing being louder than a number, or the event being "the whole thing." Stop before a market recap.`
+    : '';
   const result = await trackedGenerate('tweet_writing', {
     task: 'tweet_writing',
     modelStack: input.modelStack,
@@ -2795,6 +2812,7 @@ Obey the factualWritingContract exactly. For a source-free opinion, the approved
 ${shapeInstruction} Keep the named object and the author's actual position visible. A fragment is valid. Add context only when the thought becomes more credible, not to fill a role. Begin with the thought itself, never a label such as "my take on," "my dream acquisition," or "the thing i keep coming back to." Do not teach an audience or resolve the thought into a lesson. Follow the question budget. Preserve every number's subject, denominator, geography, period, and measurement type. Use up to ${V2_MAX_DRAFT_CHARACTERS} characters and stop where the human thought stops.
 
 ${nativeVoiceContract}
+${verifiedSourceInstruction}
 
 Before returning, compare each draft with the anchors for rhythm and with the approved thought packet for factual scope. Replace topic-swapped founder advice, polished consultant prose, anchor reskins, and unsupported embellishment. Return only the requested JSON object.${revisionInstruction}`,
     prompt: buildTweetWritingPromptV2(
