@@ -477,7 +477,7 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'The smallest improvement would be naming the operational task this control would unlock.',
       0.832,
-    )).toBe(false);
+    )).toBe(true);
     expect(shouldRunPostcriticRescueV2(
       geoffreyVoice,
       ['final_quality_margin'],
@@ -518,6 +518,31 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'Avoid the universal none-of-them claim while preserving the actuator, reducer, and seal test.',
       0.8317,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'Sharpen the thin claim by naming the approved strategic-importance dimension.',
+      0.83861,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The only useful improvement is one Anthropic-specific distribution consequence.',
+      0.83781,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'The smallest improvement is to sharpen what default interface means.',
+      0.8354,
+    )).toBe(true);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'This draft needs another pass.',
+      0.83861,
+    )).toBe(false);
+    expect(isV2MarginOnlyBoundedRepairCandidate(
+      ['final_quality_margin'],
+      'Sharpen the thin claim by naming the approved strategic-importance dimension.',
+      0.829,
     )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
@@ -1798,6 +1823,9 @@ describe('Tweet Generation V2', () => {
     expect(briefs).toHaveLength(4);
     expect(briefs.filter((entry) => entry.evidenceMode === 'verified_source')).toHaveLength(1);
     expect(briefs.filter((entry) => entry.evidenceMode === 'operator_opinion')).toHaveLength(3);
+    expect(briefs.find((entry) => entry.evidenceMode === 'verified_source')?.authorOpportunity).toContain('plain high-context reaction can be complete');
+    const ideaPrompt = JSON.parse(buildIdeaGenerationPromptV2(briefs, voiceProfile));
+    expect(ideaPrompt.requirements.verifiedSourceReactionContract).toContain('Do not invent a downstream business model');
   });
 
   it('keeps at least 70% of refill briefs in core topics without excluding recent proven lanes', () => {
