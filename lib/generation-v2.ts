@@ -3108,17 +3108,24 @@ export function selectNativeReactionAnchors(
     anchors.length,
   );
   const crossTopic = selectCrossTopicDictionAnchors(anchors, activeTopicTexts, anchors.length);
-  const pool = [
-    ...crossTopic,
-    ...anchors.filter((anchor) => !crossTopic.some((entry) => entry.id === anchor.id)),
-  ];
+  const pool = [...crossTopic, ...registerMatched, ...anchors].filter((anchor, index, entries) => (
+    entries.findIndex((entry) => entry.id === anchor.id) === index
+  ));
   const selected: DictionAnchor[] = [];
   const modes = new Set<NativeReactionMode>();
-  const registerAnchor = registerMatched.find((anchor) => nativeReactionMode(anchor.content) === preferredMode)
-    || registerMatched[0];
-  if (registerAnchor) {
-    selected.push(registerAnchor);
-    modes.add(nativeReactionMode(registerAnchor.content));
+  const preferredAnchor = registerMatched.find((anchor) => nativeReactionMode(anchor.content) === preferredMode)
+    || crossTopic.find((anchor) => nativeReactionMode(anchor.content) === preferredMode);
+  if (preferredAnchor) {
+    selected.push(preferredAnchor);
+    modes.add(nativeReactionMode(preferredAnchor.content));
+    if (selected.length >= limit) return selected;
+  }
+  const localRegisterAnchor = registerMatched.find((anchor) => (
+    !selected.some((entry) => entry.id === anchor.id)
+  ));
+  if (localRegisterAnchor) {
+    selected.push(localRegisterAnchor);
+    modes.add(nativeReactionMode(localRegisterAnchor.content));
     if (selected.length >= limit) return selected;
   }
   for (const anchor of pool) {
@@ -3135,6 +3142,60 @@ export function selectNativeReactionAnchors(
     if (selected.length >= limit) break;
   }
   return selected;
+}
+
+function initialVariantMoveForAnchor(anchor: DictionAnchor | undefined, slot: number) {
+  const fallbackMode: NativeReactionMode = slot === 2
+    ? 'named_call'
+    : slot === 3
+      ? 'rough_multibeat'
+      : 'blunt_observation';
+  const mode = anchor ? nativeReactionMode(anchor.content) : fallbackMode;
+  const shared = {
+    slot,
+    voiceAnchorId: anchor?.id || null,
+    nativeReactionMode: mode,
+  };
+  if (mode === 'direct_question') {
+    return {
+      ...shared,
+      move: 'direct_question',
+      instruction: 'Ask the live subject-specific question the author would actually ask. Do not answer it, broaden it into advice, or turn it into a rhetorical setup.',
+    };
+  }
+  if (mode === 'named_call') {
+    return {
+      ...shared,
+      move: 'named_call',
+      instruction: 'Make a direct call about the named company, person, product, valuation, or decision. Use one reason at most; never wrap a category in "the X startup/company I would back, buy, or bet on."',
+    };
+  }
+  if (mode === 'quantified_comparison') {
+    return {
+      ...shared,
+      move: 'quantified_position',
+      instruction: 'Use an approved number or comparison only when the idea packet supplies it. Make the author\'s position on that number explicit; never invent, round, or mutate a figure.',
+    };
+  }
+  if (mode === 'first_person_position') {
+    return {
+      ...shared,
+      move: 'first_person_position',
+      instruction: 'Own one narrow bet, preference, avoidance, or decision in first person. Do not turn it into universal advice or explain a complete investment framework.',
+    };
+  }
+  if (mode === 'rough_multibeat') {
+    return {
+      ...shared,
+      move: 'thought_in_motion',
+      instruction: 'Let the thought unfold in an uneven two-to-four beat progression. A fragment, aside, or self-correction is welcome; do not tidy the ending into a lesson.',
+    };
+  }
+  return {
+    ...shared,
+    move: 'blunt_reaction',
+    instruction: 'Say the actual reaction or verdict in plain language. Stop earlier than feels professionally complete.',
+  };
 }
 
 interface DraftEvaluation {
@@ -3273,37 +3334,11 @@ export function buildTweetWritingPromptV2(
     writingConstraints: writingConstraints || null,
     responseContract: {
       draftCount,
-      variantMoves: draftCount === MAX_DRAFTS_PER_IDEA ? [
-        {
-          slot: 1,
-          move: 'blunt_reaction',
-          voiceAnchorId: anchors[0]?.id || null,
-          nativeReactionMode: anchors[0] ? nativeReactionMode(anchors[0].content) : null,
-          instruction: 'Say the actual reaction or verdict in plain language. Stop earlier than feels professionally complete.',
-        },
-        {
-          slot: 2,
-          move: 'named_decision_or_consequence',
-          voiceAnchorId: anchors[1]?.id || anchors[0]?.id || null,
-          nativeReactionMode: anchors[1]
-            ? nativeReactionMode(anchors[1].content)
-            : anchors[0]
-              ? nativeReactionMode(anchors[0].content)
-              : null,
-          instruction: 'Make the named product, company, valuation, or decision call and carry one concrete consequence already present in stakes. When there is no actual named entity, state the decision criterion directly; never wrap a category in "the X startup/company I would back, buy, or bet on." Use one reason at most.',
-        },
-        {
-          slot: 3,
-          move: 'thought_in_motion',
-          voiceAnchorId: anchors[2]?.id || anchors[0]?.id || null,
-          nativeReactionMode: anchors[2]
-            ? nativeReactionMode(anchors[2].content)
-            : anchors[0]
-              ? nativeReactionMode(anchors[0].content)
-              : null,
-          instruction: 'Think aloud to one smart peer who already knows the context. Allow an uneven two-to-four sentence progression, fragment, aside, self-correction, slang, or real question when the primary anchor supports it. Do not tidy the ending into a lesson or mic drop.',
-        },
-      ] : draftCount === 2 ? [
+      variantMoves: draftCount === MAX_DRAFTS_PER_IDEA
+        ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => (
+            initialVariantMoveForAnchor(anchors[index], index + 1)
+          ))
+        : draftCount === 2 ? [
         {
           slot: 1,
           move: 'critic_repair',
@@ -3320,7 +3355,7 @@ export function buildTweetWritingPromptV2(
         instruction: 'State the named subject and actual position in one or two short sentences. Stop before evidence, an explanatory consequence, a second argument, or a concluding slogan.',
       }] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; use only that anchor as the primary evidence for cleanup level, roughness, line breaks, and public posture in that slot. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. At least one draft must make exactly one consequence from stakes legible without adding a new mechanism or lesson. Compression means no filler, not that every thought must become a slogan. Do not make all three polished one-sentence aphorisms.'
+        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Exactly one draft may make one consequence from stakes legible without adding a new mechanism or lesson; the other two stop at the reaction. Compression means no filler, not that every thought must become a slogan.'
         : draftCount === 2
           ? 'The two revisions must be materially different. Capitalization, punctuation, or grammar changes do not satisfy the second move.'
           : null,
@@ -3761,7 +3796,9 @@ async function generateDraftEvaluations({
     if (isGeoffreyVoiceProfile(input.voiceProfile) && geoffreyShadowStack) {
       writerPlans.push({
         modelStack: geoffreyShadowStack,
-        initialDraftCount: MAX_DRAFTS_PER_IDEA,
+        initialDraftCount: geoffreyShadowStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+          ? 1
+          : MAX_DRAFTS_PER_IDEA,
         candidateIdSalt: geoffreyShadowStack,
       });
     }

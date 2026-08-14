@@ -115,7 +115,7 @@ vi.mock('@/lib/generation-context', () => ({
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
   PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-92',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-93',
   getCommittedTweetCopyMemoryV2: (tweets: Tweet[], options: { limit?: number } = {}) => tweets
     .filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status) && !tweet.quarantinedAt)
     .map((tweet) => tweet.content)
@@ -217,9 +217,9 @@ vi.mock('@/lib/ai', () => ({
       String(handle || '').replace(/^@/, '').toLowerCase(),
     );
     return {
-      activeStack: geoffrey ? 'publishing_v2_fable_control' : 'publishing_v2_quality',
-      shadowStack: geoffrey ? 'publishing_v2_gpt_control' : 'publishing_v2_fable_control',
-      reason: geoffrey ? 'geoffrey_fable_primary_after_production_audit' : 'default_gpt_primary',
+      activeStack: geoffrey ? 'publishing_v2_gpt_control' : 'publishing_v2_quality',
+      shadowStack: 'publishing_v2_fable_control',
+      reason: geoffrey ? 'geoffrey_gpt_primary_after_shadow_audit' : 'default_gpt_primary',
     };
   }),
   getPrimaryAiProvider: vi.fn(() => 'openai'),
@@ -523,7 +523,7 @@ describe('autopilot remote debug logging', () => {
     await expect(refillQueue(agent as any, 2)).resolves.toBe(0);
     expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
       trending: null,
-      modelStack: 'publishing_v2_fable_control',
+      modelStack: 'publishing_v2_gpt_control',
     }));
     expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
   });

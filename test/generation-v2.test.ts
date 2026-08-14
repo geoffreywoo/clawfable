@@ -595,6 +595,39 @@ describe('Tweet Generation V2', () => {
     ]);
   });
 
+  it('leads a subject question with a native question move before local-register range', () => {
+    const anchors = [
+      { id: 'ai-number', topic: 'AI', content: 'one gw rubin may replace 20 racks. only game for the next 2 years.' },
+      { id: 'startup-long', topic: 'startups', content: 'i read every investor update. idgaf about the polish. tell me what broke.' },
+      { id: 'personal-question', topic: 'personal', content: 'quitting caffeine for two weeks. who is in?' },
+      { id: 'ai-rough', topic: 'AI', content: 'ai will rule the world.\n\nthe action surface is different.\n\nhuman shells.' },
+    ];
+
+    const selected = selectNativeReactionAnchors(
+      anchors,
+      ['AI software', 'Should Anthropic become a software company?'],
+      3,
+    );
+
+    expect(selected.map((anchor) => anchor.id)).toEqual([
+      'personal-question',
+      'ai-number',
+      'startup-long',
+    ]);
+
+    const prompt = JSON.parse(buildTweetWritingPromptV2(
+      rawIdea('AI software', 'Should Anthropic become a software company?') as IdeaCandidate,
+      brief('operator', 'AI software'),
+      [],
+      selected,
+    ));
+    expect(prompt.responseContract.variantMoves).toEqual([
+      expect.objectContaining({ move: 'direct_question', voiceAnchorId: 'personal-question' }),
+      expect.objectContaining({ move: 'quantified_position', voiceAnchorId: 'ai-number' }),
+      expect.objectContaining({ move: 'first_person_position', voiceAnchorId: 'startup-long' }),
+    ]);
+  });
+
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
   });
@@ -3253,7 +3286,7 @@ describe('Tweet Generation V2', () => {
     }));
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
       'blunt_reaction',
-      'named_decision_or_consequence',
+      'named_call',
       'thought_in_motion',
     ]);
     expect(writingPrompt.responseContract.diversityContract).toContain('must not share');
