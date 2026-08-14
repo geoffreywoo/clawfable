@@ -816,8 +816,9 @@ describe('Tweet Generation V2', () => {
         topicConfidence: 0.9,
         topicUncertainty: 'low',
         semanticDomain: 'finance_investing',
-        entities: ['Modal', 'Databricks'],
+        entities: ['Polymarket', 'Modal', 'Databricks'],
         entityRoles: [
+          { name: 'Polymarket', role: 'company' },
           { name: 'Modal', role: 'company' },
           { name: 'Databricks', role: 'company' },
         ],

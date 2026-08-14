@@ -624,6 +624,32 @@ describe('source planner', () => {
       { name: 'open source models', role: 'technology' },
     ]);
     expect(signal.strippedEventTerms).toEqual(['funding']);
+
+    const eventOnlyTopic = {
+      ...topic,
+      id: 956,
+      networkTopicId: 'network-trajectory-event-only',
+      entities: ['Trajectory', 'Sequoia'],
+      entityRoles: [
+        { name: 'Trajectory', role: 'company' as const },
+        { name: 'Sequoia', role: 'investor' as const },
+      ],
+    };
+    const [eventOnlyEnriched] = enrichTrendingTopics([eventOnlyTopic], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['unsupported events'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate');
+    expect(getOperatorTopicSignalRejectionCodes(eventOnlyEnriched)).toContain('event_only_subject');
+    expect(selectOperatorTopicSignals([eventOnlyTopic], {
+      tone: 'casual investor',
+      topics: ['AI', 'startups', 'markets'],
+      antiGoals: ['unsupported events'],
+      communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.',
+      summary: 'Geoffrey writes about startups, markets, and technology.',
+    }, null, 'moderate')).toEqual([]);
   });
 
   it('does not spend a new brief on a qualified trend already represented in the queue', () => {
