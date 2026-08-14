@@ -1506,6 +1506,46 @@ describe('Tweet Generation V2', () => {
     expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
   });
 
+  it('accepts curly-apostrophe market positions and modal acquisition desires as opinions', () => {
+    const operatorBrief = brief('operator', 'AI and markets');
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{
+        ...rawIdea('operator', 'I’d rather own TSMC than a generic basket of public AI software stocks.'),
+        tension: 'Valuation and product risk can point to different ownership choices.',
+        implication: 'My capital would move toward TSMC unless the software price changed the trade.',
+      }, {
+        ...rawIdea('operator', 'I want OpenAI to buy Linear and make project execution native inside ChatGPT.'),
+        tension: 'The acquisition would connect generated work to the place where teams revise and ship it.',
+        implication: 'I would treat the deal as an application-software ambition signal.',
+      }],
+      agentId: 'agent-1',
+      runId: 'run-operator-modal-market-opinions',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas).toHaveLength(2);
+    expect(ideas.every((idea) => !idea.rejectionCodes.includes('unsupported_operator_fact'))).toBe(true);
+  });
+
+  it('still blocks an asserted completed acquisition without source evidence', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'The OpenAI acquisition of Linear closed and makes project execution native inside ChatGPT.')],
+      agentId: 'agent-1',
+      runId: 'run-operator-asserted-acquisition',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).toContain('unsupported_operator_fact');
+  });
+
   it('blocks a generic source-free product wishlist before writing', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea(

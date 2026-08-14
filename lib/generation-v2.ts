@@ -1527,7 +1527,7 @@ function ideaText(idea: Pick<IdeaCandidate, 'claim' | 'tension' | 'implication' 
   return `${idea.claim} ${idea.tension} ${idea.implication} ${idea.authorReason}`;
 }
 
-const OPERATOR_SPECULATIVE_NUMBER_POSTURE = /\b(?:should\s+(?:buy|sell|pay|be\s+worth)|worth\s+[$£€]?\s*\d|will\s+be\s+worth|i(?:'d|\s+would)\s+(?:pay|value|buy|sell|bet)|first\s+[$£€]?\s*\d|before\s+20\d{2}|by\s+20\d{2}|prediction|price\s+target|valuation\s+target)\b/i;
+const OPERATOR_SPECULATIVE_NUMBER_POSTURE = /\b(?:should\s+(?:buy|sell|pay|be\s+worth)|worth\s+[$£€]?\s*\d|will\s+be\s+worth|i(?:['’]d|\s+would)\s+(?:pay|value|buy|sell|bet)|first\s+[$£€]?\s*\d|before\s+20\d{2}|by\s+20\d{2}|prediction|price\s+target|valuation\s+target)\b/i;
 const OPERATOR_ASSERTED_NUMBER = /\b20\d{2}\b|[$£€]\s*\d|\b\d+(?:\.\d+)?(?:%|x)(?![a-z0-9_])/i;
 
 function hasUnsupportedOperatorNumber(text: string): boolean {
@@ -1541,12 +1541,12 @@ function hasUnsupportedOperatorNumber(text: string): boolean {
 }
 
 function unsupportedOperatorFact(text: string): boolean {
-  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|merger|acquisition|this week|today|yesterday)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
+  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|acquired|merged\s+with|this week|today|yesterday)\b|\b(?:merger|acquisition)(?:\s+of\s+[a-z0-9@._-]+){0,3}\s+(?:is|has|puts?|makes?|created|closed)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
   const assertedNumber = hasUnsupportedOperatorNumber(text);
   return assertedEventOrExperience || assertedNumber;
 }
 
-const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:'d| would|'ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| judge| rate| treat| believe| think)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced))\b/i;
+const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:['’]d| would|['’]ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| refuse| own| buy| sell| long| short| judge| rate| treat| believe| think)|i(?:['’]m|\s+am)\s+(?:in|out|long|short)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced))\b/i;
 
 export function isGenericOperatorProductWishlistV2(text: string): boolean {
   return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
