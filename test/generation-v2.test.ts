@@ -1992,7 +1992,8 @@ describe('Tweet Generation V2', () => {
       verifiedSourceReactionContract: expect.objectContaining({
         publicMove: expect.stringContaining('reason to react now'),
         opening: expect.stringContaining('author\'s verdict'),
-        attribution: expect.stringContaining('trailing'),
+        factSelection: expect.stringContaining('exactly one decisive factual atom'),
+        attribution: expect.stringContaining('shortest accurate trailing'),
       }),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
       voiceAnchors: [expect.objectContaining({
@@ -2034,6 +2035,7 @@ describe('Tweet Generation V2', () => {
       expect.stringContaining('private capital'),
       expect.stringContaining('category leadership'),
     ]));
+    expect(writingPrompt.verifiedSourceReactionContract.factSelection).toContain('use only the one');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
