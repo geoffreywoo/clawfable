@@ -752,8 +752,14 @@ function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
     .slice(0, 4);
 }
 
-function operatorTopicSignalEntityRoles(topic: EnrichedTrendingTopic): TopicEntityRole[] {
-  const allowed = new Map(operatorTopicSignalEntities(topic).map((entity) => [normalizeTopic(entity), entity]));
+function operatorTopicSignalEntityRoles(
+  topic: EnrichedTrendingTopic,
+  subject = operatorTopicSignalSubject(topic),
+): TopicEntityRole[] {
+  const normalizedSubject = ` ${normalizeTopic(subject)} `;
+  const allowed = new Map(operatorTopicSignalEntities(topic)
+    .filter((entity) => normalizedSubject.includes(` ${normalizeTopic(entity)} `))
+    .map((entity) => [normalizeTopic(entity), entity]));
   return (topic.entityRoles || []).flatMap((entry) => {
     const name = allowed.get(normalizeTopic(entry.name));
     return name ? [{ name, role: entry.role }] : [];
@@ -784,6 +790,7 @@ export type OperatorTopicSignalRejectionCode =
   | 'culture_bridge_missing'
   | 'named_entity_missing'
   | 'category_too_broad'
+  | 'event_only_subject'
   | 'promotional_source';
 
 export function getOperatorTopicSignalRejectionCodes(
@@ -809,6 +816,10 @@ export function getOperatorTopicSignalRejectionCodes(
   ) codes.push('culture_bridge_missing');
   if (operatorTopicSignalEntities(topic).length === 0) codes.push('named_entity_missing');
   if (wordCount < 2 || BROAD_IDENTITY_TOPICS.has(category)) codes.push('category_too_broad');
+  if (
+    operatorTopicSignalStrippedEventTerms(topic).length > 0
+    && !operatorTopicSignalHasSurvivingObject(topic)
+  ) codes.push('event_only_subject');
   if (OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO.test(`${topic.headline} ${topic.topTweet?.text || ''}`)) {
     codes.push('promotional_source');
   }
@@ -833,6 +844,14 @@ function operatorTopicSignalSubject(topic: EnrichedTrendingTopic): string {
     return [classifiedSubject, ...descriptiveEntities].join(' ');
   }
   return entities.join(', ');
+}
+
+function operatorTopicSignalHasSurvivingObject(topic: EnrichedTrendingTopic): boolean {
+  const subject = operatorTopicSignalSubject(topic);
+  const roles = operatorTopicSignalEntityRoles(topic, subject);
+  if (roles.some((entry) => entry.role === 'product' || entry.role === 'technology')) return true;
+  const entityTokens = new Set(operatorTopicSignalEntities(topic).flatMap((entity) => [...identityTokens(entity)]));
+  return [...identityTokens(subject)].some((token) => !entityTokens.has(token));
 }
 
 function operatorTopicSignalEntityDomainAlias(topic: EnrichedTrendingTopic): string {
@@ -864,12 +883,13 @@ export function selectOperatorTopicSignals(
     .slice(0, boundedLimit)
     .map((topic) => {
       const subject = operatorTopicSignalSubject(topic);
+      const entityRoles = operatorTopicSignalEntityRoles(topic, subject);
       const entityDomainAlias = operatorTopicSignalEntityDomainAlias(topic);
       return {
         id: getTrendingTopicStableId(topic),
         subject,
         semanticAliases: entityDomainAlias && entityDomainAlias !== subject ? [entityDomainAlias] : [],
-        entityRoles: operatorTopicSignalEntityRoles(topic),
+        entityRoles,
         strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
         domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
         identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
@@ -881,16 +901,17 @@ export function selectOperatorTopicSignals(
 }
 
 function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourcePlannerBriefEvidence {
+  const subject = operatorTopicSignalSubject(topic);
   return {
     mode: 'operator_topic_signal',
-    subject: operatorTopicSignalSubject(topic),
+    subject,
     factualClaimAllowed: false,
     provenanceId: getTrendingTopicStableId(topic),
     historicalAngle: null,
     historicalAvgEngagement: null,
     historicalSampleCount: null,
     spreadMechanics: [],
-    entityRoles: operatorTopicSignalEntityRoles(topic),
+    entityRoles: operatorTopicSignalEntityRoles(topic, subject),
     strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
     instruction: 'Geoffrey recently engaged with this subject. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim. Entity roles prevent actor swaps but do not establish a relationship between entities.',
   };
