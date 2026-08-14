@@ -101,6 +101,19 @@ describe('frontier idea seeds', () => {
     expect(seed?.kind).toBe('ai_product');
   });
 
+  it('uses native AI moves instead of product-workflow wishlists', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'AI model products research software',
+      slot: 0,
+    });
+
+    expect(seed?.reactionPrompt).toContain('valuation');
+    expect(seed?.reactionPrompt).toContain('weird coherent prediction');
+    expect(seed?.reactionPrompt).not.toContain('want someone to build');
+    expect(seed?.reactionPrompt).not.toContain('what becomes newly possible');
+  });
+
   it('keeps exact frontier relevance ahead of novelty after the matching seed was used', () => {
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile: geoffreyVoiceProfile,

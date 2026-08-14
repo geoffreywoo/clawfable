@@ -26,6 +26,7 @@ import {
   getSubtractiveTailCandidateContentsV2,
   getV2GeneratedWritingIssue,
   isAbstractComparativePublicMoveV2,
+  isGenericGeoffreyProductOpsIdeaV2,
   isGenericInvestorSelectionTemplateV2,
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
@@ -370,6 +371,40 @@ describe('Tweet Generation V2', () => {
     expect(comparativeClaim.rejectionCodes).toContain('abstract_comparative_public_move');
   });
 
+  it('rejects generic AI product-governance takes for Geoffrey before copy generation', () => {
+    const genericProductOps = [
+      'The first AI agent I would trust with real authority is one that can freeze a software release.',
+      'OpenAI should make ChatGPT the place where agents earn permission to act, not just where users ask them to think.',
+      'OpenAI will be judged as a software company the minute ChatGPT can reliably finish one messy week-long task.',
+      'Let it block the bad release. That is the product I would trust with actual authority.',
+    ];
+    const nativeMoves = [
+      'OpenAI should ship a model that maintains one small open-source repository for a year under its own name.',
+      'i think oai and ant are 5-10T before 2029.',
+      'google should be willing to cannibalize chrome for gemini.',
+    ];
+
+    expect(genericProductOps.every(isGenericGeoffreyProductOpsIdeaV2)).toBe(true);
+    expect(nativeMoves.every((move) => !isGenericGeoffreyProductOpsIdeaV2(move))).toBe(true);
+
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const idea = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', genericProductOps[0])],
+      agentId: 'agent-1',
+      runId: 'run-product-ops-geoffrey',
+      briefs: [brief('operator', 'AI')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-14T06:00:00.000Z',
+    })[0];
+
+    expect(idea.rejectionCodes).toContain('generic_product_ops_take');
+  });
+
   it('detects reusable category-level investor wrappers without blocking direct calls', () => {
     expect(isGenericInvestorSelectionTemplateV2(
       'the robotics reliability company i’d back is a thermal-cycling lab with software attached.',
@@ -442,13 +477,13 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'The smallest improvement would be naming the operational task this control would unlock.',
       0.832,
-    )).toBe(true);
+    )).toBe(false);
     expect(shouldRunPostcriticRescueV2(
       geoffreyVoice,
       ['final_quality_margin'],
       'Strengthen the otherwise thin call with one concrete consequence already permitted by the idea.',
       0.816,
-    )).toBe(true);
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'Name one concrete consequence.',
@@ -468,12 +503,12 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'The smallest improvement is to acknowledge the product cost of excessive refusals.',
       0.827,
-    )).toBe(true);
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'The categorical claim should be made less absolute.',
       0.825,
-    )).toBe(true);
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'The smallest improvement is to add the approved tension around whether live-product complexity outruns model gains.',
@@ -483,12 +518,12 @@ describe('Tweet Generation V2', () => {
       ['final_quality_margin'],
       'Avoid the universal none-of-them claim while preserving the actuator, reducer, and seal test.',
       0.8317,
-    )).toBe(true);
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'Preserve the distinction between public badging and recruiter-only visibility.',
       0.822,
-    )).toBe(true);
+    )).toBe(false);
     expect(isV2MarginOnlyBoundedRepairCandidate(
       ['final_quality_margin'],
       'The draft needs another pass.',
@@ -857,6 +892,8 @@ describe('Tweet Generation V2', () => {
     const prompt = buildIdeaGenerationPromptV2([aiBrief!], geoffreyVoiceProfile);
     expect(prompt).not.toContain(excludedTopicSignal);
     expect(prompt).not.toContain(generatedPost);
+    expect(JSON.parse(prompt).requirements.geoffreyNativeMoveContract).toContain('valuation');
+    expect(JSON.parse(prompt).requirements.geoffreyNativeMoveContract).toContain('permissions');
   });
 
   it('uses structured subject cues to keep a broad personal lane on-topic', () => {
@@ -2907,6 +2944,13 @@ describe('Tweet Generation V2', () => {
     });
 
     expect(ideas[0].rejectionCodes).not.toContain('unsupported_operator_fact');
+    const writingPrompt = JSON.parse(buildTweetWritingPromptV2(
+      ideas[0],
+      brief('operator', 'AI startups'),
+      [],
+      [],
+    ));
+    expect(writingPrompt.factualWritingContract).toContain('Preserve an approved subjective valuation');
   });
 
   it('accepts curly-apostrophe market positions and modal acquisition desires as opinions', () => {
@@ -3152,6 +3196,8 @@ describe('Tweet Generation V2', () => {
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
     expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments, questions, predictions');
+    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('subjective valuation');
+    expect(ideaPrompt.requirements.geoffreyNativeMoveContract).toBeNull();
     expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
     expect(ideaPrompt.requirements.rarePremiseContract).toContain('rare premises');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({

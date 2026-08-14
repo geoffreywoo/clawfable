@@ -41,7 +41,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-91',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-92',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -453,7 +453,7 @@ describe('generation quality audit findings', () => {
           phase: 'initial',
           model: 'openai:gpt-5.6',
           judgeScore: 0.84,
-          qualityMargin: 0.834,
+          qualityMargin: 0.844,
           nativeVoice: 0.78,
           casualStartupFit: 0.65,
           novelty: 0.76,
