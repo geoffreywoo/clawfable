@@ -124,6 +124,7 @@ describe('AI model routing', () => {
       getModelChainForTask,
     } = await loadDefaultRouter();
 
+    expect(PUBLISHING_V2_CONTROL_MODEL_STACK).toBe('publishing_v2_fable_control');
     expect(getModelChainForTask('tweet_generation', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'anthropic', model: 'claude-fable-5' },
@@ -144,8 +145,8 @@ describe('AI model routing', () => {
       model: 'gpt-5.6',
     });
     expect(getModelChainForTask('tweet_writing', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
@@ -155,6 +156,12 @@ describe('AI model routing', () => {
     expect(getModelChainForTask('tweet_writing', 'quality', 'publishing_v2_fable_control')).toEqual([
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('tweet_writing', 'quality', 'publishing_v2_gpt_control')).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
