@@ -446,6 +446,50 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('does not turn excluded media-dependent posts into exact Geoffrey subject cues', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'markets'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'startups',
+          angle: 'operator startup outcomes',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{
+            content: 'SF rich: estate in woodside and padel on your home court',
+            topic: 'startups',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            voiceCorpusDispositions: ['excluded', 'topic_signal'],
+          }, {
+            content: 'google should buy @cognition for $200b and make @ScottWu46 ceo',
+            topic: 'startups',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            voiceCorpusDispositions: ['diction_anchor', 'topic_signal'],
+          }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const startupBrief = briefs.find((entry) => entry.topic === 'startups');
+    expect(startupBrief?.personalTopicSignals?.join(' ')).toContain('cognition');
+    expect(startupBrief?.personalTopicSignals?.join(' ')).not.toContain('woodside');
+    expect(startupBrief?.personalTopicSignalPremises).toHaveLength(1);
+  });
+
   it('rotates away from operator subjects already attempted in recent generation runs', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
@@ -730,6 +774,63 @@ describe('Tweet Generation V2', () => {
     });
     expect(JSON.stringify(signal)).not.toContain('secret checkout workflow');
     expect(signal?.sourceBrief).toContain('Subject cue only');
+  });
+
+  it('allocates two of four Geoffrey briefs to fresh operator-engaged subjects', () => {
+    const networkTopic = (
+      id: number,
+      networkTopicId: string,
+      category: string,
+      semanticDomain: 'ai_compute' | 'startups_markets' | 'finance_investing',
+      entities: string[],
+    ) => ({
+      id,
+      networkTopicId,
+      headline: `${category} source headline that must stay out of prompts`,
+      source: '@network',
+      relevanceScore: 90,
+      category,
+      timestamp: new Date().toISOString(),
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain,
+      entities,
+      isPrimarySource: false,
+      topTweet: { id: `${networkTopicId}-post`, text: 'raw network prose', likes: 100, author: 'network' },
+    });
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: {
+        ...voiceProfile,
+        summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+      },
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [
+        networkTopic(981, 'network-cognition-interest', 'Cognition product strategy', 'ai_compute', ['Cognition AI', 'Devin']),
+        networkTopic(982, 'network-opendoor-interest', 'Opendoor startup strategy', 'startups_markets', ['Opendoor', 'Justin Dross']),
+        networkTopic(983, 'network-polymarket-interest', 'Polymarket market structure', 'finance_investing', ['Polymarket', 'Modal']),
+      ],
+      allTweets: [],
+    });
+    const signalBriefs = briefs.filter((entry) => entry.trendTopicId?.startsWith('network-'));
+
+    expect(signalBriefs).toHaveLength(2);
+    expect(signalBriefs.every((entry) => (
+      entry.evidenceMode === 'operator_opinion'
+      && entry.evidence.length === 0
+      && entry.sourceDocumentIds.length === 0
+    ))).toBe(true);
   });
 
   it('does not reintroduce a blocked premise through an operator-engaged subject cue', () => {
