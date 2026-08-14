@@ -2118,6 +2118,47 @@ describe('Tweet Generation V2', () => {
     )).toBeNull();
   });
 
+  it('rejects reusable social-copy skeletons before paying for drafting', () => {
+    const syntheticMoves = [
+      'At $40 billion, Cognition no longer gets graded on Devin demos. It gets graded on whether developers reorganize their work around Devin.',
+      'Trajectory wins when nobody thinks about which open-source model ran their job.',
+      'Trajectory should make model choice boring. If users still pick models, the product stopped one layer too early.',
+      'Cognition at $40 billion has no room left to be merely a very good coding startup.',
+      'My bar for Cognition at $40 billion: Devin has to become the center of every developer workflow.',
+    ];
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: syntheticMoves.map((move) => rawIdea('operator', move)),
+      agentId: 'agent-1',
+      runId: 'run-generated-idea-patterns',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas).toHaveLength(3);
+    expect(ideas.every((idea) => (
+      idea.status === 'rejected'
+      && idea.rejectionCodes.includes('generated_idea_pattern')
+    ))).toBe(true);
+  });
+
+  it('keeps a direct named operator call eligible at idea preflight', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'Google should buy Cognition for $200b and make Scott Wu CEO.')],
+      agentId: 'agent-1',
+      runId: 'run-direct-native-call',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0].rejectionCodes).not.toContain('generated_idea_pattern');
+  });
+
   it('rejects an unsourced measured numeric claim', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('operator', 'OpenAI has 42% market share and the gap is widening.')],
@@ -2291,7 +2332,7 @@ describe('Tweet Generation V2', () => {
       pressure: idea.tension,
       stakes: idea.implication,
       counterargument: idea.counterargument,
-      instruction: expect.stringContaining('approved center'),
+      instruction: expect.stringContaining('approved semantic center'),
     }));
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
       'blunt_reaction',
