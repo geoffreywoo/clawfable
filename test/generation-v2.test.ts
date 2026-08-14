@@ -2552,6 +2552,51 @@ describe('Tweet Generation V2', () => {
     )).toBe(false);
   });
 
+  it('does not cool a story after another run demonstrated a viable selected premise', () => {
+    const failedIdeas = [0, 1, 2].map((index) => ({
+      schemaVersion: 2,
+      id: `idea-failed-${index}`,
+      agentId: 'agent-1',
+      generationRunId: 'run-failed',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-102',
+      briefId: 'brief-battery',
+      storyClusterId: 'story-battery',
+      topic: 'energy',
+      claim: 'Australian home batteries helped reduce wholesale power prices.',
+      tension: 'Distributed household hardware is changing grid economics.',
+      implication: 'Home batteries should be evaluated as grid infrastructure.',
+      authorReason: 'The author follows frontier energy businesses.',
+      evidenceIds: ['source-battery'],
+      counterargument: null,
+      factualRisk: 'low',
+      semanticKey: `australia:home:battery:${index}`,
+      noveltyScore: 0.8,
+      evidenceScore: 0.9,
+      identityScore: 0.9,
+      judgeScore: 0.4,
+      status: 'rejected',
+      rejectionCodes: ['idea_judge_generic_premise'],
+      createdAt: '2026-08-12T20:00:00.000Z',
+      updatedAt: '2026-08-12T20:01:00.000Z',
+    } satisfies IdeaCandidate));
+    const selectedIdea = {
+      ...failedIdeas[0],
+      id: 'idea-selected',
+      generationRunId: 'run-selected',
+      status: 'selected',
+      rejectionCodes: [],
+      judgeScore: 0.86,
+      updatedAt: '2026-08-12T20:02:00.000Z',
+    } satisfies IdeaCandidate;
+
+    const attempts = buildFailedStoryAttemptsV2(
+      [...failedIdeas, selectedIdea],
+      new Date('2026-08-13T00:00:00.000Z'),
+    );
+
+    expect(attempts).toHaveLength(0);
+  });
+
   it('does not spend research brief slots on a permanently rejected subject', () => {
     const makeStory = (id: string, title: string, topic: string, total: number): StoryCluster => ({
       schemaVersion: 2,

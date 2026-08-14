@@ -33,6 +33,7 @@ import {
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import {
+  buildFailedStoryAttemptDiagnosticsV2,
   buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
@@ -63,7 +64,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 29;
+export const GENERATION_QUALITY_AUDIT_VERSION = 30;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -443,6 +444,8 @@ interface AuditFindingInput {
   sources: {
     editorialEligibleCount: number;
     generationEligibleCount: number;
+    activeEditorialCooldownAttemptCount?: number;
+    suppressedEditorialCooldownAttemptCount?: number;
     warmedNetworkTopicCount?: number;
     operatorTopicSignalEligibleCount?: number;
     operatorTopicSignalRejectionCounts?: Array<{ value: string; count: number }>;
@@ -1063,6 +1066,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const storyEditorialOptions = {
     minConsequence: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle) ? 0.55 : undefined,
   };
+  const failedStoryAttemptDiagnostics = buildFailedStoryAttemptDiagnosticsV2(recentIdeas);
   const storyDecisions = storyClusters.map((story) => ({
     story,
     rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
@@ -1323,6 +1327,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     sources: {
       editorialEligibleCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
       generationEligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+      activeEditorialCooldownAttemptCount: failedStoryAttemptDiagnostics.activeAttempts.length,
+      suppressedEditorialCooldownAttemptCount: failedStoryAttemptDiagnostics.suppressedByViablePremise.length,
       warmedNetworkTopicCount: trending.length,
       operatorTopicSignalEligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
       operatorTopicSignalRejectionCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
@@ -1434,6 +1440,28 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       })),
       generationPlanning: {
         eligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+        editorialCooldown: {
+          ttlHours: failedStoryAttemptDiagnostics.cooldownMs / (60 * 60 * 1000),
+          activeAttemptCount: failedStoryAttemptDiagnostics.activeAttempts.length,
+          suppressedByViablePremiseCount: failedStoryAttemptDiagnostics.suppressedByViablePremise.length,
+          activeAttempts: failedStoryAttemptDiagnostics.activeAttempts.slice(0, 12).map((attempt) => ({
+            storyClusterId: attempt.storyClusterId,
+            generationRunId: attempt.generationRunId,
+            qualityPolicyVersion: attempt.qualityPolicyVersion,
+            topic: attempt.topic,
+            failedAt: attempt.failedAt,
+            failureCodes: attempt.failureCodes,
+          })),
+          suppressedByViablePremise: failedStoryAttemptDiagnostics.suppressedByViablePremise.slice(0, 12).map((attempt) => ({
+            storyClusterId: attempt.storyClusterId,
+            generationRunId: attempt.generationRunId,
+            qualityPolicyVersion: attempt.qualityPolicyVersion,
+            topic: attempt.topic,
+            failedAt: attempt.failedAt,
+            failureCodes: attempt.failureCodes,
+            viableIdeaIds: attempt.viableIdeaIds,
+          })),
+        },
         rejectionReasonCounts: topCounts(storyDecisions
           .filter((decision) => decision.rejectionCodes.length === 0)
           .flatMap((decision) => decision.planningRejectionCodes)),
