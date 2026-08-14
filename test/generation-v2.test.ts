@@ -14,6 +14,7 @@ import {
   hasCrossBriefSubjectCollisionV2,
   getOperatorTopicAttemptPenaltyV2,
   getRequiredFinalQualityMarginV2,
+  getV2BoundedRepairCharacterLimit,
   getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
@@ -234,8 +235,14 @@ describe('Tweet Generation V2', () => {
     expect(meetsV2RescueMarginFloor(0.7798, 0.78)).toBe(false);
   });
 
-  it('reconceives margin failures instead of polishing the same weak construction', () => {
-    expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('reconceive');
+  it('bounds a surgical repair close to the parent instead of allowing a new essay', () => {
+    expect(getV2BoundedRepairCharacterLimit('x'.repeat(50))).toBe(98);
+    expect(getV2BoundedRepairCharacterLimit('x'.repeat(300))).toBe(360);
+    expect(getV2BoundedRepairCharacterLimit('x'.repeat(1100))).toBe(1200);
+  });
+
+  it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {
+    expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('critic_surgical');
     expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['copy_judge_voice_mismatch', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['final_cringe_risk', 'final_quality_margin'])).toBe('reconceive');
@@ -246,7 +253,7 @@ describe('Tweet Generation V2', () => {
     expect(getV2RescueRevisionStrategy(
       ['final_quality_margin'],
       'The native position is sound; cut one hedge and stop.',
-    )).toBe('reconceive');
+    )).toBe('critic_surgical');
   });
 
   it('leads voice transfer with a same-register native posture and keeps cross-topic range', () => {

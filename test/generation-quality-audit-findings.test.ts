@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGenerationAuditFindings, buildGenerationQueueHandoffAudit } from '@/lib/generation-quality-audit';
+import { buildGenerationAuditFindings, buildGenerationQueueHandoffAudit, buildGenerationWriterOutcomeAudit } from '@/lib/generation-quality-audit';
 
 function healthyInput() {
   return {
@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-68',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-69',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -114,6 +114,47 @@ describe('generation quality audit findings', () => {
     });
   });
 
+  it('attributes initial and rescue outcomes by writer and compares parent quality', () => {
+    const outcome = buildGenerationWriterOutcomeAudit([{
+      generationRunId: 'run-repair',
+      selectedDraftIds: ['draft-rescue'],
+      stageCounts: { postcriticRescueTargets: 1 },
+      drafts: [{
+        draftCandidateId: 'draft-parent',
+        parentDraftId: null,
+        mutationRound: 0,
+        generationProvider: 'openai',
+        generationModel: 'gpt-5.6',
+        judgeScore: 0.82,
+        judgeBreakdown: { qualityMargin: 0.83, nativeVoice: 0.76, cringeRisk: 0.2 },
+        rejectionCodes: ['final_quality_margin'],
+        content: 'strong core that needs one repair',
+      }, {
+        draftCandidateId: 'draft-rescue',
+        parentDraftId: 'draft-parent',
+        mutationRound: 1,
+        generationProvider: 'anthropic',
+        generationModel: 'claude-fable-5',
+        judgeScore: 0.91,
+        judgeBreakdown: { qualityMargin: 0.9, nativeVoice: 0.86, cringeRisk: 0.08 },
+        rejectionCodes: [],
+        content: 'repaired strong core',
+      }],
+    } as any]);
+
+    expect(outcome.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'initial', model: 'openai:gpt-5.6', generatedCount: 1, selectedCount: 0 }),
+      expect.objectContaining({ phase: 'rescue', model: 'anthropic:claude-fable-5', generatedCount: 1, selectedCount: 1 }),
+    ]));
+    expect(outcome.rescue).toMatchObject({
+      targetCount: 1,
+      generatedCount: 1,
+      selectedCount: 1,
+      pairedComparisonCount: 1,
+      averageQualityMarginDelta: 0.07,
+    });
+  });
+
   it('returns no findings for a healthy current state and historical window', () => {
     expect(buildGenerationAuditFindings(healthyInput() as any)).toEqual([]);
   });
@@ -167,6 +208,51 @@ describe('generation quality audit findings', () => {
       expect.objectContaining({ code: 'current_policy_generation_yield_low', scope: 'current_policy' }),
       expect.objectContaining({ code: 'historical_delete_rate_high', scope: 'historical_window' }),
       expect.objectContaining({ code: 'historical_semantic_repeat_rate_high', scope: 'historical_window' }),
+    ]));
+  });
+
+  it('flags rescue spend that has not saved any current-policy draft', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      runCount: 2,
+      runsWithSelectedDrafts: 0,
+      selectedDraftCount: 0,
+      selectionYield: 0,
+      writerOutcomes: {
+        groups: [{
+          phase: 'rescue',
+          model: 'anthropic:claude-fable-5',
+          generatedCount: 6,
+          finalCriticCount: 2,
+          selectedCount: 0,
+          selectionRate: 0,
+          averageJudgeScore: 0.58,
+          averageQualityMargin: 0.69,
+          averageNativeVoice: 0.57,
+          averageCringeRisk: 0.48,
+          topRejectionCodes: [{ value: 'final_cringe_risk', count: 4 }],
+        }],
+        rescue: {
+          targetCount: 3,
+          generatedCount: 6,
+          finalCriticCount: 2,
+          selectedCount: 0,
+          selectionRate: 0,
+          pairedComparisonCount: 0,
+          averageQualityMarginDelta: null,
+          pairedComparisons: [],
+        },
+        nearMisses: [],
+      },
+    } as any;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_rescue_yield_zero',
+        severity: 'high',
+        scope: 'current_policy',
+      }),
     ]));
   });
 

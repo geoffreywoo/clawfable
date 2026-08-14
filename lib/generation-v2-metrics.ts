@@ -327,9 +327,18 @@ export function buildGenerationV2Metrics({
         return [{
           draftCandidateId: draft.id,
           ideaId: draft.ideaId,
+          parentDraftId: draft.parentDraftId || null,
           content: draft.content,
           status: draft.status,
           rejectionCodes: draft.rejectionCodes,
+          mutationRound: draft.mutationRound || 0,
+          generationProvider: draft.generationProvider,
+          generationModel: draft.generationModel,
+          judgeProvider: draft.judgeProvider,
+          judgeModel: draft.judgeModel,
+          judgeScore: draft.judgeScore,
+          judgeBreakdown: draft.judgeBreakdown || null,
+          judgeNotes: draft.judgeNotes || null,
           tweetId: tweet?.id || null,
           evidenceReferences: tweet?.evidenceReferences || [],
         }];
