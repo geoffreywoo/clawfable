@@ -2501,6 +2501,13 @@ type NativeReactionMode =
   | 'first_person_position'
   | 'blunt_observation';
 
+export interface NativeReactionPatternV2 {
+  reactionMode: NativeReactionMode;
+  lengthBand: 'short' | 'medium' | 'long';
+  paragraphBand: 'single' | 'two' | 'multi';
+  usesFirstPerson: boolean;
+}
+
 function nativeReactionMode(content: string): NativeReactionMode {
   const paragraphs = content.split(/\n\s*\n/).filter(Boolean).length;
   if (content.includes('?')) return 'direct_question';
@@ -2511,12 +2518,7 @@ function nativeReactionMode(content: string): NativeReactionMode {
   return 'blunt_observation';
 }
 
-function nativeReactionPattern(content: string): {
-  reactionMode: NativeReactionMode;
-  lengthBand: 'short' | 'medium' | 'long';
-  paragraphBand: 'single' | 'two' | 'multi';
-  usesFirstPerson: boolean;
-} {
+function nativeReactionPattern(content: string): NativeReactionPatternV2 {
   const paragraphCount = content.split(/\n\s*\n/).filter(Boolean).length;
   return {
     reactionMode: nativeReactionMode(content),
@@ -2524,6 +2526,37 @@ function nativeReactionPattern(content: string): {
     paragraphBand: paragraphCount <= 1 ? 'single' : paragraphCount === 2 ? 'two' : 'multi',
     usesFirstPerson: /\b(?:i|i'm|i've|i'd|i'll|my|me)\b/i.test(content),
   };
+}
+
+const GENERIC_NATIVE_SUBJECT_TOKENS = new Set([
+  'billion', 'capital', 'company', 'funding', 'investor', 'market', 'million', 'model',
+  'product', 'report', 'round', 'software', 'startup', 'technology', 'valuation',
+]);
+
+export function selectSubjectNativeReactionPatternV2(
+  idea: Pick<IdeaCandidate, 'topic' | 'claim' | 'tension' | 'implication'>,
+  anchors: DictionAnchor[],
+): NativeReactionPatternV2 | null {
+  const subject = `${idea.topic} ${idea.claim} ${idea.tension} ${idea.implication}`;
+  const subjectTokens = new Set(significantResearchTokens(`${idea.topic} ${idea.claim}`));
+  const ranked = anchors.map((anchor) => {
+    const anchorTokens = new Set(significantResearchTokens(`${anchor.topic} ${anchor.content}`));
+    const sharedDistinctive = [...subjectTokens].filter((token) => (
+      token.length >= 5
+      && !GENERIC_NATIVE_SUBJECT_TOKENS.has(token)
+      && anchorTokens.has(token)
+    ));
+    return {
+      anchor,
+      sharedDistinctive: sharedDistinctive.length,
+      similarity: researchTokenSimilarity(subject, `${anchor.topic} ${anchor.content}`),
+    };
+  }).filter((entry) => entry.sharedDistinctive > 0)
+    .sort((left, right) => (
+      right.sharedDistinctive - left.sharedDistinctive
+      || right.similarity - left.similarity
+    ));
+  return ranked[0] ? nativeReactionPattern(ranked[0].anchor.content) : null;
 }
 
 export function selectNativeReactionAnchors(
@@ -2629,6 +2662,7 @@ export function buildTweetWritingPromptV2(
   revisionContext?: Array<{ content: string; issues: string[] }>,
   revisionStrategy: DraftRevisionStrategy = 'reconceive',
   draftCount = MAX_DRAFTS_PER_IDEA,
+  subjectNativeReactionPattern: NativeReactionPatternV2 | null = null,
 ): string {
   return JSON.stringify({
     idea: {
@@ -2682,6 +2716,10 @@ export function buildTweetWritingPromptV2(
     }))).slice(0, 8),
     learnedEditorialStrategy: learningBrief ? {
       voiceMechanics: learningBrief.voiceMechanics,
+    } : null,
+    sameSubjectNativeReactionPattern: subjectNativeReactionPattern ? {
+      ...subjectNativeReactionPattern,
+      instruction: 'Positive public-move evidence from a same-subject operator post. Match only its reaction mode, length band, paragraph count, and use of first person. The prior premise and every word of prior prose are intentionally absent; do not infer or recreate them.',
     } : null,
     writingConstraints: writingConstraints || null,
     responseContract: {
@@ -2787,6 +2825,10 @@ async function writeIdeaDrafts({
       : `\n\nTreat failed attempts as negative examples. Start over from the approved idea, remove every named issue, and use a fresh opening that is specific to this subject. Changing nouns or polishing the same thesis is not a rewrite. Change the social posture, sentence skeleton, and amount of explanation; do not paraphrase the failed attempt.`
     : '';
   const draftCount = revisionContext.length > 0 ? 1 : MAX_DRAFTS_PER_IDEA;
+  const subjectNativeReactionPattern = selectSubjectNativeReactionPatternV2(
+    idea,
+    collectOperatorAnchors(input),
+  );
   const variantInstruction = draftCount === 1
     ? revisionStrategy === 'critic_surgical'
       ? 'Return exactly one revised X post. Make only the smallest change required by the critic diagnosis.'
@@ -2826,6 +2868,7 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       revisionContext,
       revisionStrategy,
       draftCount,
+      subjectNativeReactionPattern,
     ),
   }, calls);
   const root = parseJsonRoot(result.text);

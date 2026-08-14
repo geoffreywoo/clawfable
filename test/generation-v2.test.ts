@@ -23,6 +23,7 @@ import {
   orderV2IdsForPairwise,
   selectRankedIdeaPortfolioV2,
   selectNativeReactionAnchors,
+  selectSubjectNativeReactionPatternV2,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey } from '@/lib/research-utils';
@@ -138,6 +139,31 @@ describe('Tweet Generation V2', () => {
       'operator-one',
       'operator-two',
     ]);
+  });
+
+  it('uses same-subject native posts as structured reaction evidence without exposing prose', () => {
+    const pattern = selectSubjectNativeReactionPatternV2({
+      topic: 'cognition',
+      claim: 'Cognition is discussing a new round at a $40 billion valuation.',
+      tension: 'The company now needs a much larger product outcome.',
+      implication: 'The valuation changes the product bar.',
+    }, [{
+      id: 'native-cognition-call',
+      topic: 'AI',
+      content: 'google should buy @cognition for $200b and make the founder ceo',
+    }, {
+      id: 'unrelated-startup-post',
+      topic: 'startups',
+      content: 'founders should send investor updates when they have useful context',
+    }]);
+
+    expect(pattern).toEqual({
+      reactionMode: 'named_call',
+      lengthBand: 'short',
+      paragraphBand: 'single',
+      usesFirstPerson: false,
+    });
+    expect(pattern).not.toHaveProperty('content');
   });
 
   it('targets autonomous headroom for live and production-shadow generation only', () => {
@@ -1968,7 +1994,12 @@ describe('Tweet Generation V2', () => {
     const ideaPrompt = JSON.parse(buildIdeaGenerationPromptV2([currentBrief], voiceProfile));
     const writingPrompt = JSON.parse(buildTweetWritingPromptV2(idea, currentBrief, [source], [{
       id: 'operator-post-1', content: 'the market usually tells you where the bottleneck moved', topic: 'markets',
-    }]));
+    }], undefined, undefined, undefined, 'reconceive', 3, {
+      reactionMode: 'named_call',
+      lengthBand: 'short',
+      paragraphBand: 'single',
+      usesFirstPerson: false,
+    }));
 
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
@@ -1996,6 +2027,11 @@ describe('Tweet Generation V2', () => {
         attribution: expect.stringContaining('shortest accurate trailing'),
       }),
       evidence: [expect.objectContaining({ sourceDocumentId: 'source-sourced' })],
+      sameSubjectNativeReactionPattern: expect.objectContaining({
+        reactionMode: 'named_call',
+        lengthBand: 'short',
+        instruction: expect.stringContaining('prior premise and every word'),
+      }),
       voiceAnchors: [expect.objectContaining({
         id: 'operator-post-1',
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
