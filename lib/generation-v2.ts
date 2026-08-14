@@ -78,6 +78,7 @@ import {
 import {
   buildResearchSemanticKey,
   clampResearchScore,
+  extractResearchEntities,
   researchTokenSimilarity,
   significantResearchTokens,
   stableResearchId,
@@ -596,7 +597,7 @@ function operatorTopicBrief(
     ? ` Proven spread mechanics for this topic: ${spreadMechanics.join(', ')}. Use the mechanics, never prior wording or subject matter.`
     : '';
   const personalSignals = personalTopicSignals.length > 0
-    ? ' Structured personal topic signals are supplied separately. Use one to choose a concrete subject or an adjacent object; never reconstruct or extend the prior post.'
+    ? ' Structured personal topic signals are supplied separately. Keep one exact cue object as the concrete subject; never reconstruct or extend the prior post.'
     : '';
   const summary = `${historyPrefix}Develop a fresh operator judgment about ${topic}. This subject comes from ${provenance}, not from a factual source.${personalSignals}${mechanics}`;
   return {
@@ -646,9 +647,37 @@ interface OperatorTopicCandidateV2 {
 
 const PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS = new Set([
   'advice', 'better', 'build', 'building', 'business', 'company', 'companies',
-  'founder', 'founders', 'good', 'great', 'investor', 'investors', 'people',
+  'capital', 'day', 'founder', 'founders', 'good', 'great', 'https', 'investor',
+  'investors', 'market', 'people', 'remember',
   'product', 'products', 'startup', 'startups', 'thing', 'things', 'today',
-  'venture', 'world',
+  'trip', 'venture', 'world',
+]);
+
+const PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS = new Set([
+  ...PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS,
+  'ain', 'all', 'alone', 'and', 'are', 'around', 'back', 'beat', 'call', 'can',
+  'close', 'comma', 'compete', 'correct', 'could', 'cuz', 'did', 'directionally',
+  'does', 'downfall', 'even', 'especially', 'excited', 'flex', 'for', 'forward',
+  'found', 'had', 'hard', 'has', 'have', 'her', 'here', 'him', 'his', 'host',
+  'how', 'if', 'incredible', 'insight', 'its', 'journey', 'just', 'let', 'life', 'like',
+  'locked', 'long', 'made', 'make', 'month', 'most', 'my', 'never', 'next', 'not', 'of', 'only', 'other',
+  'our', 'possibly', 'pray', 'rest', 'reveal', 'rich', 'savage', 'she', 'simply',
+  'smart', 'some', 'someone', 'something', 'still', 'stronger', 'super', 'team',
+  'technical', 'than', 'the', 'them', 'then', 'there', 'they', 'this', 'those',
+  'tough', 'under-estimated', 'underestimate', 'was', 'were', 'what', 'when',
+  'where', 'which', 'who', 'why', 'winner', 'winning', 'year', 'you', 'your',
+  'ambition', 'country', 'entire', 'early', 'espa', 'expansion', 'game', 'guy',
+  'guys', 'love', 'massive', 'part', 'point', 'short', 'target', 'vamos',
+]);
+
+const PERSONAL_TOPIC_SIGNAL_CONCRETE_TOKENS = new Set([
+  'athlete', 'aura', 'bank', 'browser', 'car', 'chip', 'city', 'client', 'contract',
+  'court', 'crowd', 'customer', 'dinner', 'dude', 'estate', 'factory', 'farmer',
+  'cfo', 'fintech', 'fund', 'garage', 'gigawatt', 'girl', 'gpu', 'hamburger',
+  'hbm', 'house', 'hynix', 'kid', 'kospi',
+  'lab', 'machine', 'meal', 'merch', 'mineral', 'moon', 'parent', 'party', 'padel', 'poker',
+  'pickleball', 'profession', 'restaurant', 'round', 'school', 'state', 'stock', 'student',
+  'summit', 'term', 'venue', 'woodside', 'wsj', 'america',
 ]);
 
 const PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS = new Set([
@@ -661,25 +690,80 @@ const PERSONAL_TOPIC_PREMISE_GENERIC_TOKENS = new Set([
   'tech', 'technical', 'technology', 'the', 'think', 'who',
 ]);
 
-function structuredPersonalTopicSignals(topic: string, tweets: TweetPerformance[]): string[] {
+function normalizePersonalTopicSignalToken(token: string): string {
+  return token === 'partie' ? 'party' : token;
+}
+
+function sourceTokenSet(value: string): Set<string> {
+  return new Set(significantResearchTokens(value)
+    .map(normalizePersonalTopicSignalToken)
+    .filter((token) => !PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS.has(token)));
+}
+
+function contextualPersonalTopicTokens(value: string): { primary: Set<string>; supporting: Set<string> } {
+  const primary = new Set<string>();
+  const supporting = new Set<string>();
+  const add = (target: Set<string>, candidate: string) => {
+    for (const token of sourceTokenSet(candidate)) target.add(token);
+  };
+  for (const line of value.split(/\r?\n/)) {
+    if (/^\s*[-*]\s+/.test(line)) add(primary, line.replace(/^\s*[-*]\s+/, ''));
+  }
+  for (const match of value.matchAll(/\b(?:a|an|the|at|in|on|inside|around|from|with|without|play|use|wear|drink|buy|visit)\s+([@#]?[a-z0-9][a-z0-9_+.-]*(?:\s+[a-z0-9][a-z0-9_+.-]*){0,2})/gi)) {
+    add(supporting, match[1]);
+  }
+  for (const match of value.matchAll(/(?:^|[.!?]\s+|\n\s*)([a-z0-9][a-z0-9_+.-]{2,})\s+(?:is|are|has|have|should|will)\b/gi)) {
+    add(primary, match[1]);
+  }
+  return { primary, supporting };
+}
+
+export function buildPersonalTopicSubjectCuesV2(
+  topic: string,
+  tweets: Array<Pick<TweetPerformance, 'content' | 'topic'>>,
+): string[] {
   const topicTokens = new Set(significantResearchTokens(topic));
   return uniqueStrings(tweets.slice(0, 3).flatMap((tweet) => {
-    const semanticKey = buildResearchSemanticKey(
-      tweet.thesis || tweet.content,
-      [tweet.topic || topic],
-    );
-    const tokens = semanticKey.split(':').filter((token) => (
+    const source = tweet.content.replace(/https?:\/\/\S+/gi, ' ');
+    const mentionTokens = new Set((source.match(/@[a-z0-9_]{2,15}/gi) || [])
+      .map((mention) => mention.slice(1).toLowerCase())
+      .filter((token) => !PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS.has(token)));
+    const hashtagTokens = new Set((source.match(/#[a-z0-9_]{2,100}/gi) || [])
+      .map((hashtag) => hashtag.slice(1).toLowerCase())
+      .filter((token) => !PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS.has(token)));
+    const mentionIdentityTokens = new Set([...mentionTokens].flatMap((token) => significantResearchTokens(token)));
+    const entityTokens = new Set([...sourceTokenSet(extractResearchEntities(source).join(' '))]
+      .filter((token) => !mentionIdentityTokens.has(token)));
+    const contextualTokens = contextualPersonalTopicTokens(source);
+    const concreteTokens = new Set(significantResearchTokens(source).filter((token) => (
+      PERSONAL_TOPIC_SIGNAL_CONCRETE_TOKENS.has(token)
+    )));
+    const primary = uniqueStrings([
+      ...mentionTokens,
+      ...hashtagTokens,
+      ...entityTokens,
+      ...concreteTokens,
+      ...contextualTokens.primary,
+    ], 40).filter((token) => (
       token
       && !topicTokens.has(token)
-      && !PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS.has(token)
+      && !PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS.has(token)
     ));
-    return tokens.length >= 2 ? [tokens.slice(0, 7).join(':')] : [];
+    const supporting = [...contextualTokens.supporting].filter((token) => (
+      token
+      && !topicTokens.has(token)
+      && !PERSONAL_TOPIC_SIGNAL_NON_SUBJECT_TOKENS.has(token)
+      && !primary.includes(token)
+    ));
+    if (primary.length === 0 && supporting.length < 2) return [];
+    const ranked = uniqueStrings([...primary, ...supporting], 40);
+    return ranked.length > 0 ? [ranked.slice(0, 7).join(':')] : [];
   }), 3);
 }
 
 function personalTopicSignalPremises(topic: string, tweets: TweetPerformance[]): string[] {
   return tweets.slice(0, 3)
-    .filter((tweet) => structuredPersonalTopicSignals(topic, [tweet]).length > 0)
+    .filter((tweet) => buildPersonalTopicSubjectCuesV2(topic, [tweet]).length > 0)
     .map((tweet) => tweet.content);
 }
 
@@ -712,6 +796,16 @@ function isPersonalTopicSignalPremiseReskin(text: string, premises: string[] = [
   });
 }
 
+export function retainsPersonalTopicSubjectV2(text: string, signals: string[] = []): boolean {
+  const candidateTokens = new Set(significantResearchTokens(text).map(normalizePersonalTopicSignalToken));
+  const usableSignals = signals.map((signal) => significantResearchTokens(signal.replace(/:/g, ' '))
+    .map(normalizePersonalTopicSignalToken)
+    .filter((token) => token.length >= 4 && !PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS.has(token)))
+    .filter((tokens) => tokens.length > 0);
+  if (usableSignals.length === 0) return true;
+  return usableSignals.some((tokens) => tokens.some((token) => candidateTokens.has(token)));
+}
+
 function operatorTopicCandidates({
   voiceProfile,
   analysis,
@@ -730,7 +824,7 @@ function operatorTopicCandidates({
         provenance: 'operator-written topic outcomes',
         sampleCount: entry.sampleCount,
         historicalAngle: entry.angle || undefined,
-        personalTopicSignals: structuredPersonalTopicSignals(entry.topic, entry.topTweets || []),
+        personalTopicSignals: buildPersonalTopicSubjectCuesV2(entry.topic, entry.topTweets || []),
         personalTopicSignalPremises: personalTopicSignalPremises(entry.topic, entry.topTweets || []),
         priorityScore: Number((
           0.56
@@ -774,7 +868,10 @@ function rankOperatorTopicCandidates(
   const score = (candidate: OperatorTopicCandidateV2): number => {
     const key = topicKey(candidate.topic);
     const committedPenalty = recentTopicKeys.has(key) ? 0.08 : 0;
-    const attemptedPenalty = Math.min(0.72, (recentIdeaRuns.get(key)?.size || 0) * 0.24);
+    const attemptedPenalty = getOperatorTopicAttemptPenaltyV2(
+      candidate.provenance,
+      recentIdeaRuns.get(key)?.size || 0,
+    );
     const rotation = seedRotationKey
       ? (seedRotationOffset(`${seedRotationKey}:${key}`) % 1000) / 1000
       : 0;
@@ -788,6 +885,18 @@ function rankOperatorTopicCandidates(
       || (right.sampleCount || 0) - (left.sampleCount || 0)
       || left.topic.localeCompare(right.topic);
   });
+}
+
+export function getOperatorTopicAttemptPenaltyV2(
+  provenance: string,
+  attemptedRunCount: number,
+): number {
+  const runs = Math.max(0, Math.floor(attemptedRunCount));
+  if (runs === 0) return 0;
+  if (provenance === 'operator-written topic outcomes') return Math.min(0.18, runs * 0.03);
+  if (provenance === 'the active SOUL topic agenda') return Math.min(0.24, runs * 0.06);
+  if (provenance === 'mature account performance') return Math.min(0.36, runs * 0.12);
+  return Math.min(0.54, runs * 0.18);
 }
 
 function recentOperatorAttemptIdeas(recentIdeas: IdeaCandidate[], now: Date): IdeaCandidate[] {
@@ -1404,7 +1513,7 @@ export function buildIdeaGenerationPromptV2(
       operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
-      personalTopicSignalContract: 'Personal post history may select and rank a brief topic. Structured subject cues may contain unordered entities or objects from strong operator posts, but no historical prose, stance, or premise is supplied. Use at most one cue as a subject or adjacency prompt, then invent a fresh public move. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
+      personalTopicSignalContract: 'Personal post history may select and rank a brief topic. Structured subject cues contain unordered entities or objects from strong operator posts, but no historical prose, stance, or premise is supplied. When cues exist, every proposition must choose exactly one cue and retain at least one of its concrete entities, objects, people, places, products, or behaviors in publicMove. Spread three propositions across different cues when possible. Invent a fresh public move; do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
       nativeReactionContract: 'The native reaction patterns are structured evidence of this author\'s public moves and cadence range. Use the modes to vary the proposition. Raw native prose is intentionally withheld from ideation so it cannot supply a premise.',
       sameSubjectReactionContract: 'A brief may include a same-subject native reaction pattern. Use only its public-move shape when inventing the new proposition. The prior same-subject premise and wording are intentionally absent and must not be inferred.',
       rarePremiseContract: 'Acquisition calls and CEO-installation calls are rare premises, not reusable voice moves. If an operatorPremiseExclusion already contains a company-buying or CEO-installation call, generate no X-should-buy-Y or make-Z-CEO variant.',
@@ -1423,7 +1532,7 @@ export function buildIdeaGenerationPromptV2(
     })),
     previousPremises: semanticMemory.slice(0, 16).map((premise) => premise.slice(0, 240)),
     retry: retryFailures.length > 0 ? {
-      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one number while keeping an asserted mechanism is still a failure. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
+      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one number while keeping an asserted mechanism is still a failure. For personal_topic_subject_dropped, choose one supplied subject cue and keep a concrete cue object in publicMove without reusing the old premise. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
       failures: retryFailures,
     } : null,
     briefs: briefs.map((brief) => ({
@@ -1442,7 +1551,7 @@ export function buildIdeaGenerationPromptV2(
             informedTopicSelection: true,
             premiseSupplied: false,
             subjectCues: (brief.personalTopicSignals || []).slice(0, 3).map((signal) => signal.replace(/:/g, ' ')),
-            instruction: 'Use at most one cue for the concrete subject. The cue carries no prior opinion, claim, or wording.',
+            instruction: 'Every proposition must use exactly one cue as its concrete subject and keep at least one cue object in publicMove. Use different cues across variants when possible. The cue carries no prior opinion, claim, or wording.',
           }
         : null,
       creativeSeed: brief.creativeSeed
@@ -1902,6 +2011,9 @@ export function normalizeIdeaCandidatesV2({
       brief.personalTopicSignalPremises,
     )) {
       candidate.rejectionCodes.push('voice_anchor_semantic_reskin');
+    }
+    if (!retainsPersonalTopicSubjectV2(ideaPublicMove(candidate), brief.personalTopicSignals)) {
+      candidate.rejectionCodes.push('personal_topic_subject_dropped');
     }
     if (candidate.factualRisk === 'high') candidate.rejectionCodes.push('high_factual_risk');
     if (candidate.noveltyScore < 0.38) candidate.rejectionCodes.push('recent_semantic_repeat');

@@ -110,7 +110,8 @@ export async function reconcileAgentXIdentity(agent: Agent, now = new Date()) {
   const official = await getMe(decodeKeys(agent));
   const officialHandle = normalizeUsername(official.username);
   const officialUserId = String(official.id || '').trim();
-  if (!officialHandle || !officialUserId) {
+  const officialName = String(official.name || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  if (!officialHandle || !officialUserId || !officialName) {
     throw new AgentIdentityReconciliationError(
       'official_identity_invalid',
       'X returned an incomplete account identity.',
@@ -146,9 +147,11 @@ export async function reconcileAgentXIdentity(agent: Agent, now = new Date()) {
   }
 
   const previousHandle = normalizeUsername(agent.handle);
+  const previousName = String(agent.name || '').trim();
   const verifiedAt = now.toISOString();
   await updateAgent(agent.id, {
     handle: officialHandle,
+    name: officialName,
     xUserId: officialUserId,
     xIdentityVerifiedAt: null,
     xIdentityVerifiedHandle: null,
@@ -200,7 +203,9 @@ export async function reconcileAgentXIdentity(agent: Agent, now = new Date()) {
     source: 'manual',
     action: 'job_executed',
     reason: previousHandle === officialHandle
-      ? `Verified internal identity against official X account @${officialHandle}.`
+      ? previousName === officialName
+        ? `Verified internal identity against official X account @${officialHandle}.`
+        : `Verified @${officialHandle} and updated the internal display name from ${previousName || '(empty)'} to ${officialName}.`
       : `Updated internal X handle from @${previousHandle} to @${officialHandle} after official identity verification.`,
   }).catch(() => null);
 
@@ -209,6 +214,7 @@ export async function reconcileAgentXIdentity(agent: Agent, now = new Date()) {
     agentId: agent.id,
     previousHandle: previousHandle ? `@${previousHandle}` : null,
     officialHandle: `@${officialHandle}`,
+    officialName,
     officialXUserId: officialUserId,
     verifiedAt,
     verificationSource: 'x_api_v2_me' as const,
