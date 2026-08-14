@@ -7,7 +7,7 @@
  * 2. Auto-reply: fetch new mentions, generate replies, post them
  */
 
-import type { Agent, GenerationEvidenceReference, Mention, PostLogEntry, ProtocolSettings, RelationshipProfile, Tweet } from './types';
+import type { Agent, GenerationEvidenceReference, GenerationRunTrace, Mention, PostLogEntry, ProtocolSettings, RelationshipProfile, Tweet } from './types';
 import {
   addLearningSignal,
   getProtocolSettings,
@@ -28,7 +28,9 @@ import {
   getPerformanceHistory,
   getRelationshipProfiles,
   getProductFacts,
+  getGenerationRuns,
   invalidateAgentConnection,
+  saveGenerationRun,
   upsertRelationshipProfile,
   type ConversationTurn,
 } from './kv-storage';
@@ -2494,27 +2496,58 @@ export async function refillQueue(
 
     const addBatchItems = async (items: typeof allBatch): Promise<number> => {
       let addedFromBatch = 0;
+      const traceCache = new Map<string, GenerationRunTrace>();
+      const recordQueueDecision = async (
+        item: RankedProtocolTweet,
+        outcome: 'persisted' | 'rejected',
+        rejectionCode: string | null = null,
+      ) => {
+        const runId = item.generationRunId;
+        if (!runId) return;
+        let trace = traceCache.get(runId);
+        if (!trace) {
+          trace = (await getGenerationRuns(agent.id, 50)).find((run) => run.id === runId);
+          if (!trace) return;
+        }
+        const stageCounts = {
+          ...trace.stageCounts,
+          queueCandidatesEvaluated: (trace.stageCounts.queueCandidatesEvaluated || 0) + 1,
+          queueCandidatesPersisted: (trace.stageCounts.queueCandidatesPersisted || 0) + (outcome === 'persisted' ? 1 : 0),
+          queueCandidatesRejected: (trace.stageCounts.queueCandidatesRejected || 0) + (outcome === 'rejected' ? 1 : 0),
+        };
+        const rejectionCounts = { ...trace.rejectionCounts };
+        if (outcome === 'rejected' && rejectionCode) {
+          const key = `queue_${rejectionCode}`;
+          rejectionCounts[key] = (rejectionCounts[key] || 0) + 1;
+        }
+        trace = { ...trace, stageCounts, rejectionCounts };
+        traceCache.set(runId, trace);
+        await saveGenerationRun(agent.id, trace);
+      };
       const rejectCandidate = async (
         item: RankedProtocolTweet,
         code: string,
         detail: string | null = null,
       ) => {
-        await addPostLogEntry(agent.id, {
-          agentId: agent.id,
-          tweetId: '',
-          xTweetId: '',
-          content: item.content,
-          format: 'refill_candidate_rejected',
-          topic: item.targetTopic || 'generation',
-          postedAt: new Date().toISOString(),
-          source: 'autopilot',
-          action: 'skipped',
-          reason: detail ? `${code}: ${detail}` : code,
-          runId: item.generationRunId || undefined,
-          draftCandidateId: item.draftCandidateId || undefined,
-          model: item.finalCriticModel || item.judgeModel || item.generationModel || undefined,
-          qualityPolicyVersion: item.qualityPolicyVersion || undefined,
-        }).catch(() => null);
+        await Promise.allSettled([
+          addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: item.content,
+            format: 'refill_candidate_rejected',
+            topic: item.targetTopic || 'generation',
+            postedAt: new Date().toISOString(),
+            source: 'autopilot',
+            action: 'skipped',
+            reason: detail ? `${code}: ${detail}` : code,
+            runId: item.generationRunId || undefined,
+            draftCandidateId: item.draftCandidateId || undefined,
+            model: item.finalCriticModel || item.judgeModel || item.generationModel || undefined,
+            qualityPolicyVersion: item.qualityPolicyVersion || undefined,
+          }),
+          recordQueueDecision(item, 'rejected', code),
+        ]);
       };
       for (const item of items) {
         if (item.pipelineVersion !== 'v2' || !item.generationRunId || !item.ideaId || !item.draftCandidateId) {
@@ -2568,6 +2601,7 @@ export async function refillQueue(
           status: 'queued',
           topic: item.targetTopic,
         });
+        await recordQueueDecision(item, 'persisted').catch(() => null);
         addedFromBatch++;
       }
       return addedFromBatch;

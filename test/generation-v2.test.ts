@@ -9,6 +9,7 @@ import {
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
+  getGeoffreyFinalNoveltyIssueV2,
   getOperatorTopicConstraintIssuesV2,
   hasCrossBriefSubjectCollisionV2,
   getOperatorTopicAttemptPenaltyV2,
@@ -211,11 +212,21 @@ describe('Tweet Generation V2', () => {
   });
 
   it('targets autonomous headroom for live and production-shadow generation only', () => {
-    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.84);
-    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.84);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.86);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.86);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
-    expect(getRequiredFinalQualityMarginV2({})).toBe(0.84);
+    expect(getRequiredFinalQualityMarginV2({})).toBe(0.86);
+  });
+
+  it('blocks obvious low-novelty Geoffrey copy without applying the account gate globally', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    expect(getGeoffreyFinalNoveltyIssueV2(geoffreyVoice, 0.55)).toBe('final_novelty_below_floor');
+    expect(getGeoffreyFinalNoveltyIssueV2(geoffreyVoice, 0.62)).toBeNull();
+    expect(getGeoffreyFinalNoveltyIssueV2(voiceProfile, 0.4)).toBeNull();
   });
 
   it('does not lose a critic rescue to one-basis-point score rounding', () => {
@@ -890,7 +901,7 @@ describe('Tweet Generation V2', () => {
   });
 
   it('treats a named IPO timing comparison as a complete direct-prediction brief', () => {
-    const briefs = buildGenerationBriefsV2({
+    const input = {
       count: 2,
       stories: [],
       documents: [],
@@ -929,7 +940,8 @@ describe('Tweet Generation V2', () => {
         topTweet: { id: 'network-post-ipo', text: 'raw network prose', likes: 900, author: 'builder' },
       } as any],
       allTweets: [],
-    });
+    };
+    const briefs = buildGenerationBriefsV2(input as any);
 
     const timingBrief = briefs.find((entry) => entry.trendTopicId === 'network-modal-databricks-ipo')!;
     expect(timingBrief.authorOpportunity).toContain('say who happens first');
@@ -950,6 +962,18 @@ describe('Tweet Generation V2', () => {
       { name: 'Modal', role: 'company' },
       { name: 'Databricks', role: 'company' },
     ]);
+
+    const afterQueueCommit = buildGenerationBriefsV2({
+      ...input,
+      allTweets: [{
+        id: 'queued-ipo-prediction',
+        status: 'queued',
+        topic: 'Modal Databricks IPO timing',
+        content: 'i’m picking Databricks to IPO before Modal.',
+        createdAt: new Date().toISOString(),
+      } as Tweet],
+    } as any);
+    expect(afterQueueCommit.some((entry) => entry.trendTopicId === 'network-modal-databricks-ipo')).toBe(false);
   });
 
   it('blocks operator-topic role swaps and stripped event premises before judgment', () => {

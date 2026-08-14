@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGenerationAuditFindings } from '@/lib/generation-quality-audit';
+import { buildGenerationAuditFindings, buildGenerationQueueHandoffAudit } from '@/lib/generation-quality-audit';
 
 function healthyInput() {
   return {
@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-66',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-67',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -90,6 +90,30 @@ function healthyInput() {
 }
 
 describe('generation quality audit findings', () => {
+  it('counts a selected draft as persisted even after its draft status advances to queued', () => {
+    expect(buildGenerationQueueHandoffAudit([{
+      generationRunId: 'run-queued',
+      selectedDraftIds: ['draft-queued', 'draft-dropped'],
+      rejectionCounts: { queue_recent_semantic_duplicate: 1, final_quality_margin: 4 },
+      drafts: [{
+        draftCandidateId: 'draft-queued',
+        status: 'queued',
+        content: 'persisted draft',
+        tweetId: 'tweet-queued',
+      }, {
+        draftCandidateId: 'draft-dropped',
+        status: 'selected',
+        content: 'dropped draft',
+        tweetId: null,
+      }],
+    } as any])).toMatchObject({
+      queueHandoffRate: 0.5,
+      rejectionReasonCounts: { queue_recent_semantic_duplicate: 1 },
+      persistedSelectedDrafts: [expect.objectContaining({ draftCandidateId: 'draft-queued' })],
+      unpersistedSelectedDrafts: [expect.objectContaining({ draftCandidateId: 'draft-dropped' })],
+    });
+  });
+
   it('returns no findings for a healthy current state and historical window', () => {
     expect(buildGenerationAuditFindings(healthyInput() as any)).toEqual([]);
   });
@@ -117,7 +141,7 @@ describe('generation quality audit findings', () => {
     });
     expect(findings.find((finding) => finding.code === 'queue_quality_headroom_thin')).toMatchObject({
       severity: 'high',
-      evidence: { tweetId: 'tweet-thin', qualityMargin: 0.8285, hardFloor: 0.84 },
+      evidence: { tweetId: 'tweet-thin', qualityMargin: 0.8285, hardFloor: 0.86 },
     });
   });
 

@@ -116,6 +116,7 @@ export const V2_MIN_COPY_OVERALL = 0.58;
 export const V2_MIN_COPY_INSIGHT = 0.5;
 export const V2_MIN_COPY_VOICE_FIT = 0.72;
 export const V2_MIN_FINAL_QUALITY_MARGIN = PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN;
+export const V2_MIN_GEOFFREY_FINAL_NOVELTY = 0.62;
 const V2_MIN_STORY_IDENTITY_FIT = 0.55;
 const V2_MIN_STORY_CONSEQUENCE = 0.35;
 const V2_MIN_STORY_TOTAL = 0.58;
@@ -891,6 +892,20 @@ export function hasCrossBriefSubjectCollisionV2(left: string, right: string): bo
   return shared.length >= 2 || shared.some((token) => token.length >= 6);
 }
 
+export function isOperatorTopicSignalAlreadyCommittedV2(
+  subject: string,
+  committedTweets: Tweet[],
+): boolean {
+  const subjectTopicKey = topicKey(subject);
+  return committedTweets.some((tweet) => (
+    Boolean(subjectTopicKey && subjectTopicKey === topicKey(tweet.topic || ''))
+    || semanticIdeaSimilarity(
+      { content: subject, topic: subject },
+      { content: `${tweet.topic || ''} ${tweet.content}`, topic: tweet.topic },
+    ) >= 0.62
+  ));
+}
+
 function operatorTopicCandidates({
   voiceProfile,
   analysis,
@@ -1466,7 +1481,8 @@ export function buildGenerationBriefsV2({
       .filter((idea) => idea.briefId === briefId)
       .map((idea) => idea.generationRunId || idea.id));
     return { signal, index, attemptedRunCount: attemptedRuns.size };
-  }).sort((left, right) => (
+  }).filter((entry) => entry.attemptedRunCount === 0)
+  .sort((left, right) => (
     left.attemptedRunCount - right.attemptedRunCount
     || left.index - right.index
   )).map((entry) => entry.signal);
@@ -1475,6 +1491,7 @@ export function buildGenerationBriefsV2({
     if (briefs.length >= briefCount || operatorTopicSignalBriefs >= maxOperatorTopicSignalBriefs) break;
     const key = topicKey(signal.subject);
     if (usedTopics.has(key)) continue;
+    if (isOperatorTopicSignalAlreadyCommittedV2(signal.subject, committedTweets)) continue;
     const signalSubjects = [signal.subject, ...signal.semanticAliases];
     if (blocks.some((block) => (
       block.scope !== 'copy'
@@ -3797,6 +3814,15 @@ function finalConfidenceScore(score: CopyJudgeScore, evaluation: DraftEvaluation
   );
 }
 
+export function getGeoffreyFinalNoveltyIssueV2(
+  voiceProfile: VoiceProfile,
+  novelty: number,
+): string | null {
+  return isGeoffreyVoiceProfile(voiceProfile) && novelty < V2_MIN_GEOFFREY_FINAL_NOVELTY
+    ? 'final_novelty_below_floor'
+    : null;
+}
+
 function finalQualityRejectionCodes(
   score: CopyJudgeScore,
   evaluation: DraftEvaluation,
@@ -3809,6 +3835,10 @@ function finalQualityRejectionCodes(
   const confidenceFloor = Math.max(0.62, getAutonomyConfidenceThreshold(input.style.autonomyMode));
   const technicalLane = isGeoffreyDeepTechnicalTopic(
     `${evaluation.idea.topic} ${ideaPublicMove(evaluation.idea)} ${evaluation.idea.claim} ${evaluation.draft.content}`,
+  );
+  const geoffreyNoveltyIssue = getGeoffreyFinalNoveltyIssueV2(
+    input.voiceProfile,
+    finalScores.novelty ?? score.novelty,
   );
   return uniqueStrings([
     finalConfidenceScore(score, evaluation) < confidenceFloor ? 'final_confidence_below_floor' : null,
@@ -3826,6 +3856,7 @@ function finalQualityRejectionCodes(
     (finalScores.policySafety ?? 0) < V2_MIN_COPY_FACTUAL_SAFETY ? 'final_policy_safety_below_floor' : null,
     (finalScores.manualAnchorReskinRisk ?? 1) >= V2_MAX_ANCHOR_RESKIN_RISK ? 'copy_judge_anchor_reskin' : null,
     technicalLane && (finalScores.technicalCredibility ?? 0) < 0.45 ? 'final_technical_credibility_below_floor' : null,
+    geoffreyNoveltyIssue,
     qualityMargin < getRequiredFinalQualityMarginV2(input) ? 'final_quality_margin' : null,
   ]);
 }
@@ -4150,6 +4181,7 @@ const V2_RESCUE_ISSUE_LABELS: Record<string, string> = {
   final_generated_pattern_risk: 'recognizable generated-post pattern',
   final_voice_drift: 'drifts from the native operator register',
   final_technical_credibility_below_floor: 'technical language without enough mechanism, artifact, or operating detail',
+  final_novelty_below_floor: 'obvious or unsurprising claim with weak share value',
   final_source_copy_risk: 'too close to source wording',
   final_policy_safety_below_floor: 'unsupported or unsafe factual inference',
   final_quality_margin: 'several voice and quality dimensions only barely clear their individual floors',
@@ -4168,6 +4200,7 @@ const V2_REWRITEABLE_RESCUE_CODES = new Set([
   'final_generated_pattern_risk',
   'final_voice_drift',
   'final_technical_credibility_below_floor',
+  'final_novelty_below_floor',
   'final_quality_margin',
 ]);
 
@@ -4184,6 +4217,7 @@ const V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES = new Set([
   'final_generated_pattern_risk',
   'final_voice_drift',
   'final_technical_credibility_below_floor',
+  'final_novelty_below_floor',
 ]);
 
 function preflightRescueTargetsV2(evaluations: DraftEvaluation[], limit: number): DraftEvaluation[] {
@@ -4212,7 +4246,7 @@ function rescueTargetsV2(
   input: GenerateTweetBatchV2Input,
   excludedIdeaIds: Set<string> = new Set(),
 ): DraftEvaluation[] {
-  const nearMissFloor = Math.max(0.76, getRequiredFinalQualityMarginV2(input) - 0.08);
+  const nearMissFloor = Math.max(0.76, getRequiredFinalQualityMarginV2(input) - 0.1);
   const ranked = evaluations
     .filter((entry) => (
       entry.draft.status === 'rejected'
@@ -4254,6 +4288,7 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
   'final_generated_pattern_risk',
   'final_voice_drift',
   'final_technical_credibility_below_floor',
+  'final_novelty_below_floor',
 ]);
 
 const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;

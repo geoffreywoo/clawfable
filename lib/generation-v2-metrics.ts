@@ -308,6 +308,7 @@ export function buildGenerationV2Metrics({
       sourceDocumentIds: run.sourceDocumentIds,
       storyClusterIds: run.storyClusterIds,
       stageCounts: run.stageCounts,
+      rejectionCounts: run.rejectionCounts,
       ideas: run.ideaCandidateIds.flatMap((id) => {
         const idea = ideasById.get(id);
         return idea ? [{
