@@ -364,7 +364,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-77',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-78',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -798,6 +798,90 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('pairs Fable and GPT on one high-margin Geoffrey consequence repair', async () => {
+    let criticCalls = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        if (parsed.failedAttempts.length > 0) {
+          const fable = options.modelStack === 'publishing_v2_fable_control';
+          return result(JSON.stringify({ drafts: [{
+            content: fable
+              ? `${parsed.idea.topic}: give the agent a wallet with a hard cap before it can buy cloud credits.`
+              : `agents can buy cloud credits once their wallet has a hard cap and instant revocation.`,
+            format: 'observation',
+            posture: 'bounded operational consequence',
+          }] }), fable ? 'anthropic' : 'openai');
+        }
+        return writerResponse(options.prompt);
+      }
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        const candidates = JSON.parse(options.prompt).candidates;
+        const allowedIdea = candidates[0].ideaId;
+        return result(JSON.stringify({
+          ranking: candidates.map((candidate: any) => candidate.id),
+          scores: candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.78,
+            voiceFit: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            operatorPlausibility: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.9 : 0.82,
+            cringeRisk: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.05 : 0.1,
+            insight: criticCalls > 1 || candidate.ideaId === allowedIdea ? 0.86 : 0.78,
+            specificity: 0.82,
+            factualSafety: 0.98,
+            clarity: 0.9,
+            novelty: 0.84,
+            manualAnchorReskinRisk: 0.05,
+            diagnosis: criticCalls > 1 || candidate.ideaId === allowedIdea
+              ? 'The operational consequence is concrete and the post is publishable.'
+              : 'The core is native; the smallest improvement is naming the operational task this control would unlock.',
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2({
+      ...input,
+      modelStack: 'publishing_v2_fable_control',
+    });
+    const rescueWriterCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.length > 0);
+    const rescueDrafts = mocks.upsertDraftCandidates.mock.calls
+      .flatMap((call) => call[1])
+      .filter((draft) => draft.mutationRound === 1);
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+
+    expect(criticCalls).toBe(2);
+    expect(rescueWriterCalls).toHaveLength(2);
+    expect(rescueWriterCalls.map((call) => call.modelStack).sort()).toEqual([
+      'publishing_v2_fable_control',
+      'publishing_v2_gpt_control',
+    ]);
+    expect(rescueWriterCalls.every((call) => String(call.system).includes('BOUNDED REPAIR'))).toBe(true);
+    expect(rescueDrafts).toHaveLength(2);
+    expect(rescueDrafts.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.some((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
+    expect(finalRun).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({
+        postcriticRescueTargets: 1,
+        postcriticRescueEligibleTargets: 1,
+        postcriticRescueRunnableTargets: 1,
+        postcriticSurgicalTargets: 1,
+        postcriticPairedWriterTargets: 1,
+        postcriticRescueSuppressedNegativeValue: 0,
+        rescueDraftsGenerated: 2,
+        draftsSelected: 2,
+      }),
+    });
+  });
+
   it('spends Geoffrey post-critic capacity on fresh alternate ideas instead of rewrites', async () => {
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
@@ -845,6 +929,8 @@ describe('generateTweetBatchV2 integration', () => {
       status: 'completed',
       stageCounts: expect.objectContaining({
         postcriticRescueTargets: expect.any(Number),
+        postcriticRescueEligibleTargets: 0,
+        postcriticRescueRunnableTargets: 0,
         postcriticPairedWriterTargets: 0,
         postcriticRescueSuppressedNegativeValue: expect.any(Number),
         alternateIdeaTargets: 2,

@@ -34,6 +34,7 @@ import {
   buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
+  isV2MarginOnlyConsequenceRepairCandidate,
   isGenericInvestorSelectionTemplateV2,
 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
@@ -52,7 +53,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 22;
+export const GENERATION_QUALITY_AUDIT_VERSION = 23;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -223,8 +224,15 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
     rescue: {
       targetCount: runs.reduce((sum, run) => sum
         + (run.stageCounts.preflightRescueTargets || 0)
-        + (run.stageCounts.postcriticRescueTargets || 0)
+        + (run.stageCounts.postcriticRescueRunnableTargets
+          ?? run.stageCounts.postcriticRescueEligibleTargets
+          ?? run.stageCounts.postcriticRescueTargets
+          ?? 0)
         + (run.stageCounts.postcriticTrimTargets || 0), 0),
+      suppressedTargetCount: runs.reduce((sum, run) => sum
+        + (run.stageCounts.postcriticRescueSuppressedNegativeValue || 0), 0),
+      capacityDeferredTargetCount: runs.reduce((sum, run) => sum
+        + (run.stageCounts.postcriticRescueCapacityDeferredTargets || 0), 0),
       generatedCount: rescueEntries.length,
       finalCriticCount: rescueEntries.filter((entry) => typeof entry.judgeScore === 'number').length,
       selectedCount: selectedRescues.length,
@@ -432,6 +440,14 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     && (stageThroughput?.draftsEligible || 0) >= 4
     && stageThroughput?.draftsSelected === 0
   ) {
+    const nearMisses = input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [];
+    const hasBoundedConsequenceRepair = nearMisses.some((nearMiss) => (
+      isV2MarginOnlyConsequenceRepairCandidate(
+        nearMiss.rejectionCodes,
+        nearMiss.judgeNotes,
+        nearMiss.qualityMargin,
+      )
+    ));
     add({
       code: 'current_policy_idea_to_copy_gap',
       severity: 'high',
@@ -441,9 +457,11 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         runCount: input.currentPolicyWindow.runCount,
         stageThroughput,
         initialWriterGroups: input.currentPolicyWindow.writerOutcomes?.groups.filter((group) => group.phase === 'initial') || [],
-        nearMisses: input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [],
+        nearMisses,
       },
-      action: 'Tighten public-move eligibility and replace abstract comparison theses before writing; keep the final quality floor fixed.',
+      action: hasBoundedConsequenceRepair
+        ? 'Run one bounded, critic-directed consequence repair on the strongest margin-only draft, rejudge every revision, then rotate to a fresh idea; keep the final quality floor fixed.'
+        : 'Tighten public-move eligibility and replace abstract comparison theses before writing; keep the final quality floor fixed.',
     });
   }
 

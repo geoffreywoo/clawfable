@@ -28,6 +28,7 @@ import {
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
+  isV2MarginOnlyConsequenceRepairCandidate,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -392,12 +393,38 @@ describe('Tweet Generation V2', () => {
     )).toBe('critic_surgical');
   });
 
-  it('spends Geoffrey close-miss calls on fresh ideas instead of negative-value rewrites', () => {
+  it('repairs only high-margin Geoffrey misses with one permitted concrete consequence', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
     };
     expect(shouldRunPostcriticRescueV2(geoffreyVoice)).toBe(false);
+    expect(isV2MarginOnlyConsequenceRepairCandidate(
+      ['final_quality_margin'],
+      'The smallest improvement would be naming the operational task this control would unlock.',
+      0.832,
+    )).toBe(true);
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      ['final_quality_margin'],
+      'Strengthen the otherwise thin call with one concrete consequence already permitted by the idea.',
+      0.816,
+    )).toBe(true);
+    expect(isV2MarginOnlyConsequenceRepairCandidate(
+      ['final_quality_margin'],
+      'Name one concrete consequence.',
+      0.79,
+    )).toBe(false);
+    expect(isV2MarginOnlyConsequenceRepairCandidate(
+      ['final_quality_margin'],
+      'Cut the explanatory closer and stop.',
+      0.84,
+    )).toBe(false);
+    expect(isV2MarginOnlyConsequenceRepairCandidate(
+      ['copy_judge_voice_mismatch', 'final_quality_margin'],
+      'Name one concrete consequence.',
+      0.84,
+    )).toBe(false);
     expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
   });
 

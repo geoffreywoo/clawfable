@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-77',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-78',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -327,7 +327,8 @@ describe('generation quality audit findings', () => {
       },
     } as any;
 
-    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+    const structuralFindings = buildGenerationAuditFindings(input as any);
+    expect(structuralFindings).toEqual(expect.arrayContaining([
       expect.objectContaining({
         code: 'current_policy_idea_to_copy_gap',
         severity: 'high',
@@ -337,6 +338,14 @@ describe('generation quality audit findings', () => {
         }),
       }),
     ]));
+    expect(structuralFindings.find((finding) => finding.code === 'current_policy_idea_to_copy_gap')?.action)
+      .toContain('Tighten public-move eligibility');
+
+    (input.currentPolicyWindow as any).writerOutcomes.nearMisses[0].judgeNotes =
+      'The smallest improvement would be naming the operational task this control would unlock.';
+    const consequenceFindings = buildGenerationAuditFindings(input as any);
+    expect(consequenceFindings.find((finding) => finding.code === 'current_policy_idea_to_copy_gap')?.action)
+      .toContain('bounded, critic-directed consequence repair');
   });
 
   it('reports repeated category-level investor wrappers in current-policy drafts', () => {
