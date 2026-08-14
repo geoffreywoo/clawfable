@@ -552,9 +552,14 @@ function identityFit(document: SourceDocument, agenda: ResearchAgenda): number {
 }
 
 function consequenceScore(documents: SourceDocument[]): number {
-  const tokens = significantResearchTokens(documents.map((entry) => `${entry.title} ${entry.excerpt}`).join(' '));
+  const text = documents.map((entry) => `${entry.title} ${entry.excerpt}`).join(' ');
+  const tokens = significantResearchTokens(text);
   const hits = new Set(tokens.filter((token) => CONSEQUENCE_TERMS.has(token))).size;
-  return clampResearchScore(0.22 + hits * 0.13);
+  const measuredMagnitude = /\b(?:\d+(?:[.,]\d+)?\s*%|half|double[ds]?|triple[ds]?|\d+(?:[.,]\d+)?x)\b/i.test(text);
+  const causalChange = /\b(?:cut|cuts|cutting|drop(?:ped|s|ping)?|fall(?:en|ing|s)?|fell|halv(?:e|ed|es|ing)|increase(?:d|s|ing)?|lower(?:ed|s|ing)?|rais(?:e|ed|es|ing)|reduc(?:e|ed|es|ing)|ris(?:e|en|es|ing)|rose)\b/i.test(text);
+  const marketOutcome = /\b(?:adoption|capacity|costs?|customers?|demand|deployments?|margins?|output|prices?|revenue|supply|users?|yield)\b/i.test(text);
+  const measuredOutcomeFloor = measuredMagnitude && causalChange && marketOutcome ? 0.61 : 0;
+  return clampResearchScore(Math.max(0.22 + hits * 0.13, measuredOutcomeFloor));
 }
 
 function freshnessScore(documents: SourceDocument[], nowMs: number): number {

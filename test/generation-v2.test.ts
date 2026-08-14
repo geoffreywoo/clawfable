@@ -628,6 +628,23 @@ describe('Tweet Generation V2', () => {
     ]);
   });
 
+  it('keeps a declarative technology idea in its local register before cross-topic posture', () => {
+    const selected = selectNativeReactionAnchors([
+      { id: 'culture-blunt', topic: 'culture', content: 'do not root for a downfall. it only exposes insecurity.' },
+      { id: 'ai-rough', topic: 'AI', content: 'ai changes the action surface.\n\nthe next move is weird.\n\nhuman shells.' },
+      { id: 'startup-call', topic: 'startups', content: 'my philosophy for a founder/ceo: win first, explain later.' },
+    ], [
+      'AI software',
+      'Google could make standalone AI software feel temporary.',
+    ], 3);
+
+    expect(selected.map((anchor) => anchor.id)).toEqual([
+      'ai-rough',
+      'culture-blunt',
+      'startup-call',
+    ]);
+  });
+
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
   });
