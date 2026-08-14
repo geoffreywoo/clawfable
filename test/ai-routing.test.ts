@@ -119,6 +119,7 @@ describe('AI model routing', () => {
 
   it('uses Fable 5 for V2 copy and GPT-5.6 for V2 criticism', async () => {
     const {
+      PUBLISHING_V2_CONTROL_MODEL_STACK,
       PUBLISHING_V2_MODEL_STACK,
       getModelChainForTask,
     } = await loadDefaultRouter();
@@ -142,6 +143,15 @@ describe('AI model routing', () => {
       provider: 'openai',
       model: 'gpt-5.6',
     });
+    expect(getModelChainForTask('tweet_writing', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+    expect(getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual(
+      getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_MODEL_STACK),
+    );
   });
 
   it('dispatches V2 copy to Fable 5 before provider failover', async () => {

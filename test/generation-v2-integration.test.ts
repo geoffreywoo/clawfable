@@ -345,7 +345,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-16',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-17',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -379,6 +379,57 @@ describe('generateTweetBatchV2 integration', () => {
     releaseIdeas();
 
     await expect(generation).resolves.toHaveLength(2);
+  });
+
+  it('retries only operator briefs with no deterministic idea survivors', async () => {
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    mocks.getStoryClusters.mockResolvedValue([]);
+    let poisonedBriefId = '';
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') {
+        const prompt = JSON.parse(options.prompt);
+        const generated = JSON.parse(ideaResponse(options.prompt).text);
+        if (prompt.retry) {
+          expect(prompt.retry.failures).toEqual([expect.objectContaining({
+            briefId: poisonedBriefId,
+            attempts: expect.arrayContaining([
+              expect.objectContaining({ rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']) }),
+            ]),
+          })]);
+          generated.ideas = generated.ideas.map((idea: any, index: number) => ({
+            ...idea,
+            claim: `i'd back the named company making this startup choice on retry path ${index}`,
+            tension: `the choice is opinionated enough to repel consensus on retry path ${index}`,
+            implication: `the company should keep the sharp edge instead of explaining it on retry path ${index}`,
+            authorReason: `the author publicly takes direct company positions on retry path ${index}`,
+          }));
+          return result(JSON.stringify(generated), 'anthropic');
+        }
+        if (!poisonedBriefId) {
+          poisonedBriefId = prompt.briefs[0].id;
+          generated.ideas = generated.ideas.map((idea: any) => idea.briefId === poisonedBriefId ? {
+            ...idea,
+            claim: `Google rolled out a new product into Gmail for ${idea.claim}`,
+          } : idea);
+        }
+        return result(JSON.stringify(generated), 'anthropic');
+      }
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const ideaCalls = mocks.generateText.mock.calls.filter(([options]) => options.task === 'idea_generation');
+    const retryCalls = ideaCalls.filter(([options]) => Boolean(JSON.parse(options.prompt).retry));
+
+    expect(drafts).toHaveLength(2);
+    expect(ideaCalls).toHaveLength(3);
+    expect(retryCalls).toHaveLength(1);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      stageCounts: expect.objectContaining({ ideaGenerationCalls: 3, ideaRetryCalls: 1 }),
+    });
   });
 
   it('selects quality margin over a critic ranking that puts threshold-hugging copy first', async () => {

@@ -8,6 +8,7 @@ import type {
 import type { TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
+  PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
   getModelChainForTask,
 } from './ai';
@@ -34,7 +35,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 5;
+export const GENERATION_QUALITY_AUDIT_VERSION = 6;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -453,6 +454,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     'quality',
     activeModelStack,
   )[0];
+  const shadowControlWriting = getModelChainForTask(
+    'tweet_writing',
+    'quality',
+    PUBLISHING_V2_CONTROL_MODEL_STACK,
+  )[0];
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const queueItems = queue.map((tweet) => {
@@ -665,7 +671,15 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     models: {
       activeStack: activeModelStack,
       pipelineVersion,
-      shadowControlStack: null,
+      shadowControlStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+      shadowComparison: {
+        isolatedVariable: 'primary_writer',
+        defaultWriter: primaryWriting,
+        controlWriter: shadowControlWriting,
+        sharedIdeaGenerator: primaryIdeaGeneration,
+        sharedIdeaJudge: primaryIdeaJudge,
+        sharedCopyJudge: primaryCopyJudge,
+      },
       strictFallbackStack: null,
       preferred: {
         ideaGeneration: primaryIdeaGeneration,

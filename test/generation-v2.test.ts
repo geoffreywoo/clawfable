@@ -380,6 +380,11 @@ describe('Tweet Generation V2', () => {
     expect(new Set(operatorBriefs.map((entry) => entry.creativeSeed?.id)).size).toBe(operatorBriefs.length);
     expect(prompt.requirements.creativeSeedContract).toContain('never evidence');
     expect(prompt.briefs.every((entry: any) => entry.creativeSeed && entry.evidence.length === 0)).toBe(true);
+    expect(prompt.briefs.every((entry: any) => (
+      entry.creativeSeed.publicReactionPrompt
+      && !entry.creativeSeed.hiddenConstraint
+      && !entry.creativeSeed.nonConsensusDirection
+    ))).toBe(true);
   });
 
   it('rotates Geoffrey creative seeds across independent generation runs', () => {
@@ -1259,10 +1264,15 @@ describe('Tweet Generation V2', () => {
       "how many agent builders are actually classifying calls by latency sensitivity now that there's a fast tier? most workflow steps are delay-tolerant. blasting every token through premium speed is just burning money for vibes.",
       'corollary for founders: treat licensing and exchange access as the product, not a back-office chore. build it, partner for it, or acquire it early. a slick front end without owned rails is just a customer acquisition funnel for whoever controls clearing.',
       "if you want to diligence culture, skip the mission statement and ask about the last person who should've been let go and wasn't. founders reveal what they actually reward through who they keep. everything else is decoration.",
+      'computer-use agents hit 85%. i\'m officially retiring "cool demo" from my vocabulary for this category.',
+      "i'm genuinely moved by how fast this benchmark crossed humans.",
+      'the benchmark is the one i keep coming back to.',
     ];
 
     expect(rejectedProductionDrafts.every((draft) => getV2GeneratedWritingIssue(draft) !== null)).toBe(true);
     expect(GEOFFREY_NATIVE_EVAL.every((anchor) => getV2GeneratedWritingIssue(anchor) === null)).toBe(true);
+    expect(getV2GeneratedWritingIssue('i think google should buy @cognition for $200b and make @ScottWu46 ceo')).toBeNull();
+    expect(getV2GeneratedWritingIssue("i'd bet @cognition is worth $200b before most public software companies catch up")).toBeNull();
   });
 
   it('turns prior outcomes into compact strategy without leaking winning post copy', () => {

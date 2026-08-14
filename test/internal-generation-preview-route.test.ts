@@ -222,6 +222,19 @@ describe('internal generation preview route', () => {
     expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
   });
 
+  it('allows the isolated GPT writer control stack in preview', async () => {
+    const response = await POST(request({ count: 2, modelStack: 'publishing_v2_gpt_control' }) as any, {
+      params: Promise.resolve({ id: '13' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      modelStack: 'publishing_v2_gpt_control',
+      mode: 'preview',
+      persistArtifacts: false,
+    }));
+  });
+
   it('runs the same V2 preview contract for every entitled account', async () => {
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'another-agent', soulMd: '# SOUL' });
     const response = await POST(request({ count: 2 }) as any, {

@@ -4,6 +4,7 @@ import { isGeoffreyVoiceProfile } from './account-taste';
 export interface FrontierIdeaSeed {
   id: string;
   kind?: 'frontier' | 'startup' | 'ai_product' | 'markets' | 'culture' | 'career' | 'health' | 'sports';
+  reactionPrompt?: string;
   topic: string;
   technicalObject: string;
   hiddenConstraint: string;
@@ -244,8 +245,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'startup-revealed-incentives',
     kind: 'startup',
+    reactionPrompt: 'Name the company, founder, or decision when one is supplied. Make one direct funding, product, or company-quality call. A desire, prediction, or disagreement beats a lesson.',
     topic: 'founders, venture, and company building',
-    technicalObject: 'one specific founder decision, company move, financing term, product choice, or customer behavior worth reacting to',
+    technicalObject: 'the exact founder, company, financing term, product choice, or customer behavior in the subject cue',
     hiddenConstraint: 'the interesting part is the revealed preference in the decision, not a made-up binary or generic founder lesson',
     nonConsensusImplication: 'state the concrete company judgment Geoffrey would defend and leave the audience lesson implicit',
     startupBackingFact: '',
@@ -255,8 +257,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'startup-headcount-ambition',
     kind: 'startup',
+    reactionPrompt: 'Make an explicitly subjective bet about what one ambitious AI-native team can do. No efficiency sermon, universal team-size law, or invented founder anecdote.',
     topic: 'AI-native startup formation and team design',
-    technicalObject: 'a seed-stage founder deciding whether the next unit of ambition requires another hire, a narrower product, or better use of AI',
+    technicalObject: 'the capability or ambition of a small AI-native startup team',
     hiddenConstraint: 'headcount can add coordination and status before it adds a capability the company truly lacks',
     nonConsensusImplication: 'take a concrete position on what a fundable early team should look like now without preaching generic efficiency',
     startupBackingFact: '',
@@ -266,8 +269,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'startup-customer-truth',
     kind: 'startup',
+    reactionPrompt: 'State which company behavior would make you want to fund, buy, or distrust the company. Keep it a preference, not a founder checklist or an invented customer story.',
     topic: 'customer pull, fundraising, and company quality',
-    technicalObject: 'a technically strong startup getting praise, investor demand, pilots, and repeated paid customer use in different proportions',
+    technicalObject: 'the exact startup, product, or customer behavior in the subject cue',
     hiddenConstraint: 'social proof is easier to manufacture than a customer repeatedly changing behavior or budget',
     nonConsensusImplication: 'make one sharp company-quality judgment from revealed customer behavior without writing a founder checklist',
     startupBackingFact: '',
@@ -277,8 +281,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'ai-behavior-and-ambition',
     kind: 'ai_product',
+    reactionPrompt: 'Say what you now want someone to build, what becomes newly possible, or which ambitious behavior changes. A weird coherent prediction is valid; an AI industry recap is not.',
     topic: 'AI products, research, and how ambitious people use them',
-    technicalObject: 'a model or AI product that lets one ambitious builder attempt work that previously required a team',
+    technicalObject: 'the exact AI model, product, research object, or capability in the subject cue',
     hiddenConstraint: 'capability matters when it changes behavior, speed, ambition, or company formation, not when it only wins a benchmark',
     nonConsensusImplication: 'react to what people or startups will do differently without writing another AI industry recap',
     startupBackingFact: '',
@@ -288,8 +293,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'ai-incumbent-bundling',
     kind: 'ai_product',
+    reactionPrompt: 'Keep the exact named company or person from the subject cue. Make an audacious build, buy, leadership, valuation, or product desire. Do not invent a launch or explain incumbent distribution.',
     topic: 'AI products and incumbent distribution',
-    technicalObject: 'OpenAI or Google putting a new model capability directly inside a product people already use',
+    technicalObject: 'OpenAI, Google, Anthropic, or the exact named AI company, person, or product in the subject cue',
     hiddenConstraint: 'bundling can erase a thin feature company while making an entirely new workflow worth building',
     nonConsensusImplication: 'make a specific build, buy, or company-value judgment instead of recapping a model launch',
     startupBackingFact: '',
@@ -299,8 +305,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'ai-talent-company-formation',
     kind: 'ai_product',
+    reactionPrompt: 'Keep the named person or company when one is supplied. Make a direct should-start, should-join, should-buy, or should-lead call. Do not turn talent into generic career advice.',
     topic: 'AI talent and company formation',
-    technicalObject: 'an exceptional researcher or product builder choosing between a frontier lab, a scaled incumbent, and starting a company',
+    technicalObject: 'the exact researcher, builder, lab, company, or talent choice in the subject cue',
     hiddenConstraint: 'models change how much one person can build, but distribution, capital, and ambition still determine which game is worth playing',
     nonConsensusImplication: 'take a side on the talent or company choice in high-context startup language',
     startupBackingFact: '',
@@ -310,8 +317,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'markets-ai-value-chain',
     kind: 'markets',
+    reactionPrompt: 'Make one direct company, security, valuation, or value-chain bet. State the position you would defend; do not teach the audience a picks-and-shovels framework.',
     topic: 'where AI investment returns accrue',
-    technicalObject: 'an investor choosing exposure across model labs, cloud platforms, chips, power, and application companies',
+    technicalObject: 'the exact AI company, security, or layer of the value chain in the subject cue',
     hiddenConstraint: 'revenue can grow at one layer while capex intensity, pricing competition, or supplier economics capture the return elsewhere',
     nonConsensusImplication: 'make one company or security judgment without defaulting to a generic picks-and-shovels slogan',
     startupBackingFact: '',
@@ -321,6 +329,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'markets-public-private-risk',
     kind: 'markets',
+    reactionPrompt: 'Make one price-sensitive or ownership-sensitive call about the named company or security. Do not invent a holding, allocation, or generic public-versus-private comparison.',
     topic: 'public versus private AI exposure',
     technicalObject: 'a specific AI company, security, valuation, financing, or portfolio exposure that deserves a direct opinion',
     hiddenConstraint: 'company quality, entry price, position size, liquidity, and duration can point to different conclusions',
@@ -332,6 +341,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'markets-capital-duration',
     kind: 'markets',
+    reactionPrompt: 'Take one side on the financing, ownership, or timing choice. Keep it to the actual company or instrument when supplied; do not write a risk-management explainer.',
     topic: 'capital duration and technology timing',
     technicalObject: 'a capital-intensive technology company choosing between expensive equity, project finance, customer funding, and waiting to scale',
     hiddenConstraint: 'the financing instrument can shape what the company is able to build and who owns the upside before product risk clears',
@@ -343,6 +353,7 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'culture-status-revealed-preference',
     kind: 'culture',
+    reactionPrompt: 'React to the exact named person, institution, product, or behavior when supplied. A blunt social judgment or real question is enough; do not manufacture a status parable.',
     topic: 'culture, status, merit, ambition, and power',
     technicalObject: 'a named person, institution, product, cultural behavior, or live status object worth reacting to',
     hiddenConstraint: 'status is legible through the actual object or behavior; an invented panel, dinner, or prestige choice proves nothing',
@@ -354,8 +365,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'career-agency-over-credential',
     kind: 'career',
+    reactionPrompt: 'Make one direct judgment about a named person, choice, credential, or act of agency. Do not address an anonymous ambitious person or package it as career advice.',
     topic: 'career, ambition, talent, and agency',
-    technicalObject: 'an ambitious person choosing between credentials, proximity to powerful people, and building something directly',
+    technicalObject: 'the exact person, credential, career choice, or act of agency in the subject cue',
     hiddenConstraint: 'career advice usually hides the adviser\'s own risk tolerance, status incentives, and preferred game',
     nonConsensusImplication: 'make a direct judgment about agency or ambition without turning it into generic career advice',
     startupBackingFact: '',
@@ -365,8 +377,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'health-performance-agency',
     kind: 'health',
+    reactionPrompt: 'Ask a real first-person question or state a personal value preference. Do not invent a routine, result, biomarker, medical claim, or universal protocol.',
     topic: 'health, longevity, and human performance',
-    technicalObject: 'a health or performance habit that survives travel, work pressure, and imperfect adherence',
+    technicalObject: 'the exact health, performance, or longevity object in the subject cue',
     hiddenConstraint: 'personal agency, adherence, and opportunity cost matter more than another abstract optimization claim',
     nonConsensusImplication: 'state a personal-value judgment without inventing medical evidence or giving universal health advice',
     startupBackingFact: '',
@@ -376,8 +389,9 @@ const GEOFFREY_BROAD_SEEDS: FrontierIdeaSeed[] = [
   {
     id: 'sports-competitive-reality',
     kind: 'sports',
+    reactionPrompt: 'Keep the named athlete, matchup, or competitive choice when supplied. Make the narrow competitive call or ask the live question; do not invent sports news or add a motivational lesson.',
     topic: 'sports, fighting, and competitive behavior',
-    technicalObject: 'an athlete choosing a hard matchup, protecting a record, or staying past the physical peak',
+    technicalObject: 'the exact athlete, matchup, or competitive behavior in the subject cue',
     hiddenConstraint: 'the official narrative and the observable competitive behavior may point in different directions',
     nonConsensusImplication: 'make the narrow competitive judgment; do not manufacture sports news or a motivational lesson',
     startupBackingFact: '',
