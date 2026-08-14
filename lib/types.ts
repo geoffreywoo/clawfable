@@ -1234,8 +1234,10 @@ export interface PostLogEntry {
   action?: 'posted' | 'replied' | 'skipped' | 'error' | 'mentions_refreshed' | 'job_executed';
   reason?: string;
   runId?: string;
+  draftCandidateId?: string;
   skipReason?: string;
   model?: string;
+  qualityPolicyVersion?: string;
   errorCode?: string;
 }
 

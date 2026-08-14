@@ -33,6 +33,7 @@ import {
   type ConversationTurn,
 } from './kv-storage';
 import { generatePublishingBatchV2 } from './publishing-v2';
+import { getCommittedTweetCopyMemoryV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { buildGenerationContext } from './generation-context';
 import { buildLearnings } from './performance';
@@ -2482,8 +2483,9 @@ export async function refillQueue(
       : [];
     const allBatch = [...batch, ...marketingBatch];
 
-    // Dedup: skip tweets that are too similar to recent posts or queued items
-    const recentContent = allTweets.slice(0, 50).map((tweet) => tweet.content);
+    // Only copy that reached a committed lifecycle state can block a refill.
+    // Quarantined and unreviewed artifacts are failed attempts, not editorial memory.
+    const recentContent = getCommittedTweetCopyMemoryV2(allTweets, { limit: 50 });
     const operatorEvidence = [
       ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
       ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
@@ -2492,28 +2494,75 @@ export async function refillQueue(
 
     const addBatchItems = async (items: typeof allBatch): Promise<number> => {
       let addedFromBatch = 0;
+      const rejectCandidate = async (
+        item: RankedProtocolTweet,
+        code: string,
+        detail: string | null = null,
+      ) => {
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: item.content,
+          format: 'refill_candidate_rejected',
+          topic: item.targetTopic || 'generation',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason: detail ? `${code}: ${detail}` : code,
+          runId: item.generationRunId || undefined,
+          draftCandidateId: item.draftCandidateId || undefined,
+          model: item.finalCriticModel || item.judgeModel || item.generationModel || undefined,
+          qualityPolicyVersion: item.qualityPolicyVersion || undefined,
+        }).catch(() => null);
+      };
       for (const item of items) {
-        if (item.pipelineVersion !== 'v2' || !item.generationRunId || !item.ideaId || !item.draftCandidateId) continue;
-        if (getGeneratedPublishIssue(item)) continue;
+        if (item.pipelineVersion !== 'v2' || !item.generationRunId || !item.ideaId || !item.draftCandidateId) {
+          await rejectCandidate(item, 'missing_v2_provenance');
+          continue;
+        }
+        const originIssue = getGeneratedPublishIssue(item);
+        if (originIssue) {
+          await rejectCandidate(item, 'generated_publish_issue', originIssue);
+          continue;
+        }
         const completenessIssue = getTweetCompletenessIssue(item.content);
-        if (completenessIssue) continue;
+        if (completenessIssue) {
+          await rejectCandidate(item, 'incomplete_copy', completenessIssue);
+          continue;
+        }
         const policyIssue = getAutopostPolicyIssue(item.content, {
           allowedMentions: [agent.handle],
           allowMentions: false,
         });
-        if (policyIssue) continue;
+        if (policyIssue) {
+          await rejectCandidate(item, 'autopost_policy', policyIssue);
+          continue;
+        }
         const authorityIssue = getAuthorityProofIssue(item.content);
-        if (authorityIssue) continue;
+        if (authorityIssue) {
+          await rejectCandidate(item, 'unearned_authority', authorityIssue);
+          continue;
+        }
         const claimEvidenceIssue = assessClaimEvidence(
           item.content,
           getTrustedClaimSourceTexts(item, operatorEvidence),
         ).issue;
-        if (claimEvidenceIssue) continue;
-        if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) continue;
+        if (claimEvidenceIssue) {
+          await rejectCandidate(item, 'claim_evidence', claimEvidenceIssue);
+          continue;
+        }
+        if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) {
+          await rejectCandidate(item, 'recent_copy_duplicate');
+          continue;
+        }
         if (recentContent.some((content) => semanticIdeaSimilarity(
           { content: item.content, topic: item.targetTopic },
           { content },
-        ) >= 0.52)) continue;
+        ) >= 0.52)) {
+          await rejectCandidate(item, 'recent_semantic_duplicate');
+          continue;
+        }
         recentContent.unshift(item.content);
         await createTweetFromGeneratedCandidate(agent.id, item, {
           status: 'queued',
@@ -2524,7 +2573,7 @@ export async function refillQueue(
       return addedFromBatch;
     };
 
-    return addBatchItems(allBatch);
+    return await addBatchItems(allBatch);
   } catch (err) {
     await addPostLogEntry(agent.id, {
       agentId: agent.id,

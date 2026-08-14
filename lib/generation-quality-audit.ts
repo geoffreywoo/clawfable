@@ -27,6 +27,7 @@ import {
   getResearchAgenda,
   getSemanticBlocks,
   getIdeaCandidates,
+  getPostLog,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
@@ -51,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 14;
+export const GENERATION_QUALITY_AUDIT_VERSION = 15;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -106,6 +107,14 @@ interface AuditFindingInput {
     runsWithSelectedDrafts: number;
     selectedDraftCount: number;
     selectionYield: number | null;
+    persistedSelectedDraftCount?: number;
+    unpersistedSelectedDraftCount?: number;
+    queueHandoffRate?: number | null;
+    unpersistedDrafts?: Array<{
+      generationRunId: string;
+      draftCandidateId: string;
+      content: string;
+    }>;
   };
   generationV2: AuditGenerationV2;
   complaints: {
@@ -243,6 +252,23 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'Current-policy generation rarely produces a selectable draft',
       evidence: input.currentPolicyWindow,
       action: 'Inspect stage rejection codes and improve brief quality or writer diversity before spending more critic calls.',
+    });
+  }
+
+  if ((input.currentPolicyWindow.unpersistedSelectedDraftCount || 0) > 0) {
+    add({
+      code: 'current_policy_queue_handoff_loss',
+      severity: input.currentPolicyWindow.persistedSelectedDraftCount === 0 ? 'critical' : 'high',
+      scope: 'current_policy',
+      title: 'Final-critic selections were lost before queue persistence',
+      evidence: {
+        selectedDraftCount: input.currentPolicyWindow.selectedDraftCount,
+        persistedSelectedDraftCount: input.currentPolicyWindow.persistedSelectedDraftCount || 0,
+        unpersistedSelectedDraftCount: input.currentPolicyWindow.unpersistedSelectedDraftCount,
+        queueHandoffRate: input.currentPolicyWindow.queueHandoffRate ?? null,
+        drafts: input.currentPolicyWindow.unpersistedDrafts || [],
+      },
+      action: 'Inspect refill_candidate_rejected logs and repair the post-critic enqueue gate; do not spend more model calls until approved drafts can persist.',
     });
   }
 
@@ -462,7 +488,7 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas, analysis] = await Promise.all([
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas, analysis, postLog] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -477,6 +503,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getSemanticBlocks(agent.id),
     getIdeaCandidates(agent.id, 300),
     getAnalysis(agent.id),
+    getPostLog(agent.id, 200),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const activeModelStack = PUBLISHING_V2_MODEL_STACK;
@@ -706,6 +733,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   };
   const currentPolicyRuns = generationV2.lineage.filter((run) => (
     run.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    && run.mode === 'live'
+    && (run.surface || 'original') === 'original'
   ));
   const runsWithSelectedDrafts = currentPolicyRuns.filter((run) => (
     (run.stageCounts.draftsSelected || 0) > 0
@@ -721,6 +750,20 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const currentDraftsEligible = sumCurrentStage('draftsEligible');
   const currentDraftsSelected = sumCurrentStage('draftsSelected');
   const currentProviderAttempts = sumCurrentStage('providerAttempts');
+  const currentSelectedDrafts = currentPolicyRuns.flatMap((run) => run.drafts
+    .filter((draft) => draft.status === 'selected')
+    .map((draft) => ({
+      generationRunId: run.generationRunId,
+      draftCandidateId: draft.draftCandidateId,
+      content: draft.content,
+      tweetId: draft.tweetId,
+    })));
+  const persistedSelectedDrafts = currentSelectedDrafts.filter((draft) => Boolean(draft.tweetId));
+  const unpersistedSelectedDrafts = currentSelectedDrafts.filter((draft) => !draft.tweetId);
+  const refillCandidateRejections = postLog.filter((entry) => (
+    entry.format === 'refill_candidate_rejected'
+    && entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+  ));
   const currentPolicyWindow = {
     qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
     runCount: currentPolicyRuns.length,
@@ -734,6 +777,26 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     selectedDraftsPerRun: currentPolicyRuns.length > 0
       ? Number((currentDraftsSelected / currentPolicyRuns.length).toFixed(4))
       : null,
+    persistedSelectedDraftCount: persistedSelectedDrafts.length,
+    unpersistedSelectedDraftCount: unpersistedSelectedDrafts.length,
+    queueHandoffRate: currentSelectedDrafts.length > 0
+      ? Number((persistedSelectedDrafts.length / currentSelectedDrafts.length).toFixed(4))
+      : null,
+    unpersistedDrafts: unpersistedSelectedDrafts.slice(0, 10).map(({ tweetId: _tweetId, ...draft }) => draft),
+    refillCandidateRejections: {
+      recentCount: refillCandidateRejections.length,
+      reasonCounts: topCounts(refillCandidateRejections.map((entry) => String(entry.reason || 'unknown').split(':')[0])),
+      recent: refillCandidateRejections.slice(0, 20).map((entry) => ({
+        draftCandidateId: entry.draftCandidateId || null,
+        generationRunId: entry.runId || null,
+        topic: entry.topic,
+        reason: entry.reason || null,
+        model: entry.model || null,
+        qualityPolicyVersion: entry.qualityPolicyVersion || null,
+        rejectedAt: entry.postedAt,
+        content: entry.content,
+      })),
+    },
     stageThroughput: {
       ideasGenerated: currentIdeasGenerated,
       ideasEligible: currentIdeasEligible,

@@ -37,11 +37,19 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-65',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-66',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
       selectionYield: 1,
+      persistedSelectedDraftCount: 5,
+      unpersistedSelectedDraftCount: 0,
+      queueHandoffRate: 1,
+      unpersistedDrafts: [] as Array<{
+        generationRunId: string;
+        draftCandidateId: string;
+        content: string;
+      }>,
     },
     generationV2: {
       sample: { terminalQueueDecisions: 40, ideas: 100, drafts: 100, maturePosts: 25 },
@@ -135,6 +143,31 @@ describe('generation quality audit findings', () => {
       expect.objectContaining({ code: 'current_policy_generation_yield_low', scope: 'current_policy' }),
       expect.objectContaining({ code: 'historical_delete_rate_high', scope: 'historical_window' }),
       expect.objectContaining({ code: 'historical_semantic_repeat_rate_high', scope: 'historical_window' }),
+    ]));
+  });
+
+  it('flags final-critic selections that disappear before queue persistence', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      selectedDraftCount: 2,
+      persistedSelectedDraftCount: 1,
+      unpersistedSelectedDraftCount: 1,
+      queueHandoffRate: 0.5,
+      unpersistedDrafts: [{
+        generationRunId: 'run-lost',
+        draftCandidateId: 'draft-lost',
+        content: 'approved but never persisted',
+      }],
+    };
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_queue_handoff_loss',
+        severity: 'high',
+        scope: 'current_policy',
+        evidence: expect.objectContaining({ unpersistedSelectedDraftCount: 1, queueHandoffRate: 0.5 }),
+      }),
     ]));
   });
 

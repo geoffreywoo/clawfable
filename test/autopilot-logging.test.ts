@@ -111,7 +111,11 @@ vi.mock('@/lib/generation-context', () => ({
 vi.mock('@/lib/generation-v2', () => ({
   generateTweetBatchV2: mocks.generateTweetBatchV2,
   PUBLISHING_V2_FINAL_CRITIC_VERSION: 'publishing-v2-copy-judge-11',
-  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-65',
+  PUBLISHING_V2_QUALITY_POLICY_VERSION: 'publishing-v2-hard-gates-66',
+  getCommittedTweetCopyMemoryV2: (tweets: Tweet[], options: { limit?: number } = {}) => tweets
+    .filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status) && !tweet.quarantinedAt)
+    .map((tweet) => tweet.content)
+    .slice(0, options.limit || 80),
 }));
 
 vi.mock('@/lib/publishing-v2', () => ({
@@ -585,6 +589,72 @@ describe('autopilot remote debug logging', () => {
       agent.id,
       expect.objectContaining({ draftCandidateId: 'draft-operator-topic' }),
       expect.objectContaining({ status: 'queued', topic: 'startups' }),
+    );
+  });
+
+  it('does not let a quarantined attempt block a critic-approved refill draft', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'sharp and direct', summary: 'startup investor' },
+      learnings: {
+        voiceCorpus: { ...activeGeoffreyCorpus },
+        operatorVoiceReference: {
+          pinnedExamples: [{ content: 'i would pick the boring order here', source: 'manual', authorshipProvenance: 'operator_composed' }],
+          startupRegisterExamples: [],
+          bestPerformers: [],
+        },
+      },
+      settings: { ...baseSettings, minQueueSize: 5 },
+      style: { autonomyMode: 'balanced', trendMixTarget: 35, bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [{
+        ...queuedTweet,
+        id: 'quarantined-modal-databricks',
+        status: 'quarantined',
+        quarantinedAt: '2026-08-14T10:13:01.589Z',
+        content: 'i’d put Modal ahead of Databricks in the IPO order.',
+      }],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+    const approvedCandidate = {
+      content: 'my pick is Databricks first. Modal getting there ahead of them would be way more fun, but i dont think it happens.',
+      format: 'prediction',
+      targetTopic: 'Modal Databricks IPO prediction',
+      rationale: 'Direct operator prediction.',
+      pipelineVersion: 'v2',
+      generationSurface: 'original',
+      contentProvenance: 'generated_v2',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-modal-databricks',
+      ideaId: 'idea-modal-databricks',
+      draftCandidateId: 'draft-modal-databricks',
+      sourceLane: 'manual_core_exploit',
+      sourceBrief: 'OPERATOR-OWNED TOPIC [subject=Modal Databricks IPO prediction]',
+      candidateScore: 91,
+      confidenceScore: 0.91,
+    } as any;
+    mocks.generateTweetBatchV2.mockResolvedValue([
+      approvedCandidate,
+      { ...approvedCandidate, draftCandidateId: 'draft-modal-databricks-duplicate' },
+    ]);
+
+    expect(await refillQueue(agent as any, 2)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-modal-databricks' }),
+      expect.objectContaining({ status: 'queued' }),
+    );
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({
+        format: 'refill_candidate_rejected',
+        draftCandidateId: 'draft-modal-databricks-duplicate',
+        reason: 'recent_semantic_duplicate',
+        qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      }),
     );
   });
 
