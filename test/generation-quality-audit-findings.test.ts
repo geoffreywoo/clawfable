@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-72',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-73',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -50,6 +50,12 @@ function healthyInput() {
         draftCandidateId: string;
         content: string;
       }>,
+      stageThroughput: {
+        ideasSelected: 5,
+        draftsEligible: 5,
+        draftsSelected: 5,
+        criticSelectionRate: 1,
+      },
     },
     generationV2: {
       sample: { terminalQueueDecisions: 40, ideas: 100, drafts: 100, maturePosts: 25 },
@@ -252,6 +258,75 @@ describe('generation quality audit findings', () => {
         code: 'current_policy_rescue_yield_zero',
         severity: 'high',
         scope: 'current_policy',
+      }),
+    ]));
+  });
+
+  it('separates an idea-to-copy failure from upstream idea starvation', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      runCount: 2,
+      runsWithSelectedDrafts: 0,
+      selectedDraftCount: 0,
+      selectionYield: 0,
+      stageThroughput: {
+        ideasSelected: 9,
+        draftsEligible: 22,
+        draftsSelected: 0,
+        criticSelectionRate: 0,
+      },
+      writerOutcomes: {
+        groups: [{
+          phase: 'initial',
+          model: 'openai:gpt-5.6',
+          generatedCount: 27,
+          finalCriticCount: 15,
+          selectedCount: 0,
+          selectionRate: 0,
+          averageJudgeScore: 0.7,
+          averageQualityMargin: 0.76,
+          averageNativeVoice: 0.66,
+          averageCringeRisk: 0.31,
+          topRejectionCodes: [{ value: 'final_quality_margin', count: 15 }],
+        }],
+        rescue: {
+          targetCount: 0,
+          generatedCount: 0,
+          finalCriticCount: 0,
+          selectedCount: 0,
+          selectionRate: null,
+          pairedComparisonCount: 0,
+          averageQualityMarginDelta: null,
+          pairedComparisons: [],
+        },
+        nearMisses: [{
+          generationRunId: 'run-gap',
+          draftCandidateId: 'draft-gap',
+          parentDraftId: null,
+          phase: 'initial',
+          model: 'openai:gpt-5.6',
+          judgeScore: 0.84,
+          qualityMargin: 0.834,
+          nativeVoice: 0.78,
+          casualStartupFit: 0.65,
+          novelty: 0.76,
+          cringeRisk: 0.2,
+          rejectionCodes: ['final_quality_margin'],
+          judgeNotes: 'The public move is still an abstract comparison thesis.',
+          content: 'A comparative near miss.',
+        }],
+      },
+    } as any;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_idea_to_copy_gap',
+        severity: 'high',
+        scope: 'current_policy',
+        evidence: expect.objectContaining({
+          stageThroughput: expect.objectContaining({ ideasSelected: 9, draftsEligible: 22, draftsSelected: 0 }),
+        }),
       }),
     ]));
   });

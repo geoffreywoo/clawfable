@@ -52,7 +52,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 17;
+export const GENERATION_QUALITY_AUDIT_VERSION = 18;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -257,6 +257,12 @@ interface AuditFindingInput {
     }>;
     queueRejectionReasonCounts?: Record<string, number>;
     writerOutcomes?: ReturnType<typeof buildGenerationWriterOutcomeAudit>;
+    stageThroughput?: {
+      ideasSelected: number;
+      draftsEligible: number;
+      draftsSelected: number;
+      criticSelectionRate: number | null;
+    };
   };
   generationV2: AuditGenerationV2;
   complaints: {
@@ -397,6 +403,28 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     });
   }
 
+  const stageThroughput = input.currentPolicyWindow.stageThroughput;
+  if (
+    input.currentPolicyWindow.runCount >= 2
+    && (stageThroughput?.ideasSelected || 0) >= 4
+    && (stageThroughput?.draftsEligible || 0) >= 4
+    && stageThroughput?.draftsSelected === 0
+  ) {
+    add({
+      code: 'current_policy_idea_to_copy_gap',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'Approved ideas are reaching the critic but not becoming publishable copy',
+      evidence: {
+        runCount: input.currentPolicyWindow.runCount,
+        stageThroughput,
+        initialWriterGroups: input.currentPolicyWindow.writerOutcomes?.groups.filter((group) => group.phase === 'initial') || [],
+        nearMisses: input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [],
+      },
+      action: 'Tighten public-move eligibility and replace abstract comparison theses before writing; keep the final quality floor fixed.',
+    });
+  }
+
   const rescueOutcomes = input.currentPolicyWindow.writerOutcomes?.rescue;
   if (
     input.currentPolicyWindow.runCount >= 2
@@ -414,7 +442,7 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         writerGroups: input.currentPolicyWindow.writerOutcomes?.groups || [],
         nearMisses: input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [],
       },
-      action: 'Repair the writer from paired parent-to-rescue evidence; keep the final quality floor fixed and stop using a rewrite mode that expands concise near misses into new essays.',
+      action: 'Use paired evidence to stop negative-value rewrites; spend the next call on a new one-sided idea or initial draft while keeping the final quality floor fixed.',
     });
   }
 

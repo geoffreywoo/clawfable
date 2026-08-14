@@ -161,6 +161,8 @@ When operator topic context supplies entity roles, preserve them literally. Neve
 
 Use ordinary language and short fields. publicMove should be the sharp thought; do not write an analyst memo split across claim, tension, and implication. Avoid portfolio-manager filler such as "binding constraint," "margin pool," "value chain," "risk-adjusted," "terminal market," "position accordingly," or "the investable edge." Do not explain why the idea fits the author; that provenance is supplied by the system.
 
+Write publicMove as a one-sided position. Put the rejected alternative in tension or counterargument, not in the sentence the writer must preserve. Do not use "more interesting/valuable/compelling than," "I prefer X to Y," "rather than," "instead of," or an abstract "not X but Y" as the proposition. Do not substitute evaluations such as "gets interesting," "becomes compelling," or "is worth caring about" for the actual call. Say what the named subject should do, what the author predicts, or what the author would choose.
+
 Do not package the move in a reusable social-copy skeleton. In particular, never use "my bar for X," "my call on X," "X wins when," "no longer graded on X / now graded on Y," "the test stops being X and becomes Y," "stopped one layer too early," "has no room left to be merely," or "the moment X is the moment Y." State the subject-specific belief directly. Return only the requested JSON object.`;
 
 const IDEA_GENERATION_SCHEMA: Record<string, unknown> = {
@@ -895,7 +897,11 @@ export function hasCrossBriefSubjectCollisionV2(left: string, right: string): bo
   const leftTokens = concreteBriefSubjectTokens(left);
   const rightTokens = concreteBriefSubjectTokens(right);
   const shared = [...leftTokens].filter((token) => rightTokens.has(token));
-  return shared.length >= 2 || shared.some((token) => token.length >= 6);
+  if (shared.length >= 2 || shared.some((token) => token.length >= 6)) return true;
+  const leftCompact = left.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const rightCompact = right.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return [...leftTokens].some((token) => token.length >= 7 && rightCompact.includes(token))
+    || [...rightTokens].some((token) => token.length >= 7 && leftCompact.includes(token));
 }
 
 export function isOperatorTopicSignalAlreadyCommittedV2(
@@ -1542,6 +1548,7 @@ export function buildGenerationBriefsV2({
   }
 
   const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
+  const recentAttemptedSubjects = recentOperatorAttemptIdeas(recentIdeas, now).map(ideaText);
   const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
     .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)));
   const rankedOperatorCandidates = rankOperatorTopicCandidates(
@@ -1560,7 +1567,11 @@ export function buildGenerationBriefsV2({
       && researchTokenSimilarity(candidate.topic, `${block.topic || ''} ${block.semanticKey.replace(/:/g, ' ')}`) >= 0.62
     ))) return false;
     const personalTopicSignals = (candidate.personalTopicSignals || []).filter((signal) => (
-      !reservedConcreteSubjects.some((subject) => hasCrossBriefSubjectCollisionV2(
+      !recentAttemptedSubjects.some((subject) => hasCrossBriefSubjectCollisionV2(
+        signal.replace(/:/g, ' '),
+        subject,
+      ))
+      && !reservedConcreteSubjects.some((subject) => hasCrossBriefSubjectCollisionV2(
         signal.replace(/:/g, ' '),
         subject,
       ))
@@ -1681,7 +1692,7 @@ export function buildIdeaGenerationPromptV2(
     })),
     previousPremises: semanticMemory.slice(0, 16).map((premise) => premise.slice(0, 240)),
     retry: retryFailures.length > 0 ? {
-      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one number while keeping an asserted mechanism is still a failure. For operator_entity_role_violation, use each named entity only in its supplied role. For operator_stripped_event_reintroduced, remove the event premise entirely rather than hedging it. For personal_topic_subject_dropped, choose one supplied subject cue and keep a concrete cue object in publicMove without reusing the old premise. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
+      instruction: 'Every prior attempt below failed deterministic eligibility. Generate genuinely new propositions for these briefs. For unsupported_operator_fact, make publicMove, claim, tension, and implication independently subjective or conditional; deleting one number while keeping an asserted mechanism is still a failure. For operator_entity_role_violation, use each named entity only in its supplied role. For operator_stripped_event_reintroduced, remove the event premise entirely rather than hedging it. For personal_topic_subject_dropped, choose one supplied subject cue and keep a concrete cue object in publicMove without reusing the old premise. For abstract_comparative_public_move, state only the chosen side as a direct call, prediction, or decision; move the rejected alternative into tension or counterargument. Remove the named failure, change the public move and premise, and do not polish or paraphrase an attempt.',
       failures: retryFailures,
     } : null,
     briefs: briefs.map((brief) => ({
@@ -1879,6 +1890,17 @@ const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:['’]d| would|['’]ll| will| can| 
 
 export function isGenericOperatorProductWishlistV2(text: string): boolean {
   return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
+}
+
+const ABSTRACT_PUBLIC_MOVE_EVALUATION = /\b(?:gets?|becomes?|feels?|is|seems?|sounds?)\s+(?:(?:much|way)\s+)?(?:more\s+|less\s+)?(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b|\bworth\s+caring\s+about\b/i;
+const ANNOUNCED_PUBLIC_MOVE_PREFERENCE = /^(?:i(?:['’]d|\s+would)?\s+(?:prefer|rather)|my\s+preference\s+is)\b/i;
+const BALANCED_PUBLIC_MOVE_COMPARISON = /\b(?:more|less)\s+(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b.{0,180}\b(?:than|rather\s+than|instead\s+of)\b|\b(?:rather\s+than|instead\s+of)\b/i;
+
+export function isAbstractComparativePublicMoveV2(publicMove: string): boolean {
+  const normalized = publicMove.replace(/\s+/g, ' ').trim();
+  return ABSTRACT_PUBLIC_MOVE_EVALUATION.test(normalized)
+    || ANNOUNCED_PUBLIC_MOVE_PREFERENCE.test(normalized)
+    || BALANCED_PUBLIC_MOVE_COMPARISON.test(normalized);
 }
 
 function unsupportedOperatorEvidence(text: string, lockEvidenceConcepts = true): boolean {
@@ -2214,6 +2236,12 @@ export function normalizeIdeaCandidatesV2({
     ));
     if (isGenericOperatorProductWishlistV2(ideaText(candidate))) {
       candidate.rejectionCodes.push('generic_product_wishlist');
+    }
+    if (
+      isGeoffreyVoiceProfile(voiceProfile)
+      && isAbstractComparativePublicMoveV2(ideaPublicMove(candidate))
+    ) {
+      candidate.rejectionCodes.push('abstract_comparative_public_move');
     }
     if (assessGeneratedWritingPatterns(ideaPublicMove(candidate)).score >= V2_MAX_GENERATED_PATTERN_RISK) {
       candidate.rejectionCodes.push('generated_idea_pattern');
@@ -4373,6 +4401,10 @@ export function getV2RescueRevisionStrategy(
     : 'critic_surgical';
 }
 
+export function shouldRunPostcriticRescueV2(voiceProfile: VoiceProfile): boolean {
+  return !isGeoffreyVoiceProfile(voiceProfile);
+}
+
 async function generateRescueDraftEvaluations({
   targets,
   priorEvaluations,
@@ -4834,6 +4866,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       let retryEvaluations: DraftEvaluation[] = [];
       const selectedIdeaIds = new Set(selected.map((tweet) => tweet.ideaId).filter((id): id is string => Boolean(id)));
       const targets = rescueTargetsV2(evaluations, input.count - selected.length, input, selectedIdeaIds);
+      const postcriticRescueEnabled = shouldRunPostcriticRescueV2(input.voiceProfile);
       trace.stageCounts.postcriticRescueTargets = targets.length;
       trace.stageCounts.postcriticSurgicalTargets = targets.filter((target) => (
         getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
@@ -4841,13 +4874,18 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       trace.stageCounts.postcriticReconceiveTargets = targets.filter((target) => (
         getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'reconceive'
       )).length;
-      trace.stageCounts.postcriticPairedWriterTargets = input.modelStack === PUBLISHING_V2_MODEL_STACK
+      trace.stageCounts.postcriticPairedWriterTargets = postcriticRescueEnabled
+        && input.modelStack === PUBLISHING_V2_MODEL_STACK
         ? targets.filter((target) => (
             getV2RescueRevisionStrategy(target.draft.rejectionCodes, target.draft.judgeNotes) === 'critic_surgical'
           )).length
         : 0;
-      trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + targets.length;
-      if (targets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
+      trace.stageCounts.postcriticRescueSuppressedNegativeValue = postcriticRescueEnabled ? 0 : targets.length;
+      trace.stageCounts.rescueTargets = trace.stageCounts.rescueTargets || 0;
+      if (postcriticRescueEnabled) {
+        trace.stageCounts.rescueTargets += targets.length;
+      }
+      if (postcriticRescueEnabled && targets.length > 0 && Date.now() + 90_000 < runDeadlineAt) {
         retryUsed = true;
         retryEvaluations = await generateRescueDraftEvaluations({
           targets,
