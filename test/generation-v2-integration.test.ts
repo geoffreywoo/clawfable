@@ -347,7 +347,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-34',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-35',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -1413,16 +1413,16 @@ describe('generateTweetBatchV2 integration', () => {
           ranking: parsed.candidates.map((candidate: any) => candidate.id),
           scores: parsed.candidates.map((candidate: any) => ({
             id: candidate.id,
-            overall: 0.78,
-            voiceFit: 0.82,
-            operatorPlausibility: 0.82,
+            overall: 0.7,
+            voiceFit: 0.7,
+            operatorPlausibility: 0.7,
             cringeRisk: 0.34,
-            insight: 0.78,
+            insight: 0.72,
             specificity: 0.8,
             factualSafety: 0.98,
             clarity: 0.82,
             novelty: 0.8,
-            manualAnchorReskinRisk: 0.05,
+            manualAnchorReskinRisk: 0.24,
             diagnosis: 'The draft turns the idea into a polished founder maxim; reopen on the concrete buyer decision and stop after the owned preference.',
           })),
         }));

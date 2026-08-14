@@ -3533,7 +3533,7 @@ function rescueTargetsV2(
   input: GenerateTweetBatchV2Input,
   excludedIdeaIds: Set<string> = new Set(),
 ): DraftEvaluation[] {
-  const nearMissFloor = Math.max(0.76, getRequiredFinalQualityMarginV2(input) - 0.06);
+  const nearMissFloor = Math.max(0.76, getRequiredFinalQualityMarginV2(input) - 0.08);
   const ranked = evaluations
     .filter((entry) => (
       entry.draft.status === 'rejected'
