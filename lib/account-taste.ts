@@ -746,7 +746,7 @@ function assessCasualStartupRegister(
     && casualHits === 0
     && !situated
     && !firstOrSecondPerson;
-  const timingCall = lower.match(/^(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})\s+(?:goes public|ipos?)\s+(?:before|after)\s+(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})[.!?]?$/);
+  const timingCall = lower.match(/^(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})\s+(?:goes public|ipos?)\s+(?:before|after|earlier than|later than)\s+(@?[a-z0-9][a-z0-9_.-]*(?:\s+[a-z0-9][a-z0-9_.-]*){0,2})[.!?]?$/);
   const genericTimingSubject = (value: string) => /^(?:(?:a|an|the|another|one|some)\s+)?(?:company|startup|team|founder|business|product|model)$/.test(value);
   const compressedNamedTimingCall = Boolean(
     timingCall
@@ -757,6 +757,17 @@ function assessCasualStartupRegister(
     timingCall
     && (genericTimingSubject(timingCall[1]) || genericTimingSubject(timingCall[2])),
   );
+  const namedAssertionTokens = (content.match(/\b[A-Z][A-Za-z0-9+.-]{2,}\b/g) || [])
+    .filter((token) => !/^(?:A|An|The|This|That|These|Those|Product|Company|Startup|Team|Founder|Business|Model)$/i.test(token));
+  const compressedNamedAssertion = content.length <= 180
+    && sentences <= 2
+    && namedAssertionTokens.length > 0
+    && /\b(?:will|should|can|goes?|gets?|wins?|beats?|buys?|sells?|ships?|starts?|stops?|takes?|makes?)\b/i.test(content)
+    && generatedPattern.score < 0.24
+    && stiffHits === 0
+    && avgWordLength < 6.2
+    && !neutralResearchSummary
+    && !mechanismInventory;
 
   const stiffnessRisk = clamp(
     0.05
@@ -814,7 +825,7 @@ function assessCasualStartupRegister(
     anchorFit * 0.5
     + casualness * 0.28
     + directness * 0.22
-    + (compressedNamedTimingCall ? 0.1 : 0)
+    + (compressedNamedTimingCall || compressedNamedAssertion ? 0.1 : 0)
     - stiffnessRisk * 0.3
   );
   const compactLowercaseAssertion = lowerOpening
@@ -828,7 +839,8 @@ function assessCasualStartupRegister(
     || situated
     || contraction
     || compactLowercaseAssertion
-    || compressedNamedTimingCall;
+    || compressedNamedTimingCall
+    || compressedNamedAssertion;
   const rawScore = Math.max(topicAwareScore, styleRegisterScore);
   const score = genericPlaceholderTimingCall
     ? Math.min(0.49, rawScore)
