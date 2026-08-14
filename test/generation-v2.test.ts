@@ -1098,6 +1098,27 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('blocks unsourced product-change phrasing even when it is wrapped in an opinion', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'I think Google putting frontier AI inside Workspace makes standalone email-writing startups worth less.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-operator-product-change',
+      briefs: [brief('operator', 'AI startups')],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-01T12:00:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+    });
+  });
+
   it('rejects source-free operator mechanisms before they consume writer slots', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea('operator', 'Private fund LP behavior changes when a redemption window opens.')],
@@ -1195,7 +1216,7 @@ describe('Tweet Generation V2', () => {
 
     expect(ideaPrompt.requirements.ideasPerBrief).toBe(3);
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('not individual claims');
-    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments or preferences');
+    expect(ideaPrompt.requirements.operatorOpinionContract).toContain('personal judgments, questions, predictions');
     expect(ideaPrompt.requirements.subjectContract).toContain('concrete subject');
     expect(ideaPrompt.briefs[0].evidence).toEqual([expect.objectContaining({
       evidenceId: 'source-sourced',
@@ -1224,8 +1245,8 @@ describe('Tweet Generation V2', () => {
       [],
       [],
     ));
-    expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, preference, taste, or recommendation');
-    expect(operatorWritingPrompt.factualWritingContract).toContain('does not assert what founders');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('cannot present a current or historical event');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {

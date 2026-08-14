@@ -329,6 +329,7 @@ describe('generateTweetBatchV2 integration', () => {
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt.variantCadenceAssignments).toHaveLength(3);
     expect(new Set(writerPrompt.variantCadenceAssignments.map((entry: any) => entry.anchorId)).size).toBe(3);
+    expect(writerPrompt.variantCadenceAssignments.every((entry: any) => entry.reactionMode)).toBe(true);
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -344,7 +345,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-15',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-16',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -669,6 +670,7 @@ describe('generateTweetBatchV2 integration', () => {
     const ideaSystem = String(ideaCalls[0]?.[0].system || '');
     const ideaPrompts = ideaCalls.map(([options]) => JSON.parse(options.prompt || '{}'));
     const ideaPrompt = ideaPrompts[0];
+    const ideaJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
     const operatorPremiseExclusions = [...new Set(ideaPrompts.flatMap((prompt) => prompt.operatorPremiseExclusions || []))];
     expect(anchors).toContain('operator-written diction anchor');
     expect(anchors).toContain('timeline diction from the curated voice corpus');
@@ -689,6 +691,17 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaSystem).toContain('changed numerical scope');
     expect(ideaSystem).toContain('claim must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
+    expect(ideaPrompt.requirements.nativeReactionContract).toContain('positive evidence');
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionAnchors).map((anchor: any) => anchor.text)).toEqual(expect.arrayContaining([
+      'operator-written diction anchor',
+      'timeline diction from the curated voice corpus',
+    ]));
+    expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionAnchors).map((anchor: any) => anchor.text)).not.toContain('generated diction must not return');
+    expect(ideaJudgePrompt.nativeReactionAnchors.map((anchor: any) => anchor.text)).toEqual(expect.arrayContaining([
+      'operator-written diction anchor',
+      'timeline diction from the curated voice corpus',
+    ]));
+    expect(ideaJudgePrompt.nativeReactionAnchors.map((anchor: any) => anchor.text)).not.toContain('generated diction must not return');
     expect(ideaPrompts.flatMap((prompt) => prompt.briefs).flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
     expect(operatorPremiseExclusions).toContain('operator-written diction anchor');
     expect(operatorPremiseExclusions).toContain('timeline diction from the curated voice corpus');
