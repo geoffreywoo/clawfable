@@ -8,6 +8,7 @@ import {
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
   getRequiredFinalQualityMarginV2,
+  getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
   getStoryGenerationPlanningRejectionCodesV2,
@@ -119,6 +120,13 @@ describe('Tweet Generation V2', () => {
   it('does not lose a critic rescue to one-basis-point score rounding', () => {
     expect(meetsV2RescueMarginFloor(0.7799, 0.78)).toBe(true);
     expect(meetsV2RescueMarginFloor(0.7798, 0.78)).toBe(false);
+  });
+
+  it('reconceives structural voice failures while keeping clean near misses surgical', () => {
+    expect(getV2RescueRevisionStrategy(['final_quality_margin'])).toBe('critic_surgical');
+    expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('critic_surgical');
+    expect(getV2RescueRevisionStrategy(['copy_judge_voice_mismatch', 'final_quality_margin'])).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy(['final_cringe_risk', 'final_quality_margin'])).toBe('reconceive');
   });
 
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
@@ -1779,9 +1787,19 @@ describe('Tweet Generation V2', () => {
       })],
     }));
     expect(writingPrompt.idea).not.toHaveProperty('authorReason');
-    expect(writingPrompt.idea).not.toHaveProperty('counterargument');
-    expect(writingPrompt.idea).not.toHaveProperty('tension');
-    expect(writingPrompt.idea).not.toHaveProperty('implication');
+    expect(writingPrompt.idea).toEqual(expect.objectContaining({
+      claim: idea.claim,
+      tension: idea.tension,
+      implication: idea.implication,
+      counterargument: idea.counterargument,
+      instruction: expect.stringContaining('private thought packet'),
+    }));
+    expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
+      'direct_position',
+      'concrete_tension',
+      'consequence',
+    ]);
+    expect(writingPrompt.responseContract.diversityContract).toContain('must not share');
     expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
@@ -1792,7 +1810,7 @@ describe('Tweet Generation V2', () => {
     ));
     expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
     expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
-    expect(operatorWritingPrompt.factualWritingContract).toContain('approved claim');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('approved thought packet');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {
