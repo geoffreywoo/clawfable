@@ -34,13 +34,15 @@ import {
   buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
-  isV2MarginOnlyConsequenceRepairCandidate,
+  isV2MarginOnlyBoundedRepairCandidate,
   isGenericInvestorSelectionTemplateV2,
 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { hasAiModelPricing } from './ai-pricing';
 import {
+  classifyGeoffreyTopicDomain,
   enrichTrendingTopics,
+  isGeoffreyDeepTechnicalTopic,
   getOperatorTopicSignalRejectionCodes,
   selectOperatorTopicSignals,
 } from './source-planner';
@@ -53,7 +55,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 23;
+export const GENERATION_QUALITY_AUDIT_VERSION = 24;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -122,14 +124,29 @@ function ratio(numerator: number, denominator: number): number | null {
 }
 
 export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) {
+  const ideaContextById = new Map(runs.flatMap((run) => (run.ideas || []).map((idea) => [
+    idea.ideaId,
+    {
+      topic: idea.topic || null,
+      creativeSeedId: idea.creativeSeedId || null,
+    },
+  ] as const)));
   const entries = runs.flatMap((run) => {
     const selectedIds = new Set(run.selectedDraftIds || []);
-    return run.drafts.map((draft) => ({
-      ...draft,
-      generationRunId: run.generationRunId,
-      phase: (draft.mutationRound || 0) > 0 ? 'rescue' as const : 'initial' as const,
-      selected: selectedIds.has(draft.draftCandidateId),
-    }));
+    return run.drafts.map((draft) => {
+      const ideaContext = ideaContextById.get(draft.ideaId);
+      const topicText = `${ideaContext?.topic || ''} ${draft.content}`.trim();
+      return {
+        ...draft,
+        generationRunId: run.generationRunId,
+        phase: (draft.mutationRound || 0) > 0 ? 'rescue' as const : 'initial' as const,
+        selected: selectedIds.has(draft.draftCandidateId),
+        topic: ideaContext?.topic || null,
+        creativeSeedId: ideaContext?.creativeSeedId || null,
+        topicDomain: classifyGeoffreyTopicDomain(topicText),
+        deepTechnical: isGeoffreyDeepTechnicalTopic(topicText),
+      };
+    });
   });
   const grouped = new Map<string, typeof entries>();
   for (const entry of entries) {
@@ -170,6 +187,33 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
     || left.model.localeCompare(right.model)
   ));
   const byId = new Map(entries.map((entry) => [entry.draftCandidateId, entry]));
+  const initialEntries = entries.filter((entry) => entry.phase === 'initial');
+  const topicGroups = new Map<string, typeof initialEntries>();
+  for (const entry of initialEntries) {
+    topicGroups.set(entry.topicDomain, [...(topicGroups.get(entry.topicDomain) || []), entry]);
+  }
+  const topicDomains = [...topicGroups.entries()].map(([domain, candidates]) => {
+    const judged = candidates.filter((candidate) => typeof candidate.judgeScore === 'number');
+    const selected = candidates.filter((candidate) => candidate.selected);
+    return {
+      domain,
+      generatedCount: candidates.length,
+      finalCriticCount: judged.length,
+      selectedCount: selected.length,
+      averageQualityMargin: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.qualityMargin)
+        .filter((value): value is number => typeof value === 'number')),
+    };
+  }).sort((left, right) => (
+    right.generatedCount - left.generatedCount
+    || right.finalCriticCount - left.finalCriticCount
+    || left.domain.localeCompare(right.domain)
+  ));
+  const deepTechnicalGenerated = initialEntries.filter((entry) => entry.deepTechnical);
+  const finalCriticEntries = initialEntries.filter((entry) => typeof entry.judgeScore === 'number');
+  const deepTechnicalFinalCritic = finalCriticEntries.filter((entry) => entry.deepTechnical);
+  const selectedInitialEntries = initialEntries.filter((entry) => entry.selected);
+  const deepTechnicalSelected = selectedInitialEntries.filter((entry) => entry.deepTechnical);
   const pairedRescues = entries.flatMap((entry) => {
     if (entry.phase !== 'rescue' || !entry.parentDraftId) return [];
     const parent = byId.get(entry.parentDraftId);
@@ -195,6 +239,10 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
       phase: entry.phase,
       modelStack: entry.generationModelStack || null,
       model: modelKey(entry.generationProvider, entry.generationModel),
+      topic: entry.topic,
+      topicDomain: entry.topicDomain,
+      creativeSeedId: entry.creativeSeedId,
+      deepTechnical: entry.deepTechnical,
       judgeScore: entry.judgeScore,
       qualityMargin: entry.judgeBreakdown?.qualityMargin || null,
       nativeVoice: entry.judgeBreakdown?.nativeVoice || null,
@@ -212,6 +260,18 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
   ));
   return {
     groups,
+    topicMix: {
+      generatedCount: initialEntries.length,
+      finalCriticCount: finalCriticEntries.length,
+      selectedCount: selectedInitialEntries.length,
+      deepTechnicalGeneratedCount: deepTechnicalGenerated.length,
+      deepTechnicalFinalCriticCount: deepTechnicalFinalCritic.length,
+      deepTechnicalSelectedCount: deepTechnicalSelected.length,
+      deepTechnicalGeneratedShare: ratio(deepTechnicalGenerated.length, initialEntries.length),
+      deepTechnicalFinalCriticShare: ratio(deepTechnicalFinalCritic.length, finalCriticEntries.length),
+      deepTechnicalSelectedShare: ratio(deepTechnicalSelected.length, selectedInitialEntries.length),
+      domains: topicDomains,
+    },
     templateRisks: {
       genericInvestorSelectionCount: genericInvestorTemplates.length,
       genericInvestorSelectionRate: ratio(genericInvestorTemplates.length, entries.length),
@@ -441,8 +501,8 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     && stageThroughput?.draftsSelected === 0
   ) {
     const nearMisses = input.currentPolicyWindow.writerOutcomes?.nearMisses.slice(0, 5) || [];
-    const hasBoundedConsequenceRepair = nearMisses.some((nearMiss) => (
-      isV2MarginOnlyConsequenceRepairCandidate(
+    const hasBoundedRepair = nearMisses.some((nearMiss) => (
+      isV2MarginOnlyBoundedRepairCandidate(
         nearMiss.rejectionCodes,
         nearMiss.judgeNotes,
         nearMiss.qualityMargin,
@@ -459,8 +519,8 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         initialWriterGroups: input.currentPolicyWindow.writerOutcomes?.groups.filter((group) => group.phase === 'initial') || [],
         nearMisses,
       },
-      action: hasBoundedConsequenceRepair
-        ? 'Run one bounded, critic-directed consequence repair on the strongest margin-only draft, rejudge every revision, then rotate to a fresh idea; keep the final quality floor fixed.'
+      action: hasBoundedRepair
+        ? 'Run one bounded, critic-directed repair on the strongest margin-only draft, rejudge every revision, then rotate to a fresh idea; keep the final quality floor fixed.'
         : 'Tighten public-move eligibility and replace abstract comparison theses before writing; keep the final quality floor fixed.',
     });
   }

@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-78',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-79',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -131,8 +131,14 @@ describe('generation quality audit findings', () => {
       generationRunId: 'run-repair',
       selectedDraftIds: ['draft-rescue'],
       stageCounts: { postcriticRescueTargets: 1 },
+      ideas: [{
+        ideaId: 'idea-asic',
+        topic: 'inference ASIC rack economics',
+        creativeSeedId: 'inference-system-economics',
+      }],
       drafts: [{
         draftCandidateId: 'draft-parent',
+        ideaId: 'idea-asic',
         parentDraftId: null,
         mutationRound: 0,
         generationModelStack: 'publishing_v2_gpt_control',
@@ -144,6 +150,7 @@ describe('generation quality audit findings', () => {
         content: 'strong core that needs one repair',
       }, {
         draftCandidateId: 'draft-rescue',
+        ideaId: 'idea-asic',
         parentDraftId: 'draft-parent',
         mutationRound: 1,
         generationModelStack: 'publishing_v2_fable_control',
@@ -166,6 +173,22 @@ describe('generation quality audit findings', () => {
       selectedCount: 1,
       pairedComparisonCount: 1,
       averageQualityMarginDelta: 0.07,
+    });
+    expect(outcome.topicMix).toMatchObject({
+      generatedCount: 1,
+      finalCriticCount: 1,
+      selectedCount: 0,
+      deepTechnicalGeneratedCount: 1,
+      deepTechnicalFinalCriticCount: 1,
+      deepTechnicalGeneratedShare: 1,
+      deepTechnicalFinalCriticShare: 1,
+      domains: [expect.objectContaining({ domain: 'ai_compute', generatedCount: 1 })],
+    });
+    expect(outcome.nearMisses[0]).toMatchObject({
+      topic: 'inference ASIC rack economics',
+      topicDomain: 'ai_compute',
+      creativeSeedId: 'inference-system-economics',
+      deepTechnical: true,
     });
   });
 
@@ -345,7 +368,7 @@ describe('generation quality audit findings', () => {
       'The smallest improvement would be naming the operational task this control would unlock.';
     const consequenceFindings = buildGenerationAuditFindings(input as any);
     expect(consequenceFindings.find((finding) => finding.code === 'current_policy_idea_to_copy_gap')?.action)
-      .toContain('bounded, critic-directed consequence repair');
+      .toContain('bounded, critic-directed repair');
   });
 
   it('reports repeated category-level investor wrappers in current-policy drafts', () => {

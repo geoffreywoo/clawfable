@@ -4525,14 +4525,14 @@ const V2_RECONCEIVE_RESCUE_CODES = new Set([
 ]);
 
 const V2_RECONCEIVE_DIAGNOSIS_PATTERN = /\b(?:analyst|consultant|constructed reveal|essayistic|generic contrarian|interchangeable|manufactured|polished hot-take|recycled|scaffold|template|three-clause|three-part)\b/i;
-const V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported)\b/i;
-const V2_ADDITIVE_CONSEQUENCE_DIAGNOSIS_PATTERN = /\b(?:operational task|concrete consequence|subject-specific (?:consequence|detail|mechanism)|named (?:consequence|task|detail)|name (?:one|the) (?:consequence|task|detail)|naming (?:one|the) (?:consequence|task|detail)|thin (?:call|claim|reaction)|otherwise thin)\b/i;
+const V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN = /\b(?:cut|delete|drop|remove|trim|last sentence|closing sentence|closer|ending|performed|mic drop|least concrete|turns? (?:slightly )?explanatory|overstates?|uncited|unsupported|familiar startup maxim|drifts? toward (?:a )?familiar maxim)\b/i;
+const V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN = /\b(?:operational task|concrete consequence|subject-specific (?:consequence|constraint|detail|mechanism)|named (?:consequence|constraint|task|detail)|name (?:one|the) (?:permitted )?(?:system )?(?:consequence|constraint|task|detail|mechanism|cost|tradeoff)|naming (?:one|the) (?:permitted )?(?:system )?(?:consequence|constraint|task|detail|mechanism|cost|tradeoff)|acknowledge (?:the )?(?:product|user|operational) (?:cost|tradeoff|consequence)|thin (?:call|claim|reaction)|otherwise thin|made? less absolute|make (?:the )?(?:categorical )?claim less absolute|qualify (?:the )?(?:categorical )?claim)\b/i;
 const V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN = Math.max(
   0.8,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN - 0.06,
 );
 
-export function isV2MarginOnlyConsequenceRepairCandidate(
+export function isV2MarginOnlyBoundedRepairCandidate(
   rejectionCodes: string[],
   judgeNotes?: string | null,
   qualityMargin?: number | null,
@@ -4545,7 +4545,7 @@ export function isV2MarginOnlyConsequenceRepairCandidate(
     && qualityMargin >= V2_MIN_GEOFFREY_CONSEQUENCE_REPAIR_MARGIN
     && !V2_RECONCEIVE_DIAGNOSIS_PATTERN.test(diagnosis)
     && !V2_SUBTRACTIVE_CRITIC_DIAGNOSIS_PATTERN.test(diagnosis)
-    && V2_ADDITIVE_CONSEQUENCE_DIAGNOSIS_PATTERN.test(diagnosis);
+    && V2_BOUNDED_REPAIR_DIAGNOSIS_PATTERN.test(diagnosis);
 }
 
 export function getV2RescueRevisionStrategy(
@@ -4573,7 +4573,7 @@ export function shouldRunPostcriticRescueV2(
   qualityMargin?: number | null,
 ): boolean {
   return !isGeoffreyVoiceProfile(voiceProfile)
-    || isV2MarginOnlyConsequenceRepairCandidate(rejectionCodes, judgeNotes, qualityMargin);
+    || isV2MarginOnlyBoundedRepairCandidate(rejectionCodes, judgeNotes, qualityMargin);
 }
 
 function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
