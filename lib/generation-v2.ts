@@ -2271,6 +2271,68 @@ function rejectIdeasAfterJudgment(
   }
 }
 
+export function selectRankedIdeaPortfolioV2({
+  ranking,
+  eligible,
+  briefs,
+  voiceProfile,
+  desired,
+}: {
+  ranking: string[];
+  eligible: IdeaCandidate[];
+  briefs: GenerationBriefV2[];
+  voiceProfile: VoiceProfile;
+  desired: number;
+}): IdeaCandidate[] {
+  if (desired <= 0) return [];
+  const ideasById = new Map(eligible.map((idea) => [idea.id, idea]));
+  const briefsById = new Map(briefs.map((brief) => [brief.id, brief]));
+  const selected: IdeaCandidate[] = [];
+  const selectedBriefs = new Set<string>();
+  const geoffreyPortfolio = isGeoffreyVoiceProfile(voiceProfile);
+  let selectedVerifiedSources = 0;
+  let selectedDeepTechnical = 0;
+  let selectedManufacturingMaterials = 0;
+
+  const add = (idea: IdeaCandidate): boolean => {
+    if (selectedBriefs.has(idea.briefId)) return false;
+    const brief = briefsById.get(idea.briefId);
+    const topicContext = `${idea.topic} ${idea.claim} ${brief?.title || ''}`;
+    const verifiedSource = brief?.evidenceMode === 'verified_source';
+    const deepTechnical = isGeoffreyDeepTechnicalTopic(topicContext);
+    const manufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topicContext);
+    if (geoffreyPortfolio && (
+      (verifiedSource && selectedVerifiedSources >= 1)
+      || (deepTechnical && selectedDeepTechnical >= 1)
+      || (manufacturingMaterials && selectedManufacturingMaterials >= 1)
+    )) return false;
+    selected.push(idea);
+    selectedBriefs.add(idea.briefId);
+    if (verifiedSource) selectedVerifiedSources += 1;
+    if (deepTechnical) selectedDeepTechnical += 1;
+    if (manufacturingMaterials) selectedManufacturingMaterials += 1;
+    return true;
+  };
+
+  // A bounded live-source lane prevents broad operator opinions from starving
+  // the only timely, corroborated story. The remaining slots still follow the
+  // judge's global ranking and all existing topic-portfolio caps.
+  if (geoffreyPortfolio) {
+    const verified = ranking
+      .map((id) => ideasById.get(id))
+      .find((idea) => idea && briefsById.get(idea.briefId)?.evidenceMode === 'verified_source');
+    if (verified) add(verified);
+  }
+
+  for (const id of ranking) {
+    if (selected.length >= desired) break;
+    const idea = ideasById.get(id);
+    if (!idea || selected.includes(idea)) continue;
+    add(idea);
+  }
+  return selected.slice(0, desired);
+}
+
 async function selectIdeas({
   ideas,
   briefs,
@@ -2407,32 +2469,13 @@ Score sharePotential for whether a relevant founder, investor, or operator would
 
   const judgedEligible = eligible.filter((idea) => idea.status !== 'rejected');
   const desired = Math.min(judgedEligible.length, 4, Math.max(input.count + 2, 4));
-  const selected: IdeaCandidate[] = [];
-  const selectedBriefs = new Set<string>();
-  const geoffreyPortfolio = isGeoffreyVoiceProfile(input.voiceProfile);
-  let selectedVerifiedSources = 0;
-  let selectedDeepTechnical = 0;
-  let selectedManufacturingMaterials = 0;
-  for (const id of ranking) {
-    const idea = judgedEligible.find((candidate) => candidate.id === id);
-    if (!idea || selectedBriefs.has(idea.briefId)) continue;
-    const brief = briefs.find((entry) => entry.id === idea.briefId);
-    const topicContext = `${idea.topic} ${idea.claim} ${brief?.title || ''}`;
-    const verifiedSource = brief?.evidenceMode === 'verified_source';
-    const deepTechnical = isGeoffreyDeepTechnicalTopic(topicContext);
-    const manufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topicContext);
-    if (geoffreyPortfolio && (
-      (verifiedSource && selectedVerifiedSources >= 1)
-      || (deepTechnical && selectedDeepTechnical >= 1)
-      || (manufacturingMaterials && selectedManufacturingMaterials >= 1)
-    )) continue;
-    selected.push(idea);
-    selectedBriefs.add(idea.briefId);
-    if (verifiedSource) selectedVerifiedSources += 1;
-    if (deepTechnical) selectedDeepTechnical += 1;
-    if (manufacturingMaterials) selectedManufacturingMaterials += 1;
-    if (selected.length >= desired) break;
-  }
+  const selected = selectRankedIdeaPortfolioV2({
+    ranking,
+    eligible: judgedEligible,
+    briefs,
+    voiceProfile: input.voiceProfile,
+    desired,
+  });
   for (const idea of ideas) {
     if (selected.some((candidate) => candidate.id === idea.id)) idea.status = 'selected';
     else if (idea.status !== 'rejected') {
