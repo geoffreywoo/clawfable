@@ -149,11 +149,49 @@ describe('research agenda and story qualification', () => {
     });
 
     expect(built.operatorTopics).toEqual([
-      'OpenAI, Brad Lightcap in ai compute',
       'Cognition AI in ai compute',
       'Trajectory, Sequoia in ai compute',
+      'OpenAI, Brad Lightcap in ai compute',
     ]);
     expect(built.queries.slice(0, 3)).toEqual(built.operatorTopics);
+  });
+
+  it('deduplicates stale operator subjects before they consume bounded search capacity', () => {
+    const built = buildResearchAgenda({
+      agent: { id: 'agent-1', name: 'geoffwoo', handle: 'geoffwoo', soulMd: '' } as any,
+      voiceProfile: {
+        tone: 'direct',
+        topics: ['AI', 'startups'],
+        antiGoals: [],
+        communicationStyle: 'short and direct',
+        summary: 'founder and investor',
+      },
+      learnings: null,
+      performance: [],
+      feedback: [],
+      tweets: [],
+      current: {
+        ...agenda,
+        operatorTopics: [
+          'Polymarket, Modal, Databricks in finance investing',
+          'Trajectory, Sequoia, AI Agenda in ai compute',
+          'OpenAI, Brad Lightcap in ai compute',
+        ],
+      },
+      operatorTopicSignals: [
+        'Polymarket, Modal, Databricks in startups markets',
+        'Trajectory, Sequoia in ai compute',
+        'Cognition AI in ai compute',
+      ],
+    });
+
+    expect(built.operatorTopics).toEqual([
+      'Polymarket, Modal, Databricks in startups markets',
+      'Trajectory, Sequoia in ai compute',
+      'Cognition AI in ai compute',
+      'OpenAI, Brad Lightcap in ai compute',
+    ]);
+    expect(built.queries.slice(0, 4)).toEqual(built.operatorTopics);
   });
 
   it('removes a blocked frontier angle without suppressing the broader source portfolio', () => {
@@ -331,6 +369,56 @@ describe('research agenda and story qualification', () => {
 
     expect(clusters).toHaveLength(1);
     expect(clusters[0]).toMatchObject({ independentSourceCount: 2, evidenceQualified: false, qualifiedClaimIds: [] });
+  });
+
+  it('clusters independently corroborated story paraphrases with shared named entities', () => {
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda: { ...agenda, queries: ['Trajectory, Sequoia in ai compute'] },
+      now,
+      documents: [
+        source({
+          id: 'trajectory-network',
+          sourceType: 'x',
+          title: 'Trajectory, a startup that helps businesses customize open-source models, reportedly raised new funding from Sequoia at a $300 million valuation shortly after its prior round.',
+          publisher: '@steph_palazzolo',
+          entities: ['Trajectory', 'Sequoia'],
+          topics: ['AI startups'],
+          claims: [{
+            id: 'claim-trajectory-network',
+            text: 'Trajectory raised new funding from Sequoia at a $300 million valuation shortly after its prior round.',
+            kind: 'measurement',
+            confidence: 0.8,
+            entities: ['Trajectory', 'Sequoia'],
+          }],
+        }),
+        source({
+          id: 'trajectory-news',
+          sourceType: 'news_search',
+          title: 'Trajectory, Founded by Ex-Google and Apple Researchers, Raises Funding From Sequoia in Back-to-Back Round',
+          publisher: 'The Information',
+          entities: ['Trajectory', 'Sequoia'],
+          topics: ['AI startups'],
+          claims: [{
+            id: 'claim-trajectory-news',
+            text: 'Trajectory raised funding from Sequoia at a $300 million valuation in a back-to-back round.',
+            kind: 'measurement',
+            confidence: 0.8,
+            entities: ['Trajectory', 'Sequoia'],
+          }],
+        }),
+      ],
+    });
+
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]).toMatchObject({
+      independentSourceCount: 2,
+      evidenceQualified: true,
+      qualifiedClaimIds: expect.arrayContaining([
+        'claim-trajectory-network',
+        'claim-trajectory-news',
+      ]),
+    });
   });
 
   it('assigns zero freshness when a source has no trustworthy publication timestamp', () => {

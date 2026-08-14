@@ -114,6 +114,45 @@ function uniqueStrings(values: Array<string | null | undefined>, limit: number):
   return result;
 }
 
+const OPERATOR_TOPIC_DOMAINS = new Set([
+  'ai compute',
+  'energy nuclear',
+  'materials minerals',
+  'robotics automation',
+  'manufacturing industrial',
+  'space defense',
+  'browser infrastructure',
+  'startups markets',
+  'finance investing',
+  'culture status',
+  'health performance',
+  'sports competition',
+  'crypto',
+  'politics geopolitics',
+  'general technology',
+  'other',
+]);
+
+function operatorTopicSubject(value: string): string {
+  const separator = value.toLowerCase().lastIndexOf(' in ');
+  if (separator < 1) return value;
+  const domain = value.slice(separator + 4).trim().toLowerCase();
+  return OPERATOR_TOPIC_DOMAINS.has(domain) ? value.slice(0, separator).trim() : value;
+}
+
+function mergeOperatorTopics(fresh: string[], prior: string[], limit: number): string[] {
+  const merged: string[] = [];
+  for (const candidate of uniqueStrings([...fresh, ...prior], fresh.length + prior.length)) {
+    const subject = operatorTopicSubject(candidate);
+    if (merged.some((entry) => (
+      researchTokenSimilarity(operatorTopicSubject(entry), subject) >= 0.82
+    ))) continue;
+    merged.push(candidate);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
 function isOperatorPerformance(entry: TweetPerformance): boolean {
   return entry.authorshipProvenance !== 'known_clawfable_generated'
     && (entry.source === 'manual' || entry.authorshipProvenance === 'operator_composed');
@@ -258,10 +297,13 @@ export function buildResearchAgenda({
     frontierPlan.map((entry) => entry.researchQueries[queryIndex]).filter(Boolean)
   )).slice(0, 12);
   const operatorDiscoveryQueries = nativeDiscoveryQueries(profile, learnings);
-  const activeOperatorTopics = uniqueStrings([
-    ...(current?.operatorTopics || []),
-    ...operatorTopicSignals,
-  ], 12);
+  // Fresh engagement should change the next source fetch. Semantically duplicate
+  // prior subjects otherwise occupy the adapters' bounded query budget for hours.
+  const activeOperatorTopics = mergeOperatorTopics(
+    operatorTopicSignals,
+    current?.operatorTopics || [],
+    12,
+  );
   const querySeeds = uniqueStrings([
     ...(current?.pinnedQuestions || []),
     ...activeOperatorTopics,
@@ -543,6 +585,42 @@ function qualifiedClaimIds(documents: SourceDocument[]): string[] {
   return [...qualified];
 }
 
+const GENERIC_STORY_ENTITY_TOKENS = new Set([
+  'ai', 'business', 'capital', 'company', 'founder', 'funding', 'investor', 'market',
+  'model', 'new', 'product', 'report', 'researcher', 'round', 'startup', 'technology',
+  'venture',
+]);
+
+function distinctiveEntityTokens(document: SourceDocument): Set<string> {
+  return new Set(significantResearchTokens(document.entities.join(' ')).filter((token) => (
+    token.length >= 4 && !GENERIC_STORY_ENTITY_TOKENS.has(token)
+  )));
+}
+
+function maxClaimSimilarity(left: SourceDocument, right: SourceDocument): number {
+  const leftClaims = left.claims.filter((claim) => claim.kind !== 'opinion' && claim.confidence >= 0.45);
+  const rightClaims = right.claims.filter((claim) => claim.kind !== 'opinion' && claim.confidence >= 0.45);
+  return Math.max(0, ...leftClaims.flatMap((leftClaim) => (
+    rightClaims.map((rightClaim) => researchTokenSimilarity(leftClaim.text, rightClaim.text))
+  )));
+}
+
+function sourceDocumentsDescribeSameStory(left: SourceDocument, right: SourceDocument): boolean {
+  const titleSimilarity = researchTokenSimilarity(left.title, right.title);
+  if (titleSimilarity >= 0.55) return true;
+
+  const leftEntities = distinctiveEntityTokens(left);
+  const sharedEntities = [...distinctiveEntityTokens(right)].filter((token) => leftEntities.has(token));
+  if (sharedEntities.length === 0) return false;
+  if (titleSimilarity >= 0.34) return true;
+
+  // Lower title overlap is only accepted for genuine paraphrases: two shared
+  // named-entity tokens and claims that independently clear the evidence bar.
+  return sharedEntities.length >= 2
+    && titleSimilarity >= 0.28
+    && maxClaimSimilarity(left, right) >= 0.36;
+}
+
 function blockForStory(
   semanticKey: string,
   topic: string,
@@ -606,8 +684,7 @@ export function clusterAndQualifySources({
   for (const document of sorted) {
     const matching = groups.find((group) => {
       const representative = group[0];
-      const entityOverlap = document.entities.some((entity) => representative.entities.includes(entity));
-      return researchTokenSimilarity(document.title, representative.title) >= (entityOverlap ? 0.34 : 0.55);
+      return sourceDocumentsDescribeSameStory(document, representative);
     });
     if (matching) matching.push(document);
     else groups.push([document]);
