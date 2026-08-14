@@ -755,20 +755,23 @@ function rankOperatorTopicCandidates(
   recentTopicKeys: Set<string>,
   seedRotationKey = '',
   recentIdeas: IdeaCandidate[] = [],
+  now = new Date(),
 ): OperatorTopicCandidateV2[] {
-  const recentIdeaCounts = new Map<string, number>();
-  for (const idea of recentIdeas.slice(0, 48)) {
+  const recentIdeaRuns = new Map<string, Set<string>>();
+  for (const idea of recentOperatorAttemptIdeas(recentIdeas, now)) {
     const key = topicKey(idea.topic);
-    recentIdeaCounts.set(key, (recentIdeaCounts.get(key) || 0) + 1);
+    const runs = recentIdeaRuns.get(key) || new Set<string>();
+    runs.add(idea.generationRunId || idea.id);
+    recentIdeaRuns.set(key, runs);
   }
   const score = (candidate: OperatorTopicCandidateV2): number => {
     const key = topicKey(candidate.topic);
     const committedPenalty = recentTopicKeys.has(key) ? 0.08 : 0;
-    const attemptedPenalty = Math.min(0.16, (recentIdeaCounts.get(key) || 0) * 0.025);
+    const attemptedPenalty = Math.min(0.72, (recentIdeaRuns.get(key)?.size || 0) * 0.24);
     const rotation = seedRotationKey
       ? (seedRotationOffset(`${seedRotationKey}:${key}`) % 1000) / 1000
       : 0;
-    return candidate.priorityScore - committedPenalty - attemptedPenalty + rotation * 0.18;
+    return candidate.priorityScore - committedPenalty - attemptedPenalty + rotation * 0.08;
   };
   return [...candidates].sort((left, right) => {
     const leftScore = score(left);
@@ -778,6 +781,17 @@ function rankOperatorTopicCandidates(
       || (right.sampleCount || 0) - (left.sampleCount || 0)
       || left.topic.localeCompare(right.topic);
   });
+}
+
+function recentOperatorAttemptIdeas(recentIdeas: IdeaCandidate[], now: Date): IdeaCandidate[] {
+  const cutoff = now.getTime() - (12 * 60 * 60 * 1000);
+  return [...recentIdeas]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .filter((idea) => {
+      const createdAt = Date.parse(idea.createdAt);
+      return !Number.isFinite(createdAt) || createdAt >= cutoff;
+    })
+    .slice(0, 96);
 }
 
 const BUSINESS_TECH_OPERATOR_DOMAINS = new Set([
@@ -1211,13 +1225,23 @@ export function buildGenerationBriefsV2({
   // Keep this lane small so it broadens the account without displacing the
   // operator's durable topic history or contaminating diction evidence.
   const maxOperatorTopicSignalBriefs = Math.min(2, Math.max(0, Math.floor(briefCount / 4)));
+  const recentOperatorAttempts = recentOperatorAttemptIdeas(recentIdeas, now);
   const operatorTopicSignals = selectOperatorTopicSignals(
     trending || [],
     voiceProfile,
     learnings,
     style.trendTolerance,
     Math.max(4, maxOperatorTopicSignalBriefs * 4),
-  );
+  ).map((signal, index) => {
+    const briefId = stableResearchId('brief', 'operator-topic-signal', signal.id);
+    const attemptedRuns = new Set(recentOperatorAttempts
+      .filter((idea) => idea.briefId === briefId)
+      .map((idea) => idea.generationRunId || idea.id));
+    return { signal, index, attemptedRunCount: attemptedRuns.size };
+  }).sort((left, right) => (
+    left.attemptedRunCount - right.attemptedRunCount
+    || left.index - right.index
+  )).map((entry) => entry.signal);
   let operatorTopicSignalBriefs = 0;
   for (const signal of operatorTopicSignals) {
     if (briefs.length >= briefCount || operatorTopicSignalBriefs >= maxOperatorTopicSignalBriefs) break;
@@ -1271,6 +1295,7 @@ export function buildGenerationBriefsV2({
     recentTopicKeys,
     seedRotationKey,
     recentIdeas,
+    now,
   );
   const appendOperator = (candidate: typeof operatorCandidates[number], index: number): boolean => {
     const key = topicKey(candidate.topic);
@@ -1368,7 +1393,7 @@ export function buildIdeaGenerationPromptV2(
       operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       creativeSeedContract: 'A creative seed is a thought stimulus, never evidence or required wording. Broad topics supply one publicReactionPrompt instead of an analyst worksheet. Use its subject to invent a new author-specific proposition; do not merely restate a direction or turn a contrast into an aphorism.',
       subjectContract: 'Every idea must retain a concrete subject: a named source object for verified stories, or a specific decision, behavior, product, person, company type, or instrument from the operator seed. Category-level lessons and interchangeable startup maxims are invalid.',
-      personalTopicSignalContract: 'Personal post history may select and rank a brief topic, but no historical premise is supplied. Invent a fresh subject and public move inside that topic. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
+      personalTopicSignalContract: 'Personal post history may select and rank a brief topic. Structured subject cues may contain unordered entities or objects from strong operator posts, but no historical prose, stance, or premise is supplied. Use at most one cue as a subject or adjacency prompt, then invent a fresh public move. Do not reconstruct, invert, criticize, paraphrase, or extend a prior post.',
       nativeReactionContract: 'The native reaction patterns are structured evidence of this author\'s public moves and cadence range. Use the modes to vary the proposition. Raw native prose is intentionally withheld from ideation so it cannot supply a premise.',
       rarePremiseContract: 'Acquisition calls and CEO-installation calls are rare premises, not reusable voice moves. If an operatorPremiseExclusion already contains a company-buying or CEO-installation call, generate no X-should-buy-Y or make-Z-CEO variant.',
     },
@@ -1397,7 +1422,12 @@ export function buildIdeaGenerationPromptV2(
       authorOpportunity: brief.authorOpportunity,
       evidenceMode: brief.evidenceMode,
       personalTopicHistory: (brief.personalTopicSignals || []).length > 0
-        ? { informedTopicSelection: true, premiseSupplied: false }
+        ? {
+            informedTopicSelection: true,
+            premiseSupplied: false,
+            subjectCues: (brief.personalTopicSignals || []).slice(0, 3).map((signal) => signal.replace(/:/g, ' ')),
+            instruction: 'Use at most one cue for the concrete subject. The cue carries no prior opinion, claim, or wording.',
+          }
         : null,
       creativeSeed: brief.creativeSeed
         ? brief.creativeSeed.kind === 'frontier'
@@ -2572,7 +2602,12 @@ export function buildTweetWritingPromptV2(
       topic: brief.topic,
       title: brief.title,
       personalTopicHistory: (brief.personalTopicSignals || []).length > 0
-        ? { informedTopicSelection: true, premiseSupplied: false }
+        ? {
+            informedTopicSelection: true,
+            premiseSupplied: false,
+            subjectCues: (brief.personalTopicSignals || []).slice(0, 3).map((signal) => signal.replace(/:/g, ' ')),
+            instruction: 'The approved idea already made the new claim. Keep the cue as subject context only; do not recover or echo an older post.',
+          }
         : null,
       instruction: brief.evidenceMode === 'verified_source'
         ? 'Keep the named sourced subject in the post. It is the reason to publish now.'
@@ -2606,12 +2641,12 @@ export function buildTweetWritingPromptV2(
         },
         {
           slot: 3,
-          move: 'rough_two_beat',
-          instruction: 'Use two uneven beats as if texting one smart peer. The second beat must get simpler or more casual, not more analytical.',
+          move: 'thought_in_motion',
+          instruction: 'Think aloud to one smart peer who already knows the context. Allow an uneven two-to-four sentence progression, fragment, aside, self-correction, slang, or real question when the primary anchor supports it. Do not tidy the ending into a lesson or mic drop.',
         },
       ] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. They must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Do not make all three polished one-sentence aphorisms.'
+        ? 'Drafts map to variantMoves by slot. They must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Compression means no filler, not that every thought must become a slogan. Do not make all three polished one-sentence aphorisms.'
         : null,
     },
     failedAttempts: revisionContext?.slice(0, 3).map((attempt) => ({

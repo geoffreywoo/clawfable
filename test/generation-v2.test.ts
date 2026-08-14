@@ -260,7 +260,84 @@ describe('Tweet Generation V2', () => {
     expect(JSON.parse(prompt).briefs[0].personalTopicHistory).toEqual({
       informedTopicSelection: true,
       premiseSupplied: false,
+      subjectCues: [expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/)],
+      instruction: expect.stringContaining('subject'),
     });
+    const writingPrompt = buildTweetWritingPromptV2({
+      id: 'idea-ai-subject-cue',
+      topic: 'AI',
+      claim: 'I want to understand where the next compute bottleneck moves.',
+      tension: 'The obvious bottleneck may not remain the binding one.',
+      implication: 'The company formed around the next constraint could matter more.',
+      counterargument: null,
+    } as IdeaCandidate, aiBrief!, [], []);
+    expect(writingPrompt).not.toContain(priorPost);
+    expect(JSON.parse(writingPrompt).subjectContext.personalTopicHistory).toEqual({
+      informedTopicSelection: true,
+      premiseSupplied: false,
+      subjectCues: [expect.stringMatching(/gigawatt|rubins|300k|gpus|hbm/)],
+      instruction: expect.stringContaining('subject context only'),
+    });
+  });
+
+  it('rotates away from operator subjects already attempted in recent generation runs', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const topic = (id: number, networkTopicId: string, category: string, entities: string[]) => ({
+      id,
+      networkTopicId,
+      headline: category,
+      source: '@network',
+      relevanceScore: 90,
+      category,
+      timestamp: '2026-08-14T05:00:00.000Z',
+      tweetCount: 1,
+      sourceType: 'x' as const,
+      sourceCount: 1,
+      discoveryMethod: 'followed_network' as const,
+      networkMomentumScore: 0.82,
+      operatorEngagementScore: 0.9,
+      operatorEngagedSourceCount: 1,
+      topicConfidence: 0.88,
+      topicUncertainty: 'low' as const,
+      semanticDomain: 'startups_markets' as const,
+      entities,
+      isPrimarySource: false,
+      topTweet: { id: `${networkTopicId}-post`, text: category, likes: 100, author: 'network' },
+    });
+    const trending = [
+      topic(951, 'network-opendoor', 'Opendoor startup strategy', ['Opendoor', 'Justin Dross']),
+      topic(952, 'network-modal', 'Modal startup financing', ['Modal', 'Databricks']),
+      topic(953, 'network-cognition', 'Cognition product strategy', ['Cognition AI', 'Devin']),
+    ];
+    const common = {
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets', 'culture'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending,
+      allTweets: [],
+      seedRotationKey: 'same-run-seed',
+      now: new Date('2026-08-14T06:00:00.000Z'),
+    };
+    const first = buildGenerationBriefsV2({ ...common, recentIdeas: [] });
+    const firstSignal = first.find((entry) => entry.trendTopicId?.startsWith('network-'))!;
+    const recentIdeas = [0, 1, 2].map((index) => ({
+      id: `idea-recent-${index}`,
+      briefId: firstSignal.id,
+      topic: firstSignal.topic,
+      generationRunId: 'generation-recent',
+      createdAt: '2026-08-14T05:30:00.000Z',
+    })) as any;
+    const second = buildGenerationBriefsV2({ ...common, recentIdeas });
+    const secondSignal = second.find((entry) => entry.trendTopicId?.startsWith('network-'))!;
+
+    expect(secondSignal.trendTopicId).not.toBe(firstSignal.trendTopicId);
   });
 
   it('blocks a personal topic signal from inverting the native premise that produced it', () => {
@@ -782,6 +859,55 @@ describe('Tweet Generation V2', () => {
 
     expect(new Set(first).size).toBe(4);
     expect(new Set([...first, ...second, ...third]).size).toBeGreaterThan(4);
+  });
+
+  it('prioritizes unattempted operator topic lanes during repeated refills', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const manualTopicProfile = [
+      'AI',
+      'startups',
+      'finance',
+      'energy',
+      'robotics',
+      'space',
+      'culture',
+      'health',
+    ].map((topic) => ({
+      topic,
+      angle: '',
+      weight: 1,
+      sampleCount: 5,
+      avgEngagement: 50,
+      topTweets: [],
+    }));
+    const common = {
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: [] } } as any,
+      learnings: { manualTopicProfile } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey: 'same-refill-seed',
+      now: new Date('2026-08-14T06:00:00.000Z'),
+    };
+    const first = buildGenerationBriefsV2({ ...common, recentIdeas: [] });
+    const recentIdeas = first.flatMap((brief, briefIndex) => [0, 1, 2].map((ideaIndex) => ({
+      id: `idea-${briefIndex}-${ideaIndex}`,
+      briefId: brief.id,
+      topic: brief.topic,
+      generationRunId: 'generation-recent',
+      createdAt: '2026-08-14T05:30:00.000Z',
+    }))) as any;
+    const second = buildGenerationBriefsV2({ ...common, recentIdeas });
+
+    const freshTopics = second.filter((brief) => !first.some((prior) => prior.topic === brief.topic));
+    expect(freshTopics.length).toBeGreaterThanOrEqual(2);
   });
 
   it('uses operator history as topic-level strategy rather than replaying its premise', () => {
@@ -1850,7 +1976,7 @@ describe('Tweet Generation V2', () => {
     expect(writingPrompt.responseContract.variantMoves.map((entry: any) => entry.move)).toEqual([
       'blunt_reaction',
       'owned_bet_or_call',
-      'rough_two_beat',
+      'thought_in_motion',
     ]);
     expect(writingPrompt.responseContract.diversityContract).toContain('must not share');
     expect(writingPrompt.voiceTransferContract).toEqual(expect.objectContaining({
