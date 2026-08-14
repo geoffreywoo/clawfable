@@ -541,14 +541,18 @@ describe('Tweet Generation V2', () => {
     } as IdeaCandidate, brief('robotics', 'robotics'), [], []));
     expect(prompt.responseContract.variantMoves[1].instruction).toContain('never wrap a category');
     expect(prompt.responseContract.variantMoves[0]).toEqual(expect.objectContaining({
-      consequenceRole: 'approved_consequence',
-      instruction: expect.stringContaining('same casual thought'),
+      consequenceRole: 'reaction_only',
+      instruction: expect.stringContaining('bare spoken version'),
     }));
     expect(prompt.responseContract.variantMoves[1]).toEqual(expect.objectContaining({
       consequenceRole: 'reaction_only',
       instruction: expect.stringContaining('Stop at the direct reaction'),
     }));
-    expect(prompt.responseContract.diversityContract).toContain('Slot 1 must make one approved consequence');
+    expect(prompt.responseContract.variantMoves[2]).toEqual(expect.objectContaining({
+      consequenceRole: 'approved_consequence',
+      instruction: expect.stringContaining('same casual thought'),
+    }));
+    expect(prompt.responseContract.diversityContract).toContain('Slot 1 is the bare spoken verdict');
 
     const singleWriterPrompt = JSON.parse(buildTweetWritingPromptV2(
       rawIdea('operator', 'ChatGPT is the OpenAI asset I would bet on.') as IdeaCandidate,

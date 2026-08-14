@@ -3568,12 +3568,15 @@ export function buildTweetWritingPromptV2(
       variantMoves: draftCount === MAX_DRAFTS_PER_IDEA
         ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => {
             const move = initialVariantMoveForAnchor(anchors[index], index + 1);
+            const slotInstruction = index === 0
+              ? 'Make this the bare spoken version: named subject plus verdict, bet, or reaction in the shortest natural words. Use concrete verbs instead of analyst nouns, framing, hedges, or a declared closer. Do not add the consequence in this slot.'
+              : index === MAX_DRAFTS_PER_IDEA - 1
+                ? 'Fold exactly one consequence already present in stakes into the same casual thought; do not append a formal explanation or lesson.'
+                : 'Stop at the direct reaction and do not add a consequence, proof, or second argument.';
             return {
               ...move,
-              consequenceRole: index === 0 ? 'approved_consequence' : 'reaction_only',
-              instruction: `${move.instruction} ${index === 0
-                ? 'Fold exactly one consequence already present in stakes into the same casual thought; do not append a formal explanation or lesson.'
-                : 'Stop at the direct reaction and do not add a consequence, proof, or second argument.'}`,
+              consequenceRole: index === MAX_DRAFTS_PER_IDEA - 1 ? 'approved_consequence' : 'reaction_only',
+              instruction: `${move.instruction} ${slotInstruction}`,
             };
           })
         : draftCount === 2 ? [
@@ -3589,7 +3592,7 @@ export function buildTweetWritingPromptV2(
         },
       ] : (revisionContext?.length || 0) === 0 ? [initialSingleVariantMove] : [],
       diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Slot 1 must make one approved consequence from stakes legible inside the same casual thought; slots 2 and 3 stop at the reaction. Compression means no filler, not that every thought must become a slogan.'
+        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Slot 1 is the bare spoken verdict and stops there; slot 2 is a different direct reaction; slot 3 alone may make one approved consequence from stakes legible inside the same casual thought. Compression means no filler, not that every thought must become a slogan.'
         : draftCount === 2
           ? 'The two revisions must be materially different. Capitalization, punctuation, or grammar changes do not satisfy the second move.'
           : null,
