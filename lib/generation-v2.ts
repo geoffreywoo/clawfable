@@ -3659,14 +3659,16 @@ async function generateDraftEvaluations({
       initialDraftCount: MAX_DRAFTS_PER_IDEA,
       candidateIdSalt: '',
     }];
-    if (
-      isGeoffreyVoiceProfile(input.voiceProfile)
-      && input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
-    ) {
+    const geoffreyShadowStack = input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+      ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+      : input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+        ? PUBLISHING_V2_CONTROL_MODEL_STACK
+        : null;
+    if (isGeoffreyVoiceProfile(input.voiceProfile) && geoffreyShadowStack) {
       writerPlans.push({
-        modelStack: PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
+        modelStack: geoffreyShadowStack,
         initialDraftCount: 1,
-        candidateIdSalt: 'gpt-control',
+        candidateIdSalt: geoffreyShadowStack,
       });
     }
     const draftGroups = await Promise.all(writerPlans.map(async (plan) => {
