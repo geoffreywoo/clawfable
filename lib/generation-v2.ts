@@ -4560,6 +4560,70 @@ async function selectFinalTweets({
   return selected;
 }
 
+interface SubtractiveTailRepairPassV2 {
+  evaluations: DraftEvaluation[];
+  selected: RankedProtocolTweet[];
+  targetCount: number;
+  eligibleCount: number;
+}
+
+async function runSubtractiveTailRepairPassV2({
+  sourceEvaluations,
+  selected,
+  input,
+  calls,
+  blocks,
+  runDeadlineAt,
+}: {
+  sourceEvaluations: DraftEvaluation[];
+  selected: RankedProtocolTweet[];
+  input: GenerateTweetBatchV2Input;
+  calls: GenerationModelCallTrace[];
+  blocks: SemanticBlock[];
+  runDeadlineAt: number;
+}): Promise<SubtractiveTailRepairPassV2> {
+  const desired = input.count - selected.length;
+  const selectedIdeaIds = new Set(selected
+    .map((tweet) => tweet.ideaId)
+    .filter((id): id is string => Boolean(id)));
+  const plannedEvaluations = buildSubtractiveTailEvaluationsV2({
+    evaluations: sourceEvaluations,
+    input,
+    blocks,
+    selectedIdeaIds,
+    desired,
+  });
+  const targetCount = new Set(plannedEvaluations
+    .map((entry) => entry.draft.parentDraftId)
+    .filter((id): id is string => Boolean(id))).size;
+  if (plannedEvaluations.length === 0 || Date.now() + 45_000 >= runDeadlineAt) {
+    return { evaluations: [], selected: [], targetCount, eligibleCount: 0 };
+  }
+  const eligible = plannedEvaluations.filter((entry) => entry.draft.status !== 'rejected');
+  if (eligible.length === 0) {
+    return { evaluations: plannedEvaluations, selected: [], targetCount, eligibleCount: 0 };
+  }
+  const repairSelected = await selectFinalTweets({
+    evaluations: eligible,
+    input: {
+      ...input,
+      count: desired,
+      recentPosts: uniqueStrings([
+        ...selected.map((tweet) => tweet.content),
+        ...input.recentPosts,
+      ], 120),
+    },
+    calls,
+    blocks,
+  });
+  return {
+    evaluations: plannedEvaluations,
+    selected: repairSelected,
+    targetCount,
+    eligibleCount: eligible.length,
+  };
+}
+
 const V2_RESCUE_ISSUE_LABELS: Record<string, string> = {
   generated_writing_pattern: 'recognizable generated-post sentence pattern',
   generic_investor_selection_template: 'reusable category-level "the startup/company I would back" wrapper',
@@ -5147,11 +5211,13 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     trace.stageCounts.initialDraftsEligible = eligibleDrafts.length;
     trace.stageCounts.initialIdeasWithEligibleDrafts = eligibleIdeaIds.size;
     if (eligibleDrafts.length < input.count || eligibleIdeaIds.size < Math.min(input.count, selectedIdeas.length)) {
-      const targets = preflightRescueTargetsV2(
+      const preflightCandidates = preflightRescueTargetsV2(
         evaluations.filter((entry) => !eligibleIdeaIds.has(entry.idea.id)),
         input.count - Math.min(input.count, eligibleIdeaIds.size),
       );
+      const targets = isGeoffreyVoiceProfile(input.voiceProfile) ? [] : preflightCandidates;
       trace.stageCounts.preflightRescueTargets = targets.length;
+      trace.stageCounts.preflightRescueSuppressedNegativeValue = preflightCandidates.length - targets.length;
       trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + targets.length;
       if (targets.length > 0 && Date.now() + 60_000 < runDeadlineAt) {
         retryUsed = true;
@@ -5224,39 +5290,24 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     let selected = await selectFinalTweets({ evaluations, input, calls: trace.modelCalls, blocks });
     if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
-      const selectedIdeaIds = new Set(selected
-        .map((tweet) => tweet.ideaId)
-        .filter((id): id is string => Boolean(id)));
-      const trimEvaluations = buildSubtractiveTailEvaluationsV2({
-        evaluations,
+      const trimPass = await runSubtractiveTailRepairPassV2({
+        sourceEvaluations: evaluations,
+        selected,
         input,
+        calls: trace.modelCalls,
         blocks,
-        selectedIdeaIds,
-        desired: input.count - selected.length,
+        runDeadlineAt,
       });
-      trace.stageCounts.postcriticTrimTargets = new Set(trimEvaluations
-        .map((entry) => entry.draft.parentDraftId)
-        .filter((id): id is string => Boolean(id))).size;
-      if (trimEvaluations.length > 0 && Date.now() + 45_000 < runDeadlineAt) {
+      trace.stageCounts.postcriticTrimTargets = trimPass.targetCount;
+      if (trimPass.evaluations.length > 0) {
         retryUsed = true;
-        evaluations.push(...trimEvaluations);
-        const trimEligible = trimEvaluations.filter((entry) => entry.draft.status !== 'rejected');
-        trace.stageCounts.postcriticTrimDraftsGenerated = trimEvaluations.length;
-        trace.stageCounts.postcriticTrimDraftsEligible = trimEligible.length;
-        trace.stageCounts.draftsEligible = (trace.stageCounts.draftsEligible || 0) + trimEligible.length;
-        trace.stageCounts.copyJudgeCandidates = (trace.stageCounts.copyJudgeCandidates || 0) + trimEligible.length;
-        if (trimEligible.length > 0) {
-          const trimSelected = await selectFinalTweets({
-            evaluations: trimEligible,
-            input: { ...input, count: input.count - selected.length },
-            calls: trace.modelCalls,
-            blocks,
-          });
-          trace.stageCounts.postcriticTrimDraftsSelected = trimSelected.length;
-          selected = [...selected, ...trimSelected.slice(0, input.count - selected.length)];
-        } else {
-          trace.stageCounts.postcriticTrimDraftsSelected = 0;
-        }
+        evaluations.push(...trimPass.evaluations);
+        trace.stageCounts.postcriticTrimDraftsGenerated = trimPass.evaluations.length;
+        trace.stageCounts.postcriticTrimDraftsEligible = trimPass.eligibleCount;
+        trace.stageCounts.draftsEligible = (trace.stageCounts.draftsEligible || 0) + trimPass.eligibleCount;
+        trace.stageCounts.copyJudgeCandidates = (trace.stageCounts.copyJudgeCandidates || 0) + trimPass.eligibleCount;
+        trace.stageCounts.postcriticTrimDraftsSelected = trimPass.selected.length;
+        selected = [...selected, ...trimPass.selected.slice(0, input.count - selected.length)];
       } else {
         trace.stageCounts.postcriticTrimDraftsGenerated = 0;
         trace.stageCounts.postcriticTrimDraftsEligible = 0;
@@ -5415,6 +5466,44 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
           selected = [...selected, ...alternateSelected.slice(0, input.count - selected.length)];
         } else {
           trace.stageCounts.alternateDraftsSelected = 0;
+        }
+        if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
+          const alternateTrimPass = await runSubtractiveTailRepairPassV2({
+            sourceEvaluations: alternateEvaluations,
+            selected,
+            input,
+            calls: trace.modelCalls,
+            blocks,
+            runDeadlineAt,
+          });
+          trace.stageCounts.alternatePostcriticTrimTargets = alternateTrimPass.targetCount;
+          trace.stageCounts.postcriticTrimTargets = (trace.stageCounts.postcriticTrimTargets || 0)
+            + alternateTrimPass.targetCount;
+          if (alternateTrimPass.evaluations.length > 0) {
+            retryUsed = true;
+            evaluations.push(...alternateTrimPass.evaluations);
+            trace.stageCounts.alternatePostcriticTrimDraftsGenerated = alternateTrimPass.evaluations.length;
+            trace.stageCounts.alternatePostcriticTrimDraftsEligible = alternateTrimPass.eligibleCount;
+            trace.stageCounts.postcriticTrimDraftsGenerated = (trace.stageCounts.postcriticTrimDraftsGenerated || 0)
+              + alternateTrimPass.evaluations.length;
+            trace.stageCounts.postcriticTrimDraftsEligible = (trace.stageCounts.postcriticTrimDraftsEligible || 0)
+              + alternateTrimPass.eligibleCount;
+            trace.stageCounts.draftsEligible = (trace.stageCounts.draftsEligible || 0)
+              + alternateTrimPass.eligibleCount;
+            trace.stageCounts.copyJudgeCandidates = (trace.stageCounts.copyJudgeCandidates || 0)
+              + alternateTrimPass.eligibleCount;
+            trace.stageCounts.alternatePostcriticTrimDraftsSelected = alternateTrimPass.selected.length;
+            trace.stageCounts.postcriticTrimDraftsSelected = (trace.stageCounts.postcriticTrimDraftsSelected || 0)
+              + alternateTrimPass.selected.length;
+            selected = [
+              ...selected,
+              ...alternateTrimPass.selected.slice(0, input.count - selected.length),
+            ];
+          } else {
+            trace.stageCounts.alternatePostcriticTrimDraftsGenerated = 0;
+            trace.stageCounts.alternatePostcriticTrimDraftsEligible = 0;
+            trace.stageCounts.alternatePostcriticTrimDraftsSelected = 0;
+          }
         }
       }
     }

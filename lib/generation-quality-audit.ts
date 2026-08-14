@@ -343,6 +343,7 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
           ?? 0)
         + (run.stageCounts.postcriticTrimTargets || 0), 0),
       suppressedTargetCount: runs.reduce((sum, run) => sum
+        + (run.stageCounts.preflightRescueSuppressedNegativeValue || 0)
         + (run.stageCounts.postcriticRescueSuppressedNegativeValue || 0), 0),
       capacityDeferredTargetCount: runs.reduce((sum, run) => sum
         + (run.stageCounts.postcriticRescueCapacityDeferredTargets || 0), 0),

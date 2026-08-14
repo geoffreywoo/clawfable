@@ -380,7 +380,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-97',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-98',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -914,8 +914,20 @@ describe('generateTweetBatchV2 integration', () => {
     expect(finalRun.stageCounts.rescueDraftsGenerated || 0).toBe(0);
   });
 
-  it('spends Geoffrey post-critic capacity on fresh alternate ideas instead of rewrites', async () => {
+  it('trims and rejudges a high-margin Geoffrey alternate instead of rewriting it', async () => {
     let criticCalls = 0;
+    mocks.accountTasteImplementation = (content) => (
+      content.includes('. ')
+        ? {
+            nativeVoiceScore: 0.79,
+            casualStartupScore: 0.72,
+            stiffnessRisk: 0.15,
+            voiceDriftRisk: 0.1,
+            cringeRisk: 0.2,
+            generatedPatternRisk: 0.1,
+          }
+        : {}
+    );
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
@@ -923,7 +935,7 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'copy_judgment') {
         criticCalls += 1;
         const parsed = JSON.parse(options.prompt);
-        const score = criticCalls === 1 ? 0.78 : 0.92;
+        const score = criticCalls === 1 ? 0.78 : criticCalls === 2 ? 0.92 : 0.95;
         return result(JSON.stringify({
           ranking: parsed.candidates.map((candidate: any) => candidate.id),
           scores: parsed.candidates.map((candidate: any) => ({
@@ -940,7 +952,9 @@ describe('generateTweetBatchV2 integration', () => {
             manualAnchorReskinRisk: 0.02,
             diagnosis: criticCalls === 1
               ? 'The core is plausible but still reads like an abstract comparison thesis.'
-              : 'The alternate idea is direct and concrete.',
+              : criticCalls === 2
+                ? 'The alternate is direct; delete the explanatory last sentence.'
+                : 'The shortened alternate is direct and publishable.',
           })),
         }));
       }
@@ -953,10 +967,11 @@ describe('generateTweetBatchV2 integration', () => {
       .map(([options]) => JSON.parse(options.prompt));
     const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
 
-    expect(criticCalls).toBe(2);
+    expect(criticCalls).toBe(3);
     expect(writerPrompts.every((prompt) => prompt.failedAttempts.length === 0)).toBe(true);
     expect(drafts).toHaveLength(2);
-    expect(drafts.every((draft) => draft.mutationRound === 0)).toBe(true);
+    expect(drafts.every((draft) => draft.mutationRound === 1)).toBe(true);
+    expect(drafts.every((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
     expect(finalRun).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({
@@ -966,7 +981,11 @@ describe('generateTweetBatchV2 integration', () => {
         postcriticPairedWriterTargets: 0,
         postcriticRescueSuppressedNegativeValue: expect.any(Number),
         alternateIdeaTargets: 2,
-        alternateDraftsSelected: 2,
+        alternateDraftsSelected: 0,
+        alternatePostcriticTrimTargets: 2,
+        alternatePostcriticTrimDraftsGenerated: expect.any(Number),
+        alternatePostcriticTrimDraftsSelected: 2,
+        postcriticTrimDraftsSelected: 2,
         draftsSelected: 2,
       }),
     });
@@ -974,6 +993,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(finalRun.stageCounts.postcriticRescueSuppressedNegativeValue).toBe(
       finalRun.stageCounts.postcriticRescueTargets,
     );
+    expect(finalRun.stageCounts.alternatePostcriticTrimDraftsGenerated).toBeGreaterThanOrEqual(2);
   });
 
   it('runs a dry preview without persisting traces or candidate memory', async () => {
@@ -1719,6 +1739,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it('rewrites two distinct deterministic voice near-misses before spending the critic call', async () => {
+    mocks.geoffreyVoiceProfile = false;
     let writerCalls = 0;
     mocks.accountTasteImplementation = (content) => (
       content.includes('prove the buyer decision') ? {} : { stiffnessRisk: 0.31 }
@@ -1764,6 +1785,36 @@ describe('generateTweetBatchV2 integration', () => {
         draftsSelected: 2,
       }),
     });
+  });
+
+  it('suppresses Geoffrey preflight rewrites and records the avoided model spend', async () => {
+    mocks.accountTasteImplementation = () => ({ stiffnessRisk: 0.31 });
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponseWithReserve(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2(input);
+    const writerPrompts = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt));
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+
+    expect(drafts).toHaveLength(0);
+    expect(writerPrompts.length).toBeGreaterThanOrEqual(4);
+    expect(writerPrompts.every((prompt) => prompt.failedAttempts.length === 0)).toBe(true);
+    expect(mocks.generateText.mock.calls.filter(([options]) => options.task === 'copy_judgment')).toHaveLength(0);
+    expect(finalRun).toMatchObject({
+      status: 'empty',
+      stageCounts: expect.objectContaining({
+        preflightRescueTargets: 0,
+        preflightRescueSuppressedNegativeValue: 2,
+        rescueTargets: 0,
+      }),
+    });
+    expect(finalRun.stageCounts.draftsSelected || 0).toBe(0);
   });
 
   it('can follow a preflight rescue with a separately judged critic-informed rescue', async () => {
