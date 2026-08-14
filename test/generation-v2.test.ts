@@ -7,6 +7,8 @@ import {
   buildIdeaGenerationPromptV2,
   buildTweetWritingPromptV2,
   getGenerationV2CircuitPauseUntil,
+  getRequiredFinalQualityMarginV2,
+  getStoryGenerationPlanningRejectionCodesV2,
   getV2GeneratedWritingIssue,
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
@@ -104,6 +106,14 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
 }
 
 describe('Tweet Generation V2', () => {
+  it('targets autonomous headroom for live and production-shadow generation only', () => {
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.82);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.82);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
+    expect(getRequiredFinalQualityMarginV2({})).toBe(0.82);
+  });
+
   it('preserves native paragraph rhythm while normalizing draft whitespace', () => {
     expect(normalizeDraftContentV2('  first beat  \r\n\r\n  second   beat  ')).toBe('first beat\n\nsecond beat');
   });
@@ -157,7 +167,11 @@ describe('Tweet Generation V2', () => {
     const prompt = buildIdeaGenerationPromptV2([aiBrief!], voiceProfile);
     expect(prompt).not.toContain(priorPost);
     expect(prompt).not.toContain('A prior premise that must not be copied');
-    expect(prompt).toContain('personalTopicSignals');
+    expect(prompt).not.toContain('personalTopicSignals');
+    expect(JSON.parse(prompt).briefs[0].personalTopicHistory).toEqual({
+      informedTopicSelection: true,
+      premiseSupplied: false,
+    });
   });
 
   it('blocks a personal topic signal from inverting the native premise that produced it', () => {
@@ -638,6 +652,49 @@ describe('Tweet Generation V2', () => {
     expect(second).not.toEqual(first);
   });
 
+  it('rotates among proven Geoffrey topic lanes instead of replaying the same four briefs', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const manualTopicProfile = [
+      'AI',
+      'startups',
+      'finance',
+      'energy',
+      'robotics',
+      'space',
+      'culture',
+      'health',
+    ].map((topic) => ({
+      topic,
+      angle: '',
+      weight: 1,
+      sampleCount: 5,
+      avgEngagement: 50,
+      topTweets: [],
+    }));
+    const build = (seedRotationKey: string) => buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: [] } } as any,
+      learnings: { manualTopicProfile } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey,
+    }).map((entry) => entry.topic);
+
+    const first = build('topic-run-a');
+    const second = build('topic-run-b');
+    const third = build('topic-run-c');
+
+    expect(new Set(first).size).toBe(4);
+    expect(new Set([...first, ...second, ...third]).size).toBeGreaterThan(4);
+  });
+
   it('uses operator history as topic-level strategy rather than replaying its premise', () => {
     const briefs = buildGenerationBriefsV2({
       count: 2,
@@ -848,6 +905,10 @@ describe('Tweet Generation V2', () => {
     } as Tweet];
 
     expect(isStoryAlreadyCommittedV2(story, published, new Date('2026-08-13T00:00:00.000Z'))).toBe(true);
+    expect(getStoryGenerationPlanningRejectionCodesV2(story, {
+      committedTweets: published,
+      now: new Date('2026-08-13T00:00:00.000Z'),
+    })).toContain('already_committed');
     const briefs = buildGenerationBriefsV2({
       count: 2,
       stories: [story],

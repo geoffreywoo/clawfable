@@ -37,7 +37,7 @@ function healthyInput() {
       })),
     },
     currentPolicyWindow: {
-      qualityPolicyVersion: 'publishing-v2-hard-gates-25',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-26',
       runCount: 4,
       runsWithSelectedDrafts: 4,
       selectedDraftCount: 5,
@@ -77,6 +77,7 @@ function healthyInput() {
     },
     complaints: { total: 0, affectedPostRate: 0 },
     modelPricing: { activeComplete: true, missingModels: [] },
+    sources: { editorialEligibleCount: 3, generationEligibleCount: 1 },
   };
 }
 
@@ -165,6 +166,19 @@ describe('generation quality audit findings', () => {
         code: 'generation_cost_attribution_incomplete',
         title: 'Historical model usage lacks complete token accounting',
         evidence: expect.objectContaining({ activeModelPricingComplete: true }),
+      }),
+    ]));
+  });
+
+  it('flags when editorial sources exist but none can enter the next generation run', () => {
+    const input = healthyInput();
+    input.sources.generationEligibleCount = 0;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'source_briefs_exhausted',
+        severity: 'high',
+        scope: 'live_state',
       }),
     ]));
   });

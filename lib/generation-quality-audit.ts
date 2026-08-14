@@ -23,10 +23,15 @@ import {
   getSourceDocuments,
   getStoryClusters,
   getResearchAgenda,
+  getSemanticBlocks,
+  getIdeaCandidates,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
-import { getStoryEditorialRejectionCodesV2 } from './generation-v2';
+import {
+  getStoryEditorialRejectionCodesV2,
+  getStoryGenerationPlanningRejectionCodesV2,
+} from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { hasAiModelPricing } from './ai-pricing';
 import {
@@ -43,7 +48,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 9;
+export const GENERATION_QUALITY_AUDIT_VERSION = 10;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -107,6 +112,10 @@ interface AuditFindingInput {
   modelPricing: {
     activeComplete: boolean;
     missingModels: string[];
+  };
+  sources: {
+    editorialEligibleCount: number;
+    generationEligibleCount: number;
   };
 }
 
@@ -231,6 +240,17 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       title: 'Current-policy generation rarely produces a selectable draft',
       evidence: input.currentPolicyWindow,
       action: 'Inspect stage rejection codes and improve brief quality or writer diversity before spending more critic calls.',
+    });
+  }
+
+  if (input.sources.editorialEligibleCount > 0 && input.sources.generationEligibleCount === 0) {
+    add({
+      code: 'source_briefs_exhausted',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'No editorially valid source story is currently available to generation',
+      evidence: input.sources,
+      action: 'Refresh qualified primary sources and inspect semantic-memory, commitment, and editorial-cooldown exclusions; keep source-free opinions inside factual-restraint gates.',
     });
   }
 
@@ -439,7 +459,7 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
 
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
-  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda] = await Promise.all([
+  const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
     getVoiceCorpusSnapshot(agent.id),
@@ -451,6 +471,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getSourceDocuments(agent.id, 300),
     getStoryClusters(agent.id, 200),
     getResearchAgenda(agent.id),
+    getSemanticBlocks(agent.id),
+    getIdeaCandidates(agent.id, 300),
   ]);
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const activeModelStack = PUBLISHING_V2_MODEL_STACK;
@@ -542,6 +564,13 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const storyDecisions = storyClusters.map((story) => ({
     story,
     rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
+    planningRejectionCodes: getStoryGenerationPlanningRejectionCodesV2(story, {
+      ...storyEditorialOptions,
+      blocks: semanticBlocks,
+      committedTweets: allTweets.filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)),
+      recentIdeas,
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    }),
   }));
   const enrichedOperatorTopics = enrichTrendingTopics(
     trending,
@@ -676,6 +705,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       activeComplete: modelPricingCoverage.every((target) => target.priced),
       missingModels: modelPricingCoverage.filter((target) => !target.priced).map((target) => target.model),
     },
+    sources: {
+      editorialEligibleCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+      generationEligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+    },
   });
   const findingCounts = {
     critical: findingItems.filter((finding) => finding.severity === 'critical').length,
@@ -726,7 +759,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       storyCount: storyClusters.length,
       qualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
       evidenceQualifiedStoryCount: storyClusters.filter((story) => story.evidenceQualified && !story.blockedUntil && !story.blockReason).length,
-      generationEligibleStoryCount: storyDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
+      generationEligibleStoryCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
       blockedStoryCount: storyClusters.filter((story) => Boolean(story.blockedUntil || story.blockReason)).length,
       sourceTypeCounts: countBy(sourceDocuments.map((document) => document.sourceType)),
       trustTierCounts: countBy(sourceDocuments.map((document) => document.trustTier)),
@@ -750,6 +783,28 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         independentSourceCount: story.independentSourceCount,
         scores: story.scores,
       })),
+      generationPlanning: {
+        eligibleCount: storyDecisions.filter((decision) => decision.planningRejectionCodes.length === 0).length,
+        rejectionReasonCounts: topCounts(storyDecisions
+          .filter((decision) => decision.rejectionCodes.length === 0)
+          .flatMap((decision) => decision.planningRejectionCodes)),
+        eligible: storyDecisions
+          .filter((decision) => decision.planningRejectionCodes.length === 0)
+          .map(({ story }) => ({
+            id: story.id,
+            headline: story.title,
+            topic: story.topic,
+            scores: story.scores,
+          })),
+        unavailableAfterEditorialQualification: storyDecisions
+          .filter((decision) => decision.rejectionCodes.length === 0 && decision.planningRejectionCodes.length > 0)
+          .map(({ story, planningRejectionCodes }) => ({
+            id: story.id,
+            headline: story.title,
+            topic: story.topic,
+            rejectionCodes: planningRejectionCodes,
+          })),
+      },
       rejected: storyDecisions.filter((decision) => decision.rejectionCodes.length > 0).map(({ story, rejectionCodes }) => ({
         id: story.id,
         headline: story.title,

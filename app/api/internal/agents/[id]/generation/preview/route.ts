@@ -211,6 +211,7 @@ export async function POST(
           trending,
           modelStack: requestedModelStack,
           mode: 'preview',
+          requireAutopostQuality: true,
           persistArtifacts: false,
           entitlement: await getAgentAutomationEntitlement(id, { agent }),
           onTrace: (trace) => { generationTrace = trace; },
