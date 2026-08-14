@@ -132,7 +132,10 @@ function canonicalNumericClaim(value: string): string {
     .toLowerCase()
     .replace(/[\s,]+/g, '')
     .replace(/percentagepoints?/g, 'pp')
-    .replace(/percent(?:age)?/g, '%');
+    .replace(/percent(?:age)?/g, '%')
+    .replace(/trillion/g, 't')
+    .replace(/billion|bn/g, 'b')
+    .replace(/million/g, 'm');
 }
 
 function numericClaimSupported(claim: string, supportTexts: string[]): boolean {

@@ -326,7 +326,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.properties.content.maxLength).toBe(1200);
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
-    expect(String(writerCall.system)).toContain('Never upgrade an attributed or self-reported claim into an unqualified fact');
+    expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt.variantCadenceAssignments).toHaveLength(3);
     expect(new Set(writerPrompt.variantCadenceAssignments.map((entry: any) => entry.anchorId)).size).toBe(3);
@@ -347,7 +347,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-29',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-30',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -749,18 +749,16 @@ describe('generateTweetBatchV2 integration', () => {
     expect(anchors).toContain('timeline diction from the curated voice corpus');
     expect(anchors).not.toContain('generated diction must not return');
     expect(anchors).not.toContain('manual topic winner is a premise boundary, never a diction anchor');
-    expect(writerSystem).toContain('write the live reaction, not a compressed brief');
-    expect(writerSystem).toContain('Source-free opinions can be owned in first person');
-    expect(writerSystem).toContain('Never turn them into generic third-person advice');
-    expect(writerSystem).toContain('fabricated first-person behavior');
+    expect(writerSystem).toContain('Write the live reaction, not a compressed brief');
+    expect(writerSystem).toContain('approved claim is the concrete fact ceiling');
+    expect(writerSystem).toContain('Never turn attributed evidence into an unqualified fact');
     expect(writerSystem).toContain('Conceive each variant separately');
-    expect(writerSystem).toContain('checklist, balanced contrast, definition pair');
+    expect(writerSystem).toContain('Stop before advice, a balanced contrast');
     expect(writerSystem).toContain('rough multi-paragraph thought');
-    expect(writerSystem).toContain('Keep paragraph breaks and uneven rhythm');
-    expect(writerSystem).toContain('Do not compress every idea into a 280-character aphorism');
-    expect(writerSystem).toContain('setup shaped like "A is not a thesis. B is."');
+    expect(writerSystem).toContain('Three polished paraphrases are not');
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, period, and measurement type");
+    expect(writerSystem.length).toBeLessThan(6_000);
     expect(ideaSystem).toContain('changed numerical scope');
     expect(ideaSystem).toContain('preserve that attribution');
     expect(ideaSystem).toContain('claim must be directly entailed');

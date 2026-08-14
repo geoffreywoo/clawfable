@@ -1753,6 +1753,9 @@ describe('Tweet Generation V2', () => {
         instruction: expect.stringContaining('Diction and rhythm evidence only'),
       })],
     }));
+    expect(writingPrompt.idea).not.toHaveProperty('authorReason');
+    expect(writingPrompt.idea).not.toHaveProperty('counterargument');
+    expect(writingPrompt.subjectContext).not.toHaveProperty('creativeSeed');
 
     const operatorWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
       { ...idea, briefId: 'operator', storyClusterId: null, evidenceIds: [] },
@@ -1761,7 +1764,8 @@ describe('Tweet Generation V2', () => {
       [],
     ));
     expect(operatorWritingPrompt.factualWritingContract).toContain('personal judgment, question, prediction');
-    expect(operatorWritingPrompt.factualWritingContract).toContain('cannot present a current or historical event');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
+    expect(operatorWritingPrompt.factualWritingContract).toContain('approved claim');
   });
 
   it('hard-rejects production-observed generated cadence without rejecting native anchors', () => {

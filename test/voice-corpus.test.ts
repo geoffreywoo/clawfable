@@ -205,6 +205,14 @@ describe('versioned voice corpus', () => {
         xTweetId: 'x-unresolved-pronoun-link',
         content: 'just accumulate more money and power than them. then implement your own philosophy with money and power. https://t.co/context',
       }),
+      performance(97, {
+        xTweetId: 'x-merch-promo',
+        content: 'anti fund hats sold out because we actually know how to hype beast. get yours https://t.co/merch',
+      }),
+      performance(98, {
+        xTweetId: 'x-full-pod',
+        content: 'do more provocative things because everyone is too afraid of being canceled. full pod here https://t.co/pod',
+      }),
     ];
     const snapshot = build([...history, ...questionable]);
 
@@ -215,6 +223,8 @@ describe('versioned voice corpus', () => {
     const contextual = snapshot.entries.find((entry) => entry.xTweetId === 'x-context-dependent-link');
     const attachment = snapshot.entries.find((entry) => entry.xTweetId === 'x-media-attachment');
     const unresolved = snapshot.entries.find((entry) => entry.xTweetId === 'x-unresolved-pronoun-link');
+    const merch = snapshot.entries.find((entry) => entry.xTweetId === 'x-merch-promo');
+    const fullPod = snapshot.entries.find((entry) => entry.xTweetId === 'x-full-pod');
 
     expect(promo?.exclusionReasons).toContain('promotional post');
     expect(media?.exclusionReasons).toContain('media-dependent caption');
@@ -223,7 +233,9 @@ describe('versioned voice corpus', () => {
     expect(contextual?.exclusionReasons).toContain('media-dependent caption');
     expect(attachment?.exclusionReasons).toContain('media-dependent caption');
     expect(unresolved?.exclusionReasons).toContain('media-dependent caption');
-    for (const entry of [promo, media, truncated, clipped, contextual, attachment, unresolved]) {
+    expect(merch?.exclusionReasons).toContain('promotional post');
+    expect(fullPod?.exclusionReasons).toContain('media-dependent caption');
+    for (const entry of [promo, media, truncated, clipped, contextual, attachment, unresolved, merch, fullPod]) {
       expect(entry?.dispositions).not.toContain('diction_anchor');
     }
   });

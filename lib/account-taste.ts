@@ -1098,20 +1098,13 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
-- The approved claim, tension, and implication are over-complete private notes. Keep only the thought Geoffrey would actually feel compelled to type; never summarize all three.
-- Native posts range from one blunt line to a rough multi-paragraph thought. Do not compress every idea into a 280-character aphorism.
-- Keep paragraph breaks and uneven rhythm when the thought has multiple beats. Let clauses pile up naturally instead of resolving them into a balanced slogan.
-- Source-free opinions can be owned in first person when that is the real posture. Never turn them into generic third-person advice.
-- Make the social posture legible: disbelief, annoyance, excitement, conviction, teasing, or a real preference. Do this through the thought itself, not by prefixing analyst prose with "i think."
-- Voice anchors demonstrate range, not reusable catchphrases. Never borrow an anchor opening such as "my philosophy on" or turn one post's slang into a house style.
-- Start with the actual reaction, named subject, bet, or decision. Skip the industry introduction, framework, and audience lesson.
-- Casualness comes from direct ordinary language and high context, not pasted-on slang such as "vibes," "cosplay," "cracked," or "baller."
-- Match manual anchors' capitalization, rhythm, and amount of explanation without copying their premise, scene, metaphor, or sentence skeleton.
-- Do not manufacture a neat equation or investment slogan from the notes. Avoid "give me X over Y," "i'd rather own X than Y," paired "X is replaceable / Y isn't," and "that's the whole game/trade/reason."
-- Delete private-note residue before writing. "underwrite," "diligence question," "capability grounds," "deployment story/readiness," "workflow-level evidence," "product thesis," "timing signal," "operating lens," and "strategic relevance" usually turn a reaction into a memo. Use one only when it is literally the ordinary word the author would choose.
-- Do not make a metaphorical product command carry the whole idea, such as software "deleting the org chart" or "rewriting the company." State the actual belief unless the metaphor is already native to the supplied evidence.
-- Drafts must be separately conceived reactions, not short, medium, and long paraphrases of one sentence. It is fine for one to be a fragment or leave the reason implicit.
-- Stop where a human would stop. No consultant summary, synthetic mic drop, or neat X-versus-Y closer.`;
+- Write the thought Geoffrey would send to one smart founder or investor, then stop. It should feel high-context, casual, opinionated, and a little uneven, never like an analyst summarizing a brief.
+- Start with the named subject, reaction, bet, question, or desire. Let the position carry the personality; do not paste slang or "i think" onto formal prose.
+- Native range includes one blunt line, two uneven beats, and a rough multi-paragraph thought when the idea genuinely needs context. Do not force every take into an aphorism.
+- Use ordinary startup and market language. Keep a technical noun only when it sharpens the judgment. Delete memo residue such as "underwrite," "framework," "strategic relevance," and "the implication is."
+- Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
+- Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
+- Stop before advice, a balanced contrast, a lesson, a slogan, or a synthetic mic drop. Deterministic gates will handle the blocklist; concentrate on making the thought worth posting.`;
 }
 
 export function buildGeoffreyNativeWritingBrief(): string {

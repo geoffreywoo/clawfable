@@ -117,7 +117,7 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses GPT-5.6 for active V2 copy and preserves Fable 5 as the isolated control', async () => {
+  it('uses Fable 5 for active V2 copy with GPT-5.6 judgment and an isolated GPT writer control', async () => {
     const {
       PUBLISHING_V2_CONTROL_MODEL_STACK,
       PUBLISHING_V2_MODEL_STACK,
@@ -125,8 +125,8 @@ describe('AI model routing', () => {
     } = await loadDefaultRouter();
 
     expect(getModelChainForTask('tweet_generation', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
-      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
@@ -144,8 +144,8 @@ describe('AI model routing', () => {
       model: 'gpt-5.6',
     });
     expect(getModelChainForTask('tweet_writing', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
-      { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
@@ -154,12 +154,12 @@ describe('AI model routing', () => {
     );
   });
 
-  it('dispatches active V2 copy to GPT-5.6 before provider failover', async () => {
-    const openAiCreate = vi.fn().mockResolvedValue({
-      status: 'completed',
-      output: [{ content: [{ type: 'output_text', text: 'gpt copy' }] }],
+  it('dispatches active V2 copy to Fable 5 before provider failover', async () => {
+    const openAiCreate = vi.fn();
+    const anthropicCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'fable copy' }],
+      stop_reason: 'end_turn',
     });
-    const anthropicCreate = vi.fn();
     const {
       PUBLISHING_V2_MODEL_STACK,
       generateText,
@@ -180,22 +180,18 @@ describe('AI model routing', () => {
       jsonSchema,
     });
 
-    expect(openAiCreate).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.6',
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'tweet_generation_response',
-          schema: jsonSchema,
-          strict: true,
-        },
+    expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'claude-fable-5',
+      output_config: {
+        effort: 'medium',
+        format: { type: 'json_schema', schema: jsonSchema },
       },
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(anthropicCreate).not.toHaveBeenCalled();
+    expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      text: 'gpt copy',
-      provider: 'openai',
-      model: 'gpt-5.6',
+      text: 'fable copy',
+      provider: 'anthropic',
+      model: 'claude-fable-5',
     }));
   });
 
@@ -460,13 +456,13 @@ describe('AI model routing', () => {
       stop_reason: 'max_tokens',
     });
     const {
-      PUBLISHING_V2_CONTROL_MODEL_STACK,
+      PUBLISHING_V2_MODEL_STACK,
       generateText,
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
 
     const result = await generateText({
       task: 'tweet_generation',
-      modelStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
       system: 'Write one post.',
       prompt: 'probe',
       maxTokens: 64,
@@ -522,13 +518,13 @@ describe('AI model routing', () => {
       }), 60);
     }));
     const {
-      PUBLISHING_V2_CONTROL_MODEL_STACK,
+      PUBLISHING_V2_MODEL_STACK,
       generateText,
     } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
 
     const result = await generateText({
       task: 'tweet_writing',
-      modelStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
       system: 'Return the requested draft.',
       prompt: 'probe',
       maxTokens: 64,

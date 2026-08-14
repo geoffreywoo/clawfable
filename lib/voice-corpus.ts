@@ -26,8 +26,8 @@ const NEGATIVE_SIGNAL_TYPES = new Set([
   'x_post_rejected',
 ]);
 
-const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching today|new episode|follow me|subscribe|use code|new interview|full interview|new video|watch (?:the|our)|listen to|rt this post|happy to (?:back|support|invest)|proud to (?:back|support|invest)|congrats(?:ulations)? (?:to|@)|our portfolio company|we (?:just )?invested)\b/i;
-const MEDIA_CAPTION_PATTERN = /\b(?:watch|listen|interview|podcast|episode|video|timestamps?|full (?:conversation|breakdown)|link (?:in|below))\b/i;
+const PROMO_PATTERN = /\b(?:sign up|waitlist|book a demo|available now|launching today|new episode|follow me|subscribe|use code|new interview|full interview|new video|watch (?:the|our)|listen to|rt this post|sold out|get yours|merch|happy to (?:back|support|invest)|proud to (?:back|support|invest)|congrats(?:ulations)? (?:to|@)|our portfolio company|we (?:just )?invested)\b/i;
+const MEDIA_CAPTION_PATTERN = /\b(?:watch|listen|interview|podcast|pod|episode|video|timestamps?|full (?:conversation|breakdown)|link (?:in|below))\b/i;
 const QUOTATION_PATTERN = /^(?:["'\u201c\u2018].{20,}["'\u201d\u2019](?:\s*[-\u2014].*)?|(?:quote|from)[:\s])/i;
 const TRAILING_FRAGMENT_PATTERN = /(?:,|&|:|;|\b(?:and|or|the|a|an|to|of|for|with|is|are|was|were|has|have|that|which|because|when|if|into|more|mega))\s*$/i;
 const CONTEXT_DEPENDENT_LINK_OPENING = /^(?:sounds about right|beasts\b|the names\b|this\b|that\b|these\b|those\b|it\b|they\b|them\b|he\b|she\b|pomp is right\b|just\b[^.!?\n]{0,120}\b(?:them|him|her)\b)/i;
