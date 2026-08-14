@@ -746,6 +746,57 @@ describe('Tweet Generation V2', () => {
     expect(startupBrief?.personalTopicSignalPremises).toHaveLength(1);
   });
 
+  it('uses a named high-confidence topic signal as subject evidence without teaching its prose', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const excludedTopicSignal = 'we love @Etched and what @robertwachen is building. congrats to the whole team https://t.co/example';
+    const generatedPost = '@OpenAI should own the whole software stack';
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups', 'markets'] } } as any,
+      learnings: {
+        manualTopicProfile: [{
+          topic: 'AI',
+          angle: 'operator AI outcomes',
+          weight: 20,
+          sampleCount: 8,
+          avgEngagement: 80,
+          topTweets: [{
+            content: excludedTopicSignal,
+            topic: 'AI',
+            source: 'timeline',
+            authorshipProvenance: 'timeline_unmatched',
+            authorshipConfidence: 0.82,
+            voiceCorpusDispositions: ['excluded', 'topic_signal'],
+          }, {
+            content: generatedPost,
+            topic: 'AI',
+            source: 'autopilot',
+            authorshipProvenance: 'known_clawfable_generated',
+            authorshipConfidence: 1,
+            voiceCorpusDispositions: ['mechanics_only'],
+          }],
+        }],
+      } as any,
+      style: { autonomyMode: 'balanced', trendMixTarget: 25, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    const aiBrief = briefs.find((entry) => entry.topic === 'AI');
+    expect(aiBrief?.personalTopicSignals?.join(' ')).toMatch(/etched|robertwachen/i);
+    expect(aiBrief?.personalTopicSignals?.join(' ')).not.toContain('openai');
+    expect(aiBrief?.personalTopicSignalPremises).toEqual([excludedTopicSignal]);
+    const prompt = buildIdeaGenerationPromptV2([aiBrief!], geoffreyVoiceProfile);
+    expect(prompt).not.toContain(excludedTopicSignal);
+    expect(prompt).not.toContain(generatedPost);
+  });
+
   it('does not reuse a sourced story subject through a durable personal cue', () => {
     expect(hasCrossBriefSubjectCollisionV2('cognition scottwu46', 'Cognition valuation talks')).toBe(true);
     expect(hasCrossBriefSubjectCollisionV2('tonyrobbins storytelling', 'Tony Robbins crowd intervention')).toBe(true);
@@ -1628,12 +1679,17 @@ describe('Tweet Generation V2', () => {
       allTweets: [],
     });
 
-    const subjects = briefs.map((entry) => `${entry.topic} ${entry.title}`);
+    const subjects = briefs.map((entry) => [
+      entry.topic,
+      entry.title,
+      entry.creativeSeed?.object,
+      entry.creativeSeed?.hiddenConstraint,
+    ].filter(Boolean).join(' '));
     expect(briefs).toHaveLength(8);
     expect(subjects.filter(isGeoffreyDeepTechnicalTopic).length).toBeLessThanOrEqual(1);
     expect(subjects.filter(isGeoffreyManufacturingMaterialsTopic).length).toBeLessThanOrEqual(1);
-    const domainCounts = subjects.reduce((counts, subject) => {
-      const domain = classifyGeoffreyTopicDomain(subject);
+    const domainCounts = briefs.reduce((counts, entry) => {
+      const domain = classifyGeoffreyTopicDomain(`${entry.topic} ${entry.title}`);
       counts.set(domain, (counts.get(domain) || 0) + 1);
       return counts;
     }, new Map<string, number>());

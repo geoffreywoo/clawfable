@@ -34,6 +34,7 @@ import {
   buildGenerationBriefsV2,
   getStoryEditorialRejectionCodesV2,
   getStoryGenerationPlanningRejectionCodesV2,
+  isEligibleOperatorTopicCueSourceV2,
   isV2MarginOnlyBoundedRepairCandidate,
   isGenericInvestorSelectionTemplateV2,
 } from './generation-v2';
@@ -59,7 +60,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 25;
+export const GENERATION_QUALITY_AUDIT_VERSION = 26;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1096,15 +1097,19 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const operatorTopicTaste = (context.learnings?.manualTopicProfile || []).map((cluster) => {
     const topTweets = cluster.topTweets || [];
     const cleanSubjectCueSources = topTweets.filter((tweet) => (
-      tweet.authorshipProvenance !== 'known_clawfable_generated'
-      && tweet.voiceCorpusDispositions?.includes('diction_anchor')
+      isEligibleOperatorTopicCueSourceV2(tweet, context.voiceProfile)
     ));
+    const dictionAnchorCueSourceCount = cleanSubjectCueSources.filter((tweet) => (
+      tweet.voiceCorpusDispositions?.includes('diction_anchor')
+    )).length;
     return {
       topic: cluster.topic,
       sampleCount: cluster.sampleCount,
       averageEngagement: cluster.avgEngagement,
       topTweetCount: topTweets.length,
       cleanSubjectCueSourceCount: cleanSubjectCueSources.length,
+      dictionAnchorCueSourceCount,
+      broaderTopicSignalCueSourceCount: cleanSubjectCueSources.length - dictionAnchorCueSourceCount,
       excludedFromExactSubjectReuseCount: topTweets.length - cleanSubjectCueSources.length,
     };
   });
@@ -1332,7 +1337,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
           exactSubjectCueCount: brief.personalTopicSignals?.length || 0,
           exactSubjectCues: (brief.personalTopicSignals || []).map((signal) => signal.replace(/:/g, ' ')),
           exactSubjectCueProvenance: (brief.personalTopicSignals?.length || 0) > 0
-            ? 'clean_diction_anchors'
+            ? 'high_confidence_operator_topic_signals'
+            : null,
+          exactSubjectCueLearningUse: (brief.personalTopicSignals?.length || 0) > 0
+            ? 'subject_only_no_wording_or_premise'
             : null,
           creativeSeedId: brief.creativeSeed?.id || null,
         })),

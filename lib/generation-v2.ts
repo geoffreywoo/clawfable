@@ -931,10 +931,7 @@ function operatorTopicCandidates({
   const cleanSubjectSignalTweets = (tweets: TweetPerformance[]): TweetPerformance[] => (
     !isGeoffreyVoiceProfile(voiceProfile)
       ? tweets
-      : tweets.filter((tweet) => (
-        tweet.authorshipProvenance !== 'known_clawfable_generated'
-        && tweet.voiceCorpusDispositions?.includes('diction_anchor')
-      ))
+      : tweets.filter((tweet) => isEligibleOperatorTopicCueSourceV2(tweet, voiceProfile))
   );
   const candidates = [
     ...manualTopics
@@ -973,6 +970,34 @@ function operatorTopicCandidates({
     seen.add(key);
     return true;
   });
+}
+
+export function isEligibleOperatorTopicCueSourceV2(
+  tweet: TweetPerformance,
+  voiceProfile: VoiceProfile,
+): boolean {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return true;
+  if (
+    tweet.authorshipProvenance === 'known_clawfable_generated'
+    || tweet.authorshipProvenance === 'unknown'
+    || tweet.voiceCorpusDispositions?.includes('mechanics_only')
+    || tweet.voiceCorpusDispositions?.includes('negative')
+  ) return false;
+
+  const operatorComposed = tweet.source === 'manual'
+    || tweet.authorshipProvenance === 'operator_composed';
+  const dispositions = tweet.voiceCorpusDispositions || [];
+  const highConfidence = operatorComposed
+    || dispositions.includes('diction_anchor')
+    || (tweet.authorshipConfidence || 0) >= 0.8;
+  const topicSignal = operatorComposed || dispositions.includes('topic_signal');
+  if (!highConfidence || !topicSignal) return false;
+  if (!dispositions.includes('excluded')) return true;
+
+  // Excluded prose can never teach diction. An explicit handle is still a
+  // high-confidence subject identity, so retain only that structured cue and
+  // keep the source post itself as a negative premise-reskin boundary.
+  return /@[a-z0-9_]{2,15}\b/i.test(tweet.content);
 }
 
 function rankOperatorTopicCandidates(
@@ -1391,17 +1416,23 @@ export function buildGenerationBriefsV2({
   const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 8));
   const maxTopicDomainBriefs = Math.max(2, Math.ceil(briefCount / 4));
   const briefTopicContext = (brief: GenerationBriefV2) => `${brief.topic} ${brief.title}`;
-  const portfolioAllowsTopic = (value: string): boolean => {
+  const briefTechnicalContext = (brief: GenerationBriefV2) => [
+    brief.topic,
+    brief.title,
+    brief.creativeSeed?.object,
+    brief.creativeSeed?.hiddenConstraint,
+  ].filter(Boolean).join(' ');
+  const portfolioAllowsTopic = (value: string, domainValue = value): boolean => {
     if (!geoffreyPortfolio) return true;
     if (
       isGeoffreyDeepTechnicalTopic(value)
-      && briefs.filter((brief) => isGeoffreyDeepTechnicalTopic(briefTopicContext(brief))).length >= maxDeepTechnicalBriefs
+      && briefs.filter((brief) => isGeoffreyDeepTechnicalTopic(briefTechnicalContext(brief))).length >= maxDeepTechnicalBriefs
     ) return false;
     if (
       isGeoffreyManufacturingMaterialsTopic(value)
-      && briefs.filter((brief) => isGeoffreyManufacturingMaterialsTopic(briefTopicContext(brief))).length >= maxManufacturingMaterialsBriefs
+      && briefs.filter((brief) => isGeoffreyManufacturingMaterialsTopic(briefTechnicalContext(brief))).length >= maxManufacturingMaterialsBriefs
     ) return false;
-    const domain = classifyGeoffreyTopicDomain(value);
+    const domain = classifyGeoffreyTopicDomain(domainValue);
     return briefs.filter((brief) => classifyGeoffreyTopicDomain(briefTopicContext(brief)) === domain).length < maxTopicDomainBriefs;
   };
   const usedIdeaSeedIds = new Set(recentIdeas
@@ -1587,6 +1618,17 @@ export function buildGenerationBriefsV2({
       slot: index + seedRotation,
       usedSeedIds: usedIdeaSeedIds,
     });
+    const seededTopicContext = [
+      candidate.topic,
+      candidate.historicalAngle,
+      seed?.topic,
+      seed?.technicalObject,
+      seed?.hiddenConstraint,
+    ].filter(Boolean).join(' ');
+    if (!portfolioAllowsTopic(
+      seededTopicContext,
+      `${candidate.topic} ${candidate.historicalAngle || ''}`,
+    )) return false;
     const brief = operatorTopicBrief(
       candidate.topic,
       index,
