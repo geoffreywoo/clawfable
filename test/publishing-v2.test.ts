@@ -325,7 +325,7 @@ describe('V2 publishing surfaces', () => {
     mocks.getGenerationRuns.mockResolvedValue([{
       idempotencyKey,
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-54',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-55',
       voiceCorpusVersion: 'voice-current',
       surface: 'original',
       selectedDraftIds: ['draft-already-generated'],

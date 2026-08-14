@@ -21,6 +21,7 @@ import {
   normalizeIdeaCandidatesV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
+  selectAlternateIdeasV2,
   selectRankedIdeaPortfolioV2,
   selectNativeReactionAnchors,
   selectSubjectNativeReactionPatternV2,
@@ -140,6 +141,41 @@ describe('Tweet Generation V2', () => {
       'operator-one',
       'operator-two',
     ]);
+  });
+
+  it('rotates to the strongest judged alternate without repeating a brief', () => {
+    const idea = (
+      id: string,
+      briefId: string,
+      judgeScore: number,
+      rejectionCodes = ['idea_not_selected'],
+    ) => ({
+      id,
+      briefId,
+      status: 'rejected',
+      rejectionCodes,
+      judgeScore,
+      judgeBreakdown: {
+        publicMoveStrength: judgeScore,
+        nativeReactionPotential: judgeScore,
+        sharePotential: judgeScore,
+      },
+    }) as IdeaCandidate;
+    const selected = selectAlternateIdeasV2({
+      ideas: [
+        idea('already-tried', 'brief-a', 0.94),
+        idea('best-a', 'brief-a', 0.88),
+        idea('second-a', 'brief-a', 0.84),
+        idea('selected-brief', 'brief-b', 0.92),
+        idea('best-c', 'brief-c', 0.82),
+        idea('failed-judge', 'brief-d', 0.99, ['idea_judge_weak_public_move']),
+      ],
+      evaluatedIdeaIds: new Set(['already-tried']),
+      selectedBriefIds: new Set(['brief-b']),
+      desired: 2,
+    });
+
+    expect(selected.map((entry) => entry.id)).toEqual(['best-a', 'best-c']);
   });
 
   it('uses same-subject native posts as structured reaction evidence without exposing prose', () => {
