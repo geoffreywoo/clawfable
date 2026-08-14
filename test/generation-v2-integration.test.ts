@@ -336,6 +336,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerCall.jsonSchema.properties.drafts.items.required).toEqual(['content', 'format', 'posture']);
     expect(writerCall.jsonSchema.properties.drafts).not.toHaveProperty('maxItems');
     expect(copyJudgeCall.jsonSchema.properties.scores.items.required).toContain('diagnosis');
+    expect(String(copyJudgeCall.system)).toContain('must never recommend only capitalization');
+    expect(String(copyJudgeCall.system)).toContain('lowest substantive dimension');
     expect(String(writerCall.system)).toContain('Never turn attributed evidence into an unqualified fact');
     const writerPrompt = JSON.parse(writerCall.prompt);
     expect(writerPrompt.idea.publicMove).toEqual(expect.any(String));
@@ -359,7 +361,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       status: 'completed',
-      qualityPolicyVersion: 'publishing-v2-hard-gates-53',
+      qualityPolicyVersion: 'publishing-v2-hard-gates-54',
       stageCounts: expect.objectContaining({
         briefs: 4,
         ideaGenerationCalls: 2,
@@ -560,6 +562,10 @@ describe('generateTweetBatchV2 integration', () => {
             content: `i'd take a first-time founder in ${parsed.idea.topic} over another consensus team.`,
             format: 'observation',
             posture: 'plain funding preference',
+          }, {
+            content: `${parsed.idea.topic}: first-time founder over the consensus team for me.`,
+            format: 'short_punch',
+            posture: 'subject-first funding preference',
           }] }), 'anthropic');
         }
         return result(JSON.stringify({ drafts: [{
@@ -606,14 +612,19 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(2);
     expect(rescueWriterCalls).toHaveLength(1);
     expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_quality');
-    expect(String(rescueWriterCalls[0].system)).toContain('surgical critic pass');
+    expect(String(rescueWriterCalls[0].system)).toContain('two-path critic pass');
+    expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.draftCount).toBe(2);
+    expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.variantMoves.map((move: any) => move.move)).toEqual([
+      'critic_repair',
+      'subject_rewrite',
+    ]);
     expect(JSON.parse(rescueWriterCalls[0].prompt).failedAttempts).toHaveLength(1);
     expect(drafts).toHaveLength(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
         retryUsed: 1,
         rescueTargets: 1,
-        rescueDraftsGenerated: 1,
+        rescueDraftsGenerated: 2,
         draftsSelected: 2,
       }),
     });
@@ -1435,6 +1446,10 @@ describe('generateTweetBatchV2 integration', () => {
           content: `i want one paying ${parsed.idea.topic} customer before the next pitch deck gets touched.`,
           format: 'observation',
           posture: 'critic-informed rescue',
+        }, {
+          content: `one paying ${parsed.idea.topic} customer before another pitch deck.`,
+          format: 'short_punch',
+          posture: 'subject-first rescue',
         }] }), 'anthropic');
       }
       if (options.task === 'copy_judgment') {
@@ -1474,7 +1489,9 @@ describe('generateTweetBatchV2 integration', () => {
     expect(criticCalls).toBe(2);
     expect(criticRescueWriterCalls).toHaveLength(2);
     expect(criticRescueWriterCalls.every((call) => call.modelStack === 'publishing_v2_fable_control')).toBe(true);
-    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('Treat failed attempts as negative examples'))).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => String(call.system).includes('Return exactly two newly conceived X posts'))).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 2)).toBe(true);
+    expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).responseContract.variantMoves.map((move: any) => move.move).join(',') === 'critic_repair,subject_rewrite')).toBe(true);
     expect(criticRescueWriterCalls.every((call) => JSON.parse(call.prompt).failedAttempts.every((attempt: any) => (
       attempt.instruction.includes('Negative example only')
     )))).toBe(true);
@@ -1494,7 +1511,7 @@ describe('generateTweetBatchV2 integration', () => {
         postcriticSurgicalTargets: 0,
         postcriticReconceiveTargets: 2,
         rescueTargets: 4,
-        rescueDraftsGenerated: 4,
+        rescueDraftsGenerated: 6,
         draftsSelected: 2,
       }),
     });
