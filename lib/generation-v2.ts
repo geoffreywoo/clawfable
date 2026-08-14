@@ -1093,7 +1093,7 @@ function seedRotationOffset(value: string): number {
 const COMMITTED_TWEET_STATUSES = new Set<Tweet['status']>(['queued', 'posted', 'deleted_from_x']);
 
 function isCommittedTweet(tweet: Tweet): boolean {
-  return COMMITTED_TWEET_STATUSES.has(tweet.status);
+  return !tweet.quarantinedAt && COMMITTED_TWEET_STATUSES.has(tweet.status);
 }
 
 export function getCommittedTweetCopyMemoryV2(

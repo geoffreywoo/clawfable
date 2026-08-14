@@ -1953,6 +1953,7 @@ describe('Tweet Generation V2', () => {
       { id: 'quarantined', status: 'quarantined', content: 'Rejected copy.' },
       { id: 'draft', status: 'draft', content: 'Unreviewed copy.' },
       { id: 'preview', status: 'preview', content: 'Preview copy.' },
+      { id: 'legacy-quarantined', status: 'queued', quarantinedAt: '2026-08-01T13:00:00.000Z', content: 'Legacy quarantined copy.' },
       { id: 'queued', status: 'queued', content: 'Queued copy.' },
       { id: 'posted', status: 'posted', content: 'Posted copy.' },
       { id: 'deleted', status: 'deleted_from_x', content: 'Deleted live copy.' },
