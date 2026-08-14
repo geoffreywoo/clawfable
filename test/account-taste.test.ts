@@ -80,13 +80,44 @@ describe('account taste scoring', () => {
       'modal goes public before databricks.',
       { voiceProfile: geoffreyVoiceProfile, learnings },
     );
+    const equivalentNamed = assessAccountTaste(
+      'Databricks goes public earlier than Modal.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
     const generic = assessAccountTaste(
       'a company goes public before another company.',
       { voiceProfile: geoffreyVoiceProfile, learnings },
     );
 
     expect(named.casualStartupScore).toBeGreaterThanOrEqual(0.58);
+    expect(equivalentNamed.casualStartupScore).toBeGreaterThanOrEqual(0.58);
     expect(named.casualStartupScore).toBeGreaterThan(generic.casualStartupScore);
+    expect(generic.casualStartupScore).toBeLessThan(0.58);
+  });
+
+  it('lets concise named assertions reach the critic without treating capitalization as stiffness', () => {
+    const anchors = [
+      { content: 'google should buy @cognition for $200b and make @ScottWu46 ceo', topic: 'AI', source: 'timeline' },
+      { content: 'yes, threshold to beat is QQQ. mid market pe funds all seem like zombies.', topic: 'finance', source: 'timeline' },
+    ];
+    const learnings = {
+      operatorVoiceReference: {
+        bestPerformers: anchors,
+        startupRegisterExamples: anchors,
+        pinnedExamples: [],
+      },
+    } as any;
+
+    const named = assessAccountTaste(
+      'Rico makes this hard, but Usyk still gets the late TKO.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+    const generic = assessAccountTaste(
+      'The product will win.',
+      { voiceProfile: geoffreyVoiceProfile, learnings },
+    );
+
+    expect(named.casualStartupScore).toBeGreaterThanOrEqual(0.58);
     expect(generic.casualStartupScore).toBeLessThan(0.58);
   });
 
