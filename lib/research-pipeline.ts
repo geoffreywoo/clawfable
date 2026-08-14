@@ -141,8 +141,13 @@ function operatorTopicSubject(value: string): string {
 }
 
 function mergeOperatorTopics(fresh: string[], prior: string[], limit: number): string[] {
+  // Operator-topic searches are a live discovery lane. Carrying old subjects
+  // behind a fresh batch consumes the bounded news-search budget before broad
+  // startup and technology discovery can run. Keep prior subjects only as an
+  // outage fallback when the current network refresh found nothing usable.
+  const candidates = fresh.length > 0 ? fresh : prior;
   const merged: string[] = [];
-  for (const candidate of uniqueStrings([...fresh, ...prior], fresh.length + prior.length)) {
+  for (const candidate of uniqueStrings(candidates, candidates.length)) {
     const subject = operatorTopicSubject(candidate);
     if (merged.some((entry) => (
       researchTokenSimilarity(operatorTopicSubject(entry), subject) >= 0.82
