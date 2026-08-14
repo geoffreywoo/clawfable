@@ -422,19 +422,23 @@ function fillTemplate(template: string, seed: FrontierIdeaSeed): string {
 
 function seedScore(seed: FrontierIdeaSeed, targetTopic: string): number {
   const target = normalize(targetTopic);
-  const haystack = normalize([
+  const primary = normalize([
     seed.topic,
     seed.technicalObject,
+  ].join(' '));
+  const haystack = normalize([
+    primary,
     seed.hiddenConstraint,
     seed.nonConsensusImplication,
     seed.domains.join(' '),
   ].join(' '));
 
   if (!target) return 0;
-  if (haystack.includes(target) || target.includes(normalize(seed.topic))) return 4;
-
-  const terms = target.split(' ').filter((term) => term.length >= 4);
-  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+  const terms = target.split(' ').filter((term) => term.length >= 4 || ['ai', 'ar', 'vr'].includes(term));
+  const contains = (value: string, term: string) => (` ${value} `).includes(` ${term} `);
+  const primaryHits = terms.filter((term) => contains(primary, term)).length;
+  const supportingHits = terms.filter((term) => contains(haystack, term)).length;
+  return primaryHits * 2 + supportingHits;
 }
 
 export function getFrontierIdeaSeeds(voiceProfile?: VoiceProfile | null): FrontierIdeaSeed[] {
@@ -528,20 +532,22 @@ export function pickGeoffreyIdeaSeed({
   const frontier = FRONTIER_CHOKEPOINT_SEEDS.map((seed) => ({ ...seed, kind: 'frontier' as const }));
   const allSeeds = [...GEOFFREY_BROAD_SEEDS, ...frontier];
   const preferred = allSeeds.filter((seed) => preferredKinds.includes(seed.kind || 'frontier'));
-  const unusedPreferred = preferred.filter((seed) => !usedSeedIds.has(seed.id));
-  const unusedAll = allSeeds.filter((seed) => !usedSeedIds.has(seed.id));
-  const pool = unusedPreferred.length > 0
-    ? unusedPreferred
-    : preferred.length > 0
-      ? preferred
-      : unusedAll.length > 0 ? unusedAll : allSeeds;
-  const ranked = pool
+  const kindPool = preferred.length > 0 ? preferred : allSeeds;
+  const scored = kindPool
     .map((seed, index) => ({
       seed,
-      score: seedScore(seed, targetTopic) + ((slot + index) % pool.length) / 100,
+      relevance: seedScore(seed, targetTopic),
+      rotation: ((slot + index) % kindPool.length) / 100,
       used: usedSeedIds.has(seed.id),
       index,
-    }))
-    .sort((a, b) => Number(a.used) - Number(b.used) || b.score - a.score || a.index - b.index);
+    }));
+  const relevant = scored.filter((entry) => entry.relevance >= 1);
+  const ranked = (relevant.length > 0 ? relevant : scored)
+    .sort((a, b) => (
+      b.relevance - a.relevance
+      || Number(a.used) - Number(b.used)
+      || b.rotation - a.rotation
+      || a.index - b.index
+    ));
   return ranked[0]?.seed || null;
 }

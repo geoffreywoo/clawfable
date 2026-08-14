@@ -1107,6 +1107,7 @@ export function buildGeoffreyNativeV2WriterContract(): string {
 - Voice anchors are cadence evidence only. Match capitalization, compression, paragraph rhythm, and amount of explanation without borrowing a premise, joke, scene, metaphor, opening, or distinctive phrase.
 - The primary register anchor is the positive style target for this subject. Match how casual, blunt, or unfinished it feels. Do not average the anchors into cleaner English and never manufacture its slang or typos.
 - Conceive each variant separately. A fragment or an implicit reason is valid. Three polished paraphrases are not.
+- Do not announce a generic investment persona with "the [category] startup/company/agent I would back, buy, or bet on." Name the actual entity when one exists; otherwise state the observable decision criterion directly.
 - Begin with the content of the thought. Do not announce a "take," "rule," "philosophy," "dream acquisition," "litmus test," or thing you keep coming back to; those become synthetic scaffolds when generated.
 - Stop before advice, a balanced contrast, a lesson, a slogan, or a synthetic mic drop. Deterministic gates will handle the blocklist; concentrate on making the thought worth posting.`;
 }

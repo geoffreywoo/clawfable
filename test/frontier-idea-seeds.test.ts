@@ -90,4 +90,16 @@ describe('frontier idea seeds', () => {
 
     expect(seed?.kind).toBe('culture');
   });
+
+  it('keeps exact frontier relevance ahead of novelty after the matching seed was used', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'robotics',
+      slot: 9,
+      usedSeedIds: new Set(['robotics-field-uptime']),
+    });
+
+    expect(seed?.id).toBe('robotics-field-uptime');
+    expect(seed?.technicalObject).toContain('actuators');
+  });
 });
