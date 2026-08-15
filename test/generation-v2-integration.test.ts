@@ -485,7 +485,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('spends all three Geoffrey initial variants on GPT after the matched Fable audit', async () => {
+  it('spends Geoffrey initial variants on independent GPT calls with separate register anchors', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
       if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
@@ -523,12 +523,16 @@ describe('generateTweetBatchV2 integration', () => {
     const gptCalls = writerCalls.filter((call) => call.modelStack === 'publishing_v2_gpt_control');
     const fableCalls = writerCalls.filter((call) => call.modelStack === 'publishing_v2_fable_control');
 
-    expect(gptCalls).toHaveLength(4);
+    expect(gptCalls).toHaveLength(12);
     expect(fableCalls).toHaveLength(0);
-    expect(gptCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 3)).toBe(true);
-    expect(gptCalls.every((call) => String(call.system).includes('three separately conceived X posts'))).toBe(true);
-    expect(gptCalls.every((call) => JSON.parse(call.prompt).responseContract.variantMoves.length === 3)).toBe(true);
-    expect(gptCalls.every((call) => JSON.parse(call.prompt).voiceTransferContract.slotRegisterAnchors.length === 3)).toBe(true);
+    expect(gptCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(gptCalls.every((call) => String(call.system).includes('Write exactly one'))).toBe(true);
+    expect(new Set(gptCalls.slice(0, 3).map((call) => (
+      JSON.parse(call.prompt).voiceTransferContract.primaryRegisterAnchorId
+    ))).size).toBe(3);
+    expect(new Set(gptCalls.slice(0, 3).map((call) => (
+      JSON.parse(call.prompt).responseContract.variantMoves[0].move
+    ))).size).toBeGreaterThanOrEqual(2);
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
       stageCounts: expect.objectContaining({
         initialPrimaryWriterDrafts: 12,

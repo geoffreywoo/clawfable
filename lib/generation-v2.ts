@@ -4043,11 +4043,14 @@ async function generateDraftEvaluations({
       anchorOffset: number;
       initialSingleMoveFromAnchor: boolean;
     }> = isGeoffreyVoiceProfile(input.voiceProfile)
-      && input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+      && (
+        input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
+        || input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+      )
       ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => ({
           modelStack: input.modelStack,
           initialDraftCount: 1 as const,
-          candidateIdSalt: `fable-single-${index + 1}`,
+          candidateIdSalt: `${input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK ? 'fable' : 'gpt'}-single-${index + 1}`,
           anchorOffset: index,
           initialSingleMoveFromAnchor: index > 0,
         }))
