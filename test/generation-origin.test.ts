@@ -158,6 +158,12 @@ describe('generated publishing origin gate', () => {
       ...complete,
       finalCriticScores: { qualityMargin: 0.86 } as any,
     })).toBeNull();
+    expect(getGeneratedPublishIssue(complete, {
+      currentVoiceCorpusVersion: 'voice-corpus-v1-next',
+    })).toContain('current voice corpus voice-corpus-v1-next');
+    expect(getGeneratedPublishIssue(complete, {
+      currentVoiceCorpusVersion: 'voice-corpus-v1-current',
+    })).toBeNull();
   });
 
   it('applies to every account and reply surface', () => {

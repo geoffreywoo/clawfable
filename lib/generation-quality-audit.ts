@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 32;
+export const GENERATION_QUALITY_AUDIT_VERSION = 33;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1118,7 +1118,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const queueItems = queue.map((tweet) => {
-    const originIssue = getGeneratedPublishIssue(tweet);
+    const originIssue = getGeneratedPublishIssue(tweet, {
+      currentVoiceCorpusVersion: corpus?.snapshotId || null,
+    });
     const qualityIssues = [originIssue, tweet.quarantineReason].filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
