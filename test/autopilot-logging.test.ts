@@ -933,7 +933,7 @@ describe('autopilot remote debug logging', () => {
     }));
   });
 
-  it('does not invalidate immutable V2 lineage when the voice corpus later changes', async () => {
+  it('quarantines V2 drafts when the active voice corpus changes', async () => {
     const staleV2Draft = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -961,9 +961,13 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
     expect(mocks.generateText).not.toHaveBeenCalled();
-    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-certification', expect.objectContaining({
+      status: 'quarantined',
+      preQuarantineStatus: 'queued',
+      quarantineReason: expect.stringContaining('current voice corpus'),
+    }));
   });
 
   it('blocks a Geoffrey thesis reskin using stored posts when the post log is empty', async () => {

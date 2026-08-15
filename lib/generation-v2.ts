@@ -5090,6 +5090,26 @@ export function shouldRunPostcriticRescueV2(
   return !isGeoffreyVoiceProfile(voiceProfile);
 }
 
+export function shouldSpendOnGeoffreySubtractiveRepairV2(
+  voiceProfile: VoiceProfile,
+  recentRuns: GenerationRunTrace[],
+): boolean {
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return true;
+  const terminal = [...recentRuns]
+    .filter((run) => run.mode !== 'preview' && run.status !== 'running')
+    .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    .slice(0, 8);
+  const generated = terminal.reduce(
+    (sum, run) => sum + Number(run.stageCounts.postcriticTrimDraftsGenerated || 0),
+    0,
+  );
+  const selected = terminal.reduce(
+    (sum, run) => sum + Number(run.stageCounts.postcriticTrimDraftsSelected || 0),
+    0,
+  );
+  return generated < 4 || selected / generated >= 0.15;
+}
+
 function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
   if (modelStack === PUBLISHING_V2_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
   if (modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK) return PUBLISHING_V2_GPT_CONTROL_MODEL_STACK;
@@ -5576,7 +5596,15 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     let selected = await selectFinalTweets({ evaluations, input, calls: trace.modelCalls, blocks });
-    if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
+    const geoffreySubtractiveRepairEnabled = shouldSpendOnGeoffreySubtractiveRepairV2(
+      input.voiceProfile,
+      recentRuns,
+    );
+    if (
+      selected.length < input.count
+      && isGeoffreyVoiceProfile(input.voiceProfile)
+      && geoffreySubtractiveRepairEnabled
+    ) {
       const trimPass = await runSubtractiveTailRepairPassV2({
         sourceEvaluations: evaluations,
         selected,
@@ -5600,6 +5628,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         trace.stageCounts.postcriticTrimDraftsEligible = 0;
         trace.stageCounts.postcriticTrimDraftsSelected = 0;
       }
+    } else if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
+      trace.stageCounts.postcriticTrimSuppressedNegativeValue = 1;
     }
     const initialCopyJudgeFailure = evaluations.some((entry) => (
       entry.draft.rejectionCodes.includes('copy_judge_unavailable')
@@ -5765,7 +5795,11 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         } else {
           trace.stageCounts.alternateDraftsSelected = 0;
         }
-        if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
+        if (
+          selected.length < input.count
+          && isGeoffreyVoiceProfile(input.voiceProfile)
+          && geoffreySubtractiveRepairEnabled
+        ) {
           const alternateTrimPass = await runSubtractiveTailRepairPassV2({
             sourceEvaluations: alternateEvaluations,
             selected,
@@ -5802,6 +5836,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
             trace.stageCounts.alternatePostcriticTrimDraftsEligible = 0;
             trace.stageCounts.alternatePostcriticTrimDraftsSelected = 0;
           }
+        } else if (selected.length < input.count && isGeoffreyVoiceProfile(input.voiceProfile)) {
+          trace.stageCounts.alternatePostcriticTrimSuppressedNegativeValue = 1;
         }
       }
     }

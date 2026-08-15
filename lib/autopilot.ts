@@ -413,13 +413,14 @@ function getSemanticHistoryIssue(
 async function rescoreQueuedTweetsForCurrentPolicy(
   agent: Agent,
   queuedTweets: Tweet[],
-  _context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
+  context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
 ): Promise<Tweet[]> {
   const valid: Tweet[] = [];
   const invalid: Array<{ tweet: Tweet; issue: string }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
+  const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
   for (const tweet of queuedTweets) {
-    const originIssue = getGeneratedPublishIssue(tweet);
+    const originIssue = getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion });
     const accountMarginIssue = (
       !originIssue
       && tweet.pipelineVersion === 'v2'
@@ -481,7 +482,8 @@ export async function refreshQueuedTweetsForCurrentQualityPolicy(
   agent: Agent,
 ): Promise<QueuePolicyRefreshResult> {
   const before = await getQueuedTweets(agent.id);
-  const valid = await rescoreQueuedTweetsForCurrentPolicy(agent, before, null);
+  const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
+  const valid = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
   return {
     before: before.length,
     after: valid.length,

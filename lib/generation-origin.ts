@@ -39,7 +39,10 @@ function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
   );
 }
 
-export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string | null {
+export function getGeneratedPublishIssue(
+  tweet: GenerationOriginTweet,
+  options: { currentVoiceCorpusVersion?: string | null } = {},
+): string | null {
   if (tweet.pipelineVersion === 'v2') {
     const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(tweet.generationSurface);
     const finalCriticVersion = getPublishingV2FinalCriticVersion(tweet.generationSurface);
@@ -63,6 +66,12 @@ export function getGeneratedPublishIssue(tweet: GenerationOriginTweet): string |
     }
     if (!tweet.voiceCorpusVersion) {
       return 'V2-generated posts require voice-corpus provenance.';
+    }
+    if (
+      options.currentVoiceCorpusVersion
+      && tweet.voiceCorpusVersion !== options.currentVoiceCorpusVersion
+    ) {
+      return `V2-generated posts require current voice corpus ${options.currentVoiceCorpusVersion}.`;
     }
     if (tweet.finalCriticVersion !== finalCriticVersion) {
       return `V2-generated posts require current final critic ${finalCriticVersion}.`;

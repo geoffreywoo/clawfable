@@ -48,6 +48,7 @@ import {
   selectNativeReactionAnchors,
   selectSubjectNativeReactionPatternV2,
   shouldRunPostcriticRescueV2,
+  shouldSpendOnGeoffreySubtractiveRepairV2,
   shouldTryV2SubtractiveTailRepair,
   type GenerationBriefV2,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
@@ -136,6 +137,16 @@ function run(status: GenerationRunTrace['status'], startedAt: string, error = st
     durationMs: 1,
     status,
     error,
+  };
+}
+
+function repairRun(generated: number, selected: number, startedAt: string): GenerationRunTrace {
+  return {
+    ...run('empty', startedAt, null),
+    stageCounts: {
+      postcriticTrimDraftsGenerated: generated,
+      postcriticTrimDraftsSelected: selected,
+    },
   };
 }
 
@@ -623,6 +634,25 @@ describe('Tweet Generation V2', () => {
       0.859,
     )).toBe(false);
     expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
+  });
+
+  it('stops spending on Geoffrey tail trims after a zero-yield live window', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    expect(shouldSpendOnGeoffreySubtractiveRepairV2(geoffreyVoice, [
+      repairRun(1, 0, '2026-08-15T04:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T03:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T02:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T01:00:00.000Z'),
+    ])).toBe(false);
+    expect(shouldSpendOnGeoffreySubtractiveRepairV2(geoffreyVoice, [
+      repairRun(4, 1, '2026-08-15T04:00:00.000Z'),
+    ])).toBe(true);
+    expect(shouldSpendOnGeoffreySubtractiveRepairV2(voiceProfile, [
+      repairRun(8, 0, '2026-08-15T04:00:00.000Z'),
+    ])).toBe(true);
   });
 
   it('tries deletion-only repair for a near-autopost margin miss without requiring magic critic wording', () => {
