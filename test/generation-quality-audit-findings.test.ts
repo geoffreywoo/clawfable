@@ -49,6 +49,7 @@ function healthyInput() {
       persistedSelectedDraftCount: 5,
       unpersistedSelectedDraftCount: 0,
       queueHandoffRate: 1,
+      queueRejectionReasonCounts: {} as Record<string, number>,
       unpersistedDrafts: [] as Array<{
         generationRunId: string;
         draftCandidateId: string;
@@ -335,7 +336,7 @@ describe('generation quality audit findings', () => {
       expect.objectContaining({
         code: 'historical_fable_shadow_yield_zero',
         scope: 'historical_window',
-        action: expect.stringContaining('one matched Fable control'),
+        action: expect.stringContaining('Fable writer lane disabled'),
       }),
     ]));
   });
@@ -663,6 +664,32 @@ describe('generation quality audit findings', () => {
         evidence: expect.objectContaining({ unpersistedSelectedDraftCount: 1, queueHandoffRate: 0.5 }),
       }),
     ]));
+  });
+
+  it('reports an intentional duplicate gate separately from a queue handoff loss', () => {
+    const input = healthyInput();
+    input.currentPolicyWindow = {
+      ...input.currentPolicyWindow,
+      selectedDraftCount: 2,
+      persistedSelectedDraftCount: 1,
+      unpersistedSelectedDraftCount: 1,
+      queueHandoffRate: 0.5,
+      queueRejectionReasonCounts: { queue_recent_semantic_duplicate: 1 },
+      unpersistedDrafts: [{
+        generationRunId: 'run-duplicate',
+        draftCandidateId: 'draft-duplicate',
+        content: 'a duplicate final selection',
+      }],
+    };
+
+    const findings = buildGenerationAuditFindings(input as any);
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'current_policy_queue_safety_rejection',
+        severity: 'medium',
+      }),
+    ]));
+    expect(findings.some((finding) => finding.code === 'current_policy_queue_handoff_loss')).toBe(false);
   });
 
   it('raises factual incidents only when they belong to the active policy', () => {

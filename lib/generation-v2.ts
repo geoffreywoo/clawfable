@@ -1875,7 +1875,7 @@ export function buildIdeaGenerationPromptV2(
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       geoffreyNativeMoveContract: isGeoffreyVoiceProfile(voiceProfile)
-        ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, or disagreement; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Do not manufacture a status object, status asset, status signal, new status game, or flex to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, or benchmark comparisons. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
+        ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, capital, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, disagreement, or self-implicating decision; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Geoffrey often makes the interesting part socially risky, funny, numerically ambitious, or personally costly; preserve that energy when the packet supports it instead of retreating to a safe product wish or evaluation framework. Do not manufacture holdings, status objects, status assets, status signals, new status games, or flexes to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, benchmark comparisons, or generic demands for what a company should ship. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
         : null,
       operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       operatorTopicRoleContract: 'When an operatorTopicContext is present, preserve every entity role literally. Roles identify the entities but do not prove a relationship. Never treat an investor, person, institution, or location as a product, model, repository, host, or technology. Never restore a stripped event term as a premise.',
@@ -4051,21 +4051,6 @@ async function generateDraftEvaluations({
           anchorOffset: index,
           initialSingleMoveFromAnchor: index > 0,
         }))
-      : isGeoffreyVoiceProfile(input.voiceProfile)
-        && input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-        ? [{
-            modelStack: input.modelStack,
-            initialDraftCount: 2 as const,
-            candidateIdSalt: 'gpt-pair',
-            anchorOffset: 0,
-            initialSingleMoveFromAnchor: false,
-          }, {
-            modelStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
-            initialDraftCount: 1 as const,
-            candidateIdSalt: 'fable-matched',
-            anchorOffset: 2,
-            initialSingleMoveFromAnchor: true,
-          }]
       : [{
           modelStack: input.modelStack,
           initialDraftCount: MAX_DRAFTS_PER_IDEA,

@@ -609,6 +609,23 @@ describe('Tweet Generation V2', () => {
       expect.objectContaining({ move: 'blunt_reaction' }),
     ]);
     expect(singleWriterPrompt.factualWritingContract).toContain('millions or billions');
+
+    const pairedInitialPrompt = JSON.parse(buildTweetWritingPromptV2(
+      rawIdea('operator', 'ChatGPT is the OpenAI asset I would bet on.') as IdeaCandidate,
+      brief('operator', 'OpenAI'),
+      [],
+      [{ id: 'anchor-1', content: 'openai should name gpt-6 god?', topic: 'AI' }, {
+        id: 'anchor-2', content: 'google should buy cognition for $200b', topic: 'AI',
+      }],
+      undefined,
+      undefined,
+      undefined,
+      'reconceive',
+      2,
+    ));
+    expect(pairedInitialPrompt.responseContract.variantMoves).toHaveLength(2);
+    expect(pairedInitialPrompt.responseContract.variantMoves[0]).not.toMatchObject({ move: 'critic_repair' });
+    expect(pairedInitialPrompt.voiceTransferContract.slotRegisterAnchors).toHaveLength(2);
   });
 
   it('repairs a clean margin-only miss but reconceives structural or multi-gate failures', () => {

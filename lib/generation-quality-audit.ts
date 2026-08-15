@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 34;
+export const GENERATION_QUALITY_AUDIT_VERSION = 35;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -749,27 +749,45 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       code: 'historical_fable_shadow_yield_zero',
       severity: 'medium',
       scope: 'historical_window',
-      title: 'Fable shadow writing has not earned its prior sampling rate',
+      title: 'Fable matched writing did not earn continued live sampling',
       evidence: fableShadow,
-      action: 'Keep one matched Fable control beside the two GPT variants for each selected idea during the current policy window; disable the lane if the next 20 matched controls still produce no eligible selection.',
+      action: 'Keep the Fable writer lane disabled until its model or prompt materially changes; spend all three initial variants on the active GPT writer while retaining the historical comparison.',
     });
   }
 
   if ((input.currentPolicyWindow.unpersistedSelectedDraftCount || 0) > 0) {
+    const rejectionReasonCounts = input.currentPolicyWindow.queueRejectionReasonCounts || {};
+    const rejectionCodes = Object.keys(rejectionReasonCounts);
+    const intentionalSafetyCodes = new Set([
+      'queue_recent_copy_duplicate',
+      'queue_recent_semantic_duplicate',
+      'queue_autopost_policy',
+      'queue_claim_evidence',
+      'queue_unearned_authority',
+      'queue_incomplete_copy',
+    ]);
+    const safetyRejection = rejectionCodes.length > 0
+      && rejectionCodes.every((code) => intentionalSafetyCodes.has(code));
     add({
-      code: 'current_policy_queue_handoff_loss',
-      severity: input.currentPolicyWindow.persistedSelectedDraftCount === 0 ? 'critical' : 'high',
+      code: safetyRejection ? 'current_policy_queue_safety_rejection' : 'current_policy_queue_handoff_loss',
+      severity: safetyRejection
+        ? 'medium'
+        : input.currentPolicyWindow.persistedSelectedDraftCount === 0 ? 'critical' : 'high',
       scope: 'current_policy',
-      title: 'Final-critic selections were lost before queue persistence',
+      title: safetyRejection
+        ? 'Queue safety rejected a final-critic selection'
+        : 'Final-critic selections were lost before queue persistence',
       evidence: {
         selectedDraftCount: input.currentPolicyWindow.selectedDraftCount,
         persistedSelectedDraftCount: input.currentPolicyWindow.persistedSelectedDraftCount || 0,
         unpersistedSelectedDraftCount: input.currentPolicyWindow.unpersistedSelectedDraftCount,
         queueHandoffRate: input.currentPolicyWindow.queueHandoffRate ?? null,
-        rejectionReasonCounts: input.currentPolicyWindow.queueRejectionReasonCounts || {},
+        rejectionReasonCounts,
         drafts: input.currentPolicyWindow.unpersistedDrafts || [],
       },
-      action: 'Inspect queue rejection receipts in the generation trace and repair the post-critic enqueue gate; do not spend more model calls until approved drafts can persist.',
+      action: safetyRejection
+        ? 'Move the recorded duplicate or policy boundary earlier in idea and draft eligibility so model judgment is not spent on copy the queue must reject.'
+        : 'Inspect queue rejection receipts in the generation trace and repair the post-critic enqueue gate; do not spend more model calls until approved drafts can persist.',
     });
   }
 
@@ -1256,6 +1274,20 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       excludedFromExactSubjectReuseCount: topTweets.length - cleanSubjectCueSources.length,
     };
   });
+  const auditNowMs = Date.now();
+  const postedOriginals = postLog.filter((entry) => (
+    (entry.action === 'posted' || (!entry.action && Boolean(entry.tweetId)))
+    && Boolean(entry.xTweetId)
+    && Number.isFinite(Date.parse(entry.postedAt))
+  ));
+  const postedOriginalsLast24Hours = postedOriginals.filter((entry) => (
+    auditNowMs - Date.parse(entry.postedAt) <= 24 * 60 * 60 * 1000
+  ));
+  const postedOriginalsLast7Days = postedOriginals.filter((entry) => (
+    auditNowMs - Date.parse(entry.postedAt) <= 7 * 24 * 60 * 60 * 1000
+  ));
+  const lastOriginal = [...postedOriginals]
+    .sort((left, right) => Date.parse(right.postedAt) - Date.parse(left.postedAt))[0] || null;
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -1264,6 +1296,22 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     minQueueSize: context.settings.minQueueSize,
     refillBatchLimit: 2,
     refillCanIterateUntilMinimum: true,
+    postedOriginalsLast24Hours: postedOriginalsLast24Hours.length,
+    postsRemainingInRolling24Hours: Math.max(0, 5 - postedOriginalsLast24Hours.length),
+    postedOriginalsLast7Days: postedOriginalsLast7Days.length,
+    averageOriginalsPerDayLast7Days: Number((postedOriginalsLast7Days.length / 7).toFixed(3)),
+    currentPolicyOriginalsLast7Days: postedOriginalsLast7Days.filter((entry) => (
+      entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    )).length,
+    lastOriginal: lastOriginal ? {
+      tweetId: lastOriginal.tweetId,
+      xTweetId: lastOriginal.xTweetId,
+      postedAt: lastOriginal.postedAt,
+      source: lastOriginal.source,
+      model: lastOriginal.model || null,
+      qualityPolicyVersion: lastOriginal.qualityPolicyVersion || null,
+      content: lastOriginal.content,
+    } : null,
   };
   const corpusSurfaceRiskAnchors = anchors.flatMap((entry) => {
     const reasons = getVoiceCorpusTextSurfaceExclusions(entry.content);
@@ -1641,7 +1689,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       shadowComparison: {
         isolatedVariable: 'primary_writer',
         samplingDesign: activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-          ? 'two GPT variants plus one matched Fable control per selected idea'
+          ? 'three GPT variants; matched Fable control retired after zero-yield production audit'
           : 'one control variant on the highest-ranked selected idea',
         defaultWriter: primaryWriting,
         controlWriter: shadowControlWriting,

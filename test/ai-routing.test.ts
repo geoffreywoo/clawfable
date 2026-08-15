@@ -167,7 +167,7 @@ describe('AI model routing', () => {
     ]);
   });
 
-  it('uses GPT for Geoffrey copy after shadow audits and keeps one Fable shadow lane', async () => {
+  it('uses GPT for Geoffrey copy after the matched Fable control audit', async () => {
     const {
       getModelChainForTask,
       resolvePublishingV2ModelStacks,
@@ -180,7 +180,7 @@ describe('AI model routing', () => {
     expect(current).toEqual({
       activeStack: 'publishing_v2_gpt_control',
       shadowStack: 'publishing_v2_fable_control',
-      reason: 'geoffrey_gpt_primary_with_matched_fable_control',
+      reason: 'geoffrey_gpt_primary_after_matched_control_audit',
     });
     expect(legacyHandle).toEqual(current);
     expect(generic).toEqual({
