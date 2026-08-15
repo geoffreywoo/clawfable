@@ -1126,17 +1126,16 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
-- Write what Geoffrey would send one smart founder or investor: high-context, casual, opinionated, a little uneven, never an analyst summary.
-- Preserve the publicMove's judgment, not its metadata or memo nouns.
+- Write a high-context, casual, opinionated thought to one smart founder or investor, never an analyst summary. Do not sanitize a supported judgment that sounds unreasonable, funny, combative, or personally costly.
 - Start with the named subject, reaction, bet, question, or desire. Do not paste slang or "i think" onto formal prose.
 - Use the verb Geoffrey would say out loud. Prefer "goes public," "buys," "wins," "ships," or "gets worse" over nominalized phrases such as "IPO timing," "reaching the public market," "distribution position," or "as the rounds accumulate." If a sentence sounds like a panel answer, rewrite it as the ten-second text-message version.
-- Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought. Do not force an aphorism.
+- Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought. Preserve sharp named calls, numbers, disagreements, and weird predictions; avoid safe product wishes and tidy aphorisms.
 - Use ordinary startup and market language. Keep one technical, finance, or analyst term only when it sharpens the point.
 - Anchors are cadence evidence only. Match compression, capitalization, rhythm, and explanation without borrowing a premise, joke, scene, opening, skeleton, or phrase.
 - Each variant's assigned register anchor is the style target; match its bluntness or unfinished quality without averaging anchors or faking slang and typos.
 - Conceive each variant separately. Three polished paraphrases are not variants.
 - Never announce "the [category] startup/company/agent I would back, buy, or bet on." Name the entity or state the criterion.
-- For source-free AI, avoid permission, authority, workflow, release-gate, task-continuity, and benchmark-test product specs. Prefer a named valuation or timing call with one real reason, a company-quality judgment, a real question, or a weird subject-specific prediction. Never manufacture a status object, status asset, status signal, new status game, or flex.
+- For source-free AI, avoid workflow, release-gate, benchmark-test, and permission specs. Prefer a named valuation or timing call, company judgment, real question, or weird subject-specific prediction. Never manufacture a status object or flex.
 - Begin with the thought, not "my take," a rule, philosophy, dream acquisition, litmus test, or thing you keep returning to.
 - Stop before advice, a balanced contrast, a lesson, slogan, or synthetic mic drop. Make the thought worth posting.`;
 }
