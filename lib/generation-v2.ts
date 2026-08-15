@@ -5090,11 +5090,23 @@ export function getV2RescueRevisionStrategy(
 
 export function shouldRunPostcriticRescueV2(
   voiceProfile: VoiceProfile,
-  _rejectionCodes: string[] = [],
-  _judgeNotes?: string | null,
-  _qualityMargin?: number | null,
+  rejectionCodes: string[] = [],
+  judgeNotes?: string | null,
+  qualityMargin?: number | null,
+  finalScores?: CandidateJudgeBreakdown | null,
 ): boolean {
-  return !isGeoffreyVoiceProfile(voiceProfile);
+  if (!isGeoffreyVoiceProfile(voiceProfile)) return true;
+  const uniqueCodes = uniqueStrings(rejectionCodes);
+  const minimumMargin = Math.max(0.85, PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN - 0.02);
+  return uniqueCodes.length === 1
+    && uniqueCodes[0] === 'final_quality_margin'
+    && getV2RescueRevisionStrategy(uniqueCodes, judgeNotes) === 'critic_surgical'
+    && !hasFinishedCriticDiagnosisV2(judgeNotes)
+    && typeof qualityMargin === 'number'
+    && qualityMargin >= minimumMargin
+    && (finalScores?.nativeVoice ?? 0) >= 0.79
+    && (finalScores?.casualStartupFit ?? 0) >= 0.72
+    && (finalScores?.cringeRisk ?? 1) < 0.24;
 }
 
 export function shouldSpendOnGeoffreySubtractiveRepairV2(
@@ -5122,7 +5134,11 @@ export function shouldSpendOnGeoffreySubtractiveRepairV2(
   return generated < 4 || selected / generated >= 0.15;
 }
 
-function getPostcriticRepairModelStackV2(modelStack: GenerationModelStackId): GenerationModelStackId {
+export function getPostcriticRepairModelStackV2(
+  modelStack: GenerationModelStackId,
+  voiceProfile?: VoiceProfile | null,
+): GenerationModelStackId {
+  if (voiceProfile && isGeoffreyVoiceProfile(voiceProfile)) return modelStack;
   if (modelStack === PUBLISHING_V2_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
   if (modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK) return PUBLISHING_V2_GPT_CONTROL_MODEL_STACK;
   if (modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK) return PUBLISHING_V2_CONTROL_MODEL_STACK;
@@ -5650,17 +5666,22 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     if (selected.length < input.count && !initialCopyJudgeFailure) {
       let retryEvaluations: DraftEvaluation[] = [];
       const selectedIdeaIds = new Set(selected.map((tweet) => tweet.ideaId).filter((id): id is string => Boolean(id)));
-      const targets = rescueTargetsV2(evaluations, input.count - selected.length, input, selectedIdeaIds);
+      const remaining = input.count - selected.length;
+      const rescueCandidateLimit = isGeoffreyVoiceProfile(input.voiceProfile)
+        ? Math.max(3, remaining * 3)
+        : remaining;
+      const targets = rescueTargetsV2(evaluations, rescueCandidateLimit, input, selectedIdeaIds);
       const eligibleTargets = targets.filter((target) => shouldRunPostcriticRescueV2(
         input.voiceProfile,
         target.draft.rejectionCodes,
         target.draft.judgeNotes,
         target.draft.judgeBreakdown?.qualityMargin,
+        target.draft.judgeBreakdown,
       ));
       const runnableTargets = isGeoffreyVoiceProfile(input.voiceProfile)
         ? eligibleTargets.slice(0, 1)
         : eligibleTargets;
-      const repairModelStack = getPostcriticRepairModelStackV2(input.modelStack);
+      const repairModelStack = getPostcriticRepairModelStackV2(input.modelStack, input.voiceProfile);
       trace.stageCounts.postcriticRescueTargets = targets.length;
       trace.stageCounts.postcriticRescueEligibleTargets = eligibleTargets.length;
       trace.stageCounts.postcriticRescueRunnableTargets = runnableTargets.length;

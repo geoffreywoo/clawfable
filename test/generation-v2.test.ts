@@ -11,6 +11,7 @@ import {
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
   getGeoffreyFinalNoveltyIssueV2,
+  getPostcriticRepairModelStackV2,
   getOperatorTopicConstraintIssuesV2,
   getOperatorTopicSignalAttemptDecisionV2,
   hasCrossBriefSubjectCollisionV2,
@@ -60,7 +61,7 @@ import {
   isGeoffreyDeepTechnicalTopic,
   isGeoffreyManufacturingMaterialsTopic,
 } from '@/lib/source-planner';
-import type { GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
+import type { CandidateJudgeBreakdown, GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
 
 const voiceProfile = {
@@ -647,7 +648,7 @@ describe('Tweet Generation V2', () => {
     )).toBe('critic_surgical');
   });
 
-  it('suppresses generative Geoffrey repair after live negative-value evidence', () => {
+  it('only repairs Geoffrey margin-only near misses with strong native headroom', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
@@ -659,7 +660,35 @@ describe('Tweet Generation V2', () => {
       'The smallest improvement would be naming the operational task this control would unlock.',
       0.859,
     )).toBe(false);
+    const nativeNearMiss = {
+      nativeVoice: 0.81,
+      casualStartupFit: 0.76,
+      cringeRisk: 0.2,
+    } as CandidateJudgeBreakdown;
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      ['final_quality_margin'],
+      'The direct company judgment is sound; remove the hedge and stop.',
+      0.856,
+      nativeNearMiss,
+    )).toBe(true);
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      ['final_cringe_risk', 'final_quality_margin'],
+      'The ending still reads like a manufactured reveal.',
+      0.856,
+      nativeNearMiss,
+    )).toBe(false);
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      ['final_quality_margin'],
+      'The direct company judgment is sound; remove the hedge and stop.',
+      0.856,
+      { ...nativeNearMiss, cringeRisk: 0.3 },
+    )).toBe(false);
     expect(shouldRunPostcriticRescueV2(voiceProfile)).toBe(true);
+    expect(getPostcriticRepairModelStackV2('publishing_v2_gpt_control', geoffreyVoice)).toBe('publishing_v2_gpt_control');
+    expect(getPostcriticRepairModelStackV2('publishing_v2_gpt_control', voiceProfile)).toBe('publishing_v2_fable_control');
   });
 
   it('stops spending on Geoffrey tail trims after a zero-yield live window', () => {
