@@ -572,6 +572,35 @@ describe('followed-network topic intelligence', () => {
     expect(mocks.generateText.mock.calls[0][0].system).toContain('entityRoles');
   });
 
+  it('does not manufacture one network story from unrelated posts sharing vague words', async () => {
+    const candidates = [
+      observation({ tweetId: 'vague-1', text: 'I always build tennis sessions around one Alcaraz match.' }),
+      observation({ tweetId: 'vague-2', text: 'Life at OpenAI changed after the latest model launch.' }),
+      observation({ tweetId: 'vague-3', text: 'Anything involving copper refining gets harder at scale.' }),
+      observation({ tweetId: 'vague-4', text: 'Career notes from a biotech founder raising a seed round.' }),
+    ];
+
+    expect(buildFallbackNetworkTopics(candidates).every((topic) => topic.tweetIds.length === 1)).toBe(true);
+
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({
+        topics: [{
+          label: 'anything always build life',
+          summary: 'Breakout discussion about anything, always building, careers, and life.',
+          tweetIds: candidates.map((candidate) => candidate.tweetId),
+          entities: [],
+          whyNow: 'Four followed-network posts are breaking out.',
+          confidence: 0.95,
+        }],
+      }),
+      provider: 'openai',
+      model: 'gpt-5.6',
+      stopReason: 'end_turn',
+    });
+
+    await expect(extractNetworkTopicsWithAi(candidates)).resolves.toEqual([]);
+  });
+
   it('keeps Servo in browser infrastructure and filters unusable X source shapes', () => {
     expect(inferNetworkSemanticDomain('Mozilla Servo browser engine adds a new rendering backend')).toBe('browser_infrastructure');
     expect(inferNetworkSemanticDomain('June in Servo: real world compat, media queries, SharedWorker, and more')).toBe('browser_infrastructure');

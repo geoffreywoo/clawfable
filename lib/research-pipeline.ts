@@ -493,8 +493,14 @@ export function selectSourceDocumentsForEnrichment(
   return selected;
 }
 
-export function isResearchDocumentEligibleForClustering(document: SourceDocument): boolean {
-  return document.sourceType !== 'sec_edgar' || !isLowSignalSecFilingTitle(document.title);
+export function isResearchDocumentEligibleForClustering(
+  document: SourceDocument,
+  observedNetworkDocumentIds?: Set<string>,
+): boolean {
+  if (document.sourceType === 'sec_edgar' && isLowSignalSecFilingTitle(document.title)) return false;
+  return document.sourceType !== 'x'
+    || !observedNetworkDocumentIds
+    || observedNetworkDocumentIds.has(document.id);
 }
 
 function identityFit(document: SourceDocument, agenda: ResearchAgenda): number {
@@ -926,14 +932,17 @@ export async function refreshAgentResearch(
       }
     }
     const storedDocuments = await upsertSourceDocuments(agent.id, enriched);
-    const clusterDocuments = storedDocuments.filter(isResearchDocumentEligibleForClustering);
+    const observedDocumentIds = new Set(fetchedDocuments.map((document) => document.id));
+    const clusterDocuments = storedDocuments.filter((document) => (
+      isResearchDocumentEligibleForClustering(document, observedDocumentIds)
+    ));
     const clusters = clusterAndQualifySources({
       agentId: agent.id,
       documents: clusterDocuments,
       agenda,
       existingClusters,
       blocks: effectiveSemanticBlocks,
-      observedDocumentIds: new Set(fetchedDocuments.map((document) => document.id)),
+      observedDocumentIds,
       now,
     });
     const storedClusters = await upsertStoryClusters(agent.id, clusters);
