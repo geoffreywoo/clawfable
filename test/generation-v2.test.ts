@@ -41,6 +41,7 @@ import {
   normalizeDirectComparisonPublicMoveV2,
   normalizeDraftContentV2,
   orderV2IdsForPairwise,
+  reconcileV2CriticDiagnosis,
   retainsPersonalTopicSubjectV2,
   selectAlternateIdeasV2,
   selectRankedIdeaPortfolioV2,
@@ -52,6 +53,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey, stableResearchId } from '@/lib/research-utils';
+import { getPublishingV2AutopostQualityMargin } from '@/lib/publishing-quality-policy';
 import {
   classifyGeoffreyTopicDomain,
   isGeoffreyDeepTechnicalTopic,
@@ -293,12 +295,12 @@ describe('Tweet Generation V2', () => {
     } as any;
     expect(getRequiredFinalQualityMarginV2({ mode: 'live' })).toBe(0.86);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', requireAutopostQuality: true })).toBe(0.86);
-    expect(getRequiredFinalQualityMarginV2({ mode: 'live', voiceProfile: geoffreyVoiceProfile })).toBe(0.88);
+    expect(getRequiredFinalQualityMarginV2({ mode: 'live', voiceProfile: geoffreyVoiceProfile })).toBe(0.87);
     expect(getRequiredFinalQualityMarginV2({
       mode: 'preview',
       requireAutopostQuality: true,
       voiceProfile: geoffreyVoiceProfile,
-    })).toBe(0.88);
+    })).toBe(0.87);
     expect(getRequiredFinalQualityMarginV2({ mode: 'preview', persistArtifacts: false })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({
       mode: 'manual',
@@ -306,6 +308,24 @@ describe('Tweet Generation V2', () => {
     })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({ mode: 'manual' })).toBe(0.81);
     expect(getRequiredFinalQualityMarginV2({})).toBe(0.86);
+    expect(getPublishingV2AutopostQualityMargin('@geoffwoo')).toBe(0.87);
+    expect(getPublishingV2AutopostQualityMargin('geoffreywoo')).toBe(0.87);
+    expect(getPublishingV2AutopostQualityMargin('another-founder')).toBe(0.86);
+  });
+
+  it('keeps raw critic confidence from masking a deterministic margin miss', () => {
+    expect(reconcileV2CriticDiagnosis(
+      'The named timing pick is native; no substantive rewrite is needed.',
+      ['final_quality_margin'],
+      0.8694,
+      0.87,
+    )).toContain('do not clear the 0.870 autopost bar');
+    expect(reconcileV2CriticDiagnosis(
+      'The middle is too abstract and needs one named consequence.',
+      ['final_quality_margin'],
+      0.85,
+      0.87,
+    )).toBe('The middle is too abstract and needs one named consequence.');
   });
 
   it('weights literal operator plausibility above extra casual texture in final margin calibration', () => {

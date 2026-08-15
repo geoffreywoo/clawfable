@@ -860,6 +860,7 @@ export interface DraftCandidate {
   judgeModel: string | null;
   judgeScore: number | null;
   judgeBreakdown?: CandidateJudgeBreakdown | null;
+  judgeRawNotes?: string | null;
   judgeNotes?: string | null;
   mutationRound?: number;
   status: GenerationCandidateStatus;
