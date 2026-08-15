@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 36;
+export const GENERATION_QUALITY_AUDIT_VERSION = 37;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1705,7 +1705,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       shadowComparison: {
         isolatedVariable: 'primary_writer',
         samplingDesign: activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-          ? 'three GPT variants; matched Fable control retired after zero-yield production audit'
+          ? 'three independent GPT one-draft calls with separate native register anchors; matched Fable control retired after zero-yield production audit'
           : 'one control variant on the highest-ranked selected idea',
         defaultWriter: primaryWriting,
         controlWriter: shadowControlWriting,

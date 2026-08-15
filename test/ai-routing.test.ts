@@ -180,7 +180,7 @@ describe('AI model routing', () => {
     expect(current).toEqual({
       activeStack: 'publishing_v2_gpt_control',
       shadowStack: 'publishing_v2_fable_control',
-      reason: 'geoffrey_gpt_primary_after_matched_control_audit',
+      reason: 'geoffrey_gpt_independent_native_variants_after_control_audit',
     });
     expect(legacyHandle).toEqual(current);
     expect(generic).toEqual({
