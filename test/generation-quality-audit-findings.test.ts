@@ -335,7 +335,7 @@ describe('generation quality audit findings', () => {
       expect.objectContaining({
         code: 'historical_fable_shadow_yield_zero',
         scope: 'historical_window',
-        action: expect.stringContaining('strongest matched idea'),
+        action: expect.stringContaining('one matched Fable control'),
       }),
     ]));
   });

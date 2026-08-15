@@ -147,7 +147,7 @@ export const PUBLISHING_V2_GPT_CONTROL_MODEL_STACK: GenerationModelStackId = 'pu
 export interface PublishingV2ModelStackAssignment {
   activeStack: GenerationModelStackId;
   shadowStack: GenerationModelStackId;
-  reason: 'geoffrey_gpt_primary_after_shadow_audit' | 'default_gpt_primary';
+  reason: 'geoffrey_gpt_primary_with_matched_fable_control' | 'default_gpt_primary';
 }
 
 export function resolvePublishingV2ModelStacks(handle?: string | null): PublishingV2ModelStackAssignment {
@@ -156,7 +156,7 @@ export function resolvePublishingV2ModelStacks(handle?: string | null): Publishi
     return {
       activeStack: PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
       shadowStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
-      reason: 'geoffrey_gpt_primary_after_shadow_audit',
+      reason: 'geoffrey_gpt_primary_with_matched_fable_control',
     };
   }
   return {

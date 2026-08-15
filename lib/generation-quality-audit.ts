@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 33;
+export const GENERATION_QUALITY_AUDIT_VERSION = 34;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -751,7 +751,7 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       scope: 'historical_window',
       title: 'Fable shadow writing has not earned its prior sampling rate',
       evidence: fableShadow,
-      action: 'Sample Fable only on the strongest matched idea in each batch; disable the lane if the next 20 matched shadows still produce no eligible selection.',
+      action: 'Keep one matched Fable control beside the two GPT variants for each selected idea during the current policy window; disable the lane if the next 20 matched controls still produce no eligible selection.',
     });
   }
 
@@ -1640,6 +1640,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       shadowControlStack: modelStackAssignment.shadowStack,
       shadowComparison: {
         isolatedVariable: 'primary_writer',
+        samplingDesign: activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+          ? 'two GPT variants plus one matched Fable control per selected idea'
+          : 'one control variant on the highest-ranked selected idea',
         defaultWriter: primaryWriting,
         controlWriter: shadowControlWriting,
         sharedIdeaGenerator: primaryIdeaGeneration,

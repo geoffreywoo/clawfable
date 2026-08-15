@@ -3501,6 +3501,7 @@ export function buildTweetWritingPromptV2(
         nativeReactionMode: anchors[0] ? nativeReactionMode(anchors[0].content) : 'blunt_observation',
         instruction: 'State the named subject and actual position in one or two short sentences. Stop before evidence, an explanatory consequence, a second argument, or a concluding slogan.',
       };
+  const initialMultiDraft = (revisionContext?.length || 0) === 0 && draftCount > 1;
   return JSON.stringify({
     idea: {
       id: idea.id,
@@ -3565,17 +3566,17 @@ export function buildTweetWritingPromptV2(
     writingConstraints: writingConstraints || null,
     responseContract: {
       draftCount,
-      variantMoves: draftCount === MAX_DRAFTS_PER_IDEA
-        ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => {
+      variantMoves: initialMultiDraft
+        ? Array.from({ length: draftCount }, (_, index) => {
             const move = initialVariantMoveForAnchor(anchors[index], index + 1);
             const slotInstruction = index === 0
               ? 'Make this the bare spoken version: named subject plus verdict, bet, or reaction in the shortest natural words. Use concrete verbs instead of analyst nouns, framing, hedges, or a declared closer. Do not add the consequence in this slot.'
-              : index === MAX_DRAFTS_PER_IDEA - 1
+              : index === draftCount - 1
                 ? 'Fold exactly one consequence already present in stakes into the same casual thought; do not append a formal explanation or lesson.'
                 : 'Stop at the direct reaction and do not add a consequence, proof, or second argument.';
             return {
               ...move,
-              consequenceRole: index === MAX_DRAFTS_PER_IDEA - 1 ? 'approved_consequence' : 'reaction_only',
+              consequenceRole: index === draftCount - 1 ? 'approved_consequence' : 'reaction_only',
               instruction: `${move.instruction} ${slotInstruction}`,
             };
           })
@@ -3591,8 +3592,8 @@ export function buildTweetWritingPromptV2(
           instruction: 'Return to the named subject and approved publicMove, then solve the same diagnosis with a different opening and sentence skeleton.',
         },
       ] : (revisionContext?.length || 0) === 0 ? [initialSingleVariantMove] : [],
-      diversityContract: draftCount === MAX_DRAFTS_PER_IDEA
-        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the three anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Slot 1 is the bare spoken verdict and stops there; slot 2 is a different direct reaction; slot 3 alone may make one approved consequence from stakes legible inside the same casual thought. Compression means no filler, not that every thought must become a slogan.'
+      diversityContract: initialMultiDraft
+        ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the anchors into one house style. Drafts must not share an opening clause, sentence skeleton, closer, or merely paraphrase the same line. Slot 1 is the bare spoken verdict and stops there; the last slot alone may make one approved consequence from stakes legible inside the same casual thought. Compression means no filler, not that every thought must become a slogan.'
         : draftCount === 2
           ? 'The two revisions must be materially different. Capitalization, punctuation, or grammar changes do not satisfy the second move.'
           : null,
@@ -3613,21 +3614,21 @@ export function buildTweetWritingPromptV2(
     })) || [],
     voiceTransferContract: anchors.length > 0 ? {
       primaryRegisterAnchorId: anchors[0].id,
-      slotRegisterAnchors: (revisionContext?.length || 0) > 0 || draftCount !== MAX_DRAFTS_PER_IDEA
+      slotRegisterAnchors: !initialMultiDraft
         ? []
         : anchors.slice(0, draftCount).map((anchor, index) => ({
             slot: index + 1,
             voiceAnchorId: anchor.id,
             nativeReactionMode: nativeReactionMode(anchor.content),
           })),
-      instruction: draftCount === MAX_DRAFTS_PER_IDEA && !(revisionContext?.length || 0)
+      instruction: initialMultiDraft
         ? 'Each initial slot has its own primary register anchor. Match that slot anchor\'s level of formality, cleanup, roughness, line breaks, and public posture, never its premise, names, metaphor, distinctive phrase, or sentence skeleton. Do not blend the anchors.'
         : 'The primary anchor matches the conversational register or public posture of this idea. Match its level of formality and amount of cleanup, never its premise or sentence skeleton. The other anchors show the author\'s wider range.',
     } : null,
     voiceAnchors: anchors.slice(0, 3).map((anchor, index) => ({
       id: anchor.id,
       text: anchor.content,
-      role: draftCount === MAX_DRAFTS_PER_IDEA && !(revisionContext?.length || 0)
+      role: initialMultiDraft
         ? `slot_${index + 1}_register`
         : index === 0
           ? 'primary_register'
@@ -3713,7 +3714,7 @@ async function writeIdeaDrafts({
   revisionDraftCount?: 1 | 2;
   revisionParentDraftId?: string | null;
   candidateIdSalt?: string;
-  initialDraftCount?: 1 | typeof MAX_DRAFTS_PER_IDEA;
+  initialDraftCount?: 1 | 2 | typeof MAX_DRAFTS_PER_IDEA;
   initialSingleMoveFromAnchor?: boolean;
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
@@ -3737,6 +3738,7 @@ async function writeIdeaDrafts({
     : '';
   const draftCount = revisionContext.length > 0 ? revisionDraftCount : initialDraftCount;
   const initialSingleDraft = revisionContext.length === 0 && draftCount === 1;
+  const initialMultiDraft = revisionContext.length === 0 && draftCount > 1;
   const subjectNativeReactionPattern = selectSubjectNativeReactionPatternV2(
     idea,
     collectOperatorAnchors(input),
@@ -3750,7 +3752,9 @@ async function writeIdeaDrafts({
       ? 'Return exactly one revised X post. Make only the smallest change required by the critic diagnosis.'
       : 'Write exactly one new X post from the approved idea. It must be a fresh replacement, not an edit or paraphrase of the failed attempt.'
     : draftCount === 2
-      ? revisionStrategy === 'critic_surgical'
+      ? initialMultiDraft
+        ? 'Write exactly two separately conceived X posts from one approved idea. They must use different openings, public moves, and sentence skeletons; do not make one a polished version of the other.'
+        : revisionStrategy === 'critic_surgical'
         ? 'Return exactly two candidate revisions. The first makes the smallest substantive critic-directed repair. The second starts from the approved publicMove again and applies the same diagnosis with a different sentence skeleton. A change to capitalization, punctuation, or grammar alone is not a revision.'
         : 'Return exactly two newly conceived X posts from the approved publicMove. Apply the critic diagnosis with different openings and sentence skeletons; neither may edit or paraphrase the failed attempt.'
     : 'Write exactly three separately conceived X posts from one approved idea. They are not short, medium, and long versions of one sentence. Do not summarize or reconcile all three.';
@@ -3761,10 +3765,12 @@ async function writeIdeaDrafts({
       ? 'Keep the edit target\'s natural shape unless the diagnosis explicitly identifies that shape as the problem.'
       : 'Choose the most natural shape for the replacement. Start from the subject again instead of preserving the failed draft\'s opening or length.'
     : draftCount === 2
-      ? 'Keep one candidate close enough to preserve the sound core, but make the other materially different in wording and shape. Both must fix the substantive issue named by the critic.'
-    : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
-  const consequenceInstruction = draftCount === MAX_DRAFTS_PER_IDEA
-    ? 'For this initial three-variant pass, make exactly one supplied consequence legible in exactly one variant; the other variants should stop at the direct reaction.'
+      ? initialMultiDraft
+        ? 'Let both initial drafts choose their own natural length and shape. Use different openings and public moves; neither draft is a revision of the other.'
+        : 'Keep one candidate close enough to preserve the sound core, but make the other materially different in wording and shape. Both must fix the substantive issue named by the critic.'
+      : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
+  const consequenceInstruction = initialMultiDraft
+    ? 'For this initial multi-variant pass, make exactly one supplied consequence legible in exactly one variant; the other variants should stop at the direct reaction.'
     : initialSingleDraft
       ? 'Do not add a consequence or supporting proof; this control variant is only the direct reaction.'
       : 'Do not add a consequence unless the critic-directed repair explicitly requires one already present in the approved packet.';
@@ -4032,7 +4038,7 @@ async function generateDraftEvaluations({
     const anchors = anchorsForIdea(idea, anchorPool);
     const writerPlans: Array<{
       modelStack: GenerationModelStackId;
-      initialDraftCount: 1 | typeof MAX_DRAFTS_PER_IDEA;
+      initialDraftCount: 1 | 2 | typeof MAX_DRAFTS_PER_IDEA;
       candidateIdSalt: string;
       anchorOffset: number;
       initialSingleMoveFromAnchor: boolean;
@@ -4045,6 +4051,21 @@ async function generateDraftEvaluations({
           anchorOffset: index,
           initialSingleMoveFromAnchor: index > 0,
         }))
+      : isGeoffreyVoiceProfile(input.voiceProfile)
+        && input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+        ? [{
+            modelStack: input.modelStack,
+            initialDraftCount: 2 as const,
+            candidateIdSalt: 'gpt-pair',
+            anchorOffset: 0,
+            initialSingleMoveFromAnchor: false,
+          }, {
+            modelStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
+            initialDraftCount: 1 as const,
+            candidateIdSalt: 'fable-matched',
+            anchorOffset: 2,
+            initialSingleMoveFromAnchor: true,
+          }]
       : [{
           modelStack: input.modelStack,
           initialDraftCount: MAX_DRAFTS_PER_IDEA,
@@ -4054,9 +4075,7 @@ async function generateDraftEvaluations({
         }];
     const geoffreyShadowStack = input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
       ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-      : input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-        ? PUBLISHING_V2_CONTROL_MODEL_STACK
-        : null;
+      : null;
     if (
       isGeoffreyVoiceProfile(input.voiceProfile)
       && geoffreyShadowStack
@@ -5107,6 +5126,11 @@ export function shouldSpendOnGeoffreySubtractiveRepairV2(
     (sum, run) => sum + Number(run.stageCounts.postcriticTrimDraftsSelected || 0),
     0,
   );
+  const suppressed = terminal.reduce(
+    (sum, run) => sum + Number(run.stageCounts.postcriticTrimSuppressedNegativeValue || 0),
+    0,
+  );
+  if (suppressed > 0 && selected === 0) return false;
   return generated < 4 || selected / generated >= 0.15;
 }
 
