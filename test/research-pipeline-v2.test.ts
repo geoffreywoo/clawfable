@@ -552,6 +552,16 @@ describe('research agenda and story qualification', () => {
     }))).toBe(true);
   });
 
+  it('keeps stale X topic documents out of a fresh research clustering pass', () => {
+    const current = source({ id: 'x-current', sourceType: 'x', title: 'Current followed-network topic', publisher: 'X' });
+    const stale = source({ id: 'x-stale', sourceType: 'x', title: 'Stale malformed network topic', publisher: 'X' });
+    const observed = new Set([current.id]);
+
+    expect(isResearchDocumentEligibleForClustering(current, observed)).toBe(true);
+    expect(isResearchDocumentEligibleForClustering(stale, observed)).toBe(false);
+    expect(isResearchDocumentEligibleForClustering(stale)).toBe(true);
+  });
+
   it('blocks political drift and explicit source/topic exclusions before generation', () => {
     const clusters = clusterAndQualifySources({
       agentId: 'agent-1',

@@ -35,6 +35,7 @@ const GENERIC_STOP_WORDS = new Set([
   'will', 'with', 'would', 'your', 'youre', 'https', 'today', 'thread', 'people', 'think', 'make',
   'makes', 'made', 'using', 'used', 'first', 'every', 'still', 'even', 'like', 'good', 'great',
   'well', 'year', 'years', 'time', 'work', 'working', 'world', 'right', 'actually', 'something',
+  'always', 'anything', 'build', 'building', 'career', 'life', 'things', 'going', 'never', 'better',
 ]);
 
 type FollowingAccount = Awaited<ReturnType<typeof getFollowing>>[number];
@@ -721,6 +722,19 @@ function tokenSimilarity(a: string, b: string): number {
   return shared / Math.max(1, Math.min(left.size, right.size));
 }
 
+function sharedSignificantTokenCount(a: string, b: string): number {
+  const left = new Set(significantTokens(a));
+  return [...new Set(significantTokens(b))].filter((token) => left.has(token)).length;
+}
+
+function fallbackTopicSimilarity(a: NetworkTweetObservation, b: NetworkTweetObservation): number {
+  const leftEntities = new Set(extractVisibleEntities(a.text).map(normalizeLabel));
+  const sharedEntity = extractVisibleEntities(b.text).some((entity) => leftEntities.has(normalizeLabel(entity)));
+  const sharedTokens = sharedSignificantTokenCount(a.text, b.text);
+  if (!sharedEntity && sharedTokens < 2) return 0;
+  return tokenSimilarity(a.text, b.text);
+}
+
 function extractVisibleEntities(text: string): string[] {
   const hashtags = [...text.matchAll(/(?:^|\s)#([A-Za-z][A-Za-z0-9_-]{2,})/g)].map((match) => match[1]);
   const acronyms = [...text.matchAll(/\b[A-Z][A-Z0-9-]{2,}\b/g)].map((match) => match[0]);
@@ -793,7 +807,7 @@ export function buildFallbackNetworkTopics(
     const best = groups
       .map((group, index) => ({
         index,
-        similarity: Math.max(...group.map((item) => tokenSimilarity(item.text, candidate.text))),
+        similarity: Math.max(...group.map((item) => fallbackTopicSimilarity(item, candidate))),
       }))
       .sort((a, b) => b.similarity - a.similarity)[0];
     if (best && best.similarity >= 0.24) groups[best.index].push(candidate);
@@ -869,10 +883,28 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
     const item = raw as Record<string, unknown>;
     const label = compact(String(item.label || '').replace(/[\r\n]+/g, ' '), 80);
     const summary = compact(String(item.summary || '').replace(/[\r\n]+/g, ' '), 220);
-    const tweetIds = Array.isArray(item.tweetIds)
+    const rawTweetIds = Array.isArray(item.tweetIds)
       ? item.tweetIds.map(String).filter((id) => inputIds.has(id) && !usedIds.has(id)).slice(0, 8)
       : [];
-    if (!label || significantTokens(label).length === 0 || !summary || tweetIds.length === 0) continue;
+    const rawEntities = Array.isArray(item.entities)
+      ? [...new Set(item.entities.map((entity) => compact(String(entity), 60)).filter(Boolean))].slice(0, 8)
+      : [];
+    const candidateTextById = new Map(rawTweetIds.map((id) => [
+      id,
+      candidates.find((candidate) => candidate.tweetId === id)?.text || '',
+    ]));
+    const supportedEntities = rawEntities.filter((entity) => {
+      const normalizedEntity = normalizeLabel(entity);
+      const support = [...candidateTextById.values()].filter((text) => normalizeLabel(text).includes(normalizedEntity)).length;
+      return rawTweetIds.length === 1 ? support === 1 : support >= 2;
+    });
+    const labelTokens = new Set(significantTokens(label));
+    const tweetIds = rawTweetIds.filter((id) => {
+      const text = candidateTextById.get(id) || '';
+      if (supportedEntities.some((entity) => normalizeLabel(text).includes(normalizeLabel(entity)))) return true;
+      return labelTokens.size >= 2 && sharedSignificantTokenCount(label, text) >= 2;
+    });
+    if (!label || (labelTokens.size < 2 && supportedEntities.length === 0) || !summary || tweetIds.length === 0) continue;
     const evidenceText = tweetIds
       .map((id) => candidates.find((candidate) => candidate.tweetId === id)?.text || '')
       .join(' ');
@@ -890,9 +922,7 @@ function normalizeExtractedTopics(value: unknown, candidates: NetworkTweetObserv
         : 'other';
     const confidence = Number(clamp(finite(item.confidence)).toFixed(3));
     tweetIds.forEach((id) => usedIds.add(id));
-    const entities = Array.isArray(item.entities)
-      ? [...new Set(item.entities.map((entity) => compact(String(entity), 60)).filter(Boolean))].slice(0, 8)
-      : [];
+    const entities = supportedEntities;
     normalized.push({
       label,
       summary,
