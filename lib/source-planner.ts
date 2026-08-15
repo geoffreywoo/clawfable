@@ -741,7 +741,7 @@ function buildHistoricalOperatorEvidence(cluster: ManualTopicCluster): SourcePla
   };
 }
 
-const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:intro|vcs?|venture capital|early-stage founders?|founders?|startups?|geoff(?:rey)? woo|anti fund)$/i;
+const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:intro|vcs?|venture capital|early-stage founders?|founders?|startups?|@?geoff(?:rey)?\s*woo|@?anti\s*fund)$/i;
 const OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO = /\b(?:sign up|join (?:the )?waitlist|book a demo|try it here|apply now|dm me|email me|contact me|personally show|we can help)\b|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
 const OPERATOR_TOPIC_SIGNAL_EVENT_TERMS = /\b(?:announc(?:e|ed|es|ing)|appoint(?:ed|s|ing)?|acquir(?:e|ed|es|ing)|bought|buys?|challeng(?:e|ed|es|ing)|depart(?:ed|s|ing)?|filed?|fund(?:ed|ing)|hir(?:e|ed|es|ing)|join(?:ed|s|ing)?|launch(?:ed|es|ing)?|leav(?:e|es|ing)|left|merg(?:e|ed|es|ing)|pitch(?:ed|es|ing)?|promot(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|resign(?:ed|s|ing)?|sign(?:ed|s|ing)?|steps?\s+down)\b/gi;
 
