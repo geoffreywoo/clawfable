@@ -4162,6 +4162,7 @@ function buildSubtractiveTailEvaluationsV2({
       judgeModel: null,
       judgeScore: null,
       judgeBreakdown: null,
+      judgeRawNotes: null,
       judgeNotes: null,
       mutationRound: 1,
       status: 'generated',
@@ -4323,6 +4324,7 @@ async function judgeDrafts(
           verified_source: 'Direct entailment from supplied evidence is required.',
           operator_opinion: 'No external evidence is expected. Reward factual restraint; do not penalize empty evidence.',
         },
+        activeAutopostQualityMargin: getRequiredFinalQualityMarginV2(input),
         voiceAnchors: [...voiceAnchorCatalog.values()],
         ideaContexts: [...ideaContexts.values()],
         candidates: shuffled.map((entry) => ({
@@ -4496,6 +4498,20 @@ function finalQualityRejectionCodes(
     geoffreyNoveltyIssue,
     qualityMargin < getRequiredFinalQualityMarginV2(input) ? 'final_quality_margin' : null,
   ]);
+}
+
+export function reconcileV2CriticDiagnosis(
+  diagnosis: string,
+  rejectionCodes: string[],
+  qualityMargin: number,
+  requiredMargin: number,
+): string {
+  if (!hasFinishedCriticDiagnosisV2(diagnosis) || rejectionCodes.length === 0) return diagnosis;
+  const primaryIssue = rejectionCodes.find((code) => code !== 'final_quality_margin');
+  const issue = primaryIssue
+    ? (V2_RESCUE_ISSUE_LABELS[primaryIssue] || primaryIssue.replace(/_/g, ' '))
+    : 'the combined voice, insight, and anti-slop headroom is still too thin';
+  return `The critic scores do not clear the ${requiredMargin.toFixed(3)} autopost bar because ${issue}; the combined quality margin is ${qualityMargin.toFixed(3)}.`;
 }
 
 export function getRequiredFinalQualityMarginV2(
@@ -4699,7 +4715,7 @@ async function selectFinalTweets({
     evaluation.draft.judgeProvider = judge.provider;
     evaluation.draft.judgeModel = judge.model;
     evaluation.draft.judgeScore = score.overall;
-    evaluation.draft.judgeNotes = score.diagnosis;
+    evaluation.draft.judgeRawNotes = score.diagnosis;
     evaluation.draft.updatedAt = new Date().toISOString();
     const baseFinalScores = finalCriticBreakdown(score, evaluation, input);
     const finalScores = {
@@ -4708,15 +4724,12 @@ async function selectFinalTweets({
     };
     evaluation.draft.judgeBreakdown = finalScores;
     const finalQualityCodes = finalQualityRejectionCodes(score, evaluation, input, finalScores);
-    const criticDiagnosisConflict = hasFinishedCriticDiagnosisV2(score.diagnosis)
-      && (
-        score.factualSafety < V2_MIN_COPY_FACTUAL_SAFETY
-        || score.overall < V2_MIN_COPY_OVERALL
-        || score.insight < V2_MIN_COPY_INSIGHT
-        || score.voiceFit < V2_MIN_COPY_VOICE_FIT
-        || score.manualAnchorReskinRisk >= V2_MAX_ANCHOR_RESKIN_RISK
-        || finalQualityCodes.length > 0
-      );
+    evaluation.draft.judgeNotes = reconcileV2CriticDiagnosis(
+      score.diagnosis,
+      finalQualityCodes,
+      finalScores.qualityMargin,
+      getRequiredFinalQualityMarginV2(input),
+    );
     if (
       score.factualSafety < V2_MIN_COPY_FACTUAL_SAFETY
       || score.overall < V2_MIN_COPY_OVERALL
@@ -4733,7 +4746,6 @@ async function selectFinalTweets({
         score.insight < V2_MIN_COPY_INSIGHT ? 'copy_judge_weak_idea_expression' : null,
         score.voiceFit < V2_MIN_COPY_VOICE_FIT ? 'copy_judge_voice_mismatch' : null,
         score.manualAnchorReskinRisk >= V2_MAX_ANCHOR_RESKIN_RISK ? 'copy_judge_anchor_reskin' : null,
-        criticDiagnosisConflict ? 'copy_judge_diagnosis_conflict' : null,
         ...finalQualityCodes,
       ]);
       continue;

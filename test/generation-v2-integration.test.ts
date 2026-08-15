@@ -490,11 +490,11 @@ describe('generateTweetBatchV2 integration', () => {
     mocks.accountTasteImplementation = (content) => (
       content.includes('extra explanation')
         ? {
-            nativeVoiceScore: 0.89,
+            nativeVoiceScore: 0.88,
             casualStartupScore: 0.75,
             stiffnessRisk: 0.01,
             voiceDriftRisk: 0,
-            cringeRisk: 0.137,
+            cringeRisk: 0.3,
             generatedPatternRisk: 0,
             technicalCredibilityScore: 0.615,
           }
@@ -550,7 +550,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(judgedOriginals.every((draft) => draft.rejectionCodes.includes('final_quality_margin'))).toBe(true);
     expect(judgedOriginals.every((draft) => (
       (draft.judgeBreakdown?.qualityMargin || 0) >= 0.86
-      && (draft.judgeBreakdown?.qualityMargin || 0) < 0.88
+      && (draft.judgeBreakdown?.qualityMargin || 0) < 0.87
     ))).toBe(true);
     expect(trimCount).toBeGreaterThan(4);
     expect(trims.every((draft) => Boolean(draft.parentDraftId))).toBe(true);

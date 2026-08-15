@@ -68,7 +68,7 @@ import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import { resolveQueuedTweetFailure } from './queue-healing';
 import { PUBLISHING_V2_MODEL_STACK, resolvePublishingV2ModelStacks } from './ai';
-import { PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN } from './publishing-quality-policy';
+import { getPublishingV2AutopostQualityMargin } from './publishing-quality-policy';
 import { getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
 import { semanticIdeaSimilarity } from './tweet-features';
@@ -417,8 +417,19 @@ async function rescoreQueuedTweetsForCurrentPolicy(
 ): Promise<Tweet[]> {
   const valid: Tweet[] = [];
   const invalid: Array<{ tweet: Tweet; issue: string }> = [];
+  const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   for (const tweet of queuedTweets) {
-    const issue = getGeneratedPublishIssue(tweet);
+    const originIssue = getGeneratedPublishIssue(tweet);
+    const accountMarginIssue = (
+      !originIssue
+      && tweet.pipelineVersion === 'v2'
+      && tweet.generationSurface === 'original'
+      && typeof tweet.finalCriticScores?.qualityMargin === 'number'
+      && tweet.finalCriticScores.qualityMargin < requiredAutopostMargin
+    )
+      ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
+      : null;
+    const issue = originIssue || accountMarginIssue;
     if (issue) invalid.push({ tweet, issue });
     else valid.push(tweet);
   }
@@ -431,7 +442,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   await Promise.all(invalid
     .filter(({ tweet }) => (
       typeof tweet.finalCriticScores?.qualityMargin === 'number'
-      && tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN
+      && tweet.finalCriticScores.qualityMargin < requiredAutopostMargin
     ))
     .map(({ tweet, issue }) => addLearningSignal(agent.id, {
       tweetId: tweet.id,
