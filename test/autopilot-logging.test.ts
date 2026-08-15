@@ -219,7 +219,7 @@ vi.mock('@/lib/ai', () => ({
     return {
       activeStack: geoffrey ? 'publishing_v2_gpt_control' : 'publishing_v2_quality',
       shadowStack: 'publishing_v2_fable_control',
-      reason: geoffrey ? 'geoffrey_gpt_primary_after_shadow_audit' : 'default_gpt_primary',
+      reason: geoffrey ? 'geoffrey_gpt_primary_with_matched_fable_control' : 'default_gpt_primary',
     };
   }),
   getPrimaryAiProvider: vi.fn(() => 'openai'),

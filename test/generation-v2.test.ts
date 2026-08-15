@@ -150,6 +150,15 @@ function repairRun(generated: number, selected: number, startedAt: string): Gene
   };
 }
 
+function suppressedRepairRun(startedAt: string): GenerationRunTrace {
+  return {
+    ...run('empty', startedAt, null),
+    stageCounts: {
+      postcriticTrimSuppressedNegativeValue: 1,
+    },
+  };
+}
+
 describe('Tweet Generation V2', () => {
   it('reserves one verified live story in Geoffrey ranked idea portfolios', () => {
     const briefs = [
@@ -650,6 +659,14 @@ describe('Tweet Generation V2', () => {
     expect(shouldSpendOnGeoffreySubtractiveRepairV2(geoffreyVoice, [
       repairRun(4, 1, '2026-08-15T04:00:00.000Z'),
     ])).toBe(true);
+    expect(shouldSpendOnGeoffreySubtractiveRepairV2(geoffreyVoice, [
+      suppressedRepairRun('2026-08-15T08:00:00.000Z'),
+      suppressedRepairRun('2026-08-15T07:00:00.000Z'),
+      suppressedRepairRun('2026-08-15T06:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T05:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T04:00:00.000Z'),
+      repairRun(1, 0, '2026-08-15T03:00:00.000Z'),
+    ])).toBe(false);
     expect(shouldSpendOnGeoffreySubtractiveRepairV2(voiceProfile, [
       repairRun(8, 0, '2026-08-15T04:00:00.000Z'),
     ])).toBe(true);

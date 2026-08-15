@@ -485,6 +485,60 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('gives every Geoffrey idea two GPT drafts and one matched Fable control draft', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        const fable = options.modelStack === 'publishing_v2_fable_control';
+        const drafts = fable ? [{
+          content: `${parsed.idea.topic} is still my pick.`,
+          format: 'short_punch',
+          posture: 'direct preference',
+        }] : [{
+          content: `${parsed.idea.topic}: prove the buyer decision before reserving the expensive capacity.`,
+          format: 'observation',
+          posture: 'capital allocation judgment',
+        }, {
+          content: `i keep coming back to ${parsed.idea.topic}. the buyer commitment has to come first.`,
+          format: 'observation',
+          posture: 'first person preference',
+        }];
+        return result(JSON.stringify({ drafts }), fable ? 'anthropic' : 'openai');
+      }
+      if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await generateTweetBatchV2({
+      ...input,
+      modelStack: 'publishing_v2_gpt_control',
+    });
+    const writerCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => (
+        options.task === 'tweet_writing'
+        && JSON.parse(options.prompt).failedAttempts.length === 0
+      ));
+    const gptCalls = writerCalls.filter((call) => call.modelStack === 'publishing_v2_gpt_control');
+    const fableCalls = writerCalls.filter((call) => call.modelStack === 'publishing_v2_fable_control');
+
+    expect(gptCalls).toHaveLength(4);
+    expect(fableCalls).toHaveLength(4);
+    expect(gptCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 2)).toBe(true);
+    expect(gptCalls.every((call) => String(call.system).includes('two separately conceived X posts'))).toBe(true);
+    expect(gptCalls.every((call) => JSON.parse(call.prompt).responseContract.variantMoves.length === 2)).toBe(true);
+    expect(gptCalls.every((call) => JSON.parse(call.prompt).voiceTransferContract.slotRegisterAnchors.length === 2)).toBe(true);
+    expect(fableCalls.every((call) => JSON.parse(call.prompt).responseContract.draftCount === 1)).toBe(true);
+    expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({
+      stageCounts: expect.objectContaining({
+        initialPrimaryWriterDrafts: 8,
+        initialShadowWriterDrafts: 4,
+      }),
+    });
+  });
+
   it('rejudges a deletion-only tail trim instead of autoposting a Geoffrey headroom draft', async () => {
     let criticCalls = 0;
     mocks.accountTasteImplementation = (content) => (
