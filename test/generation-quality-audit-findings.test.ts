@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildGenerationAuditFindings, buildGenerationQueueHandoffAudit, buildGenerationWriterOutcomeAudit } from '@/lib/generation-quality-audit';
+import { buildAutopostPostingRateAudit, buildGenerationAuditFindings, buildGenerationQueueHandoffAudit, buildGenerationWriterOutcomeAudit } from '@/lib/generation-quality-audit';
+import type { Tweet } from '@/lib/types';
 
 function healthyInput() {
   return {
@@ -107,6 +108,44 @@ function healthyInput() {
 }
 
 describe('generation quality audit findings', () => {
+  it('derives actual posting rates from authoritative tweet lifecycle state', () => {
+    const tweet = (
+      id: string,
+      type: string,
+      status: Tweet['status'],
+      postedAt: string | null,
+      qualityPolicyVersion: string,
+      xTweetId: string | null = `x-${id}`,
+    ) => ({
+      id,
+      agentId: '13',
+      content: `post ${id}`,
+      type,
+      status,
+      postedAt,
+      xTweetId,
+      qualityPolicyVersion,
+      contentProvenance: 'generated_v2',
+      generationModel: 'gpt-5.6',
+    } as Tweet);
+    const audit = buildAutopostPostingRateAudit([
+      tweet('recent', 'original', 'posted', '2026-08-16T07:00:00.000Z', 'policy-current'),
+      tweet('deleted', 'original', 'deleted_from_x', '2026-08-14T08:00:00.000Z', 'policy-old'),
+      tweet('reply', 'reply', 'posted', '2026-08-16T06:00:00.000Z', 'policy-current'),
+      tweet('old', 'original', 'posted', '2026-08-07T08:00:00.000Z', 'policy-old'),
+      tweet('queued', 'original', 'queued', null, 'policy-current', null),
+    ], 'policy-current', new Date('2026-08-16T08:00:00.000Z'));
+
+    expect(audit).toMatchObject({
+      postedOriginalsLast24Hours: 1,
+      postsRemainingInRolling24Hours: 4,
+      postedOriginalsLast7Days: 2,
+      averageOriginalsPerDayLast7Days: 0.286,
+      currentPolicyOriginalsLast7Days: 1,
+      lastOriginal: expect.objectContaining({ tweetId: 'recent', xTweetId: 'x-recent' }),
+    });
+  });
+
   it('counts a selected draft as persisted even after its draft status advances to queued', () => {
     expect(buildGenerationQueueHandoffAudit([{
       generationRunId: 'run-queued',

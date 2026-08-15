@@ -65,7 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 35;
+export const GENERATION_QUALITY_AUDIT_VERSION = 36;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1058,6 +1058,47 @@ function generatedPostedTweets(tweets: Tweet[]): Tweet[] {
   ));
 }
 
+export function buildAutopostPostingRateAudit(
+  tweets: Tweet[],
+  qualityPolicyVersion: string,
+  now = new Date(),
+) {
+  const nowMs = now.getTime();
+  const postedOriginals = tweets.filter((tweet) => {
+    const postedAt = Date.parse(tweet.postedAt || '');
+    return tweet.type === 'original'
+      && Boolean(tweet.xTweetId)
+      && ['posted', 'deleted_from_x'].includes(tweet.status)
+      && Number.isFinite(postedAt)
+      && postedAt <= nowMs;
+  });
+  const inWindow = (tweet: Tweet, windowMs: number) => (
+    nowMs - Date.parse(tweet.postedAt || '') <= windowMs
+  );
+  const last24Hours = postedOriginals.filter((tweet) => inWindow(tweet, 24 * 60 * 60 * 1000));
+  const last7Days = postedOriginals.filter((tweet) => inWindow(tweet, 7 * 24 * 60 * 60 * 1000));
+  const lastOriginal = [...postedOriginals]
+    .sort((left, right) => Date.parse(right.postedAt || '') - Date.parse(left.postedAt || ''))[0] || null;
+  return {
+    postedOriginalsLast24Hours: last24Hours.length,
+    postsRemainingInRolling24Hours: Math.max(0, 5 - last24Hours.length),
+    postedOriginalsLast7Days: last7Days.length,
+    averageOriginalsPerDayLast7Days: Number((last7Days.length / 7).toFixed(3)),
+    currentPolicyOriginalsLast7Days: last7Days.filter((tweet) => (
+      tweet.qualityPolicyVersion === qualityPolicyVersion
+    )).length,
+    lastOriginal: lastOriginal ? {
+      tweetId: lastOriginal.id,
+      xTweetId: lastOriginal.xTweetId,
+      postedAt: lastOriginal.postedAt,
+      source: lastOriginal.contentProvenance || null,
+      model: lastOriginal.generationModel || null,
+      qualityPolicyVersion: lastOriginal.qualityPolicyVersion || null,
+      content: lastOriginal.content,
+    } : null,
+  };
+}
+
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
   const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas, analysis, postLog] = await Promise.all([
@@ -1274,20 +1315,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       excludedFromExactSubjectReuseCount: topTweets.length - cleanSubjectCueSources.length,
     };
   });
-  const auditNowMs = Date.now();
-  const postedOriginals = postLog.filter((entry) => (
-    (entry.action === 'posted' || (!entry.action && Boolean(entry.tweetId)))
-    && Boolean(entry.xTweetId)
-    && Number.isFinite(Date.parse(entry.postedAt))
-  ));
-  const postedOriginalsLast24Hours = postedOriginals.filter((entry) => (
-    auditNowMs - Date.parse(entry.postedAt) <= 24 * 60 * 60 * 1000
-  ));
-  const postedOriginalsLast7Days = postedOriginals.filter((entry) => (
-    auditNowMs - Date.parse(entry.postedAt) <= 7 * 24 * 60 * 60 * 1000
-  ));
-  const lastOriginal = [...postedOriginals]
-    .sort((left, right) => Date.parse(right.postedAt) - Date.parse(left.postedAt))[0] || null;
+  const postingRateAudit = buildAutopostPostingRateAudit(
+    allTweets,
+    PUBLISHING_V2_QUALITY_POLICY_VERSION,
+  );
   const autopostSummary = {
     enabled: context.settings.enabled,
     configuredPostsPerDay,
@@ -1296,22 +1327,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     minQueueSize: context.settings.minQueueSize,
     refillBatchLimit: 2,
     refillCanIterateUntilMinimum: true,
-    postedOriginalsLast24Hours: postedOriginalsLast24Hours.length,
-    postsRemainingInRolling24Hours: Math.max(0, 5 - postedOriginalsLast24Hours.length),
-    postedOriginalsLast7Days: postedOriginalsLast7Days.length,
-    averageOriginalsPerDayLast7Days: Number((postedOriginalsLast7Days.length / 7).toFixed(3)),
-    currentPolicyOriginalsLast7Days: postedOriginalsLast7Days.filter((entry) => (
-      entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
-    )).length,
-    lastOriginal: lastOriginal ? {
-      tweetId: lastOriginal.tweetId,
-      xTweetId: lastOriginal.xTweetId,
-      postedAt: lastOriginal.postedAt,
-      source: lastOriginal.source,
-      model: lastOriginal.model || null,
-      qualityPolicyVersion: lastOriginal.qualityPolicyVersion || null,
-      content: lastOriginal.content,
-    } : null,
+    ...postingRateAudit,
   };
   const corpusSurfaceRiskAnchors = anchors.flatMap((entry) => {
     const reasons = getVoiceCorpusTextSurfaceExclusions(entry.content);
