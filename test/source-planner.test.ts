@@ -517,7 +517,7 @@ describe('source planner', () => {
     });
     const signals = selectOperatorTopicSignals([
       topic(951, 'network-opendoor', 'Opendoor startup strategy', ['Coverage', 'Opendoor', 'Justin Ross']),
-      topic(952, 'network-self', 'Anti Fund founder introductions', ['Geoff Woo', 'Anti Fund', 'Intro']),
+      topic(952, 'network-self', 'Creator partnership alignment playbook geoffwoo antifund', ['geoffwoo', 'antifund', 'Intro']),
       topic(953, 'network-generic', 'VCs discuss early-stage founders', ['VCs', 'early-stage founders']),
     ], {
       tone: 'casual investor',
