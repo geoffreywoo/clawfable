@@ -915,7 +915,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('suppresses generative Geoffrey repair even when the critic gives actionable instructions', async () => {
+  it('suppresses Geoffrey repair when the near miss lacks enough native headroom', async () => {
     let criticCalls = 0;
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -981,16 +981,110 @@ describe('generateTweetBatchV2 integration', () => {
     expect(finalRun).toMatchObject({
       status: 'completed',
       stageCounts: expect.objectContaining({
-        postcriticRescueTargets: 1,
+        postcriticRescueTargets: 2,
         postcriticRescueEligibleTargets: 0,
         postcriticRescueRunnableTargets: 0,
-        postcriticSurgicalTargets: 1,
+        postcriticSurgicalTargets: 2,
         postcriticPairedWriterTargets: 0,
-        postcriticRescueSuppressedNegativeValue: 1,
+        postcriticRescueSuppressedNegativeValue: 2,
         draftsSelected: 1,
       }),
     });
     expect(finalRun.stageCounts.rescueDraftsGenerated || 0).toBe(0);
+  });
+
+  it('surgically repairs one high-native Geoffrey margin miss on GPT and rejudges it', async () => {
+    let criticCalls = 0;
+    mocks.accountTasteOverride = {
+      nativeVoiceScore: 0.81,
+      casualStartupScore: 0.76,
+      stiffnessRisk: 0.01,
+      voiceDriftRisk: 0,
+      cringeRisk: 0.2,
+      generatedPatternRisk: 0,
+      sourceCopyRisk: 0,
+    };
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') {
+        const parsed = JSON.parse(options.prompt);
+        if (parsed.failedAttempts.length > 0) {
+          return result(JSON.stringify({ drafts: [{
+            content: `${parsed.idea.topic} should hire a novelist.`,
+            format: 'observation',
+            posture: 'direct company judgment',
+          }, {
+            content: `i want ${parsed.idea.topic} to hire a novelist.`,
+            format: 'observation',
+            posture: 'owned company judgment',
+          }] }));
+        }
+        return result(JSON.stringify({ drafts: [{
+          content: `i'm not convinced ${parsed.idea.topic} should hire a novelist.`,
+          format: 'observation',
+          posture: 'hedged company judgment',
+        }] }));
+      }
+      if (options.task === 'copy_judgment') {
+        criticCalls += 1;
+        const candidates = JSON.parse(options.prompt).candidates;
+        const allowedIdea = candidates[0].ideaId;
+        const repaired = criticCalls > 1;
+        return result(JSON.stringify({
+          ranking: candidates.map((candidate: any) => candidate.id),
+          scores: candidates.map((candidate: any) => ({
+            id: candidate.id,
+            overall: repaired || candidate.ideaId === allowedIdea ? 0.95 : 0.86,
+            voiceFit: repaired || candidate.ideaId === allowedIdea ? 0.94 : 0.84,
+            operatorPlausibility: repaired || candidate.ideaId === allowedIdea ? 0.94 : 0.84,
+            cringeRisk: 0.05,
+            insight: repaired || candidate.ideaId === allowedIdea ? 0.94 : 0.83,
+            specificity: 0.88,
+            factualSafety: 0.99,
+            clarity: 0.94,
+            novelty: 0.84,
+            manualAnchorReskinRisk: 0.05,
+            diagnosis: repaired || candidate.ideaId === allowedIdea
+              ? 'The direct company judgment is publishable.'
+              : 'The direct company judgment is sound; remove the hedge and stop.',
+          })),
+        }));
+      }
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    const drafts = await generateTweetBatchV2({
+      ...input,
+      modelStack: 'publishing_v2_gpt_control',
+    });
+    const rescueWriterCalls = mocks.generateText.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.task === 'tweet_writing' && JSON.parse(options.prompt).failedAttempts.length > 0);
+    const rescueDrafts = mocks.upsertDraftCandidates.mock.calls
+      .flatMap((call) => call[1])
+      .filter((draft) => draft.mutationRound === 1);
+    const finalRun = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+
+    expect(criticCalls).toBe(2);
+    expect(rescueWriterCalls).toHaveLength(1);
+    expect(rescueWriterCalls[0].modelStack).toBe('publishing_v2_gpt_control');
+    expect(JSON.parse(rescueWriterCalls[0].prompt).responseContract.draftCount).toBe(2);
+    expect(rescueDrafts).toHaveLength(2);
+    expect(rescueDrafts.every((draft) => Boolean(draft.parentDraftId))).toBe(true);
+    expect(drafts).toHaveLength(2);
+    expect(drafts.some((draft) => Boolean(draft.parentDraftCandidateId))).toBe(true);
+    expect(finalRun).toMatchObject({
+      status: 'completed',
+      stageCounts: expect.objectContaining({
+        postcriticRescueEligibleTargets: expect.any(Number),
+        postcriticRescueRunnableTargets: 1,
+        postcriticPairedWriterTargets: 0,
+        rescueDraftsGenerated: 2,
+        draftsSelected: 2,
+      }),
+    });
+    expect(finalRun.stageCounts.postcriticRescueEligibleTargets).toBeGreaterThan(0);
   });
 
   it('trims and rejudges a high-margin Geoffrey alternate instead of rewriting it', async () => {
