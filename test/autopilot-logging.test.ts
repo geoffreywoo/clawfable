@@ -918,11 +918,16 @@ describe('autopilot remote debug logging', () => {
       content: 'the NBA should remove defensive three seconds. Wemby would make every possession weird.',
       topic: 'sports',
     };
-    mocks.getQueuedTweets.mockResolvedValue([sportsDraft]);
+    const secondSportsDraft = {
+      ...sportsDraft,
+      id: 'v2-sports-draft-2',
+      content: 'Caitlin Clark has turned every WNBA road game into a home game.',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([sportsDraft, secondSportsDraft]);
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 2, after: 0, certified: 0, quarantined: 2 });
     expect(mocks.updateTweet).toHaveBeenCalledWith('v2-sports-draft', expect.objectContaining({
       status: 'quarantined',
       quarantineReason: expect.stringContaining('excludes sports'),
@@ -938,6 +943,11 @@ describe('autopilot remote debug logging', () => {
         operatorDirective: 'stop_posting_sports',
       }),
     }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledTimes(2);
+    expect(mocks.addLearningSignal.mock.calls.map((call) => call[1].tweetId)).toEqual([
+      'v2-sports-draft',
+      'v2-sports-draft-2',
+    ]);
   });
 
   it('quarantines stale V2 policy artifacts instead of grandfathering them into autopost', async () => {
