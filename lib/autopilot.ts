@@ -459,9 +459,11 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     quarantinedAt: new Date().toISOString(),
     quarantineReason: issue,
   })));
-  await Promise.all(invalid
-    .filter(({ policyGate }) => policyGate === 'account_topic_policy' || policyGate === 'autopost_quality_margin')
-    .map(({ tweet, issue, policyGate }) => addLearningSignal(agent.id, {
+  const learningInvalid = invalid.filter(({ policyGate }) => (
+    policyGate === 'account_topic_policy' || policyGate === 'autopost_quality_margin'
+  ));
+  for (const { tweet, issue, policyGate } of learningInvalid) {
+    await addLearningSignal(agent.id, {
       tweetId: tweet.id,
       xTweetId: tweet.xTweetId || undefined,
       signalType: 'x_post_rejected',
@@ -479,7 +481,8 @@ async function rescoreQueuedTweetsForCurrentPolicy(
         operatorDirective: policyGate === 'account_topic_policy' ? 'stop_posting_sports' : null,
         qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
       },
-    })));
+    });
+  }
   if (invalid.length > 0) {
     await addPostLogEntry(agent.id, {
       agentId: agent.id,
