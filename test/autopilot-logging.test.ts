@@ -910,6 +910,36 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
+  it('quarantines queued sports for @geoffwoo and records structured topic feedback', async () => {
+    const sportsDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-sports-draft',
+      content: 'the NBA should remove defensive three seconds. Wemby would make every possession weird.',
+      topic: 'sports',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([sportsDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-sports-draft', expect.objectContaining({
+      status: 'quarantined',
+      quarantineReason: expect.stringContaining('excludes sports'),
+    }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      signalType: 'x_post_rejected',
+      rewardDelta: -0.9,
+      metadata: expect.objectContaining({
+        accountTopicPolicyVersion: 'account-topic-policy-1',
+        feedbackReasonCode: 'bad_source_topic',
+        policyGate: 'account_topic_policy',
+        blockedDomain: 'sports_competition',
+        operatorDirective: 'stop_posting_sports',
+      }),
+    }));
+  });
+
   it('quarantines stale V2 policy artifacts instead of grandfathering them into autopost', async () => {
     const stalePolicyDraft = {
       ...validQueuedTweet,

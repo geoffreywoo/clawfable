@@ -1111,7 +1111,8 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - Start with the reaction, bet, or question. Do not introduce the industry or teach the reader the topic.
 - The subject can be a company, product, founder, market, person, institution, cultural behavior, competition, or frontier technology. Do not force every subject into manufacturing or supply-chain language.
 - Privately identify the concrete object and tension: who is doing what, what changed, or what revealed preference matters. The final post may leave the consequence implicit when a smart reader will get it.
-- For a technical subject, use at most one technical fact. For culture, markets, sports, or founder behavior, use one specific event, incentive, behavior, or contradiction instead.
+- For a technical subject, use at most one technical fact. For culture, markets, or founder behavior, use one specific event, incentive, behavior, or contradiction instead.
+- Sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Do not propose or write them.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.
 - Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
@@ -1145,7 +1146,8 @@ export function buildGeoffreyNativeWritingBrief(): string {
 For @geoffwoo, write like a startup investor/operator reacting in public, not an industry analyst, engineer writing a memo, or social media manager.
 - Manual/operator posts are the author model. Match their casual high-context diction, compression, uneven rhythm, directness, and social posture. Do not average them into polished prose.
 - Begin where a text to another smart founder or investor would begin: the verdict, reaction, bet, or question. Do not introduce the industry first.
-- Preserve Geoffrey's demonstrated range across AI, startups, investing, products, culture, health, sports, status, and occasional frontier technology. Technical subjects should be a minority, not the default setting.
+- Preserve Geoffrey's demonstrated range across AI, startups, investing, products, culture, health, status, and occasional frontier technology. Technical subjects should be a minority, not the default setting.
+- Sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Do not propose or write them, even when they appear in historical performance or network signals.
 - Lead with a judgment about a company, product, market, person, incentive, capital, talent, culture, competition, cost, or timing. Put a mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
 - Make a human attitude legible through what the post notices and concludes. A neutral constraint plus a declared winner still reads like generated market copy, but a prefixed "i think," "i care," "i'd bet," or "i would not underwrite" does not create personality either.
 - The subject may come before the actor when that is the natural thought. Do not contort every opening into a company-outcome sentence.
@@ -1222,7 +1224,11 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(too technical|overly technical|too specialized|overly specialized|too much manufacturing|manufacturing heavy|broaden(?: the)? topics?)\b/.test(reasonText)) {
     metadata.overSpecializedTopicComplaint = true;
-    preferenceHints.push('Operator wants the demonstrated broad mix of AI, startups, investing, products, culture, health, sports, and occasional frontier technology; do not equate specificity with manufacturing detail.');
+    preferenceHints.push('Operator wants the demonstrated broad mix of AI, startups, investing, products, culture, health, and occasional frontier technology; do not equate specificity with manufacturing detail.');
+  }
+  if (/\b(?:stop|don'?t|do not|no more|not)\b[^.]{0,48}\b(?:sports?|boxing|nba|nfl|athletes?)\b|\b(?:sports?|boxing|nba|nfl|athletes?)\b[^.]{0,48}\b(?:not my style|off voice)\b/.test(reasonText)) {
+    metadata.sportsTopicOptOut = true;
+    preferenceHints.push('Sports and competitive-sports subjects are excluded for @geoffwoo, regardless of historical engagement or network momentum.');
   }
 
   if (preferenceHints.length > 0) {

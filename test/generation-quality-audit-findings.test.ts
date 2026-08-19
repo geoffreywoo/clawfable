@@ -302,6 +302,27 @@ describe('generation quality audit findings', () => {
     expect(buildGenerationAuditFindings(healthyInput() as any)).toEqual([]);
   });
 
+  it('makes queued account-topic violations visible as a live-state finding', () => {
+    const input = healthyInput();
+    input.queue.qualityEligibleCount = 4;
+    input.queue.items[0] = {
+      id: 'tweet-sports',
+      qualityEligible: false,
+      qualityIssues: ['@geoffwoo account topic policy excludes sports and competitive-sports content.'],
+      scores: { qualityMargin: 0.94 },
+      content: 'the NBA should remove defensive three seconds.',
+    } as any;
+
+    expect(buildGenerationAuditFindings(input as any)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'account_topic_policy_queue_artifacts',
+        severity: 'high',
+        scope: 'live_state',
+        evidence: expect.objectContaining({ count: 1 }),
+      }),
+    ]));
+  });
+
   it('flags a stale corpus policy and active anchors that are promotional or media-dependent', () => {
     const input = healthyInput();
     input.corpus = {
