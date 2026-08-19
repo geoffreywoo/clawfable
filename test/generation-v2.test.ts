@@ -917,6 +917,50 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('does not build or normalize sports ideas for the Geoffrey account', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['AI', 'startups', 'sports'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const sportsBrief = brief('sports', 'NBA defensive three seconds');
+    const requested = buildGenerationBriefsV2({
+      count: 1,
+      requestedTopic: 'Caitlin Clark and the WNBA',
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['sports', 'AI'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'explore', trendMixTarget: 80, trendTolerance: 'adjacent', exploration: { underusedTopics: ['sports'] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        sportsBrief.id,
+        'the NBA should remove defensive three seconds because Wemby would make every possession weird.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-sports-block',
+      briefs: [sportsBrief],
+      voiceProfile: geoffreyVoiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-19T00:00:00.000Z',
+    });
+
+    expect(requested).toEqual([]);
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['account_topic_blocked']),
+    });
+    expect(JSON.parse(buildIdeaGenerationPromptV2(
+      [brief('ai', 'AI startups')],
+      geoffreyVoiceProfile,
+    )).author.topics).not.toContain('sports');
+  });
+
   it('does not interpret repeated writing failures as loss of native topic taste', () => {
     expect(getOperatorTopicAttemptPenaltyV2('operator-written topic outcomes', 1)).toBe(0.03);
     expect(getOperatorTopicAttemptPenaltyV2('operator-written topic outcomes', 12)).toBe(0.18);
@@ -2178,7 +2222,8 @@ describe('Tweet Generation V2', () => {
       entry.creativeSeed?.object,
       entry.creativeSeed?.hiddenConstraint,
     ].filter(Boolean).join(' '));
-    expect(briefs).toHaveLength(8);
+    expect(briefs.length).toBeGreaterThanOrEqual(7);
+    expect(subjects.some((subject) => classifyGeoffreyTopicDomain(subject) === 'sports_competition')).toBe(false);
     expect(subjects.filter(isGeoffreyDeepTechnicalTopic).length).toBeLessThanOrEqual(1);
     expect(subjects.filter(isGeoffreyManufacturingMaterialsTopic).length).toBeLessThanOrEqual(1);
     const domainCounts = briefs.reduce((counts, entry) => {

@@ -421,7 +421,7 @@ describe('source planner', () => {
     expect(topic.plannerReason).toContain('two independent authors or primary-source support');
   });
 
-  it('uses a singleton operator like as a subject cue without promoting it to factual evidence', () => {
+  it('does not use a singleton sports like as a Geoffrey subject cue', () => {
     const likedTopic = {
       id: 939,
       networkTopicId: 'network-liked-boxing',
@@ -476,20 +476,11 @@ describe('source planner', () => {
     });
 
     const signalSlot = plan.slots.find((slot) => slot.briefEvidence?.mode === 'operator_topic_signal');
-    expect(plan.topicSignals?.map((topic) => topic.networkTopicId)).toContain('network-liked-boxing');
-    expect(signalSlot).toMatchObject({
-      targetTopic: 'Jake Paul NFL boxing',
-      trendTopicId: null,
-      trendHeadline: null,
-      ideaSeed: null,
-      briefEvidence: {
-        mode: 'operator_topic_signal',
-        subject: 'Jake Paul NFL boxing',
-        factualClaimAllowed: false,
-        provenanceId: 'network-liked-boxing',
-      },
-    });
-    expect(signalSlot?.briefEvidence?.instruction).toContain('do not repeat or imply the source headline');
+    expect(plan.topicSignals?.map((topic) => topic.networkTopicId)).not.toContain('network-liked-boxing');
+    expect(signalSlot?.briefEvidence?.provenanceId).not.toBe('network-liked-boxing');
+    expect(plan.slots.every((slot) => classifyGeoffreyTopicDomain(
+      `${slot.targetTopic} ${slot.trendHeadline || ''}`,
+    ) !== 'sports_competition')).toBe(true);
   });
 
   it('removes classifier debris and self-references from operator topic subjects', () => {
@@ -699,7 +690,7 @@ describe('source planner', () => {
       .toBeGreaterThanOrEqual(3);
   });
 
-  it('uses engagement cues from a different semantic domain than the qualified story', () => {
+  it('excludes sports even when network engagement and historical topics favor it', () => {
     const now = new Date().toISOString();
     const plan = buildSourcePlannerPlan({
       count: 4,
@@ -800,8 +791,10 @@ describe('source planner', () => {
       `${slot.targetTopic} ${slot.trendHeadline || ''}`,
     ));
     expect(new Set(domains).size).toBe(4);
-    expect(domains.filter((domain) => domain === 'sports_competition')).toHaveLength(1);
+    expect(domains.filter((domain) => domain === 'sports_competition')).toHaveLength(0);
     expect(domains.filter((domain) => domain === 'ai_compute')).toHaveLength(1);
+    expect(plan.acceptedTrends.some((topic) => topic.semanticDomain === 'sports_competition')).toBe(false);
+    expect(plan.rejectedTrends.some((topic) => topic.semanticDomain === 'sports_competition')).toBe(true);
   });
 
   it('turns high-performing operator topics into structured historical evidence, not generic placeholders', () => {

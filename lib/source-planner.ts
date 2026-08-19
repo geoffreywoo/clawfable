@@ -15,6 +15,7 @@ import {
 } from './trending';
 import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
 import { isGeoffreyVoiceProfile } from './account-taste';
+import { isVoiceProfileTopicBlocked } from './account-topic-policy';
 import { inferContentSpreadMechanics } from './winner-learning';
 
 export interface TrendFitScores {
@@ -873,6 +874,11 @@ export function selectOperatorTopicSignals(
   if (boundedLimit === 0) return [];
   return enrichTrendingTopics(trending, voiceProfile, learnings, tolerance)
     .filter(isSpecificOperatorSubjectSignal)
+    .filter((topic) => !isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+      topic.semanticDomain,
+    ))
     .sort((left, right) => (
       Number(isGeoffreyDeepTechnicalTopic(`${left.category} ${left.headline}`))
       - Number(isGeoffreyDeepTechnicalTopic(`${right.category} ${right.headline}`))
@@ -942,15 +948,24 @@ export function buildSourcePlannerPlan({
   fallbackTopics?: string[];
   excludedTrendTopicIds?: string[];
 }): SourcePlannerPlan {
+  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
   const excludedTrendIds = new Set(excludedTrendTopicIds.map((id) => String(id).trim()).filter(Boolean));
   const classified = enrichTrendingTopics(trending || [], voiceProfile, learnings, trendTolerance)
     .sort((a, b) => b.fitScores.total - a.fitScores.total || b.relevanceScore - a.relevanceScore);
-  const accepted = classified.filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)));
+  const accountTopicAllowed = (topic: EnrichedTrendingTopic) => !isVoiceProfileTopicBlocked(
+    voiceProfile,
+    `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+    topic.semanticDomain,
+  );
+  const accepted = classified
+    .filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)))
+    .filter(accountTopicAllowed);
   const acceptedAligned = accepted.filter((topic) => topic.sourceLane === 'trend_aligned_exploit');
   const acceptedAdjacent = accepted.filter((topic) => topic.sourceLane === 'trend_adjacent_explore');
-  const rejectedTrends = classified.filter((topic) => topic.sourceLane === 'reject');
+  const rejectedTrends = classified.filter((topic) => topic.sourceLane === 'reject' || !accountTopicAllowed(topic));
   const operatorTopicSignals = classified
     .filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)))
+    .filter(accountTopicAllowed)
     .filter(isSpecificOperatorTopicSignal)
     .sort((a, b) => (
       Number(isGeoffreyDeepTechnicalTopic(`${a.category} ${a.headline}`))
@@ -1010,7 +1025,6 @@ export function buildSourcePlannerPlan({
   };
 
   const orderedLanes = distributeLanes(laneCounts).slice(0, count);
-  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
   const rawManualTopics = pickManualTopics(learnings, [...voiceProfile.topics, ...fallbackTopics]);
   const rawFallbackPool = [...new Set([...fallbackTopics, ...voiceProfile.topics])].filter(Boolean);
   const coreDefaults = [
@@ -1021,18 +1035,23 @@ export function buildSourcePlannerPlan({
     'career, ambition, talent, and agency',
     'software, products, and technology shifts',
     'health, longevity, and human performance',
-    'sports and competitive behavior',
     'frontier technology',
   ];
   const manualTopics = geoffreyStrict
     ? [...new Set([
-        ...rawManualTopics.filter((topic) => isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))),
+        ...rawManualTopics.filter((topic) => (
+          isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))
+          && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+        )),
         ...coreDefaults,
       ])]
     : rawManualTopics;
   const fallbackPool = geoffreyStrict
     ? [...new Set([
-        ...rawFallbackPool.filter((topic) => isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))),
+        ...rawFallbackPool.filter((topic) => (
+          isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))
+          && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+        )),
         ...manualTopics,
         ...coreDefaults,
       ])]
@@ -1139,6 +1158,7 @@ export function buildSourcePlannerPlan({
           const frontierCapacityAvailable = deepTechnicalBriefs < maxDeepTechnicalBriefs
             && manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs;
           return !usedTargetTopics.has(normalizeTopic(topic))
+            && !isVoiceProfileTopicBlocked(voiceProfile, topic)
             && (!replacementDeepTechnical || deepTechnicalBriefs < maxDeepTechnicalBriefs)
             && (!replacementManufacturingMaterials || manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs)
             && (!isBroadFrontierTopic(topic) || frontierCapacityAvailable)
@@ -1169,7 +1189,7 @@ export function buildSourcePlannerPlan({
       || (lane === 'manual_core_exploit' && isBroadFrontierTopic(targetTopic))
       || (!trendHeadline && isBroadFrontierTopic(targetTopic))
     );
-    const ideaSeed = shouldAttachIdeaSeed
+    let ideaSeed = shouldAttachIdeaSeed
       ? geoffreyStrict
         ? pickGeoffreyIdeaSeed({ voiceProfile, targetTopic, slot: index + 1, usedSeedIds: usedIdeaSeedIds })
         : pickFrontierIdeaSeed({ voiceProfile, targetTopic, slot: index + 1, usedSeedIds: usedIdeaSeedIds })
@@ -1180,6 +1200,24 @@ export function buildSourcePlannerPlan({
         targetTopic = ideaSeed.topic;
       }
       plannerReason = `${plannerReason} ${ideaSeed.kind === 'frontier' ? 'Frontier' : 'Native topic'} seed: ${ideaSeed.technicalObject} / ${ideaSeed.hiddenConstraint}`;
+    }
+
+    if (geoffreyStrict && isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${targetTopic} ${trendHeadline || ''} ${ideaSeed?.topic || ''} ${ideaSeed?.technicalObject || ''}`,
+    )) {
+      const replacement = coreDefaults.find((topic) => (
+        !usedTargetTopics.has(normalizeTopic(topic))
+        && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+      )) || coreDefaults[0];
+      targetTopic = replacement;
+      trendTopicId = null;
+      trendHeadline = null;
+      operatorTopicSignal = null;
+      ideaSeed = null;
+      lane = 'manual_core_exploit';
+      mode = 'exploit';
+      plannerReason = 'Replaced a subject excluded by the current account topic policy.';
     }
 
     if (geoffreyStrict) {

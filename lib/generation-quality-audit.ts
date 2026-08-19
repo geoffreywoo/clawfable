@@ -64,8 +64,9 @@ import {
   getVoiceCorpusTextSurfaceExclusions,
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
+import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 38;
+export const GENERATION_QUALITY_AUDIT_VERSION = 39;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -127,6 +128,10 @@ export function buildGenerationQueueHandoffAudit(runs: AuditGenerationLineage) {
 function average(values: number[]): number | null {
   if (values.length === 0) return null;
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4));
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function ratio(numerator: number, denominator: number): number | null {
@@ -408,6 +413,7 @@ interface AuditFindingInput {
     items: Array<{
       id: string;
       qualityEligible: boolean;
+      qualityIssues?: string[];
       scores: CandidateJudgeBreakdown | null;
       content: string;
     }>;
@@ -510,6 +516,27 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         deficit: input.autopost.minQueueSize - input.queue.qualityEligibleCount,
       },
       action: 'Fix current-policy generation yield; do not relax voice or anti-slop gates to fill the deficit.',
+    });
+  }
+
+  const blockedAccountTopicQueueItems = input.queue.items.filter((item) => (
+    (item.qualityIssues || []).some((issue) => /account topic policy excludes sports/i.test(issue))
+  ));
+  if (blockedAccountTopicQueueItems.length > 0) {
+    add({
+      code: 'account_topic_policy_queue_artifacts',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'Queued artifacts violate the current account topic policy',
+      evidence: {
+        count: blockedAccountTopicQueueItems.length,
+        items: blockedAccountTopicQueueItems.slice(0, 8).map((item) => ({
+          id: item.id,
+          content: item.content,
+          qualityIssues: item.qualityIssues,
+        })),
+      },
+      action: 'Quarantine the blocked drafts and refill from permitted operator topics.',
     });
   }
 
@@ -697,7 +724,7 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
         concentratedDomain,
         domains: topicMix?.domains || [],
       },
-      action: 'Keep operator-engaged briefs distinct by semantic domain and rotate the remaining slots through proven startup, investing, culture, health, sports, and technology lanes before writing.',
+      action: 'Keep operator-engaged briefs distinct by semantic domain and rotate the remaining slots through permitted startup, investing, culture, health, and technology lanes before writing.',
     });
   }
 
@@ -1180,7 +1207,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
     });
-    const qualityIssues = [originIssue, tweet.quarantineReason].filter((value): value is string => Boolean(value));
+    const accountTopicIssue = getAccountTopicPolicyIssue(
+      agent.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+    );
+    const qualityIssues = [accountTopicIssue, originIssue, tweet.quarantineReason]
+      .filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
       xTweetId: tweet.xTweetId,
@@ -1219,16 +1251,28 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     minConsequence: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle) ? 0.55 : undefined,
   };
   const failedStoryAttemptDiagnostics = buildFailedStoryAttemptDiagnosticsV2(recentIdeas);
-  const storyDecisions = storyClusters.map((story) => ({
-    story,
-    rejectionCodes: getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
-    planningRejectionCodes: getStoryGenerationPlanningRejectionCodesV2(story, {
-      ...storyEditorialOptions,
-      blocks: semanticBlocks,
-      committedTweets: allTweets.filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)),
-      recentIdeas,
-    }),
-  }));
+  const storyDecisions = storyClusters.map((story) => {
+    const accountTopicBlocked = getAccountTopicPolicyIssue(
+      agent.handle,
+      `${story.topic} ${story.title} ${story.entities.join(' ')}`,
+    );
+    return {
+      story,
+      rejectionCodes: uniqueStrings([
+        ...getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
+        accountTopicBlocked ? 'account_topic_blocked' : null,
+      ]),
+      planningRejectionCodes: uniqueStrings([
+        ...getStoryGenerationPlanningRejectionCodesV2(story, {
+          ...storyEditorialOptions,
+          blocks: semanticBlocks,
+          committedTweets: allTweets.filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)),
+          recentIdeas,
+        }),
+        accountTopicBlocked ? 'account_topic_blocked' : null,
+      ]),
+    };
+  });
   const enrichedOperatorTopics = enrichTrendingTopics(
     trending,
     context.voiceProfile,
@@ -1237,7 +1281,14 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   );
   const operatorTopicSignalDecisions = enrichedOperatorTopics.map((topic) => ({
     topic,
-    rejectionCodes: getOperatorTopicSignalRejectionCodes(topic),
+    rejectionCodes: uniqueStrings([
+      ...getOperatorTopicSignalRejectionCodes(topic),
+      getAccountTopicPolicyIssue(
+        agent.handle,
+        `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+        topic.semanticDomain,
+      ) ? 'account_topic_blocked' : null,
+    ]),
   }));
   const selectedOperatorTopicSignals = selectOperatorTopicSignals(
     trending,
@@ -1527,6 +1578,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     },
     policy: {
       pipelineVersion,
+      accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
+      blockedTopicDomains: ['sports_competition'],
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,

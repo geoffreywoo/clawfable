@@ -472,6 +472,18 @@ describe('account taste scoring', () => {
     expect(feedback.preferenceHints.join(' ')).toContain('do not equate specificity with manufacturing detail');
   });
 
+  it('stores a sports opt-out as an explicit account-topic instruction', () => {
+    const feedback = classifyTasteFeedbackReason(
+      'the sports content is not in my style. stop posting about sports',
+    );
+
+    expect(feedback.metadata).toMatchObject({
+      sportsTopicOptOut: true,
+      tasteComplaint: true,
+    });
+    expect(feedback.preferenceHints.join(' ')).toContain('excluded for @geoffwoo');
+  });
+
   it('keeps review-grade generated patterns out of Geoffrey autopost queue', () => {
     const templated = assessAccountTaste(
       'creator economy question:\n\nwhen generation becomes unlimited, who owns review and provenance?',

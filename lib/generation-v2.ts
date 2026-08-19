@@ -53,6 +53,7 @@ import {
   buildGeoffreyNativeV2WriterContract,
   isGeoffreyVoiceProfile,
 } from './account-taste';
+import { getVoiceProfileTopicPolicyIssue, isVoiceProfileTopicBlocked } from './account-topic-policy';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
@@ -1568,6 +1569,7 @@ export function buildGenerationBriefsV2({
   ].filter(Boolean).join(' ');
   const portfolioAllowsTopic = (value: string, domainValue = value): boolean => {
     if (!geoffreyPortfolio) return true;
+    if (isVoiceProfileTopicBlocked(voiceProfile, value)) return false;
     if (
       isGeoffreyDeepTechnicalTopic(value)
       && briefs.filter((brief) => isGeoffreyDeepTechnicalTopic(briefTechnicalContext(brief))).length >= maxDeepTechnicalBriefs
@@ -1587,6 +1589,7 @@ export function buildGenerationBriefsV2({
 
   const requested = requestedTopic?.replace(/\s+/g, ' ').trim().slice(0, 280);
   if (requested) {
+    if (isVoiceProfileTopicBlocked(voiceProfile, requested)) return [];
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile,
       targetTopic: requested,
@@ -1736,7 +1739,11 @@ export function buildGenerationBriefsV2({
   const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
   const recentAttemptedSubjects = recentOperatorAttemptIdeas(recentIdeas, now).map(ideaText);
   const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
-    .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)));
+    .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
+    .filter((candidate) => !isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${candidate.topic} ${candidate.historicalAngle || ''} ${(candidate.personalTopicSignals || []).join(' ')}`,
+    ));
   const rankedOperatorCandidates = rankOperatorTopicCandidates(
     operatorCandidates,
     recentTopicKeys,
@@ -1834,7 +1841,12 @@ export function buildGenerationBriefsV2({
     }
   }
 
-  return briefs.slice(0, briefCount);
+  return briefs
+    .filter((brief) => !isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${brief.topic} ${brief.title} ${brief.creativeSeed?.object || ''}`,
+    ))
+    .slice(0, briefCount);
 }
 
 export function buildIdeaGenerationPromptV2(
@@ -1859,7 +1871,9 @@ export function buildIdeaGenerationPromptV2(
   return JSON.stringify({
     author: {
       tone: voiceProfile.tone,
-      topics: voiceProfile.topics.slice(0, 16),
+      topics: voiceProfile.topics
+        .filter((topic) => !isVoiceProfileTopicBlocked(voiceProfile, topic))
+        .slice(0, 16),
       worldview: voiceProfile.summary.slice(0, 900),
       communicationStyle: voiceProfile.communicationStyle.slice(0, 600),
     },
@@ -2474,6 +2488,12 @@ export function normalizeIdeaCandidatesV2({
     if (brief.evidenceMode === 'operator_opinion' && unsupportedOperatorEvidence(ideaText(candidate))) {
       candidate.rejectionCodes.push('unsupported_operator_fact');
     }
+    if (getVoiceProfileTopicPolicyIssue(
+      voiceProfile,
+      `${brief.topic} ${brief.title} ${ideaText(candidate)}`,
+    )) {
+      candidate.rejectionCodes.push('account_topic_blocked');
+    }
     candidate.rejectionCodes.push(...getOperatorTopicConstraintIssuesV2(
       ideaText(candidate),
       brief.operatorTopicContext,
@@ -2992,6 +3012,7 @@ export function selectRankedIdeaPortfolioV2({
       verifiedSource: brief?.evidenceMode === 'verified_source',
       deepTechnical: isGeoffreyDeepTechnicalTopic(topicContext),
       manufacturingMaterials: isGeoffreyManufacturingMaterialsTopic(topicContext),
+      accountTopicBlocked: isVoiceProfileTopicBlocked(voiceProfile, topicContext),
     };
   };
 
@@ -3004,7 +3025,8 @@ export function selectRankedIdeaPortfolioV2({
 
   const add = (idea: IdeaCandidate): boolean => {
     if (selectedBriefs.has(idea.briefId)) return false;
-    const { verifiedSource, deepTechnical, manufacturingMaterials } = portfolioTraits(idea);
+    const { verifiedSource, deepTechnical, manufacturingMaterials, accountTopicBlocked } = portfolioTraits(idea);
+    if (accountTopicBlocked) return false;
     if (geoffreyPortfolio && (
       (verifiedSource && selectedVerifiedSources >= 1)
       || (deepTechnical && selectedDeepTechnical >= 1)
@@ -3114,7 +3136,9 @@ async function selectIdeas({
   const judgePayload = {
     author: {
       tone: input.voiceProfile.tone,
-      topics: input.voiceProfile.topics.slice(0, 16),
+      topics: input.voiceProfile.topics
+        .filter((topic) => !isVoiceProfileTopicBlocked(input.voiceProfile, topic))
+        .slice(0, 16),
       worldview: input.voiceProfile.summary.slice(0, 900),
       communicationStyle: input.voiceProfile.communicationStyle.slice(0, 600),
     },
@@ -3954,11 +3978,16 @@ function preflightDraft({
     untrustedSourceTexts,
   });
   const technicalLane = isGeoffreyDeepTechnicalTopic(`${idea.topic} ${ideaPublicMove(idea)} ${idea.claim} ${content}`);
+  const accountTopicIssue = getVoiceProfileTopicPolicyIssue(
+    input.voiceProfile,
+    `${brief.topic} ${brief.title} ${ideaText(idea)} ${content}`,
+  );
 
   if (generatedIssue) codes.push('incomplete_or_prompt_leak');
   if (generatedWritingIssue) codes.push('generated_writing_pattern');
   if (lengthIssue) codes.push('over_x_length');
   if (policyIssue) codes.push('autopost_policy');
+  if (accountTopicIssue) codes.push('account_topic_blocked');
   if (authorityIssue) codes.push('unearned_authority');
   if (brief.evidenceMode === 'verified_source' && claimIssue) codes.push('claim_evidence');
   if (sourceAttributionIssue) codes.push('source_attribution_dropped');

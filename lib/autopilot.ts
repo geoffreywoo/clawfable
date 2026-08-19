@@ -80,6 +80,7 @@ import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-sa
 import { buildGenerationLearningMetadata } from './learning-loop';
 import { assertAgentAutomationEntitlement } from './automation-entitlement';
 import { createTweetFromGeneratedCandidate } from './tweet-persistence';
+import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
 
 export interface AutopilotResult {
   agentId: string;
@@ -189,7 +190,8 @@ function isAutopostableQueuedTweet(tweet: Tweet): boolean {
 
 function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): boolean {
   return isAutopostableQueuedTweet(tweet)
-    && !getGeneratedPublishIssue(tweet);
+    && !getGeneratedPublishIssue(tweet)
+    && !getAccountTopicPolicyIssue(agent?.handle, `${tweet.topic || ''} ${tweet.content}`);
 }
 
 const NON_ORIGINAL_LOG_FORMATS = new Set([
@@ -224,7 +226,8 @@ function latestSuccessfulOriginalPostAt(postLog: PostLogEntry[]): string | null 
 }
 
 function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null {
-  return getAutopostPolicyIssue(tweet.content, {
+  return getAccountTopicPolicyIssue(agent.handle, `${tweet.topic || ''} ${tweet.content}`)
+    || getAutopostPolicyIssue(tweet.content, {
     allowedMentions: [agent.handle],
     allowMentions: tweet.format === 'shoutout',
   });
@@ -416,10 +419,18 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
 ): Promise<Tweet[]> {
   const valid: Tweet[] = [];
-  const invalid: Array<{ tweet: Tweet; issue: string }> = [];
+  const invalid: Array<{
+    tweet: Tweet;
+    issue: string;
+    policyGate: 'account_topic_policy' | 'generation_origin' | 'autopost_quality_margin';
+  }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
   for (const tweet of queuedTweets) {
+    const accountTopicIssue = getAccountTopicPolicyIssue(
+      agent.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+    );
     const originIssue = getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion });
     const accountMarginIssue = (
       !originIssue
@@ -430,8 +441,16 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     )
       ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
       : null;
-    const issue = originIssue || accountMarginIssue;
-    if (issue) invalid.push({ tweet, issue });
+    const issue = accountTopicIssue || originIssue || accountMarginIssue;
+    if (issue) invalid.push({
+      tweet,
+      issue,
+      policyGate: accountTopicIssue
+        ? 'account_topic_policy'
+        : originIssue
+          ? 'generation_origin'
+          : 'autopost_quality_margin',
+    });
     else valid.push(tweet);
   }
   await Promise.all(invalid.map(({ tweet, issue }) => updateTweet(tweet.id, {
@@ -441,23 +460,23 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     quarantineReason: issue,
   })));
   await Promise.all(invalid
-    .filter(({ tweet }) => (
-      typeof tweet.finalCriticScores?.qualityMargin === 'number'
-      && tweet.finalCriticScores.qualityMargin < requiredAutopostMargin
-    ))
-    .map(({ tweet, issue }) => addLearningSignal(agent.id, {
+    .filter(({ policyGate }) => policyGate === 'account_topic_policy' || policyGate === 'autopost_quality_margin')
+    .map(({ tweet, issue, policyGate }) => addLearningSignal(agent.id, {
       tweetId: tweet.id,
       xTweetId: tweet.xTweetId || undefined,
       signalType: 'x_post_rejected',
       surface: 'queue',
-      rewardDelta: -0.7,
+      rewardDelta: policyGate === 'account_topic_policy' ? -0.9 : -0.7,
       reason: issue,
       inferred: true,
       metadata: {
         pipelineVersion: tweet.pipelineVersion || null,
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
-        feedbackReasonCode: 'bad_writing',
-        policyGate: 'autopost_quality_margin',
+        accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
+        feedbackReasonCode: policyGate === 'account_topic_policy' ? 'bad_source_topic' : 'bad_writing',
+        policyGate,
+        blockedDomain: policyGate === 'account_topic_policy' ? 'sports_competition' : null,
+        operatorDirective: policyGate === 'account_topic_policy' ? 'stop_posting_sports' : null,
         qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
       },
     })));
@@ -472,7 +491,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       postedAt: new Date().toISOString(),
       source: 'autopilot',
       action: 'skipped',
-      reason: `Quarantined ${invalid.length} queued artifact${invalid.length === 1 ? '' : 's'} without valid V2 or operator provenance.`,
+      reason: `Quarantined ${invalid.length} queued artifact${invalid.length === 1 ? '' : 's'} that failed current generation, quality, or account-topic policy.`,
     });
   }
   return valid;
@@ -2571,6 +2590,14 @@ export async function refillQueue(
         const originIssue = getGeneratedPublishIssue(item);
         if (originIssue) {
           await rejectCandidate(item, 'generated_publish_issue', originIssue);
+          continue;
+        }
+        const accountTopicIssue = getAccountTopicPolicyIssue(
+          agent.handle,
+          `${item.targetTopic || ''} ${item.content}`,
+        );
+        if (accountTopicIssue) {
+          await rejectCandidate(item, 'account_topic_blocked', accountTopicIssue);
           continue;
         }
         const completenessIssue = getTweetCompletenessIssue(item.content);
