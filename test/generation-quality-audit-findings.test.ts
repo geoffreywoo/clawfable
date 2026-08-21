@@ -323,6 +323,25 @@ describe('generation quality audit findings', () => {
     ]));
   });
 
+  it('fails visibly when a portfolio-company queue entry violates constructive alignment', () => {
+    const input = healthyInput() as any;
+    input.portfolio = {
+      briefDue: false,
+      nextBriefCount: 1,
+      queuePolicyIssueCount: 1,
+      queuedCount: 1,
+      postedLast7Count: 2,
+    };
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'portfolio_company_queue_policy_failure',
+        severity: 'critical',
+        scope: 'live_state',
+      }),
+    ]));
+  });
+
   it('flags a stale corpus policy and active anchors that are promotional or media-dependent', () => {
     const input = healthyInput();
     input.corpus = {

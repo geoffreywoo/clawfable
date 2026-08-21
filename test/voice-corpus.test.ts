@@ -173,6 +173,34 @@ describe('versioned voice corpus', () => {
     expect(blocked?.exclusionReasons).toContain('explicitly blocked example');
   });
 
+  it('keeps sports out of Geoffrey diction and topic learning even when the post performs', () => {
+    const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
+    const sports = performance(120, {
+      xTweetId: 'x-sports-winner',
+      content: 'UFC needs to book this fight now because the matchup is too good to waste.',
+      topic: 'UFC combat sports',
+      likes: 5000,
+      retweets: 500,
+      replies: 300,
+    });
+    const snapshot = buildVoiceCorpusSnapshot({
+      agentId: 'agent-geoffwoo',
+      accountHandle: 'geoffwoo',
+      history: [...history, sports],
+      tweets: [],
+      postLog: [],
+      signals: [],
+      curation: { pinnedXTweetIds: [], blockedXTweetIds: [], updatedAt: '2026-06-01T00:00:00.000Z' },
+      generatedAt: '2026-07-31T00:00:00.000Z',
+    });
+    const entry = snapshot.entries.find((candidate) => candidate.xTweetId === sports.xTweetId);
+
+    expect(entry?.dispositions).not.toContain('topic_signal');
+    expect(entry?.dispositions).not.toContain('diction_anchor');
+    expect(entry?.dispositions).toContain('excluded');
+    expect(entry?.exclusionReasons.join(' ')).toContain('excludes sports');
+  });
+
   it('keeps promotions, media captions, and incomplete text out of diction anchors', () => {
     const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
     const questionable = [

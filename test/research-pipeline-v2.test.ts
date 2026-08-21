@@ -117,12 +117,11 @@ describe('research agenda and story qualification', () => {
       tweets: [],
     });
 
-    expect(built.queries.slice(0, 4)).toEqual([
+    expect(built.queries.slice(0, 2)).toEqual([
       'technology products software developers startups companies',
       'startup founders funding acquisitions products customers',
-      'inference ASIC HBM bandwidth rack power tokens per watt',
-      'hybrid bonding alignment yield chiplets',
     ]);
+    expect(built.queries.slice(2, 4).every((query) => query.endsWith('latest product launch funding customers'))).toBe(true);
     expect(built.queries).toEqual(expect.arrayContaining(['crypto', 'tech', 'startup']));
     expect(built.queries.filter((query) => /(?:inference|bonding|robot|transformer|tungsten|antimony|gallium|graphite|fluorspar)/i.test(query)).length).toBeLessThanOrEqual(12);
   });

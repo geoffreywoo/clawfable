@@ -42,6 +42,20 @@ describe('generated tweet persistence', () => {
         trustTier: 'primary',
         claim: 'Memory bandwidth sets the serving constraint.',
       }],
+      portfolioCompanyContext: {
+        policyVersion: 'antifund-portfolio-alignment-1',
+        snapshotVersion: 'antifund-portfolio-2026-08-21',
+        snapshotExpiresAt: '2026-11-19T00:00:00.000Z',
+        companyId: 'etched',
+        companyName: 'Etched',
+        companyUrl: 'https://www.etched.com/',
+        category: 'ai_infrastructure_national_resilience',
+        description: 'Purpose-built chips for transformer inference.',
+        sportsAdjacent: false,
+        relationship: 'antifund_selected_investment',
+        intent: 'live_development',
+        sourceUrl: 'https://antifund.com/#portfolio',
+      },
     } as any, { status: 'preview' });
 
     expect(tweet).toMatchObject({
@@ -63,6 +77,7 @@ describe('generated tweet persistence', () => {
       ideaId: 'idea-v2-provenance',
       draftCandidateId: 'draft-v2-provenance',
       evidenceReferences: [expect.objectContaining({ sourceDocumentId: 'source-v2-provenance' })],
+      portfolioCompanyContext: expect.objectContaining({ companyId: 'etched' }),
     });
 
     const edited = await updateTweet(tweet.id, {

@@ -71,6 +71,7 @@ export function buildGenerationLearningMetadata(
     | 'ideaId'
     | 'draftCandidateId'
     | 'evidenceReferences'
+    | 'portfolioCompanyContext'
   >,
 ): Record<string, string | number | boolean | null> {
   return {
@@ -83,6 +84,10 @@ export function buildGenerationLearningMetadata(
     draftCandidateId: tweet.draftCandidateId || null,
     evidenceCount: tweet.evidenceReferences?.length || 0,
     evidenceSourceIds: tweet.evidenceReferences?.map((reference) => reference.sourceDocumentId).join(',') || null,
+    portfolioCompanyId: tweet.portfolioCompanyContext?.companyId || null,
+    portfolioCompanyName: tweet.portfolioCompanyContext?.companyName || null,
+    portfolioCompanyPolicyVersion: tweet.portfolioCompanyContext?.policyVersion || null,
+    portfolioCompanySnapshotVersion: tweet.portfolioCompanyContext?.snapshotVersion || null,
   };
 }
 

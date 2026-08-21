@@ -155,6 +155,18 @@ function rankingResponse(prompt: string, key: 'ideas' | 'candidates') {
 function writerResponse(prompt: string) {
   const parsed = JSON.parse(prompt);
   const topic = parsed.idea.topic;
+  const portfolioCompany = parsed.subjectContext?.portfolioCompanyContext?.companyName;
+  if (portfolioCompany) {
+    return result(JSON.stringify({ drafts: [{
+      content: `${portfolioCompany} can prove the buyer decision before reserving expensive capacity. the product launch order matters more than the demo.`,
+      format: 'observation',
+      posture: 'plain company-building judgment',
+    }, {
+      content: `${portfolioCompany} gets interesting as a platform when customers commit before the full system exists.`,
+      format: 'hot_take',
+      posture: 'customer commitment observation',
+    }] }), 'anthropic');
+  }
   return result(JSON.stringify({ drafts: [{
     content: `${topic}: prove the buyer decision before reserving the expensive capacity. the launch order matters more than the demo.`,
     format: 'observation',
@@ -215,6 +227,12 @@ const input = {
     paidCurrency: null,
   },
 } as any;
+
+const portfolioSatisfiedTweets = [
+  { id: 'portfolio-1', agentId: 'agent-1', content: 'Etched will matter for inference.', status: 'queued', type: 'original', topic: 'AI', createdAt: '2026-08-01T00:00:00.000Z' },
+  { id: 'portfolio-2', agentId: 'agent-1', content: 'Cognition can become a massive company.', status: 'queued', type: 'original', topic: 'startups', createdAt: '2026-08-01T00:00:00.000Z' },
+  { id: 'portfolio-3', agentId: 'agent-1', content: 'founders notice constraints early.', status: 'queued', type: 'original', topic: 'founders', createdAt: '2026-08-01T00:00:00.000Z' },
+] as any;
 
 const researchTopics = [
   ['AI startups', 'Inference Lab', 'Compiler release cuts deployment staffing.', 'Inference Lab documents lower headcount requirements for model serving.'],
@@ -592,7 +610,7 @@ describe('generateTweetBatchV2 integration', () => {
       throw new Error(`Unexpected task ${options.task}`);
     });
 
-    const drafts = await generateTweetBatchV2(input);
+    const drafts = await generateTweetBatchV2({ ...input, allTweets: portfolioSatisfiedTweets });
     const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
     const judgedOriginals = persistedDrafts.filter((draft) => (
       draft.mutationRound === 0 && typeof draft.judgeScore === 'number'
@@ -964,6 +982,7 @@ describe('generateTweetBatchV2 integration', () => {
     const drafts = await generateTweetBatchV2({
       ...input,
       modelStack: 'publishing_v2_gpt_control',
+      allTweets: portfolioSatisfiedTweets,
     });
     const rescueWriterCalls = mocks.generateText.mock.calls
       .map(([options]) => options)
@@ -1222,7 +1241,14 @@ describe('generateTweetBatchV2 integration', () => {
     expect(drafts).toHaveLength(2);
     expect(drafts.every((draft) => draft.sourceLane === 'manual_core_exploit')).toBe(true);
     expect(drafts.every((draft) => draft.evidenceReferences.length === 0)).toBe(true);
-    expect(drafts.every((draft) => draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'operator_topic'))).toBe(true);
+    expect(drafts.every((draft) => draft.generationEvidenceReferences?.some((reference: any) => (
+      reference.kind === 'operator_topic' || reference.kind === 'portfolio_company'
+    )))).toBe(true);
+    expect(drafts.some((draft) => draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'operator_topic'))).toBe(true);
+    expect(drafts.some((draft) => (
+      draft.portfolioCompanyContext
+      && draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'portfolio_company')
+    ))).toBe(true);
     expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1].every((idea: any) => idea.creativeSeedId)).toBe(true);
     expect(mocks.generateText).toHaveBeenCalled();
     expect(mocks.saveGenerationRun.mock.calls.at(-1)?.[1]).toMatchObject({

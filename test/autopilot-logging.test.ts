@@ -227,6 +227,7 @@ vi.mock('@/lib/ai', () => ({
 
 import { archiveStaleNetworkTopicQueue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
 import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
+import { ACCOUNT_TOPIC_POLICY_VERSION } from '@/lib/account-topic-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 const baseAgent = {
@@ -936,7 +937,7 @@ describe('autopilot remote debug logging', () => {
       signalType: 'x_post_rejected',
       rewardDelta: -0.9,
       metadata: expect.objectContaining({
-        accountTopicPolicyVersion: 'account-topic-policy-1',
+        accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
         feedbackReasonCode: 'bad_source_topic',
         policyGate: 'account_topic_policy',
         blockedDomain: 'sports_competition',
@@ -948,6 +949,37 @@ describe('autopilot remote debug logging', () => {
       'v2-sports-draft',
       'v2-sports-draft-2',
     ]);
+  });
+
+  it('keeps a qualified Betr company-business draft eligible while the sports ban remains active', async () => {
+    const portfolioDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-betr-business-draft',
+      content: 'Betr can build the consumer media and distribution brand for sports betting.',
+      topic: 'sports business',
+      portfolioCompanyContext: {
+        policyVersion: 'antifund-portfolio-alignment-2',
+        snapshotVersion: 'antifund-portfolio-2026-08-21',
+        snapshotExpiresAt: '2026-11-19T00:00:00.000Z',
+        companyId: 'betr',
+        companyName: 'Betr',
+        companyUrl: 'https://betr.app/',
+        category: 'consumer_platforms_brands',
+        description: 'Sports betting, fantasy, and media.',
+        sportsAdjacent: true,
+        relationship: 'antifund_selected_investment',
+        intent: 'constructive_conviction',
+        sourceUrl: 'https://antifund.com/#portfolio',
+      },
+    };
+    mocks.getQueuedTweets.mockResolvedValue([portfolioDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
   });
 
   it('quarantines stale V2 policy artifacts instead of grandfathering them into autopost', async () => {

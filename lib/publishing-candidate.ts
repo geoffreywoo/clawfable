@@ -15,6 +15,7 @@ import type {
   GenerationSurface,
   MediaExperimentType,
   PostPortfolioRole,
+  PortfolioCompanyGenerationContext,
   PromptStrategy,
   TweetEvidenceReference,
 } from './types';
@@ -52,6 +53,7 @@ export interface PublishingCandidate {
   parentDraftCandidateId?: string | null;
   evidenceReferences?: TweetEvidenceReference[] | null;
   generationEvidenceReferences?: GenerationEvidenceReference[] | null;
+  portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;

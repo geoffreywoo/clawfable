@@ -65,8 +65,20 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
+import {
+  ANTIFUND_PORTFOLIO_COMPANIES,
+  ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
+  ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
+  ANTIFUND_PORTFOLIO_SOURCE_URL,
+  buildAntiFundPortfolioContext,
+  findAntiFundPortfolioCompanies,
+  findSingleAntiFundPortfolioCompany,
+  getAntiFundPortfolioPolicyIssue,
+  isAntiFundPortfolioBriefDue,
+} from './antifund-portfolio';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 39;
+export const GENERATION_QUALITY_AUDIT_VERSION = 40;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -464,6 +476,13 @@ interface AuditFindingInput {
     operatorTopicSignalEligibleCount?: number;
     operatorTopicSignalRejectionCounts?: Array<{ value: string; count: number }>;
   };
+  portfolio?: {
+    briefDue: boolean;
+    nextBriefCount: number;
+    queuePolicyIssueCount: number;
+    queuedCount: number;
+    postedLast7Count: number;
+  };
 }
 
 export function buildGenerationAuditFindings(input: AuditFindingInput): GenerationAuditFinding[] {
@@ -474,6 +493,27 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     .flatMap((group) => group.topRejectionCodes || [])
     .filter((entry) => entry.value === 'final_source_copy_risk')
     .reduce((sum, entry) => sum + entry.count, 0) || 0;
+
+  if ((input.portfolio?.queuePolicyIssueCount || 0) > 0) {
+    add({
+      code: 'portfolio_company_queue_policy_failure',
+      severity: 'critical',
+      scope: 'live_state',
+      title: 'Queued portfolio-company copy violates the constructive promotion policy',
+      evidence: input.portfolio || {},
+      action: 'Quarantine the affected queue entries, preserve the rejection receipt, and refill only through the current portfolio policy.',
+    });
+  }
+  if (input.portfolio?.briefDue && input.portfolio.nextBriefCount === 0) {
+    add({
+      code: 'portfolio_company_brief_lane_empty',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'The next generation plan is missing a due portfolio-company brief',
+      evidence: input.portfolio,
+      action: 'Restore one rotating non-sports Anti Fund portfolio subject without relaxing evidence, voice, or anti-slop gates.',
+    });
+  }
 
   if (input.identity.status !== 'verified') {
     add({
@@ -1203,6 +1243,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   }));
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
+  const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
+  const isGeoffrey = ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle);
   const queueItems = queue.map((tweet) => {
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
@@ -1210,8 +1252,16 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const accountTopicIssue = getAccountTopicPolicyIssue(
       agent.handle,
       `${tweet.topic || ''} ${tweet.content}`,
+      null,
+      tweet.portfolioCompanyContext,
     );
-    const qualityIssues = [accountTopicIssue, originIssue, tweet.quarantineReason]
+    const portfolioCompanyIssue = isGeoffrey || tweet.portfolioCompanyContext
+      ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+      : null;
+    const matchedPortfolioCompanies = findAntiFundPortfolioCompanies(
+      `${tweet.topic || ''} ${tweet.content}`,
+    );
+    const qualityIssues = [accountTopicIssue, portfolioCompanyIssue, originIssue, tweet.quarantineReason]
       .filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
@@ -1220,6 +1270,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       sourceLane: tweet.sourceLane || null,
       trendTopicId: tweet.trendTopicId || null,
       sourceEvidenceCount: tweet.sourceEvidenceTexts?.length || 0,
+      portfolioCompanyContext: tweet.portfolioCompanyContext || null,
+      portfolioCompanyMatches: matchedPortfolioCompanies.map((company) => company.id),
+      portfolioCompanyIssue,
       qualityEligible: qualityIssues.length === 0 && !tweet.quarantinedAt,
       qualityIssues,
       scores: tweet.finalCriticScores || null,
@@ -1246,15 +1299,20 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const postedGenerated = generatedPostedTweets(allTweets);
   const activeQueueItems = queueItems.filter((item) => item.status === 'queued' && !item.quarantinedAt);
   const identity = buildAgentIdentityAudit(agent);
-  const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
   const storyEditorialOptions = {
     minConsequence: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle) ? 0.55 : undefined,
   };
   const failedStoryAttemptDiagnostics = buildFailedStoryAttemptDiagnosticsV2(recentIdeas);
   const storyDecisions = storyClusters.map((story) => {
+    const storyText = `${story.topic} ${story.title} ${story.entities.join(' ')}`;
+    const portfolioCompany = findSingleAntiFundPortfolioCompany(storyText, {
+      exactEntities: story.entities,
+    });
     const accountTopicBlocked = getAccountTopicPolicyIssue(
       agent.handle,
-      `${story.topic} ${story.title} ${story.entities.join(' ')}`,
+      storyText,
+      null,
+      portfolioCompany ? buildAntiFundPortfolioContext(portfolioCompany, 'live_development') : null,
     );
     return {
       story,
@@ -1336,17 +1394,62 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     style: context.style,
     trending,
     allTweets,
+    signals: context.signals,
     blocks: semanticBlocks,
     recentIdeas,
     seedRotationKey: `audit:${agent.id}:${PUBLISHING_V2_QUALITY_POLICY_VERSION}`,
   });
   const nextBriefLaneCounts = countBy(nextBriefPlan.map((brief) => (
-    brief.evidenceMode === 'verified_source'
+    brief.portfolioCompanyContext
+      ? 'portfolio_company'
+      : brief.evidenceMode === 'verified_source'
       ? 'verified_source'
       : brief.trendTopicId
         ? 'operator_engaged_subject'
         : 'durable_operator_topic'
   )));
+  const portfolioBriefDue = isGeoffrey && isAntiFundPortfolioBriefDue(allTweets, context.signals);
+  const portfolioNextBriefs = nextBriefPlan.filter((brief) => Boolean(brief.portfolioCompanyContext));
+  const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  const postedLast7 = allTweets.filter((tweet) => {
+    if (tweet.type === 'reply' || !tweet.xTweetId || !['posted', 'deleted_from_x'].includes(tweet.status)) return false;
+    const postedAt = Date.parse(tweet.postedAt || tweet.createdAt);
+    return Number.isFinite(postedAt) && postedAt >= sevenDaysAgo;
+  });
+  const portfolioPostedLast7 = postedLast7.flatMap((tweet) => {
+    const matches = tweet.portfolioCompanyContext
+      ? [tweet.portfolioCompanyContext.companyId]
+      : findAntiFundPortfolioCompanies(`${tweet.topic || ''} ${tweet.content}`).map((company) => company.id);
+    return matches.length > 0 ? [{ tweet, companyIds: matches }] : [];
+  });
+  const portfolioQueueItems = queueItems.filter((item) => (
+    Boolean(item.portfolioCompanyContext) || item.portfolioCompanyMatches.length > 0
+  ));
+  const portfolioSummary = {
+    policyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+    snapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
+    snapshotExpiresAt: ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
+    sourceUrl: ANTIFUND_PORTFOLIO_SOURCE_URL,
+    companyCount: ANTIFUND_PORTFOLIO_COMPANIES.length,
+    generationEligibleCompanyCount: ANTIFUND_PORTFOLIO_COMPANIES.length,
+    sportsAdjacentCompanies: ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => company.sportsAdjacent).map((company) => company.name),
+    sportsPortfolioRule: 'Betr and Kings League require a company-business angle; unrelated games, athletes, players, scores, matchups, and picks remain blocked.',
+    briefDue: portfolioBriefDue,
+    nextBriefCount: portfolioNextBriefs.length,
+    nextBriefCompanies: portfolioNextBriefs.map((brief) => brief.portfolioCompanyContext?.companyName).filter(Boolean),
+    queuedCount: portfolioQueueItems.length,
+    queueShare: ratio(portfolioQueueItems.length, activeQueueItems.length),
+    queuePolicyIssueCount: portfolioQueueItems.filter((item) => Boolean(item.portfolioCompanyIssue)).length,
+    queuedCompanyCounts: countBy(portfolioQueueItems.flatMap((item) => (
+      item.portfolioCompanyContext
+        ? [item.portfolioCompanyContext.companyId]
+        : item.portfolioCompanyMatches
+    ))),
+    postedLast7Count: portfolioPostedLast7.length,
+    postedLast7Share: ratio(portfolioPostedLast7.length, postedLast7.length),
+    postedLast7GeneratedCount: portfolioPostedLast7.filter(({ tweet }) => tweet.contentProvenance === 'generated_v2').length,
+    postedLast7CompanyCounts: countBy(portfolioPostedLast7.flatMap((entry) => entry.companyIds)),
+  };
   const operatorTopicTaste = (context.learnings?.manualTopicProfile || []).map((cluster) => {
     const topTweets = cluster.topTweets || [];
     const cleanSubjectCueSources = topTweets.filter((tweet) => (
@@ -1388,6 +1491,16 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       content: entry.content,
     }] : [];
   });
+  const accountBlockedAnchors = anchors.filter((entry) => {
+    const content = `${entry.topic} ${entry.content}`;
+    const portfolioCompany = findSingleAntiFundPortfolioCompany(content);
+    return getAccountTopicPolicyIssue(
+      agent.handle,
+      content,
+      null,
+      portfolioCompany ? buildAntiFundPortfolioContext(portfolioCompany, 'constructive_conviction') : null,
+    );
+  });
   const corpusSummary = corpus ? {
     snapshotId: corpus.snapshotId,
     schemaVersion: corpus.version,
@@ -1401,6 +1514,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       ? Number(((anchors.length - generatedAnchors.length) / anchors.length).toFixed(4))
       : null,
     knownGeneratedAnchorCount: generatedAnchors.length,
+    accountBlockedAnchorCount: accountBlockedAnchors.length,
+    accountBlockedAnchors: accountBlockedAnchors.slice(0, 12).map(summarizeCorpusEntry),
     surfaceRiskAnchorCount: corpusSurfaceRiskAnchors.length,
     surfaceRiskAnchors: corpusSurfaceRiskAnchors.slice(0, 12),
     dispositionCounts: countBy(corpus.entries.flatMap((entry) => entry.dispositions)),
@@ -1551,6 +1666,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       operatorTopicSignalEligibleCount: operatorTopicSignalDecisions.filter((decision) => decision.rejectionCodes.length === 0).length,
       operatorTopicSignalRejectionCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
     },
+    portfolio: portfolioSummary,
   });
   const findingCounts = {
     critical: findingItems.filter((finding) => finding.severity === 'critical').length,
@@ -1580,6 +1696,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       pipelineVersion,
       accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
       blockedTopicDomains: ['sports_competition'],
+      portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+      portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
@@ -1601,6 +1719,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     autopost: autopostSummary,
     corpus: corpusSummary,
     queue: queueSummary,
+    portfolio: portfolioSummary,
     sources: {
       nextBriefPlan: {
         deterministicSeedPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
@@ -1618,6 +1737,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
           storyClusterId: brief.storyClusterId,
           trendTopicId: brief.trendTopicId,
           operatorTopicContext: brief.operatorTopicContext || null,
+          portfolioCompanyContext: brief.portfolioCompanyContext || null,
           exactSubjectCueCount: brief.personalTopicSignals?.length || 0,
           exactSubjectCues: (brief.personalTopicSignals || []).map((signal) => signal.replace(/:/g, ' ')),
           exactSubjectCueProvenance: (brief.personalTopicSignals?.length || 0) > 0

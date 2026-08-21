@@ -104,6 +104,36 @@ describe('research adapters', () => {
     expect(documents.find((document) => document.publisher === '@builder')).toMatchObject({ isPrimary: true, trustTier: 'primary' });
   });
 
+  it('treats an official portfolio company X post as first-party evidence', () => {
+    const [document] = sourceDocumentsFromTrending('agent-1', [{
+      id: 4,
+      headline: 'Etched ships an inference rack',
+      source: '@Etched',
+      sourceType: 'x',
+      sourceUrl: 'https://x.com/Etched/status/4',
+      relevanceScore: 95,
+      category: 'ai',
+      timestamp: now.toISOString(),
+      tweetCount: 1,
+      evidence: [{
+        tweetId: '4', author: 'Etched', text: 'We shipped our first rack to Jane Street.', createdAt: now.toISOString(),
+        sourceUrl: 'https://x.com/Etched/status/4', likes: 100, retweets: 20, replies: 5, quotes: 4,
+        bookmarks: 10, weightedEngagement: 139, authorBaseline: 30, breakoutMultiple: 4.6,
+        engagementVelocity: 3, viralScore: 0.9, isPrimarySource: false,
+      }],
+    }] as any, now);
+
+    expect(document).toMatchObject({
+      publisher: '@Etched',
+      isPrimary: true,
+      trustTier: 'primary',
+      metadata: expect.objectContaining({
+        portfolioCompanyId: 'etched',
+        portfolioPrimaryReason: 'official_company_x_account',
+      }),
+    });
+  });
+
   it('isolates a failed feed while preserving successful configured feeds', async () => {
     const configured = {
       ...agenda,
