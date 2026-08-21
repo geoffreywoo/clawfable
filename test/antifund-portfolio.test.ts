@@ -51,6 +51,18 @@ describe('Anti Fund portfolio generation policy', () => {
       'i think Etched gets to the next rack faster than people expect.',
       context,
     )).toEqual([]);
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Etched shipping its first rack to Jane Street is the endorsement I would put above the valuation.',
+      context,
+    )).toEqual([]);
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Jane Street receiving the first Etched rack makes this round unusually concrete.',
+      context,
+    )).toEqual([]);
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Etched has earned the right to make the valuation sound less hypothetical.',
+      context,
+    )).toEqual([]);
     expect(getAntiFundPortfolioPolicyIssues('Etched is overrated and cannot compete.', context)).toContain('portfolio_disparagement');
     expect(getAntiFundPortfolioPolicyIssues('we met the Etched team and they showed me the next chip.', context)).toContain('portfolio_invented_access');
     expect(getAntiFundPortfolioPolicyIssues('check Etched out and sign up now.', context)).toContain('portfolio_ad_copy');
