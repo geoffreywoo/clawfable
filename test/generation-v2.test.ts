@@ -63,6 +63,7 @@ import {
 } from '@/lib/source-planner';
 import type { CandidateJudgeBreakdown, GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
+import { ANTIFUND_PORTFOLIO_POLICY_VERSION } from '@/lib/antifund-portfolio';
 
 const voiceProfile = {
   tone: 'casual and direct',
@@ -959,6 +960,175 @@ describe('Tweet Generation V2', () => {
       [brief('ai', 'AI startups')],
       geoffreyVoiceProfile,
     )).author.topics).not.toContain('sports');
+  });
+
+  it('reserves one constructive Anti Fund portfolio brief when the recent slate is empty', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['AI', 'startups', 'investing', 'consumer'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'consumer'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 30, trendTolerance: 'moderate', exploration: { underusedTopics: ['consumer'] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey: 'portfolio-brief-test',
+      now: new Date('2026-08-21T00:00:00.000Z'),
+    });
+    const portfolioBriefs = briefs.filter((entry) => Boolean(entry.portfolioCompanyContext));
+
+    expect(portfolioBriefs).toHaveLength(1);
+    expect(portfolioBriefs[0].portfolioCompanyContext).toMatchObject({
+      policyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+      relationship: 'antifund_selected_investment',
+      intent: 'constructive_conviction',
+    });
+    if (portfolioBriefs[0].portfolioCompanyContext?.sportsAdjacent) {
+      expect(portfolioBriefs[0].authorOpportunity).toContain('as a company');
+    }
+    expect(buildIdeaGenerationPromptV2([portfolioBriefs[0]], geoffreyVoiceProfile)).toContain('portfolioCompanyContext');
+  });
+
+  it('rejects a negative or fabricated portfolio-company idea before model judgment', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const portfolioBrief = buildGenerationBriefsV2({
+      count: 1,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 20, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey: 'portfolio-negative-test',
+      now: new Date('2026-08-21T00:00:00.000Z'),
+    }).find((entry) => entry.portfolioCompanyContext)!;
+    const company = portfolioBrief.portfolioCompanyContext!.companyName;
+    const [idea] = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(portfolioBrief.id, `we met the ${company} team and i think the company is overrated and cannot compete.`)],
+      agentId: 'agent-1',
+      runId: 'run-portfolio-negative',
+      briefs: [portfolioBrief],
+      voiceProfile: geoffreyVoiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-21T00:00:00.000Z',
+    });
+
+    expect(idea.status).toBe('rejected');
+    expect(idea.rejectionCodes).toEqual(expect.arrayContaining([
+      'portfolio_disparagement',
+      'portfolio_invented_access',
+    ]));
+  });
+
+  it('keeps Betr and Kings League eligible only through a company-building brief', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    let sportsPortfolioBrief: ReturnType<typeof buildGenerationBriefsV2>[number] | undefined;
+    for (let index = 0; index < 200 && !sportsPortfolioBrief; index += 1) {
+      sportsPortfolioBrief = buildGenerationBriefsV2({
+        count: 1,
+        stories: [],
+        documents: [],
+        voiceProfile: geoffreyVoiceProfile,
+        analysis: { engagementPatterns: { topTopics: ['startups', 'consumer', 'media'] } } as any,
+        learnings: null,
+        style: { autonomyMode: 'balanced', trendMixTarget: 20, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+        trending: null,
+        allTweets: [],
+        seedRotationKey: `sports-portfolio-${index}`,
+        now: new Date('2026-08-21T00:00:00.000Z'),
+      }).find((entry) => entry.portfolioCompanyContext?.sportsAdjacent);
+    }
+
+    expect(sportsPortfolioBrief?.portfolioCompanyContext?.companyId).toMatch(/^(?:betr|kings-league)$/);
+    expect(sportsPortfolioBrief?.authorOpportunity).toContain('as a company');
+    expect(sportsPortfolioBrief?.authorOpportunity).toMatch(/Do not write about a game, matchup, athlete, player, score, or betting pick/i);
+    expect(buildIdeaGenerationPromptV2([sportsPortfolioBrief!], geoffreyVoiceProfile)).toContain('company-building');
+  });
+
+  it('admits sports-adjacent portfolio stories only when the source itself is company news', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const makeSource = (id: string, title: string, excerpt: string): SourceDocument => ({
+      schemaVersion: 2,
+      id: `source-${id}`,
+      agentId: 'agent-1',
+      sourceType: 'x',
+      canonicalUrl: `https://x.com/betr/status/${id}`,
+      title,
+      publisher: '@betr',
+      publishedAt: '2026-08-21T00:00:00.000Z',
+      fetchedAt: '2026-08-21T00:05:00.000Z',
+      trustTier: 'primary',
+      isPrimary: true,
+      excerpt,
+      contentHash: `hash-${id}`,
+      entities: ['Betr'],
+      claims: [{ id: `claim-${id}`, text: excerpt, kind: 'announcement', confidence: 0.95, entities: ['Betr'] }],
+      topics: ['Betr'],
+      query: null,
+      metadata: {},
+    });
+    const makeStory = (id: string, title: string, summary: string): StoryCluster => ({
+      schemaVersion: 2,
+      id: `story-${id}`,
+      agentId: 'agent-1',
+      semanticKey: `betr:${id}`,
+      title,
+      summary,
+      topic: 'sports media',
+      entities: ['Betr'],
+      sourceDocumentIds: [`source-${id}`],
+      qualifiedClaimIds: [`claim-${id}`],
+      primarySourceCount: 1,
+      independentSourceCount: 1,
+      evidenceQualified: true,
+      scores: { identityFit: 0.92, evidenceStrength: 0.95, consequence: 0.8, freshness: 0.95, novelty: 0.8, networkMomentum: 0.8, total: 0.9 },
+      firstSeenAt: '2026-08-21T00:00:00.000Z',
+      lastSeenAt: '2026-08-21T00:00:00.000Z',
+      blockedUntil: null,
+      blockReason: null,
+    });
+    const build = (story: StoryCluster, source: SourceDocument) => buildGenerationBriefsV2({
+      count: 2,
+      stories: [story],
+      documents: [source],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'consumer'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 50, trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+      seedRotationKey: story.id,
+      now: new Date('2026-08-21T01:00:00.000Z'),
+    });
+
+    const randomSportsSource = makeSource('event', "Betr odds on tonight's UFC matchup", 'Betr posted betting odds on tonight\'s UFC matchup.');
+    const randomSportsStory = makeStory('event', randomSportsSource.title, randomSportsSource.excerpt);
+    const businessSource = makeSource('business', 'Betr launches a media partnership', 'Betr launches a new media distribution partnership.');
+    const businessStory = makeStory('business', businessSource.title, businessSource.excerpt);
+
+    expect(build(randomSportsStory, randomSportsSource).some((brief) => brief.storyClusterId === randomSportsStory.id)).toBe(false);
+    expect(build(businessStory, businessSource).find((brief) => brief.storyClusterId === businessStory.id)?.portfolioCompanyContext).toMatchObject({
+      companyId: 'betr',
+      intent: 'live_development',
+    });
   });
 
   it('does not interpret repeated writing failures as loss of native topic taste', () => {

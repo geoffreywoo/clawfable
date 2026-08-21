@@ -17,6 +17,10 @@ import {
   stableResearchId,
   stripResearchMarkup,
 } from './research-utils';
+import {
+  ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
+  findOfficialAntiFundPortfolioPublisher,
+} from './antifund-portfolio';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
 const MAX_FEED_BYTES = 2_000_000;
@@ -527,6 +531,10 @@ export function sourceDocumentsFromTrending(
       const title = compactText(topic.headline, 300);
       const entities = [...new Set([...(topic.entities || []), ...extractResearchEntities(`${title}. ${excerpt}`)])].slice(0, 12);
       const publishedAt = safePublishedAt(entry.publishedAt, now);
+      const portfolioPublisher = sourceType === 'x'
+        ? findOfficialAntiFundPortfolioPublisher(entry.publisher)
+        : null;
+      const isPrimary = entry.primary || Boolean(portfolioPublisher);
       return [{
         schemaVersion: 2 as const,
         id: stableResearchId('source', canonicalUrl),
@@ -537,8 +545,8 @@ export function sourceDocumentsFromTrending(
         publisher: entry.publisher,
         publishedAt,
         fetchedAt: now.toISOString(),
-        trustTier: entry.primary ? 'primary' as const : 'community' as const,
-        isPrimary: entry.primary,
+        trustTier: isPrimary ? 'primary' as const : 'community' as const,
+        isPrimary,
         excerpt,
         contentHash: stableResearchId('content', title, excerpt),
         entities,
@@ -555,6 +563,9 @@ export function sourceDocumentsFromTrending(
           networkMomentum: topic.networkMomentumScore ?? null,
           operatorEngagement: topic.operatorEngagementScore ?? null,
           publishedAtKnown: publishedAt !== '1970-01-01T00:00:00.000Z',
+          portfolioCompanyId: portfolioPublisher?.id || null,
+          portfolioSnapshotVersion: portfolioPublisher ? ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION : null,
+          portfolioPrimaryReason: portfolioPublisher ? 'official_company_x_account' : null,
         },
       }];
     });

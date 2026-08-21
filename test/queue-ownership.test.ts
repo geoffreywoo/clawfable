@@ -25,9 +25,111 @@ vi.mock('@/lib/delete-intent', () => ({
   inferDeleteIntent: vi.fn(async ({ tweetText }: { tweetText: string }) => `Inferred intent for: ${tweetText}`),
 }));
 
+vi.mock('@/lib/automation-entitlement', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/automation-entitlement')>('@/lib/automation-entitlement');
+  return {
+    ...actual,
+    assertAgentAutomationEntitlement: vi.fn(async () => ({
+      source: 'agent_exemption',
+      eligible: true,
+      reason: 'test exemption',
+      verifiedAt: new Date().toISOString(),
+      paidThrough: null,
+      paidInvoiceId: null,
+      paidAmountCents: null,
+      paidCurrency: null,
+    })),
+  };
+});
+
 import { DELETE, PATCH } from '@/app/api/agents/[id]/queue/[tweetId]/route';
+import { ANTIFUND_PORTFOLIO_COMPANIES, buildAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
 
 describe('queue ownership route guard', () => {
+  it('preserves canonical portfolio provenance when an operator edits a qualified sports-adjacent draft', async () => {
+    const agent = await createAgent({
+      handle: 'portfolio-edit-qualified',
+      name: 'Geoff Woo',
+      soulMd: '# soul',
+    } as any);
+    const context = buildAntiFundPortfolioContext(
+      ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'betr')!,
+      'constructive_conviction',
+    );
+    const queuedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'Betr can build the consumer media and distribution layer for sports betting.',
+      type: 'original',
+      status: 'queued',
+      topic: 'Betr startup conviction',
+      pipelineVersion: 'v2',
+      portfolioCompanyContext: context,
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Betr can build an even larger media distribution business.' }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: queuedTweet.id }) },
+    );
+    const child = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(child).toMatchObject({
+      status: 'queued',
+      portfolioCompanyContext: { companyId: 'betr', policyVersion: context.policyVersion },
+    });
+    expect(await getTweet(queuedTweet.id)).toMatchObject({ status: 'quarantined' });
+    expect((await getLearningSignals(agent.id))[0].metadata).toMatchObject({
+      portfolioCompanyId: 'betr',
+      portfolioCompanyPolicyVersion: context.policyVersion,
+    });
+  });
+
+  it('rejects a portfolio edit that mixes business language with random players and events', async () => {
+    const agent = await createAgent({
+      handle: 'portfolio-edit-event',
+      name: 'Geoff Woo',
+      soulMd: '# soul',
+    } as any);
+    const context = buildAntiFundPortfolioContext(
+      ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'betr')!,
+      'constructive_conviction',
+    );
+    const queuedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'Betr can build the consumer media and distribution layer for sports betting.',
+      type: 'original',
+      status: 'queued',
+      topic: 'Betr startup conviction',
+      pipelineVersion: 'v2',
+      portfolioCompanyContext: context,
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Betr business will sign this NBA player tonight.' }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: queuedTweet.id }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ code: 'account_publish_policy' });
+    expect(await getTweet(queuedTweet.id)).toMatchObject({ status: 'queued' });
+  });
+
   it('returns 404 when updating a tweet that belongs to another agent', async () => {
     const primaryAgent = await createAgent({
       handle: 'queue-owner-primary',

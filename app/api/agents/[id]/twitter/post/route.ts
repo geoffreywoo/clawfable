@@ -11,6 +11,7 @@ import { findPostedReplyForConversation, normalizeTweetTarget } from '@/lib/repl
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
+import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -69,6 +70,17 @@ export async function POST(
       : null;
     if (generationOriginIssue) {
       return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
+    }
+    if (!isReply) {
+      const publishingPolicyIssue = getAccountPublishingPolicyIssue({
+        handle: agent.handle,
+        content,
+        topic: existingTweet?.topic,
+        portfolioCompanyContext: existingTweet?.portfolioCompanyContext,
+      });
+      if (publishingPolicyIssue) {
+        return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
+      }
     }
     if (isReply && !replyConversationId) {
       replyConversationId = existingTweet?.followupForTweetId || existingTweet?.quoteTweetId || effectiveReplyToId;

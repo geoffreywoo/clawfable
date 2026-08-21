@@ -78,9 +78,14 @@ import {
 } from './source-trust';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from './reply-safety';
 import { buildGenerationLearningMetadata } from './learning-loop';
+import { isGeoffreyAccount } from './account-taste';
 import { assertAgentAutomationEntitlement } from './automation-entitlement';
 import { createTweetFromGeneratedCandidate } from './tweet-persistence';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
+import {
+  ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  getAntiFundPortfolioPolicyIssue,
+} from './antifund-portfolio';
 
 export interface AutopilotResult {
   agentId: string;
@@ -189,9 +194,18 @@ function isAutopostableQueuedTweet(tweet: Tweet): boolean {
 }
 
 function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): boolean {
+  const portfolioCompanyIssue = isGeoffreyAccount(agent?.handle) || tweet.portfolioCompanyContext
+    ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+    : null;
   return isAutopostableQueuedTweet(tweet)
     && !getGeneratedPublishIssue(tweet)
-    && !getAccountTopicPolicyIssue(agent?.handle, `${tweet.topic || ''} ${tweet.content}`);
+    && !getAccountTopicPolicyIssue(
+      agent?.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+      null,
+      tweet.portfolioCompanyContext,
+    )
+    && !portfolioCompanyIssue;
 }
 
 const NON_ORIGINAL_LOG_FORMATS = new Set([
@@ -226,7 +240,15 @@ function latestSuccessfulOriginalPostAt(postLog: PostLogEntry[]): string | null 
 }
 
 function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null {
-  return getAccountTopicPolicyIssue(agent.handle, `${tweet.topic || ''} ${tweet.content}`)
+  return getAccountTopicPolicyIssue(
+    agent.handle,
+    `${tweet.topic || ''} ${tweet.content}`,
+    null,
+    tweet.portfolioCompanyContext,
+  )
+    || (isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
+      ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+      : null)
     || getAutopostPolicyIssue(tweet.content, {
     allowedMentions: [agent.handle],
     allowMentions: tweet.format === 'shoutout',
@@ -422,7 +444,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
-    policyGate: 'account_topic_policy' | 'generation_origin' | 'autopost_quality_margin';
+    policyGate: 'account_topic_policy' | 'portfolio_company_policy' | 'generation_origin' | 'autopost_quality_margin';
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
@@ -430,8 +452,13 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     const accountTopicIssue = getAccountTopicPolicyIssue(
       agent.handle,
       `${tweet.topic || ''} ${tweet.content}`,
+      null,
+      tweet.portfolioCompanyContext,
     );
     const originIssue = getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion });
+    const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
+      ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+      : null;
     const accountMarginIssue = (
       !originIssue
       && tweet.pipelineVersion === 'v2'
@@ -441,15 +468,17 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     )
       ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
       : null;
-    const issue = accountTopicIssue || originIssue || accountMarginIssue;
+    const issue = accountTopicIssue || portfolioCompanyIssue || originIssue || accountMarginIssue;
     if (issue) invalid.push({
       tweet,
       issue,
       policyGate: accountTopicIssue
         ? 'account_topic_policy'
-        : originIssue
-          ? 'generation_origin'
-          : 'autopost_quality_margin',
+        : portfolioCompanyIssue
+          ? 'portfolio_company_policy'
+          : originIssue
+            ? 'generation_origin'
+            : 'autopost_quality_margin',
     });
     else valid.push(tweet);
   }
@@ -460,7 +489,9 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     quarantineReason: issue,
   })));
   const learningInvalid = invalid.filter(({ policyGate }) => (
-    policyGate === 'account_topic_policy' || policyGate === 'autopost_quality_margin'
+    policyGate === 'account_topic_policy'
+    || policyGate === 'portfolio_company_policy'
+    || policyGate === 'autopost_quality_margin'
   ));
   for (const { tweet, issue, policyGate } of learningInvalid) {
     await addLearningSignal(agent.id, {
@@ -468,17 +499,23 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       xTweetId: tweet.xTweetId || undefined,
       signalType: 'x_post_rejected',
       surface: 'queue',
-      rewardDelta: policyGate === 'account_topic_policy' ? -0.9 : -0.7,
+      rewardDelta: policyGate === 'account_topic_policy' ? -0.9 : policyGate === 'portfolio_company_policy' ? -0.85 : -0.7,
       reason: issue,
       inferred: true,
       metadata: {
         pipelineVersion: tweet.pipelineVersion || null,
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
         accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
-        feedbackReasonCode: policyGate === 'account_topic_policy' ? 'bad_source_topic' : 'bad_writing',
+        portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+        feedbackReasonCode: policyGate === 'account_topic_policy'
+          ? 'bad_source_topic'
+          : policyGate === 'portfolio_company_policy'
+            ? 'bad_premise'
+            : 'bad_writing',
         policyGate,
         blockedDomain: policyGate === 'account_topic_policy' ? 'sports_competition' : null,
         operatorDirective: policyGate === 'account_topic_policy' ? 'stop_posting_sports' : null,
+        portfolioCompanyId: tweet.portfolioCompanyContext?.companyId || null,
         qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
       },
     });
@@ -2598,9 +2635,18 @@ export async function refillQueue(
         const accountTopicIssue = getAccountTopicPolicyIssue(
           agent.handle,
           `${item.targetTopic || ''} ${item.content}`,
+          null,
+          item.portfolioCompanyContext,
         );
         if (accountTopicIssue) {
           await rejectCandidate(item, 'account_topic_blocked', accountTopicIssue);
+          continue;
+        }
+        const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || item.portfolioCompanyContext
+          ? getAntiFundPortfolioPolicyIssue(item.content, item.portfolioCompanyContext)
+          : null;
+        if (portfolioCompanyIssue) {
+          await rejectCandidate(item, 'portfolio_company_policy', portfolioCompanyIssue);
           continue;
         }
         const completenessIssue = getTweetCompletenessIssue(item.content);

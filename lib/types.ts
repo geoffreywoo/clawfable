@@ -440,6 +440,21 @@ export type GenerationSurface =
 
 export type PublishingContentProvenance = 'operator_written' | 'generated_v2' | 'historical_v1';
 
+export interface PortfolioCompanyGenerationContext {
+  policyVersion: string;
+  snapshotVersion: string;
+  snapshotExpiresAt: string;
+  companyId: string;
+  companyName: string;
+  companyUrl: string;
+  category: string;
+  description: string;
+  sportsAdjacent: boolean;
+  relationship: 'antifund_selected_investment';
+  intent: 'live_development' | 'constructive_conviction';
+  sourceUrl: string;
+}
+
 export type QueueFeedbackReasonCode =
   | 'bad_source_topic'
   | 'bad_premise'
@@ -497,6 +512,7 @@ export interface Tweet {
   parentDraftCandidateId?: string | null;
   evidenceReferences?: TweetEvidenceReference[] | null;
   generationEvidenceReferences?: GenerationEvidenceReference[] | null;
+  portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;
@@ -887,6 +903,7 @@ export type GenerationEvidenceKind =
   | 'original_post'
   | 'performance_snapshot'
   | 'product_fact'
+  | 'portfolio_company'
   | 'remix_parent';
 
 export interface GenerationEvidenceReference {

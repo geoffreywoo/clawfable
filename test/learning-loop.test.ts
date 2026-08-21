@@ -139,6 +139,10 @@ describe('buildPersonalizationMemory', () => {
       draftCandidateId: 'draft-v2',
       evidenceCount: 1,
       evidenceSourceIds: 'source-v2',
+      portfolioCompanyId: null,
+      portfolioCompanyName: null,
+      portfolioCompanyPolicyVersion: null,
+      portfolioCompanySnapshotVersion: null,
     });
   });
 });

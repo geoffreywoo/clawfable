@@ -26,6 +26,8 @@ import {
 } from '@/lib/queue-feedback';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
+import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
+import { resolveAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -76,7 +78,35 @@ export async function PATCH(
           return NextResponse.json({ error: `Taste gate blocked queueing: ${taste.reasons.join(', ') || 'quality risk'}` }, { status: 422 });
         }
       }
+      if ((status === 'queued' || status === 'posted') && !immutableV2Edit && tweet.type !== 'reply') {
+        const publishingPolicyIssue = getAccountPublishingPolicyIssue({
+          handle: agent.handle,
+          content: content ?? tweet.content,
+          topic: tweet.topic,
+          portfolioCompanyContext: tweet.portfolioCompanyContext,
+        });
+        if (publishingPolicyIssue) {
+          return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
+        }
+      }
       updates.status = status;
+    }
+    if (
+      content !== undefined
+      && status === undefined
+      && tweet.status === 'queued'
+      && !immutableV2Edit
+      && tweet.type !== 'reply'
+    ) {
+      const publishingPolicyIssue = getAccountPublishingPolicyIssue({
+        handle: agent.handle,
+        content,
+        topic: tweet.topic,
+        portfolioCompanyContext: tweet.portfolioCompanyContext,
+      });
+      if (publishingPolicyIssue) {
+        return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
+      }
     }
     if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt;
     if (deletionReason !== undefined) updates.deletionReason = deletionReason;
@@ -89,6 +119,22 @@ export async function PATCH(
         const completenessIssue = getTweetCompletenessIssue(content);
         if (completenessIssue) {
           return NextResponse.json({ error: completenessIssue }, { status: 422 });
+        }
+      }
+      const portfolioCompanyContext = resolveAntiFundPortfolioContext(
+        content,
+        tweet.portfolioCompanyContext,
+        'constructive_conviction',
+      );
+      if (childStatus === 'queued' && tweet.type !== 'reply') {
+        const publishingPolicyIssue = getAccountPublishingPolicyIssue({
+          handle: agent.handle,
+          content,
+          topic: tweet.topic,
+          portfolioCompanyContext,
+        });
+        if (publishingPolicyIssue) {
+          return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
         }
       }
       const child = await createTweet({
@@ -104,6 +150,7 @@ export async function PATCH(
         parentTweetId: tweet.id,
         parentIdeaId: tweet.ideaId,
         parentDraftCandidateId: tweet.draftCandidateId,
+        portfolioCompanyContext,
         quoteTweetId: tweet.quoteTweetId,
         quoteTweetAuthor: tweet.quoteTweetAuthor,
         followupForTweetId: tweet.followupForTweetId,
@@ -125,6 +172,7 @@ export async function PATCH(
         rewardDelta: editSummary.rewardDelta,
         reason: editSummary.summary,
         metadata: metadataWithStyleMode(tweet, {
+          ...buildGenerationLearningMetadata(tweet),
           ...editSummary.metadata,
           parentTweetId: tweet.id,
           parentIdeaId: tweet.ideaId || null,

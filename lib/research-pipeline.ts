@@ -65,6 +65,11 @@ import {
   stableResearchId,
 } from './research-utils';
 import { classifyGeoffreyTopicDomain, selectOperatorTopicSignals } from './source-planner';
+import { isGeoffreyAccount } from './account-taste';
+import {
+  ANTIFUND_PORTFOLIO_COMPANIES,
+  isAntiFundPortfolioCompanyMentioned,
+} from './antifund-portfolio';
 
 const RESEARCH_INTERVAL_MS: Partial<Record<ResearchSourceType, number>> = {
   x: 4 * 60 * 60 * 1000,
@@ -310,10 +315,28 @@ export function buildResearchAgenda({
     current?.operatorTopics || [],
     12,
   );
+  const recentPortfolioText = tweets
+    .filter((tweet) => ['queued', 'posted', 'deleted_from_x'].includes(tweet.status))
+    .slice(0, 20)
+    .map((tweet) => `${tweet.topic || ''} ${tweet.content}`)
+    .join('\n');
+  const portfolioRotationKey = `${agent.id}:${current?.updatedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10)}`;
+  const portfolioQueries = isGeoffreyAccount(agent.handle)
+    ? ANTIFUND_PORTFOLIO_COMPANIES
+        .filter((company) => !isAntiFundPortfolioCompanyMentioned(recentPortfolioText, company))
+        .sort((left, right) => (
+          stableResearchId('portfolio-query', portfolioRotationKey, left.id)
+            .localeCompare(stableResearchId('portfolio-query', portfolioRotationKey, right.id))
+        ))
+        .slice(0, 2)
+        .map((company) => `${company.name} latest product launch funding customers`)
+    : [];
   const querySeeds = uniqueStrings([
     ...(current?.pinnedQuestions || []),
     ...activeOperatorTopics,
-    ...operatorDiscoveryQueries,
+    ...operatorDiscoveryQueries.slice(0, 2),
+    ...portfolioQueries,
+    ...operatorDiscoveryQueries.slice(2),
     ...frontierQueries.slice(0, 2),
     ...profile.topics,
     ...manualTopics,

@@ -66,6 +66,7 @@ vi.mock('@/lib/automation-entitlement', async () => {
 
 import { POST } from '@/app/api/agents/[id]/twitter/post/route';
 import { TwitterActionError } from '@/lib/twitter-debug';
+import { ANTIFUND_PORTFOLIO_COMPANIES, buildAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
 
 describe('twitter post route', () => {
   beforeEach(() => {
@@ -107,6 +108,77 @@ describe('twitter post route', () => {
         tweet: updated,
         detail: 'Quarantined the immutable draft.',
       };
+    });
+  });
+
+  it('blocks random sports at the final X write while allowing qualified portfolio business context', async () => {
+    const agent = await createAgent({
+      handle: 'geoffreywoo',
+      name: 'Geoff Woo',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-geoffwoo-policy',
+    } as any);
+    const randomSports = await createTweet({
+      agentId: agent.id,
+      content: 'The Lakers should sign this NBA player tonight.',
+      type: 'original',
+      status: 'draft',
+      topic: 'sports',
+      contentProvenance: 'operator_written',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+    mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+
+    const blocked = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: randomSports.content, tweetId: randomSports.id }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) },
+    );
+
+    expect(blocked.status).toBe(422);
+    expect(await blocked.json()).toMatchObject({ code: 'account_publish_policy' });
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+
+    const betrContext = buildAntiFundPortfolioContext(
+      ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'betr')!,
+      'constructive_conviction',
+    );
+    const portfolioBusiness = await createTweet({
+      agentId: agent.id,
+      content: 'Betr can build the consumer media and distribution layer for sports betting.',
+      type: 'original',
+      status: 'draft',
+      topic: 'Betr startup conviction',
+      contentProvenance: 'operator_written',
+      portfolioCompanyContext: betrContext,
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+    const allowed = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: portfolioBusiness.content, tweetId: portfolioBusiness.id }),
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) },
+    );
+
+    expect(allowed.status).toBe(200);
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.any(Object), portfolioBusiness.content, {
+      username: 'geoffreywoo',
     });
   });
 

@@ -1032,6 +1032,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   if (history.length === 0) {
     const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
       agentId: agent.id,
+      accountHandle: agent.handle,
       history: [],
       tweets: allTweets,
       postLog,
@@ -1082,6 +1083,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
 
   const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
     agentId: agent.id,
+    accountHandle: agent.handle,
     history,
     tweets: allTweets,
     postLog,

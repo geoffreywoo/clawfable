@@ -59,6 +59,7 @@ export async function createTweetFromGeneratedCandidate(
     parentDraftCandidateId: item.parentDraftCandidateId ?? null,
     evidenceReferences: item.evidenceReferences ?? null,
     generationEvidenceReferences: item.generationEvidenceReferences ?? null,
+    portfolioCompanyContext: item.portfolioCompanyContext ?? null,
     generationMode: item.generationMode,
     candidateScore: item.candidateScore,
     confidenceScore: item.confidenceScore,

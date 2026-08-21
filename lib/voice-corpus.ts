@@ -13,6 +13,8 @@ import type {
 import { extractCandidateFeatureTags } from './tweet-features';
 import { scoreSlopRisk } from './virality-signals';
 import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { getAccountTopicPolicyIssue } from './account-topic-policy';
+import { buildAntiFundPortfolioContext, findSingleAntiFundPortfolioCompany } from './antifund-portfolio';
 
 export const VOICE_CORPUS_SCHEMA_VERSION = 2;
 export const VOICE_CORPUS_TARGET_ANCHORS = 40;
@@ -144,6 +146,7 @@ function exclusionReasons(
   blocked: boolean,
   slopScore: number,
   patternRisk: number,
+  accountTopicIssue: string | null,
 ): string[] {
   const content = performance.content.trim();
   const prose = content.replace(/https?:\/\/\S+/gi, ' ').replace(/@\w+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -165,6 +168,7 @@ function exclusionReasons(
   }
   if (slopScore >= 0.32) reasons.push(`slop risk ${slopScore.toFixed(2)}`);
   if (patternRisk >= 0.28) reasons.push(`generated-pattern risk ${patternRisk.toFixed(2)}`);
+  if (accountTopicIssue) reasons.push(accountTopicIssue);
   return [...new Set(reasons)];
 }
 
@@ -232,6 +236,7 @@ export function buildVoiceCorpusSnapshot({
   postLog,
   signals,
   curation,
+  accountHandle,
   generatedAt = new Date().toISOString(),
 }: {
   agentId: string;
@@ -240,6 +245,7 @@ export function buildVoiceCorpusSnapshot({
   postLog: PostLogEntry[];
   signals: LearningSignal[];
   curation: ManualExampleCuration;
+  accountHandle?: string | null;
   generatedAt?: string;
 }): VoiceCorpusSnapshot {
   const tweetsByXId = new Map(
@@ -291,6 +297,14 @@ export function buildVoiceCorpusSnapshot({
     const generatedPatternRisk = assessGeneratedWritingPatterns(performance.content).score;
     const negative = negativeXIds.has(xTweetId);
     const blocked = blockedIds.has(xTweetId);
+    const topicContext = `${performance.topic || ''} ${performance.content}`;
+    const portfolioCompany = findSingleAntiFundPortfolioCompany(topicContext);
+    const accountTopicIssue = getAccountTopicPolicyIssue(
+      accountHandle,
+      topicContext,
+      null,
+      portfolioCompany ? buildAntiFundPortfolioContext(portfolioCompany, 'constructive_conviction') : null,
+    );
     const exclusions = exclusionReasons(
       performance,
       provenance,
@@ -298,6 +312,7 @@ export function buildVoiceCorpusSnapshot({
       blocked,
       slopScore,
       generatedPatternRisk,
+      accountTopicIssue,
     );
     const engagement = performance.likes + (performance.retweets * 2) + performance.replies;
     const engagementScore = clamp(Math.log1p(engagement) / Math.log(500));
@@ -316,7 +331,7 @@ export function buildVoiceCorpusSnapshot({
       && exclusions.length > 0
       && exclusions.every(isPinnableHeuristicExclusion);
     if (provenance === 'known_clawfable_generated') dispositions.push('mechanics_only');
-    else if (provenance !== 'unknown' && !negative && !blocked) dispositions.push('topic_signal');
+    else if (provenance !== 'unknown' && !negative && !blocked && !accountTopicIssue) dispositions.push('topic_signal');
     if (negative || blocked) dispositions.push('negative');
     if (exclusions.length > 0 && !pinnedHeuristicOverride && !dispositions.includes('mechanics_only')) dispositions.push('excluded');
 
