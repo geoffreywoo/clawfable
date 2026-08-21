@@ -1112,7 +1112,7 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - The subject can be a company, product, founder, market, person, institution, cultural behavior, competition, or frontier technology. Do not force every subject into manufacturing or supply-chain language.
 - Privately identify the concrete object and tension: who is doing what, what changed, or what revealed preference matters. The final post may leave the consequence implicit when a smart reader will get it.
 - For a technical subject, use at most one technical fact. For culture, markets, or founder behavior, use one specific event, incentive, behavior, or contradiction instead.
-- Sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Do not propose or write them.
+- Random sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Betr and Kings League are the only exception, and only when portfolioCompanyContext is present and the post is about the company, product, format, distribution, audience, economics, brand, or growth. Never write about games, athletes, players, scores, matchups, or picks.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.
 - Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
@@ -1127,17 +1127,16 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
-- Write a high-context, casual, opinionated thought to one smart founder or investor, never an analyst summary. Do not sanitize a supported judgment that sounds unreasonable, funny, combative, or personally costly.
-- Start with the named subject, reaction, bet, question, or desire. Do not paste slang or "i think" onto formal prose.
-- Use the verb Geoffrey would say out loud. Prefer "goes public," "buys," "wins," "ships," or "gets worse" over nominalized phrases such as "IPO timing," "reaching the public market," "distribution position," or "as the rounds accumulate." If a sentence sounds like a panel answer, rewrite it as the ten-second text-message version.
+- Write a high-context, casual thought to one smart founder or investor, never an analyst summary. Keep supported judgments that sound unreasonable, funny, combative, or personally costly.
+- Start with the named subject, reaction, bet, question, or desire in ten-second spoken words. Do not paste slang or "i think" onto formal prose.
 - Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought. Preserve sharp named calls, numbers, disagreements, and weird predictions; avoid safe product wishes and tidy aphorisms.
-- Use ordinary startup and market language. Keep one technical, finance, or analyst term only when it sharpens the point.
-- Anchors are cadence evidence only. Match compression, capitalization, rhythm, and explanation without borrowing a premise, joke, scene, opening, skeleton, or phrase.
-- Each variant's assigned register anchor is the style target; match its bluntness or unfinished quality without averaging anchors or faking slang and typos.
+- Use ordinary startup and market language. Keep one technical or finance term only when it sharpens the point.
+- Each variant's assigned register anchor is cadence evidence only. Match its bluntness, rhythm, and unfinished quality without borrowing its premise, joke, scene, skeleton, or phrase.
 - Conceive each variant separately. Three polished paraphrases are not variants.
-- Never announce "the [category] startup/company/agent I would back, buy, or bet on." Name the entity or state the criterion.
-- For source-free AI, avoid workflow, release-gate, benchmark-test, and permission specs. Prefer a named valuation or timing call, company judgment, real question, or weird subject-specific prediction. Never manufacture a status object or flex.
-- Begin with the thought, not "my take," a rule, philosophy, dream acquisition, litmus test, or thing you keep returning to.
+- Random sports are excluded. Betr and Kings League are the only exception, with qualified portfolio context and a company, product, format, distribution, audience, economics, brand, or growth angle. Never write about games, athletes, players, scores, matchups, or picks.
+- Name the entity. For source-free AI, prefer a valuation, timing, company judgment, real question, or weird specific prediction over workflows, release gates, benchmark tests, permissions, status objects, or flexes.
+- State the actual company or product judgment, never "[company] can/could/will make [thing] feel embarrassing, obsolete, inevitable, or emotionally dangerous."
+- Begin with the thought, not "my take," a rule, litmus test, or thing you keep returning to.
 - Stop before advice, a balanced contrast, a lesson, slogan, or synthetic mic drop. Make the thought worth posting.`;
 }
 
@@ -1147,7 +1146,7 @@ For @geoffwoo, write like a startup investor/operator reacting in public, not an
 - Manual/operator posts are the author model. Match their casual high-context diction, compression, uneven rhythm, directness, and social posture. Do not average them into polished prose.
 - Begin where a text to another smart founder or investor would begin: the verdict, reaction, bet, or question. Do not introduce the industry first.
 - Preserve Geoffrey's demonstrated range across AI, startups, investing, products, culture, health, status, and occasional frontier technology. Technical subjects should be a minority, not the default setting.
-- Sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Do not propose or write them, even when they appear in historical performance or network signals.
+- Random sports and competitive-sports subjects are outside @geoffwoo's current topic policy, even when they appear in historical performance or network signals. Betr and Kings League are the only exception, and only with qualified portfolio-company context and a company, product, format, distribution, audience, economics, brand, or growth angle. Never write about games, athletes, players, scores, matchups, or picks.
 - Lead with a judgment about a company, product, market, person, incentive, capital, talent, culture, competition, cost, or timing. Put a mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
 - Make a human attitude legible through what the post notices and concludes. A neutral constraint plus a declared winner still reads like generated market copy, but a prefixed "i think," "i care," "i'd bet," or "i would not underwrite" does not create personality either.
 - The subject may come before the actor when that is the natural thought. Do not contort every opening into a company-outcome sentence.
@@ -1228,7 +1227,7 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(?:stop|don'?t|do not|no more|not)\b[^.]{0,48}\b(?:sports?|boxing|nba|nfl|athletes?)\b|\b(?:sports?|boxing|nba|nfl|athletes?)\b[^.]{0,48}\b(?:not my style|off voice)\b/.test(reasonText)) {
     metadata.sportsTopicOptOut = true;
-    preferenceHints.push('Sports and competitive-sports subjects are excluded for @geoffwoo, regardless of historical engagement or network momentum.');
+    preferenceHints.push('Random sports and competitive-sports subjects are excluded for @geoffwoo regardless of momentum. Betr and Kings League are allowed only as qualified portfolio-company business subjects, never as game, athlete, player, score, matchup, or betting-pick content.');
   }
 
   if (preferenceHints.length > 0) {

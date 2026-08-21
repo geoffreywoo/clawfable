@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   assessAccountTaste,
   assessTechnicalCredibility,
+  buildGeoffreyNativeGenerationBrief,
+  buildGeoffreyNativeV2WriterContract,
+  buildGeoffreyNativeWritingBrief,
   classifyTasteFeedbackReason,
   getAutonomousQueueTasteIssue,
   isGeoffreyVoiceProfile,
@@ -481,7 +484,19 @@ describe('account taste scoring', () => {
       sportsTopicOptOut: true,
       tasteComplaint: true,
     });
-    expect(feedback.preferenceHints.join(' ')).toContain('excluded for @geoffwoo');
+    expect(feedback.preferenceHints.join(' ')).toContain('Random sports');
+    expect(feedback.preferenceHints.join(' ')).toContain('Betr and Kings League');
+  });
+
+  it('keeps the narrow portfolio sports exception in every Geoffrey writing contract', () => {
+    for (const contract of [
+      buildGeoffreyNativeGenerationBrief(),
+      buildGeoffreyNativeV2WriterContract(),
+      buildGeoffreyNativeWritingBrief(),
+    ]) {
+      expect(contract).toContain('Betr and Kings League');
+      expect(contract).toMatch(/Never write about games, athletes, players, scores, matchups, or picks/i);
+    }
   });
 
   it('keeps review-grade generated patterns out of Geoffrey autopost queue', () => {
