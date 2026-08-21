@@ -21,6 +21,7 @@ const PATTERN_RULES: PatternRule[] = [
   { label: 'announced-call-open', weight: 0.52, pattern: /^(?:my|the)\s+call\s+on\b[^:\n]{0,120}:/im },
   { label: 'ceremonial-first-person', weight: 0.62, pattern: /\bi(?:['’]m| am)\s+officially\s+(?:retiring|removing|adding|done|calling|declaring|promoting|demoting|banning|canceling|cancelling)\b|\bfrom my vocabulary\b/i },
   { label: 'performed-emotion', weight: 0.62, pattern: /\bi(?:['’]m| am)\s+genuinely\s+(?:moved|shocked|excited|surprised|obsessed|stunned|speechless|emotional)\b/i },
+  { label: 'synthetic-affect-forecast', weight: 0.52, pattern: /^(?:i think\s+)?[^.!?\n]{1,70}\s+(?:can|could|will|is going to)\s+make\b[^.!?\n]{3,150}\b(?:feel(?:ing)?|emotionally)\b[^.!?\n]{2,120}(?:[.!?]|$)/i },
   { label: 'invented-attention-pattern', weight: 0.52, pattern: /\bthe (?:one|thing) i keep coming back to\b/i },
   { label: 'invented-chewing-on', weight: 0.52, pattern: /^(?:i(?:['’]ve| have)\s+)?been chewing on\b/im },
   { label: 'old-new-scaffold', weight: 0.58, pattern: /(?:^|\n)\s*old\s*:\s*[^\n]+[\s\S]{0,420}(?:^|\n)\s*new\s*:/im },

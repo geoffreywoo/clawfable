@@ -161,6 +161,18 @@ describe('generated writing patterns', () => {
     )).toMatchObject({ primarySignature: 'superlative-colon-verdict', score: 0.52 });
   });
 
+  it('blocks synthetic company affect forecasts observed in production queue survivors', () => {
+    for (const content of [
+      'i think Lighter can make an exchange screenshot without proof feel embarrassing to post.',
+      'Apple Vision Pro is going to make old home videos emotionally dangerous when they start feeling like rooms you can walk back into.',
+    ]) {
+      expect(assessGeneratedWritingPatterns(content)).toMatchObject({
+        primarySignature: 'synthetic-affect-forecast',
+        score: 0.52,
+      });
+    }
+  });
+
   it('blocks the generic X is just Y with Z quip mold', () => {
     expect(assessGeneratedWritingPatterns(
       'hiring fast before product truth is just anxiety with a payroll attached.',
