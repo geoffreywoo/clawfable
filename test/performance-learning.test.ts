@@ -32,6 +32,7 @@ import {
   getTweetClassificationMaxTokens,
   getVelocityFollowupMaxTokens,
   selectTweetClassificationBacklog,
+  selectTweetDirectMetricBackfill,
 } from '@/lib/performance';
 
 function performanceEntry(overrides: Record<string, unknown>) {
@@ -46,6 +47,8 @@ function performanceEntry(overrides: Record<string, unknown>) {
     likes: Number(overrides.likes ?? 10),
     retweets: Number(overrides.retweets ?? 2),
     replies: Number(overrides.replies ?? 1),
+    ...(overrides.quotes !== undefined ? { quotes: Number(overrides.quotes) } : {}),
+    ...(overrides.bookmarks !== undefined ? { bookmarks: Number(overrides.bookmarks) } : {}),
     impressions: Number(overrides.impressions ?? 100),
     engagementRate: Number(overrides.engagementRate ?? 13),
     wasViral: Boolean(overrides.wasViral ?? false),
@@ -126,6 +129,21 @@ describe('performance learning smoke', () => {
     expect(first.map((tweet) => tweet.id)).toEqual(timeline.slice(0, 20).map((tweet) => tweet.id));
     expect(second.map((tweet) => tweet.id)).toEqual(timeline.slice(20, 40).map((tweet) => tweet.id));
     expect(third.map((tweet) => tweet.id)).toEqual(timeline.slice(40).map((tweet) => tweet.id));
+  });
+
+  it('backfills direct share metrics on mature rows without reclassifying them', () => {
+    const timeline = Array.from({ length: 320 }, (_, index) => ({ id: `timeline-${index}`, text: `timeline post ${index}` }));
+    const latest = new Map(timeline.map((tweet, index) => [tweet.id, performanceEntry({
+      xTweetId: tweet.id,
+      format: 'observation',
+      topic: 'AI',
+      ...(index === 0 ? { quotes: 0, bookmarks: 0 } : {}),
+    }) as any]));
+    const backfill = selectTweetDirectMetricBackfill(timeline, latest, 300);
+
+    expect(backfill).toHaveLength(300);
+    expect(backfill.map((tweet) => tweet.id)).not.toContain('timeline-0');
+    expect(backfill[0]?.id).toBe('timeline-1');
   });
 
   it('budgets velocity follow-up prompt context and completion size', () => {
