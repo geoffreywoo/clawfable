@@ -376,8 +376,15 @@ export function buildVoiceCorpusSnapshot({
     }
   }
 
-  const snapshotBasis = entries
-    .map((entry) => `${entry.xTweetId}:${entry.contentHash}:${entry.dispositions.sort().join(',')}`)
+  // The version certifies the diction evidence used by generation. Topic-only,
+  // excluded, and generated mechanics records may change without changing the
+  // operator voice that a queued draft was judged against.
+  const snapshotBasis = selected
+    .map((entry) => [
+      entry.xTweetId,
+      entry.contentHash,
+      pinnedIds.has(entry.xTweetId) ? 'pinned' : 'automatic',
+    ].join(':'))
     .sort()
     .join('|');
   const snapshotId = `voice-corpus-v${VOICE_CORPUS_SCHEMA_VERSION}-${stableHash(snapshotBasis)}`;

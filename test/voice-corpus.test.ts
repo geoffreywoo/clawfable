@@ -154,6 +154,48 @@ describe('versioned voice corpus', () => {
     expect(snapshot.entries.every((entry) => entry.dispositions.includes('excluded'))).toBe(true);
   });
 
+  it('keeps the corpus version stable when only generated mechanics evidence changes', () => {
+    const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
+    const first = build(history);
+    const generated = performance(101, {
+      tweetId: 'generated-mechanics',
+      xTweetId: 'x-generated-mechanics',
+      content: 'the winners will own the feedback loop and compound the real moat.',
+      likes: 5000,
+      retweets: 900,
+      replies: 400,
+      source: 'manual',
+    });
+    const second = build([...history, generated], [generatedTweet(generated)]);
+
+    expect(second.entries).toHaveLength(first.entries.length + 1);
+    expect(second.entries.find((entry) => entry.xTweetId === generated.xTweetId)?.dispositions)
+      .toContain('mechanics_only');
+    expect(second.snapshotId).toBe(first.snapshotId);
+  });
+
+  it('changes the corpus version when the diction anchors change', () => {
+    const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
+    const first = build(history);
+    const second = buildVoiceCorpusSnapshot({
+      agentId: 'agent-corpus',
+      history,
+      tweets: [],
+      postLog: [],
+      signals: [],
+      curation: {
+        pinnedXTweetIds: [],
+        blockedXTweetIds: [history[0].xTweetId],
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      generatedAt: '2026-07-31T00:00:00.000Z',
+    });
+
+    expect(second.entries.find((entry) => entry.xTweetId === history[0].xTweetId)?.dispositions)
+      .not.toContain('diction_anchor');
+    expect(second.snapshotId).not.toBe(first.snapshotId);
+  });
+
   it('lets an explicit block override an otherwise eligible native post', () => {
     const history = Array.from({ length: NATIVE_TEXTS.length }, (_, index) => performance(index));
     const blockedId = history[0].xTweetId;
