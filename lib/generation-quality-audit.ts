@@ -65,6 +65,7 @@ import {
   VOICE_CORPUS_SCHEMA_VERSION,
 } from './voice-corpus';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
+import { GEOFFREY_AI_HORIZON_POLICY_VERSION } from './account-taste';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
@@ -78,7 +79,7 @@ import {
   isAntiFundPortfolioBriefDue,
 } from './antifund-portfolio';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 40;
+export const GENERATION_QUALITY_AUDIT_VERSION = 41;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1698,6 +1699,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       blockedTopicDomains: ['sports_competition'],
       portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
       portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
+      geoffreyAIFutureHorizonPolicyVersion: GEOFFREY_AI_HORIZON_POLICY_VERSION,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,

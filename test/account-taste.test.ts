@@ -488,6 +488,23 @@ describe('account taste scoring', () => {
     expect(feedback.preferenceHints.join(' ')).toContain('Betr and Kings League');
   });
 
+  it('stores lagging AI baseline feedback as a future-horizon instruction', () => {
+    const feedback = classifyTasteFeedbackReason(
+      'OpenAI is already at a trillion-dollar valuation and elite engineers already use Devin for hard work. Be more bullish and AI-pilled. My voice should be 6-12 months ahead of its time.',
+      'i would bet people start using ChatGPT as a generic verb',
+    );
+
+    expect(feedback.metadata).toMatchObject({
+      frontierBaselineLagComplaint: true,
+      futureHorizonMonths: '6-12',
+      aiBullishPostureRequested: true,
+      tasteComplaint: true,
+    });
+    expect(feedback.metadata).not.toHaveProperty('aiSlopComplaint');
+    expect(feedback.preferenceHints.join(' ')).toContain('current frontier adoption');
+    expect(feedback.preferenceHints.join(' ')).toContain('strong AI trajectory conviction');
+  });
+
   it('keeps the narrow portfolio sports exception in every Geoffrey writing contract', () => {
     for (const contract of [
       buildGeoffreyNativeGenerationBrief(),
@@ -496,6 +513,18 @@ describe('account taste scoring', () => {
     ]) {
       expect(contract).toContain('Betr and Kings League');
       expect(contract).toMatch(/Never write about games, athletes, players, scores, matchups, or picks/i);
+    }
+  });
+
+  it('keeps the current AI baseline and 6-12 month lead in every Geoffrey writing contract', () => {
+    for (const contract of [
+      buildGeoffreyNativeGenerationBrief(),
+      buildGeoffreyNativeV2WriterContract(),
+      buildGeoffreyNativeWritingBrief(),
+    ]) {
+      expect(contract).toContain('6-12');
+      expect(contract).toMatch(/OpenAI.*trillion-dollar scale/i);
+      expect(contract).toMatch(/frontier engineers.*coding agents/i);
     }
   });
 

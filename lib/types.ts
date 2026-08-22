@@ -224,6 +224,8 @@ export interface CandidateJudgeBreakdown {
   insight?: number;
   specificity?: number;
   operatorPlausibility?: number;
+  frontierLead?: number;
+  aiBullishness?: number;
   modelCringeRisk?: number;
   nativeVoice?: number;
   casualStartupFit?: number;
@@ -279,6 +281,8 @@ export interface CandidateScoreProvenance {
   technicalElevation?: number;
   banalOpsTexture?: number;
   nativeVoice?: number;
+  frontierLead?: number;
+  aiBullishness?: number;
   nativeStyle?: number;
   casualStartupFit?: number;
   stiffnessRisk?: number;
@@ -815,6 +819,8 @@ export interface IdeaJudgeBreakdown {
   nativeReactionPotential: number;
   publicMoveStrength: number;
   sharePotential: number;
+  frontierLead: number;
+  aiBullishness: number;
 }
 
 export interface IdeaCandidate {
