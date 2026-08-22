@@ -10,6 +10,8 @@ import {
   calculateV2FinalQualityMargin,
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
+  getGeoffreyAIBaselineLagIssueV2,
+  getGeoffreyAIFutureRejectionCodesV2,
   getGeoffreyFinalNoveltyIssueV2,
   getPostcriticRepairModelStackV2,
   getOperatorTopicConstraintIssuesV2,
@@ -412,6 +414,8 @@ describe('Tweet Generation V2', () => {
       nativeReactionPotential: 0.72,
       publicMoveStrength: 0.72,
       sharePotential: 0.68,
+      frontierLead: 1,
+      aiBullishness: 1,
     };
     const geoffreyVoice = {
       ...voiceProfile,
@@ -427,6 +431,104 @@ describe('Tweet Generation V2', () => {
       'idea_judge_weak_public_move',
       'idea_judge_low_share_potential',
     ]));
+  });
+
+  it('blocks AI premises that forecast Geoffrey current baselines', () => {
+    expect(getGeoffreyAIBaselineLagIssueV2(
+      'i’d bet people start using ChatGPT as a generic verb before OpenAI hits a trillion-dollar valuation.',
+    )).toBe('openai_trillion_is_current_baseline');
+    expect(getGeoffreyAIBaselineLagIssueV2(
+      'i want Scott Wu to make Cognition so good that elite engineers choose Devin for their hardest work',
+    )).toBe('frontier_agent_adoption_is_current_baseline');
+    expect(getGeoffreyAIBaselineLagIssueV2(
+      'frontier coding agents are already good enough. the next $100b software company might employ fewer people than this fund.',
+    )).toBeNull();
+  });
+
+  it('requires frontier lead and bullish trajectory conviction for Geoffrey AI ideas', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const lagging = {
+      evidenceFidelity: 0.95,
+      authorFit: 0.9,
+      consequence: 0.9,
+      distinctiveness: 0.9,
+      nativeReactionPotential: 0.9,
+      publicMoveStrength: 0.9,
+      sharePotential: 0.9,
+      frontierLead: 0.25,
+      aiBullishness: 0.4,
+    };
+
+    expect(getV2IdeaJudgeRejectionCodes(lagging, geoffreyVoice, 'OpenAI ChatGPT AI')).toEqual(
+      expect.arrayContaining([
+        'idea_judge_lagging_frontier_baseline',
+        'idea_judge_timid_ai_posture',
+      ]),
+    );
+    expect(getV2IdeaJudgeRejectionCodes(lagging, geoffreyVoice, 'fusion reactor')).toEqual([]);
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'OpenAI coding agents',
+      content: 'coding agents will matter eventually',
+      frontierLead: 0.25,
+      aiBullishness: 0.4,
+    })).toEqual(expect.arrayContaining([
+      'final_frontier_lead_below_floor',
+      'final_ai_bullishness_below_floor',
+    ]));
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'fusion reactor',
+      content: 'fusion could matter eventually',
+      frontierLead: 0.25,
+      aiBullishness: 0.4,
+    })).toEqual([]);
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'OpenAI ChatGPT',
+      content: 'i’d bet people start using ChatGPT as a generic verb before OpenAI hits a trillion-dollar valuation.',
+      frontierLead: 0.95,
+      aiBullishness: 0.95,
+    })).toContain('final_frontier_baseline_lag');
+  });
+
+  it('rejects lagging AI baselines before paying the idea judge', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const stale = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'i want Scott Wu to make Cognition so good that elite engineers choose Devin for their hardest work',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-frontier-baseline-stale',
+      briefs: [brief('operator', 'AI coding agents')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-22T00:00:00.000Z',
+    })[0];
+    const forward = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'coding agents already do frontier work. the first ten-person software company at $10b will look overstaffed.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-frontier-baseline-forward',
+      briefs: [brief('operator', 'AI coding agents')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-22T00:00:00.000Z',
+    })[0];
+
+    expect(stale.rejectionCodes).toContain('behind_frontier_baseline');
+    expect(forward.rejectionCodes).not.toContain('behind_frontier_baseline');
   });
 
   it('rejects abstract comparison theses for Geoffrey before copy generation', () => {
@@ -3890,6 +3992,34 @@ describe('Tweet Generation V2', () => {
     expect(operatorWritingPrompt.factualWritingContract).toContain('Do not add a current or historical event');
     expect(operatorWritingPrompt.factualWritingContract).toContain('approved idea packet');
     expect(operatorWritingPrompt.verifiedSourceReactionContract).toBeNull();
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const geoffreyIdeaPrompt = JSON.parse(buildIdeaGenerationPromptV2(
+      [brief('operator', 'OpenAI coding agents')],
+      geoffreyVoice,
+    ));
+    const geoffreyWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
+      { ...idea, briefId: 'operator', storyClusterId: null, topic: 'OpenAI coding agents', evidenceIds: [] },
+      brief('operator', 'OpenAI coding agents'),
+      [],
+      [],
+      undefined,
+      undefined,
+      undefined,
+      'reconceive',
+      3,
+      null,
+      false,
+      geoffreyVoice,
+    ));
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('6-12');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('trillion-dollar scale');
+    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
+      lead: expect.stringContaining('6-12 months'),
+      instruction: expect.stringContaining('strong AI trajectory conviction'),
+    }));
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
       expect.stringContaining('category leadership'),
