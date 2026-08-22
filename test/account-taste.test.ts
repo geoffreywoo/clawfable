@@ -498,11 +498,14 @@ describe('account taste scoring', () => {
       frontierBaselineLagComplaint: true,
       futureHorizonMonths: '6-12',
       aiBullishPostureRequested: true,
+      roboticsTimelineConvictionRequested: true,
+      exponentialIntuitionRequested: true,
+      forecastGroundingRequested: true,
       tasteComplaint: true,
     });
     expect(feedback.metadata).not.toHaveProperty('aiSlopComplaint');
     expect(feedback.preferenceHints.join(' ')).toContain('current frontier adoption');
-    expect(feedback.preferenceHints.join(' ')).toContain('strong AI trajectory conviction');
+    expect(feedback.preferenceHints.join(' ')).toContain('nonlinear capability');
   });
 
   it('keeps the narrow portfolio sports exception in every Geoffrey writing contract', () => {
@@ -525,6 +528,8 @@ describe('account taste scoring', () => {
       expect(contract).toContain('6-12');
       expect(contract).toMatch(/OpenAI.*trillion-dollar scale/i);
       expect(contract).toMatch(/frontier engineers.*coding agents/i);
+      expect(contract).toMatch(/robots.*factor(?:y|ies).*warehouse/i);
+      expect(contract).toMatch(/threshold/i);
     }
   });
 

@@ -28,6 +28,7 @@ import {
   summarizeViralityPostmortemMemory,
 } from './growth-engine';
 import { classifyTasteFeedbackReason } from './account-taste';
+import { weightedSpreadEngagement } from './performance-signals';
 
 export { summarizeEditDelta };
 export type { EditDeltaSummary };
@@ -36,8 +37,8 @@ function unique(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
-function weightedScore(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return entry.likes + entry.retweets + (entry.replies * 2);
+function weightedScore(entry: TweetPerformance): number {
+  return weightedSpreadEngagement(entry);
 }
 
 function sortCounts(entries: Record<string, number>): string[] {
@@ -391,7 +392,7 @@ export function buildPersonalizationMemory({
 }: BuildPersonalizationMemoryOptions): PersonalizationMemory {
   const alwaysDoMoreOfThis = unique([
     ...(learnings?.insights.slice(0, 3) || []),
-    ...(learnings?.bestPerformers.slice(0, 2).map((entry) => `Reuse the energy of: ${entry.content.slice(0, 80)}...`) || []),
+    ...summarizeReferenceBank(learnings?.bestPerformers || []).slice(0, 2),
   ]).slice(0, 5);
 
   const neverDoThisAgain = unique([

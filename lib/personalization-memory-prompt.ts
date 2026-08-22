@@ -34,7 +34,7 @@ const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
     key: 'referenceBank',
     title: 'HIGH-PERFORMING REFERENCE BANK',
     limit: 3,
-    intro: 'Use these as style and substance anchors without copying exact claims.',
+    intro: 'These rows teach spread structure only, never wording, stance, or a reusable premise. Native diction is supplied through the isolated voice corpus.',
   },
   {
     key: 'conversationInsights',

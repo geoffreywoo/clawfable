@@ -416,6 +416,9 @@ describe('Tweet Generation V2', () => {
       sharePotential: 0.68,
       frontierLead: 1,
       aiBullishness: 1,
+      trajectoryConviction: 1,
+      forecastGrounding: 1,
+      exponentialIntuition: 1,
     };
     const geoffreyVoice = {
       ...voiceProfile,
@@ -443,6 +446,9 @@ describe('Tweet Generation V2', () => {
     expect(getGeoffreyAIBaselineLagIssueV2(
       'frontier coding agents are already good enough. the next $100b software company might employ fewer people than this fund.',
     )).toBeNull();
+    expect(getGeoffreyAIBaselineLagIssueV2(
+      'humanoid robots will start working in factories next year',
+    )).toBe('industrial_robot_pilots_are_current_baseline');
   });
 
   it('requires frontier lead and bullish trajectory conviction for Geoffrey AI ideas', () => {
@@ -460,12 +466,18 @@ describe('Tweet Generation V2', () => {
       sharePotential: 0.9,
       frontierLead: 0.25,
       aiBullishness: 0.4,
+      trajectoryConviction: 0.4,
+      forecastGrounding: 0.4,
+      exponentialIntuition: 0.4,
     };
 
     expect(getV2IdeaJudgeRejectionCodes(lagging, geoffreyVoice, 'OpenAI ChatGPT AI')).toEqual(
       expect.arrayContaining([
         'idea_judge_lagging_frontier_baseline',
         'idea_judge_timid_ai_posture',
+        'idea_judge_weak_trajectory_conviction',
+        'idea_judge_weak_forecast_grounding',
+        'idea_judge_linear_extrapolation',
       ]),
     );
     expect(getV2IdeaJudgeRejectionCodes(lagging, geoffreyVoice, 'fusion reactor')).toEqual([]);
@@ -475,9 +487,15 @@ describe('Tweet Generation V2', () => {
       content: 'coding agents will matter eventually',
       frontierLead: 0.25,
       aiBullishness: 0.4,
+      trajectoryConviction: 0.4,
+      forecastGrounding: 0.4,
+      exponentialIntuition: 0.4,
     })).toEqual(expect.arrayContaining([
       'final_frontier_lead_below_floor',
       'final_ai_bullishness_below_floor',
+      'final_trajectory_conviction_below_floor',
+      'final_forecast_grounding_below_floor',
+      'final_exponential_intuition_below_floor',
     ]));
     expect(getGeoffreyAIFutureRejectionCodesV2({
       voiceProfile: geoffreyVoice,
@@ -485,6 +503,9 @@ describe('Tweet Generation V2', () => {
       content: 'fusion could matter eventually',
       frontierLead: 0.25,
       aiBullishness: 0.4,
+      trajectoryConviction: 0.4,
+      forecastGrounding: 0.4,
+      exponentialIntuition: 0.4,
     })).toEqual([]);
     expect(getGeoffreyAIFutureRejectionCodesV2({
       voiceProfile: geoffreyVoice,
@@ -492,6 +513,9 @@ describe('Tweet Generation V2', () => {
       content: 'i’d bet people start using ChatGPT as a generic verb before OpenAI hits a trillion-dollar valuation.',
       frontierLead: 0.95,
       aiBullishness: 0.95,
+      trajectoryConviction: 0.95,
+      forecastGrounding: 0.95,
+      exponentialIntuition: 0.95,
     })).toContain('final_frontier_baseline_lag');
   });
 
@@ -4016,9 +4040,12 @@ describe('Tweet Generation V2', () => {
     ));
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('6-12');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('trillion-dollar scale');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('robots already piloting');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('nonlinear');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
       lead: expect.stringContaining('6-12 months'),
-      instruction: expect.stringContaining('strong AI trajectory conviction'),
+      currentBaselines: expect.arrayContaining([expect.stringContaining('robots already pilot')]),
+      instruction: expect.stringContaining('strong AI and robotics trajectory conviction'),
     }));
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
@@ -4058,6 +4085,16 @@ describe('Tweet Generation V2', () => {
       formatRankings: [{ format: 'announcement', avgEngagement: 36, count: 4 }, { format: 'analysis', avgEngagement: 13, count: 1 }],
       audienceSegmentPerformance: [{ segment: 'generalists', posts: 12, avgEngagement: 33, wins: 7 }],
       promptStrategyPerformance: [{ strategy: 'high_specificity', posts: 8, avgEngagement: 30, wins: 5 }],
+      frontierForecastProfile: {
+        version: 'frontier-forecast-learning-test',
+        eligiblePosts: 12,
+        forecastPosts: 8,
+        directShareMetricCoverage: 0.75,
+        aggressiveForecastShare: 0.625,
+        exponentialMechanismShare: 0.5,
+        winningPatterns: ['Horizon 6 12 months averages 0.82 relative spread across 4 posts (3 wins).'],
+        avoidPatterns: ['Avoid overusing posture wish or request.'],
+      },
       operatorVoiceReference: {
         styleFingerprint: {
           avgLength: 160,
@@ -4092,6 +4129,11 @@ describe('Tweet Generation V2', () => {
       winningAudiences: [expect.objectContaining({ audience: 'generalists', wins: 7 })],
       winningStrategies: [expect.objectContaining({ strategy: 'high_specificity', wins: 5 })],
       voiceMechanics: expect.objectContaining({ averageLength: 160, shortPercent: 75, questionPercent: 25 }),
+      frontierForecast: expect.objectContaining({
+        version: 'frontier-forecast-learning-test',
+        aggressiveForecastShare: 0.625,
+        exponentialMechanismShare: 0.5,
+      }),
       doMore: expect.arrayContaining(['Use concrete operator evidence.', 'Stop after the point lands.']),
       avoid: expect.arrayContaining(['Do not write generic AI advice.', 'Avoid political drift.', 'consultant cadence']),
     });

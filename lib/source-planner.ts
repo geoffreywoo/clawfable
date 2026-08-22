@@ -17,6 +17,8 @@ import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, pickGeoffreyIdeaSeed
 import { isGeoffreyVoiceProfile } from './account-taste';
 import { isVoiceProfileTopicBlocked } from './account-topic-policy';
 import { inferContentSpreadMechanics } from './winner-learning';
+import { weightedSpreadEngagement } from './performance-signals';
+import { canonicalizeLearningTopic } from './learning-topic';
 
 export interface TrendFitScores {
   freshness: number;
@@ -245,8 +247,8 @@ function parseDate(value: string | null | undefined): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function weightedEngagement(tweet: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return tweet.likes + (tweet.retweets * 3) + (tweet.replies * 1.25);
+function weightedEngagement(tweet: TweetPerformance): number {
+  return weightedSpreadEngagement(tweet);
 }
 
 function recencyWeight(isoDate: string): number {
@@ -256,7 +258,8 @@ function recencyWeight(isoDate: string): number {
 }
 
 function engagementWeight(tweet: TweetPerformance): number {
-  return weightedEngagement(tweet) * recencyWeight(tweet.postedAt || tweet.checkedAt);
+  const spreadMultiplier = 0.65 + (tweet.relativeSpreadScore ?? 0.5);
+  return weightedEngagement(tweet) * recencyWeight(tweet.postedAt || tweet.checkedAt) * spreadMultiplier;
 }
 
 function isPinned(curation: ManualExampleCuration | null | undefined, xTweetId: string): boolean {
@@ -323,7 +326,7 @@ export function buildManualTopicProfile(
 
   const buckets = new Map<string, TweetPerformance[]>();
   for (const tweet of usable) {
-    const key = normalizeTopic(tweet.topic);
+    const key = canonicalizeLearningTopic(tweet);
     const bucket = buckets.get(key) || [];
     bucket.push(tweet);
     buckets.set(key, bucket);

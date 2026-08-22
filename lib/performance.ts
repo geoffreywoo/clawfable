@@ -39,6 +39,15 @@ import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
 import { collapsePerformanceSnapshots } from './performance-history';
 import { historicalPerformanceEvidenceWeight, inferContentSpreadMechanics } from './winner-learning';
+import { buildFrontierForecastLearningProfile, describeFrontierForecastPattern } from './frontier-forecast-learning';
+import {
+  buildPerformanceSignalBaseline,
+  confidenceAdjustedPerformanceAverage,
+  computeRelativeSpreadSignal,
+  weightedSpreadEngagement,
+} from './performance-signals';
+import { canonicalizeLearningTopic, isEligibleForAccountPolicyLearning } from './learning-topic';
+import { isGeoffreyAccount } from './account-taste';
 import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -70,7 +79,13 @@ function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic:
 }
 
 function weightedEngagementScore(tweet: TweetPerformance): number {
-  return tweet.likes + tweet.retweets + (tweet.replies * 2);
+  return weightedSpreadEngagement(tweet);
+}
+
+export function getLearningRefreshIntervalMs(agent: Pick<Agent, 'handle'>): number {
+  return isGeoffreyAccount(agent.handle)
+    ? 3 * 60 * 60 * 1000
+    : 24 * 60 * 60 * 1000;
 }
 
 function parsePerformanceTimestamp(value: string | undefined): number {
@@ -97,6 +112,13 @@ export function filterLearningMentions(mentions: Mention[]): Mention[] {
 }
 
 export function formatLearningInsightTweetExample(tweet: TweetPerformance, textChars: number): string {
+  const observedMetrics = [
+    `${tweet.likes} likes`,
+    `${tweet.retweets} RTs`,
+    typeof tweet.quotes === 'number' ? `${tweet.quotes} quotes` : null,
+    typeof tweet.bookmarks === 'number' ? `${tweet.bookmarks} bookmarks` : null,
+    `source:${tweet.source}`,
+  ].filter((value): value is string => Boolean(value)).join(', ');
   if (
     tweet.voiceCorpusDispositions
     && !tweet.voiceCorpusDispositions.includes('diction_anchor')
@@ -107,13 +129,13 @@ export function formatLearningInsightTweetExample(tweet: TweetPerformance, textC
       replies: tweet.replies,
       retweets: tweet.retweets,
     });
-    return `- [${tweet.likes} likes, ${tweet.retweets} RTs, source:${tweet.source}] mechanics=${mechanics.join('; ')}`;
+    return `- [${observedMetrics}] mechanics=${mechanics.join('; ')}`;
   }
   const content = tweet.content.replace(/\s+/g, ' ').trim();
   const text = content.length <= textChars
     ? content
     : `${content.slice(0, textChars - 3).trimEnd()}...`;
-  return `- [${tweet.likes} likes, ${tweet.retweets} RTs, source:${tweet.source}] "${text}"`;
+  return `- [${observedMetrics}] "${text}"`;
 }
 
 const TWEET_CLASSIFICATION_TEXT_LIMIT = 220;
@@ -240,8 +262,9 @@ function weightedLearningScore(tweet: TweetPerformance): number {
     ?? tweet.actionRewards?.qualityAdjustedGrowthScore
     ?? computeActionRewards(tweet).qualityAdjustedGrowthScore
     ?? 50;
+  const relativeSpread = tweet.relativeSpreadScore ?? 0.5;
   return (
-    ((qualityScore * 1.15) + (weightedEngagementScore(tweet) * 0.28))
+    ((qualityScore * 0.9) + (relativeSpread * 100 * 1.35) + (weightedEngagementScore(tweet) * 0.08))
     * sourceSignalWeight(tweet.source)
     * historicalPerformanceEvidenceWeight(tweet)
   );
@@ -775,6 +798,7 @@ export async function checkPerformance(
 
   const analysis = await getAnalysis(agent.id);
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
+  const performanceBaseline = buildPerformanceSignalBaseline(collapsePerformanceSnapshots(existing));
 
   // Collect new checkpoints plus a bounded classification backlog. Backlog
   // entries are re-written as fresh snapshots, so later runs naturally move
@@ -816,7 +840,11 @@ export async function checkPerformance(
       topic: ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general',
     });
 
-    const totalEngagement = timelineTweet.likes + timelineTweet.retweets + (timelineTweet.replies ?? 0);
+    const totalEngagement = timelineTweet.likes
+      + timelineTweet.retweets
+      + (timelineTweet.replies ?? 0)
+      + (timelineTweet.quotes ?? 0)
+      + (timelineTweet.bookmarks ?? 0);
     const engagementRate = timelineTweet.impressions > 0
       ? Math.round((totalEngagement / timelineTweet.impressions) * 10000) / 100
       : 0;
@@ -848,6 +876,8 @@ export async function checkPerformance(
       likes: timelineTweet.likes,
       retweets: timelineTweet.retweets,
       replies: timelineTweet.replies ?? 0,
+      quotes: timelineTweet.quotes ?? 0,
+      bookmarks: timelineTweet.bookmarks ?? 0,
       impressions: timelineTweet.impressions ?? 0,
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,
@@ -879,7 +909,16 @@ export async function checkPerformance(
       hasMedia: timelineTweet.hasMedia,
       isTextComplete: timelineTweet.isTextComplete,
     };
-    entry.actionRewards = computeActionRewards(entry, analysis?.engagementPatterns || null);
+    const spreadSignal = computeRelativeSpreadSignal(entry, performanceBaseline);
+    entry.relativeSpreadScore = spreadSignal.score;
+    entry.spreadMetricCoverage = spreadSignal.metricCoverage;
+    entry.wasViral ||= spreadSignal.score >= 0.78;
+    entry.actionRewards = computeActionRewards(entry, {
+      avgLikes: analysis?.engagementPatterns?.avgLikes || performanceBaseline.likes,
+      avgRetweets: analysis?.engagementPatterns?.avgRetweets || performanceBaseline.retweets,
+      avgQuotes: performanceBaseline.quotes || undefined,
+      avgBookmarks: performanceBaseline.bookmarks || undefined,
+    });
     entry.qualityAdjustedGrowthScore = entry.actionRewards.qualityAdjustedGrowthScore;
     entry.earlyVelocityScore = computeEarlyVelocityScore(entry);
 
@@ -1073,6 +1112,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       networkClusterPerformance: [],
       topRelationshipHandles: [],
       viralityPostmortems: [],
+      frontierForecastProfile: buildFrontierForecastLearningProfile([]),
     };
     await Promise.all([
       saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot),
@@ -1093,16 +1133,29 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   await saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot);
   history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
 
-  const autopilotHistory = history.filter((t) => t.source === 'autopilot');
-  const manualHistory = history.filter((t) => t.source === 'manual');
-  const timelineHistory = history.filter((t) => t.source === 'timeline');
-  const operatorReferenceHistory = history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'));
-  const operatorHistory = history.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'));
+  const performanceBaseline = buildPerformanceSignalBaseline(history);
+  history = history.map((entry) => {
+    const spread = computeRelativeSpreadSignal(entry, performanceBaseline);
+    return {
+      ...entry,
+      relativeSpreadScore: spread.score,
+      spreadMetricCoverage: spread.metricCoverage,
+    };
+  });
+  const policyLearningHistory = history.filter((entry) => (
+    isEligibleForAccountPolicyLearning(agent, entry, allTweets)
+  ));
+
+  const autopilotHistory = policyLearningHistory.filter((t) => t.source === 'autopilot');
+  const manualHistory = policyLearningHistory.filter((t) => t.source === 'manual');
+  const timelineHistory = policyLearningHistory.filter((t) => t.source === 'timeline');
+  const operatorReferenceHistory = policyLearningHistory.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'));
+  const operatorHistory = policyLearningHistory.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'));
   const trainingHistory = operatorHistory.length > 0
-    ? history
+    ? policyLearningHistory
     : autopilotHistory.length >= 10
       ? autopilotHistory
-      : history;
+      : policyLearningHistory;
   const sourceBreakdown = {
     autopilot: autopilotHistory.length,
     manual: manualHistory.length,
@@ -1128,6 +1181,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
+  const globalSignalAverage = trainingHistory.length > 0
+    ? trainingHistory.reduce((sum, entry) => sum + weightedLearningScore(entry), 0) / trainingHistory.length
+    : 0;
 
   // Format rankings
   const formatMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
@@ -1142,15 +1198,23 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const formatRankings = Object.entries(formatMap)
     .map(([format, d]) => ({ format, avgEngagement: Math.round(d.total / d.count), count: d.count }))
     .sort((a, b) => {
-      const left = formatMap[a.format].signalTotal / Math.max(formatMap[a.format].count, 1);
-      const right = formatMap[b.format].signalTotal / Math.max(formatMap[b.format].count, 1);
+      const left = confidenceAdjustedPerformanceAverage(
+        formatMap[a.format].signalTotal,
+        formatMap[a.format].count,
+        globalSignalAverage,
+      );
+      const right = confidenceAdjustedPerformanceAverage(
+        formatMap[b.format].signalTotal,
+        formatMap[b.format].count,
+        globalSignalAverage,
+      );
       return right - left || b.avgEngagement - a.avgEngagement;
     });
 
   // Topic rankings
   const topicMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
   for (const h of trainingHistory) {
-    const t = h.topic || 'general';
+    const t = canonicalizeLearningTopic(h);
     if (t === 'general' || t === 'unknown') continue;
     if (!topicMap[t]) topicMap[t] = { total: 0, count: 0, signalTotal: 0 };
     topicMap[t].total += weightedEngagementScore(h);
@@ -1160,8 +1224,16 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   const topicRankings = Object.entries(topicMap)
     .map(([topic, d]) => ({ topic, avgEngagement: Math.round(d.total / d.count), count: d.count }))
     .sort((a, b) => {
-      const left = topicMap[a.topic].signalTotal / Math.max(topicMap[a.topic].count, 1);
-      const right = topicMap[b.topic].signalTotal / Math.max(topicMap[b.topic].count, 1);
+      const left = confidenceAdjustedPerformanceAverage(
+        topicMap[a.topic].signalTotal,
+        topicMap[a.topic].count,
+        globalSignalAverage,
+      );
+      const right = confidenceAdjustedPerformanceAverage(
+        topicMap[b.topic].signalTotal,
+        topicMap[b.topic].count,
+        globalSignalAverage,
+      );
       return right - left || b.avgEngagement - a.avgEngagement;
     });
 
@@ -1176,13 +1248,14 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   // Diction stays restricted to the clean anchor corpus, while topic taste can
   // learn from the broader high-confidence operator corpus.
   const manualTopicProfile = buildManualTopicProfile(operatorHistory, manualExampleCuration);
-  const sourceLanePerformance = buildSourceLanePerformance(history, allTweets);
-  const styleModePerformance = buildStyleModePerformance(history, allTweets, signals);
-  const audienceSegmentPerformance = buildAudienceSegmentPerformance(history);
-  const promptStrategyPerformance = buildPromptStrategyPerformance(history);
-  const mediaExperimentPerformance = buildMediaExperimentPerformance(history);
-  const portfolioRolePerformance = buildPortfolioRolePerformance(history);
-  const networkClusterPerformance = buildNetworkClusterPerformance(history);
+  const sourceLanePerformance = buildSourceLanePerformance(policyLearningHistory, allTweets);
+  const styleModePerformance = buildStyleModePerformance(policyLearningHistory, allTweets, signals);
+  const audienceSegmentPerformance = buildAudienceSegmentPerformance(policyLearningHistory);
+  const promptStrategyPerformance = buildPromptStrategyPerformance(policyLearningHistory);
+  const mediaExperimentPerformance = buildMediaExperimentPerformance(policyLearningHistory);
+  const portfolioRolePerformance = buildPortfolioRolePerformance(policyLearningHistory);
+  const networkClusterPerformance = buildNetworkClusterPerformance(policyLearningHistory);
+  const frontierForecastProfile = buildFrontierForecastLearningProfile(policyLearningHistory);
   const relationshipOpportunities = buildRelationshipOpportunities({
     agentId: agent.id,
     mentions: learningMentions,
@@ -1190,7 +1263,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     performanceHistory: history,
   });
   const topRelationshipHandles = buildTopRelationshipHandles(learningMentions);
-  const baselineLikes = analysisLikeBaseline(history);
+  const baselineLikes = analysisLikeBaseline(policyLearningHistory);
   const viralityPostmortems = sorted
     .filter((entry) => {
       const engagement = weightedEngagementScore(entry);
@@ -1211,7 +1284,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights
-  const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
+  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
 
   const learnings: AgentLearnings = {
     agentId: agent.id,
@@ -1251,6 +1324,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     networkClusterPerformance,
     topRelationshipHandles,
     viralityPostmortems,
+    frontierForecastProfile,
     sourceBreakdown,
   };
 

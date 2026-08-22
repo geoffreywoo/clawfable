@@ -6,7 +6,7 @@ import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-he
 import { decodeKeys, getLatestTwitterTweetIdCursor, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
 import { discoverAndFollow } from '@/lib/proactive-engagement';
-import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
+import { checkPerformance, buildLearnings, autoAdjustSettings, getLearningRefreshIntervalMs, maybeReanalyze } from '@/lib/performance';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
@@ -155,20 +155,21 @@ export async function GET(request: NextRequest) {
           });
         }
 
-        // Rebuild learnings once per day (or on first run when null)
+        // High-cadence accounts rebuild after each posting interval so fresh
+        // spread signals can steer the next batch. Other accounts stay daily.
         try {
           const existingLearnings = await getLearnings(agent.id);
           const hasPerformanceData = (await getPerformanceHistory(agent.id, 1)).length > 0;
           const learningsAge = existingLearnings?.updatedAt
             ? Date.now() - new Date(existingLearnings.updatedAt).getTime()
             : Infinity;
-          const oneDayMs = 24 * 60 * 60 * 1000;
+          const learningRefreshIntervalMs = getLearningRefreshIntervalMs(agent);
           const needsVoiceCorpusMigration = (
             !existingLearnings?.voiceCorpus
             || existingLearnings.voiceCorpus.version !== VOICE_CORPUS_SCHEMA_VERSION
           );
 
-          if (hasPerformanceData && (!existingLearnings || learningsAge > oneDayMs || needsVoiceCorpusMigration)) {
+          if (hasPerformanceData && (!existingLearnings || learningsAge > learningRefreshIntervalMs || needsVoiceCorpusMigration)) {
             const learnings = await buildLearnings(agent);
             await autoAdjustSettings(agent.id, learnings);
           }

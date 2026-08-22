@@ -218,7 +218,7 @@ export async function buildGenerationContext(
   }
 
   if (effectiveLearnings?.manualTopicProfile && effectiveLearnings.manualTopicProfile.length > 0) {
-    voiceProfile.communicationStyle += `\n\n## MANUAL TOPIC PRIORS (topics that overperform in operator-written posts)\n${effectiveLearnings.manualTopicProfile.slice(0, 6).map((cluster) => `- ${cluster.topic}: ${cluster.angle} (${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement)`).join('\n')}`;
+    voiceProfile.communicationStyle += `\n\n## MANUAL TOPIC PRIORS (subject selection only; never reconstruct historical wording or premises)\n${effectiveLearnings.manualTopicProfile.slice(0, 6).map((cluster) => `- ${cluster.topic}: ${cluster.sampleCount} examples, avg ${cluster.avgEngagement} engagement`).join('\n')}`;
   }
 
   const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);

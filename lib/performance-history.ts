@@ -1,5 +1,6 @@
 import type { TweetPerformance } from './types';
 import { STANDARD_STYLE_MODE } from './style-mode';
+import { weightedSpreadEngagement } from './performance-signals';
 
 export interface CollapsedPerformanceHistory {
   entries: TweetPerformance[];
@@ -14,7 +15,7 @@ function timestamp(value: string | undefined): number {
 }
 
 function engagement(entry: TweetPerformance): number {
-  return entry.likes + entry.retweets + (entry.replies * 2);
+  return weightedSpreadEngagement(entry);
 }
 
 function entryKey(entry: TweetPerformance): string {
@@ -31,8 +32,14 @@ function mergeEntries(primary: TweetPerformance, secondary: TweetPerformance): T
   const likes = Math.max(primary.likes, secondary.likes);
   const retweets = Math.max(primary.retweets, secondary.retweets);
   const replies = Math.max(primary.replies, secondary.replies);
+  const quotes = typeof primary.quotes === 'number' || typeof secondary.quotes === 'number'
+    ? Math.max(primary.quotes || 0, secondary.quotes || 0)
+    : undefined;
+  const bookmarks = typeof primary.bookmarks === 'number' || typeof secondary.bookmarks === 'number'
+    ? Math.max(primary.bookmarks || 0, secondary.bookmarks || 0)
+    : undefined;
   const impressions = Math.max(primary.impressions, secondary.impressions);
-  const totalEngagement = likes + retweets + replies;
+  const totalEngagement = likes + retweets + replies + (quotes || 0) + (bookmarks || 0);
   const earlierPostedAt = timestamp(primary.postedAt) <= timestamp(secondary.postedAt)
     ? (primary.postedAt || secondary.postedAt)
     : secondary.postedAt;
@@ -58,11 +65,15 @@ function mergeEntries(primary: TweetPerformance, secondary: TweetPerformance): T
     likes,
     retweets,
     replies,
+    quotes,
+    bookmarks,
     impressions,
     engagementRate: impressions > 0
       ? Math.round((totalEngagement / impressions) * 10000) / 100
       : Math.max(primary.engagementRate, secondary.engagementRate),
     wasViral: primary.wasViral || secondary.wasViral,
+    relativeSpreadScore: Math.max(primary.relativeSpreadScore || 0, secondary.relativeSpreadScore || 0) || undefined,
+    spreadMetricCoverage: Math.max(primary.spreadMetricCoverage || 0, secondary.spreadMetricCoverage || 0) || undefined,
     source: sourcePriority(primary.source) >= sourcePriority(secondary.source) ? primary.source : secondary.source,
   };
 }

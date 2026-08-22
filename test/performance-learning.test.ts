@@ -28,6 +28,7 @@ import {
   formatVelocityFollowupSoulForPrompt,
   getLearningInsightMaxTokens,
   getLearningInsightPromptLimits,
+  getLearningRefreshIntervalMs,
   getTweetClassificationMaxTokens,
   getVelocityFollowupMaxTokens,
   selectTweetClassificationBacklog,
@@ -57,6 +58,11 @@ function performanceEntry(overrides: Record<string, unknown>) {
 }
 
 describe('performance learning smoke', () => {
+  it('rebuilds Geoffrey learnings on the posting cadence while keeping other accounts daily', () => {
+    expect(getLearningRefreshIntervalMs({ handle: 'geoffwoo' })).toBe(3 * 60 * 60 * 1000);
+    expect(getLearningRefreshIntervalMs({ handle: 'anotherfounder' })).toBe(24 * 60 * 60 * 1000);
+  });
+
   it('budgets learning insight prompt examples by history size', () => {
     expect(getLearningInsightPromptLimits(8)).toEqual({ rankingRows: 4, examples: 4, textChars: 180 });
     expect(getLearningInsightPromptLimits(20)).toEqual({ rankingRows: 6, examples: 6, textChars: 220 });
@@ -318,7 +324,7 @@ describe('performance learning smoke', () => {
     expect(learnings.sourceBreakdown?.manual).toBe(1);
     expect(learnings.sourceBreakdown?.trainingSource).toBe('mixed');
     expect(learnings.formatRankings[0]?.format).toBe('hot_take');
-    expect(learnings.topicRankings[0]?.topic).toBe('Biohacking');
+    expect(learnings.topicRankings[0]?.topic).toBe('health');
     expect(learnings.bestPerformers[0]?.source).toBe('manual');
     expect(learnings.operatorVoiceReference?.sampleCount).toBe(1);
     expect(learnings.operatorVoiceReference?.bestPerformers[0]?.xTweetId).toBe('x-manual-posted');

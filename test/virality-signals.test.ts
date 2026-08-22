@@ -79,6 +79,25 @@ describe('virality signals', () => {
     expect(rewards.total).toBeLessThanOrEqual(0.9);
   });
 
+  it('uses direct quote and bookmark outcomes instead of a like-based bookmark proxy', () => {
+    const rewards = computeActionRewards(performance({
+      likes: 8,
+      retweets: 3,
+      replies: 2,
+      quotes: 7,
+      bookmarks: 12,
+    }), {
+      avgLikes: 12,
+      avgRetweets: 2,
+      avgQuotes: 1,
+      avgBookmarks: 2,
+    });
+
+    expect(rewards.quoteReward).toBeGreaterThan(0);
+    expect(rewards.bookmarkReward).toBeGreaterThan(0);
+    expect(rewards.bookmarkProxyReward).toBe(0);
+  });
+
   it('boosts known relationship targets in reply scoring', () => {
     const unknown = scoreHighValueReply({
       text: 'Can you give a concrete example of this?',
