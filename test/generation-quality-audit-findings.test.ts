@@ -302,6 +302,26 @@ describe('generation quality audit findings', () => {
     expect(buildGenerationAuditFindings(healthyInput() as any)).toEqual([]);
   });
 
+  it('surfaces stale and timid forecast learning without weakening publish gates', () => {
+    const input = healthyInput() as any;
+    input.learning = {
+      totalTracked: 200,
+      forecastProfileVersion: 'frontier-forecast-learning-old',
+      eligiblePosts: 30,
+      forecastPosts: 12,
+      directShareMetricCoverage: 0.1,
+      aggressiveForecastShare: 0.25,
+      exponentialMechanismShare: 0.2,
+    };
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'frontier_forecast_learning_stale', severity: 'high' }),
+      expect.objectContaining({ code: 'frontier_forecast_share_metrics_sparse', severity: 'medium' }),
+      expect.objectContaining({ code: 'frontier_forecast_posture_too_timid', severity: 'medium' }),
+      expect.objectContaining({ code: 'frontier_forecast_exponential_logic_sparse', severity: 'medium' }),
+    ]));
+  });
+
   it('makes queued account-topic violations visible as a live-state finding', () => {
     const input = healthyInput();
     input.queue.qualityEligibleCount = 4;

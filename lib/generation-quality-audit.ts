@@ -66,6 +66,7 @@ import {
 } from './voice-corpus';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
 import { GEOFFREY_AI_HORIZON_POLICY_VERSION } from './account-taste';
+import { FRONTIER_FORECAST_LEARNING_VERSION } from './frontier-forecast-learning';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
@@ -79,7 +80,7 @@ import {
   isAntiFundPortfolioBriefDue,
 } from './antifund-portfolio';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 41;
+export const GENERATION_QUALITY_AUDIT_VERSION = 42;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -208,6 +209,15 @@ export function buildGenerationWriterOutcomeAudit(runs: AuditGenerationLineage) 
         .filter((value): value is number => typeof value === 'number')),
       averageCringeRisk: average(judged
         .map((candidate) => candidate.judgeBreakdown?.cringeRisk)
+        .filter((value): value is number => typeof value === 'number')),
+      averageTrajectoryConviction: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.trajectoryConviction)
+        .filter((value): value is number => typeof value === 'number')),
+      averageForecastGrounding: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.forecastGrounding)
+        .filter((value): value is number => typeof value === 'number')),
+      averageExponentialIntuition: average(judged
+        .map((candidate) => candidate.judgeBreakdown?.exponentialIntuition)
         .filter((value): value is number => typeof value === 'number')),
       topRejectionCodes: topCounts(candidates.flatMap((candidate) => candidate.rejectionCodes || []), 8),
     };
@@ -460,6 +470,15 @@ interface AuditFindingInput {
     total: number;
     affectedPostRate: number | null;
   };
+  learning?: {
+    totalTracked: number;
+    forecastProfileVersion: string | null;
+    eligiblePosts: number;
+    forecastPosts: number;
+    directShareMetricCoverage: number;
+    aggressiveForecastShare: number;
+    exponentialMechanismShare: number;
+  };
   modelPricing: {
     activeComplete: boolean;
     missingModels: string[];
@@ -494,6 +513,51 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     .flatMap((group) => group.topRejectionCodes || [])
     .filter((entry) => entry.value === 'final_source_copy_risk')
     .reduce((sum, entry) => sum + entry.count, 0) || 0;
+
+  if (
+    input.learning
+    && input.learning.totalTracked > 0
+    && input.learning.forecastProfileVersion !== FRONTIER_FORECAST_LEARNING_VERSION
+  ) {
+    add({
+      code: 'frontier_forecast_learning_stale',
+      severity: 'high',
+      scope: 'live_state',
+      title: 'AI and robotics forecast learning is missing or stale',
+      evidence: input.learning,
+      action: 'Rebuild learnings under the current forecast policy before treating historical performance as generation guidance.',
+    });
+  }
+  if (input.learning && input.learning.eligiblePosts >= 10 && input.learning.directShareMetricCoverage < 0.25) {
+    add({
+      code: 'frontier_forecast_share_metrics_sparse',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Forecast learning has sparse quote and bookmark coverage',
+      evidence: input.learning,
+      action: 'Keep collecting direct quote and bookmark metrics; do not infer shareability from likes alone.',
+    });
+  }
+  if (input.learning && input.learning.forecastPosts >= 4 && input.learning.aggressiveForecastShare < 0.4) {
+    add({
+      code: 'frontier_forecast_posture_too_timid',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'The historical AI and robotics forecast mix is too timid',
+      evidence: input.learning,
+      action: 'Increase owned 6-12 month calls while preserving the final grounding and native-voice gates.',
+    });
+  }
+  if (input.learning && input.learning.forecastPosts >= 4 && input.learning.exponentialMechanismShare < 0.3) {
+    add({
+      code: 'frontier_forecast_exponential_logic_sparse',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Few historical forecasts identify a nonlinear threshold',
+      evidence: input.learning,
+      action: 'Prefer capability, cost, reliability, fleet-data, or adoption thresholds with a concrete second-order consequence.',
+    });
+  }
 
   if ((input.portfolio?.queuePolicyIssueCount || 0) > 0) {
     add({
@@ -1650,6 +1714,15 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     currentPolicyWindow,
     generationV2,
     complaints: complaintSummary,
+    learning: isGeoffrey ? {
+      totalTracked: context.learnings?.totalTracked || 0,
+      forecastProfileVersion: context.learnings?.frontierForecastProfile?.version || null,
+      eligiblePosts: context.learnings?.frontierForecastProfile?.eligiblePosts || 0,
+      forecastPosts: context.learnings?.frontierForecastProfile?.forecastPosts || 0,
+      directShareMetricCoverage: context.learnings?.frontierForecastProfile?.directShareMetricCoverage || 0,
+      aggressiveForecastShare: context.learnings?.frontierForecastProfile?.aggressiveForecastShare || 0,
+      exponentialMechanismShare: context.learnings?.frontierForecastProfile?.exponentialMechanismShare || 0,
+    } : undefined,
     modelPricing: {
       activeComplete: modelPricingCoverage.every((target) => target.priced),
       missingModels: modelPricingCoverage.filter((target) => !target.priced).map((target) => target.model),
@@ -1700,6 +1773,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
       portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
       geoffreyAIFutureHorizonPolicyVersion: GEOFFREY_AI_HORIZON_POLICY_VERSION,
+      frontierForecastLearningVersion: FRONTIER_FORECAST_LEARNING_VERSION,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
@@ -1719,6 +1793,13 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       },
     },
     autopost: autopostSummary,
+    learning: {
+      updatedAt: context.learnings?.updatedAt || null,
+      totalTracked: context.learnings?.totalTracked || 0,
+      refreshIntervalHours: isGeoffrey ? 3 : 24,
+      topicRankings: context.learnings?.topicRankings || [],
+      frontierForecast: context.learnings?.frontierForecastProfile || null,
+    },
     corpus: corpusSummary,
     queue: queueSummary,
     portfolio: portfolioSummary,

@@ -302,7 +302,8 @@ describe('generation context', () => {
     expect(context.voiceProfile.communicationStyle).toContain('Best human tones: analytical, provocative');
     expect(context.voiceProfile.communicationStyle).toContain('manual killer opener');
     expect(context.voiceProfile.communicationStyle).toContain('## MANUAL TOPIC PRIORS');
-    expect(context.voiceProfile.communicationStyle).toContain('AI distribution is moving from model quality to workflow leverage');
+    expect(context.voiceProfile.communicationStyle).toContain('ai: 4 examples, avg 92 engagement');
+    expect(context.voiceProfile.communicationStyle).not.toContain('AI distribution is moving from model quality to workflow leverage');
   });
 
   it('does not inject legacy IdeaAtom thesis mappings into V2 generation context', async () => {

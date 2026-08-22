@@ -17,6 +17,9 @@ import type {
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import type { EnrichedTrendingTopic } from './source-planner';
 import { computeActionRewards, inferAudienceSegment } from './virality-signals';
+import { inferContentSpreadMechanics } from './winner-learning';
+import { describeFrontierForecastPattern } from './frontier-forecast-learning';
+import { weightedSpreadEngagement } from './performance-signals';
 
 export const PORTFOLIO_SEQUENCE: PostPortfolioRole[] = [
   'proof',
@@ -38,8 +41,8 @@ function normalizeHandle(value: string | null | undefined): string {
   return (value || '').replace(/^@/, '').trim().toLowerCase();
 }
 
-function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return entry.likes + entry.retweets + (entry.replies * 2);
+function weightedEngagement(entry: TweetPerformance): number {
+  return weightedSpreadEngagement(entry);
 }
 
 function parseDate(value: string | null | undefined): number {
@@ -337,6 +340,17 @@ export function buildViralityPostmortem(
   const win = entry.wasViral || engagement >= 40 || (qualityScore !== null && qualityScore >= 72);
   const replyDense = entry.replies >= Math.max(2, Math.round(entry.likes * 0.15));
   const media = entry.mediaExperimentType || 'text_only';
+  const spreadMechanics = inferContentSpreadMechanics(entry.content, {
+    topic: entry.topic,
+    thesis: entry.thesis,
+    replies: entry.replies,
+    retweets: entry.retweets,
+  });
+  const forecastPattern = describeFrontierForecastPattern(entry.content, entry.topic);
+  const observedShareMetrics = [
+    typeof entry.quotes === 'number' ? `${entry.quotes} quotes` : null,
+    typeof entry.bookmarks === 'number' ? `${entry.bookmarks} bookmarks` : null,
+  ].filter((value): value is string => Boolean(value));
   const factors = [
     entry.hook ? `Hook: ${String(entry.hook).replace(/_/g, ' ')}` : '',
     entry.structure ? `Structure: ${String(entry.structure).replace(/_/g, ' ')}` : '',
@@ -344,6 +358,8 @@ export function buildViralityPostmortem(
     replyDense ? 'High reply density' : '',
     (entry.earlyVelocityScore || 0) >= 0.58 ? 'Fast early velocity' : '',
     media !== 'text_only' ? `Media test: ${media}` : '',
+    ...spreadMechanics.slice(0, 2).map((mechanic) => `Spread mechanic: ${mechanic}`),
+    forecastPattern ? `Forecast pattern: ${forecastPattern}` : '',
   ].filter(Boolean);
   const misses = [
     entry.slopScore && entry.slopScore >= 0.45 ? 'Reduce generic phrasing/slop risk.' : '',
@@ -363,14 +379,19 @@ export function buildViralityPostmortem(
     analyzedAt: new Date().toISOString(),
     score: qualityScore ?? engagement,
     qualityAdjustedGrowthScore: qualityScore,
-    performanceSummary: `${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies, ${entry.impressions} impressions${qualityScore !== null ? `, quality growth ${qualityScore}/100` : ''}.`,
+    performanceSummary: `${entry.likes} likes, ${entry.retweets} reposts${observedShareMetrics.length > 0 ? `, ${observedShareMetrics.join(', ')}` : ''}, ${entry.replies} replies, ${entry.impressions} impressions${typeof entry.relativeSpreadScore === 'number' ? `, relative spread ${entry.relativeSpreadScore.toFixed(2)}` : ''}${qualityScore !== null ? `, quality growth ${qualityScore}/100` : ''}.`,
+    relativeSpreadScore: entry.relativeSpreadScore ?? null,
+    quotes: entry.quotes,
+    bookmarks: entry.bookmarks,
+    forecastPattern,
     winningFactors: factors.length > 0 ? factors.slice(0, 5) : ['No dominant winning factor detected yet.'],
     misses: misses.length > 0 ? misses.slice(0, 4) : ['No major miss detected from available metrics.'],
     nextExperiments: [
+      forecastPattern ? `Retest the forecast posture with a different named consequence while preserving the learned horizon and grounding shape.` : '',
       entry.portfolioRole ? `Retest ${entry.portfolioRole.replace(/_/g, ' ')} with a different hook.` : 'Retest the core thesis in a different portfolio role.',
       entry.targetAudienceSegment ? `Aim a follow-up at ${entry.targetAudienceSegment.replace(/_/g, ' ')}.` : 'Aim a follow-up at the reply segment that engaged.',
       media === 'text_only' ? 'Try a visual/media version if the claim can be made concrete.' : 'Compare this media format against a text-only holdout.',
-    ],
+    ].filter(Boolean).slice(0, 3),
     portfolioRole: entry.portfolioRole ?? null,
     mediaExperimentType: entry.mediaExperimentType ?? null,
     targetAudienceSegment: entry.targetAudienceSegment ?? null,

@@ -10,6 +10,8 @@ import type {
   Tweet,
   TweetPerformance,
 } from './types';
+import { inferContentSpreadMechanics } from './winner-learning';
+import { weightedSpreadEngagement } from './performance-signals';
 
 export interface HighValueReplyScore {
   score: number;
@@ -36,8 +38,8 @@ function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies' | 'quotes' | 'bookmarks'>): number {
+  return weightedSpreadEngagement(entry);
 }
 
 export function inferAudienceSegment(content: string, topic?: string | null): AudienceSegment {
@@ -599,12 +601,23 @@ export function computeEarlyVelocityScore(entry: TweetPerformance): number {
 
 export function computeActionRewards(
   entry: TweetPerformance,
-  baseline?: { avgLikes: number; avgRetweets: number } | null,
+  baseline?: {
+    avgLikes: number;
+    avgRetweets: number;
+    avgQuotes?: number;
+    avgBookmarks?: number;
+  } | null,
 ): ActionRewardBreakdown {
   const baselineLikes = Math.max(1, baseline?.avgLikes || 12);
   const baselineRetweets = Math.max(1, baseline?.avgRetweets || 2);
   const likeReward = clamp((entry.likes - baselineLikes) / baselineLikes * 0.22, -0.28, 0.42);
   const repostReward = clamp((entry.retweets - baselineRetweets) / baselineRetweets * 0.2, -0.24, 0.42);
+  const quoteReward = typeof entry.quotes === 'number'
+    ? clamp((entry.quotes - Math.max(1, baseline?.avgQuotes || 1)) / Math.max(1, baseline?.avgQuotes || 1) * 0.24, -0.2, 0.46)
+    : 0;
+  const bookmarkReward = typeof entry.bookmarks === 'number'
+    ? clamp((entry.bookmarks - Math.max(1, baseline?.avgBookmarks || 1)) / Math.max(1, baseline?.avgBookmarks || 1) * 0.2, -0.16, 0.4)
+    : 0;
   const replyReward = clamp(entry.replies / Math.max(2, baselineLikes * 0.35) * 0.18, 0, 0.32);
   const impressionReward = entry.impressions > 0 ? clamp(Math.log10(entry.impressions + 1) / 12, 0, 0.28) : 0;
   const engagementRateReward = clamp((entry.engagementRate - 2) / 20, -0.1, 0.25);
@@ -625,12 +638,14 @@ export function computeActionRewards(
     0,
     0.26,
   );
-  const bookmarkProxyReward = clamp(
-    (entry.impressions > 0 ? Math.log10(entry.impressions + 1) / 18 : 0)
-    + Math.max(0, entry.engagementRate - 2) / 60,
-    0,
-    0.24,
-  );
+  const bookmarkProxyReward = typeof entry.bookmarks === 'number'
+    ? 0
+    : clamp(
+      (entry.impressions > 0 ? Math.log10(entry.impressions + 1) / 18 : 0)
+      + Math.max(0, entry.engagementRate - 2) / 60,
+      0,
+      0.24,
+    );
   const cringeRiskPenalty = clamp(
     (entry.slopScore || 0) * 0.14
     + (entry.creativeRiskScore || 0) * 0.12
@@ -642,6 +657,8 @@ export function computeActionRewards(
   const qualityAdjustedGrowthReward = clamp(
     (likeReward * 0.62)
     + (repostReward * 0.9)
+    + (quoteReward * 1.05)
+    + (bookmarkReward * 0.88)
     + highQualityReplyReward
     + relationshipReward
     + targetAudienceReward
@@ -654,7 +671,7 @@ export function computeActionRewards(
   );
   const qualityAdjustedGrowthScore = Math.round(clamp((qualityAdjustedGrowthReward + 0.6) / 1.5) * 100);
   const total = clamp(
-    (likeReward + replyReward + repostReward + impressionReward + engagementRateReward + profileClickReward + followReward - negativeFeedbackRisk) * 0.45
+    (likeReward + replyReward + repostReward + quoteReward + bookmarkReward + impressionReward + engagementRateReward + profileClickReward + followReward - negativeFeedbackRisk) * 0.45
     + qualityAdjustedGrowthReward * 0.55,
     -0.6,
     0.9,
@@ -664,6 +681,8 @@ export function computeActionRewards(
     likeReward: Number(likeReward.toFixed(3)),
     replyReward: Number(replyReward.toFixed(3)),
     repostReward: Number(repostReward.toFixed(3)),
+    quoteReward: Number(quoteReward.toFixed(3)),
+    bookmarkReward: Number(bookmarkReward.toFixed(3)),
     impressionReward: Number(impressionReward.toFixed(3)),
     engagementRateReward: Number(engagementRateReward.toFixed(3)),
     profileClickReward,
@@ -685,8 +704,13 @@ export function summarizeReferenceBank(performanceHistory: TweetPerformance[]): 
     .sort((a, b) => weightedEngagement(b) - weightedEngagement(a))
     .slice(0, 12)
     .map((entry) => {
-      const firstLine = entry.content.split('\n').map((line) => line.trim()).find(Boolean) || entry.content;
-      return `${entry.topic}/${entry.hook || 'hook'}: ${firstLine.slice(0, 110)}`;
+      const mechanics = inferContentSpreadMechanics(entry.content, {
+        topic: entry.topic,
+        thesis: entry.thesis,
+        replies: entry.replies,
+        retweets: entry.retweets,
+      });
+      return `Mechanics only ${entry.topic}/${entry.hook || 'hook'}: ${mechanics.join('; ')}${typeof entry.relativeSpreadScore === 'number' ? `; relative spread ${entry.relativeSpreadScore.toFixed(2)}` : ''}`;
     })
     .filter(Boolean)
     .slice(0, 6);
@@ -699,7 +723,13 @@ export function summarizeConversationInsights(performanceHistory: TweetPerforman
     .slice(0, 6)
     .map((entry) => {
       const ratio = Math.round((entry.replies / Math.max(1, entry.likes + entry.retweets + entry.replies)) * 100);
-      return `${entry.topic} posts with ${entry.hook || 'unknown'} hooks trigger replies (${entry.replies} replies, ${ratio}% reply share): "${entry.content.slice(0, 100)}"`;
+      const mechanics = inferContentSpreadMechanics(entry.content, {
+        topic: entry.topic,
+        thesis: entry.thesis,
+        replies: entry.replies,
+        retweets: entry.retweets,
+      });
+      return `${entry.topic} posts with ${entry.hook || 'unknown'} hooks trigger replies (${entry.replies} replies, ${ratio}% reply share); mechanics only: ${mechanics.join('; ')}.`;
     });
 }
 

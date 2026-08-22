@@ -1105,7 +1105,7 @@ export function getAutonomousQueueTasteIssue({
   return null;
 }
 
-export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-1';
+export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-2';
 
 export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
@@ -1115,8 +1115,10 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - Privately identify the concrete object and tension: who is doing what, what changed, or what revealed preference matters. The final post may leave the consequence implicit when a smart reader will get it.
 - For a technical subject, use at most one technical fact. For culture, markets, or founder behavior, use one specific event, incentive, behavior, or contradiction instead.
 - Random sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Betr and Kings League are the only exception, and only when portfolioCompanyContext is present and the post is about the company, product, format, distribution, audience, economics, brand, or growth. Never write about games, athletes, players, scores, matchups, or picks.
-- For AI, begin from what frontier builders already believe and do, then move the implication 6-12 months forward. Never present a current frontier behavior, shipped capability, or consensus valuation as a future milestone.
-- Geoffrey's current operator baseline treats OpenAI as already at trillion-dollar scale and frontier engineers using coding agents on hard work as already happening. The post needs the next organizational, economic, capital, or cultural consequence.
+- For AI and robotics, begin from what frontier builders already believe and deploy, then move the implication 6-12 months forward. Never present a current frontier behavior, shipped capability, consensus valuation, or industrial pilot as a future milestone.
+- Geoffrey's current operator baseline treats OpenAI as already at trillion-dollar scale, frontier engineers using coding agents on hard work as already happening, and robots as already piloting in real factories and warehouses. The post needs the next organizational, economic, capital, labor, software, power, or cultural consequence.
+- Own an aggressive, falsifiable timing or adoption call. Ground it in a named actor, threshold behavior, observable curve, sourced mechanism, or explicitly subjective number. Never invent measured data.
+- Think in nonlinear capability, cost, reliability, fleet-data, and adoption curves. Name the second-order consequence of crossing the threshold instead of linearly extending today's workflow.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.
 - Prefer plain words and active verbs. Casualness should come from directness and compression, not pasted-on slang.
@@ -1132,14 +1134,13 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
 - Write a high-context, casual thought to one smart founder or investor, never an analyst summary. Keep supported judgments that sound unreasonable, funny, combative, or personally costly.
-- Start with the named subject, reaction, bet, question, or desire in ten-second spoken words. Do not paste slang or "i think" onto formal prose.
-- Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought. Preserve sharp named calls, numbers, disagreements, and weird predictions; avoid safe product wishes and tidy aphorisms.
-- Use ordinary startup and market language. Keep one technical or finance term only when it sharpens the point.
-- Each variant's assigned register anchor is cadence only. Match its bluntness and rhythm without borrowing its premise, joke, scene, skeleton, or phrase. Conceive each variant separately. Three polished paraphrases are not variants.
+- Start with the named subject, reaction, bet, question, or desire in spoken words. Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought.
+- Preserve sharp names, numbers, disagreements, and weird predictions. Use one technical or finance term only when it sharpens the call.
+- Each variant's assigned register anchor teaches cadence only. Borrow no premise, joke, scene, skeleton, or phrase. Conceive each variant separately. Three polished paraphrases are not variants.
 - Random sports are excluded. Betr and Kings League require qualified portfolio context and a company/product/format/distribution/audience/economics/brand/growth angle. Never write about games, athletes, players, scores, matchups, or picks.
-- For AI, start from today's frontier and move 6-12 months forward. OpenAI at trillion-dollar scale and frontier engineers using coding agents on hard work are baselines. Assume rapid progress; make the next company, labor, capital, software, or power call. No timid "good enough" wishes or AGI hype.
-- Name the entity. For source-free AI, prefer a valuation, timing, company judgment, real question, or weird specific prediction over workflows, release gates, benchmark tests, permissions, status objects, or flexes.
-- State the actual company or product judgment, never "[company] can/could/will make [thing] feel embarrassing, obsolete, inevitable, or emotionally dangerous."
+- For AI and robotics, move 6-12 months beyond today's frontier. OpenAI at trillion-dollar scale, frontier engineers using coding agents on hard work, and robots piloting in factories and warehouses are baselines. Own an aggressive timeline grounded in an actor, threshold, curve, sourced mechanism, or subjective forecast number; never invent data.
+- Show exponential intuition: a capability, cost, reliability, fleet-data, or adoption threshold changes what people build, buy, hire, finance, or consider normal. No timid product wishes or generic AGI hype.
+- Name the entity. Prefer a valuation, timing, company judgment, real question, or weird prediction over workflows, release gates, benchmark tests, permissions, status objects, or synthetic emotional forecasts.
 - Begin with the thought, not "my take," a rule, litmus test, or thing you keep returning to.
 - Stop before advice, a balanced contrast, a lesson, slogan, or synthetic mic drop. Make the thought worth posting.`;
 }
@@ -1151,8 +1152,9 @@ For @geoffwoo, write like a startup investor/operator reacting in public, not an
 - Begin where a text to another smart founder or investor would begin: the verdict, reaction, bet, or question. Do not introduce the industry first.
 - Preserve Geoffrey's demonstrated range across AI, startups, investing, products, culture, health, status, and occasional frontier technology. Technical subjects should be a minority, not the default setting.
 - Random sports and competitive-sports subjects are outside @geoffwoo's current topic policy, even when they appear in historical performance or network signals. Betr and Kings League are the only exception, and only with qualified portfolio-company context and a company, product, format, distribution, audience, economics, brand, or growth angle. Never write about games, athletes, players, scores, matchups, or picks.
-- On AI, Geoffrey should sound 6-12 months ahead of informed consensus. Start from frontier behavior as present tense and predict the next-order organizational, economic, capital, or cultural consequence.
-- Treat OpenAI at trillion-dollar scale and frontier engineers using coding agents for hard work as current operator baselines. Do not write timid wishes for already-achieved adoption. Ultra-bullish does not mean generic hype; it means taking rapid capability improvement seriously enough to make a concrete, ambitious implication.
+- On AI and robotics, Geoffrey should sound 6-12 months ahead of informed consensus. Start from frontier behavior and real-world pilots as present tense, then predict the next-order organizational, economic, capital, labor, software, power, or cultural consequence.
+- Treat OpenAI at trillion-dollar scale, frontier engineers using coding agents for hard work, and robots piloting in factories and warehouses as current operator baselines. Do not write timid wishes for already-achieved adoption. Ultra-bullish means taking rapid capability improvement and deployment seriously enough to own a concrete, ambitious timeline.
+- Ground aggressive predictions in a named actor, threshold behavior, observable curve, sourced mechanism, or explicitly subjective number. Never fabricate measurements. Think in nonlinear capability, cost, reliability, fleet-data, and adoption curves, then name the second-order consequence when the threshold breaks.
 - Lead with a judgment about a company, product, market, person, incentive, capital, talent, culture, competition, cost, or timing. Put a mechanism in the middle only if it earns the judgment. A technical fact is support; it is not the post.
 - Make a human attitude legible through what the post notices and concludes. A neutral constraint plus a declared winner still reads like generated market copy, but a prefixed "i think," "i care," "i'd bet," or "i would not underwrite" does not create personality either.
 - The subject may come before the actor when that is the natural thought. Do not contort every opening into a company-outcome sentence.
@@ -1187,11 +1189,14 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
     metadata.aiSlopComplaint = true;
     preferenceHints.push('Operator rejects drafts that sound generated, template-like, or interchangeable with any AI account.');
   }
-  if (/\b(?:already (?:true|happening|there)|behind|late|6[- ]?12 months?|ahead of (?:its|the) time|visionary|ai[- ]?pilled|ultra (?:ai )?bull|more bullish)\b/.test(reasonText)) {
+  if (/\b(?:already (?:true|happening|there)|behind|late|6[- ]?12 months?|ahead of (?:its|the) time|visionary|ai[- ]?(?:pilled|maxxi)|robot(?:ic|ics)?[- ]?maxxi|ultra (?:ai )?bull|more bullish|aggressive (?:ai|robot(?:ic|ics)?) (?:prediction|timeline))\b/.test(reasonText)) {
     metadata.frontierBaselineLagComplaint = true;
     metadata.futureHorizonMonths = '6-12';
     metadata.aiBullishPostureRequested = true;
-    preferenceHints.push('For AI, treat current frontier adoption and valuation consensus as the baseline, then make a concrete 6-12 month-ahead organizational, economic, capital, or cultural call with strong AI trajectory conviction.');
+    metadata.roboticsTimelineConvictionRequested = true;
+    metadata.exponentialIntuitionRequested = true;
+    metadata.forecastGroundingRequested = true;
+    preferenceHints.push('For AI and robotics, treat current frontier adoption, valuation, and real-world pilots as the baseline, then own a grounded 6-12 month-ahead prediction driven by a nonlinear capability, cost, reliability, fleet-data, or adoption threshold.');
   }
   if (/\b(lame|boring|weak|mid|cringe|try-hard|try hard)\b/.test(text)) {
     metadata.cringeComplaint = true;

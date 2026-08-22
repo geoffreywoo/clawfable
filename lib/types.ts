@@ -226,6 +226,9 @@ export interface CandidateJudgeBreakdown {
   operatorPlausibility?: number;
   frontierLead?: number;
   aiBullishness?: number;
+  trajectoryConviction?: number;
+  forecastGrounding?: number;
+  exponentialIntuition?: number;
   modelCringeRisk?: number;
   nativeVoice?: number;
   casualStartupFit?: number;
@@ -283,6 +286,9 @@ export interface CandidateScoreProvenance {
   nativeVoice?: number;
   frontierLead?: number;
   aiBullishness?: number;
+  trajectoryConviction?: number;
+  forecastGrounding?: number;
+  exponentialIntuition?: number;
   nativeStyle?: number;
   casualStartupFit?: number;
   stiffnessRisk?: number;
@@ -342,6 +348,8 @@ export interface ActionRewardBreakdown {
   likeReward: number;
   replyReward: number;
   repostReward: number;
+  quoteReward?: number;
+  bookmarkReward?: number;
   impressionReward: number;
   engagementRateReward: number;
   profileClickReward: number;
@@ -821,6 +829,9 @@ export interface IdeaJudgeBreakdown {
   sharePotential: number;
   frontierLead: number;
   aiBullishness: number;
+  trajectoryConviction: number;
+  forecastGrounding: number;
+  exponentialIntuition: number;
 }
 
 export interface IdeaCandidate {
@@ -1284,8 +1295,10 @@ export interface TweetPerformance {
   likes: number;
   retweets: number;
   replies: number;
+  quotes?: number;
+  bookmarks?: number;
   impressions: number;
-  engagementRate: number;  // (likes+RTs+replies) / impressions
+  engagementRate: number;  // (likes+RTs+replies+quotes+bookmarks) / impressions when available
   wasViral: boolean;       // exceeded the viral threshold
   source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline
   styleMode?: ContentStyleMode;
@@ -1311,6 +1324,8 @@ export interface TweetPerformance {
   slopScore?: number;
   replyBaitScore?: number;
   earlyVelocityScore?: number;
+  relativeSpreadScore?: number;
+  spreadMetricCoverage?: number;
   referenceType?: 'quoted' | 'replied_to' | 'retweeted' | null;
   referencedTweetId?: string | null;
   hasMedia?: boolean;
@@ -1435,6 +1450,62 @@ export interface StyleModePerformance {
   confidencePassRate: number;
 }
 
+export type FrontierForecastDomain =
+  | 'ai_capability'
+  | 'ai_adoption'
+  | 'robotics_deployment'
+  | 'compute_power'
+  | 'startup_organization';
+
+export type FrontierForecastHorizon =
+  | 'under_6_months'
+  | '6_12_months'
+  | '12_24_months'
+  | 'over_24_months'
+  | 'implicit';
+
+export type FrontierForecastPosture =
+  | 'committed_prediction'
+  | 'owned_bet'
+  | 'question'
+  | 'wish_or_request'
+  | 'observation';
+
+export type FrontierForecastGrounding =
+  | 'quantified_curve'
+  | 'named_threshold'
+  | 'mechanism_backed'
+  | 'named_actor_only'
+  | 'ungrounded';
+
+export interface FrontierForecastPerformanceSlice {
+  key: string;
+  posts: number;
+  operatorPosts: number;
+  generatedPosts: number;
+  wins: number;
+  avgSpreadScore: number;
+  avgQualityScore: number;
+}
+
+export interface FrontierForecastLearningProfile {
+  version: string;
+  generatedAt: string;
+  eligiblePosts: number;
+  forecastPosts: number;
+  operatorPosts: number;
+  generatedPosts: number;
+  directShareMetricCoverage: number;
+  aggressiveForecastShare: number;
+  exponentialMechanismShare: number;
+  domains: FrontierForecastPerformanceSlice[];
+  horizons: FrontierForecastPerformanceSlice[];
+  postures: FrontierForecastPerformanceSlice[];
+  groundingModes: FrontierForecastPerformanceSlice[];
+  winningPatterns: string[];
+  avoidPatterns: string[];
+}
+
 export interface AgentLearnings {
   agentId: string;
   updatedAt: string;
@@ -1467,6 +1538,7 @@ export interface AgentLearnings {
   networkClusterPerformance?: Array<{ cluster: AudienceSegment; posts: number; avgEngagement: number; wins: number }>;
   topRelationshipHandles?: Array<{ handle: string; interactions: number; avgEngagement: number; lastSeenAt: string }>;
   viralityPostmortems?: ViralityPostmortem[];
+  frontierForecastProfile?: FrontierForecastLearningProfile;
 }
 
 export interface DraftExperiment {
@@ -1593,6 +1665,10 @@ export interface ViralityPostmortem {
   score: number;
   qualityAdjustedGrowthScore?: number | null;
   performanceSummary: string;
+  relativeSpreadScore?: number | null;
+  quotes?: number;
+  bookmarks?: number;
+  forecastPattern?: string | null;
   winningFactors: string[];
   misses: string[];
   nextExperiments: string[];
