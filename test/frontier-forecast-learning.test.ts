@@ -91,4 +91,20 @@ describe('frontier forecast learning', () => {
     ]));
     expect(JSON.stringify(profile)).not.toContain(winning);
   });
+
+  it('never converts the mandated horizon, conviction, or grounding shapes into avoid rules', () => {
+    const lowSpread = [
+      performance('within 9 months AI agents will double accepted work once reliability clears the threshold.', {
+        tweetId: 'required-1',
+        relativeSpreadScore: 0.3,
+      }),
+      performance('within 9 months AI agents will double accepted work once reliability clears the threshold.', {
+        tweetId: 'required-2',
+        relativeSpreadScore: 0.32,
+      }),
+    ];
+    const profile = buildFrontierForecastLearningProfile(lowSpread, now);
+
+    expect(profile.avoidPatterns.join(' ')).not.toMatch(/6 12 months|committed prediction|named threshold/i);
+  });
 });

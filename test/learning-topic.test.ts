@@ -7,6 +7,8 @@ describe('learning topic policy', () => {
     expect(canonicalizeLearningTopic({ topic: 'AI/ML', content: 'model capability update' })).toBe('ai');
     expect(canonicalizeLearningTopic({ topic: 'openai', content: 'ChatGPT adoption' })).toBe('ai');
     expect(canonicalizeLearningTopic({ topic: 'technology', content: 'Servo browser rendering engine ships better CSS support' })).toBe('software');
+    expect(canonicalizeLearningTopic({ topic: 'investing', content: 'NVIDIA AI demand is intact' })).toBe('investing');
+    expect(canonicalizeLearningTopic({ topic: 'modal versus databricks ipo timing', content: 'a named timing call' })).toBe('general');
   });
 
   it('excludes random sports from Geoffrey learning while preserving qualified portfolio business posts', () => {

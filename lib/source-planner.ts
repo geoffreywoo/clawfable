@@ -327,6 +327,7 @@ export function buildManualTopicProfile(
   const buckets = new Map<string, TweetPerformance[]>();
   for (const tweet of usable) {
     const key = canonicalizeLearningTopic(tweet);
+    if (key === 'general') continue;
     const bucket = buckets.get(key) || [];
     bucket.push(tweet);
     buckets.set(key, bucket);

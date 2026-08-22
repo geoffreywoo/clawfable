@@ -199,7 +199,14 @@ export function buildFrontierForecastLearningProfile(
     .slice(0, 5)
     .map(({ label, row }) => winningPattern(label, row));
   const avoidPatterns = candidatePatterns
-    .filter(({ row }) => row.avgSpreadScore < 0.45 || row.wins === 0)
+    .filter(({ label, row }) => {
+      const policyRequiredShape = (
+        (label === 'Horizon' && row.key === '6_12_months')
+        || (label === 'Posture' && ['committed_prediction', 'owned_bet'].includes(row.key))
+        || (label === 'Grounding' && ['quantified_curve', 'named_threshold', 'mechanism_backed'].includes(row.key))
+      );
+      return !policyRequiredShape && (row.avgSpreadScore < 0.45 || row.wins === 0);
+    })
     .sort((left, right) => left.row.avgSpreadScore - right.row.avgSpreadScore || right.row.posts - left.row.posts)
     .slice(0, 4)
     .map(({ label, row }) => losingPattern(label, row));

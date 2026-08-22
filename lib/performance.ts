@@ -206,10 +206,26 @@ export function selectTweetClassificationBacklog<T extends { id: string; text: s
   knownClawfableXIds: Set<string>,
   limit = 20,
 ): T[] {
-  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const boundedLimit = Math.max(1, Math.min(300, Math.floor(limit)));
   return timeline
     .filter((tweet) => !knownClawfableXIds.has(String(tweet.id)))
     .filter((tweet) => needsManualClassification(latestByXId.get(String(tweet.id))))
+    .slice(0, boundedLimit);
+}
+
+export function needsDirectShareMetricBackfill(existing: TweetPerformance | undefined): boolean {
+  return Boolean(existing)
+    && (typeof existing?.quotes !== 'number' || typeof existing?.bookmarks !== 'number');
+}
+
+export function selectTweetDirectMetricBackfill<T extends { id: string }>(
+  timeline: T[],
+  latestByXId: Map<string, TweetPerformance>,
+  limit = 100,
+): T[] {
+  const boundedLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+  return timeline
+    .filter((tweet) => needsDirectShareMetricBackfill(latestByXId.get(String(tweet.id))))
     .slice(0, boundedLimit);
 }
 
@@ -800,9 +816,9 @@ export async function checkPerformance(
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
   const performanceBaseline = buildPerformanceSignalBaseline(collapsePerformanceSnapshots(existing));
 
-  // Collect new checkpoints plus a bounded classification backlog. Backlog
-  // entries are re-written as fresh snapshots, so later runs naturally move
-  // on instead of reclassifying the same first page forever.
+  // Collect new checkpoints plus bounded classification and metric-migration
+  // backlogs. Fresh snapshots let later runs move through old rows without
+  // reprocessing already migrated posts.
   const checkedAtForRun = new Date().toISOString();
   const classificationBacklog = selectTweetClassificationBacklog(
     timeline,
@@ -811,8 +827,14 @@ export async function checkPerformance(
     classificationBacklogLimit,
   );
   const classificationBacklogIds = new Set(classificationBacklog.map((tweet) => String(tweet.id)));
+  const directMetricBackfillIds = new Set(selectTweetDirectMetricBackfill(
+    timeline,
+    latestByXId,
+    classificationBacklogLimit,
+  ).map((tweet) => String(tweet.id)));
   const newTweets = timeline.filter((tweet) => (
     classificationBacklogIds.has(String(tweet.id))
+    || directMetricBackfillIds.has(String(tweet.id))
     || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
   ));
   if (newTweets.length === 0) return 0;
