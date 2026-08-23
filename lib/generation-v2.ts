@@ -2064,7 +2064,7 @@ export function buildIdeaGenerationPromptV2(
       avoidSemanticReskins: true,
       evidenceIdContract: 'Copy evidenceIds exactly from allowedEvidenceIds. They identify source documents, not individual claims.',
       verifiedSourceReactionContract: 'For a verified story, react to the strongest sourced fact with a direct surprise, belief update, question, or allocation, company, or product judgment. Outside Geoffrey AI and robotics lanes, a plain high-context reaction can be complete. In Geoffrey AI and robotics lanes, geoffreyAIFutureHorizonContract takes precedence: the sourced fact is the present baseline and publicMove must make a next-12-month forecast using only supported facts plus explicitly predictive downstream logic. Do not invent a downstream business model, causal mechanism, market behavior, financing product, or metaphor merely to avoid summarizing.',
-      operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. publicMove, claim, tension, and implication must each be factual-safe on their own. A modal phrase cannot license an asserted event, measured or current number, quote, customer, measured behavior, external mechanism, or personal experience in another field. A number is allowed only as an unmistakably subjective valuation, price, timing forecast, or amount the author would pay or bet, and every field containing it must preserve that forecast posture.',
+      operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. publicMove, claim, tension, and implication must each be factual-safe on their own. A modal phrase cannot license an asserted current event, measured or current number, quote, customer, measured behavior, or personal experience in another field. A future mechanism is allowed only inside an explicit prediction no more than 12 months out; every field that names it must preserve that future or conditional posture. A number is allowed only as an unmistakably subjective valuation, price, timing forecast, or amount the author would pay or bet, and every field containing it must preserve that forecast posture.',
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
       portfolioCompanyContract: 'When portfolioCompanyContext is present, the company is a selected Anti Fund investment and the purpose is constructive amplification. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
@@ -2072,7 +2072,7 @@ export function buildIdeaGenerationPromptV2(
         ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, capital, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, disagreement, or self-implicating decision; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Geoffrey often makes the interesting part socially risky, funny, numerically ambitious, or personally costly; preserve that energy when the packet supports it instead of retreating to a safe product wish or evaluation framework. Do not manufacture holdings, status objects, status assets, status signals, new status games, or flexes to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, benchmark comparisons, or generic demands for what a company should ship. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
         : null,
       geoffreyAIFutureHorizonContract: isGeoffreyVoiceProfile(voiceProfile)
-        ? 'For every AI or robotics proposition, first identify the current frontier baseline, then make the publicMove about the next 6-12 month organizational, economic, capital, software, labor, power, or cultural consequence. Treat OpenAI at trillion-dollar scale, ChatGPT verb-like usage, frontier engineers using coding agents on hard work, and robots already piloting in real factories and warehouses as present baselines, not predictions. Geoffrey is ultra bullish on AI and robotic deployment: own an aggressive near-term call grounded in a named actor, threshold, observable curve, sourced mechanism, or explicitly subjective number. Reward nonlinear capability, cost, reliability, fleet-data, or adoption logic and its second-order consequence. Reject timid wishes for a product to become good enough when frontier users already crossed the proposed threshold. Never invent measured data.'
+        ? 'For every AI or robotics proposition, first identify the current frontier baseline, then make the publicMove about the next 6-12 month organizational, economic, capital, software, labor, power, or cultural consequence. HARD SHAPE: publicMove itself must literally include an explicit window no more than 12 months out, an owned will/could/expect/bet prediction, one capability, cost, reliability, fleet-data, adoption, or deployment mechanism, and a nonlinear cue such as each generation, each model, doubling, cost curve, threshold, compounding, or fleet data. It must state the second-order consequence, not merely today\'s event. Treat OpenAI at trillion-dollar scale, ChatGPT verb-like usage, frontier engineers using coding agents on hard work, and robots already piloting in real factories and warehouses as present baselines, not predictions. Geoffrey is ultra bullish on AI and robotic deployment. Keep every source-free mechanism explicitly future or conditional; never invent measured data.'
         : null,
       operatorAntiMemoContract: 'Write rough private thoughts in ordinary language. Do not distribute one polished investment memo across claim, tension, and implication, and do not return an author-fit rationale.',
       operatorTopicRoleContract: 'When an operatorTopicContext is present, preserve every entity role literally. Roles identify the entities but do not prove a relationship. Never treat an investor, person, institution, or location as a product, model, repository, host, or technology. Never restore a stripped event term as a premise.',
@@ -2344,10 +2344,17 @@ export function getGeoffreyAIBaselineLagIssueV2(value: string): string | null {
 }
 
 const OPERATOR_SPECULATIVE_NUMBER_POSTURE = /\b(?:should\s+(?:buy|sell|pay|be\s+worth)|worth\s+[$£€]?\s*\d|will\s+be\s+worth|i(?:['’]d|\s+would)\s+(?:pay|value|buy|sell|bet)|first\s+[$£€]?\s*\d|(?:next|within|in)\s+(?:the\s+next\s+)?(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+(?:months?|years?)|before\s+20\d{2}|by\s+20\d{2}|prediction|price\s+target|valuation\s+target)\b/i;
-const OPERATOR_ASSERTED_NUMBER = /\b20\d{2}\b|[$£€]\s*\d|\b\d+(?:\.\d+)?(?:%|x)(?![a-z0-9_])/i;
+const OPERATOR_ASSERTED_NUMBER = /\b20\d{2}\b|[$£€]\s*\d|\b\d+(?:\.\d+)?(?:%|x)(?![a-z0-9_])|\b\d+(?:\.\d+)?\s*(?:api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|parts?|samples?|models?|sensors?|chips?|racks?|boards?|minutes?|hours?|days?|weeks?|months?|years?|shifts?|incidents?|failures?|defects?)\b/i;
+const OPERATOR_NEAR_TERM_FORECAST_HORIZON = /\b(?:next\s+(?:quarter|year)|(?:next|within|in)\s+(?:the\s+next\s+)?(?:[1-9]|1[0-2]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:[1-9]|1[0-2]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+months?)\b/i;
+const OPERATOR_FORECAST_MODAL = /\b(?:will|could|going\s+to|base\s+case|i\s+(?:think|expect|believe)|i(?:['’]d|\s+would)\s+bet)\b/i;
+
+function hasExplicitNearTermOperatorForecast(text: string): boolean {
+  return OPERATOR_NEAR_TERM_FORECAST_HORIZON.test(text) && OPERATOR_FORECAST_MODAL.test(text);
+}
 
 function hasUnsupportedOperatorNumber(text: string): boolean {
   const withoutSpeculativeNumbers = text
+    .replace(/\b(?:next|within|in)\s+(?:the\s+next\s+)?(?:[1-9]|1[0-2]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:[1-9]|1[0-2]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+months?\b/gi, ' ')
     .replace(/\b(?:worth|value(?:d)?\s+at|pay|bet)\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
     .replace(/\b(?:buy|sell|acquire)\b.{0,60}?\bfor\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
     .replace(/\bfirst\s+[$£€]?\s*\d[\d,.]*(?:\.\d+)?\s*(?:[kmbt]|million|billion|trillion)?\b/gi, ' ')
@@ -2398,9 +2405,15 @@ export function isGenericInvestorSelectionTemplateV2(content: string): boolean {
   return /^(?:the\s+)?(?:[a-z0-9&+/-]+\s+){0,6}(?:startup|company|agent|product)\s+i(?:['’]d|\s+would)\s+(?:back|buy|bet\s+on)\b/i.test(opening);
 }
 
-function unsupportedOperatorEvidence(text: string, lockEvidenceConcepts = true): boolean {
-  const lockConcepts = lockEvidenceConcepts && !OPERATOR_JUDGMENT_POSTURE.test(text);
-  const assessment = assessClaimEvidence(text, [], { lockEvidenceConcepts: lockConcepts });
+export function hasUnsupportedOperatorEvidenceV2(text: string, lockEvidenceConcepts = true): boolean {
+  const explicitNearTermForecast = hasExplicitNearTermOperatorForecast(text);
+  const lockConcepts = lockEvidenceConcepts
+    && !OPERATOR_JUDGMENT_POSTURE.test(text)
+    && !explicitNearTermForecast;
+  const assessment = assessClaimEvidence(text, [], {
+    lockEvidenceConcepts: lockConcepts,
+    allowForecastTimingNumbers: explicitNearTermForecast,
+  });
   const speculativeNumbers = OPERATOR_SPECULATIVE_NUMBER_POSTURE.test(text)
     && !hasUnsupportedOperatorNumber(text);
   return unsupportedOperatorFact(text)
@@ -2739,7 +2752,7 @@ export function normalizeIdeaCandidatesV2({
         candidate.rejectionCodes.push('claim_not_grounded_in_evidence');
       }
     }
-    if (brief.evidenceMode === 'operator_opinion' && unsupportedOperatorEvidence(ideaText(candidate))) {
+    if (brief.evidenceMode === 'operator_opinion' && hasUnsupportedOperatorEvidenceV2(ideaText(candidate))) {
       candidate.rejectionCodes.push('unsupported_operator_fact');
     }
     if (getVoiceProfileTopicPolicyIssue(
@@ -3886,7 +3899,7 @@ export function buildTweetWritingPromptV2(
             'frontier engineers already use coding agents on hard work',
             'robots already pilot real work in factories and warehouses',
           ],
-          instruction: 'Treat those as present tense. Write the next organizational, economic, capital, software, labor, power, or cultural consequence with strong AI and robotics trajectory conviction. Own an aggressive near-term call, ground it in an actor, threshold, observable curve, sourced mechanism, or explicitly subjective number, and show the nonlinear second-order consequence. Never invent measured data. Do not write a timid adoption wish or generic AGI hype.',
+          instruction: 'Treat those as present tense. HARD SHAPE: the draft itself must literally include an explicit window no more than 12 months out, an owned will/could/expect/bet prediction, one capability, cost, reliability, fleet-data, adoption, or deployment mechanism, a nonlinear cue such as each generation, each model, doubling, cost curve, threshold, compounding, or fleet data, and the second-order consequence. Keep a source-free mechanism future or conditional. Compress this into one or two human clauses instead of appending an explanation. Never invent measured data, write a timid adoption wish, or use generic AGI hype.',
         }
       : null,
     subjectContext: {
@@ -3908,7 +3921,7 @@ export function buildTweetWritingPromptV2(
         : 'Use this only to keep the approved position concrete. Personal history selected the broad topic but supplies no prior premise or factual evidence.',
     },
     factualWritingContract: brief.evidenceMode === 'operator_opinion'
-      ? 'The approved idea packet is the concrete fact ceiling. Write a personal judgment, question, prediction, or explicitly modal speculation. Preserve an approved subjective valuation, price, timing forecast, or amount the author would pay or bet. Do not add a current or historical event, or add or mutate any number, scale word such as millions or billions, quote, customer, measured behavior, external mechanism, or personal behavior outside the packet.'
+      ? 'The approved idea packet is the concrete fact ceiling. Write a personal judgment, question, prediction, or explicitly modal speculation. Preserve an approved subjective valuation, price, timing forecast, or amount the author would pay or bet. A mechanism already present in an approved near-term forecast may be restated only as future or conditional. Do not add a current or historical event, or add or mutate any number, scale word such as millions or billions, quote, customer, measured behavior, external mechanism, or personal behavior outside the packet.'
       : 'Every factual premise and mechanism in the post must be directly supported by the supplied evidence. Preserve any says, claims, reports, or according-to qualifier.',
     portfolioCompanyContract: brief.portfolioCompanyContext ? {
       company: brief.portfolioCompanyContext.companyName,
@@ -4377,7 +4390,7 @@ function preflightDraft({
   if (authorityIssue) codes.push('unearned_authority');
   if (brief.evidenceMode === 'verified_source' && claimIssue) codes.push('claim_evidence');
   if (sourceAttributionIssue) codes.push('source_attribution_dropped');
-  if (brief.evidenceMode === 'operator_opinion' && unsupportedOperatorEvidence(content)) codes.push('unsupported_operator_fact');
+  if (brief.evidenceMode === 'operator_opinion' && hasUnsupportedOperatorEvidenceV2(content)) codes.push('unsupported_operator_fact');
   codes.push(...getOperatorTopicConstraintIssuesV2(content, brief.operatorTopicContext));
   if (isGenericOperatorProductWishlistV2(content)) codes.push('generic_product_wishlist');
   if (isGeoffreyVoiceProfile(input.voiceProfile) && isGenericGeoffreyProductOpsIdeaV2(content)) {

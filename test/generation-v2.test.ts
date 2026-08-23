@@ -10,6 +10,7 @@ import {
   calculateV2FinalQualityMargin,
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
+  hasUnsupportedOperatorEvidenceV2,
   getGeoffreyAIBaselineLagIssueV2,
   getGeoffreyAIFutureRejectionCodesV2,
   getGeoffreyFrontierForecastShapeRejectionCodesV2,
@@ -3763,6 +3764,21 @@ describe('Tweet Generation V2', () => {
     });
   });
 
+  it('allows bounded future mechanisms without opening the evidence gate to current facts or metrics', () => {
+    expect(hasUnsupportedOperatorEvidenceV2(
+      'within 12 months, gallium nitride capacity will get defense-tech pricing as qualification becomes the bottleneck.',
+    )).toBe(false);
+    expect(hasUnsupportedOperatorEvidenceV2(
+      'gallium nitride capacity gets defense-tech pricing because qualification is the bottleneck.',
+    )).toBe(true);
+    expect(hasUnsupportedOperatorEvidenceV2(
+      'within 12 months, 10 factories will get defense-tech pricing as qualification becomes the bottleneck.',
+    )).toBe(true);
+    expect(hasUnsupportedOperatorEvidenceV2(
+      'OpenAI announced a power project today and will own generation within 12 months.',
+    )).toBe(true);
+  });
+
   it('allows an explicit operator financing preference without pretending it is sourced fact', () => {
     const ideas = normalizeIdeaCandidatesV2({
       raw: [rawIdea(
@@ -4154,12 +4170,15 @@ describe('Tweet Generation V2', () => {
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('trillion-dollar scale');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('robots already piloting');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('nonlinear');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('HARD SHAPE');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('literally include an explicit window');
     expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
       lead: expect.stringContaining('6-12 months'),
       currentBaselines: expect.arrayContaining([expect.stringContaining('robots already pilot')]),
-      instruction: expect.stringContaining('strong AI and robotics trajectory conviction'),
+      instruction: expect.stringContaining('HARD SHAPE'),
     }));
+    expect(geoffreyWritingPrompt.factualWritingContract).toContain('future or conditional');
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
       expect.stringContaining('category leadership'),
