@@ -853,7 +853,10 @@ async function generateContextualBatchV2(
       if (getTweetLengthIssue(draft.content, request.surface === 'reply' || request.surface === 'followup' ? 'reply' : 'post')) rejections.push('over_x_length');
       if (getAutopostPolicyIssue(draft.content, { allowMentions: allowedMentions.length > 0, allowedMentions })) rejections.push('autopost_policy');
       if (getAuthorityProofIssue(draft.content)) rejections.push('unearned_authority');
-      if (assessClaimEvidence(draft.content, evidenceTexts, { lockEvidenceConcepts: true }).issue) rejections.push('claim_evidence');
+      if (assessClaimEvidence(draft.content, evidenceTexts, {
+        lockEvidenceConcepts: true,
+        allowForecastTimingNumbers: true,
+      }).issue) rejections.push('claim_evidence');
       if (isNearDuplicate(draft.content, recentComparisonTexts, 0.55).isDuplicate) rejections.push('recent_copy_duplicate');
       if (isNearDuplicate(draft.content, sourceComparisonTexts, 0.72).isDuplicate) rejections.push('source_copy');
       if (blocks.some((block) => block.scope === 'copy' && researchTokenSimilarity(draft.content, block.semanticKey.replace(/:/g, ' ')) >= 0.56)) rejections.push('blocked_copy_pattern');

@@ -12,7 +12,7 @@ import {
   computeRelativeSpreadSignal,
 } from './performance-signals';
 
-export const FRONTIER_FORECAST_LEARNING_VERSION = 'frontier-forecast-learning-1';
+export const FRONTIER_FORECAST_LEARNING_VERSION = 'frontier-forecast-learning-2';
 
 export interface FrontierForecastFeatures {
   domain: FrontierForecastDomain | null;
@@ -29,9 +29,9 @@ const COMPUTE_POWER_PATTERN = /\b(?:gpu|tpu|asic|inference\s+chip|compute|token\
 const AI_PATTERN = /\b(?:ai|artificial\s+intelligence|llm|model|openai|chatgpt|gpt[- ]?\d|claude|anthropic|gemini|codex|devin|cognition|cursor|agentic|agents?)\b/i;
 const ADOPTION_PATTERN = /\b(?:adopt|use|users?|engineers?|developers?|employees?|jobs?|work|workflow|company|companies|teams?|default|replace|hire|headcount|labor|customer|consumer|teenagers?|students?)\b/i;
 const STARTUP_ORG_PATTERN = /\b(?:startups?|founders?|series\s+[abc]|seed\s+round|org\s+chart|headcount|employees?|teams?|compan(?:y|ies)|venture|funding|valuation|ipo)\b/i;
-const FORECAST_PATTERN = /\b(?:next\s+(?:quarter|year|\d+\s+months?)|within\s+\d+\s+(?:months?|years?)|in\s+\d+\s+(?:months?|years?)|by\s+20\d{2}|before\s+20\d{2}|will|going\s+to|base\s+case|prediction|i(?:['’]d|\s+would)\s+bet|i\s+expect|soon|inevitable)\b/i;
+const FORECAST_PATTERN = /\b(?:next\s+(?:quarter|year|(?:the\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+months?)|within\s+(?:the\s+next\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+(?:months?|years?)|in\s+(?:the\s+next\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+(?:months?|years?)|by\s+20\d{2}|before\s+20\d{2}|will|going\s+to|base\s+case|prediction|i(?:['’]d|\s+would)\s+bet|i\s+expect|soon|inevitable)\b/i;
 const WISH_PATTERN = /^(?:i\s+)?(?:want|hope)\b|\b(?:should|needs?\s+to)\b/i;
-const COMMITTED_PATTERN = /\b(?:will|going\s+to|base\s+case|inevitable|by\s+20\d{2}|before\s+20\d{2}|next\s+(?:quarter|year|\d+\s+months?))\b/i;
+const COMMITTED_PATTERN = /\b(?:will|going\s+to|base\s+case|inevitable|by\s+20\d{2}|before\s+20\d{2}|next\s+(?:quarter|year))\b/i;
 const OWNED_BET_PATTERN = /\bi(?:['’]d|\s+would)\s+bet\b|\bi\s+(?:expect|think|believe)\b/i;
 const CURVE_PATTERN = /\b(?:exponential|doubl(?:e|es|ed|ing)|compound(?:s|ed|ing)?|scaling\s+(?:curve|law)|learning\s+curve|cost\s+curve|price[- ]performance|tokens?\s+per\s+dollar|capability\s+(?:gain|jump|improvement)|each\s+(?:generation|model)|fleet\s+data|reliability\s+curve|iteration\s+rate|threshold|recursive\s+improvement)\b/i;
 const MECHANISM_PATTERN = /\b(?:inference|training|compute|data|cost|latency|reliability|deployment|utilization|power|capability|automation|headcount|labor|fleet|simulation|teleoperation|distillation|memory|context|tool\s+use)\b/i;
@@ -42,10 +42,29 @@ function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
 }
 
+const MONTH_WORD_VALUES: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
+
+function parseMonthValue(value: string): number {
+  return MONTH_WORD_VALUES[value.toLowerCase()] || Number(value);
+}
+
 function horizonFromText(text: string, now: Date): FrontierForecastHorizon {
-  const months = text.match(/\b(?:next|within|in)\s+(\d{1,2})\s+months?\b/i);
+  const months = text.match(/\b(?:next|within|in)\s+(?:the\s+next\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+months?\b/i);
   if (months) {
-    const value = Number(months[1]);
+    const value = parseMonthValue(months[2] || months[1]);
     if (value <= 5) return 'under_6_months';
     if (value <= 12) return '6_12_months';
     if (value <= 24) return '12_24_months';
@@ -80,12 +99,13 @@ export function extractFrontierForecastFeatures(
 ): FrontierForecastFeatures {
   const text = `${topic || ''} ${content}`;
   const domain = domainFromText(text);
-  const isForecast = Boolean(domain && FORECAST_PATTERN.test(text));
+  const horizon = horizonFromText(text, now);
+  const isForecast = Boolean(domain && (horizon !== 'implicit' || FORECAST_PATTERN.test(text)));
   const posture: FrontierForecastPosture = WISH_PATTERN.test(content.trim())
     ? 'wish_or_request'
     : OWNED_BET_PATTERN.test(text)
       ? 'owned_bet'
-      : COMMITTED_PATTERN.test(text)
+      : COMMITTED_PATTERN.test(text) || horizon !== 'implicit'
         ? 'committed_prediction'
         : content.includes('?')
           ? 'question'
@@ -106,7 +126,7 @@ export function extractFrontierForecastFeatures(
           : 'ungrounded';
   return {
     domain,
-    horizon: horizonFromText(text, now),
+    horizon,
     posture,
     grounding,
     isForecast,

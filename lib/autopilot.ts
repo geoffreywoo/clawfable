@@ -371,6 +371,7 @@ function getQueuedClaimEvidenceIssue(
   const currentIssue = assessClaimEvidence(
     tweet.content,
     getTrustedClaimSourceTexts(tweet, operatorEvidence),
+    { allowForecastTimingNumbers: true },
   ).issue;
   if (currentIssue) return currentIssue;
   const scoredRisk = tweet.scoreProvenance?.truthfulnessRisk;
@@ -2670,6 +2671,7 @@ export async function refillQueue(
         const claimEvidenceIssue = assessClaimEvidence(
           item.content,
           getTrustedClaimSourceTexts(item, operatorEvidence),
+          { allowForecastTimingNumbers: true },
         ).issue;
         if (claimEvidenceIssue) {
           await rejectCandidate(item, 'claim_evidence', claimEvidenceIssue);

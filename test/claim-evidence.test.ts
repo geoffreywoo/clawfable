@@ -3,6 +3,22 @@ import { assessClaimEvidence } from '@/lib/claim-evidence';
 import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from '@/lib/writing-patterns';
 
 describe('claim evidence', () => {
+  it('allows an explicit forecast horizon without waiving other invented numbers', () => {
+    const forecast = assessClaimEvidence(
+      'i think within 12 months AI teams will be the default',
+      [],
+      { allowForecastTimingNumbers: true },
+    );
+    const inventedMetric = assessClaimEvidence(
+      'i think within 12 months AI teams will improve 10x',
+      [],
+      { allowForecastTimingNumbers: true },
+    );
+
+    expect(forecast.unsupportedNumbers).toEqual([]);
+    expect(inventedMetric.unsupportedNumbers).toContain('10x');
+  });
+
   it('does not treat the number in Hut 8 as a quantitative claim', () => {
     expect(assessClaimEvidence(
       'Hut 8 is supplying energy infrastructure beneath HighriseAi.',
