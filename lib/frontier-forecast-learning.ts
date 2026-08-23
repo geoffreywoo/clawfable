@@ -12,7 +12,7 @@ import {
   computeRelativeSpreadSignal,
 } from './performance-signals';
 
-export const FRONTIER_FORECAST_LEARNING_VERSION = 'frontier-forecast-learning-2';
+export const FRONTIER_FORECAST_LEARNING_VERSION = 'frontier-forecast-learning-3';
 
 export interface FrontierForecastFeatures {
   domain: FrontierForecastDomain | null;
@@ -34,6 +34,11 @@ const WISH_PATTERN = /^(?:i\s+)?(?:want|hope)\b|\b(?:should|needs?\s+to)\b/i;
 const COMMITTED_PATTERN = /\b(?:will|going\s+to|base\s+case|inevitable|by\s+20\d{2}|before\s+20\d{2}|next\s+(?:quarter|year))\b/i;
 const OWNED_BET_PATTERN = /\bi(?:['’]d|\s+would)\s+bet\b|\bi\s+(?:expect|think|believe)\b/i;
 const CURVE_PATTERN = /\b(?:exponential|doubl(?:e|es|ed|ing)|compound(?:s|ed|ing)?|scaling\s+(?:curve|law)|learning\s+curve|cost\s+curve|price[- ]performance|tokens?\s+per\s+dollar|capability\s+(?:gain|jump|improvement)|each\s+(?:generation|model)|fleet\s+data|reliability\s+curve|iteration\s+rate|threshold|recursive\s+improvement)\b/i;
+const TIME_COMPRESSION_PATTERN = /\bcompress(?:es|ed|ing)?\b[^.!?\n]{0,100}\b(?:years?|quarters?|months?)\b[^.!?\n]{0,60}\b(?:into|to)\b[^.!?\n]{0,30}\b(?:quarters?|months?|weeks?|days?)\b/i;
+const SMALL_CHANGE_PATTERN = /\b(?:small|modest|marginal|incremental)\s+(?:capability|reliability|performance|cost|latency|adoption)\s+(?:gain|gains|improvement|improvements|drop|drops|reduction|reductions)\b/i;
+const SCALE_AMPLIFIER_PATTERN = /\b(?:distribution|installed\s+base|deployment\s+base|fleet|usage|adoption|default|reach)\b/i;
+const SECOND_ORDER_BREAK_PATTERN = /\b(?:shock|collapse|replace|replacement|default|unfundable|obsolete|compress|eliminate|remove|shrink|shrinks|explode|explodes|reprice|reprices|rewrite|rewrites)\b/i;
+const REPEATED_LEARNING_PATTERN = /\b(?:field|fleet|deployment|usage)\s+data\b[\s\S]{0,180}\b(?:loop|compound|transfer|improve|learn)\w*\b|\b(?:learning|feedback)\s+loop\b/i;
 const MECHANISM_PATTERN = /\b(?:inference|training|compute|data|cost|latency|reliability|deployment|utilization|power|capability|automation|headcount|labor|fleet|simulation|teleoperation|distillation|memory|context|tool\s+use)\b/i;
 const THRESHOLD_BEHAVIOR_PATTERN = /\b(?:once|until|before|after|when)\b[\s\S]{0,120}\b(?:default|replace|choose|stop|start|ask|hire|build|buy|use|ship|work)\b/i;
 const ACTOR_PATTERN = /\b(?:openai|anthropic|claude|chatgpt|gemini|codex|devin|cognition|cursor|founders?|startups?|companies|engineers?|developers?|teenagers?|students?|workers?|factories|customers?|investors?)\b/i;
@@ -112,7 +117,17 @@ export function extractFrontierForecastFeatures(
           : 'observation';
   const exponentialMechanism = Boolean(
     domain
-    && (CURVE_PATTERN.test(text) || (AI_PATTERN.test(text) && THRESHOLD_BEHAVIOR_PATTERN.test(text))),
+    && (
+      CURVE_PATTERN.test(text)
+      || TIME_COMPRESSION_PATTERN.test(text)
+      || REPEATED_LEARNING_PATTERN.test(text)
+      || (
+        SMALL_CHANGE_PATTERN.test(text)
+        && SCALE_AMPLIFIER_PATTERN.test(text)
+        && SECOND_ORDER_BREAK_PATTERN.test(text)
+      )
+      || (AI_PATTERN.test(text) && THRESHOLD_BEHAVIOR_PATTERN.test(text))
+    ),
   );
   const quantified = /\b\d+(?:\.\d+)?\s*(?:x|%|months?|years?|tokens?|gpus?|robots?|employees?)\b|\b20\d{2}\b/i.test(text);
   const grounding: FrontierForecastGrounding = quantified && (CURVE_PATTERN.test(text) || isForecast)

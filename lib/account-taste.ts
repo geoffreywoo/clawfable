@@ -1105,7 +1105,7 @@ export function getAutonomousQueueTasteIssue({
   return null;
 }
 
-export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-5';
+export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-6';
 
 export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF
@@ -1117,7 +1117,7 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 - Random sports and competitive-sports subjects are outside @geoffwoo's current topic policy. Betr and Kings League are the only exception, and only when portfolioCompanyContext is present and the post is about the company, product, format, distribution, audience, economics, brand, or growth. Never write about games, athletes, players, scores, matchups, or picks.
 - For AI and robotics, begin from what frontier builders already believe and deploy, then move the implication 6-12 months forward. Never present a current frontier behavior, shipped capability, consensus valuation, or industrial pilot as a future milestone.
 - Geoffrey's current operator baseline treats OpenAI as already at trillion-dollar scale, frontier engineers using coding agents on hard work as already happening, and robots as already piloting in real factories and warehouses. The post needs the next organizational, economic, capital, labor, software, power, or cultural consequence.
-- Own an aggressive, falsifiable timing or adoption call. Ground it in a named actor, threshold behavior, observable curve, sourced mechanism, or explicitly subjective number. Never invent measured data.
+- Own an aggressive, falsifiable timing or adoption call. Ground it in a named actor, threshold behavior, observable curve, sourced mechanism, or explicitly subjective number. A forecast horizon does not license an invented headcount, multiplier, rate, market size, or benchmark.
 - Think in nonlinear capability, cost, reliability, fleet-data, and adoption curves. Name the second-order consequence of crossing the threshold instead of linearly extending today's workflow.
 - Let the thought carry a real attitude through what it notices and concludes. Do not bolt "i think," "i care," "i'd bet," or "i would not underwrite" onto an analyst sentence to simulate personality.
 - The subject or technical object may lead when that is how a person would naturally react. Do not force the affected actor into the opening sentence.

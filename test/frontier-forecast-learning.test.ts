@@ -65,6 +65,38 @@ describe('frontier forecast learning', () => {
     expect(features.exponentialMechanism).toBe(true);
   });
 
+  it('recognizes natural time-compression and distribution-amplification mechanisms', () => {
+    const acquisition = extractFrontierForecastFeatures(
+      'within 12 months, Anthropic will use acquisitions to compress years of capability-building into quarters.',
+      'AI',
+      now,
+    );
+    const distribution = extractFrontierForecastFeatures(
+      "within 9 months, a modest reliability gain across Gemini's Search distribution will turn into a labor shock.",
+      'AI',
+      now,
+    );
+
+    expect(acquisition.exponentialMechanism).toBe(true);
+    expect(distribution.exponentialMechanism).toBe(true);
+  });
+
+  it('recognizes deployment-data learning loops without accepting generic improvement', () => {
+    const loop = extractFrontierForecastFeatures(
+      'within 9 months, field data will improve every deployed robot; that learning loop makes the fleet harder to copy.',
+      'robotics',
+      now,
+    );
+    const linear = extractFrontierForecastFeatures(
+      'within 9 months, AI models will improve and more companies will use them.',
+      'AI',
+      now,
+    );
+
+    expect(loop.exponentialMechanism).toBe(true);
+    expect(linear.exponentialMechanism).toBe(false);
+  });
+
   it('distinguishes a lagging product wish from a trajectory forecast', () => {
     const features = extractFrontierForecastFeatures(
       'i want humanoid robots to start working in factories',

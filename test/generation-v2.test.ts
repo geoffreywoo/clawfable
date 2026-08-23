@@ -3775,6 +3775,12 @@ describe('Tweet Generation V2', () => {
       'within 12 months, 10 factories will get defense-tech pricing as qualification becomes the bottleneck.',
     )).toBe(true);
     expect(hasUnsupportedOperatorEvidenceV2(
+      'within 9 months, coding agents could make software companies with 20 people before launch look overbuilt.',
+    )).toBe(true);
+    expect(hasUnsupportedOperatorEvidenceV2(
+      'within 9 months, coding agents could make 20-person pre-launch software teams look overbuilt.',
+    )).toBe(true);
+    expect(hasUnsupportedOperatorEvidenceV2(
       'OpenAI announced a power project today and will own generation within 12 months.',
     )).toBe(true);
   });
@@ -4174,6 +4180,7 @@ describe('Tweet Generation V2', () => {
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('literally include an explicit window');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('semantic constraints, not a sentence template');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('subject will outcome within N months');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('does not license a second number');
     expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
       lead: expect.stringContaining('6-12 months'),
@@ -4182,7 +4189,9 @@ describe('Tweet Generation V2', () => {
     }));
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('semantic atoms, never prose order');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('supplied slot voice anchor');
+    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('never add illustrative headcount');
     expect(geoffreyWritingPrompt.factualWritingContract).toContain('future or conditional');
+    expect(geoffreyWritingPrompt.factualWritingContract).toContain('Never convert a qualitative scale claim');
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
       expect.stringContaining('category leadership'),
