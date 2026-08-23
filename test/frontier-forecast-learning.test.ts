@@ -51,6 +51,20 @@ describe('frontier forecast learning', () => {
     });
   });
 
+  it('recognizes natural-language and ranged next-12-month horizons', () => {
+    const features = extractFrontierForecastFeatures(
+      'within the next six to twelve months, AI agents will double accepted code per engineer. once inference cost falls another 10x, startups stop hiring for backlog.',
+      'AI',
+      now,
+    );
+
+    expect(features.horizon).toBe('6_12_months');
+    expect(features.posture).toBe('committed_prediction');
+    expect(features.isForecast).toBe(true);
+    expect(features.aggressive).toBe(true);
+    expect(features.exponentialMechanism).toBe(true);
+  });
+
   it('distinguishes a lagging product wish from a trajectory forecast', () => {
     const features = extractFrontierForecastFeatures(
       'i want humanoid robots to start working in factories',

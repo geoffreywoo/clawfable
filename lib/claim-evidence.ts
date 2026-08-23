@@ -11,6 +11,7 @@ export interface ClaimEvidenceAssessment {
 
 export interface ClaimEvidenceOptions {
   lockEvidenceConcepts?: boolean;
+  allowForecastTimingNumbers?: boolean;
 }
 
 const PERSONAL_EXPERIENCE_PATTERNS = [
@@ -127,6 +128,15 @@ function numericClaims(content: string): string[] {
   return [...new Set(claims)];
 }
 
+function forecastTimingClaims(content: string): Set<string> {
+  const claims = new Set<string>();
+  const pattern = /\b(?:next|within|in)\s+(?:the\s+next\s+)?(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+(?:months?|years?)\b/gi;
+  for (const match of content.matchAll(pattern)) {
+    for (const claim of numericClaims(match[0])) claims.add(claim);
+  }
+  return claims;
+}
+
 function canonicalNumericClaim(value: string): string {
   return value
     .toLowerCase()
@@ -196,7 +206,12 @@ export function assessClaimEvidence(
   const cleanSupport = supportTexts.map((text) => String(text || '').trim()).filter(Boolean);
   const hasPersonalExperienceClaim = PERSONAL_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(content));
   const personalExperienceSupported = !hasPersonalExperienceClaim || personalClaimIsSupported(content, cleanSupport);
-  const unsupportedNumbers = numericClaims(content).filter((claim) => !numericClaimSupported(claim, cleanSupport));
+  const allowedForecastTiming = options.allowForecastTimingNumbers
+    ? forecastTimingClaims(content)
+    : new Set<string>();
+  const unsupportedNumbers = numericClaims(content).filter((claim) => (
+    !allowedForecastTiming.has(claim) && !numericClaimSupported(claim, cleanSupport)
+  ));
   const crossClaimNumericSynthesis = crossClaimNumbers(content, cleanSupport);
   const unsupportedConcepts = options.lockEvidenceConcepts
     ? unsupportedEvidenceConcepts(content, cleanSupport)

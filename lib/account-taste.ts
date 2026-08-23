@@ -961,7 +961,7 @@ export function assessAccountTaste(
     ...(reference?.startupRegisterExamples || []).map((entry) => entry.content),
     ...(reference?.bestPerformers || []).map((entry) => entry.content),
   ];
-  const claimEvidence = assessClaimEvidence(content, sourceTexts);
+  const claimEvidence = assessClaimEvidence(content, sourceTexts, { allowForecastTimingNumbers: true });
   const sourceCopy = assessExternalSourceCopyRisk(content, context.untrustedSourceTexts);
   const rejectedSimilarity = rejectedDraftSimilarity(content, featureTags, context.memory);
   const memoryAvoid = [
@@ -1105,7 +1105,7 @@ export function getAutonomousQueueTasteIssue({
   return null;
 }
 
-export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-2';
+export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-3';
 
 export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF

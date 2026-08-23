@@ -12,6 +12,7 @@ import {
   getCommittedTweetCopyMemoryV2,
   getGeoffreyAIBaselineLagIssueV2,
   getGeoffreyAIFutureRejectionCodesV2,
+  getGeoffreyFrontierForecastShapeRejectionCodesV2,
   getGeoffreyFinalNoveltyIssueV2,
   getPostcriticRepairModelStackV2,
   getOperatorTopicConstraintIssuesV2,
@@ -519,6 +520,92 @@ describe('Tweet Generation V2', () => {
     })).toContain('final_frontier_baseline_lag');
   });
 
+  it('does not let high model scores turn a current AI reaction into a frontier forecast', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const reaction = 'Anthropic discussing $6B for Decart makes normal startup acquisition math feel obsolete. Early talks, per Fortune.';
+    const forecast = 'within 12 months, Anthropic will make frontier acquisitions routine once each model cycle makes buying a team faster than recruiting it.';
+
+    expect(getGeoffreyFrontierForecastShapeRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'Anthropic AI acquisition',
+      content: reaction,
+      stage: 'idea',
+    })).toEqual(expect.arrayContaining([
+      'idea_frontier_forecast_missing',
+      'idea_frontier_owned_prediction_missing',
+      'idea_frontier_near_term_horizon_missing',
+      'idea_frontier_grounding_shape_missing',
+      'idea_frontier_exponential_mechanism_missing',
+    ]));
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'Anthropic AI acquisition',
+      content: reaction,
+      frontierLead: 0.95,
+      aiBullishness: 0.95,
+      trajectoryConviction: 0.95,
+      forecastGrounding: 0.95,
+      exponentialIntuition: 0.95,
+    })).toEqual(expect.arrayContaining([
+      'final_frontier_forecast_missing',
+      'final_frontier_near_term_horizon_missing',
+      'final_frontier_exponential_mechanism_missing',
+    ]));
+    expect(getGeoffreyFrontierForecastShapeRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'Anthropic AI acquisition',
+      content: forecast,
+      stage: 'idea',
+    })).toEqual([]);
+    expect(getGeoffreyFrontierForecastShapeRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'fusion reactor',
+      content: reaction,
+      stage: 'idea',
+    })).toEqual([]);
+  });
+
+  it('rejects reaction-only Geoffrey AI ideas before copy generation', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const reaction = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'Anthropic discussing $6B for Decart makes normal startup acquisition math feel obsolete.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-frontier-shape-reaction',
+      briefs: [brief('operator', 'Anthropic AI acquisition')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-22T00:00:00.000Z',
+    })[0];
+    const forecast = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'within 12 months, Anthropic will make frontier acquisitions routine once each model cycle makes buying a team faster than recruiting it.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-frontier-shape-forecast',
+      briefs: [brief('operator', 'Anthropic AI acquisition')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-22T00:00:00.000Z',
+    })[0];
+
+    expect(reaction.rejectionCodes).toContain('idea_frontier_forecast_missing');
+    expect(reaction.rejectionCodes).toContain('idea_frontier_exponential_mechanism_missing');
+    expect(forecast.rejectionCodes.some((code) => code.startsWith('idea_frontier_'))).toBe(false);
+    expect(forecast.rejectionCodes).not.toContain('unsupported_operator_fact');
+  });
+
   it('rejects lagging AI baselines before paying the idea judge', () => {
     const geoffreyVoice = {
       ...voiceProfile,
@@ -761,6 +848,10 @@ describe('Tweet Generation V2', () => {
     expect(getV2RescueRevisionStrategy(['final_confidence_below_floor', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['copy_judge_voice_mismatch', 'final_quality_margin'])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(['final_cringe_risk', 'final_quality_margin'])).toBe('reconceive');
+    expect(getV2RescueRevisionStrategy([
+      'final_frontier_near_term_horizon_missing',
+      'final_frontier_exponential_mechanism_missing',
+    ])).toBe('reconceive');
     expect(getV2RescueRevisionStrategy(
       ['final_quality_margin'],
       'The middle reads like a constructed reveal from an analyst account.',
@@ -805,6 +896,27 @@ describe('Tweet Generation V2', () => {
       'The ending still reads like a manufactured reveal.',
       0.856,
       nativeNearMiss,
+    )).toBe(false);
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      [
+        'final_frontier_near_term_horizon_missing',
+        'final_frontier_exponential_mechanism_missing',
+        'final_quality_margin',
+      ],
+      'The native robotics call is strong but it needs an explicit near-term threshold forecast.',
+      0.861,
+      { ...nativeNearMiss, voiceDriftRisk: 0.1 },
+    )).toBe(true);
+    expect(shouldRunPostcriticRescueV2(
+      geoffreyVoice,
+      [
+        'final_frontier_near_term_horizon_missing',
+        'final_frontier_exponential_mechanism_missing',
+      ],
+      'The current-event reaction has no forecast shape.',
+      0.72,
+      { ...nativeNearMiss, voiceDriftRisk: 0.1 },
     )).toBe(false);
     expect(shouldRunPostcriticRescueV2(
       geoffreyVoice,
@@ -4042,6 +4154,7 @@ describe('Tweet Generation V2', () => {
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('trillion-dollar scale');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('robots already piloting');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('nonlinear');
+    expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
       lead: expect.stringContaining('6-12 months'),
       currentBaselines: expect.arrayContaining([expect.stringContaining('robots already pilot')]),
