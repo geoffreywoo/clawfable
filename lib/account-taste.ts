@@ -1105,7 +1105,7 @@ export function getAutonomousQueueTasteIssue({
   return null;
 }
 
-export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-4';
+export const GEOFFREY_AI_HORIZON_POLICY_VERSION = 'geoffrey-ai-horizon-5';
 
 export function buildGeoffreyNativeGenerationBrief(): string {
   return `## GEOFFREY-NATIVE WRITING BRIEF

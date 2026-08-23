@@ -189,6 +189,19 @@ describe('generated writing patterns', () => {
     }
   });
 
+  it('blocks the production-observed forecast checklist scaffold', () => {
+    expect(assessGeneratedWritingPatterns(
+      'google will make standalone ai search nearly unfundable within 9 months as each gemini generation pushes the cost curve down.',
+    )).toMatchObject({
+      primarySignature: 'forecast-checklist-scaffold',
+      score: 0.52,
+    });
+
+    expect(assessGeneratedWritingPatterns(
+      '9 months feels long.\n\ni think every serious startup ships with an ai agent before then.',
+    )).toMatchObject({ primarySignature: null, score: 0 });
+  });
+
   it('blocks the generic X is just Y with Z quip mold', () => {
     expect(assessGeneratedWritingPatterns(
       'hiring fast before product truth is just anxiety with a payroll attached.',
