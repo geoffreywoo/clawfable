@@ -588,7 +588,14 @@ function consequenceScore(documents: SourceDocument[]): number {
   const causalChange = /\b(?:cut|cuts|cutting|drop(?:ped|s|ping)?|fall(?:en|ing|s)?|fell|halv(?:e|ed|es|ing)|increase(?:d|s|ing)?|lower(?:ed|s|ing)?|rais(?:e|ed|es|ing)|reduc(?:e|ed|es|ing)|ris(?:e|en|es|ing)|rose)\b/i.test(text);
   const marketOutcome = /\b(?:adoption|capacity|costs?|customers?|demand|deployments?|margins?|output|prices?|revenue|supply|users?|yield)\b/i.test(text);
   const measuredOutcomeFloor = measuredMagnitude && causalChange && marketOutcome ? 0.61 : 0;
-  return clampResearchScore(Math.max(0.22 + hits * 0.13, measuredOutcomeFloor));
+  const currencyMagnitude = /(?:[$\u00a3\u20ac]\s*|\b(?:usd|eur|gbp)\s*)\d+(?:[.,]\d+)?\s*(?:[kmbt]|thousand|million|billion|trillion)\b/i.test(text);
+  const marketTransaction = /\b(?:acquir(?:e|es|ed|ing|ition)|bought|buy(?:s|ing)?|contracts?|deals?|financ(?:e|es|ed|ing)|funding|invest(?:ed|ing|ment|ments)|merg(?:e|ed|er|ers|es|ing)|takeover|valuation)\b/i.test(text);
+  const transactionMagnitudeFloor = currencyMagnitude && marketTransaction ? 0.61 : 0;
+  return clampResearchScore(Math.max(
+    0.22 + hits * 0.13,
+    measuredOutcomeFloor,
+    transactionMagnitudeFloor,
+  ));
 }
 
 function freshnessScore(documents: SourceDocument[], nowMs: number): number {

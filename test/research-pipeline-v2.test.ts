@@ -342,6 +342,27 @@ describe('research agenda and story qualification', () => {
     expect(batteryStory.scores.consequence).toBeGreaterThanOrEqual(0.61);
   });
 
+  it('recognizes a market-scale transaction as a concrete consequence', () => {
+    const [acquisitionStory] = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda,
+      now,
+      documents: [source({
+        id: 'anthropic-acquisition',
+        title: 'Anthropic agrees to buy Decart at a $6B valuation',
+        excerpt: 'The AI lab agreed to acquire the model startup in a transaction valuing Decart at $6 billion.',
+        publisher: 'Anthropic',
+        trustTier: 'primary',
+        isPrimary: true,
+        topics: ['AI startups'],
+        entities: ['Anthropic', 'Decart'],
+      })],
+    });
+
+    expect(acquisitionStory.evidenceQualified).toBe(true);
+    expect(acquisitionStory.scores.consequence).toBeGreaterThanOrEqual(0.61);
+  });
+
   it('does not treat stale or one-token arXiv matches as current identity evidence', () => {
     const arxivAgenda = {
       ...agenda,
