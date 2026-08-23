@@ -4172,12 +4172,16 @@ describe('Tweet Generation V2', () => {
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('nonlinear');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('HARD SHAPE');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('literally include an explicit window');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('semantic constraints, not a sentence template');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('subject will outcome within N months');
     expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
     expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
       lead: expect.stringContaining('6-12 months'),
       currentBaselines: expect.arrayContaining([expect.stringContaining('robots already pilot')]),
       instruction: expect.stringContaining('HARD SHAPE'),
     }));
+    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('semantic atoms, never prose order');
+    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('supplied slot voice anchor');
     expect(geoffreyWritingPrompt.factualWritingContract).toContain('future or conditional');
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
       expect.stringContaining('private capital'),
