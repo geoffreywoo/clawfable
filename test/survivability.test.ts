@@ -342,13 +342,23 @@ describe('getAutopostPolicyIssue', () => {
     expect(getAutopostPolicyIssue('Great breakdown from @somefounder on agent workflows')).toContain('@somefounder');
   });
 
-  it('allows the agent handle and explicit opt-in mention formats', () => {
+  it('allows only explicitly named handles', () => {
     expect(getAutopostPolicyIssue('Shipping notes from @debugbot', {
       allowedMentions: ['debugbot'],
     })).toBeNull();
-    expect(getAutopostPolicyIssue('Organic shoutout to @anotheragent', {
-      allowMentions: true,
+    expect(getAutopostPolicyIssue('Organic shoutout to @anotheragent')).toContain('@anotheragent');
+  });
+
+  it('blocks a leading handle even when that handle is explicitly allowed', () => {
+    expect(getAutopostPolicyIssue('@OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
+    })).toContain('cannot start with an @mention');
+    expect(getAutopostPolicyIssue('i think @OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
     })).toBeNull();
+    expect(getAutopostPolicyIssue('.@OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
+    })).toContain('cannot start with an @mention');
   });
 });
 

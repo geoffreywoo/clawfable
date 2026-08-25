@@ -30,7 +30,7 @@ import {
   getIdeaCandidates,
   getPostLog,
 } from './kv-storage';
-import { clampPostsPerDay } from './survivability';
+import { clampPostsPerDay, getAutopostPolicyIssue } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import {
   buildFailedStoryAttemptDiagnosticsV2,
@@ -79,8 +79,9 @@ import {
   getAntiFundPortfolioPolicyIssue,
   isAntiFundPortfolioBriefDue,
 } from './antifund-portfolio';
+import { ENTITY_MENTION_POLICY_VERSION } from './entity-mentions';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 42;
+export const GENERATION_QUALITY_AUDIT_VERSION = 43;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1323,10 +1324,13 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const portfolioCompanyIssue = isGeoffrey || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null;
+    const mentionPolicyIssue = getAutopostPolicyIssue(tweet.content, {
+      allowedMentions: [agent.handle, ...(tweet.allowedMentionHandles || [])],
+    });
     const matchedPortfolioCompanies = findAntiFundPortfolioCompanies(
       `${tweet.topic || ''} ${tweet.content}`,
     );
-    const qualityIssues = [accountTopicIssue, portfolioCompanyIssue, originIssue, tweet.quarantineReason]
+    const qualityIssues = [accountTopicIssue, portfolioCompanyIssue, mentionPolicyIssue, originIssue, tweet.quarantineReason]
       .filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
@@ -1338,6 +1342,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       portfolioCompanyContext: tweet.portfolioCompanyContext || null,
       portfolioCompanyMatches: matchedPortfolioCompanies.map((company) => company.id),
       portfolioCompanyIssue,
+      mentionPolicyIssue,
+      allowedMentionHandles: tweet.allowedMentionHandles || [],
       qualityEligible: qualityIssues.length === 0 && !tweet.quarantinedAt,
       qualityIssues,
       scores: tweet.finalCriticScores || null,
@@ -1775,6 +1781,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       geoffreyAIFutureHorizonPolicyVersion: GEOFFREY_AI_HORIZON_POLICY_VERSION,
       frontierForecastLearningVersion: FRONTIER_FORECAST_LEARNING_VERSION,
       qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      entityMentionPolicyVersion: ENTITY_MENTION_POLICY_VERSION,
       finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
       autopostQualityMarginFloor: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle)

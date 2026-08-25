@@ -767,7 +767,7 @@ function operatorTopicSignalEntityRoles(
     .map((entity) => [normalizeTopic(entity), entity]));
   return (topic.entityRoles || []).flatMap((entry) => {
     const name = allowed.get(normalizeTopic(entry.name));
-    return name ? [{ name, role: entry.role }] : [];
+    return name ? [{ name, role: entry.role, ...(entry.xHandle ? { xHandle: entry.xHandle } : {}) }] : [];
   }).slice(0, 4);
 }
 

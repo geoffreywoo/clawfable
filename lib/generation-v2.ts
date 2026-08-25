@@ -29,6 +29,13 @@ import type { ContentStyleConfig } from './content-style';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import type { TopicEntityRole, TrendingTopic } from './trending';
 import {
+  buildVerifiedEntityMentions,
+  ENTITY_MENTION_POLICY_VERSION,
+  getMissingVerifiedEntityTagIssue,
+  usedVerifiedMentionHandles,
+  type VerifiedEntityMention,
+} from './entity-mentions';
+import {
   estimateAiUsageCostUsd,
   generateText,
   hasTextGenerationProvider,
@@ -404,6 +411,7 @@ export interface GenerationBriefV2 {
   freshnessScore: number;
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   operatorTopicContext?: OperatorTopicContextV2 | null;
+  verifiedEntityMentions?: VerifiedEntityMention[];
   personalTopicSignals?: string[];
   personalTopicSignalPremises?: string[];
   creativeSeed?: {
@@ -749,6 +757,13 @@ function antiFundPortfolioBrief(
     evidenceScore: 0.5,
     freshnessScore: 0.5,
     portfolioCompanyContext,
+    verifiedEntityMentions: buildVerifiedEntityMentions({
+      curated: company.officialXHandles.slice(0, 1).map((handle) => ({
+        entity: company.name,
+        handle,
+        role: 'company' as const,
+      })),
+    }),
     creativeSeed: {
       id: stableResearchId('portfolio-seed', company.id),
       kind: 'startup',
@@ -1329,6 +1344,14 @@ function storyBrief(story: StoryCluster, documents: SourceDocument[]): Generatio
     claim: claim.text,
   }))).slice(0, 10);
   const portfolioCompany = portfolioCompanyForStory(story, documents);
+  const verifiedEntityMentions = buildVerifiedEntityMentions({
+    documents: sourceDocuments,
+    curated: portfolioCompany?.officialXHandles.slice(0, 1).map((handle) => ({
+      entity: portfolioCompany.name,
+      handle,
+      role: 'company' as const,
+    })) || [],
+  });
   return {
     id: stableResearchId('brief', story.id),
     topic: story.topic,
@@ -1356,6 +1379,7 @@ function storyBrief(story: StoryCluster, documents: SourceDocument[]): Generatio
     portfolioCompanyContext: portfolioCompany
       ? buildAntiFundPortfolioContext(portfolioCompany, 'live_development')
       : null,
+    verifiedEntityMentions,
   };
 }
 
@@ -1743,6 +1767,9 @@ export function buildGenerationBriefsV2({
       slot: seedRotation,
       usedSeedIds: usedIdeaSeedIds,
     });
+    const requestedCompany = findSingleAntiFundPortfolioCompany(requested, {
+      exactEntities: [requested],
+    });
     briefs.push({
       id: stableResearchId('brief', 'operator-request', requested),
       topic: requested,
@@ -1762,6 +1789,13 @@ export function buildGenerationBriefsV2({
       identityScore: 0.9,
       evidenceScore: 0.5,
       freshnessScore: 0.5,
+      verifiedEntityMentions: buildVerifiedEntityMentions({
+        curated: requestedCompany?.officialXHandles.slice(0, 1).map((handle) => ({
+          entity: requestedCompany.name,
+          handle,
+          role: 'company' as const,
+        })) || [],
+      }),
       creativeSeed: seed ? {
         id: seed.id,
         kind: seed.kind,
@@ -1895,6 +1929,7 @@ export function buildGenerationBriefsV2({
         strippedEventTerms: signal.strippedEventTerms,
         relationshipStatus: 'unverified',
       },
+      verifiedEntityMentions: buildVerifiedEntityMentions({ entityRoles: signal.entityRoles }),
       sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
     });
     usedTopics.add(key);
@@ -3920,6 +3955,17 @@ export function buildTweetWritingPromptV2(
         ? 'Keep the named sourced subject in the post. It is the reason to publish now.'
         : 'Use this only to keep the approved position concrete. Personal history selected the broad topic but supplies no prior premise or factual evidence.',
     },
+    verifiedEntityMentionPolicy: {
+      available: (brief.verifiedEntityMentions || []).map((entry) => ({
+        entity: entry.entity,
+        handle: `@${entry.handle}`,
+        role: entry.role,
+        source: entry.source,
+      })),
+      instruction: (brief.verifiedEntityMentions || []).length > 0
+        ? 'When the post names an available person or company, replace its first natural reference with the supplied @handle. Use only supplied handles. Never begin the post with @; put ordinary feed text before the handle. Do not use a leading period or punctuation hack.'
+        : 'No verified handles are supplied. Use plain names and never invent or guess an @handle.',
+    },
     factualWritingContract: brief.evidenceMode === 'operator_opinion'
       ? 'The approved idea packet is the concrete fact ceiling. Write a personal judgment, question, prediction, or explicitly modal speculation. Preserve an approved subjective valuation, price, timing forecast, or amount the author would pay or bet; those are the only allowed numbers. Never convert a qualitative scale claim into an illustrative headcount, team size, multiplier, market size, rate, benchmark, or percentage. A mechanism already present in an approved near-term forecast may be restated only as future or conditional. Do not add a current or historical event, or add or mutate any number, scale word such as millions or billions, quote, customer, measured behavior, external mechanism, or personal behavior outside the packet.'
       : 'Every factual premise and mechanism in the post must be directly supported by the supplied evidence. Preserve any says, claims, reports, or according-to qualifier.',
@@ -4330,7 +4376,11 @@ function preflightDraft({
   const generatedIssue = getGeneratedTweetIssue(content);
   const generatedWritingIssue = getV2GeneratedWritingIssue(content);
   const lengthIssue = getTweetLengthIssue(content);
-  const policyIssue = getAutopostPolicyIssue(content);
+  const verifiedEntityMentions = brief.verifiedEntityMentions || [];
+  const missingVerifiedEntityTagIssue = getMissingVerifiedEntityTagIssue(content, verifiedEntityMentions);
+  const policyIssue = getAutopostPolicyIssue(content, {
+    allowedMentions: verifiedEntityMentions.map((entry) => entry.handle),
+  });
   const authorityIssue = getAuthorityProofIssue(content);
   const claimIssue = assessClaimEvidence(content, claims, {
     lockEvidenceConcepts: true,
@@ -4382,6 +4432,7 @@ function preflightDraft({
   );
 
   if (generatedIssue) codes.push('incomplete_or_prompt_leak');
+  if (missingVerifiedEntityTagIssue) codes.push('missing_verified_entity_tag');
   if (generatedWritingIssue) codes.push('generated_writing_pattern');
   if (lengthIssue) codes.push('over_x_length');
   if (policyIssue) codes.push('autopost_policy');
@@ -5140,6 +5191,10 @@ function toRankedTweet(
     evidenceReferences: refs,
     generationEvidenceReferences: generationRefs,
     portfolioCompanyContext: brief.portfolioCompanyContext || null,
+    allowedMentionHandles: usedVerifiedMentionHandles(
+      draft.content,
+      brief.verifiedEntityMentions || [],
+    ),
     generationModelStack: draft.generationModelStack || input.modelStack,
     generationProvider: draft.generationProvider,
     generationModel: draft.generationModel,
@@ -6004,7 +6059,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       blocks.map((block) => `${block.id}:${block.blockedUntil || ''}`).sort().join(','),
       buildFailedStoryAttemptsV2(recentIdeas, new Date())
         .map((attempt) => `${attempt.storyClusterId}:${attempt.failedAt}`).sort().join(','),
-      briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}`).sort().join(','),
+      ENTITY_MENTION_POLICY_VERSION,
+      briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}:${(brief.verifiedEntityMentions || []).map((entry) => `${entry.entity}=@${entry.handle}`).join('|')}`).sort().join(','),
     );
     const qualityPauseUntil = getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);
     if (qualityPauseUntil) {

@@ -9,6 +9,7 @@ import TwitterApi from 'twitter-api-v2';
 import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug';
 import { getInternalPromptLeakIssue } from './survivability';
 import { normalizeGeneratedTweetContent } from './tweet-text';
+import { isLeadingXMention } from './entity-mentions';
 
 export interface TwitterKeys {
   appKey: string;
@@ -64,6 +65,9 @@ export function getSanitizedTweetTextIssue(
 ): string | null {
   const tweetText = sanitizeTweetText(text);
   if (tweetText.length > 0) {
+    if (surface === 'post' && isLeadingXMention(tweetText)) {
+      return 'Original posts cannot start with an @mention; put the handle after ordinary feed text.';
+    }
     return getInternalPromptLeakIssue(tweetText);
   }
 

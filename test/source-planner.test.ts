@@ -593,7 +593,7 @@ describe('source planner', () => {
       semanticDomain: 'startups_markets' as const,
       entities: ['Trajectory', 'Sequoia', 'open source models'],
       entityRoles: [
-        { name: 'Trajectory', role: 'company' as const },
+        { name: 'Trajectory', role: 'company' as const, xHandle: 'trajectoryai' },
         { name: 'Sequoia', role: 'investor' as const },
         { name: 'open source models', role: 'technology' as const },
       ],
@@ -611,7 +611,7 @@ describe('source planner', () => {
     expect(signal.subject).toBe('Trajectory Sequoia open source models');
     expect(signal.subject).not.toContain('funding');
     expect(signal.entityRoles).toEqual([
-      { name: 'Trajectory', role: 'company' },
+      { name: 'Trajectory', role: 'company', xHandle: 'trajectoryai' },
       { name: 'Sequoia', role: 'investor' },
       { name: 'open source models', role: 'technology' },
     ]);

@@ -116,7 +116,7 @@ describe('research adapters', () => {
       timestamp: now.toISOString(),
       tweetCount: 1,
       evidence: [{
-        tweetId: '4', author: 'Etched', text: 'We shipped our first rack to Jane Street.', createdAt: now.toISOString(),
+        tweetId: '4', author: 'Etched', authorName: 'Etched', authorVerified: true, text: 'We shipped our first rack to Jane Street.', createdAt: now.toISOString(),
         sourceUrl: 'https://x.com/Etched/status/4', likes: 100, retweets: 20, replies: 5, quotes: 4,
         bookmarks: 10, weightedEngagement: 139, authorBaseline: 30, breakoutMultiple: 4.6,
         engagementVelocity: 3, viralScore: 0.9, isPrimarySource: false,
@@ -130,6 +130,9 @@ describe('research adapters', () => {
       metadata: expect.objectContaining({
         portfolioCompanyId: 'etched',
         portfolioPrimaryReason: 'official_company_x_account',
+        sourceAuthorHandle: 'Etched',
+        sourceAuthorName: 'Etched',
+        sourceAuthorVerified: true,
       }),
     });
   });

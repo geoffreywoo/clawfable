@@ -46,6 +46,7 @@ export type TopicEntityRoleName =
 export interface TopicEntityRole {
   name: string;
   role: TopicEntityRoleName;
+  xHandle?: string;
 }
 
 export interface TrendingTopic {

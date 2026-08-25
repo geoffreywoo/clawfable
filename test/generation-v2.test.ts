@@ -1157,6 +1157,25 @@ describe('Tweet Generation V2', () => {
     expect(new Set(briefs.map((entry) => entry.topic.toLowerCase())).size).toBe(briefs.length);
   });
 
+  it('supplies a curated official handle for an exact named portfolio-company request', () => {
+    const [requested] = buildGenerationBriefsV2({
+      count: 1,
+      requestedTopic: 'OpenAI',
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(requested.verifiedEntityMentions).toEqual([
+      { entity: 'OpenAI', handle: 'openai', role: 'company', source: 'curated_registry' },
+    ]);
+  });
+
   it('does not build or normalize sports ideas for the Geoffrey account', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
@@ -2177,7 +2196,7 @@ describe('Tweet Generation V2', () => {
         topicUncertainty: 'low',
         semanticDomain: 'ai_compute',
         entities: ['OpenAI'],
-        entityRoles: [{ name: 'OpenAI', role: 'company' }],
+        entityRoles: [{ name: 'OpenAI', role: 'company', xHandle: 'openai' }],
         isPrimarySource: false,
         topTweet: { id: 'network-post-1', text: headline, likes: 900, author: 'builder' },
       } as any],
@@ -2196,10 +2215,26 @@ describe('Tweet Generation V2', () => {
     expect(signal?.sourceBrief).toContain('Subject cue only');
     expect(signal?.authorOpportunity).toContain('Roles do not prove any relationship');
     expect(signal?.operatorTopicContext).toEqual({
-      entityRoles: [{ name: 'OpenAI', role: 'company' }],
+      entityRoles: [{ name: 'OpenAI', role: 'company', xHandle: 'openai' }],
       strippedEventTerms: ['launch'],
       relationshipStatus: 'unverified',
     });
+    expect(signal?.verifiedEntityMentions).toEqual([
+      { entity: 'OpenAI', handle: 'openai', role: 'company', source: 'official_x_author' },
+    ]);
+    const writingPrompt = JSON.parse(buildTweetWritingPromptV2({
+      id: 'idea-openai-mention',
+      publicMove: 'OpenAI will make consumer agents the default interface.',
+      claim: 'I expect OpenAI to make consumer agents the default interface.',
+      tension: 'The current interface still feels early.',
+      implication: 'Consumer behavior changes.',
+      counterargument: 'Adoption could take longer.',
+      topic: signal!.topic,
+    } as IdeaCandidate, signal!, [], []));
+    expect(writingPrompt.verifiedEntityMentionPolicy).toMatchObject({
+      available: [{ entity: 'OpenAI', handle: '@openai', role: 'company' }],
+    });
+    expect(writingPrompt.verifiedEntityMentionPolicy.instruction).toContain('Never begin the post with @');
   });
 
   it('treats a named IPO timing comparison as a complete direct-prediction brief', () => {

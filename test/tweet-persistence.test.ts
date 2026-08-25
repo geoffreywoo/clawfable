@@ -56,6 +56,7 @@ describe('generated tweet persistence', () => {
         intent: 'live_development',
         sourceUrl: 'https://antifund.com/#portfolio',
       },
+      allowedMentionHandles: ['etched'],
     } as any, { status: 'preview' });
 
     expect(tweet).toMatchObject({
@@ -78,6 +79,7 @@ describe('generated tweet persistence', () => {
       draftCandidateId: 'draft-v2-provenance',
       evidenceReferences: [expect.objectContaining({ sourceDocumentId: 'source-v2-provenance' })],
       portfolioCompanyContext: expect.objectContaining({ companyId: 'etched' }),
+      allowedMentionHandles: ['etched'],
     });
 
     const edited = await updateTweet(tweet.id, {

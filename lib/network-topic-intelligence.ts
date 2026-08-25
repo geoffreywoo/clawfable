@@ -11,6 +11,7 @@ import type { TopicEntityRole, TopicEntityRoleName, TopicSemanticDomain, Trendin
 import type { TwitterKeys } from './twitter-client';
 import { getFollowing, getHomeTimeline, getLikedTweets, getUserTimeline } from './twitter-client';
 import { isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
+import { normalizeXHandle, xIdentityMatchesEntity } from './entity-mentions';
 
 const NETWORK_MAX_AGE_HOURS = 72;
 const DEFAULT_ACCOUNT_SAMPLE_LIMIT = 18;
@@ -57,6 +58,8 @@ export interface NetworkViralTweetRecord {
   id: string;
   authorId: string;
   author: string;
+  authorName?: string;
+  authorVerified?: boolean;
   text: string;
   createdAt: string;
   sourceUrl: string;
@@ -130,6 +133,8 @@ export interface NetworkTopicIntelligenceState {
 export interface NetworkTopicEvidence {
   tweetId: string;
   author: string;
+  authorName?: string;
+  authorVerified?: boolean;
   text: string;
   createdAt: string;
   sourceUrl: string;
@@ -190,6 +195,8 @@ export interface NetworkTopicDiscoveryOptions {
 interface RawNetworkTweet extends TimelineTweet {
   authorId: string;
   author: string;
+  authorName?: string;
+  authorVerified?: boolean;
   followersCount: number;
   operatorEngaged?: boolean;
 }
@@ -468,6 +475,8 @@ async function collectNetworkTweets(
           ...tweet,
           authorId: String(account.id),
           author: account.username,
+          authorName: account.name,
+          authorVerified: account.verified,
           followersCount: finite(account.followersCount),
         });
       }
@@ -514,6 +523,8 @@ function normalizeLikedTimeline(
       bookmarks: tweet.bookmarks,
       authorId: tweet.authorId,
       author: tweet.author,
+      authorName: tweet.authorName,
+      authorVerified: tweet.authorVerified,
       followersCount: finite(tweet.authorFollowersCount),
       referenceType: tweet.referenceType,
       referencedTweetId: tweet.referencedTweetId,
@@ -567,6 +578,8 @@ function normalizeHomeTimeline(
       bookmarks: tweet.bookmarks,
       authorId: tweet.authorId,
       author: tweet.author,
+      authorName: tweet.authorName,
+      authorVerified: tweet.authorVerified,
       followersCount: finite(tweet.authorFollowersCount),
       referenceType: tweet.referenceType,
       referencedTweetId: tweet.referencedTweetId,
@@ -641,6 +654,8 @@ export function scoreNetworkTweets(
       tweetId: String(tweet.id),
       authorId: tweet.authorId,
       author: tweet.author,
+      authorName: tweet.authorName,
+      authorVerified: tweet.authorVerified,
       text: tweet.text,
       createdAt: tweet.createdAt,
       sourceUrl: `https://x.com/${tweet.author}/status/${tweet.id}`,
@@ -1022,9 +1037,35 @@ function mergeEntityRoles(
     const key = normalizeLabel(entry.name);
     if (!allowed.has(key)) continue;
     const previous = merged.get(key);
-    if (!previous || previous.role === 'other' || entry.role !== 'other') merged.set(key, entry);
+    if (!previous) {
+      merged.set(key, entry);
+      continue;
+    }
+    if (previous.role === 'other' || entry.role !== 'other') {
+      merged.set(key, {
+        ...entry,
+        xHandle: entry.xHandle || previous.xHandle,
+      });
+    } else if (!previous.xHandle && entry.xHandle) {
+      merged.set(key, { ...previous, xHandle: entry.xHandle });
+    }
   }
   return [...merged.values()].slice(0, 12);
+}
+
+function attachVerifiedEntityHandles(
+  roles: TopicEntityRole[],
+  evidence: NetworkTweetObservation[],
+): TopicEntityRole[] {
+  return roles.map((entry) => {
+    const handles = [...new Set(evidence.flatMap((tweet) => {
+      const handle = normalizeXHandle(tweet.author);
+      if (!handle) return [];
+      const identityMatches = xIdentityMatchesEntity(handle, entry.name);
+      return identityMatches ? [handle] : [];
+    }))];
+    return handles.length === 1 ? { ...entry, xHandle: handles[0] } : entry;
+  });
 }
 
 function mergeTopicHistory(
@@ -1085,7 +1126,10 @@ function mergeTopicHistory(
       weightedEngagement: Number(weightedTotal.toFixed(2)),
     };
     const mergedEntities = [...new Set([...(historical?.entities || []), ...cluster.entities])].slice(0, 12);
-    const mergedEntityRoles = mergeEntityRoles(historical?.entityRoles, cluster.entityRoles, mergedEntities);
+    const mergedEntityRoles = attachVerifiedEntityHandles(
+      mergeEntityRoles(historical?.entityRoles, cluster.entityRoles, mergedEntities),
+      evidence,
+    );
     const history: NetworkTopicHistoryEntry = {
       id: topicId,
       label: cluster.label,
@@ -1160,6 +1204,8 @@ function mergeTopicHistory(
       evidence: evidence.map((tweet): NetworkTopicEvidence => ({
         tweetId: tweet.tweetId,
         author: tweet.author,
+        authorName: tweet.authorName,
+        authorVerified: tweet.authorVerified,
         text: tweet.text,
         createdAt: tweet.createdAt,
         sourceUrl: tweet.sourceUrl,
@@ -1219,6 +1265,8 @@ function mergeViralTweetHistory(
       id: candidate.tweetId,
       authorId: candidate.authorId,
       author: candidate.author,
+      authorName: candidate.authorName,
+      authorVerified: candidate.authorVerified,
       text: candidate.text,
       createdAt: candidate.createdAt,
       sourceUrl: candidate.sourceUrl,

@@ -98,6 +98,19 @@ describe('twitter-client', () => {
     expect(mocks.tweet).toHaveBeenCalledWith('ship the write first, read later');
   });
 
+  it('sends a mid-post @mention as original text without reply metadata', async () => {
+    await postTweet(keys, 'i think @OpenAI will turn this into the default interface', { username: '@debugbot' });
+
+    expect(mocks.tweet).toHaveBeenCalledWith('i think @OpenAI will turn this into the default interface');
+    expect(mocks.tweet).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reply: expect.anything() }));
+  });
+
+  it('refuses to publish an original whose first token is an @mention', async () => {
+    await expect(postTweet(keys, '@OpenAI will turn this into the default interface', { username: '@debugbot' }))
+      .rejects.toThrow('Original posts cannot start with an @mention');
+    expect(mocks.tweet).not.toHaveBeenCalled();
+  });
+
   it('does not call get_me before replying when the account handle is already known', async () => {
     const result = await replyToTweet(
       keys,
@@ -110,6 +123,14 @@ describe('twitter-client', () => {
     expect(mocks.me).not.toHaveBeenCalled();
     expect(mocks.tweet).toHaveBeenCalledWith('exactly. write-path reads are reliability debt', {
       reply: { in_reply_to_tweet_id: 'mention-1' },
+    });
+  });
+
+  it('allows a real API reply to start with a handle because reply metadata is explicit', async () => {
+    await replyToTweet(keys, '@builder exactly. the write path should stay boring', 'mention-2', { username: 'debugbot' });
+
+    expect(mocks.tweet).toHaveBeenCalledWith('@builder exactly. the write path should stay boring', {
+      reply: { in_reply_to_tweet_id: 'mention-2' },
     });
   });
 

@@ -525,6 +525,7 @@ export interface Tweet {
   evidenceReferences?: TweetEvidenceReference[] | null;
   generationEvidenceReferences?: GenerationEvidenceReference[] | null;
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
+  allowedMentionHandles?: string[] | null;
   generationMode?: AutonomyMode | null;
   candidateScore?: number | null;
   confidenceScore?: number | null;

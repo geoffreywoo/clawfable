@@ -45,6 +45,7 @@ import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-featu
 import { buildResearchSemanticKey, clampResearchScore, researchTokenSimilarity, stableResearchId } from './research-utils';
 import { summarizeGenerationUsage } from './generation-usage';
 import { assessAccountTaste } from './account-taste';
+import { ENTITY_MENTION_POLICY_VERSION } from './entity-mentions';
 import {
   getPublishingV2FinalCriticVersion,
   getPublishingV2QualityPolicyVersion,
@@ -208,6 +209,7 @@ function requestContextFingerprint(input: GeneratePublishingBatchV2Input): strin
     input.learnings?.voiceCorpus?.snapshotId || '',
     input.modelStack,
     input.style.autonomyMode,
+    ENTITY_MENTION_POLICY_VERSION,
   );
 }
 
@@ -249,7 +251,7 @@ function surfaceInstruction(request: Exclude<PublishingGenerationRequest, { surf
   if (request.surface === 'followup') return 'Add a substantive follow-up to the original post using its observed performance as context. Add information or a sharper implication; do not celebrate engagement or ask for more.';
   if (request.surface === 'remix') return `Create an immutable child draft. Apply this direction: ${request.direction}. ${request.changesClaim ? 'The direction changes the claim, so establish a newly qualified judgment.' : 'Preserve the parent claim exactly; change only its expression.'}`;
   if (request.surface === 'marketing') return 'Write a natural builder update supported only by the active product facts. No unverified metrics, customer claims, roadmap promises, or generic ad language.';
-  return `Respond naturally to or highlight @${request.targetHandle} using only the verified target post. Make the relationship-specific reason clear without empty praise.`;
+  return `Respond naturally to or highlight @${request.targetHandle} using only the verified target post. Use that exact handle, but never begin the post with @; put ordinary feed text before it so this remains a broadly distributed original mention. Make the relationship-specific reason clear without empty praise.`;
 }
 
 function topicForRequest(request: Exclude<PublishingGenerationRequest, { surface: 'original' }>): string {
@@ -452,6 +454,9 @@ function rankedContextualDraft(
     parentDraftCandidateId: draft.parentDraftId || null,
     evidenceReferences: toLegacyEvidence(evidence),
     generationEvidenceReferences: evidence,
+    allowedMentionHandles: request.surface === 'relationship'
+      ? [request.targetHandle.replace(/^@/, '').toLowerCase()]
+      : [],
     generationModelStack: input.modelStack,
     generationProvider: draft.generationProvider,
     generationModel: draft.generationModel,
@@ -851,7 +856,10 @@ async function generateContextualBatchV2(
       if (getGeneratedTweetIssue(draft.content)) rejections.push('incomplete_or_prompt_leak');
       if (getV2GeneratedWritingIssue(draft.content)) rejections.push('generated_writing_pattern');
       if (getTweetLengthIssue(draft.content, request.surface === 'reply' || request.surface === 'followup' ? 'reply' : 'post')) rejections.push('over_x_length');
-      if (getAutopostPolicyIssue(draft.content, { allowMentions: allowedMentions.length > 0, allowedMentions })) rejections.push('autopost_policy');
+      if (getAutopostPolicyIssue(draft.content, {
+        allowedMentions,
+        allowLeadingMention: request.surface === 'reply' || request.surface === 'followup',
+      })) rejections.push('autopost_policy');
       if (getAuthorityProofIssue(draft.content)) rejections.push('unearned_authority');
       if (assessClaimEvidence(draft.content, evidenceTexts, {
         lockEvidenceConcepts: true,

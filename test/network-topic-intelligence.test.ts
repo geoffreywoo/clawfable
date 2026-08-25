@@ -157,6 +157,10 @@ describe('followed-network topic intelligence', () => {
         summary: 'Jake Paul offered $1 million to an NFL player who can outperform him in boxing.',
         tweetIds: ['jake-offer'],
         entities: ['Jake Paul', 'NFL'],
+        entityRoles: [
+          { name: 'Jake Paul', role: 'person' },
+          { name: 'NFL', role: 'institution' },
+        ],
         whyNow: 'The first-party offer is receiving unusual engagement.',
         confidence: 0.92,
         semanticDomain: 'sports_competition',
@@ -170,7 +174,13 @@ describe('followed-network topic intelligence', () => {
     });
     expect(result.topics[0].evidence?.[0]).toMatchObject({
       author: 'jakepaul',
+      authorName: 'Jake Paul',
       isPrimarySource: true,
+    });
+    expect(result.topics[0].entityRoles).toContainEqual({
+      name: 'Jake Paul',
+      role: 'person',
+      xHandle: 'jakepaul',
     });
     expect(result.topics[0].sourceQuality).toBeGreaterThan(0.7);
   });

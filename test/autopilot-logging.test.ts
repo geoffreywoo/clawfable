@@ -1399,6 +1399,32 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
+  it('passes a persisted verified entity handle allowlist into final autopost policy', async () => {
+    const taggedTweet = {
+      ...validQueuedTweet,
+      id: 'verified-mention',
+      content: 'i think @OpenAI turns this into the default interface',
+      allowedMentionHandles: ['openai'],
+    };
+    mocks.getQueuedTweets.mockResolvedValue([taggedTweet]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-verified-mention', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(mocks.getAutopostPolicyIssue).toHaveBeenCalledWith(
+      taggedTweet.content,
+      expect.objectContaining({
+        allowedMentions: expect.arrayContaining(['debugbot', 'openai']),
+      }),
+    );
+    expect(mocks.postTweet).toHaveBeenCalledWith(
+      expect.anything(),
+      taggedTweet.content,
+      { username: baseAgent.handle },
+    );
+  });
+
   it('quarantines queued original posts with unsolicited mentions before autoposting', async () => {
     const unsafeMentionTweet = {
       ...validQueuedTweet,

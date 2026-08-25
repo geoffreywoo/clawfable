@@ -54,6 +54,7 @@ export interface PublishingCandidate {
   evidenceReferences?: TweetEvidenceReference[] | null;
   generationEvidenceReferences?: GenerationEvidenceReference[] | null;
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
+  allowedMentionHandles?: string[] | null;
   sourceLane?: ContentSourceLane | null;
   styleMode?: ContentStyleMode | null;
   trendTopicId?: string | null;

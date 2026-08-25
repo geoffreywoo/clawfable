@@ -9,6 +9,7 @@
  */
 
 import type { Tweet, PostLogEntry } from './types';
+import { isLeadingXMention } from './entity-mentions';
 
 // ─── Timing jitter ──────────────────────────────────────────────────────────
 
@@ -373,11 +374,12 @@ export function getAutopostPolicyIssue(
   text: string,
   options: {
     allowedMentions?: string[];
-    allowMentions?: boolean;
+    allowLeadingMention?: boolean;
   } = {},
 ): string | null {
-  if (options.allowMentions) return null;
-
+  if (!options.allowLeadingMention && isLeadingXMention(text)) {
+    return 'Autopost blocked because an original post cannot start with an @mention; put the handle after ordinary feed text.';
+  }
   const allowed = new Set((options.allowedMentions || []).map(normalizeHandle).filter(Boolean));
   const unsolicited = extractMentionHandles(text)
     .filter((handle) => !allowed.has(handle));

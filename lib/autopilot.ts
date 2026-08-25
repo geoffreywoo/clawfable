@@ -250,8 +250,11 @@ function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null)
     || getAutopostPolicyIssue(tweet.content, {
-    allowedMentions: [agent.handle],
-    allowMentions: tweet.format === 'shoutout',
+    allowedMentions: [
+      agent.handle,
+      ...(tweet.allowedMentionHandles || []),
+      ...(tweet.relationshipTargetHandle ? [tweet.relationshipTargetHandle] : []),
+    ],
   });
 }
 
@@ -2656,8 +2659,7 @@ export async function refillQueue(
           continue;
         }
         const policyIssue = getAutopostPolicyIssue(item.content, {
-          allowedMentions: [agent.handle],
-          allowMentions: false,
+          allowedMentions: [agent.handle, ...(item.allowedMentionHandles || [])],
         });
         if (policyIssue) {
           await rejectCandidate(item, 'autopost_policy', policyIssue);
