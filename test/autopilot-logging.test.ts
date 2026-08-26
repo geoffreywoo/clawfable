@@ -640,7 +640,7 @@ describe('autopilot remote debug logging', () => {
       signals: [],
     });
     const approvedCandidate = {
-      content: 'my pick is Databricks first. Modal getting there ahead of them would be way more fun, but i dont think it happens.',
+      content: 'my pick is Databricks first. @modal getting there ahead of them would be way more fun, but i dont think it happens.',
       format: 'prediction',
       targetTopic: 'Modal Databricks IPO prediction',
       rationale: 'Direct operator prediction.',
@@ -653,6 +653,7 @@ describe('autopilot remote debug logging', () => {
       draftCandidateId: 'draft-modal-databricks',
       sourceLane: 'manual_core_exploit',
       sourceBrief: 'OPERATOR-OWNED TOPIC [subject=Modal Databricks IPO prediction]',
+      allowedMentionHandles: ['modal'],
       candidateScore: 91,
       confidenceScore: 0.91,
     } as any;

@@ -106,7 +106,7 @@ describe('verified entity mentions', () => {
   });
 
   it('resolves recurring companies and people from the versioned curated registry', () => {
-    expect(CURATED_X_ENTITY_REGISTRY_VERSION).toBe('curated-x-entities-2026-08-26-1');
+    expect(CURATED_X_ENTITY_REGISTRY_VERSION).toBe('curated-x-entities-2026-08-26-2');
     expect(findCuratedVerifiedEntityMentions(
       'Cursor and OpenAI are compounding faster than people expect. Scott Wu sees it too.',
     )).toEqual([
@@ -115,6 +115,19 @@ describe('verified entity mentions', () => {
       { entity: 'Scott Wu', handle: 'scottwu46', role: 'person', source: 'curated_registry' },
     ]);
     expect(findCuratedVerifiedEntityMentions('move the cursor over the open dialog')).toEqual([]);
+  });
+
+  it('matches distinctive brands in lowercase without treating common words as companies', () => {
+    expect(findCuratedVerifiedEntityMentions(
+      'linkedin, openai, and elevenlabs all compound through distribution',
+    )).toEqual([
+      { entity: 'OpenAI', handle: 'openai', role: 'company', source: 'curated_registry' },
+      { entity: 'ElevenLabs', handle: 'elevenlabs', role: 'company', source: 'curated_registry' },
+      { entity: 'LinkedIn', handle: 'linkedin', role: 'company', source: 'curated_registry' },
+    ]);
+    expect(findCuratedVerifiedEntityMentions(
+      'move the cursor in the modal before testing cognition and adding a stripe',
+    )).toEqual([]);
   });
 
   it('requires current curated tags and allows their handles without persisted provenance', () => {
