@@ -52,6 +52,7 @@ describe('generated tweet persistence', () => {
         category: 'ai_infrastructure_national_resilience',
         description: 'Purpose-built chips for transformer inference.',
         sportsAdjacent: false,
+        promotionTier: 'flagship',
         relationship: 'antifund_selected_investment',
         intent: 'live_development',
         sourceUrl: 'https://antifund.com/#portfolio',

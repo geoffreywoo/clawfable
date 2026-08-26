@@ -959,7 +959,7 @@ describe('autopilot remote debug logging', () => {
       content: 'Betr can build the consumer media and distribution brand for sports betting.',
       topic: 'sports business',
       portfolioCompanyContext: {
-        policyVersion: 'antifund-portfolio-alignment-2',
+        policyVersion: 'antifund-portfolio-alignment-3',
         snapshotVersion: 'antifund-portfolio-2026-08-21',
         snapshotExpiresAt: '2026-11-19T00:00:00.000Z',
         companyId: 'betr',
@@ -968,6 +968,7 @@ describe('autopilot remote debug logging', () => {
         category: 'consumer_platforms_brands',
         description: 'Sports betting, fantasy, and media.',
         sportsAdjacent: true,
+        promotionTier: 'flagship',
         relationship: 'antifund_selected_investment',
         intent: 'constructive_conviction',
         sourceUrl: 'https://antifund.com/#portfolio',
@@ -980,6 +981,32 @@ describe('autopilot remote debug logging', () => {
     expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
     expect(mocks.updateTweet).not.toHaveBeenCalled();
     expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+  });
+
+  it('quarantines Natural promotion even when a stale draft has no portfolio context', async () => {
+    const naturalDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-natural-promotion',
+      content: 'Natural can own payments infrastructure for AI agents.',
+      topic: 'AI agent payments startup',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([naturalDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith('v2-natural-promotion', expect.objectContaining({
+      status: 'quarantined',
+      quarantineReason: expect.stringContaining('portfolio_company_promotion_excluded'),
+    }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      rewardDelta: -0.85,
+      metadata: expect.objectContaining({
+        portfolioCompanyPolicyVersion: 'antifund-portfolio-alignment-3',
+        policyGate: 'portfolio_company_policy',
+      }),
+    }));
   });
 
   it('quarantines stale V2 policy artifacts instead of grandfathering them into autopost', async () => {

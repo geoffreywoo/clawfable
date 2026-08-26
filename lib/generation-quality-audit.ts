@@ -69,6 +69,8 @@ import { GEOFFREY_AI_HORIZON_POLICY_VERSION } from './account-taste';
 import { FRONTIER_FORECAST_LEARNING_VERSION } from './frontier-forecast-learning';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
+  ANTIFUND_PROMOTION_COMPANIES,
+  ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
   ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
@@ -81,7 +83,7 @@ import {
 } from './antifund-portfolio';
 import { ENTITY_MENTION_POLICY_VERSION } from './entity-mentions';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 43;
+export const GENERATION_QUALITY_AUDIT_VERSION = 44;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1502,7 +1504,15 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     snapshotExpiresAt: ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
     sourceUrl: ANTIFUND_PORTFOLIO_SOURCE_URL,
     companyCount: ANTIFUND_PORTFOLIO_COMPANIES.length,
-    generationEligibleCompanyCount: ANTIFUND_PORTFOLIO_COMPANIES.length,
+    generationEligibleCompanyCount: ANTIFUND_PROMOTION_COMPANIES.length,
+    promotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
+    flagshipPromotionCompanies: ANTIFUND_PROMOTION_COMPANIES.map((company) => company.name),
+    promotionExcludedCompanies: ANTIFUND_PORTFOLIO_COMPANIES
+      .filter((company) => company.promotionTier === 'excluded')
+      .map((company) => company.name),
+    standardCompaniesExcludedFromAutomaticPromotion: ANTIFUND_PORTFOLIO_COMPANIES
+      .filter((company) => company.promotionTier === 'standard')
+      .map((company) => company.name),
     sportsAdjacentCompanies: ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => company.sportsAdjacent).map((company) => company.name),
     sportsPortfolioRule: 'Betr and Kings League require a company-business angle; unrelated games, athletes, players, scores, matchups, and picks remain blocked.',
     briefDue: portfolioBriefDue,
@@ -1777,6 +1787,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
       blockedTopicDomains: ['sports_competition'],
       portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+      portfolioCompanyPromotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
       portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
       geoffreyAIFutureHorizonPolicyVersion: GEOFFREY_AI_HORIZON_POLICY_VERSION,
       frontierForecastLearningVersion: FRONTIER_FORECAST_LEARNING_VERSION,
