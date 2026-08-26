@@ -52,6 +52,7 @@ import {
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
+import { ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION } from './antifund-portfolio';
 
 const CONTEXTUAL_IDEA_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -210,6 +211,7 @@ function requestContextFingerprint(input: GeneratePublishingBatchV2Input): strin
     input.modelStack,
     input.style.autonomyMode,
     ENTITY_MENTION_POLICY_VERSION,
+    ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   );
 }
 

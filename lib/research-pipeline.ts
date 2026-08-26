@@ -67,7 +67,7 @@ import {
 import { classifyGeoffreyTopicDomain, selectOperatorTopicSignals } from './source-planner';
 import { isGeoffreyAccount } from './account-taste';
 import {
-  ANTIFUND_PORTFOLIO_COMPANIES,
+  ANTIFUND_PROMOTION_COMPANIES,
   isAntiFundPortfolioCompanyMentioned,
 } from './antifund-portfolio';
 
@@ -322,7 +322,7 @@ export function buildResearchAgenda({
     .join('\n');
   const portfolioRotationKey = `${agent.id}:${current?.updatedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10)}`;
   const portfolioQueries = isGeoffreyAccount(agent.handle)
-    ? ANTIFUND_PORTFOLIO_COMPANIES
+    ? ANTIFUND_PROMOTION_COMPANIES
         .filter((company) => !isAntiFundPortfolioCompanyMentioned(recentPortfolioText, company))
         .sort((left, right) => (
           stableResearchId('portfolio-query', portfolioRotationKey, left.id)

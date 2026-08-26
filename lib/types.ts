@@ -462,6 +462,7 @@ export interface PortfolioCompanyGenerationContext {
   category: string;
   description: string;
   sportsAdjacent: boolean;
+  promotionTier: 'flagship' | 'standard' | 'excluded';
   relationship: 'antifund_selected_investment';
   intent: 'live_development' | 'constructive_conviction';
   sourceUrl: string;

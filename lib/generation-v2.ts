@@ -114,14 +114,17 @@ import {
 } from './publishing-quality-policy';
 import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
   ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
   ANTIFUND_PORTFOLIO_SOURCE_URL,
   buildAntiFundPortfolioContext,
+  findAntiFundPortfolioCompanies,
   findSingleAntiFundPortfolioCompany,
   getAntiFundPortfolioPolicyIssues,
   isQualifiedSportsPortfolioContext,
   isAntiFundPortfolioBriefDue,
+  isAntiFundPortfolioPromotionEligible,
   selectAntiFundPortfolioCompany,
   type AntiFundPortfolioCompany,
 } from './antifund-portfolio';
@@ -743,14 +746,14 @@ function antiFundPortfolioBrief(
     sourceLane: 'manual_core_exploit',
     storyClusterId: null,
     title: company.name,
-    summary: `${company.name} is a selected Anti Fund investment. The public portfolio description is supplied only to identify the company and category, not as evidence for a current event or private experience.`,
+    summary: `${company.name} is in the flagship Anti Fund promotion set. The public portfolio description is supplied only to identify the company and category, not as evidence for a current event or private experience.`,
     authorOpportunity,
     evidenceMode: 'operator_opinion',
     evidenceIds: [],
     sourceDocumentIds: [],
     qualifiedClaimIds: [],
     evidence: [],
-    sourceBrief: `ANTI FUND PORTFOLIO SUBJECT [company=${company.name}; category=${company.category}; snapshot=${ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION}; policy=${ANTIFUND_PORTFOLIO_POLICY_VERSION}; source=${ANTIFUND_PORTFOLIO_SOURCE_URL}] Subject and relationship provenance only. Never claim a private interaction or restate the description as current evidence.`,
+    sourceBrief: `ANTI FUND FLAGSHIP PORTFOLIO SUBJECT [company=${company.name}; category=${company.category}; promotionPolicy=${ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION}; snapshot=${ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION}; policy=${ANTIFUND_PORTFOLIO_POLICY_VERSION}; source=${ANTIFUND_PORTFOLIO_SOURCE_URL}] Subject and relationship provenance only. Never claim a private interaction or restate the description as current evidence.`,
     trendTopicId: null,
     trendHeadline: null,
     identityScore: 0.94,
@@ -1311,6 +1314,7 @@ function portfolioCompanyForStory(
     ...storyDocuments.flatMap((document) => [document.title, document.publisher, document.excerpt]),
   ].join(' ');
   const company = findSingleAntiFundPortfolioCompany(storyText, { exactEntities: story.entities });
+  if (!isAntiFundPortfolioPromotionEligible(company)) return null;
   if (!company || !company.sportsAdjacent) return company;
   const context = buildAntiFundPortfolioContext(company, 'live_development');
   return isQualifiedSportsPortfolioContext(storyText, context) ? company : null;
@@ -1738,8 +1742,12 @@ export function buildGenerationBriefsV2({
     value: string,
     domainValue = value,
     portfolioCompanyContext: PortfolioCompanyGenerationContext | null | undefined = null,
+    exactEntities: string[] = [],
   ): boolean => {
     if (!geoffreyPortfolio) return true;
+    if (findAntiFundPortfolioCompanies(value, { exactEntities }).some((company) => (
+      company.promotionTier === 'excluded'
+    ))) return false;
     if (isVoiceProfileTopicBlocked(voiceProfile, value, null, portfolioCompanyContext)) return false;
     if (
       isGeoffreyDeepTechnicalTopic(value)
@@ -1770,6 +1778,7 @@ export function buildGenerationBriefsV2({
     const requestedCompany = findSingleAntiFundPortfolioCompany(requested, {
       exactEntities: [requested],
     });
+    if (requestedCompany && !isAntiFundPortfolioPromotionEligible(requestedCompany)) return [];
     briefs.push({
       id: stableResearchId('brief', 'operator-request', requested),
       topic: requested,
@@ -1819,6 +1828,7 @@ export function buildGenerationBriefsV2({
       `${story.topic} ${story.title} ${story.entities.join(' ')}`,
       `${story.topic} ${story.title} ${story.entities.join(' ')}`,
       brief.portfolioCompanyContext,
+      story.entities,
     )) return false;
     briefs.push(geoffreyPortfolio ? brief : { ...brief, portfolioCompanyContext: null });
     usedTopics.add(key);
@@ -1909,7 +1919,12 @@ export function buildGenerationBriefsV2({
         ))
       )
     ) continue;
-    if (!portfolioAllowsTopic(signal.subject)) continue;
+    if (!portfolioAllowsTopic(
+      signal.subject,
+      signal.subject,
+      null,
+      signal.entityRoles.map((entry) => entry.name),
+    )) continue;
     const brief = operatorTopicBrief(
       signal.subject,
       briefs.length,
@@ -2102,7 +2117,7 @@ export function buildIdeaGenerationPromptV2(
       operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. publicMove, claim, tension, and implication must each be factual-safe on their own. A modal phrase cannot license an asserted current event, measured or current number, quote, customer, measured behavior, or personal experience in another field. A future mechanism is allowed only inside an explicit prediction no more than 12 months out; every field that names it must preserve that future or conditional posture. A number is allowed only as an unmistakably subjective valuation, price, timing forecast, or amount the author would pay or bet, and every field containing it must preserve that forecast posture.',
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
-      portfolioCompanyContract: 'When portfolioCompanyContext is present, the company is a selected Anti Fund investment and the purpose is constructive amplification. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
+      portfolioCompanyContract: 'When portfolioCompanyContext is present, the company is in the explicit flagship Anti Fund promotion set and the purpose is constructive amplification. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
       geoffreyNativeMoveContract: isGeoffreyVoiceProfile(voiceProfile)
         ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, capital, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, disagreement, or self-implicating decision; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Geoffrey often makes the interesting part socially risky, funny, numerically ambitious, or personally costly; preserve that energy when the packet supports it instead of retreating to a safe product wish or evaluation framework. Do not manufacture holdings, status objects, status assets, status signals, new status games, or flexes to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, benchmark comparisons, or generic demands for what a company should ship. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
         : null,
@@ -6060,6 +6075,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       buildFailedStoryAttemptsV2(recentIdeas, new Date())
         .map((attempt) => `${attempt.storyClusterId}:${attempt.failedAt}`).sort().join(','),
       ENTITY_MENTION_POLICY_VERSION,
+      ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
       briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}:${(brief.verifiedEntityMentions || []).map((entry) => `${entry.entity}=@${entry.handle}`).join('|')}`).sort().join(','),
     );
     const qualityPauseUntil = getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);

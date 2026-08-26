@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
+  ANTIFUND_PROMOTION_COMPANIES,
   buildAntiFundPortfolioContext,
   findAntiFundPortfolioCompanies,
   findSingleAntiFundPortfolioCompany,
@@ -10,18 +12,84 @@ import {
   getAntiFundPortfolioContextIssues,
   getAntiFundPortfolioPolicyIssues,
   isAntiFundPortfolioBriefDue,
+  isAntiFundPortfolioPromotionEligible,
   resolveAntiFundPortfolioContext,
+  selectAntiFundPortfolioCompany,
 } from '@/lib/antifund-portfolio';
 
 describe('Anti Fund portfolio generation policy', () => {
   it('keeps the official portfolio broad and marks sports-adjacent companies for a narrower business rule', () => {
     expect(ANTIFUND_PORTFOLIO_COMPANIES).toHaveLength(51);
+    expect(ANTIFUND_PROMOTION_COMPANIES).toHaveLength(17);
+    expect(ANTIFUND_PROMOTION_COMPANIES.map((company) => company.name)).toEqual([
+      'OpenAI',
+      'Anduril',
+      'Helion',
+      'Saronic',
+      'General Matter',
+      'Cognition',
+      'Etched',
+      'Physical Intelligence',
+      'Ramp',
+      'ElevenLabs',
+      'Polymarket',
+      'Kings League',
+      'Ketone-IQ',
+      'Eight Sleep',
+      'Betr',
+      'Chronosphere',
+      'SpaceX',
+    ]);
     expect(ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => company.sportsAdjacent).map((company) => company.name)).toEqual([
       'Kings League',
       'Betr',
     ]);
     expect(findAntiFundPortfolioCompanies('i think Etched gets to the next rack faster than people expect').map((company) => company.name)).toContain('Etched');
     expect(findAntiFundPortfolioCompanies('Betr should own sports media').map((company) => company.name)).toContain('Betr');
+  });
+
+  it('hard-excludes Natural and keeps ordinary portfolio companies outside automatic promotion', () => {
+    const natural = ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'natural')!;
+    const melius = ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'melius')!;
+
+    expect(natural.promotionTier).toBe('excluded');
+    expect(melius.promotionTier).toBe('standard');
+    expect(isAntiFundPortfolioPromotionEligible(natural)).toBe(false);
+    expect(isAntiFundPortfolioPromotionEligible(melius)).toBe(false);
+    expect(getAntiFundPortfolioContextIssues(
+      buildAntiFundPortfolioContext(natural, 'constructive_conviction'),
+      new Date('2026-08-22T00:00:00.000Z'),
+    )).toEqual(expect.arrayContaining([
+      'portfolio_company_promotion_excluded',
+      'portfolio_company_not_flagship',
+    ]));
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Natural can own payments infrastructure for AI agents.',
+    )).toEqual(expect.arrayContaining([
+      'portfolio_company_promotion_excluded',
+      'portfolio_company_not_flagship',
+    ]));
+    expect(getAntiFundPortfolioPolicyIssues('Natural will win.')).toContain(
+      'portfolio_company_promotion_excluded',
+    );
+    expect(getAntiFundPortfolioPolicyIssues('Natural language models keep improving.')).toEqual([]);
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Melius can build the creative workspace for AI agents.',
+      buildAntiFundPortfolioContext(melius, 'constructive_conviction'),
+    )).toContain('portfolio_company_not_flagship');
+    expect(getAntiFundPortfolioPolicyIssues(
+      'Melius released a new creative workspace for AI agents.',
+    )).toEqual([]);
+  });
+
+  it('rotates only across the flagship promotion set', () => {
+    const selected = new Set(Array.from({ length: 250 }, (_, index) => (
+      selectAntiFundPortfolioCompany([], `rotation-${index}`)?.id
+    )).filter(Boolean));
+
+    expect(selected.has('natural')).toBe(false);
+    expect([...selected].every((id) => ANTIFUND_PROMOTION_COMPANIES.some((company) => company.id === id))).toBe(true);
+    expect(ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION).toBe('antifund-flagship-promotion-1');
   });
 
   it('recognizes exact official company accounts as first-party portfolio sources', () => {

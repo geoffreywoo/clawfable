@@ -2,8 +2,34 @@ import type { LearningSignal, PortfolioCompanyGenerationContext, Tweet } from '.
 
 export const ANTIFUND_PORTFOLIO_SOURCE_URL = 'https://antifund.com/#portfolio';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION = 'antifund-portfolio-2026-08-21';
-export const ANTIFUND_PORTFOLIO_POLICY_VERSION = 'antifund-portfolio-alignment-2';
+export const ANTIFUND_PORTFOLIO_POLICY_VERSION = 'antifund-portfolio-alignment-3';
+export const ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION = 'antifund-flagship-promotion-1';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT = '2026-11-19T00:00:00.000Z';
+
+export const ANTIFUND_FLAGSHIP_PROMOTION_COMPANY_IDS = [
+  'openai',
+  'anduril',
+  'helion',
+  'saronic',
+  'general-matter',
+  'cognition',
+  'etched',
+  'physical-intelligence',
+  'ramp',
+  'elevenlabs',
+  'polymarket',
+  'ketone-iq',
+  'eight-sleep',
+  'betr',
+  'kings-league',
+  'chronosphere',
+  'spacex',
+] as const;
+
+export const ANTIFUND_PROMOTION_EXCLUDED_COMPANY_IDS = ['natural'] as const;
+
+const FLAGSHIP_PROMOTION_COMPANY_IDS = new Set<string>(ANTIFUND_FLAGSHIP_PROMOTION_COMPANY_IDS);
+const PROMOTION_EXCLUDED_COMPANY_IDS = new Set<string>(ANTIFUND_PROMOTION_EXCLUDED_COMPANY_IDS);
 
 export type AntiFundPortfolioCategory =
   | 'ai_infrastructure_national_resilience'
@@ -20,6 +46,7 @@ export interface AntiFundPortfolioCompany {
   aliases: string[];
   officialXHandles: string[];
   sportsAdjacent: boolean;
+  promotionTier: 'flagship' | 'standard' | 'excluded';
 }
 
 type PortfolioRow = readonly [
@@ -96,16 +123,34 @@ export const ANTIFUND_PORTFOLIO_COMPANIES: AntiFundPortfolioCompany[] = ROWS.map
   category,
   aliases = [],
   officialXHandles = [],
-]) => ({
-  id: slug(name),
-  name,
-  url,
-  description,
-  category,
-  aliases: [...new Set([name, ...aliases])],
-  officialXHandles: officialXHandles.map((handle) => handle.replace(/^@/, '').toLowerCase()),
-  sportsAdjacent: name === 'Betr' || name === 'Kings League',
-}));
+]) => {
+  const id = slug(name);
+  return {
+    id,
+    name,
+    url,
+    description,
+    category,
+    aliases: [...new Set([name, ...aliases])],
+    officialXHandles: officialXHandles.map((handle) => handle.replace(/^@/, '').toLowerCase()),
+    sportsAdjacent: name === 'Betr' || name === 'Kings League',
+    promotionTier: FLAGSHIP_PROMOTION_COMPANY_IDS.has(id)
+      ? 'flagship'
+      : PROMOTION_EXCLUDED_COMPANY_IDS.has(id)
+        ? 'excluded'
+        : 'standard',
+  };
+});
+
+export const ANTIFUND_PROMOTION_COMPANIES = ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => (
+  company.promotionTier === 'flagship'
+));
+
+export function isAntiFundPortfolioPromotionEligible(
+  company: AntiFundPortfolioCompany | null | undefined,
+): company is AntiFundPortfolioCompany {
+  return company?.promotionTier === 'flagship';
+}
 
 const GENERIC_COMPANY_NAMES = new Set([
   'aeon', 'archive', 'creed', 'enigma', 'lighter', 'merge', 'modal', 'monaco',
@@ -198,6 +243,7 @@ export function buildAntiFundPortfolioContext(
     category: company.category,
     description: company.description,
     sportsAdjacent: company.sportsAdjacent,
+    promotionTier: company.promotionTier,
     relationship: 'antifund_selected_investment',
     intent,
     sourceUrl: ANTIFUND_PORTFOLIO_SOURCE_URL,
@@ -223,12 +269,15 @@ export function getAntiFundPortfolioContextIssues(
   if (context.snapshotVersion !== canonical.snapshotVersion) issues.push('portfolio_context_snapshot_stale');
   if (context.snapshotExpiresAt !== canonical.snapshotExpiresAt) issues.push('portfolio_context_expiry_mismatch');
   if (now.getTime() >= Date.parse(canonical.snapshotExpiresAt)) issues.push('portfolio_context_snapshot_expired');
+  if (company.promotionTier === 'excluded') issues.push('portfolio_company_promotion_excluded');
+  if (company.promotionTier !== 'flagship') issues.push('portfolio_company_not_flagship');
   if (
     context.companyName !== canonical.companyName
     || context.companyUrl !== canonical.companyUrl
     || context.category !== canonical.category
     || context.description !== canonical.description
     || context.sportsAdjacent !== canonical.sportsAdjacent
+    || context.promotionTier !== canonical.promotionTier
     || context.relationship !== canonical.relationship
     || context.sourceUrl !== canonical.sourceUrl
     || !['live_development', 'constructive_conviction'].includes(context.intent)
@@ -271,6 +320,7 @@ const NEGATIVE_OUTCOME_PATTERN = /\b(?:(?:should|must|needs?\s+to)\s+be\s+(?:ban
 const INVENTED_ACCESS_PATTERN = /\b(?:(?:i|we)(?:'ve|\s+have)?\s+(?:invested\s+in|backed|met|talked\s+(?:to|with)|spoke\s+(?:to|with)|saw|visited|remember|heard\s+from|were\s+shown)|(?:my|our)\s+(?:investment|portfolio\s+company)|(?:i|we)\s+(?:had|took)\s+a\s+call\s+with|the\s+team\s+(?:told|showed|sent)\s+(?:me|us))\b/i;
 const AD_COPY_PATTERN = /\b(?:sign\s+up|join\s+the\s+waitlist|book\s+a\s+demo|use\s+code|buy\s+now|download\s+now|check\s+(?:it|them)\s+out|our\s+portfolio\s+company|proud\s+to\s+(?:back|support|invest))\b/i;
 const CONSTRUCTIVE_CONVICTION_PATTERN = /\b(?:i\s+(?:think|believe|want|love)|i(?:'d|\s+would)\s+(?:now\s+)?(?:back|bet|buy|choose|expect|favor|give|make|pick|prefer|put|rank|take|use|watch)|deserves?|worth|winner|special|underestimated|undervalued|impressive|insane|huge|great|best|ahead|faster|early|cheap|dominant|breakout|real|congrats|congratulations|endorsement|unusually\s+(?:concrete|convincing|credible)|earn(?:s|ed)?\s+(?:the\s+right|attention|credibility|weight)|gets?\s+(?:there|to|it|this|that|better|faster|cheaper|stronger|bigger|interesting)|(?:can|could|will|should)\s+(?:build|become|compound|create|capture|expand|grow|improve|lead|lower|own|prove|reduce|scale|ship|unlock|win))\b/i;
+const NATURAL_COMPANY_PROMOTION_PATTERN = /(?:\bi\s+(?:think|believe|want|love)\s+Natural(?:\.co)?\b)|(?:\b(?:back|bet(?:ting)?|bullish|buy(?:ing)?|invest(?:ed|ing)?|long)\s+(?:in\s+|on\s+)?Natural(?:\.co)?\b)|(?:\bNatural(?:\.co)?\b\s+(?:can|could|will|should|is|gets|deserves|builds?|launch(?:es|ed|ing)?|owns?|rais(?:e|es|ed|ing)|wins?)\b)/;
 
 export function getAntiFundPortfolioPolicyIssues(
   content: string,
@@ -279,11 +329,28 @@ export function getAntiFundPortfolioPolicyIssues(
   const company = context ? getAntiFundPortfolioCompany(context.companyId) : null;
   const contextIssues = context ? getAntiFundPortfolioContextIssues(context) : [];
   if (contextIssues.length > 0) return contextIssues;
+  const mentionedCompanies = company
+    ? [company]
+    : findAntiFundPortfolioCompanies(content);
+  const naturalCompanyMention = !company
+    && /\bNatural(?:\.co)?\b/.test(content)
+    && (
+      /\b(?:agentic|ai\s+agents?|commerce|company|fintech|payments?|startup|transactions?)\b/i.test(content)
+      || NATURAL_COMPANY_PROMOTION_PATTERN.test(content)
+    );
   const mentioned = company
     ? isAntiFundPortfolioCompanyMentioned(content, company, { required: true })
-    : findAntiFundPortfolioCompanies(content).length > 0;
+    : mentionedCompanies.length > 0 || naturalCompanyMention;
   if (!mentioned && !context) return [];
   const issues: string[] = [];
+
+  if (mentionedCompanies.some((entry) => entry.promotionTier === 'excluded') || naturalCompanyMention) {
+    issues.push('portfolio_company_promotion_excluded');
+  }
+  if (
+    (context && mentionedCompanies.some((entry) => entry.promotionTier !== 'flagship'))
+    || naturalCompanyMention
+  ) issues.push('portfolio_company_not_flagship');
 
   if (company?.sportsAdjacent && !isQualifiedSportsPortfolioContext(content, context)) {
     issues.push('portfolio_sports_business_relevance_missing');
@@ -322,7 +389,8 @@ export function isAntiFundPortfolioBriefDue(
       tweet.portfolioCompanyContext
       && getAntiFundPortfolioContextIssues(tweet.portfolioCompanyContext, now).length === 0
     )
-    || findAntiFundPortfolioCompanies(`${tweet.topic || ''} ${tweet.content}`).length > 0
+    || findAntiFundPortfolioCompanies(`${tweet.topic || ''} ${tweet.content}`)
+      .some(isAntiFundPortfolioPromotionEligible)
   )).length;
   if (!(recent.length < 3 || portfolioCount < 2)) return false;
   const retryBlocked = signals.some((signal) => (
@@ -339,10 +407,10 @@ export function selectAntiFundPortfolioCompany(
   rotationKey: string,
 ): AntiFundPortfolioCompany | null {
   const recent = recentContent.join('\n');
-  const eligible = ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => (
+  const eligible = ANTIFUND_PROMOTION_COMPANIES.filter((company) => (
     !isAntiFundPortfolioCompanyMentioned(recent, company)
   ));
-  const pool = eligible.length > 0 ? eligible : ANTIFUND_PORTFOLIO_COMPANIES;
+  const pool = eligible.length > 0 ? eligible : ANTIFUND_PROMOTION_COMPANIES;
   if (pool.length === 0) return null;
   const hash = [...rotationKey].reduce((value, character) => (
     ((value * 31) + character.charCodeAt(0)) >>> 0

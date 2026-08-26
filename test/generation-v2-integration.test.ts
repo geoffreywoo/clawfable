@@ -1341,9 +1341,12 @@ describe('generateTweetBatchV2 integration', () => {
       reference.kind === 'operator_topic' || reference.kind === 'portfolio_company'
     )))).toBe(true);
     expect(drafts.some((draft) => draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'operator_topic'))).toBe(true);
-    expect(drafts.some((draft) => (
-      draft.portfolioCompanyContext
-      && draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'portfolio_company')
+    expect(drafts.every((draft) => (
+      !draft.portfolioCompanyContext
+      || (
+        draft.portfolioCompanyContext.promotionTier === 'flagship'
+        && draft.generationEvidenceReferences?.some((reference: any) => reference.kind === 'portfolio_company')
+      )
     ))).toBe(true);
     expect(mocks.upsertIdeaCandidates.mock.calls.at(-1)?.[1].every((idea: any) => idea.creativeSeedId)).toBe(true);
     expect(mocks.generateText).toHaveBeenCalled();

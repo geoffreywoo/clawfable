@@ -67,7 +67,10 @@ import {
 } from '@/lib/source-planner';
 import type { CandidateJudgeBreakdown, GenerationRunTrace, IdeaCandidate, SemanticBlock, SourceDocument, StoryCluster, Tweet } from '@/lib/types';
 import { GEOFFREY_NATIVE_EVAL } from './fixtures/geoffrey-quality-eval';
-import { ANTIFUND_PORTFOLIO_POLICY_VERSION } from '@/lib/antifund-portfolio';
+import {
+  ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
+} from '@/lib/antifund-portfolio';
 
 const voiceProfile = {
   tone: 'casual and direct',
@@ -1176,6 +1179,23 @@ describe('Tweet Generation V2', () => {
     ]);
   });
 
+  it('refuses an exact Natural promotion request before idea generation', () => {
+    const requested = buildGenerationBriefsV2({
+      count: 1,
+      requestedTopic: 'Natural',
+      stories: [],
+      documents: [],
+      voiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(requested).toEqual([]);
+  });
+
   it('does not build or normalize sports ideas for the Geoffrey account', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
@@ -1244,9 +1264,11 @@ describe('Tweet Generation V2', () => {
     expect(portfolioBriefs).toHaveLength(1);
     expect(portfolioBriefs[0].portfolioCompanyContext).toMatchObject({
       policyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+      promotionTier: 'flagship',
       relationship: 'antifund_selected_investment',
       intent: 'constructive_conviction',
     });
+    expect(portfolioBriefs[0].sourceBrief).toContain(ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION);
     if (portfolioBriefs[0].portfolioCompanyContext?.sportsAdjacent) {
       expect(portfolioBriefs[0].authorOpportunity).toContain('as a company');
     }

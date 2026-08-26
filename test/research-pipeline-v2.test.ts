@@ -6,6 +6,7 @@ import {
   selectSourceDocumentsForEnrichment,
 } from '@/lib/research-pipeline';
 import type { ResearchAgenda, SourceDocument } from '@/lib/types';
+import { ANTIFUND_PROMOTION_COMPANIES } from '@/lib/antifund-portfolio';
 
 const now = new Date('2026-08-01T12:00:00.000Z');
 
@@ -122,6 +123,13 @@ describe('research agenda and story qualification', () => {
       'startup founders funding acquisitions products customers',
     ]);
     expect(built.queries.slice(2, 4).every((query) => query.endsWith('latest product launch funding customers'))).toBe(true);
+    const portfolioQueryCompanies = built.queries.slice(2, 4).map((query) => (
+      query.replace(/ latest product launch funding customers$/, '')
+    ));
+    expect(portfolioQueryCompanies.every((name) => (
+      ANTIFUND_PROMOTION_COMPANIES.some((company) => company.name === name)
+    ))).toBe(true);
+    expect(portfolioQueryCompanies).not.toContain('Natural');
     expect(built.queries).toEqual(expect.arrayContaining(['crypto', 'tech', 'startup']));
     expect(built.queries.filter((query) => /(?:inference|bonding|robot|transformer|tungsten|antimony|gallium|graphite|fluorspar)/i.test(query)).length).toBeLessThanOrEqual(12);
   });
