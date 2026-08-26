@@ -2,8 +2,8 @@ import type { SourceDocument } from './types';
 import type { TopicEntityRole, TopicEntityRoleName } from './trending';
 
 export type VerifiedEntityMentionSource = 'official_x_author' | 'curated_registry';
-export const ENTITY_MENTION_POLICY_VERSION = 'verified-entity-mentions-v2';
-export const CURATED_X_ENTITY_REGISTRY_VERSION = 'curated-x-entities-2026-08-26-1';
+export const ENTITY_MENTION_POLICY_VERSION = 'verified-entity-mentions-v3';
+export const CURATED_X_ENTITY_REGISTRY_VERSION = 'curated-x-entities-2026-08-26-2';
 
 export interface VerifiedEntityMention {
   entity: string;
@@ -17,36 +17,40 @@ export interface CuratedXEntityRegistryEntry {
   aliases?: readonly string[];
   handle: string;
   role: TopicEntityRoleName;
+  caseSensitive?: boolean;
 }
 
 // Handles are accepted only after a live X identity check or a first-party
-// site links the account. Matching is case-sensitive to avoid ordinary nouns.
+// site links the account. Ambiguous common words require canonical casing;
+// distinctive brands still match Geoffrey's intentionally lowercase prose.
 export const CURATED_X_ENTITY_REGISTRY: readonly CuratedXEntityRegistryEntry[] = [
-  { entity: 'Cursor', handle: 'cursor_ai', role: 'company' },
+  { entity: 'Cursor', handle: 'cursor_ai', role: 'company', caseSensitive: true },
   { entity: 'OpenAI', handle: 'OpenAI', role: 'company' },
-  { entity: 'Anthropic', handle: 'AnthropicAI', role: 'company' },
-  { entity: 'Claude', handle: 'claudeai', role: 'product' },
-  { entity: 'Cognition', aliases: ['Cognition AI'], handle: 'cognition', role: 'company' },
+  { entity: 'Anthropic', handle: 'AnthropicAI', role: 'company', caseSensitive: true },
+  { entity: 'Claude', handle: 'claudeai', role: 'product', caseSensitive: true },
+  { entity: 'Cognition', aliases: ['Cognition AI'], handle: 'cognition', role: 'company', caseSensitive: true },
   { entity: 'SpaceX', aliases: ['Space X'], handle: 'SpaceX', role: 'company' },
   { entity: 'xAI', handle: 'xai', role: 'company' },
-  { entity: 'Grok', handle: 'grok', role: 'product' },
-  { entity: 'Tesla', handle: 'Tesla', role: 'company' },
+  { entity: 'Grok', handle: 'grok', role: 'product', caseSensitive: true },
+  { entity: 'Tesla', handle: 'Tesla', role: 'company', caseSensitive: true },
   { entity: 'NVIDIA', aliases: ['Nvidia'], handle: 'nvidia', role: 'company' },
   { entity: 'Google DeepMind', aliases: ['DeepMind'], handle: 'GoogleDeepMind', role: 'company' },
-  { entity: 'Gemini', aliases: ['Google Gemini'], handle: 'GeminiApp', role: 'product' },
+  { entity: 'Gemini', aliases: ['Google Gemini'], handle: 'GeminiApp', role: 'product', caseSensitive: true },
   { entity: 'Microsoft', handle: 'Microsoft', role: 'company' },
-  { entity: 'Anduril', aliases: ['Anduril Industries'], handle: 'anduriltech', role: 'company' },
-  { entity: 'Physical Intelligence', handle: 'physical_int', role: 'company' },
+  { entity: 'Anduril', aliases: ['Anduril Industries'], handle: 'anduriltech', role: 'company', caseSensitive: true },
+  { entity: 'Physical Intelligence', handle: 'physical_int', role: 'company', caseSensitive: true },
   { entity: 'ElevenLabs', aliases: ['Eleven Labs'], handle: 'ElevenLabs', role: 'company' },
-  { entity: 'Perplexity', handle: 'perplexity_ai', role: 'company' },
-  { entity: 'Lovable', handle: 'Lovable', role: 'company' },
+  { entity: 'Perplexity', handle: 'perplexity_ai', role: 'company', caseSensitive: true },
+  { entity: 'Lovable', handle: 'Lovable', role: 'company', caseSensitive: true },
   { entity: 'Replit', handle: 'Replit', role: 'company' },
   { entity: 'Vercel', handle: 'vercel', role: 'company' },
+  { entity: 'Modal', handle: 'modal', role: 'company', caseSensitive: true },
+  { entity: 'Ramp', handle: 'tryramp', role: 'company', caseSensitive: true },
   { entity: 'Polymarket', handle: 'Polymarket', role: 'company' },
-  { entity: 'Helion', handle: 'Helion_Energy', role: 'company' },
-  { entity: 'Saronic', handle: 'Saronic', role: 'company' },
-  { entity: 'General Matter', handle: 'generalmatter', role: 'company' },
-  { entity: 'Etched', handle: 'Etched', role: 'company' },
+  { entity: 'Helion', handle: 'Helion_Energy', role: 'company', caseSensitive: true },
+  { entity: 'Saronic', handle: 'Saronic', role: 'company', caseSensitive: true },
+  { entity: 'General Matter', handle: 'generalmatter', role: 'company', caseSensitive: true },
+  { entity: 'Etched', handle: 'Etched', role: 'company', caseSensitive: true },
   { entity: 'Ketone-IQ', aliases: ['Ketone IQ'], handle: 'ketone', role: 'company' },
   { entity: 'Eight Sleep', handle: 'eightsleep', role: 'company' },
   { entity: 'Betr', handle: 'betr', role: 'company' },
@@ -61,7 +65,7 @@ export const CURATED_X_ENTITY_REGISTRY: readonly CuratedXEntityRegistryEntry[] =
   { entity: 'Waymo', handle: 'Waymo', role: 'company' },
   { entity: 'Boston Dynamics', handle: 'BostonDynamics', role: 'company' },
   { entity: 'Midjourney', handle: 'midjourney', role: 'company' },
-  { entity: 'Stripe', handle: 'stripe', role: 'company' },
+  { entity: 'Stripe', handle: 'stripe', role: 'company', caseSensitive: true },
   { entity: 'Sam Altman', handle: 'sama', role: 'person' },
   { entity: 'Elon Musk', handle: 'elonmusk', role: 'person' },
   { entity: 'Satya Nadella', handle: 'satyanadella', role: 'person' },
@@ -285,7 +289,7 @@ export function findCuratedVerifiedEntityMentions(
   return buildVerifiedEntityMentions({
     curated: CURATED_X_ENTITY_REGISTRY.flatMap((entry) => {
       const aliases = [entry.entity, ...(entry.aliases || [])];
-      const named = aliases.some((alias) => textNamesEntity(text, alias, true));
+      const named = aliases.some((alias) => textNamesEntity(text, alias, entry.caseSensitive === true));
       return named || textMentionsHandle(text, entry.handle)
         ? [{ entity: entry.entity, handle: entry.handle, role: entry.role }]
         : [];
