@@ -956,8 +956,9 @@ describe('autopilot remote debug logging', () => {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
       id: 'v2-betr-business-draft',
-      content: 'Betr can build the consumer media and distribution brand for sports betting.',
+      content: 'i think @betr can build the consumer media and distribution brand for sports betting.',
       topic: 'sports business',
+      allowedMentionHandles: ['betr'],
       portfolioCompanyContext: {
         policyVersion: 'antifund-portfolio-alignment-3',
         snapshotVersion: 'antifund-portfolio-2026-08-21',
@@ -1449,6 +1450,51 @@ describe('autopilot remote debug logging', () => {
       expect.anything(),
       taggedTweet.content,
       { username: baseAgent.handle },
+    );
+  });
+
+  it('quarantines a queued post that names a curated company without tagging it', async () => {
+    const untaggedTweet = {
+      ...validQueuedTweet,
+      id: 'untagged-cursor',
+      content: 'Cursor at twice its last private price would still be interesting.',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([untaggedTweet]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy(baseAgent);
+
+    expect(result).toMatchObject({ before: 1, after: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith(
+      untaggedTweet.id,
+      expect.objectContaining({
+        status: 'quarantined',
+        quarantineReason: expect.stringContaining('Cursor=@cursor_ai'),
+      }),
+    );
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        metadata: expect.objectContaining({ policyGate: 'entity_mention_policy' }),
+      }),
+    );
+  });
+
+  it('allows a current curated handle even when an older artifact did not persist its allowlist', async () => {
+    const taggedTweet = {
+      ...validQueuedTweet,
+      id: 'curated-cursor',
+      content: 'i would pay twice @cursor_ai’s last private price within 12 months',
+      allowedMentionHandles: [],
+    };
+    mocks.getQueuedTweets.mockResolvedValue([taggedTweet]);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-curated-cursor', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result).toMatchObject({ action: 'posted', tweetId: taggedTweet.id });
+    expect(mocks.getAutopostPolicyIssue).toHaveBeenCalledWith(
+      taggedTweet.content,
+      expect.objectContaining({ allowedMentions: expect.arrayContaining(['cursor_ai']) }),
     );
   });
 

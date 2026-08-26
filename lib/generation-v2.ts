@@ -31,7 +31,10 @@ import type { TopicEntityRole, TrendingTopic } from './trending';
 import {
   buildVerifiedEntityMentions,
   ENTITY_MENTION_POLICY_VERSION,
+  findCuratedVerifiedEntityMentions,
+  getDeprecatedCuratedEntityHandleIssue,
   getMissingVerifiedEntityTagIssue,
+  mergeVerifiedEntityMentions,
   usedVerifiedMentionHandles,
   type VerifiedEntityMention,
 } from './entity-mentions';
@@ -2333,6 +2336,24 @@ function ideaText(idea: Pick<IdeaCandidate, 'publicMove' | 'claim' | 'tension' |
   return `${ideaPublicMove(idea)} ${idea.claim} ${idea.tension} ${idea.implication}`;
 }
 
+function verifiedEntityMentionsForIdea(
+  brief: GenerationBriefV2,
+  idea: Pick<IdeaCandidate, 'publicMove' | 'claim' | 'tension' | 'implication' | 'topic'>,
+  ...additionalTexts: Array<string | null | undefined>
+): VerifiedEntityMention[] {
+  return mergeVerifiedEntityMentions(
+    brief.verifiedEntityMentions || [],
+    findCuratedVerifiedEntityMentions(
+      brief.topic,
+      brief.title,
+      brief.summary,
+      idea.topic,
+      ideaText(idea),
+      ...additionalTexts,
+    ),
+  );
+}
+
 export function isGeoffreyAIFutureLaneV2(value: string): boolean {
   const domain = classifyGeoffreyTopicDomain(value);
   return domain === 'ai_compute' || domain === 'robotics_automation';
@@ -3911,6 +3932,7 @@ export function buildTweetWritingPromptV2(
   initialSingleMoveFromAnchor = false,
   voiceProfile?: VoiceProfile | null,
 ): string {
+  const verifiedEntityMentions = verifiedEntityMentionsForIdea(brief, idea);
   const repairSource = revisionStrategy === 'critic_surgical'
     ? revisionContext?.[0]?.content || ''
     : '';
@@ -3971,13 +3993,13 @@ export function buildTweetWritingPromptV2(
         : 'Use this only to keep the approved position concrete. Personal history selected the broad topic but supplies no prior premise or factual evidence.',
     },
     verifiedEntityMentionPolicy: {
-      available: (brief.verifiedEntityMentions || []).map((entry) => ({
+      available: verifiedEntityMentions.map((entry) => ({
         entity: entry.entity,
         handle: `@${entry.handle}`,
         role: entry.role,
         source: entry.source,
       })),
-      instruction: (brief.verifiedEntityMentions || []).length > 0
+      instruction: verifiedEntityMentions.length > 0
         ? 'When the post names an available person or company, replace its first natural reference with the supplied @handle. Use only supplied handles. Never begin the post with @; put ordinary feed text before the handle. Do not use a leading period or punctuation hack.'
         : 'No verified handles are supplied. Use plain names and never invent or guess an @handle.',
     },
@@ -4391,7 +4413,8 @@ function preflightDraft({
   const generatedIssue = getGeneratedTweetIssue(content);
   const generatedWritingIssue = getV2GeneratedWritingIssue(content);
   const lengthIssue = getTweetLengthIssue(content);
-  const verifiedEntityMentions = brief.verifiedEntityMentions || [];
+  const verifiedEntityMentions = verifiedEntityMentionsForIdea(brief, idea, content);
+  const deprecatedVerifiedEntityHandleIssue = getDeprecatedCuratedEntityHandleIssue(content);
   const missingVerifiedEntityTagIssue = getMissingVerifiedEntityTagIssue(content, verifiedEntityMentions);
   const policyIssue = getAutopostPolicyIssue(content, {
     allowedMentions: verifiedEntityMentions.map((entry) => entry.handle),
@@ -4447,6 +4470,7 @@ function preflightDraft({
   );
 
   if (generatedIssue) codes.push('incomplete_or_prompt_leak');
+  if (deprecatedVerifiedEntityHandleIssue) codes.push('deprecated_verified_entity_handle');
   if (missingVerifiedEntityTagIssue) codes.push('missing_verified_entity_tag');
   if (generatedWritingIssue) codes.push('generated_writing_pattern');
   if (lengthIssue) codes.push('over_x_length');
@@ -5208,7 +5232,7 @@ function toRankedTweet(
     portfolioCompanyContext: brief.portfolioCompanyContext || null,
     allowedMentionHandles: usedVerifiedMentionHandles(
       draft.content,
-      brief.verifiedEntityMentions || [],
+      verifiedEntityMentionsForIdea(brief, idea, draft.content),
     ),
     generationModelStack: draft.generationModelStack || input.modelStack,
     generationProvider: draft.generationProvider,
@@ -5498,6 +5522,8 @@ async function runSubtractiveTailRepairPassV2({
 }
 
 const V2_RESCUE_ISSUE_LABELS: Record<string, string> = {
+  missing_verified_entity_tag: 'named person or company must use the supplied verified X handle without starting the post with @',
+  deprecated_verified_entity_handle: 'obsolete X handle must be replaced with the current verified handle',
   generated_writing_pattern: 'recognizable generated-post sentence pattern',
   generic_investor_selection_template: 'reusable category-level "the startup/company I would back" wrapper',
   source_attribution_dropped: 'an attributed or self-reported source claim became an unqualified fact',

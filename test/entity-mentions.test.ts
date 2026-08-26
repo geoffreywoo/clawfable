@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildVerifiedEntityMentions,
+  CURATED_X_ENTITY_REGISTRY_VERSION,
+  findCuratedVerifiedEntityMentions,
+  getCuratedEntityMentionPolicyIssue,
+  getDeprecatedCuratedEntityHandleIssue,
   getMissingVerifiedEntityTagIssue,
   isLeadingXMention,
+  mergeVerifiedEntityMentions,
+  usedCuratedVerifiedMentionHandles,
   usedVerifiedMentionHandles,
   xIdentityMatchesEntity,
 } from '@/lib/entity-mentions';
@@ -97,5 +103,39 @@ describe('verified entity mentions', () => {
     expect(usedVerifiedMentionHandles('i think @OpenAI will ship this faster than people expect.', mentions)).toEqual(['openai']);
     expect(isLeadingXMention('@OpenAI will ship this faster than people expect.')).toBe(true);
     expect(isLeadingXMention('i think @OpenAI will ship this faster than people expect.')).toBe(false);
+  });
+
+  it('resolves recurring companies and people from the versioned curated registry', () => {
+    expect(CURATED_X_ENTITY_REGISTRY_VERSION).toBe('curated-x-entities-2026-08-26-1');
+    expect(findCuratedVerifiedEntityMentions(
+      'Cursor and OpenAI are compounding faster than people expect. Scott Wu sees it too.',
+    )).toEqual([
+      { entity: 'Cursor', handle: 'cursor_ai', role: 'company', source: 'curated_registry' },
+      { entity: 'OpenAI', handle: 'openai', role: 'company', source: 'curated_registry' },
+      { entity: 'Scott Wu', handle: 'scottwu46', role: 'person', source: 'curated_registry' },
+    ]);
+    expect(findCuratedVerifiedEntityMentions('move the cursor over the open dialog')).toEqual([]);
+  });
+
+  it('requires current curated tags and allows their handles without persisted provenance', () => {
+    expect(getCuratedEntityMentionPolicyIssue(
+      'Cursor at twice its last private price would still be interesting.',
+    )).toContain('Cursor=@cursor_ai');
+    expect(getCuratedEntityMentionPolicyIssue(
+      'i would pay twice @cursor_ai’s last private price.',
+    )).toBeNull();
+    expect(usedCuratedVerifiedMentionHandles(
+      'i would pay twice @cursor_ai’s last private price and still buy @OpenAI.',
+    )).toEqual(['cursor_ai', 'openai']);
+    expect(getDeprecatedCuratedEntityHandleIssue('i think @elevenlabsio can win')).toContain('@elevenlabs');
+  });
+
+  it('lets a current curated handle supersede stale source provenance', () => {
+    expect(mergeVerifiedEntityMentions(
+      [{ entity: 'ElevenLabs', handle: 'elevenlabsio', role: 'company', source: 'official_x_author' }],
+      [{ entity: 'ElevenLabs', handle: 'elevenlabs', role: 'company', source: 'curated_registry' }],
+    )).toEqual([
+      { entity: 'ElevenLabs', handle: 'elevenlabs', role: 'company', source: 'curated_registry' },
+    ]);
   });
 });
