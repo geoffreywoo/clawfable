@@ -1179,6 +1179,24 @@ describe('Tweet Generation V2', () => {
     ]);
   });
 
+  it('supplies a curated handle when an idea introduces a company on a broad brief', () => {
+    const writingPrompt = JSON.parse(buildTweetWritingPromptV2({
+      id: 'idea-cursor-valuation',
+      briefId: 'startups',
+      topic: 'startups',
+      publicMove: 'I would pay twice Cursor’s last private price within 12 months.',
+      claim: 'Cursor could compound into the software creation layer.',
+      tension: 'The current price still looks expensive.',
+      implication: 'Coding-agent reliability changes the valuation frame.',
+      counterargument: 'Reliability may plateau.',
+    } as IdeaCandidate, brief('startups', 'startups'), [], []));
+
+    expect(writingPrompt.verifiedEntityMentionPolicy).toMatchObject({
+      available: [{ entity: 'Cursor', handle: '@cursor_ai', role: 'company' }],
+    });
+    expect(writingPrompt.verifiedEntityMentionPolicy.instruction).toContain('Never begin the post with @');
+  });
+
   it('refuses an exact Natural promotion request before idea generation', () => {
     const requested = buildGenerationBriefsV2({
       count: 1,

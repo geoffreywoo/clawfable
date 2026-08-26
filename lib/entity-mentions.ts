@@ -2,7 +2,8 @@ import type { SourceDocument } from './types';
 import type { TopicEntityRole, TopicEntityRoleName } from './trending';
 
 export type VerifiedEntityMentionSource = 'official_x_author' | 'curated_registry';
-export const ENTITY_MENTION_POLICY_VERSION = 'verified-entity-mentions-v1';
+export const ENTITY_MENTION_POLICY_VERSION = 'verified-entity-mentions-v2';
+export const CURATED_X_ENTITY_REGISTRY_VERSION = 'curated-x-entities-2026-08-26-1';
 
 export interface VerifiedEntityMention {
   entity: string;
@@ -10,6 +11,82 @@ export interface VerifiedEntityMention {
   role: TopicEntityRoleName;
   source: VerifiedEntityMentionSource;
 }
+
+export interface CuratedXEntityRegistryEntry {
+  entity: string;
+  aliases?: readonly string[];
+  handle: string;
+  role: TopicEntityRoleName;
+}
+
+// Handles are accepted only after a live X identity check or a first-party
+// site links the account. Matching is case-sensitive to avoid ordinary nouns.
+export const CURATED_X_ENTITY_REGISTRY: readonly CuratedXEntityRegistryEntry[] = [
+  { entity: 'Cursor', handle: 'cursor_ai', role: 'company' },
+  { entity: 'OpenAI', handle: 'OpenAI', role: 'company' },
+  { entity: 'Anthropic', handle: 'AnthropicAI', role: 'company' },
+  { entity: 'Claude', handle: 'claudeai', role: 'product' },
+  { entity: 'Cognition', aliases: ['Cognition AI'], handle: 'cognition', role: 'company' },
+  { entity: 'SpaceX', aliases: ['Space X'], handle: 'SpaceX', role: 'company' },
+  { entity: 'xAI', handle: 'xai', role: 'company' },
+  { entity: 'Grok', handle: 'grok', role: 'product' },
+  { entity: 'Tesla', handle: 'Tesla', role: 'company' },
+  { entity: 'NVIDIA', aliases: ['Nvidia'], handle: 'nvidia', role: 'company' },
+  { entity: 'Google DeepMind', aliases: ['DeepMind'], handle: 'GoogleDeepMind', role: 'company' },
+  { entity: 'Gemini', aliases: ['Google Gemini'], handle: 'GeminiApp', role: 'product' },
+  { entity: 'Microsoft', handle: 'Microsoft', role: 'company' },
+  { entity: 'Anduril', aliases: ['Anduril Industries'], handle: 'anduriltech', role: 'company' },
+  { entity: 'Physical Intelligence', handle: 'physical_int', role: 'company' },
+  { entity: 'ElevenLabs', aliases: ['Eleven Labs'], handle: 'ElevenLabs', role: 'company' },
+  { entity: 'Perplexity', handle: 'perplexity_ai', role: 'company' },
+  { entity: 'Lovable', handle: 'Lovable', role: 'company' },
+  { entity: 'Replit', handle: 'Replit', role: 'company' },
+  { entity: 'Vercel', handle: 'vercel', role: 'company' },
+  { entity: 'Polymarket', handle: 'Polymarket', role: 'company' },
+  { entity: 'Helion', handle: 'Helion_Energy', role: 'company' },
+  { entity: 'Saronic', handle: 'Saronic', role: 'company' },
+  { entity: 'General Matter', handle: 'generalmatter', role: 'company' },
+  { entity: 'Etched', handle: 'Etched', role: 'company' },
+  { entity: 'Ketone-IQ', aliases: ['Ketone IQ'], handle: 'ketone', role: 'company' },
+  { entity: 'Eight Sleep', handle: 'eightsleep', role: 'company' },
+  { entity: 'Betr', handle: 'betr', role: 'company' },
+  { entity: 'Kings League', handle: 'KingsLeague', role: 'company' },
+  { entity: 'Chronosphere', handle: 'chronosphereio', role: 'company' },
+  { entity: 'LinkedIn', aliases: ['Linkedin'], handle: 'LinkedIn', role: 'company' },
+  { entity: 'GitHub', aliases: ['Github'], handle: 'github', role: 'company' },
+  { entity: 'Scale AI', handle: 'scale_AI', role: 'company' },
+  { entity: 'CoreWeave', handle: 'CoreWeave', role: 'company' },
+  { entity: 'Palantir', handle: 'PalantirTech', role: 'company' },
+  { entity: 'Figure AI', handle: 'Figure_robot', role: 'company' },
+  { entity: 'Waymo', handle: 'Waymo', role: 'company' },
+  { entity: 'Boston Dynamics', handle: 'BostonDynamics', role: 'company' },
+  { entity: 'Midjourney', handle: 'midjourney', role: 'company' },
+  { entity: 'Stripe', handle: 'stripe', role: 'company' },
+  { entity: 'Sam Altman', handle: 'sama', role: 'person' },
+  { entity: 'Elon Musk', handle: 'elonmusk', role: 'person' },
+  { entity: 'Satya Nadella', handle: 'satyanadella', role: 'person' },
+  { entity: 'Dario Amodei', handle: 'DarioAmodei', role: 'person' },
+  { entity: 'Scott Wu', handle: 'ScottWu46', role: 'person' },
+  { entity: 'Alexandr Wang', handle: 'alexandr_wang', role: 'person' },
+  { entity: 'Aravind Srinivas', handle: 'AravSrinivas', role: 'person' },
+  { entity: 'Bret Taylor', handle: 'btaylor', role: 'person' },
+  { entity: 'Patrick Collison', handle: 'patrickc', role: 'person' },
+  { entity: 'John Collison', handle: 'collision', role: 'person' },
+  { entity: 'Brian Armstrong', handle: 'brian_armstrong', role: 'person' },
+  { entity: 'Demis Hassabis', handle: 'demishassabis', role: 'person' },
+  { entity: 'Yann LeCun', handle: 'ylecun', role: 'person' },
+  { entity: 'Andrej Karpathy', handle: 'karpathy', role: 'person' },
+  { entity: 'Palmer Luckey', handle: 'PalmerLuckey', role: 'person' },
+  { entity: 'Dylan Field', handle: 'zoink', role: 'person' },
+  { entity: 'Michael Truell', handle: 'MichaelTruell', role: 'person' },
+  { entity: 'Amjad Masad', handle: 'amasad', role: 'person' },
+  { entity: 'Guillermo Rauch', handle: 'rauchg', role: 'person' },
+];
+
+const DEPRECATED_CURATED_X_HANDLES = new Map<string, string>([
+  ['elevenlabsio', 'elevenlabs'],
+  ['modal_labs', 'modal'],
+]);
 
 const FIRST_PARTY_HANDLE_SUFFIXES = [
   'official',
@@ -149,13 +226,24 @@ export function buildVerifiedEntityMentions({
     });
   }
 
+  return mergeVerifiedEntityMentions(candidates);
+}
+
+export function mergeVerifiedEntityMentions(
+  ...collections: Array<readonly VerifiedEntityMention[]>
+): VerifiedEntityMention[] {
   const byEntity = new Map<string, VerifiedEntityMention>();
   const conflicted = new Set<string>();
-  for (const candidate of candidates) {
+  for (const candidate of collections.flat()) {
     const key = normalizeIdentity(candidate.entity);
     if (!key || conflicted.has(key)) continue;
     const existing = byEntity.get(key);
     if (existing && existing.handle !== candidate.handle) {
+      if (existing.source === 'curated_registry' && candidate.source !== 'curated_registry') continue;
+      if (candidate.source === 'curated_registry' && existing.source !== 'curated_registry') {
+        byEntity.set(key, candidate);
+        continue;
+      }
       byEntity.delete(key);
       conflicted.add(key);
       continue;
@@ -177,13 +265,45 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function textNamesEntity(text: string, entity: string): boolean {
+function textNamesEntity(text: string, entity: string, caseSensitive = false): boolean {
   const escaped = escapeRegExp(entity).replace(/\s+/g, '\\s+');
-  return new RegExp(`(^|[^\\p{L}\\p{N}_@])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(text);
+  return new RegExp(
+    `(^|[^\\p{L}\\p{N}_@])${escaped}(?=$|[^\\p{L}\\p{N}_])`,
+    caseSensitive ? 'u' : 'iu',
+  ).test(text);
 }
 
 function textMentionsHandle(text: string, handle: string): boolean {
   return new RegExp(`(^|[^\\w])@${escapeRegExp(handle)}\\b`, 'i').test(text);
+}
+
+export function findCuratedVerifiedEntityMentions(
+  ...texts: Array<string | null | undefined>
+): VerifiedEntityMention[] {
+  const text = texts.filter((value): value is string => Boolean(value?.trim())).join('\n');
+  if (!text) return [];
+  return buildVerifiedEntityMentions({
+    curated: CURATED_X_ENTITY_REGISTRY.flatMap((entry) => {
+      const aliases = [entry.entity, ...(entry.aliases || [])];
+      const named = aliases.some((alias) => textNamesEntity(text, alias, true));
+      return named || textMentionsHandle(text, entry.handle)
+        ? [{ entity: entry.entity, handle: entry.handle, role: entry.role }]
+        : [];
+    }),
+  });
+}
+
+export function getDeprecatedCuratedEntityHandleIssue(text: string): string | null {
+  for (const handle of extractXHandles(text)) {
+    const replacement = DEPRECATED_CURATED_X_HANDLES.get(handle);
+    if (replacement) return `Deprecated X handle @${handle} must use @${replacement}.`;
+  }
+  return null;
+}
+
+function extractXHandles(text: string): string[] {
+  return [...new Set([...text.matchAll(/(^|[^\w])@([a-zA-Z0-9_]{1,15})\b/g)]
+    .map((match) => match[2].toLowerCase()))];
 }
 
 export function getMissingVerifiedEntityTagIssue(
@@ -198,6 +318,11 @@ export function getMissingVerifiedEntityTagIssue(
   return `Named X ${missing.length === 1 ? 'entity' : 'entities'} must use the verified handle: ${missing.map((entry) => `${entry.entity}=@${entry.handle}`).join(', ')}.`;
 }
 
+export function getCuratedEntityMentionPolicyIssue(text: string): string | null {
+  return getDeprecatedCuratedEntityHandleIssue(text)
+    || getMissingVerifiedEntityTagIssue(text, findCuratedVerifiedEntityMentions(text));
+}
+
 export function usedVerifiedMentionHandles(
   text: string,
   mentions: VerifiedEntityMention[],
@@ -205,4 +330,8 @@ export function usedVerifiedMentionHandles(
   return [...new Set(mentions
     .filter((mention) => textMentionsHandle(text, mention.handle))
     .map((mention) => mention.handle))];
+}
+
+export function usedCuratedVerifiedMentionHandles(text: string): string[] {
+  return usedVerifiedMentionHandles(text, findCuratedVerifiedEntityMentions(text));
 }

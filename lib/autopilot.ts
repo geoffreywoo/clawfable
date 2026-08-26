@@ -86,6 +86,11 @@ import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   getAntiFundPortfolioPolicyIssue,
 } from './antifund-portfolio';
+import {
+  ENTITY_MENTION_POLICY_VERSION,
+  getCuratedEntityMentionPolicyIssue,
+  usedCuratedVerifiedMentionHandles,
+} from './entity-mentions';
 
 export interface AutopilotResult {
   agentId: string;
@@ -205,7 +210,8 @@ function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): b
       null,
       tweet.portfolioCompanyContext,
     )
-    && !portfolioCompanyIssue;
+    && !portfolioCompanyIssue
+    && !getQueuedEntityMentionPolicyIssue(tweet);
 }
 
 const NON_ORIGINAL_LOG_FORMATS = new Set([
@@ -239,6 +245,10 @@ function latestSuccessfulOriginalPostAt(postLog: PostLogEntry[]): string | null 
   return postLog.find(isSuccessfulOriginalPostLogEntry)?.postedAt || null;
 }
 
+function getQueuedEntityMentionPolicyIssue(tweet: Tweet): string | null {
+  return getCuratedEntityMentionPolicyIssue(tweet.content);
+}
+
 function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null {
   return getAccountTopicPolicyIssue(
     agent.handle,
@@ -249,10 +259,12 @@ function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null
     || (isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null)
+    || getQueuedEntityMentionPolicyIssue(tweet)
     || getAutopostPolicyIssue(tweet.content, {
     allowedMentions: [
       agent.handle,
       ...(tweet.allowedMentionHandles || []),
+      ...usedCuratedVerifiedMentionHandles(tweet.content),
       ...(tweet.relationshipTargetHandle ? [tweet.relationshipTargetHandle] : []),
     ],
   });
@@ -448,7 +460,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
-    policyGate: 'account_topic_policy' | 'portfolio_company_policy' | 'generation_origin' | 'autopost_quality_margin';
+    policyGate: 'account_topic_policy' | 'portfolio_company_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
@@ -463,6 +475,9 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null;
+    const entityMentionIssue = !accountTopicIssue && !portfolioCompanyIssue
+      ? getQueuedEntityMentionPolicyIssue(tweet)
+      : null;
     const accountMarginIssue = (
       !originIssue
       && tweet.pipelineVersion === 'v2'
@@ -472,7 +487,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     )
       ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
       : null;
-    const issue = accountTopicIssue || portfolioCompanyIssue || originIssue || accountMarginIssue;
+    const issue = accountTopicIssue || portfolioCompanyIssue || entityMentionIssue || originIssue || accountMarginIssue;
     if (issue) invalid.push({
       tweet,
       issue,
@@ -480,9 +495,11 @@ async function rescoreQueuedTweetsForCurrentPolicy(
         ? 'account_topic_policy'
         : portfolioCompanyIssue
           ? 'portfolio_company_policy'
-          : originIssue
-            ? 'generation_origin'
-            : 'autopost_quality_margin',
+          : entityMentionIssue
+            ? 'entity_mention_policy'
+            : originIssue
+              ? 'generation_origin'
+              : 'autopost_quality_margin',
     });
     else valid.push(tweet);
   }
@@ -495,6 +512,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const learningInvalid = invalid.filter(({ policyGate }) => (
     policyGate === 'account_topic_policy'
     || policyGate === 'portfolio_company_policy'
+    || policyGate === 'entity_mention_policy'
     || policyGate === 'autopost_quality_margin'
   ));
   for (const { tweet, issue, policyGate } of learningInvalid) {
@@ -511,6 +529,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
         accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
         portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+        entityMentionPolicyVersion: ENTITY_MENTION_POLICY_VERSION,
         feedbackReasonCode: policyGate === 'account_topic_policy'
           ? 'bad_source_topic'
           : policyGate === 'portfolio_company_policy'
@@ -2653,13 +2672,22 @@ export async function refillQueue(
           await rejectCandidate(item, 'portfolio_company_policy', portfolioCompanyIssue);
           continue;
         }
+        const entityMentionIssue = getCuratedEntityMentionPolicyIssue(item.content);
+        if (entityMentionIssue) {
+          await rejectCandidate(item, 'entity_mention_policy', entityMentionIssue);
+          continue;
+        }
         const completenessIssue = getTweetCompletenessIssue(item.content);
         if (completenessIssue) {
           await rejectCandidate(item, 'incomplete_copy', completenessIssue);
           continue;
         }
         const policyIssue = getAutopostPolicyIssue(item.content, {
-          allowedMentions: [agent.handle, ...(item.allowedMentionHandles || [])],
+          allowedMentions: [
+            agent.handle,
+            ...(item.allowedMentionHandles || []),
+            ...usedCuratedVerifiedMentionHandles(item.content),
+          ],
         });
         if (policyIssue) {
           await rejectCandidate(item, 'autopost_policy', policyIssue);

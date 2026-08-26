@@ -44,6 +44,9 @@ describe('Anti Fund portfolio generation policy', () => {
       'Kings League',
       'Betr',
     ]);
+    expect(ANTIFUND_PROMOTION_COMPANIES.every((company) => company.officialXHandles.length > 0)).toBe(true);
+    expect(ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'elevenlabs')?.officialXHandles).toEqual(['elevenlabs']);
+    expect(ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'modal')?.officialXHandles).toEqual(['modal']);
     expect(findAntiFundPortfolioCompanies('i think Etched gets to the next rack faster than people expect').map((company) => company.name)).toContain('Etched');
     expect(findAntiFundPortfolioCompanies('Betr should own sports media').map((company) => company.name)).toContain('Betr');
   });
