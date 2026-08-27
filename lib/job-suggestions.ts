@@ -49,16 +49,16 @@ export function generateJobSuggestions(analysis: AccountAnalysis, activeJobs: Tw
     });
   }
 
-  // 3. Quote Tweet Reactor
-  if (!activeNames.has('quote tweet reactor')) {
+  // 3. Engage Desk Prep
+  if (!activeNames.has('engage desk prep')) {
     suggestions.push({
-      name: 'Quote Tweet Reactor',
-      description: 'React to trending posts from accounts you follow with sharp takes.',
+      name: 'Engage Desk Prep',
+      description: 'Prepare sharp, in-voice takes for supervised replies to rising posts from accounts you follow.',
       schedule: 'every 4h',
       postsPerRun: 1,
       topics: engagementPatterns.topTopics.slice(0, 2),
-      formats: ['qt_contrarian', 'qt_reframe'],
-      reason: 'Quote tweets get 2-3x more reach than originals.',
+      formats: ['hot_take', 'short_punch'],
+      reason: 'Early, relevant replies can earn visibility, but X requires this workflow to stay supervised.',
     });
   }
 

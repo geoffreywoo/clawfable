@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildFrontierSeedDiscoveryPlan,
+  expandFrontierSeedResearchQueries,
+  getFrontierIdeaSeeds,
+  getFrontierSeedSourceFamilies,
+  pickFrontierIdeaSeed,
+  pickGeoffreyIdeaSeed,
+} from '@/lib/frontier-idea-seeds';
+
+const geoffreyVoiceProfile = {
+  tone: 'technical operator/investor',
+  topics: ['AI', 'tungsten and critical minerals', 'rare earth minerals', 'frontier tech'],
+  antiGoals: ['low-status SaaS-ops texture'],
+  communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffreywoo: compressed hard-tech constraints.',
+  summary: 'Geoffrey writes about AI infrastructure, industrial capacity, and critical mineral chokeholds.',
+};
+
+describe('frontier idea seeds', () => {
+  it('exposes chokehold seeds only for Geoffrey-like frontier-tech profiles', () => {
+    expect(getFrontierIdeaSeeds(geoffreyVoiceProfile).length).toBeGreaterThan(0);
+    expect(getFrontierIdeaSeeds({
+      tone: 'founder',
+      topics: ['startups'],
+      antiGoals: [],
+      communicationStyle: 'operator notes',
+      summary: 'startup voice',
+    })).toHaveLength(0);
+  });
+
+  it('selects tungsten when the target topic asks for critical minerals', () => {
+    const seed = pickFrontierIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'tungsten and critical minerals',
+      slot: 1,
+    });
+
+    expect(seed?.id).toBe('tungsten-hardmetal');
+    expect(seed?.technicalObject).toContain('tungsten carbide');
+  });
+
+  it('expands seed research into auditable source-family queries', () => {
+    const seed = getFrontierIdeaSeeds(geoffreyVoiceProfile).find((item) => item.id === 'tungsten-hardmetal');
+    expect(seed).toBeDefined();
+
+    const queries = expandFrontierSeedResearchQueries(seed!, 20);
+
+    expect(queries).toEqual(expect.arrayContaining([
+      expect.stringContaining('USGS tungsten'),
+      expect.stringContaining('site:usgs.gov'),
+      expect.stringContaining('site:bis.doc.gov'),
+      expect.stringContaining('Google Patents'),
+    ]));
+  });
+
+  it('builds a discovery plan with source family provenance for each seed', () => {
+    const plan = buildFrontierSeedDiscoveryPlan(geoffreyVoiceProfile, 3);
+
+    expect(plan).toHaveLength(3);
+    expect(plan[0].sourceFamilies.length).toBeGreaterThan(0);
+    expect(plan[0].researchQueries.length).toBeGreaterThan(plan[0].seed.sourceQueries.length);
+    expect(getFrontierSeedSourceFamilies().map((family) => family.id)).toEqual(
+      expect.arrayContaining(['mineral-surveys', 'technical-papers-patents', 'field-signals']),
+    );
+  });
+
+  it('reuses a compatible broad seed instead of drifting software into frontier hardware', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'software',
+      slot: 4,
+      usedSeedIds: new Set([
+        'ai-behavior-and-ambition',
+        'ai-incumbent-bundling',
+        'ai-talent-company-formation',
+      ]),
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+    expect(seed?.id).not.toBe('robotics-field-uptime');
+    expect(seed?.id).not.toBe('neon-lithography-lasers');
+  });
+
+  it('rotates to an unused broad seed before repeating the same software premise', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'software',
+      slot: 4,
+      usedSeedIds: new Set(['ai-incumbent-bundling']),
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+    expect(seed?.id).not.toBe('ai-incumbent-bundling');
+  });
+
+  it('maps humor topics to cultural reactions instead of arbitrary AI or market seeds', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'humor',
+      slot: 2,
+    });
+
+    expect(seed?.kind).toBe('culture');
+  });
+
+  it('maps engineering topics to AI-product reactions instead of arbitrary market seeds', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'Engineering',
+      slot: 2,
+    });
+
+    expect(seed?.kind).toBe('ai_product');
+  });
+
+  it('uses native AI moves instead of product-workflow wishlists', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'AI model products research software',
+      slot: 0,
+    });
+
+    expect(seed?.reactionPrompt).toContain('valuation');
+    expect(seed?.reactionPrompt).toContain('weird coherent prediction');
+    expect(seed?.reactionPrompt).not.toContain('want someone to build');
+    expect(seed?.reactionPrompt).not.toContain('what becomes newly possible');
+  });
+
+  it('keeps exact frontier relevance ahead of novelty after the matching seed was used', () => {
+    const seed = pickGeoffreyIdeaSeed({
+      voiceProfile: geoffreyVoiceProfile,
+      targetTopic: 'robotics',
+      slot: 9,
+      usedSeedIds: new Set(['robotics-field-uptime']),
+    });
+
+    expect(seed?.id).toBe('robotics-field-uptime');
+    expect(seed?.technicalObject).toContain('actuators');
+  });
+});

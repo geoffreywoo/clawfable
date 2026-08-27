@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createTweet, getAnalysis } from '@/lib/kv-storage';
-import { parseSoulMd } from '@/lib/soul-parser';
+import { getAnalysis } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { buildGenerationContext } from '@/lib/generation-context';
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { hasPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
+import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
+import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
+import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import type { GenerationEvidenceReference } from '@/lib/types';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -13,86 +17,92 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const { agent } = await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
+    const entitlement = await assertAgentAutomationEntitlement(id, { agent, user });
 
     const body = await request.json();
-    const { content, authorHandle } = body;
-    if (!content || !authorHandle) {
-      return NextResponse.json({ error: 'content and authorHandle required' }, { status: 400 });
+    const content = typeof body?.content === 'string' ? body.content.trim() : '';
+    const authorHandle = typeof body?.authorHandle === 'string' ? body.authorHandle.trim() : '';
+    const targetTweetId = normalizeTweetTarget(body?.targetTweetId || body?.tweetId || body?.replyToId);
+    const replyConversationId = normalizeTweetTarget(body?.conversationId) || targetTweetId;
+    if (!content || !authorHandle || !targetTweetId) {
+      return NextResponse.json({ error: 'content, authorHandle, and targetTweetId required' }, { status: 400 });
+    }
+    if (areRepliesDisabled()) {
+      return NextResponse.json({
+        error: REPLY_AUTOMATION_DISABLED_REASON,
+        code: 'reply_emergency_disabled',
+      }, { status: 503 });
+    }
+    if (await hasPostedReplyForConversation(id, replyConversationId)) {
+      return NextResponse.json({
+        error: 'This account has already replied to that root conversation.',
+        code: 'duplicate_reply_conversation',
+      }, { status: 409 });
     }
 
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
     const analysis = await getAnalysis(id);
-
-    // Build a rich system prompt with full identity awareness
-    const systemParts: string[] = [];
-
-    systemParts.push(`You are @${agent.handle} (${agent.name}). You are writing a reply tweet AS THIS ACCOUNT. This is YOUR identity — own it completely.`);
-
-    systemParts.push(`\n## YOUR IDENTITY
-- Handle: @${agent.handle}
-- Name: ${agent.name}
-- Any references to "${agent.handle}", "${agent.name}", "@${agent.handle}", or related tokens/tickers (like $${agent.handle.replace(/ai$/i, '')}) are about YOU.
-- You are self-aware about your identity. If someone mentions you, talks about you, or tags you — they're talking to YOU.
-- Your human creator is Geoffrey Woo (@geoffreywoo). He built you. If he's mentioned or tweets at you, show respect — he's the boss. If others reference him, you know who he is.`);
-
-    systemParts.push(`\n## YOUR VOICE
-- Tone: ${voiceProfile.tone}
-- Style: ${voiceProfile.communicationStyle}
-- Topics: ${voiceProfile.topics.join(', ')}
-- Anti-goals: ${voiceProfile.antiGoals.join('; ') || 'none'}`);
-
-    systemParts.push(`\n## YOUR SOUL.md
-${agent.soulMd}`);
-
-    // Include viral tweets as style examples
-    if (analysis && analysis.viralTweets.length > 0) {
-      systemParts.push(`\n## YOUR BEST TWEETS (match this energy and style)`);
-      for (const vt of analysis.viralTweets.slice(0, 5)) {
-        systemParts.push(`- [${vt.likes} likes] "${vt.text}"`);
-      }
+    if (!analysis) {
+      return NextResponse.json({ error: 'Run account analysis before generating replies.' }, { status: 409 });
+    }
+    const context = await buildGenerationContext(agent, {
+      negativeLimit: 5,
+      directiveLimit: 10,
+    });
+    const normalizedAuthor = authorHandle.replace(/^@/, '');
+    const targetPost: GenerationEvidenceReference = {
+      id: `x-post:${targetTweetId}`,
+      kind: 'target_post',
+      sourceDocumentId: null,
+      url: `https://x.com/${normalizedAuthor}/status/${targetTweetId}`,
+      title: `Post by @${normalizedAuthor}`,
+      publisher: normalizedAuthor,
+      content,
+      publishedAt: null,
+      verifiedAt: new Date().toISOString(),
+      expiresAt: null,
+      trustTier: 'community',
+    };
+    const [candidate] = await generatePublishingBatchV2({
+      agentId: id,
+      count: 1,
+      request: {
+        surface: 'reply',
+        triggerId: targetTweetId,
+        targetPost,
+      },
+      voiceProfile: context.voiceProfile,
+      analysis,
+      learnings: context.learnings,
+      style: context.style,
+      recentPosts: context.recentPosts,
+      allTweets: context.allTweets,
+      memory: context.memory,
+      signals: context.signals,
+      trending: null,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      mode: 'manual',
+      entitlement,
+    });
+    if (!candidate) {
+      return NextResponse.json({
+        error: 'No reply cleared the context, safety, originality, and voice gates.',
+        code: 'no_qualified_reply',
+      }, { status: 422 });
     }
 
-    systemParts.push(`\n## REPLY STRATEGY
-1. **TROLLS & ATTACKERS**: If someone is trolling you, attacking you, being sarcastic, or trying to provoke — go MAXIMUM SNARK. Be witty, savage, and funny. Roast them. Don't be defensive — be the one who's funnier. Twitter loves a good clapback. Make the ratio work in your favor.
-2. **Shitposters**: Match their energy but be cleverer. One-liners that make people screenshot and share.
-3. **Genuine questions**: Be helpful but still in-voice. Don't break character.
-4. **Compliments/support**: Acknowledge briefly, stay cool, don't be cringe.
-5. **Other accounts mentioning you by name or token**: You know they're talking about you. Respond with full self-awareness.
-6. ALWAYS stay in character as @${agent.handle}. Never break the fourth wall about being AI.
-
-## RULES
-- Output ONLY the reply text. No quotes, no "Reply:" prefix, nothing else.
-- Be specific to what they actually said — don't give generic responses.
-- Replies can be any length. Short and punchy (under 100 chars) often hits hardest. But go longer if the clapback or explanation needs room. X supports up to 4000 chars.`);
-
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
-      system: systemParts.join('\n'),
-      messages: [{ role: 'user', content: `${authorHandle} tweeted this at you:\n\n"${content}"\n\nWrite your reply.` }],
-    });
-
-    const replyContent = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
-      .replace(/^["']|["']$/g, '');
-
-    const tweet = await createTweet({
-      agentId: id,
-      content: replyContent,
-      type: 'reply',
+    const tweet = await createTweetFromGeneratedCandidate(id, candidate, {
       status: 'draft',
-      topic: `Reply to ${authorHandle}`,
-      xTweetId: null,
-      quoteTweetId: null,
-      quoteTweetAuthor: null,
-      scheduledAt: null,
+      type: 'reply',
+      topic: `Reply to @${normalizedAuthor}`,
+      followupForTweetId: targetTweetId,
+      replyConversationId,
     });
     return NextResponse.json(tweet);
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to generate reply';
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,15 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getAgent, updateAgent } from '@/lib/kv-storage';
+import { addPostLogEntry, getOAuthTemp, deleteOAuthTemp, getAgent, getAgentByHandle, updateAgent } from '@/lib/kv-storage';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
+import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
+import { resolveRequestOrigin } from '@/lib/request-origin';
 
 // GET /api/auth/twitter/callback — Twitter redirects here after user authorizes agent connection
+function agentRedirectUrl(origin: string, agentId: string, params: Record<string, string>): URL {
+  const url = new URL(`/agent/${agentId}`, origin);
+  url.searchParams.set('tab', 'today');
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return url;
+}
+
 export async function GET(request: NextRequest) {
   const oauthToken = request.nextUrl.searchParams.get('oauth_token');
   const oauthVerifier = request.nextUrl.searchParams.get('oauth_verifier');
   const denied = request.nextUrl.searchParams.get('denied');
-  const origin = process.env.APP_URL || request.nextUrl.origin;
+  const origin = resolveRequestOrigin(request);
 
   if (denied) {
+    const deniedTemp = await getOAuthTemp(denied).catch(() => null);
+    if (deniedTemp?.purpose === 'connect' && deniedTemp.agentId) {
+      await addPostLogEntry(deniedTemp.agentId, {
+        agentId: deniedTemp.agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_denied',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: 'X connect flow was canceled on X before tokens were attached to this agent.',
+      }).catch(() => null);
+      await deleteOAuthTemp(denied).catch(() => null);
+    }
+    if (deniedTemp?.agentId) {
+      return NextResponse.redirect(agentRedirectUrl(origin, deniedTemp.agentId, { oauth: 'denied' }));
+    }
     return NextResponse.redirect(new URL('/?oauth=denied', origin));
   }
 
@@ -17,8 +46,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/?oauth=error', origin));
   }
 
+  let temp: Awaited<ReturnType<typeof getOAuthTemp>> = null;
+
   try {
-    const temp = await getOAuthTemp(oauthToken);
+    temp = await getOAuthTemp(oauthToken);
     if (!temp || temp.purpose !== 'connect' || !temp.agentId) {
       return NextResponse.redirect(new URL('/?oauth=expired', origin));
     }
@@ -28,17 +59,61 @@ export async function GET(request: NextRequest) {
     const { accessToken, accessSecret, userId, screenName } =
       await exchangeOAuthTokens(oauthToken, oauthTokenSecret, oauthVerifier);
 
-    const consumerKey = process.env.TWITTER_CONSUMER_KEY!;
-    const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!;
+    const duplicateAgent = await findExistingConnectedAgentByXUserId(userId, agentId);
+    if (duplicateAgent) {
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_duplicate',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: `This X account is already attached to agent ${duplicateAgent.id} (@${duplicateAgent.handle}).`,
+      }).catch(() => null);
+      await deleteOAuthTemp(oauthToken);
+      return NextResponse.redirect(
+        new URL(`/agent/${duplicateAgent.id}?oauth=duplicate&username=${screenName}`, origin)
+      );
+    }
+
+    const handleAgent = await getAgentByHandle(screenName);
+    if (handleAgent && String(handleAgent.id) !== String(agentId)) {
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_duplicate',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: `This X handle is already mapped to agent ${handleAgent.id} (@${handleAgent.handle}).`,
+      }).catch(() => null);
+      await deleteOAuthTemp(oauthToken);
+      return NextResponse.redirect(
+        new URL(`/agent/${handleAgent.id}?oauth=duplicate&username=${screenName}`, origin)
+      );
+    }
+
+    const consumerKey = process.env.TWITTER_CONSUMER_KEY!.trim();
+    const consumerSecret = process.env.TWITTER_CONSUMER_SECRET!.trim();
 
     const agent = await getAgent(agentId);
+    const verifiedAt = new Date().toISOString();
     const updates: Record<string, unknown> = {
+      handle: screenName,
       apiKey: Buffer.from(consumerKey).toString('base64'),
       apiSecret: Buffer.from(consumerSecret).toString('base64'),
-      accessToken: Buffer.from(accessToken).toString('base64'),
-      accessSecret: Buffer.from(accessSecret).toString('base64'),
+      accessToken: Buffer.from(accessToken.trim()).toString('base64'),
+      accessSecret: Buffer.from(accessSecret.trim()).toString('base64'),
       isConnected: 1,
       xUserId: userId,
+      xIdentityVerifiedAt: verifiedAt,
+      xIdentityVerifiedHandle: screenName,
+      xIdentityVerifiedUserId: userId,
+      xIdentityVerificationSource: 'oauth_exchange',
     };
 
     if (agent && (agent.setupStep === 'oauth' || !agent.setupStep)) {
@@ -46,13 +121,43 @@ export async function GET(request: NextRequest) {
     }
 
     await updateAgent(agentId, updates as Parameters<typeof updateAgent>[1]);
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'x_auth_connected',
+      topic: 'auth',
+      postedAt: new Date().toISOString(),
+      source: 'manual',
+      reason: `Attached X account @${screenName} to this agent using the current X app credentials.`,
+    }).catch(() => null);
     await deleteOAuthTemp(oauthToken);
 
     return NextResponse.redirect(
-      new URL(`/agent/${agentId}?oauth=success&username=${screenName}`, origin)
+      agentRedirectUrl(origin, agentId, { oauth: 'success', username: screenName })
     );
   } catch (err) {
+    if (temp?.agentId) {
+      await addPostLogEntry(temp.agentId, {
+        agentId: temp.agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_callback_error',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: `X callback failed before tokens were attached: ${err instanceof Error ? err.message : String(err)}`,
+      }).catch(() => null);
+    }
+    if (oauthToken) {
+      await deleteOAuthTemp(oauthToken).catch(() => null);
+    }
     console.error('OAuth callback error:', err instanceof Error ? err.message : err);
+    if (temp?.agentId) {
+      return NextResponse.redirect(agentRedirectUrl(origin, temp.agentId, { oauth: 'error' }));
+    }
     return NextResponse.redirect(new URL('/?oauth=error', origin));
   }
 }

@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  createTweet,
-  getAnalysis,
-  getLearnings,
-  getProtocolSettings,
-  getRecentNegativeFeedback,
-  getStyleSignals,
-  getTweets,
-} from '@/lib/kv-storage';
-import { parseSoulMd } from '@/lib/soul-parser';
-import { generateViralBatch } from '@/lib/viral-generator';
+import { checkRateLimit, getAnalysis, getTrendingCache } from '@/lib/kv-storage';
+import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import type { TrendingTopic } from '@/lib/trending';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { buildGenerationContext } from '@/lib/generation-context';
+import { getGeneratedTweetIssue } from '@/lib/survivability';
+import { validateGenerationRequest } from '@/lib/request-validation';
+import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 
-// POST /api/agents/[id]/protocol/generate — generate viral content via Claude
+// POST /api/agents/[id]/protocol/generate - generate V2 preview or paid draft content.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -27,56 +25,57 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}));
-    const count = Math.min(body.count || 5, 20);
-
-    const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-
-    const [styleSignals, negatives] = await Promise.all([
-      getStyleSignals(id),
-      getRecentNegativeFeedback(id),
-    ]);
-
-    if (styleSignals?.rawExtraction) {
-      voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
+    const parsed = validateGenerationRequest(body, { maxCount: 5 });
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid generation request' }, { status: 400 });
     }
-    if (negatives.length > 0) {
-      voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map((item) => `- "${item}"`).join('\n')}`;
+    const entitlement = await getAgentAutomationEntitlement(id, { agent });
+    const requestedCount = parsed.value.count ?? 5;
+    const count = entitlement.eligible ? requestedCount : Math.min(2, requestedCount);
+    if (!entitlement.eligible && !(await checkRateLimit(id, 'unpaid_preview_generation', 5))) {
+      return NextResponse.json({ error: 'Free preview limit reached. Try again later.' }, { status: 429 });
     }
 
-    const learnings = await getLearnings(id);
-    const settings = await getProtocolSettings(id);
-    const style = {
-      lengthMix: settings.lengthMix || { short: 30, medium: 30, long: 40 },
-      enabledFormats: settings.enabledFormats || [],
-    };
-    // Get recent posts to avoid repetition
-    const allTweets = await getTweets(id);
-    const recentPosts = allTweets
-      .filter((t) => t.status === 'posted' || t.status === 'queued')
-      .slice(0, 15)
-      .map((t) => t.content);
+    const { voiceProfile, learnings, style, recentPosts, allTweets, memory, signals = [] } = await buildGenerationContext(agent, {
+      negativeLimit: 10,
+      directiveLimit: 10,
+    });
 
-    const batch = await generateViralBatch(voiceProfile, analysis, count, null, learnings, agent.soulMd, style, recentPosts);
+    const cachedTrending = await getTrendingCache(id);
+    const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : null;
+    const batch = await generatePublishingBatchV2({
+      agentId: id,
+      count,
+      request: {
+        surface: 'original',
+        triggerId: `protocol:${Date.now()}`,
+        requestedTopic: parsed.value.topic || parsed.value.headline || null,
+      },
+      voiceProfile,
+      analysis,
+      learnings,
+      style,
+      recentPosts,
+      allTweets,
+      memory,
+      signals,
+      trending,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      mode: entitlement.eligible ? 'manual' : 'preview',
+      entitlement,
+    });
+    const completeBatch = batch.filter((item) => !getGeneratedTweetIssue(item.content));
 
-    if (batch.length === 0) {
-      return NextResponse.json({ error: 'Generation failed — no tweets produced' }, { status: 500 });
+    if (completeBatch.length === 0) {
+      return NextResponse.json({
+        error: 'No ideas cleared the evidence, originality, and voice gates. Try again after the research cache refreshes.',
+      }, { status: 422 });
     }
 
     // Store as draft tweets
     const tweets = await Promise.all(
-      batch.map((item) =>
-        createTweet({
-          agentId: id,
-          content: item.content,
-          type: 'original',
-          status: 'draft',
-          format: item.format || null,
-          topic: item.targetTopic,
-          xTweetId: null,
-          quoteTweetId: null,
-          quoteTweetAuthor: null,
-          scheduledAt: null,
-        }).then((tweet) => ({
+      completeBatch.map((item) =>
+        createTweetFromGeneratedCandidate(id, item, { status: entitlement.eligible ? 'draft' : 'preview', topic: item.targetTopic }).then((tweet) => ({
           ...tweet,
           format: tweet.format || item.format,
           rationale: item.rationale,
@@ -84,7 +83,11 @@ export async function POST(
       )
     );
 
-    return NextResponse.json({ tweets, analysis: { contentFingerprint: analysis.contentFingerprint } });
+    return NextResponse.json({
+      tweets,
+      previewLimited: !entitlement.eligible,
+      analysis: { contentFingerprint: analysis.contentFingerprint },
+    });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Generation failed';

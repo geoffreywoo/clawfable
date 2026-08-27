@@ -1,4 +1,5 @@
 import {
+  addLearningSignal,
   deleteTweet,
   getAgent,
   getPreviewTweets,
@@ -8,6 +9,8 @@ import {
   updateTweet,
 } from './kv-storage';
 import { clampPostsPerDay } from './survivability';
+import { getGeneratedPublishIssue } from './generation-origin';
+import { assertAgentAutomationEntitlement } from './automation-entitlement';
 
 export class SetupLaunchError extends Error {}
 
@@ -37,6 +40,7 @@ export async function launchAgentFromPreview({
   if (!agent) {
     throw new SetupLaunchError('Agent not found');
   }
+  await assertAgentAutomationEntitlement(agentId, { agent });
 
   const previewTweets = await getPreviewTweets(agentId);
   // Vercel KV (Upstash) auto-deserializes numeric strings as numbers.
@@ -45,7 +49,11 @@ export async function launchAgentFromPreview({
   const requestedApprovals = dedupeIds(approvedTweetIds).map(String);
 
   // Resolve approved IDs against what actually exists in KV.
-  const approvedIds = requestedApprovals.filter((id) => previewIds.has(id));
+  const retiredApprovalIds = requestedApprovals.filter((id) => {
+    const tweet = previewTweets.find((entry) => String(entry.id) === id);
+    return tweet ? Boolean(getGeneratedPublishIssue(tweet)) : false;
+  });
+  const approvedIds = requestedApprovals.filter((id) => previewIds.has(id) && !retiredApprovalIds.includes(id));
 
   // If no valid approvals remain, check if there are any preview tweets at all
   if (previewTweets.length === 0) {
@@ -53,6 +61,9 @@ export async function launchAgentFromPreview({
   }
 
   if (approvedIds.length === 0) {
+    if (retiredApprovalIds.length > 0) {
+      throw new SetupLaunchError('Generate and approve a fresh V2 preview before launch');
+    }
     throw new SetupLaunchError('Approve at least one preview tweet before launch');
   }
 
@@ -62,6 +73,19 @@ export async function launchAgentFromPreview({
     .map((tweet) => tweet.id);
 
   await Promise.all(approvedIds.map((id) => updateTweet(id, { status: 'queued' })));
+  await Promise.all(approvedIds.map((id) => {
+    const tweet = previewTweets.find((item) => item.id === id);
+    if (!tweet) return Promise.resolve();
+    return addLearningSignal(agentId, {
+      tweetId: tweet.id,
+      signalType: 'approved_without_edit',
+      surface: 'setup',
+      rewardDelta: 0.85,
+      metadata: {
+        timeToApprovalMins: Math.round((Date.now() - new Date(tweet.createdAt).getTime()) / 60000),
+      },
+    });
+  }));
   await Promise.all(rejectedIds.map((id) => deleteTweet(id)));
 
   await updateProtocolSettings(agentId, {

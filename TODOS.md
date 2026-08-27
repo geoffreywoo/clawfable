@@ -35,6 +35,6 @@ No open P1 items.
 ## Completed
 
 - **Launch orchestration** — Already server-side in `lib/setup-launch.ts` (single atomic endpoint)
-- **Survivability guardrails** — `lib/survivability.ts`: posting jitter ±15%, daily hard cap (12), content diversity gate, near-duplicate detection (bigram), postsPerDay clamped to 10 max. Wired into autopilot + protocol settings + launch.
+- **Survivability guardrails** — `lib/survivability.ts`: posting jitter ±15%, original-post daily hard cap (12), proactive engagement excluded from original-post cap, content diversity gate, near-duplicate detection (bigram), postsPerDay clamped to 12 max. Wired into autopilot + protocol settings + launch.
 - **Funnel instrumentation** — All 5 milestones wired (`wizard_start`, `wizard_soul_complete`, `preview_approve`, `first_post`, `tenth_post`). `getFunnelEvents` + `computeFunnelSummary` reader. Funnel summary exposed on metrics API.
 - All earlier ad hoc TODOs were resolved before this review cycle.

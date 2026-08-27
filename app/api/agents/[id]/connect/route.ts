@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateAgent } from '@/lib/kv-storage';
+import { getAgentByHandle, updateAgent } from '@/lib/kv-storage';
 import { getMe } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 
 // POST /api/agents/[id]/connect
 export async function POST(
@@ -18,18 +19,50 @@ export async function POST(
       return NextResponse.json({ error: 'All four API keys are required' }, { status: 400 });
     }
 
+    const normalizedApiKey = String(apiKey).trim();
+    const normalizedApiSecret = String(apiSecret).trim();
+    const normalizedAccessToken = String(accessToken).trim();
+    const normalizedAccessSecret = String(accessSecret).trim();
+
     // Validate keys by calling getMe
-    const keys = { appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret };
+    const keys = {
+      appKey: normalizedApiKey,
+      appSecret: normalizedApiSecret,
+      accessToken: normalizedAccessToken,
+      accessSecret: normalizedAccessSecret,
+    };
     const user = await getMe(keys);
 
+    const duplicateAgent = await findExistingConnectedAgentByXUserId(user.id, id);
+    if (duplicateAgent) {
+      return NextResponse.json({
+        error: `This X account is already connected to agent ${duplicateAgent.handle || duplicateAgent.id}.`,
+        duplicateAgentId: duplicateAgent.id,
+      }, { status: 409 });
+    }
+
+    const handleAgent = await getAgentByHandle(user.username);
+    if (handleAgent && String(handleAgent.id) !== String(id)) {
+      return NextResponse.json({
+        error: `This X handle is already mapped to agent ${handleAgent.handle || handleAgent.id}.`,
+        duplicateAgentId: handleAgent.id,
+      }, { status: 409 });
+    }
+
     // Store encoded and advance setup step
+    const verifiedAt = new Date().toISOString();
     const updates: Record<string, unknown> = {
-      apiKey: Buffer.from(apiKey).toString('base64'),
-      apiSecret: Buffer.from(apiSecret).toString('base64'),
-      accessToken: Buffer.from(accessToken).toString('base64'),
-      accessSecret: Buffer.from(accessSecret).toString('base64'),
+      handle: user.username,
+      apiKey: Buffer.from(normalizedApiKey).toString('base64'),
+      apiSecret: Buffer.from(normalizedApiSecret).toString('base64'),
+      accessToken: Buffer.from(normalizedAccessToken).toString('base64'),
+      accessSecret: Buffer.from(normalizedAccessSecret).toString('base64'),
       isConnected: 1,
       xUserId: user.id,
+      xIdentityVerifiedAt: verifiedAt,
+      xIdentityVerifiedHandle: user.username,
+      xIdentityVerifiedUserId: user.id,
+      xIdentityVerificationSource: 'x_api_v2_me',
     };
     // Advance setup if on oauth step
     if (agent.setupStep === 'oauth') {

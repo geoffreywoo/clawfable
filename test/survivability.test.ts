@@ -5,6 +5,15 @@ import {
   isDailyCapReached,
   isRepetitiveContent,
   isNearDuplicate,
+  getRecentPostDuplicateIssue,
+  getReplyRepetitionIssue,
+  getInternalPromptLeakIssue,
+  getTweetCompletenessIssue,
+  getTweetLengthIssue,
+  getGeneratedTweetIssue,
+  isCompleteTweetDraft,
+  extractMentionHandles,
+  getAutopostPolicyIssue,
   pickDiverseTweet,
   clampPostsPerDay,
   DAILY_HARD_CAP,
@@ -39,6 +48,7 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     status: 'queued',
     format: 'hot_take',
     topic: 'AI',
+    deletionReason: null,
     xTweetId: null,
     quoteTweetId: null,
     quoteTweetAuthor: null,
@@ -99,6 +109,17 @@ describe('countPostsInLast24h', () => {
     const entry = makePostLogEntry({ source: 'autopilot' });
     delete (entry as unknown as Record<string, unknown>).action;
     expect(countPostsInLast24h([entry])).toBe(1);
+  });
+
+  it('does not count proactive engagement actions as original posts', () => {
+    const entries = [
+      makePostLogEntry({ format: 'hot_take', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'auto_reply_high_value', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'proactive_reply', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'proactive_like', source: 'autopilot', action: 'posted' }),
+      makePostLogEntry({ format: 'auto_follow', source: 'autopilot', action: 'posted' }),
+    ];
+    expect(countPostsInLast24h(entries)).toBe(1);
   });
 });
 
@@ -196,6 +217,151 @@ describe('isNearDuplicate', () => {
   });
 });
 
+describe('getRecentPostDuplicateIssue', () => {
+  it('flags queued drafts that are too close to recent live posts', () => {
+    const issue = getRecentPostDuplicateIssue(
+      'Your moat is not distribution if the model can rebuild your feature overnight.',
+      ['Your moat is not distribution when the model can rebuild your feature overnight.']
+    );
+
+    expect(issue).toContain('Recent duplicate gate');
+    expect(issue).toContain('similar');
+  });
+
+  it('allows fresh angles on the same broad topic', () => {
+    const issue = getRecentPostDuplicateIssue(
+      'The useful AI agent benchmark is recovery: can it notice a broken tool call and route around it?',
+      ['Your moat is not distribution when the model can rebuild your feature overnight.']
+    );
+
+    expect(issue).toBeNull();
+  });
+});
+
+describe('getReplyRepetitionIssue', () => {
+  it('flags replies that repeat what the account already said in the thread', () => {
+    const issue = getReplyRepetitionIssue(
+      'The real eval is recovery: can the agent notice a broken tool call and route around it?',
+      ['The real eval is recovery. Can the agent notice a broken tool call and route around it?']
+    );
+
+    expect(issue).toContain('Reply repetition gate');
+    expect(issue).toContain('already said');
+  });
+
+  it('allows replies that add a fresh next step', () => {
+    const issue = getReplyRepetitionIssue(
+      'Next step: log the failed tool call, retry once with a narrower input, then hand off to a human.',
+      ['The real eval is recovery. Can the agent notice a broken tool call and route around it?']
+    );
+
+    expect(issue).toBeNull();
+  });
+});
+
+// ─── Draft completeness detection ──────────────────────────────────────────
+
+describe('getTweetCompletenessIssue', () => {
+  it('allows complete sentences ending in short object pronouns', () => {
+    expect(getTweetCompletenessIssue(
+      "nobody remembers a model's eval scores a month later, they remember the first thing they shipped with it",
+    )).toBeNull();
+  });
+
+  it('flags dangling trailing fragments like the production truncation case', () => {
+    const issue = getTweetCompletenessIssue(
+      'psa to every founder still raising pre-seed rounds:\n\nyour runway is compressing fast\n\nthe only'
+    );
+    expect(issue).toContain('incomplete trailing fragment');
+  });
+
+  it('flags drafts that end with unfinished delimiters', () => {
+    const issue = getTweetCompletenessIssue('the real opportunity is this:');
+    expect(issue).toContain('unfinished clause');
+  });
+
+  it('flags long drafts that die mid-word after a connector', () => {
+    const issue = getTweetCompletenessIssue(
+      'psa to every vc partner still doing "pattern matching":\n\n' +
+      'your entire investment thesis just became obsolete\n\n' +
+      "while you're scheduling 47 coffee meetings to evaluate one deal, mythos agents are processing 10k startups per day with better accuracy than y"
+    );
+    expect(issue).toContain('mid-word or mid-thought');
+  });
+
+  it('accepts complete tweets even without ending punctuation', () => {
+    const issue = getTweetCompletenessIssue(
+      'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
+    );
+    expect(issue).toBeNull();
+    expect(isCompleteTweetDraft(
+      'you are not competing with startups anymore\n\nyou are competing with model improvement curves'
+    )).toBe(true);
+  });
+
+  it('flags model outputs that hit the token limit before finishing', () => {
+    const issue = getGeneratedTweetIssue('complete enough looking text', 'max_tokens');
+    expect(issue).toContain('token limit');
+  });
+});
+
+describe('getInternalPromptLeakIssue', () => {
+  it('flags leaked operator voice reference text', () => {
+    const leaked = [
+      'The real edge is tighter feedback loops, faster iteration, and clearer taste.',
+      '',
+      '## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice, sentiment, tone, topic boundaries, and rhythm)',
+      'Derived from 193 manually posted or operator-written tweets.',
+    ].join('\n');
+
+    expect(getInternalPromptLeakIssue(leaked)).toContain('Internal prompt leak gate');
+    expect(getGeneratedTweetIssue(leaked)).toContain('Internal prompt leak gate');
+  });
+
+  it('does not block ordinary public product language', () => {
+    expect(getInternalPromptLeakIssue('SOUL.md gives agents a durable voice contract.')).toBeNull();
+  });
+});
+
+describe('getTweetLengthIssue', () => {
+  it('blocks posts and replies above the longform-aware X API text cap', () => {
+    expect(getTweetLengthIssue('x'.repeat(4000), 'post')).toBeNull();
+    expect(getTweetLengthIssue('x'.repeat(4001), 'post')).toContain('Draft is 4001 characters');
+    expect(getTweetLengthIssue('x'.repeat(4001), 'reply')).toContain('Reply is 4001 characters');
+  });
+});
+
+// ─── Autopost policy detection ─────────────────────────────────────────────
+
+describe('getAutopostPolicyIssue', () => {
+  it('extracts unique X handles without treating email addresses as mentions', () => {
+    expect(extractMentionHandles('cc founder@example.com and @Builder_AI because @builder_ai asked')).toEqual(['builder_ai']);
+  });
+
+  it('blocks unsolicited mentions in original autoposts', () => {
+    expect(getAutopostPolicyIssue('Great breakdown from @somefounder on agent workflows')).toContain('@somefounder');
+  });
+
+  it('allows only explicitly named handles', () => {
+    expect(getAutopostPolicyIssue('Shipping notes from @debugbot', {
+      allowedMentions: ['debugbot'],
+    })).toBeNull();
+    expect(getAutopostPolicyIssue('Organic shoutout to @anotheragent')).toContain('@anotheragent');
+  });
+
+  it('blocks a leading handle even when that handle is explicitly allowed', () => {
+    expect(getAutopostPolicyIssue('@OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
+    })).toContain('cannot start with an @mention');
+    expect(getAutopostPolicyIssue('i think @OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
+    })).toBeNull();
+    expect(getAutopostPolicyIssue('.@OpenAI is going to ship this faster than people expect.', {
+      allowedMentions: ['openai'],
+    })).toContain('cannot start with an @mention');
+  });
+});
+
 // ─── Queue selection ────────────────────────────────────────────────────────
 
 describe('pickDiverseTweet', () => {
@@ -210,6 +376,19 @@ describe('pickDiverseTweet', () => {
     ];
     const picked = pickDiverseTweet(queue, recent);
     expect(picked?.id).toBe('diverse');
+  });
+
+  it('penalizes repeated formats even when the topic changes', () => {
+    const queue = [
+      makeTweet({ id: 'same-format', format: 'hot_take', topic: 'Startups', content: 'Hot take about startups' }),
+      makeTweet({ id: 'fresh-format', format: 'question', topic: 'Startups', content: 'Question about startups' }),
+    ];
+    const recent = [
+      { format: 'hot_take', topic: 'AI', content: 'AI hot take one' },
+      { format: 'hot_take', topic: 'Crypto', content: 'AI hot take two' },
+    ];
+    const picked = pickDiverseTweet(queue, recent);
+    expect(picked?.id).toBe('fresh-format');
   });
 
   it('returns null for empty queue', () => {
@@ -231,7 +410,7 @@ describe('pickDiverseTweet', () => {
 describe('clampPostsPerDay', () => {
   it('clamps to MAX_POSTS_PER_DAY_SETTING', () => {
     expect(clampPostsPerDay(100)).toBe(MAX_POSTS_PER_DAY_SETTING);
-    expect(clampPostsPerDay(48)).toBe(48); // 48 is within range
+    expect(clampPostsPerDay(12)).toBe(12);
   });
 
   it('clamps minimum to 1', () => {

@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createAgent,
   createTweet,
+  addAgentToUser,
   getAgent,
   getProtocolSettings,
   getQueuedTweets,
@@ -10,6 +11,10 @@ import {
 import { SetupLaunchError, launchAgentFromPreview } from '@/lib/setup-launch';
 
 describe('setup launch flow', () => {
+  afterEach(() => {
+    delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+  });
+
   it('queues approved preview tweets, discards rejected ones, and marks setup ready', async () => {
     const agent = await createAgent({
       handle: 'launch-ready-agent',
@@ -17,6 +22,8 @@ describe('setup launch flow', () => {
       soulMd: '# soul',
       setupStep: 'preview',
     } as any);
+    await addAgentToUser('setup-owner', agent.id);
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
 
     const approved = await createTweet({
       agentId: agent.id,
@@ -71,6 +78,8 @@ describe('setup launch flow', () => {
       soulMd: '# soul',
       setupStep: 'preview',
     } as any);
+    await addAgentToUser('setup-owner', agent.id);
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
 
     const first = await createTweet({
       agentId: agent.id,
@@ -116,6 +125,8 @@ describe('setup launch flow', () => {
       soulMd: '# soul',
       setupStep: 'preview',
     } as any);
+    await addAgentToUser('setup-owner', agent.id);
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
 
     await createTweet({
       agentId: agent.id,

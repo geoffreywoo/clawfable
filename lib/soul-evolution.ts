@@ -12,15 +12,29 @@ import {
   updateProtocolSettings,
   updateAgent,
   pushSoulVersion,
+  getVoiceDirectiveRules,
+  getRecentNegativeFeedback,
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { generateText } from './ai';
+import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_TRACKED_FOR_EVOLUTION = 50;
+const SOUL_EVOLUTION_PROMPT_SOUL_LIMIT = 6000;
+
+export function formatSoulForEvolutionPrompt(soulMd: string): string {
+  const trimmed = soulMd.trim();
+  if (trimmed.length <= SOUL_EVOLUTION_PROMPT_SOUL_LIMIT) return trimmed;
+  return `${trimmed.slice(0, SOUL_EVOLUTION_PROMPT_SOUL_LIMIT).trimEnd()}\n\n[SOUL.md trimmed for evolution prompt; preserve the existing structure and identity.]`;
+}
+
+export function getSoulEvolutionMaxTokens(currentSoulLength: number): number {
+  if (currentSoulLength <= 2500) return 2048;
+  if (currentSoulLength <= SOUL_EVOLUTION_PROMPT_SOUL_LIMIT) return 3072;
+  return 4096;
+}
 
 export interface EvolutionResult {
   evolved: boolean;
@@ -78,6 +92,14 @@ async function evolveSoul(
     if (!currentSoul || currentSoul.length < 50) {
       return { evolved: false, reason: 'No SOUL.md to evolve' };
     }
+    const promptSoul = formatSoulForEvolutionPrompt(currentSoul);
+
+    // Gather operator signals that soul evolution should respect
+    const [directiveRules, negFeedback] = await Promise.all([
+      getVoiceDirectiveRules(agent.id),
+      getRecentNegativeFeedback(agent.id, 5),
+    ]);
+    const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
 
     // Build the evolution prompt
     const fp = learnings.styleFingerprint;
@@ -88,9 +110,10 @@ async function evolveSoul(
       .map((t) => `[${t.likes} likes] "${t.content.slice(0, 200)}"`)
       .join('\n');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+    const response = await generateText({
+      task: 'learning',
+      tier: 'quality',
+      maxTokens: getSoulEvolutionMaxTokens(currentSoul.length),
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.
 
 RULES:
@@ -103,10 +126,8 @@ RULES:
 - Output the COMPLETE updated SOUL.md — not a diff, not instructions
 
 After the SOUL.md, output one line starting with "CHANGES:" summarizing what you changed in under 50 words.`,
-      messages: [{
-        role: 'user',
-        content: `CURRENT SOUL.md:
-${currentSoul}
+      prompt: `CURRENT SOUL.md:
+${promptSoul}
 
 PERFORMANCE DATA (${learnings.totalTracked} tweets tracked):
 Avg likes: ${learnings.avgLikes}, Avg RTs: ${learnings.avgRetweets}
@@ -134,14 +155,16 @@ ${topTweets}
 WORST 3 TWEETS (do LESS like these):
 ${worstTweets}
 
-Evolve this SOUL.md to incorporate what actually works. Output the complete updated SOUL.md, then a CHANGES: line.`,
-      }],
+${activeDirectiveRules.length > 0 ? `OPERATOR VOICE DIRECTIVES (from coaching sessions — these MUST be respected in the evolved soul):
+${activeDirectiveRules.map((rule, i) => formatVoiceDirectiveRule(rule, i)).join('\n')}` : ''}
+
+${negFeedback.length > 0 ? `CONTENT THE OPERATOR REJECTED (the soul should steer AWAY from these patterns):
+${negFeedback.map((f) => `- ${f}`).join('\n')}` : ''}
+
+Evolve this SOUL.md to incorporate what actually works. Respect operator directives. Output the complete updated SOUL.md, then a CHANGES: line.`,
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     // Split the response into new soul + change summary
     const changesIdx = text.lastIndexOf('CHANGES:');

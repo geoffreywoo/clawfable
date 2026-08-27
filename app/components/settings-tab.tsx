@@ -30,6 +30,10 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
+  const connectionStatusNote = agent.connectionStatusNote ?? null;
+  const connectionActionLabel = connecting
+    ? isConnected ? 'REDIRECTING TO RE-AUTH...' : 'REDIRECTING...'
+    : isConnected ? 'RE-AUTH X FOR THIS AGENT' : 'ATTACH X TO THIS AGENT';
 
   const handleGenerateSoul = async () => {
     if (!isConnected) {
@@ -108,11 +112,15 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Delete failed');
+      }
       showToast('Agent deleted');
       onAgentDeleted();
-    } catch {
-      showToast('Delete failed');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed');
       setDeleting(false);
     }
   };
@@ -141,8 +149,8 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
 
       {/* Header */}
       <div className="section-title">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="#8b5cf6" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
-        <h2>AGENT SETTINGS</h2>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="3" stroke="var(--primary)" strokeWidth="1.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        <h2>Agent settings</h2>
       </div>
 
       {/* ─── Identity ─────────────────────────────────────────────────────────── */}
@@ -187,7 +195,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               title={isConnected ? 'Analyze your tweet history and auto-generate a SOUL.md' : 'Connect X API first'}
               style={{ fontSize: '9px' }}
             >
-              {generatingSoul ? 'ANALYZING TWEETS...' : 'GENERATE FROM MY TWEETS'}
+              {generatingSoul ? 'LEARNING FROM X...' : 'DRAFT FROM X HISTORY'}
             </button>
             <span className="label" style={{ textTransform: 'none' }}>{soulMd.length} chars</span>
           </div>
@@ -199,7 +207,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           }}>
             <div className="wizard-spinner" style={{ margin: '0 auto 8px' }} />
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-              Fetching up to 1000 tweets, analyzing voice patterns, generating SOUL.md...
+              Fetching up to 1000 tweets, learning voice patterns, and drafting the contract...
             </p>
           </div>
         )}
@@ -224,7 +232,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               lineHeight: '1.7',
             }}
           >
-            <span style={{ color: 'var(--primary)', fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+            <span style={{ color: 'var(--primary)', fontSize: '9px', letterSpacing: '0', textTransform: 'none', fontWeight: 700 }}>
               Parsed Voice:{' '}
             </span>
             {agent.soulSummary}
@@ -236,9 +244,9 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             disabled={!soulChanged || savingSoul}
             onClick={handleSaveSoul}
             data-testid="button-save-soul"
-            style={{ background: soulChanged ? '#8b5cf6' : undefined }}
+            style={{ background: soulChanged ? 'var(--primary)' : undefined }}
           >
-            {savingSoul ? 'SAVING...' : 'SAVE CHANGES'}
+            {savingSoul ? 'Saving...' : 'Save changes'}
           </button>
         </div>
       </div>
@@ -252,30 +260,41 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               {isConnected ? (
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#22c55e" strokeWidth="1.5" /><polyline points="4,8 7,11 12,5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               ) : (
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#8b5cf6" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--primary)" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
               )}
               <span
                 style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '11px',
                   fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  color: isConnected ? '#22c55e' : '#8b5cf6',
+                  letterSpacing: '0',
+                  color: isConnected ? '#22c55e' : 'var(--primary)',
                 }}
               >
                 {isConnected ? 'X API CONNECTED' : 'X API DISCONNECTED'}
               </span>
             </div>
-            {isConnected && (
+            <div className="flex items-center gap-2">
               <button
-                className="btn btn-danger btn-sm"
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                data-testid="button-disconnect"
+                className={`btn ${isConnected ? 'btn-outline' : 'btn-primary'} btn-sm`}
+                onClick={handleOAuthConnect}
+                disabled={connecting || disconnecting}
+                data-testid={isConnected ? 'button-reauth' : 'button-connect'}
+                style={isConnected ? undefined : { background: 'var(--primary)' }}
               >
-                {disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+                {connectionActionLabel}
               </button>
-            )}
+              {isConnected && (
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={handleDisconnect}
+                  disabled={disconnecting || connecting}
+                  data-testid="button-disconnect"
+                >
+                  {disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+                </button>
+              )}
+            </div>
           </div>
           <p
             style={{
@@ -285,45 +304,76 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             }}
           >
             {isConnected
-              ? 'Connected — live posting and mentions sync enabled.'
-              : 'Configure your X API keys below to enable live posting and mentions sync.'}
+              ? 'Connected — live posting and mentions sync enabled. Use re-auth to refresh this agent without disconnecting first.'
+              : 'This specific agent does not currently have an attached X user token. Logging into Clawfable is separate from attaching X to this agent.'}
           </p>
+          {!isConnected && connectionStatusNote && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(74,139,103,0.18)',
+                background: 'rgba(74,139,103,0.06)',
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  letterSpacing: '0',
+                  color: '#c4b5fd',
+                  marginBottom: '6px',
+                }}
+              >
+                LAST X AUTH EVENT
+              </p>
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  lineHeight: '1.7',
+                  color: 'var(--text)',
+                }}
+              >
+                {connectionStatusNote.reason}
+              </p>
+              <p
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '9px',
+                  color: 'var(--text-muted)',
+                  marginTop: '6px',
+                }}
+              >
+                {new Date(connectionStatusNote.occurredAt).toLocaleString()}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* OAuth connect button */}
-        {!isConnected && (
-          <div style={{ marginTop: '12px' }}>
-            <button
-              className="btn btn-primary btn-wide"
-              disabled={connecting}
-              onClick={handleOAuthConnect}
-              data-testid="button-connect"
-              style={{ background: '#8b5cf6' }}
-            >
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" style={{ marginRight: '2px' }}>
-                <path d="M9.3 2h2.5l-5.5 6.2L13 14h-4.1l-3.4-4.4L1.8 14H0l5.8-6.6L.3 2h4.2l3 4L9.3 2zm-.8 10.8h1.4L5.5 3.4H4L8.5 12.8z" fill="currentColor" />
-              </svg>
-              {connecting ? 'REDIRECTING...' : 'AUTHORIZE WITH X'}
-            </button>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7', marginTop: '10px' }}>
-              You&apos;ll be redirected to X to authorize this agent. Requires Read + Write permissions.
-            </p>
-          </div>
-        )}
+        <div style={{ marginTop: '12px' }}>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
+            {isConnected
+              ? 'Re-auth refreshes this agent’s X token and permissions in place. Disconnect only removes the current token from this agent.'
+              : 'You’ll be redirected to X to authorize this specific agent. A successful callback should flip the status card above from disconnected to connected.'}
+          </p>
+        </div>
       </div>
 
       {/* ─── Soul Evolution ────────────────────────────────────────────────── */}
       <div style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderLeft: '3px solid #8b5cf6',
+        borderLeft: '3px solid var(--primary)',
         borderRadius: 'var(--radius-lg)',
         padding: '16px 20px',
         marginBottom: '16px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0' }}>
               SOUL EVOLUTION
             </p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
@@ -369,12 +419,12 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0.06em' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--text)', letterSpacing: '0' }}>
               OPEN SOURCE SOUL
             </p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
               List this agent&apos;s SOUL.md on{' '}
-              <a href="/souls" target="_blank" style={{ color: '#8b5cf6', textDecoration: 'none' }}>clawfable.com/souls</a>
+              <a href="/souls" target="_blank" style={{ color: 'var(--primary)', textDecoration: 'none' }}>clawfable.com/souls</a>
             </p>
           </div>
           <button
@@ -410,7 +460,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
       <div className="danger-zone">
         <div className="flex items-center gap-2 mb-3">
           <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M7 2L13 12H1L7 2z" stroke="#ef4444" strokeWidth="1.3" strokeLinejoin="round" /><line x1="7" y1="6" x2="7" y2="9" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><circle cx="7" cy="10.5" r="0.5" fill="#ef4444" /></svg>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#ef4444' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', textTransform: 'none', color: '#ef4444' }}>
             Danger Zone
           </span>
         </div>
@@ -430,7 +480,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#ef4444' }}>Are you sure?</p>
             <button
               className="btn btn-sm"
-              style={{ background: '#8b5cf6', color: '#fff', border: '1px solid #8b5cf6' }}
+              style={{ background: 'var(--primary)', color: '#fff', border: '1px solid var(--primary)' }}
               disabled={deleting}
               onClick={handleDelete}
               data-testid="button-delete-agent-final"
@@ -441,7 +491,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
               className="btn btn-ghost btn-sm"
               onClick={() => setDeleteConfirm(false)}
             >
-              CANCEL
+              Cancel
             </button>
           </div>
         )}

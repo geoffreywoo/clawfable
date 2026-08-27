@@ -1,6 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { SETUP_BANNER_CONTENT, normalizeSetupStep } from '@/lib/setup-state';
 import type { AgentSummary } from '@/lib/types';
 
 function getAgentHue(name: string): number {
@@ -12,32 +13,36 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
-  const router = useRouter();
   const hue = getAgentHue(agent.name);
   const isConnected = agent.isConnected === 1;
-  const inSetup = agent.setupStep && agent.setupStep !== 'ready';
-
-  const handleOpen = () => {
-    router.push(`/agent/${agent.id}`);
-  };
+  const setupStep = normalizeSetupStep(agent.setupStep);
+  const inSetup = setupStep !== 'ready';
+  const setupContent = inSetup ? SETUP_BANNER_CONTENT[setupStep] : null;
+  const soulPreview = agent.soulMdPreview && !agent.soulMdPreview.startsWith('# Pending')
+    ? agent.soulMdPreview
+    : inSetup
+      ? 'Setup is still in progress. Open the workspace to finish the voice contract and approve the first batch.'
+      : 'Open the workspace to inspect drafts, queue health, automation, and what the system is learning.';
 
   return (
-    <div
+    <Link
+      href={`/agent/${agent.id}`}
       className="agent-card"
       style={{
-        borderColor: `hsla(${hue}, 60%, 40%, 0.2)`,
+        borderColor: `hsla(${hue}, 45%, 48%, 0.22)`,
+        color: 'inherit',
+        textDecoration: 'none',
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLElement;
-        el.style.boxShadow = `0 0 18px hsla(${hue}, 60%, 40%, 0.12)`;
-        el.style.borderColor = `hsla(${hue}, 60%, 40%, 0.45)`;
+        el.style.boxShadow = `0 18px 40px hsla(${hue}, 30%, 42%, 0.16)`;
+        el.style.borderColor = `hsla(${hue}, 45%, 48%, 0.42)`;
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLElement;
         el.style.boxShadow = '';
-        el.style.borderColor = `hsla(${hue}, 60%, 40%, 0.2)`;
+        el.style.borderColor = `hsla(${hue}, 45%, 48%, 0.22)`;
       }}
-      onClick={handleOpen}
       data-testid={`card-agent-${agent.id}`}
     >
       {/* Header */}
@@ -46,9 +51,9 @@ export function AgentCard({ agent }: AgentCardProps) {
           <div
             className="agent-avatar"
             style={{
-              background: `hsla(${hue}, 60%, 22%, 0.5)`,
-              border: `1px solid hsla(${hue}, 60%, 40%, 0.3)`,
-              color: `hsl(${hue}, 60%, 65%)`,
+              background: `hsla(${hue}, 60%, 92%, 1)`,
+              border: `1px solid hsla(${hue}, 45%, 48%, 0.22)`,
+              color: `hsl(${hue}, 45%, 34%)`,
             }}
           >
             {agent.name.charAt(0).toUpperCase()}
@@ -64,15 +69,23 @@ export function AgentCard({ agent }: AgentCardProps) {
             title={inSetup ? 'Setup in progress' : isConnected ? 'X API Connected' : 'Not connected'}
           />
           <span className={`status-label ${inSetup ? 'setup' : isConnected ? 'live' : 'offline'}`}>
-            {inSetup ? 'SETUP' : isConnected ? 'LIVE' : 'OFFLINE'}
+            {inSetup ? 'Setup' : isConnected ? 'Live' : 'Offline'}
           </span>
         </div>
       </div>
 
       {/* Soul preview */}
       <p className="agent-soul-preview">
-        {agent.soulMdPreview || 'No soul defined'}
+        {soulPreview}
       </p>
+
+      {setupContent && (
+        <div className="agent-card-next-step">
+          <p className="agent-card-next-label">NEXT STEP</p>
+          <p className="agent-card-next-title">{setupContent.title}</p>
+          <p className="agent-card-next-desc">{setupContent.desc}</p>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="agent-stats mb-4">
@@ -85,23 +98,19 @@ export function AgentCard({ agent }: AgentCardProps) {
       </div>
 
       {/* Open button */}
-      <button
+      <span
         className="btn"
         style={{
           width: '100%',
           justifyContent: 'center',
-          background: `hsla(${hue}, 60%, 22%, 0.3)`,
-          border: `1px solid hsla(${hue}, 60%, 40%, 0.3)`,
-          color: `hsl(${hue}, 60%, 65%)`,
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleOpen();
+          background: `hsla(${hue}, 60%, 95%, 1)`,
+          border: `1px solid hsla(${hue}, 45%, 48%, 0.22)`,
+          color: `hsl(${hue}, 45%, 34%)`,
         }}
         data-testid={`button-open-agent-${agent.id}`}
       >
-        OPEN DASHBOARD
-      </button>
-    </div>
+        {inSetup ? 'Continue setup' : 'Open workspace'}
+      </span>
+    </Link>
   );
 }

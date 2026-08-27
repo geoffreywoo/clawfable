@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { SetupWizard } from './setup-wizard';
 import { normalizeSetupStep } from '@/lib/setup-state';
 import type { AgentDetail } from '@/lib/types';
@@ -13,6 +14,17 @@ interface Props {
 
 export function SetupContinuation({ agentId, agent, onComplete, onClose }: Props) {
   const setupStep = normalizeSetupStep(agent.setupStep);
+
+  useEffect(() => {
+    if (setupStep === 'ready') {
+      onClose();
+    }
+  }, [onClose, setupStep]);
+
+  if (setupStep === 'ready') {
+    return null;
+  }
+
   const initialStep = setupStep === 'preview' ? 'preview' : setupStep === 'analyze' ? 'analyze' : 'soul';
 
   return (

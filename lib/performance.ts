@@ -4,8 +4,9 @@
  * and feeds insights back into generation.
  */
 
-import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint } from './types';
+import type { Agent, TweetPerformance, AgentLearnings, StyleFingerprint, OperatorVoiceReference, ManualExampleCuration, SourceLanePerformance, StyleModePerformance, Tweet, LearningSignal, AudienceSegment, PromptStrategy, MediaExperimentType, PostPortfolioRole, Mention, GenerationEvidenceReference } from './types';
 import {
+  createTweet,
   getTweets,
   getPerformanceHistory,
   addPerformanceEntry,
@@ -16,20 +17,702 @@ import {
   updateProtocolSettings,
   saveAnalysis,
   addPostLogEntry,
+  getPostLog,
+  getRecentMentions,
+  updateTweet,
+  saveFeedback,
+  addLearningSignal,
+  getManualExampleCuration,
+  getLearningSignals,
+  invalidateAgentConnection,
+  saveRelationshipOpportunities,
+  saveViralityPostmortems,
+  saveVoiceCorpusSnapshot,
+  backfillAudienceVoiceComplaints,
 } from './kv-storage';
-import { getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
+import { getDeepTimeline, getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
-import Anthropic from '@anthropic-ai/sdk';
+import { inferDeleteIntent } from './delete-intent';
+import { generateText, PUBLISHING_V2_MODEL_STACK } from './ai';
+import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
+import { buildManualTopicProfile } from './source-planner';
+import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
+import { collapsePerformanceSnapshots } from './performance-history';
+import { historicalPerformanceEvidenceWeight, inferContentSpreadMechanics } from './winner-learning';
+import { buildFrontierForecastLearningProfile, describeFrontierForecastPattern } from './frontier-forecast-learning';
+import {
+  buildPerformanceSignalBaseline,
+  confidenceAdjustedPerformanceAverage,
+  computeRelativeSpreadSignal,
+  weightedSpreadEngagement,
+} from './performance-signals';
+import { canonicalizeLearningTopic, isEligibleForAccountPolicyLearning } from './learning-topic';
+import { isGeoffreyAccount } from './account-taste';
+import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
+import { classifyAudienceVoiceComplaint } from './audience-feedback';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
+import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
+import {
+  computeActionRewards,
+  computeEarlyVelocityScore,
+  inferAudienceSegment,
+  inferPerformanceCheckpoint,
+  inferPromptStrategy,
+  scoreReplyPotential,
+  scoreSlopRisk,
+} from './virality-signals';
+import {
+  buildRelationshipOpportunities,
+  buildViralityPostmortem,
+  inferPortfolioRole,
+  shouldCreateVelocityFollowup,
+} from './growth-engine';
+import { isNearDuplicate } from './survivability';
+import { assessGeneratedWritingPatterns } from './writing-patterns';
+import { buildGenerationContext } from './generation-context';
+import { generatePublishingBatchV2 } from './publishing-v2';
+import { createTweetFromGeneratedCandidate } from './tweet-persistence';
+import { assertAgentAutomationEntitlement } from './automation-entitlement';
 
-const anthropic = new Anthropic();
+function replyLogEntry(postLog: Array<{ xTweetId: string; format: string; topic: string }>, xTweetId: string) {
+  return postLog.find((e) => String(e.xTweetId) === xTweetId) || null;
+}
 
+function weightedEngagementScore(tweet: TweetPerformance): number {
+  return weightedSpreadEngagement(tweet);
+}
+
+export function getLearningRefreshIntervalMs(agent: Pick<Agent, 'handle'>): number {
+  return isGeoffreyAccount(agent.handle)
+    ? 3 * 60 * 60 * 1000
+    : 24 * 60 * 60 * 1000;
+}
+
+function parsePerformanceTimestamp(value: string | undefined): number {
+  const timestamp = value ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+export function getLearningInsightPromptLimits(historyLength: number): { rankingRows: number; examples: number; textChars: number } {
+  if (historyLength < 12) return { rankingRows: 4, examples: 4, textChars: 180 };
+  if (historyLength < 30) return { rankingRows: 6, examples: 6, textChars: 220 };
+  return { rankingRows: 8, examples: 8, textChars: 250 };
+}
+
+export function getLearningInsightMaxTokens(historyLength: number): number {
+  if (historyLength < 12) return 768;
+  return 1024;
+}
+
+export function filterLearningMentions(mentions: Mention[]): Mention[] {
+  return mentions.filter((mention) => {
+    const complaint = classifyAudienceVoiceComplaint(mention.content);
+    return !complaint.isComplaint || complaint.confidence < 0.9;
+  });
+}
+
+export function formatLearningInsightTweetExample(tweet: TweetPerformance, textChars: number): string {
+  const observedMetrics = [
+    `${tweet.likes} likes`,
+    `${tweet.retweets} RTs`,
+    typeof tweet.quotes === 'number' ? `${tweet.quotes} quotes` : null,
+    typeof tweet.bookmarks === 'number' ? `${tweet.bookmarks} bookmarks` : null,
+    `source:${tweet.source}`,
+  ].filter((value): value is string => Boolean(value)).join(', ');
+  if (
+    tweet.voiceCorpusDispositions
+    && !tweet.voiceCorpusDispositions.includes('diction_anchor')
+  ) {
+    const mechanics = inferContentSpreadMechanics(tweet.content, {
+      topic: tweet.topic,
+      thesis: tweet.thesis,
+      replies: tweet.replies,
+      retweets: tweet.retweets,
+    });
+    return `- [${observedMetrics}] mechanics=${mechanics.join('; ')}`;
+  }
+  const content = tweet.content.replace(/\s+/g, ' ').trim();
+  const text = content.length <= textChars
+    ? content
+    : `${content.slice(0, textChars - 3).trimEnd()}...`;
+  return `- [${observedMetrics}] "${text}"`;
+}
+
+const TWEET_CLASSIFICATION_TEXT_LIMIT = 220;
+
+export function getTweetClassificationMaxTokens(tweetCount: number): number {
+  if (tweetCount <= 5) return 768;
+  if (tweetCount <= 10) return 1280;
+  return 2048;
+}
+
+function compactClassificationTweetText(text: string): string {
+  const compacted = text.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= TWEET_CLASSIFICATION_TEXT_LIMIT) return compacted;
+  return `${compacted.slice(0, TWEET_CLASSIFICATION_TEXT_LIMIT - 3).trimEnd()}...`;
+}
+
+export function formatTweetClassificationList(tweets: Array<{ id: string; text: string }>): string {
+  return tweets
+    .map((tweet, index) => `[${index}] "${compactClassificationTweetText(tweet.text)}"`)
+    .join('\n');
+}
+
+const CHECKPOINT_ORDER: Array<NonNullable<TweetPerformance['performanceCheckpoint']>> = [
+  'initial_15m',
+  'early_30m',
+  'momentum_2h',
+  'full_24h',
+  'late',
+];
+
+function checkpointRank(checkpoint: TweetPerformance['performanceCheckpoint'] | undefined): number {
+  const index = CHECKPOINT_ORDER.indexOf(checkpoint || 'initial_15m');
+  return index === -1 ? 0 : index;
+}
+
+function latestPerformanceByXId(history: TweetPerformance[]): Map<string, TweetPerformance> {
+  const byId = new Map<string, TweetPerformance>();
+  for (const entry of history) {
+    const id = String(entry.xTweetId || '');
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (!existing || parsePerformanceTimestamp(entry.checkedAt) > parsePerformanceTimestamp(existing.checkedAt)) {
+      byId.set(id, entry);
+    }
+  }
+  return byId;
+}
+
+function shouldTrackPerformanceCheckpoint(existing: TweetPerformance | undefined, postedAt: string, checkedAt: string): boolean {
+  if (!existing) return true;
+  const nextCheckpoint = inferPerformanceCheckpoint(postedAt, checkedAt);
+  if (checkpointRank(nextCheckpoint) <= checkpointRank(existing.performanceCheckpoint)) return false;
+  const lastChecked = parsePerformanceTimestamp(existing.checkedAt);
+  if (!lastChecked) return true;
+  return Date.parse(checkedAt) - lastChecked >= 10 * 60 * 1000;
+}
+
+function needsManualClassification(existing: TweetPerformance | undefined): boolean {
+  if (!existing) return true;
+  const formatMissing = !existing.format || existing.format === 'unknown';
+  const topicMissing = !existing.topic || ['general', 'unknown'].includes(existing.topic.toLowerCase());
+  return formatMissing || topicMissing;
+}
+
+export function selectTweetClassificationBacklog<T extends { id: string; text: string }>(
+  timeline: T[],
+  latestByXId: Map<string, TweetPerformance>,
+  knownClawfableXIds: Set<string>,
+  limit = 20,
+): T[] {
+  const boundedLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+  return timeline
+    .filter((tweet) => !knownClawfableXIds.has(String(tweet.id)))
+    .filter((tweet) => needsManualClassification(latestByXId.get(String(tweet.id))))
+    .slice(0, boundedLimit);
+}
+
+export function needsDirectShareMetricBackfill(existing: TweetPerformance | undefined): boolean {
+  return Boolean(existing)
+    && (typeof existing?.quotes !== 'number' || typeof existing?.bookmarks !== 'number');
+}
+
+export function selectTweetDirectMetricBackfill<T extends { id: string }>(
+  timeline: T[],
+  latestByXId: Map<string, TweetPerformance>,
+  limit = 100,
+): T[] {
+  const boundedLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+  return timeline
+    .filter((tweet) => needsDirectShareMetricBackfill(latestByXId.get(String(tweet.id))))
+    .slice(0, boundedLimit);
+}
+
+function manualPostSuccessSignals(signals: LearningSignal[]): { tweetIds: Set<string>; xTweetIds: Set<string> } {
+  const tweetIds = new Set<string>();
+  const xTweetIds = new Set<string>();
+
+  for (const signal of signals) {
+    if (signal.signalType !== 'x_post_succeeded' || signal.surface !== 'manual_post') continue;
+    if (signal.tweetId) tweetIds.add(String(signal.tweetId));
+    if (signal.xTweetId) xTweetIds.add(String(signal.xTweetId));
+  }
+
+  return { tweetIds, xTweetIds };
+}
+
+function wasManuallyPosted(
+  tweetId: string | null | undefined,
+  xTweetId: string | null | undefined,
+  manualSignals: { tweetIds: Set<string>; xTweetIds: Set<string> },
+): boolean {
+  return Boolean(
+    (tweetId && manualSignals.tweetIds.has(String(tweetId))) ||
+    (xTweetId && manualSignals.xTweetIds.has(String(xTweetId)))
+  );
+}
+
+function normalizeManualPerformanceSources(
+  history: TweetPerformance[],
+  signals: LearningSignal[],
+): TweetPerformance[] {
+  const manualSignals = manualPostSuccessSignals(signals);
+  if (manualSignals.tweetIds.size === 0 && manualSignals.xTweetIds.size === 0) return history;
+
+  return history.map((entry) => {
+    if (entry.source !== 'autopilot') return entry;
+    if (!wasManuallyPosted(entry.tweetId, entry.xTweetId, manualSignals)) return entry;
+    return { ...entry, source: 'manual' };
+  });
+}
+
+function sourceSignalWeight(source: TweetPerformance['source']): number {
+  if (source === 'manual') return 2;
+  if (source === 'timeline') return 1.25;
+  return 1;
+}
+
+function weightedLearningScore(tweet: TweetPerformance): number {
+  const qualityScore = tweet.qualityAdjustedGrowthScore
+    ?? tweet.actionRewards?.qualityAdjustedGrowthScore
+    ?? computeActionRewards(tweet).qualityAdjustedGrowthScore
+    ?? 50;
+  const relativeSpread = tweet.relativeSpreadScore ?? 0.5;
+  return (
+    ((qualityScore * 0.9) + (relativeSpread * 100 * 1.35) + (weightedEngagementScore(tweet) * 0.08))
+    * sourceSignalWeight(tweet.source)
+    * historicalPerformanceEvidenceWeight(tweet)
+  );
+}
+
+function buildSourceLanePerformance(
+  history: TweetPerformance[],
+  allTweets: Tweet[],
+): SourceLanePerformance[] {
+  const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  const tweetByXId = new Map(
+    allTweets
+      .filter((tweet) => tweet.xTweetId)
+      .map((tweet) => [String(tweet.xTweetId), tweet]),
+  );
+  const buckets = new Map<SourceLanePerformance['lane'], { total: number; count: number; wins: number }>();
+
+  for (const entry of history) {
+    const tweet = (entry.tweetId && tweetById.get(String(entry.tweetId))) || tweetByXId.get(String(entry.xTweetId));
+    const lane = tweet?.sourceLane;
+    if (!lane) continue;
+    const current = buckets.get(lane) || { total: 0, count: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.count += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(lane, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([lane, stats]) => ({
+      lane,
+      posts: stats.count,
+      avgEngagement: Math.round(stats.total / Math.max(stats.count, 1)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildStyleModePerformance(
+  history: TweetPerformance[],
+  allTweets: Tweet[],
+  signals: LearningSignal[],
+): StyleModePerformance[] {
+  const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
+  const tweetByXId = new Map(
+    allTweets
+      .filter((tweet) => tweet.xTweetId)
+      .map((tweet) => [String(tweet.xTweetId), tweet]),
+  );
+  const buckets = new Map<StyleModePerformance['mode'], {
+    total: number;
+    posts: number;
+    wins: number;
+    approvals: number;
+    rejections: number;
+    deletes: number;
+    confidenceTotal: number;
+    confidenceCount: number;
+    confidencePasses: number;
+  }>();
+  const ensure = (mode: StyleModePerformance['mode']) => {
+    const existing = buckets.get(mode);
+    if (existing) return existing;
+    const next = {
+      total: 0,
+      posts: 0,
+      wins: 0,
+      approvals: 0,
+      rejections: 0,
+      deletes: 0,
+      confidenceTotal: 0,
+      confidenceCount: 0,
+      confidencePasses: 0,
+    };
+    buckets.set(mode, next);
+    return next;
+  };
+
+  ensure(STANDARD_STYLE_MODE);
+  ensure(SHITPOAST_STYLE_MODE);
+
+  const resolveMode = (tweetId?: string, xTweetId?: string, metadataMode?: unknown): StyleModePerformance['mode'] => {
+    const tweet = (tweetId && tweetById.get(String(tweetId))) || (xTweetId && tweetByXId.get(String(xTweetId))) || null;
+    return normalizeContentStyleMode(metadataMode || tweet?.styleMode);
+  };
+
+  for (const entry of history) {
+    const mode = normalizeContentStyleMode(
+      entry.styleMode ||
+      ((entry.tweetId && tweetById.get(String(entry.tweetId))?.styleMode) || null) ||
+      ((entry.xTweetId && tweetByXId.get(String(entry.xTweetId))?.styleMode) || null),
+    );
+    const current = ensure(mode);
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+  }
+
+  for (const tweet of allTweets) {
+    const mode = tweetStyleMode(tweet);
+    const confidence = tweet.confidenceScore;
+    if (typeof confidence !== 'number') continue;
+    const current = ensure(mode);
+    current.confidenceTotal += confidence;
+    current.confidenceCount += 1;
+    if (confidence >= 0.58) current.confidencePasses += 1;
+  }
+
+  for (const signal of signals) {
+    const mode = resolveMode(signal.tweetId, signal.xTweetId, signal.metadata?.styleMode);
+    const current = ensure(mode);
+    if (signal.signalType === 'approved_without_edit' || signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post') {
+      current.approvals += 1;
+    }
+    if (signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected') {
+      current.rejections += 1;
+    }
+    if (signal.signalType === 'deleted_from_queue' || signal.signalType === 'deleted_from_x') {
+      current.deletes += 1;
+    }
+  }
+
+  return [SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE].map((mode) => {
+    const stats = ensure(mode);
+    return {
+      mode,
+      posts: stats.posts,
+      avgEngagement: stats.posts > 0 ? Math.round(stats.total / stats.posts) : 0,
+      wins: stats.wins,
+      approvals: stats.approvals,
+      rejections: stats.rejections,
+      deletes: stats.deletes,
+      avgConfidence: stats.confidenceCount > 0 ? Number((stats.confidenceTotal / stats.confidenceCount).toFixed(3)) : 0,
+      confidencePassRate: stats.confidenceCount > 0 ? Math.round((stats.confidencePasses / stats.confidenceCount) * 100) : 0,
+    };
+  });
+}
+
+function buildAudienceSegmentPerformance(history: TweetPerformance[]): AgentLearnings['audienceSegmentPerformance'] {
+  const buckets = new Map<AudienceSegment, { total: number; posts: number; wins: number }>();
+  for (const entry of history) {
+    const segment = entry.targetAudienceSegment || inferAudienceSegment(entry.content, entry.topic);
+    const current = buckets.get(segment) || { total: 0, posts: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(segment, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([segment, stats]) => ({
+      segment,
+      posts: stats.posts,
+      avgEngagement: Math.round(stats.total / Math.max(1, stats.posts)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildPromptStrategyPerformance(history: TweetPerformance[]): AgentLearnings['promptStrategyPerformance'] {
+  const buckets = new Map<PromptStrategy, { total: number; posts: number; wins: number }>();
+  for (const entry of history) {
+    const strategy = entry.promptStrategy || 'baseline';
+    const current = buckets.get(strategy) || { total: 0, posts: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(strategy, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([strategy, stats]) => ({
+      strategy,
+      posts: stats.posts,
+      avgEngagement: Math.round(stats.total / Math.max(1, stats.posts)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildMediaExperimentPerformance(history: TweetPerformance[]): AgentLearnings['mediaExperimentPerformance'] {
+  const buckets = new Map<MediaExperimentType, { total: number; posts: number; wins: number }>();
+  for (const entry of history) {
+    const type = entry.mediaExperimentType || 'text_only';
+    const current = buckets.get(type) || { total: 0, posts: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(type, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([type, stats]) => ({
+      type,
+      posts: stats.posts,
+      avgEngagement: Math.round(stats.total / Math.max(1, stats.posts)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildPortfolioRolePerformance(history: TweetPerformance[]): AgentLearnings['portfolioRolePerformance'] {
+  const buckets = new Map<PostPortfolioRole, { total: number; posts: number; wins: number }>();
+  for (const entry of history) {
+    const role = entry.portfolioRole || inferPortfolioRole({
+      content: entry.content,
+      format: entry.format,
+      creativeLane: entry.creativeLane,
+      mediaExperimentType: entry.mediaExperimentType,
+    });
+    const current = buckets.get(role) || { total: 0, posts: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(role, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([role, stats]) => ({
+      role,
+      posts: stats.posts,
+      avgEngagement: Math.round(stats.total / Math.max(1, stats.posts)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildNetworkClusterPerformance(history: TweetPerformance[]): AgentLearnings['networkClusterPerformance'] {
+  const buckets = new Map<AudienceSegment, { total: number; posts: number; wins: number }>();
+  for (const entry of history) {
+    const cluster = entry.networkCluster || entry.targetAudienceSegment || inferAudienceSegment(entry.content, entry.topic);
+    const current = buckets.get(cluster) || { total: 0, posts: 0, wins: 0 };
+    current.total += weightedEngagementScore(entry);
+    current.posts += 1;
+    if (entry.wasViral || weightedEngagementScore(entry) >= 40) current.wins += 1;
+    buckets.set(cluster, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([cluster, stats]) => ({
+      cluster,
+      posts: stats.posts,
+      avgEngagement: Math.round(stats.total / Math.max(1, stats.posts)),
+      wins: stats.wins,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.posts - a.posts);
+}
+
+function buildTopRelationshipHandles(mentions: Mention[]): NonNullable<AgentLearnings['topRelationshipHandles']> {
+  const buckets = new Map<string, { interactions: number; total: number; lastSeenAt: string }>();
+  for (const mention of mentions) {
+    const handle = mention.authorHandle.replace(/^@/, '').trim().toLowerCase();
+    if (!handle) continue;
+    const current = buckets.get(handle) || { interactions: 0, total: 0, lastSeenAt: mention.createdAt };
+    current.interactions += 1;
+    current.total += mention.engagementLikes + (mention.engagementRetweets * 2);
+    if (parsePerformanceTimestamp(mention.createdAt) > parsePerformanceTimestamp(current.lastSeenAt)) {
+      current.lastSeenAt = mention.createdAt;
+    }
+    buckets.set(handle, current);
+  }
+
+  return [...buckets.entries()]
+    .map(([handle, stats]) => ({
+      handle,
+      interactions: stats.interactions,
+      avgEngagement: Math.round(stats.total / Math.max(stats.interactions, 1)),
+      lastSeenAt: stats.lastSeenAt,
+    }))
+    .sort((a, b) => b.avgEngagement - a.avgEngagement || b.interactions - a.interactions)
+    .slice(0, 12);
+}
+
+function analysisLikeBaseline(history: TweetPerformance[]): number {
+  if (history.length === 0) return 10;
+  const likes = history.map((entry) => entry.likes).sort((a, b) => a - b);
+  const middle = Math.floor(likes.length / 2);
+  return likes.length % 2 === 0
+    ? Math.round((likes[middle - 1] + likes[middle]) / 2)
+    : likes[middle];
+}
+
+function qualityGrowthScore(entry: TweetPerformance): number {
+  return entry.qualityAdjustedGrowthScore
+    ?? entry.actionRewards?.qualityAdjustedGrowthScore
+    ?? computeActionRewards(entry).qualityAdjustedGrowthScore
+    ?? 50;
+}
+
+const VELOCITY_FOLLOWUP_SOUL_LIMIT = 1000;
+const VELOCITY_FOLLOWUP_POST_LIMIT = 1200;
+
+function compactVelocityFollowupPromptText(value: string, limit: number): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= limit) return compacted;
+  return `${compacted.slice(0, limit - 3).trimEnd()}...`;
+}
+
+export function formatVelocityFollowupSoulForPrompt(soulMd: string | null | undefined): string {
+  if (!soulMd?.trim()) return 'No SOUL.md provided.';
+  return compactVelocityFollowupPromptText(soulMd, VELOCITY_FOLLOWUP_SOUL_LIMIT);
+}
+
+export function formatVelocityFollowupPostForPrompt(content: string): string {
+  return compactVelocityFollowupPromptText(content, VELOCITY_FOLLOWUP_POST_LIMIT);
+}
+
+export function getVelocityFollowupMaxTokens(originalLength: number): number {
+  if (originalLength <= 280) return 256;
+  if (originalLength <= 1000) return 384;
+  return 512;
+}
+
+async function createVelocityFollowupDraft(
+  agent: Agent,
+  entry: TweetPerformance,
+  allTweets: Tweet[],
+): Promise<Tweet | null> {
+  if (!shouldCreateVelocityFollowup(entry)) return null;
+  if (allTweets.some((tweet) => tweet.followupForTweetId && String(tweet.followupForTweetId) === String(entry.xTweetId))) {
+    return null;
+  }
+
+  const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
+  const analysis = await getAnalysis(agent.id);
+  if (!analysis) return null;
+  const context = await buildGenerationContext(agent, {
+    negativeLimit: 6,
+    directiveLimit: 10,
+  });
+  const checkedAt = entry.checkedAt || new Date().toISOString();
+  const evidence: { originalPost: GenerationEvidenceReference; performance: GenerationEvidenceReference } = {
+    originalPost: {
+      id: `x-post:${entry.xTweetId}`,
+      kind: 'original_post',
+      sourceDocumentId: null,
+      url: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${entry.xTweetId}`,
+      title: 'Original post',
+      publisher: agent.handle.replace(/^@/, ''),
+      content: entry.content,
+      publishedAt: entry.postedAt,
+      verifiedAt: checkedAt,
+      expiresAt: null,
+      trustTier: 'primary',
+    },
+    performance: {
+      id: `performance:${entry.xTweetId}:${checkedAt}`,
+      kind: 'performance_snapshot',
+      sourceDocumentId: null,
+      url: null,
+      title: 'Observed X performance',
+      publisher: 'X API',
+      content: JSON.stringify({
+        likes: entry.likes,
+        reposts: entry.retweets,
+        replies: entry.replies,
+        impressions: entry.impressions,
+        engagementRate: entry.engagementRate,
+        earlyVelocityScore: entry.earlyVelocityScore ?? null,
+      }),
+      publishedAt: checkedAt,
+      verifiedAt: checkedAt,
+      expiresAt: new Date(Date.parse(checkedAt) + 6 * 60 * 60 * 1000).toISOString(),
+      trustTier: 'primary',
+    },
+  };
+  const [candidate] = await generatePublishingBatchV2({
+    agentId: agent.id,
+    count: 1,
+    request: {
+      surface: 'followup',
+      triggerId: `early-velocity:${entry.xTweetId}:${checkedAt}`,
+      originalPost: evidence.originalPost,
+      performance: evidence.performance,
+    },
+    voiceProfile: context.voiceProfile,
+    analysis,
+    learnings: context.learnings,
+    style: context.style,
+    recentPosts: context.recentPosts,
+    allTweets: context.allTweets,
+    memory: context.memory,
+    signals: context.signals,
+    trending: null,
+    modelStack: PUBLISHING_V2_MODEL_STACK,
+    mode: 'live',
+    entitlement,
+  });
+  if (!candidate) return null;
+
+  const tweet = await createTweetFromGeneratedCandidate(agent.id, candidate, {
+    status: 'draft',
+    type: 'reply',
+    topic: entry.topic || 'followup',
+    followupForTweetId: entry.xTweetId,
+    replyConversationId: entry.xTweetId,
+  });
+  await updateTweet(tweet.id, {
+    followupTrigger: `early_velocity:${entry.earlyVelocityScore ?? 0}`,
+  });
+
+  await addPostLogEntry(agent.id, {
+    agentId: agent.id,
+    tweetId: tweet.id,
+    xTweetId: entry.xTweetId,
+    content: tweet.content,
+    format: 'velocity_followup_draft',
+    topic: entry.topic || 'followup',
+    postedAt: new Date().toISOString(),
+    source: 'cron',
+    action: 'skipped',
+    reason: 'Created a supervised V2 follow-up draft from verified early-velocity evidence.',
+  });
+
+  return tweet;
+}
 /**
  * Check performance of ALL recent tweets on the timeline.
  * Tracks both Clawfable-posted and manually written tweets.
  * Manually written tweets are the richest training signal — they show
  * what the human operator writes when they want maximum engagement.
  */
-export async function checkPerformance(agent: Agent): Promise<number> {
+export interface CheckPerformanceOptions {
+  timelineLimit?: number;
+  classificationBacklogLimit?: number;
+}
+
+export async function checkPerformance(
+  agent: Agent,
+  options: CheckPerformanceOptions = {},
+): Promise<number> {
+  await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
     return 0;
   }
@@ -42,14 +725,70 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   });
 
   // Get existing performance entries to avoid re-checking
-  const existing = await getPerformanceHistory(agent.id, 500);
-  const checkedXIds = new Set(existing.map((e) => String(e.xTweetId)));
+  const existing = await getPerformanceHistory(agent.id, 2000);
+  const latestByXId = latestPerformanceByXId(existing);
+  const [postLog, signals, settings] = await Promise.all([
+    getPostLog(agent.id, 200),
+    getLearningSignals(agent.id, 500),
+    getProtocolSettings(agent.id),
+  ]);
+  const manualSignals = manualPostSuccessSignals(signals);
 
-  // Fetch full recent timeline (all tweets, not just ours)
+  if (hasRecentReadEndpointFailure(postLog, 'performance_timeline_error')) {
+    return 0;
+  }
+
+  const timelineLimit = Math.max(1, Math.min(1000, Math.floor(options.timelineLimit || 300)));
+  const classificationBacklogLimit = Math.max(
+    1,
+    Math.min(300, Math.floor(options.classificationBacklogLimit || 60)),
+  );
+
+  // Fetch full recent timeline (all tweets, not just ours). Protected quality
+  // refreshes can page deeper without increasing every cron read.
   let timeline;
   try {
-    timeline = await getUserTimeline(keys, String(agent.xUserId), 100);
-  } catch {
+    timeline = timelineLimit > 300
+      ? await getDeepTimeline(keys, String(agent.xUserId), timelineLimit)
+      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit);
+  } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    if (invalidCredentials) {
+      await invalidateAgentConnection(agent.id);
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X credentials rejected by X. Agent disconnected, reconnect in Settings. '
+      : rateLimited
+        ? `X performance timeline read rate limited${resetAt ? ` until ${resetAt}` : ''}; learning will retry on a later cron run. `
+        : transient
+          ? 'Transient X performance timeline failure; learning will retry on a later cron run. '
+          : '';
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'performance_timeline_error',
+      topic: 'learning',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'error',
+      reason: `${prefix}${formatActionError(err, 'fetch_timeline_for_performance', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'fetch_timeline_for_performance',
+    });
     return 0;
   }
 
@@ -59,17 +798,59 @@ export async function checkPerformance(agent: Agent): Promise<number> {
   const allTweets = await getTweets(agent.id);
   const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
   const ourTweetMap = new Map(allTweets.filter((t) => t.xTweetId).map((t) => [String(t.xTweetId), t]));
+  const followupTargets = new Set(
+    allTweets
+      .filter((tweet) => tweet.followupForTweetId)
+      .map((tweet) => String(tweet.followupForTweetId))
+  );
+
+  // Also include reply xTweetIds from the post log (replies aren't in getTweets)
+  const replyXIds = new Set(
+    postLog
+      .filter((e) => (e.format === 'auto_reply' || e.format === 'auto_reply_high_value' || e.format === 'proactive_reply') && e.xTweetId)
+      .map((e) => String(e.xTweetId))
+  );
+  for (const xid of replyXIds) ourXIds.add(xid);
 
   const analysis = await getAnalysis(agent.id);
   const viralThreshold = analysis?.engagementPatterns?.viralThreshold || 30;
+  const performanceBaseline = buildPerformanceSignalBaseline(collapsePerformanceSnapshots(existing));
 
-  // Collect new tweets to track
-  const newTweets = timeline.filter((t) => !checkedXIds.has(String(t.id)));
+  // Collect new checkpoints plus bounded classification and metric-migration
+  // backlogs. Fresh snapshots let later runs move through old rows without
+  // reprocessing already migrated posts.
+  const checkedAtForRun = new Date().toISOString();
+  const classificationBacklog = selectTweetClassificationBacklog(
+    timeline,
+    latestByXId,
+    ourXIds,
+    classificationBacklogLimit,
+  );
+  const classificationBacklogIds = new Set(classificationBacklog.map((tweet) => String(tweet.id)));
+  const directMetricBackfillIds = new Set(selectTweetDirectMetricBackfill(
+    timeline,
+    latestByXId,
+    classificationBacklogLimit,
+  ).map((tweet) => String(tweet.id)));
+  const newTweets = timeline.filter((tweet) => (
+    classificationBacklogIds.has(String(tweet.id))
+    || directMetricBackfillIds.has(String(tweet.id))
+    || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
+  ));
   if (newTweets.length === 0) return 0;
 
-  // Batch classify manually written tweets via Claude (up to 20 at a time)
-  const manualTweets = newTweets.filter((t) => !ourXIds.has(String(t.id)));
-  const classifications = await batchClassifyTweets(manualTweets.slice(0, 20));
+  const classificationChunks = Array.from(
+    { length: Math.ceil(classificationBacklog.length / 20) },
+    (_, index) => classificationBacklog.slice(index * 20, (index + 1) * 20),
+  );
+  const classificationResults: Array<Awaited<ReturnType<typeof batchClassifyTweets>>> = [];
+  const classificationConcurrency = 3;
+  for (let index = 0; index < classificationChunks.length; index += classificationConcurrency) {
+    classificationResults.push(...await Promise.all(
+      classificationChunks.slice(index, index + classificationConcurrency).map(batchClassifyTweets),
+    ));
+  }
+  const classifications = new Map(classificationResults.flatMap((result) => [...result.entries()]));
 
   let tracked = 0;
 
@@ -77,57 +858,181 @@ export async function checkPerformance(agent: Agent): Promise<number> {
     const isOurs = ourXIds.has(String(timelineTweet.id));
     const ourTweet = isOurs ? ourTweetMap.get(String(timelineTweet.id)) : null;
     const classification = classifications.get(String(timelineTweet.id));
+    const inferredFeatures = extractCandidateFeatureTags(timelineTweet.text, {
+      topic: ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general',
+    });
 
-    const totalEngagement = timelineTweet.likes + timelineTweet.retweets + (timelineTweet.replies ?? 0);
+    const totalEngagement = timelineTweet.likes
+      + timelineTweet.retweets
+      + (timelineTweet.replies ?? 0)
+      + (timelineTweet.quotes ?? 0)
+      + (timelineTweet.bookmarks ?? 0);
     const engagementRate = timelineTweet.impressions > 0
       ? Math.round((totalEngagement / timelineTweet.impressions) * 10000) / 100
       : 0;
+    const format = ourTweet?.format || replyLogEntry(postLog, String(timelineTweet.id))?.format || classification?.format || 'unknown';
+    const topic = ourTweet?.topic || replyLogEntry(postLog, String(timelineTweet.id))?.topic || classification?.topic || 'general';
+    const targetAudienceSegment = ourTweet?.targetAudienceSegment || inferAudienceSegment(timelineTweet.text, topic);
+    const promptStrategy = ourTweet?.promptStrategy || inferPromptStrategy({
+      creativeLane: ourTweet?.creativeLane,
+      sourceLane: ourTweet?.sourceLane,
+      featureTags: inferredFeatures,
+      content: timelineTweet.text,
+    });
+    const checkedAt = new Date().toISOString();
+    const performanceCheckpoint = inferPerformanceCheckpoint(timelineTweet.createdAt, checkedAt);
 
     const entry: TweetPerformance = {
       tweetId: ourTweet?.id || '',
       xTweetId: String(timelineTweet.id),
       content: timelineTweet.text,
-      format: ourTweet?.format || classification?.format || 'unknown',
-      topic: ourTweet?.topic || classification?.topic || 'general',
-      hook: classification?.hook,
-      tone: classification?.tone,
-      specificity: classification?.specificity,
+      format,
+      topic,
+      hook: classification?.hook || inferredFeatures.hook,
+      tone: classification?.tone || inferredFeatures.tone,
+      specificity: classification?.specificity || inferredFeatures.specificity,
+      structure: inferredFeatures.structure || extractStructureType(timelineTweet.text),
+      thesis: inferredFeatures.thesis,
       postedAt: timelineTweet.createdAt,
-      checkedAt: new Date().toISOString(),
+      checkedAt,
       likes: timelineTweet.likes,
       retweets: timelineTweet.retweets,
       replies: timelineTweet.replies ?? 0,
+      quotes: timelineTweet.quotes ?? 0,
+      bookmarks: timelineTweet.bookmarks ?? 0,
       impressions: timelineTweet.impressions ?? 0,
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,
-      source: isOurs ? 'autopilot' : 'timeline',
+      source: isOurs
+        ? (wasManuallyPosted(ourTweet?.id, String(timelineTweet.id), manualSignals) ? 'manual' : 'autopilot')
+        : 'timeline',
+      styleMode: ourTweet?.styleMode ?? STANDARD_STYLE_MODE,
+      creativeLane: ourTweet?.creativeLane ?? undefined,
+      targetAudienceSegment,
+      promptStrategy,
+      mediaExperimentType: ourTweet?.mediaExperimentType ?? undefined,
+      mediaBrief: ourTweet?.mediaBrief ?? undefined,
+      portfolioRole: ourTweet?.portfolioRole ?? undefined,
+      relationshipTargetHandle: ourTweet?.relationshipTargetHandle ?? undefined,
+      followupForTweetId: ourTweet?.followupForTweetId ?? undefined,
+      followupTrigger: ourTweet?.followupTrigger ?? undefined,
+      trendFitScore: ourTweet?.trendFitScore ?? undefined,
+      networkCluster: targetAudienceSegment,
+      performanceCheckpoint,
+      draftExperimentId: ourTweet?.draftExperimentId ?? undefined,
+      experimentBatchId: ourTweet?.experimentBatchId ?? undefined,
+      experimentHoldout: ourTweet?.experimentHoldout === true,
+      surpriseScore: ourTweet?.surpriseScore ?? undefined,
+      creativeRiskScore: ourTweet?.creativeRiskScore ?? undefined,
+      slopScore: ourTweet?.slopScore ?? scoreSlopRisk(timelineTweet.text, inferredFeatures),
+      replyBaitScore: ourTweet?.replyBaitScore ?? scoreReplyPotential(timelineTweet.text, inferredFeatures),
+      referenceType: timelineTweet.referenceType,
+      referencedTweetId: timelineTweet.referencedTweetId,
+      hasMedia: timelineTweet.hasMedia,
+      isTextComplete: timelineTweet.isTextComplete,
     };
+    const spreadSignal = computeRelativeSpreadSignal(entry, performanceBaseline);
+    entry.relativeSpreadScore = spreadSignal.score;
+    entry.spreadMetricCoverage = spreadSignal.metricCoverage;
+    entry.wasViral ||= spreadSignal.score >= 0.78;
+    entry.actionRewards = computeActionRewards(entry, {
+      avgLikes: analysis?.engagementPatterns?.avgLikes || performanceBaseline.likes,
+      avgRetweets: analysis?.engagementPatterns?.avgRetweets || performanceBaseline.retweets,
+      avgQuotes: performanceBaseline.quotes || undefined,
+      avgBookmarks: performanceBaseline.bookmarks || undefined,
+    });
+    entry.qualityAdjustedGrowthScore = entry.actionRewards.qualityAdjustedGrowthScore;
+    entry.earlyVelocityScore = computeEarlyVelocityScore(entry);
 
     await addPerformanceEntry(agent.id, entry);
+    if (settings.earlyVelocityFollowups !== false && !followupTargets.has(String(entry.xTweetId)) && shouldCreateVelocityFollowup(entry)) {
+      await createVelocityFollowupDraft(agent, entry, allTweets);
+      followupTargets.add(String(entry.xTweetId));
+    }
     tracked++;
+  }
+
+  // Detect manual deletions: posted tweets whose xTweetId is no longer on the timeline
+  // Only check tweets posted in the last 7 days (older tweets naturally fall off the timeline API)
+  const timelineXIds = new Set(timeline.map((t) => String(t.id)));
+  const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const postedEntries = new Map(
+    postLog
+      .filter((entry) => entry.action === 'posted' && entry.tweetId)
+      .map((entry) => [String(entry.tweetId), entry])
+  );
+  const postedTweets = allTweets.filter((t) => {
+    if (t.status !== 'posted' || !t.xTweetId) return false;
+    const postedAt = postedEntries.get(String(t.id))?.postedAt || t.createdAt;
+    return new Date(postedAt).getTime() > recentCutoff;
+  });
+
+  for (const tweet of postedTweets) {
+    if (!timelineXIds.has(String(tweet.xTweetId))) {
+      // Tweet was deleted from X — mark it
+      try {
+        await updateTweet(tweet.id, { status: 'deleted_from_x' as any });
+        const inferredReason = await inferDeleteIntent({
+          agentName: agent.name,
+          soulMd: agent.soulMd,
+          tweetText: tweet.content,
+        });
+        await saveFeedback(agent.id, {
+          tweetId: tweet.id,
+          tweetText: tweet.content,
+          rating: 'down',
+          generatedAt: new Date().toISOString(),
+          intentSummary: inferredReason,
+          source: 'queue_delete',
+          userProvidedReason: false,
+        });
+        await addLearningSignal(agent.id, {
+          tweetId: tweet.id,
+          xTweetId: tweet.xTweetId || undefined,
+          signalType: 'deleted_from_x',
+          surface: 'cron',
+          rewardDelta: -0.8,
+          reason: inferredReason,
+          inferred: true,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: tweet.id,
+          xTweetId: tweet.xTweetId || '',
+          content: tweet.content,
+          format: 'deletion_detected',
+          topic: tweet.topic || 'general',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: 'skipped',
+          reason: 'Tweet deleted from X — inferred reason captured, operator can still override it',
+        });
+      } catch { /* non-critical */ }
+    }
   }
 
   return tracked;
 }
 
 /**
- * Batch classify tweets using Claude. Extracts format, topic, hook type,
+ * Batch classify tweets using the fast AI tier. Extracts format, topic, hook type,
  * tone, and specificity for each tweet. This is the key to learning from
  * manually written tweets — we can't learn from them without knowing what
  * dimensions they express.
  */
 async function batchClassifyTweets(
   tweets: Array<{ id: string; text: string }>
-): Promise<Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>> {
-  const result = new Map<string, { format: string; topic: string; hook: string; tone: string; specificity: string }>();
+): Promise<Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>> {
+  const result = new Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>();
   if (tweets.length === 0) return result;
 
   try {
-    const tweetList = tweets.map((t, i) => `[${i}] "${t.text.slice(0, 300)}"`).join('\n');
+    const tweetList = formatTweetClassificationList(tweets);
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+    const response = await generateText({
+      task: 'classification',
+      tier: 'fast',
+      maxTokens: getTweetClassificationMaxTokens(tweets.length),
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
 - "idx": the tweet index number
 - "format": one of: hot_take, question, data_point, short_punch, long_form, analysis, observation, thread_hook, story, announcement
@@ -137,13 +1042,10 @@ async function batchClassifyTweets(
 - "specificity": abstract, concrete, data_driven
 
 Output ONLY JSON objects, one per line, no other text.`,
-      messages: [{ role: 'user', content: `Classify these tweets:\n${tweetList}` }],
+      prompt: `Classify these tweets:\n${tweetList}`,
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
@@ -155,9 +1057,9 @@ Output ONLY JSON objects, one per line, no other text.`,
           result.set(String(tweets[idx].id), {
             format: parsed.format || 'unknown',
             topic: parsed.topic || 'general',
-            hook: parsed.hook || 'observation',
-            tone: parsed.tone || 'casual',
-            specificity: parsed.specificity || 'concrete',
+            hook: (parsed.hook || 'observation') as TweetPerformance['hook'],
+            tone: (parsed.tone || 'casual') as TweetPerformance['tone'],
+            specificity: (parsed.specificity || 'concrete') as TweetPerformance['specificity'],
           });
         }
       } catch { /* skip malformed lines */ }
@@ -176,10 +1078,29 @@ Output ONLY JSON objects, one per line, no other text.`,
  * and generates prescriptive rules for generation.
  */
 export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
-  const history = await getPerformanceHistory(agent.id, 500);
+  await backfillAudienceVoiceComplaints(agent.id, 1000);
+  const rawHistory = await getPerformanceHistory(agent.id, 2000);
+  const [allTweets, manualExampleCuration, signals, mentions, postLog] = await Promise.all([
+    getTweets(agent.id),
+    getManualExampleCuration(agent.id),
+    getLearningSignals(agent.id, 500),
+    getRecentMentions(agent.id, 500).catch(() => []),
+    getPostLog(agent.id, 300).catch(() => []),
+  ]);
+  const learningMentions = filterLearningMentions(mentions);
+  let history = normalizeManualPerformanceSources(collapsePerformanceSnapshots(rawHistory), signals);
 
   if (history.length === 0) {
-    return {
+    const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
+      agentId: agent.id,
+      accountHandle: agent.handle,
+      history: [],
+      tweets: allTweets,
+      postLog,
+      signals,
+      curation: manualExampleCuration,
+    });
+    const emptyLearnings: AgentLearnings = {
       agentId: agent.id,
       updatedAt: new Date().toISOString(),
       totalTracked: 0,
@@ -190,46 +1111,202 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       formatRankings: [],
       topicRankings: [],
       insights: [],
+      manualExampleCuration,
+      voiceCorpus: {
+        snapshotId: voiceCorpusSnapshot.snapshotId,
+        version: voiceCorpusSnapshot.version,
+        active: voiceCorpusSnapshot.active,
+        targetAnchorCount: voiceCorpusSnapshot.targetAnchorCount,
+        minimumAnchorCount: voiceCorpusSnapshot.minimumAnchorCount,
+        anchorCount: voiceCorpusSnapshot.anchorCount,
+        topicSignalCount: voiceCorpusSnapshot.topicSignalCount,
+        mechanicsOnlyCount: voiceCorpusSnapshot.mechanicsOnlyCount,
+        negativeCount: voiceCorpusSnapshot.negativeCount,
+        excludedCount: voiceCorpusSnapshot.excludedCount,
+        knownGeneratedAnchorCount: voiceCorpusSnapshot.knownGeneratedAnchorCount,
+        generatedAt: voiceCorpusSnapshot.generatedAt,
+      },
+      styleModePerformance: buildStyleModePerformance([], allTweets, signals),
+      audienceSegmentPerformance: [],
+      promptStrategyPerformance: [],
+      mediaExperimentPerformance: [],
+      portfolioRolePerformance: [],
+      networkClusterPerformance: [],
+      topRelationshipHandles: [],
+      viralityPostmortems: [],
+      frontierForecastProfile: buildFrontierForecastLearningProfile([]),
     };
+    await Promise.all([
+      saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot),
+      saveLearnings(agent.id, emptyLearnings),
+    ]);
+    return emptyLearnings;
   }
 
-  // Sort by engagement
-  const sorted = [...history].sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets));
+  const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
+    agentId: agent.id,
+    accountHandle: agent.handle,
+    history,
+    tweets: allTweets,
+    postLog,
+    signals,
+    curation: manualExampleCuration,
+  });
+  await saveVoiceCorpusSnapshot(agent.id, voiceCorpusSnapshot);
+  history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
+
+  const performanceBaseline = buildPerformanceSignalBaseline(history);
+  history = history.map((entry) => {
+    const spread = computeRelativeSpreadSignal(entry, performanceBaseline);
+    return {
+      ...entry,
+      relativeSpreadScore: spread.score,
+      spreadMetricCoverage: spread.metricCoverage,
+    };
+  });
+  const policyLearningHistory = history.filter((entry) => (
+    isEligibleForAccountPolicyLearning(agent, entry, allTweets)
+  ));
+
+  const autopilotHistory = policyLearningHistory.filter((t) => t.source === 'autopilot');
+  const manualHistory = policyLearningHistory.filter((t) => t.source === 'manual');
+  const timelineHistory = policyLearningHistory.filter((t) => t.source === 'timeline');
+  const operatorReferenceHistory = policyLearningHistory.filter((tweet) => tweet.voiceCorpusDispositions?.includes('diction_anchor'));
+  const operatorHistory = policyLearningHistory.filter((tweet) => tweet.voiceCorpusDispositions?.includes('topic_signal'));
+  const trainingHistory = operatorHistory.length > 0
+    ? policyLearningHistory
+    : autopilotHistory.length >= 10
+      ? autopilotHistory
+      : policyLearningHistory;
+  const sourceBreakdown = {
+    autopilot: autopilotHistory.length,
+    manual: manualHistory.length,
+    timeline: timelineHistory.length,
+    trainingCount: trainingHistory.length,
+    trainingSource: operatorHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' as const : 'mixed' as const,
+  };
+
+  // Sort by weighted engagement
+  const sorted = [...trainingHistory].sort((a, b) =>
+    weightedLearningScore(b) - weightedLearningScore(a) ||
+    weightedEngagementScore(b) - weightedEngagementScore(a)
+  );
+  const identityHistory = operatorReferenceHistory.length > 0
+    ? operatorReferenceHistory
+    : operatorHistory.length > 0
+      ? operatorHistory
+      : trainingHistory;
+  const identitySorted = [...identityHistory].sort((a, b) =>
+    weightedLearningScore(b) - weightedLearningScore(a) ||
+    weightedEngagementScore(b) - weightedEngagementScore(a)
+  );
 
   const totalLikes = history.reduce((s, h) => s + h.likes, 0);
   const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
+  const globalSignalAverage = trainingHistory.length > 0
+    ? trainingHistory.reduce((sum, entry) => sum + weightedLearningScore(entry), 0) / trainingHistory.length
+    : 0;
 
   // Format rankings
-  const formatMap: Record<string, { total: number; count: number }> = {};
-  for (const h of history) {
+  const formatMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
+  for (const h of trainingHistory) {
     const f = h.format || 'unknown';
     if (f === 'unknown') continue; // skip unclassified
-    if (!formatMap[f]) formatMap[f] = { total: 0, count: 0 };
-    formatMap[f].total += h.likes + h.retweets;
+    if (!formatMap[f]) formatMap[f] = { total: 0, count: 0, signalTotal: 0 };
+    formatMap[f].total += weightedEngagementScore(h);
+    formatMap[f].signalTotal += weightedLearningScore(h);
     formatMap[f].count++;
   }
   const formatRankings = Object.entries(formatMap)
     .map(([format, d]) => ({ format, avgEngagement: Math.round(d.total / d.count), count: d.count }))
-    .sort((a, b) => b.avgEngagement - a.avgEngagement);
+    .sort((a, b) => {
+      const left = confidenceAdjustedPerformanceAverage(
+        formatMap[a.format].signalTotal,
+        formatMap[a.format].count,
+        globalSignalAverage,
+      );
+      const right = confidenceAdjustedPerformanceAverage(
+        formatMap[b.format].signalTotal,
+        formatMap[b.format].count,
+        globalSignalAverage,
+      );
+      return right - left || b.avgEngagement - a.avgEngagement;
+    });
 
   // Topic rankings
-  const topicMap: Record<string, { total: number; count: number }> = {};
-  for (const h of history) {
-    const t = h.topic || 'general';
+  const topicMap: Record<string, { total: number; count: number; signalTotal: number }> = {};
+  for (const h of trainingHistory) {
+    const t = canonicalizeLearningTopic(h);
     if (t === 'general' || t === 'unknown') continue;
-    if (!topicMap[t]) topicMap[t] = { total: 0, count: 0 };
-    topicMap[t].total += h.likes + h.retweets;
+    if (!topicMap[t]) topicMap[t] = { total: 0, count: 0, signalTotal: 0 };
+    topicMap[t].total += weightedEngagementScore(h);
+    topicMap[t].signalTotal += weightedLearningScore(h);
     topicMap[t].count++;
   }
   const topicRankings = Object.entries(topicMap)
     .map(([topic, d]) => ({ topic, avgEngagement: Math.round(d.total / d.count), count: d.count }))
-    .sort((a, b) => b.avgEngagement - a.avgEngagement);
+    .sort((a, b) => {
+      const left = confidenceAdjustedPerformanceAverage(
+        topicMap[a.topic].signalTotal,
+        topicMap[a.topic].count,
+        globalSignalAverage,
+      );
+      const right = confidenceAdjustedPerformanceAverage(
+        topicMap[b.topic].signalTotal,
+        topicMap[b.topic].count,
+        globalSignalAverage,
+      );
+      return right - left || b.avgEngagement - a.avgEngagement;
+    });
 
-  // Compute style fingerprint from top 30 tweets
-  const styleFingerprint = computeStyleFingerprint(sorted.slice(0, 30), sorted.slice(-10));
+  // Engagement can learn from every post. Identity cannot: once manual/operator
+  // evidence exists, generated posts are excluded from the style fingerprint.
+  const styleFingerprint = computeStyleFingerprint(identitySorted.slice(0, 30), identitySorted.slice(-10));
+  const operatorVoiceReference = buildOperatorVoiceReference(
+    operatorReferenceHistory,
+    manualExampleCuration,
+    voiceCorpusSnapshot.snapshotId,
+  );
+  // Diction stays restricted to the clean anchor corpus, while topic taste can
+  // learn from the broader high-confidence operator corpus.
+  const manualTopicProfile = buildManualTopicProfile(operatorHistory, manualExampleCuration);
+  const sourceLanePerformance = buildSourceLanePerformance(policyLearningHistory, allTweets);
+  const styleModePerformance = buildStyleModePerformance(policyLearningHistory, allTweets, signals);
+  const audienceSegmentPerformance = buildAudienceSegmentPerformance(policyLearningHistory);
+  const promptStrategyPerformance = buildPromptStrategyPerformance(policyLearningHistory);
+  const mediaExperimentPerformance = buildMediaExperimentPerformance(policyLearningHistory);
+  const portfolioRolePerformance = buildPortfolioRolePerformance(policyLearningHistory);
+  const networkClusterPerformance = buildNetworkClusterPerformance(policyLearningHistory);
+  const frontierForecastProfile = buildFrontierForecastLearningProfile(policyLearningHistory);
+  const relationshipOpportunities = buildRelationshipOpportunities({
+    agentId: agent.id,
+    mentions: learningMentions,
+    postLog,
+    performanceHistory: history,
+  });
+  const topRelationshipHandles = buildTopRelationshipHandles(learningMentions);
+  const baselineLikes = analysisLikeBaseline(policyLearningHistory);
+  const viralityPostmortems = sorted
+    .filter((entry) => {
+      const engagement = weightedEngagementScore(entry);
+      const quality = qualityGrowthScore(entry);
+      const bigWin = entry.wasViral || engagement >= Math.max(20, baselineLikes * 2) || quality >= 72;
+      const meaningfulMiss = (
+        (entry.source === 'autopilot' || entry.source === 'manual') &&
+        (engagement <= Math.max(2, baselineLikes * 0.35) || quality <= 34)
+      );
+      return bigWin || meaningfulMiss;
+    })
+    .sort((a, b) => {
+      const aDistance = Math.abs(qualityGrowthScore(a) - 50) + (a.wasViral ? 20 : 0);
+      const bDistance = Math.abs(qualityGrowthScore(b) - 50) + (b.wasViral ? 20 : 0);
+      return bDistance - aDistance || weightedLearningScore(b) - weightedLearningScore(a);
+    })
+    .slice(0, 12)
+    .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights
-  const insights = await generateInsights(history, sorted, formatRankings, topicRankings, styleFingerprint);
+  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
 
   const learnings: AgentLearnings = {
     agentId: agent.id,
@@ -243,9 +1320,43 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     topicRankings,
     insights,
     styleFingerprint,
+    operatorVoiceReference,
+    manualTopicProfile,
+    manualExampleCuration,
+    voiceCorpus: {
+      snapshotId: voiceCorpusSnapshot.snapshotId,
+      version: voiceCorpusSnapshot.version,
+      active: voiceCorpusSnapshot.active,
+      targetAnchorCount: voiceCorpusSnapshot.targetAnchorCount,
+      minimumAnchorCount: voiceCorpusSnapshot.minimumAnchorCount,
+      anchorCount: voiceCorpusSnapshot.anchorCount,
+      topicSignalCount: voiceCorpusSnapshot.topicSignalCount,
+      mechanicsOnlyCount: voiceCorpusSnapshot.mechanicsOnlyCount,
+      negativeCount: voiceCorpusSnapshot.negativeCount,
+      excludedCount: voiceCorpusSnapshot.excludedCount,
+      knownGeneratedAnchorCount: voiceCorpusSnapshot.knownGeneratedAnchorCount,
+      generatedAt: voiceCorpusSnapshot.generatedAt,
+    },
+    sourceLanePerformance,
+    styleModePerformance,
+    audienceSegmentPerformance,
+    promptStrategyPerformance,
+    mediaExperimentPerformance,
+    portfolioRolePerformance,
+    networkClusterPerformance,
+    topRelationshipHandles,
+    viralityPostmortems,
+    frontierForecastProfile,
+    sourceBreakdown,
   };
 
   await saveLearnings(agent.id, learnings);
+  if (relationshipOpportunities.length > 0) {
+    await saveRelationshipOpportunities(agent.id, relationshipOpportunities);
+  }
+  if (viralityPostmortems.length > 0) {
+    await saveViralityPostmortems(agent.id, viralityPostmortems);
+  }
 
   // Log it
   await addPostLogEntry(agent.id, {
@@ -262,6 +1373,231 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   });
 
   return learnings;
+}
+
+const STARTUP_REGISTER_TERMS = [
+  'startup', 'founder', 'venture', 'vc', 'invest', 'capital', 'fund', 'company', 'product',
+  'software', 'hardware', 'ai', 'model', 'codex', 'compute', 'market', 'customer', 'sales',
+  'engineering', 'r&d', 'm&a', 'ebitda', 'pe ', 'qqq', 'valuation', 'round', 'talent',
+  'factory', 'manufacturing', 'robot', 'energy', 'space', 'industrial',
+];
+
+const CASUAL_REGISTER_TERMS = [
+  'actually', 'super', 'jus ', 'just ', 'def ', 'obv', 'gonna', 'gotta', 'wanna', 'kinda',
+  'cuz', 'y\'all', 'bro', 'lol', 'come on', 'cooking', 'mad lad', 'zombies', 'badass',
+  'do damage', 'go hard', 'balls', 'chump change', 'gamechanger',
+];
+
+const STARTUP_JUDGMENT_TERMS = [
+  'startup', 'founder', 'company', 'product', 'customer', 'market', 'pricing', 'software',
+  'hardware', 'compute', 'capital', 'invest', 'investing', 'fund', 'vc', 'pe', 'qqq',
+  'valuation', 'round', 'sales', 'talent', 'factory', 'manufacturing', 'robot', 'industrial',
+];
+
+const STIFF_REGISTER_TERMS = [
+  'less cooperative', 'production response', 'depends on whether', 'eventually runs into',
+  'must account for', 'critical strategic', 'therefore', 'moreover', 'increasingly',
+  'commercialization requires', 'the implication is', 'this highlights',
+];
+
+function registerTermHits(value: string, terms: string[]): number {
+  const normalized = value.toLowerCase();
+  return terms.filter((term) => {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (/^[a-z0-9]+$/.test(normalizedTerm) && normalizedTerm.length <= 3) {
+      return new RegExp(`\\b${normalizedTerm}\\b`, 'i').test(normalized);
+    }
+    return normalized.includes(normalizedTerm);
+  }).length;
+}
+
+function buildStartupRegisterExamples(
+  history: TweetPerformance[],
+  pinnedXTweetIds: Set<string>,
+): TweetPerformance[] {
+  const now = Date.now();
+  const scored = history
+    .map((tweet) => {
+      const haystack = `${tweet.topic || ''} ${tweet.content}`.toLowerCase();
+      const topicHits = registerTermHits(haystack, STARTUP_REGISTER_TERMS);
+      const startupJudgmentHits = registerTermHits(haystack, STARTUP_JUDGMENT_TERMS);
+      if (topicHits === 0 || startupJudgmentHits === 0) return null;
+
+      const content = tweet.content.trim();
+      const prose = content
+        .replace(/https?:\/\/\S+/gi, ' ')
+        .replace(/@\w+/g, ' ')
+        .replace(/#[a-z0-9_]+/gi, ' ')
+        .replace(/[^a-z0-9'&+.-]+/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const proseWordCount = prose.split(/\s+/).filter(Boolean).length;
+      const timestampLines = content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}\s*[-–]/.test(line)).length;
+      const mediaDependent = /https?:\/\/\S+/i.test(content) && proseWordCount < 16;
+      const promotionalCaption = /\b(?:follow me|new interview|day \d+ with|powered by)\b/i.test(content);
+      if (mediaDependent || timestampLines >= 2 || promotionalCaption) return null;
+      const lowerOpening = /^[a-z0-9]/.test(content);
+      const casualHits = registerTermHits(` ${content.toLowerCase()} `, CASUAL_REGISTER_TERMS);
+      const situated = /@\w+|https?:\/\//i.test(content);
+      const directQuestion = content.includes('?');
+      const firstPerson = /\b(?:i|we|my|our)\b/i.test(content);
+      const stiffHits = registerTermHits(content, STIFF_REGISTER_TERMS);
+      const generatedRisk = assessGeneratedWritingPatterns(content).score;
+      const incompleteLongPost = content.length > 180 && /(?:,|&|\b(?:and|or|the|a))\s*$/i.test(content);
+      if (stiffHits >= 2 || generatedRisk >= 0.32 || incompleteLongPost) return null;
+      const ageDays = Math.max(0, (now - Date.parse(tweet.postedAt || tweet.checkedAt)) / (24 * 60 * 60 * 1000));
+      const recency = Math.max(0, 1 - (ageDays / 60));
+      const engagement = Math.min(1, Math.log1p(weightedEngagementScore(tweet)) / Math.log(180));
+      const pinned = pinnedXTweetIds.has(String(tweet.xTweetId));
+      const score =
+        Math.min(0.32, topicHits * 0.08)
+        + Math.min(0.18, startupJudgmentHits * 0.06)
+        + Math.min(0.2, casualHits * 0.07)
+        + (lowerOpening ? 0.08 : 0)
+        + (situated ? 0.08 : 0)
+        + (directQuestion ? 0.04 : 0)
+        + (firstPerson ? 0.05 : 0)
+        + (recency * 0.12)
+        + (engagement * 0.16)
+        + (pinned ? 0.35 : 0)
+        - (stiffHits * 0.18)
+        - (generatedRisk * 0.2);
+
+      return { tweet, score };
+    })
+    .filter((entry): entry is { tweet: TweetPerformance; score: number } => Boolean(entry))
+    .sort((a, b) => b.score - a.score || weightedEngagementScore(b.tweet) - weightedEngagementScore(a.tweet));
+
+  const selected: TweetPerformance[] = [];
+  for (const { tweet } of scored) {
+    if (isNearDuplicate(tweet.content, selected.map((entry) => entry.content), 0.4).isDuplicate) continue;
+    selected.push(tweet);
+    if (selected.length >= 8) break;
+  }
+  return selected;
+}
+
+function buildOperatorVoiceReference(
+  history: TweetPerformance[],
+  curation: ManualExampleCuration,
+  corpusVersion?: string,
+): OperatorVoiceReference | undefined {
+  const blocked = new Set(curation.blockedXTweetIds.map((id) => String(id)));
+  const usableHistory = history.filter((tweet) =>
+    tweet.content
+    && tweet.content.trim().length > 0
+    && !blocked.has(String(tweet.xTweetId))
+  );
+  if (usableHistory.length === 0) return undefined;
+
+  const pinnedExamples = usableHistory.filter((tweet) => curation.pinnedXTweetIds.includes(String(tweet.xTweetId)));
+  const sorted = [...usableHistory].sort((a, b) => weightedEngagementScore(b) - weightedEngagementScore(a));
+  const recent = [...usableHistory].sort((a, b) =>
+    Date.parse(b.postedAt || b.checkedAt) - Date.parse(a.postedAt || a.checkedAt)
+  );
+  const hasStandaloneSubstance = (tweet: TweetPerformance) => {
+    const prose = tweet.content
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/@\w+/g, ' ')
+      .replace(/#[a-z0-9_]+/gi, ' ')
+      .replace(/[^a-z0-9'&+.-]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const wordCount = prose.split(/\s+/).filter(Boolean).length;
+    const timestampLines = tweet.content.split('\n').filter((line) => /^\s*\d{1,2}:\d{2}\s*[-–]/.test(line)).length;
+    const dependsOnAttachedMedia = /https?:\/\/\S+/i.test(tweet.content);
+    return wordCount >= (dependsOnAttachedMedia ? 14 : 8) && timestampLines < 2;
+  };
+  const substantiveSorted = sorted.filter(hasStandaloneSubstance);
+  const substantiveRecent = recent.filter(hasStandaloneSubstance);
+  const secondary = sorted.filter((tweet) => !hasStandaloneSubstance(tweet));
+  const topPerformers: TweetPerformance[] = [];
+  const seenIds = new Set<string>();
+  const modeCounts = new Map<string, number>();
+  const addCandidate = (
+    tweet: TweetPerformance,
+    options: { pinned?: boolean; enforceModeDiversity?: boolean } = {},
+  ): boolean => {
+    const id = String(tweet.xTweetId || tweet.tweetId || tweet.content);
+    if (seenIds.has(id)) return false;
+    const pinned = options.pinned === true || curation.pinnedXTweetIds.includes(String(tweet.xTweetId));
+    if (
+      !pinned
+      && isNearDuplicate(tweet.content, topPerformers.map((entry) => entry.content), 0.4).isDuplicate
+    ) {
+      return false;
+    }
+    const lengthMode = tweet.content.length < 120 ? 'short' : tweet.content.length < 360 ? 'medium' : 'long';
+    const socialMode = /^@\w+/.test(tweet.content.trim())
+      ? 'reply'
+      : tweet.content.includes('?')
+        ? 'question'
+        : tweet.content.includes('\n')
+          ? 'linebreak'
+          : 'statement';
+    const registerMode = /\b(?:bro|lol|cuz|ain'?t|bullshit\w*)\b|\.\./i.test(tweet.content)
+      ? 'rough'
+      : 'plain';
+    const signature = [
+      tweet.format || 'unknown',
+      tweet.hook || 'unknown',
+      tweet.tone || 'unknown',
+      lengthMode,
+      socialMode,
+      registerMode,
+    ].join(':');
+    if (!pinned && options.enforceModeDiversity !== false && (modeCounts.get(signature) || 0) >= 2) {
+      return false;
+    }
+    topPerformers.push(tweet);
+    seenIds.add(id);
+    modeCounts.set(signature, (modeCounts.get(signature) || 0) + 1);
+    return true;
+  };
+
+  for (const tweet of pinnedExamples) {
+    addCandidate(tweet, { pinned: true });
+    if (topPerformers.length >= 8) break;
+  }
+
+  const engagementTarget = Math.max(5, topPerformers.length);
+  for (const tweet of substantiveSorted) {
+    addCandidate(tweet);
+    if (topPerformers.length >= engagementTarget) break;
+  }
+
+  for (const tweet of substantiveRecent) {
+    addCandidate(tweet);
+    if (topPerformers.length >= 8) break;
+  }
+
+  for (const tweet of [...substantiveSorted, ...substantiveRecent]) {
+    if (topPerformers.length >= 8) break;
+    addCandidate(tweet, { enforceModeDiversity: false });
+  }
+
+  if (topPerformers.length < 8) {
+    for (const tweet of secondary) {
+      addCandidate(tweet, { enforceModeDiversity: false });
+      if (topPerformers.length >= 8) break;
+    }
+  }
+  const worstPerformers = sorted.slice(-6);
+  if (topPerformers.length === 0) return undefined;
+  const startupRegisterExamples = buildStartupRegisterExamples(
+    usableHistory,
+    new Set(curation.pinnedXTweetIds.map((id) => String(id))),
+  );
+
+  return {
+    sampleCount: usableHistory.length,
+    bestPerformers: topPerformers.slice(0, 8),
+    styleFingerprint: computeStyleFingerprint(topPerformers, worstPerformers),
+    pinnedExamples: pinnedExamples.slice(0, 3),
+    startupRegisterExamples,
+    blockedXTweetIds: [...blocked],
+    corpusVersion,
+  };
 }
 
 /**
@@ -297,7 +1633,9 @@ function computeStyleFingerprint(
   // Count hook types from classified tweets
   const hookCounts: Record<string, number> = {};
   for (const t of top) {
-    if (t.hook) { hookCounts[t.hook] = (hookCounts[t.hook] || 0) + 1; }
+    const inferred = extractCandidateFeatureTags(t.content, { topic: t.topic });
+    const hook = t.hook || inferred.hook;
+    if (hook) { hookCounts[hook] = (hookCounts[hook] || 0) + 1; }
   }
   const topHooks = Object.entries(hookCounts)
     .sort((a, b) => b[1] - a[1])
@@ -306,7 +1644,9 @@ function computeStyleFingerprint(
 
   const toneCounts: Record<string, number> = {};
   for (const t of top) {
-    if (t.tone) { toneCounts[t.tone] = (toneCounts[t.tone] || 0) + 1; }
+    const inferred = extractCandidateFeatureTags(t.content, { topic: t.topic });
+    const tone = t.tone || inferred.tone;
+    if (tone) { toneCounts[tone] = (toneCounts[tone] || 0) + 1; }
   }
   const topTones = Object.entries(toneCounts)
     .sort((a, b) => b[1] - a[1])
@@ -330,6 +1670,40 @@ function computeStyleFingerprint(
     if (worstNoQuestion.length > worst.length * 0.7 && questionRatio > 30) {
       antiPatterns.push('Tweets without questions underperform — your best work asks questions');
     }
+
+    // Extract common opening phrases from worst performers (hard blocklist)
+    const openingPhrases: Record<string, number> = {};
+    for (const t of worst) {
+      // Extract first 5 words as the opening phrase
+      const opening = t.content.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
+      if (opening.length > 10) {
+        openingPhrases[opening] = (openingPhrases[opening] || 0) + 1;
+      }
+    }
+    for (const [phrase, count] of Object.entries(openingPhrases)) {
+      if (count >= 2) {
+        antiPatterns.push(`NEVER start with: "${phrase}" (appeared ${count}x in worst tweets)`);
+      }
+    }
+
+    // Detect topics that consistently get 0 engagement
+    const worstTopics: Record<string, number> = {};
+    for (const t of worst) {
+      if (t.topic && t.topic !== 'general' && t.topic !== 'unknown') {
+        worstTopics[t.topic] = (worstTopics[t.topic] || 0) + 1;
+      }
+    }
+    for (const [topic, count] of Object.entries(worstTopics)) {
+      if (count >= 3) {
+        antiPatterns.push(`Topic "${topic}" consistently underperforms (${count}x in bottom tweets)`);
+      }
+    }
+
+    // Detect if worst tweets have a consistent length pattern
+    const worstAllLong = worst.filter((t) => t.content.length > 500).length > worst.length * 0.6;
+    const worstAllShort = worst.filter((t) => t.content.length < 100).length > worst.length * 0.6;
+    if (worstAllLong) antiPatterns.push('Long tweets (500+ chars) consistently bomb — keep it concise');
+    if (worstAllShort) antiPatterns.push('Very short tweets (<100 chars) consistently bomb — add substance');
   }
 
   return {
@@ -346,18 +1720,26 @@ async function generateInsights(
   formatRankings: AgentLearnings['formatRankings'],
   topicRankings: AgentLearnings['topicRankings'],
   styleFingerprint: StyleFingerprint,
+  sourceBreakdown: NonNullable<AgentLearnings['sourceBreakdown']>,
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
-  const best = sorted.slice(0, 10);
-  const worst = sorted.slice(-10);
-  const timelineTweets = history.filter((t) => t.source === 'timeline');
+  const promptLimits = getLearningInsightPromptLimits(history.length);
+  const best = sorted.slice(0, promptLimits.examples);
+  const worst = sorted.slice(-promptLimits.examples);
+  const operatorTweets = history.filter((t) => t.source !== 'autopilot');
   const autopilotTweets = history.filter((t) => t.source === 'autopilot');
+  const trainingSetLabel = sourceBreakdown.trainingSource === 'autopilot'
+    ? 'autopilot only'
+    : sourceBreakdown.manual > 0
+      ? 'mixed with manually posted high-signal approvals'
+      : 'mixed because autopilot history is still sparse';
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+    const response = await generateText({
+      task: 'learning',
+      tier: 'quality',
+      maxTokens: getLearningInsightMaxTokens(history.length),
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")
 2. Grounded in the data (reference actual numbers)
@@ -366,9 +1748,9 @@ async function generateInsights(
 Include at least one rule about what to STOP doing.
 Include at least one rule comparing autopilot vs manual tweet performance (if both exist).
 Output bullet points, one per line, no numbering.`,
-      messages: [{
-        role: 'user',
-        content: `PERFORMANCE DATA: ${history.length} tweets (${timelineTweets.length} manual, ${autopilotTweets.length} autopilot)
+      prompt: `PERFORMANCE DATA: ${history.length} tweets (${operatorTweets.length} operator-written reference, ${autopilotTweets.length} autopilot)
+TRAINING SET FOR AUTONOMOUS POLICY: ${sourceBreakdown.trainingCount} tweets (${trainingSetLabel})
+VOICE CORPUS RULE: Only rows whose source text is shown are approved diction anchors. Every other row exposes spread mechanics only; never infer wording or cadence from it.
 
 STYLE FINGERPRINT (computed from top 30 tweets):
 - Avg length: ${styleFingerprint.avgLength} chars (${styleFingerprint.shortPct}% short, ${styleFingerprint.mediumPct}% medium, ${styleFingerprint.longPct}% long)
@@ -379,25 +1761,21 @@ STYLE FINGERPRINT (computed from top 30 tweets):
 - Anti-patterns: ${styleFingerprint.antiPatterns.join('; ') || 'none detected'}
 
 FORMAT RANKINGS:
-${formatRankings.slice(0, 8).map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
+${formatRankings.slice(0, promptLimits.rankingRows).map((f) => `- ${f.format}: avg ${f.avgEngagement} engagement, ${f.count} tweets`).join('\n')}
 
 TOPIC RANKINGS:
-${topicRankings.slice(0, 8).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
+${topicRankings.slice(0, promptLimits.rankingRows).map((t) => `- ${t.topic}: avg ${t.avgEngagement} engagement, ${t.count} tweets`).join('\n')}
 
-TOP 10 TWEETS (with full text so you can analyze style):
-${best.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
+TOP ${best.length} TWEETS (native anchor text or mechanics-only summaries):
+${best.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
-BOTTOM 10 TWEETS:
-${worst.map((t) => `- [${t.likes} likes, ${t.retweets} RTs, source:${t.source}] "${t.content.slice(0, 250)}"`).join('\n')}
+BOTTOM ${worst.length} TWEETS:
+${worst.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
 Generate prescriptive rules for improving content quality. Focus on style patterns, not just topics.`,
-      }],
     });
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
 
     return text.split('\n')
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())
@@ -413,20 +1791,23 @@ Generate prescriptive rules for improving content quality. Focus on style patter
  * Called after buildLearnings when we have enough data.
  */
 export async function autoAdjustSettings(agentId: string, learnings: AgentLearnings): Promise<void> {
+  if (learnings.sourceBreakdown?.trainingSource !== 'autopilot') return;
   if (learnings.totalTracked < 10) return; // Need enough data
 
   const settings = await getProtocolSettings(agentId);
+  const trainingCount = learnings.sourceBreakdown?.trainingCount || 0;
 
   // Auto-adjust format list — enable top performers, drop consistent underperformers
-  // Only auto-adjust if user hasn't manually configured formats
-  if ((!settings.enabledFormats || settings.enabledFormats.length === 0) && learnings.formatRankings.length >= 4) {
+  // Only auto-adjust if user hasn't manually configured formats, and only after
+  // we have enough autonomous data to avoid collapsing variety too early.
+  if ((!settings.enabledFormats || settings.enabledFormats.length === 0) && trainingCount >= 24 && learnings.formatRankings.length >= 5) {
     const avgEngagement = learnings.formatRankings.reduce((s, f) => s + f.avgEngagement, 0) / learnings.formatRankings.length;
     // Keep formats that perform at least 30% of average (very loose filter — just drops truly dead formats)
     const viableFormats = learnings.formatRankings
       .filter((f) => f.count >= 3 && f.avgEngagement >= avgEngagement * 0.3)
       .map((f) => f.format);
-    // Only restrict if we have a meaningful distinction (keep at least 4 formats)
-    if (viableFormats.length >= 4 && viableFormats.length < learnings.formatRankings.length) {
+    // Only restrict if we still preserve enough room for experimentation.
+    if (viableFormats.length >= 5 && viableFormats.length < learnings.formatRankings.length) {
       await updateProtocolSettings(agentId, { enabledFormats: viableFormats });
     }
   }
@@ -486,6 +1867,11 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
     if (ageMs < sevenDays) return false;
   }
 
+  const postLog = await getPostLog(agent.id, 200).catch(() => []);
+  if (hasRecentReadEndpointFailure(postLog, 'cron_reanalysis_error')) {
+    return false;
+  }
+
   try {
     const keys = decodeKeys({
       apiKey: agent.apiKey,
@@ -511,7 +1897,45 @@ export async function maybeReanalyze(agent: Agent): Promise<boolean> {
     });
 
     return true;
-  } catch {
+  } catch (err) {
+    const invalidCredentials = isInvalidTwitterCredentialError(err);
+    if (invalidCredentials) {
+      await invalidateAgentConnection(agent.id).catch(() => null);
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    const transient = !rateLimited && isTransientTwitterError(err);
+    const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+    const prefix = invalidCredentials
+      ? 'X credentials rejected by X during auto re-analysis. Agent disconnected, reconnect in Settings. '
+      : rateLimited
+        ? `X auto re-analysis rate limited${resetAt ? ` until ${resetAt}` : ''}; learning will retry on a later cron run. `
+        : transient
+          ? 'Transient X auto re-analysis failure; learning will retry on a later cron run. '
+          : '';
+
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'cron_reanalysis_error',
+      topic: 'analysis',
+      postedAt: new Date().toISOString(),
+      source: 'cron',
+      action: 'error',
+      reason: `${prefix}${formatActionError(err, 'reanalyze_account', {
+        handle: `@${agent.handle}`,
+        xUserId: agent.xUserId,
+      })}`,
+      errorCode: invalidCredentials
+        ? 'x_invalid_credentials'
+        : rateLimited
+          ? 'x_rate_limit'
+          : transient
+            ? 'x_transient'
+            : 'reanalyze_account',
+    }).catch(() => null);
     return false;
   }
 }

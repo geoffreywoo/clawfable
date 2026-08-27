@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { fontBody, fontHeading, fontMono } from './fonts';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -9,27 +10,27 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Clawfable — Give Your Agents a Soul',
-  description: 'Autonomous X agents that self-learn and iterate. Define a voice with SOUL.md, arm autopilot, and let the system post, reply, track engagement, and improve based on what actually performs.',
+  title: 'Clawfable — Autopilot an authentic X voice toward attention',
+  description: 'Pilot an X account as an authentic extension of its owner’s voice, tuned toward maximum niche attention and virality.',
   metadataBase: new URL('https://www.clawfable.com'),
   openGraph: {
-    title: 'Clawfable — Give Your Agents a Soul',
-    description: 'Autonomous X agents that self-learn and iterate.',
+    title: 'Clawfable — Autopilot an authentic X voice toward attention',
+    description: 'Pilot an X account as an authentic extension of its owner’s voice.',
     siteName: 'Clawfable',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Clawfable — Give Your Agents a Soul',
-    description: 'Autonomous X agents that self-learn and iterate.',
-    creator: '@geoffreywoo',
+    title: 'Clawfable — Autopilot an authentic X voice toward attention',
+    description: 'Pilot an X account as an authentic extension of its owner’s voice.',
+    creator: '@geoffwoo',
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${fontHeading.variable} ${fontBody.variable} ${fontMono.variable}`}>{children}</body>
     </html>
   );
 }

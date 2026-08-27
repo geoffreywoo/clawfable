@@ -4,20 +4,20 @@ export type SetupStep = (typeof SETUP_STEPS)[number];
 
 export const SETUP_BANNER_CONTENT: Record<Exclude<SetupStep, 'ready'>, { title: string; desc: string }> = {
   oauth: {
-    title: 'CONNECT X API',
-    desc: 'This agent needs X API credentials before setup can continue.',
+    title: 'CONNECT ACCOUNT',
+    desc: 'Connect X so Clawfable can analyze the account and draft safely. Nothing posts during setup.',
   },
   soul: {
-    title: 'DEFINE VOICE',
-    desc: 'Create or generate a SOUL.md profile so the agent has a clear personality contract.',
+    title: 'DEFINE VOICE CONTRACT',
+    desc: 'Create the voice contract so the agent knows how to sound, what to talk about, and what to avoid.',
   },
   analyze: {
-    title: 'RUN ANALYSIS',
-    desc: 'Analyze the account before preview so generation can use engagement and audience signals.',
+    title: 'LEARN THE ACCOUNT',
+    desc: 'Analyze the account before preview so the first batch is grounded in real engagement and audience signals.',
   },
   preview: {
-    title: 'APPROVE PREVIEW',
-    desc: 'Review the preview batch and approve at least one tweet before autopilot can be armed.',
+    title: 'APPROVE FIRST BATCH',
+    desc: 'Review the first batch and approve at least one tweet before the queue and automation can go live.',
   },
 };
 

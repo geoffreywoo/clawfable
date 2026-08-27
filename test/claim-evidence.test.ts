@@ -1,0 +1,361 @@
+import { describe, expect, it } from 'vitest';
+import { assessClaimEvidence } from '@/lib/claim-evidence';
+import { assessGeneratedWritingPatterns, scoreWritingPatternReuse } from '@/lib/writing-patterns';
+
+describe('claim evidence', () => {
+  it('allows an explicit forecast horizon without waiving other invented numbers', () => {
+    const forecast = assessClaimEvidence(
+      'i think within 12 months AI teams will be the default',
+      [],
+      { allowForecastTimingNumbers: true },
+    );
+    const inventedMetric = assessClaimEvidence(
+      'i think within 12 months AI teams will improve 10x',
+      [],
+      { allowForecastTimingNumbers: true },
+    );
+
+    expect(forecast.unsupportedNumbers).toEqual([]);
+    expect(inventedMetric.unsupportedNumbers).toContain('10x');
+  });
+
+  it('does not treat the number in Hut 8 as a quantitative claim', () => {
+    expect(assessClaimEvidence(
+      'Hut 8 is supplying energy infrastructure beneath HighriseAi.',
+      ['HighriseAi is fueled by energy infrastructure leader Hut8Corp.'],
+      { lockEvidenceConcepts: true },
+    )).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
+  it('requires support for invented first-person reading habits and capital-market mechanisms', () => {
+    expect(assessClaimEvidence('i read seed decks backwards now.', [], { lockEvidenceConcepts: true })).toMatchObject({
+      hasPersonalExperienceClaim: true,
+      personalExperienceSupported: false,
+    });
+    expect(assessClaimEvidence(
+      'most private fund LPs are blindfolded until the redemption window opens.',
+      [],
+      { lockEvidenceConcepts: true },
+    ).unsupportedEvidenceConcepts).toContain('capital-market mechanism');
+  });
+
+  it('blocks invented anonymous anecdotes even when they sound technically specific', () => {
+    const result = assessClaimEvidence(
+      'A machine shop owner showed me two carbide end mills. One ran 11 hours. One chipped after 47 minutes.',
+      ['Tungsten carbide tooling depends on powder metallurgy, binder chemistry, and qualification.'],
+    );
+
+    expect(result.risk).toBeGreaterThanOrEqual(0.8);
+    expect(result.personalExperienceSupported).toBe(false);
+    expect(result.unsupportedNumbers).toEqual(expect.arrayContaining(['11hours', '47minutes']));
+    expect(result.issue).toContain('personal anecdote');
+  });
+
+  it('allows a personal claim when it is grounded in a matching operator anchor', () => {
+    const anchor = 'i remember this trip. i had a call with scott and zach to invest in the cognition series A at $2b.';
+    const result = assessClaimEvidence(anchor, [anchor]);
+
+    expect(result.risk).toBe(0);
+    expect(result.personalExperienceSupported).toBe(true);
+    expect(result.unsupportedNumbers).toEqual([]);
+  });
+
+  it('requires precise numbers to appear in supplied evidence', () => {
+    expect(assessClaimEvidence('The line lost 9 days to bearing failure.', ['Bearing failures stop production.']).risk).toBeGreaterThanOrEqual(0.5);
+    expect(assessClaimEvidence('The line lost 9 days to bearing failure.', ['The incident report says the line lost 9 days.']).risk).toBe(0);
+    expect(assessClaimEvidence('The meeting gets 10x more serious.', ['The portfolio was worth $10b.']).risk).toBeGreaterThan(0.4);
+  });
+
+  it('normalizes percent notation but rejects cross-claim numeric synthesis', () => {
+    const support = [
+      'Of 77 commodities, China produced 74 and ranked first for 39.',
+      'Gallium production reached 98 percent; reserve shares ranged from 20 percent for zinc to 52 percent for tungsten.',
+    ];
+    const scoped = assessClaimEvidence('China produced up to 98% of global gallium.', support);
+    const spliced = assessClaimEvidence(
+      'China led 39 commodities while holding 20–52% of reserves for those same commodities.',
+      support,
+    );
+
+    expect(scoped.unsupportedNumbers).toEqual([]);
+    expect(scoped.crossClaimNumbers).toEqual([]);
+    expect(scoped.risk).toBe(0);
+    expect(spliced.unsupportedNumbers).toEqual([]);
+    expect(spliced.crossClaimNumbers).toEqual(expect.arrayContaining(['39', '20%', '52%']));
+    expect(spliced.issue).toContain('combines separate evidence claims');
+  });
+
+  it('normalizes equivalent compact and written magnitude notation', () => {
+    const support = ['The author says Coverage protects $50B in revenue across more than 1,000 clients.'];
+    const assessment = assessClaimEvidence(
+      'Coverage says it protects $50 billion in revenue across more than 1,000 clients.',
+      support,
+      { lockEvidenceConcepts: true },
+    );
+
+    expect(assessment.unsupportedNumbers).toEqual([]);
+    expect(assessment.issue).toBeNull();
+  });
+
+  it('rejects concrete mechanisms that qualified evidence never establishes', () => {
+    const result = assessClaimEvidence(
+      'The leverage sits in processing and refining capacity, not geology.',
+      ['China produced 74 commodities and ranked first for 39 of them.'],
+      { lockEvidenceConcepts: true },
+    );
+
+    expect(result.unsupportedEvidenceConcepts).toContain('processing or refining');
+    expect(result.risk).toBeGreaterThanOrEqual(0.7);
+    expect(result.issue).toContain('evidence does not establish');
+  });
+
+  it('does not mistake model and product identifiers for unsupported quantities', () => {
+    expect(assessClaimEvidence('Xiaomi-Robotics-1 matters because Xiaomi can ship it.', []).risk).toBe(0);
+    expect(assessClaimEvidence('GPT-5.6 is a model release.', []).risk).toBe(0);
+  });
+
+  it('catches unsupported operational precision written as number words', () => {
+    const invented = assessClaimEvidence(
+      'bro you have three API calls, two are wrappers, and the third returns null.',
+      [],
+    );
+    const supported = assessClaimEvidence(
+      'bro you have three API calls, two are wrappers, and the third returns null.',
+      ['The product currently exposes three API calls.'],
+    );
+
+    expect(invented.unsupportedNumbers).toContain('3apicalls');
+    expect(invented.risk).toBeGreaterThanOrEqual(0.5);
+    expect(supported.risk).toBe(0);
+    expect(assessClaimEvidence('fusion has four clocks: plasma, fuel, wall, inventory.', []).risk).toBe(0);
+  });
+
+  it('blocks synthetic personal rules without matching first-person evidence', () => {
+    const result = assessClaimEvidence(
+      'personal rule: when visiting a factory, photograph the rejected parts.',
+      ['Factory yield depends on understanding rejected parts.'],
+    );
+
+    expect(result.hasPersonalExperienceClaim).toBe(true);
+    expect(result.personalExperienceSupported).toBe(false);
+    expect(result.risk).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('blocks staged dialogue unless the quote appears in source evidence', () => {
+    const content = 'battery independence discourse:\n\n“we found graphite”\n\ncool. now qualify the anode material.';
+    const unsupported = assessClaimEvidence(content, ['A new graphite deposit was reported.']);
+    const supported = assessClaimEvidence(content, ['The source announcement says: “we found graphite”.']);
+
+    expect(unsupported.unsupportedQuotes).toEqual(['we found graphite']);
+    expect(unsupported.risk).toBeGreaterThanOrEqual(0.6);
+    expect(supported.unsupportedQuotes).toEqual([]);
+  });
+});
+
+describe('generated writing patterns', () => {
+  it('blocks the reusable product and valuation skeletons observed in live shadows', () => {
+    const cases: Array<[string, string]> = [
+      ['my bar for Cognition at $40b: Devin has to become the workflow.', 'synthetic-bar-open'],
+      ['my call on Trajectory: model choice should disappear.', 'announced-call-open'],
+      ['Trajectory wins when nobody thinks about which model ran the job.', 'named-subject-wins-when'],
+      ['if users still pick models, the product stopped one layer too early.', 'one-layer-too-early'],
+      ['Cognition no longer gets graded on demos. It gets graded on adoption.', 'graded-reframe'],
+      ['Cognition has no room left to be merely a coding startup.', 'no-room-left-merely'],
+      ['been chewing on Trajectory. model choice is plumbing.', 'invented-chewing-on'],
+    ];
+
+    for (const [content, signature] of cases) {
+      const assessment = assessGeneratedWritingPatterns(content);
+      expect(assessment.hits).toContain(signature);
+      expect(assessment.score).toBeGreaterThanOrEqual(0.28);
+    }
+  });
+
+  it('blocks synthetic superlative verdict labels', () => {
+    expect(assessGeneratedWritingPatterns(
+      "hardest signal to fake in a startup: the customer renews and the founder wasn't in the building.",
+    )).toMatchObject({ primarySignature: 'superlative-colon-verdict', score: 0.52 });
+  });
+
+  it('blocks synthetic company affect forecasts observed in production queue survivors', () => {
+    for (const content of [
+      'i think Lighter can make an exchange screenshot without proof feel embarrassing to post.',
+      'Apple Vision Pro is going to make old home videos emotionally dangerous when they start feeling like rooms you can walk back into.',
+    ]) {
+      expect(assessGeneratedWritingPatterns(content)).toMatchObject({
+        primarySignature: 'synthetic-affect-forecast',
+        score: 0.52,
+      });
+    }
+  });
+
+  it('blocks the production-observed forecast checklist scaffold', () => {
+    expect(assessGeneratedWritingPatterns(
+      'google will make standalone ai search nearly unfundable within 9 months as each gemini generation pushes the cost curve down.',
+    )).toMatchObject({
+      primarySignature: 'forecast-checklist-scaffold',
+      score: 0.52,
+    });
+
+    expect(assessGeneratedWritingPatterns(
+      '9 months feels long.\n\ni think every serious startup ships with an ai agent before then.',
+    )).toMatchObject({ primarySignature: null, score: 0 });
+  });
+
+  it('blocks the generic X is just Y with Z quip mold', () => {
+    expect(assessGeneratedWritingPatterns(
+      'hiring fast before product truth is just anxiety with a payroll attached.',
+    )).toMatchObject({ primarySignature: 'just-y-with-z-reframe', score: 0.34 });
+  });
+
+  it('blocks the recycled pilot is a polite no startup aphorism', () => {
+    expect(assessGeneratedWritingPatterns(
+      'a pilot is an enterprise saying no politely. renewals are the only compliment a buyer ever pays you.',
+    )).toMatchObject({ primarySignature: 'pilot-polite-no-aphorism', score: 0.42 });
+  });
+
+  it('blocks neat one-versus-two aphorism scaffolding', () => {
+    expect(assessGeneratedWritingPatterns(
+      'one purchase is curiosity, two is a habit someone fought accounting for.',
+    )).toMatchObject({ primarySignature: 'one-two-aphorism', score: 0.34 });
+  });
+
+  it('blocks synthetic status replacement flexes', () => {
+    expect(assessGeneratedWritingPatterns(
+      'the patagonia vest is dead as a status symbol. steel toe boots and a hi-vis jacket in your pfp is the new flex',
+    )).toMatchObject({ primarySignature: 'status-replacement-flex', score: 0.42 });
+  });
+
+  it('blocks generic if-your-edge advice contrasts', () => {
+    expect(assessGeneratedWritingPatterns(
+      "if your edge is distribution, not research, i'd take the scaled incumbent every time.",
+    )).toMatchObject({ primarySignature: 'if-your-edge-is', score: 0.42 });
+  });
+
+  it('detects repeated anonymous-anecdote scaffolds', () => {
+    const candidate = 'A founder showed me an inspection robot. The exception path preserved the labor.';
+    const assessment = assessGeneratedWritingPatterns(candidate);
+    const reuse = scoreWritingPatternReuse(candidate, [
+      'A machine shop owner showed me two end mills.',
+      'A founder showed me a customer call.',
+    ]);
+
+    expect(assessment.hits).toContain('anonymous-anecdote');
+    expect(reuse).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('treats repeated how-to openings as one generated scaffold', () => {
+    expect(assessGeneratedWritingPatterns('how to diligence a magnet company: ask about coercivity.').primarySignature).toBe('how-to-open');
+    expect(scoreWritingPatternReuse(
+      'how to raise frontier capital: bring the failed sample.',
+      ['how to diligence a magnet company: ask about coercivity.'],
+    )).toBeGreaterThanOrEqual(0.4);
+  });
+
+  it('detects generated contrasts and rhetorical reskins split across lines', () => {
+    const splitContrast = assessGeneratedWritingPatterns(
+      'your hardware startup does not have a prototype.\n\nit has one unusually cooperative specimen.',
+    );
+    const contractedSplitContrast = assessGeneratedWritingPatterns(
+      "the fastest way to lose sf's forgiveness isn't blowing up the company. it's how you talked to people during the year you thought you'd already won.",
+    );
+    const nounVerb = assessGeneratedWritingPatterns(
+      'ore is the easy noun. purification, morphology and qualification are the verbs.',
+    );
+    const slideReality = assessGeneratedWritingPatterns(
+      'datacenter powerpoint:\n\ncompute forever\n\nphysical world:\n\ntransformer lead time',
+    );
+    const topicLabel = assessGeneratedWritingPatterns(
+      'creator economy question:\n\nwho owns provenance?',
+    );
+
+    expect(splitContrast.hits).toContain('split-not-x-y');
+    expect(splitContrast.score).toBeGreaterThanOrEqual(0.5);
+    expect(contractedSplitContrast.hits).toContain('split-not-x-y');
+    expect(contractedSplitContrast.score).toBeGreaterThanOrEqual(0.5);
+    expect(nounVerb.hits).toContain('noun-verb-gimmick');
+    expect(slideReality.hits).toContain('slide-reality-scaffold');
+    expect(topicLabel.hits).toContain('topic-question-label');
+  });
+
+  it('detects explicit AI-voice constructions found in autonomous drafts', () => {
+    expect(assessGeneratedWritingPatterns(
+      'industrial status symbols:\n\nold: headcount\nnew: qualified production yield',
+    ).hits).toContain('old-new-scaffold');
+    expect(assessGeneratedWritingPatterns(
+      'personal rule: if i cannot explain the process window, i do not underwrite the factory.',
+    ).hits).toContain('synthetic-personal-rule');
+    expect(assessGeneratedWritingPatterns(
+      'hardware startup horoscope:\n\nsun in prototype\nmoon in qualification',
+    ).hits).toContain('horoscope-template');
+    expect(assessGeneratedWritingPatterns(
+      'startup advice for hard tech:\n\nname the first qualification gate.',
+    ).hits).toContain('topic-advice-label');
+    expect(assessGeneratedWritingPatterns(
+      'when a robot jams:\n\nwho notices?\n\nwho can restart it?\n\nsame factory. radically different company.',
+    ).score).toBeGreaterThanOrEqual(0.7);
+    expect(assessGeneratedWritingPatterns(
+      'future status object: a robot cell that ran the entire shift without an exception.',
+    ).hits).toContain('synthetic-status-test');
+    expect(assessGeneratedWritingPatterns(
+      'AI hardware marketing photo starter pack:\n\nwafer under purple light\nserver rack door open',
+    ).hits).toContain('starter-pack-list');
+    expect(assessGeneratedWritingPatterns(
+      'normal vc hears robotics and models labor TAM. the happy path is murdered by exception handling.',
+    ).score).toBeGreaterThanOrEqual(0.5);
+    expect(assessGeneratedWritingPatterns(
+      'investors ask whether power is cheap.\n\nwrong level of resolution.\n\ncan the site energize the interconnect?',
+    ).hits).toContain('wrong-resolution-scaffold');
+    expect(assessGeneratedWritingPatterns(
+      'when did reliability become less impressive than choreography?',
+    ).hits).toContain('when-did-contrast-question');
+  });
+
+  it('detects stiff analyst constructions that escaped earlier Geoffrey gates', () => {
+    expect(assessGeneratedWritingPatterns(
+      'startup founders love speed until the product has to survive vibration and thermal cycling. then suddenly the calendar has physics in it.',
+    ).hits).toEqual(expect.arrayContaining([
+      'typed-actor-loves-until',
+      'calendar-has-physics',
+    ]));
+    expect(assessGeneratedWritingPatterns(
+      'humanoid robot forecasts love unit counts. motor performance at temperature is less cooperative.',
+    ).hits).toContain('forecast-less-cooperative');
+    expect(assessGeneratedWritingPatterns(
+      'finance guys love assets they can mark every day. industrial assets make them emotionally unstable.',
+    ).hits).toContain('typed-actor-emotional-punchline');
+    expect(assessGeneratedWritingPatterns(
+      'how do you model gallium supply like a normal mine when most output is a refinery side-stream?',
+    ).hits).toContain('polished-model-question');
+    expect(assessGeneratedWritingPatterns(
+      'rare earth magnets look like a mining story. they are actually a chemistry and manufacturing story.',
+    ).hits).toContain('looks-like-actually');
+    expect(assessGeneratedWritingPatterns(
+      "everyone's building battery companies. fewer are solving cell qualification.",
+    ).hits).toContain('everyone-building-fewer');
+  });
+
+  it('detects packaged hard-tech investment closers', () => {
+    expect(assessGeneratedWritingPatterns(
+      'robot builders get the headlines. the better business sits upstream with the magnet processors.',
+    ).hits).toEqual(expect.arrayContaining([
+      'headlines-upstream-scaffold',
+      'better-business-scaffold',
+    ]));
+    expect(assessGeneratedWritingPatterns(
+      'buyers can complain about qualification. processors hold the cards.',
+    ).hits).toContain('packaged-industrial-closer');
+  });
+
+  it('detects polished prediction cards that should not teach diction', () => {
+    expect(assessGeneratedWritingPatterns(
+      'Spain has the best midfield. Argentina has the better transition game.\n\nFinal call:\nSpain 58%\nArgentina 42%',
+    ).hits).toContain('prediction-percentage-card');
+  });
+
+  it('detects qualification language packaged as a synthetic closer', () => {
+    expect(assessGeneratedWritingPatterns(
+      'rhenium sounds replaceable. qualification takes the substitution fantasy off the table.',
+    ).hits).toContain('qualification-off-table');
+  });
+});

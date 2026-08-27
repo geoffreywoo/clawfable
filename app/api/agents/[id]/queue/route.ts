@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getQueuedTweets, createTweet } from '@/lib/kv-storage';
+import { createTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { getAgentQueueFeed } from '@/lib/dashboard-data';
+import { validateQueueCreateRequest } from '@/lib/request-validation';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 
 // GET /api/agents/[id]/queue
 export async function GET(
@@ -10,8 +13,7 @@ export async function GET(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const tweets = await getQueuedTweets(id);
-    return NextResponse.json(tweets);
+    return NextResponse.json(await getAgentQueueFeed(id));
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch queue' }, { status: 500 });
@@ -25,10 +27,14 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { agent, user } = await requireAgentAccess(id);
+    await assertAgentAutomationEntitlement(id, { agent, user });
     const body = await request.json();
-    const { content, topic, type } = body;
-    if (!content) return NextResponse.json({ error: 'Content required' }, { status: 400 });
+    const parsed = validateQueueCreateRequest(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid queue request' }, { status: 400 });
+    }
+    const { content, topic, type, quoteTweetId, quoteTweetAuthor } = parsed.value;
 
     const tweet = await createTweet({
       agentId: id,
@@ -37,12 +43,16 @@ export async function POST(
       status: 'queued',
       topic: topic || null,
       xTweetId: null,
-      quoteTweetId: body.quoteTweetId || null,
-      quoteTweetAuthor: body.quoteTweetAuthor || null,
+      quoteTweetId: quoteTweetId || null,
+      quoteTweetAuthor: quoteTweetAuthor || null,
       scheduledAt: null,
+      contentProvenance: 'operator_written',
     });
     return NextResponse.json(tweet);
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to add to queue' }, { status: 500 });
   }

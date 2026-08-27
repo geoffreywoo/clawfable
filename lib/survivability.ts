@@ -5,34 +5,58 @@
  * 1. Jittering post timing (±15% of interval)
  * 2. Enforcing content diversity (no consecutive same-format/topic)
  * 3. Detecting near-duplicate content before posting
- * 4. Enforcing daily hard caps regardless of settings
+ * 4. Enforcing daily original-post caps regardless of settings
  */
 
 import type { Tweet, PostLogEntry } from './types';
+import { isLeadingXMention } from './entity-mentions';
 
 // ─── Timing jitter ──────────────────────────────────────────────────────────
+
+export const POST_INTERVAL_JITTER_FRACTION = 0.15;
 
 /**
  * Given a base interval in ms, returns a jittered interval ±15%.
  * Posts at perfectly regular intervals are the #1 bot detection signal.
  */
 export function jitterInterval(baseMs: number): number {
-  const jitterFraction = 0.15;
-  const min = baseMs * (1 - jitterFraction);
-  const max = baseMs * (1 + jitterFraction);
+  const min = baseMs * (1 - POST_INTERVAL_JITTER_FRACTION);
+  const max = baseMs * (1 + POST_INTERVAL_JITTER_FRACTION);
   return Math.round(min + Math.random() * (max - min));
 }
 
 // ─── Daily hard cap ─────────────────────────────────────────────────────────
 
-/** Absolute max posts per day, regardless of user settings. */
-export const DAILY_HARD_CAP = 60;
+/** Absolute max original posts per day, regardless of user settings. */
+export const DAILY_HARD_CAP = 12;
 
 /** Absolute max postsPerDay the user can configure. */
-export const MAX_POSTS_PER_DAY_SETTING = 48;
+export const MAX_POSTS_PER_DAY_SETTING = 12;
+
+/** Longform-aware hard cap for a single X post or reply. */
+export const X_POST_TEXT_LIMIT = 4000;
+
+const NON_ORIGINAL_POST_FORMATS = new Set([
+  'auto_reply',
+  'auto_reply_high_value',
+  'proactive_reply',
+  'proactive_like',
+  'auto_follow',
+  'cron',
+  'learning',
+  'queue_refresh',
+  'system',
+]);
+
+function isOriginalPostEntry(entry: PostLogEntry): boolean {
+  const format = (entry.format || '').toLowerCase();
+  if (NON_ORIGINAL_POST_FORMATS.has(format)) return false;
+  if (format.endsWith('_error')) return false;
+  return true;
+}
 
 /**
- * Count how many autopilot posts happened in the last 24 hours.
+ * Count how many autopilot original posts happened in the last 24 hours.
  * Only counts entries with source='autopilot' and action='posted' (or no action, for legacy entries).
  */
 export function countPostsInLast24h(postLog: PostLogEntry[]): number {
@@ -42,6 +66,7 @@ export function countPostsInLast24h(postLog: PostLogEntry[]): number {
     // Only count actual posts, not skips/errors/mention-refreshes
     const isPost = !entry.action || entry.action === 'posted';
     if (!isPost) return false;
+    if (!isOriginalPostEntry(entry)) return false;
     const ts = new Date(entry.postedAt).getTime();
     return ts >= cutoff;
   }).length;
@@ -156,6 +181,224 @@ export function isNearDuplicate(
   return { isDuplicate: false };
 }
 
+export const RECENT_POST_DUPLICATE_THRESHOLD = 0.72;
+
+export function getRecentPostDuplicateIssue(
+  candidate: string,
+  recentPosts: string[],
+  threshold = RECENT_POST_DUPLICATE_THRESHOLD,
+): string | null {
+  const duplicate = isNearDuplicate(candidate, recentPosts, threshold);
+  if (!duplicate.isDuplicate) return null;
+
+  const score = typeof duplicate.similarity === 'number'
+    ? `${Math.round(duplicate.similarity * 100)}%`
+    : 'high';
+  const preview = (duplicate.matchedContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+  return `Recent duplicate gate: queued draft is ${score} similar to a recent live post${preview ? ` (“${preview}”)` : ''}.`;
+}
+
+export const REPLY_REPETITION_THRESHOLD = 0.68;
+
+export function getReplyRepetitionIssue(
+  reply: string,
+  previousReplies: string[],
+  threshold = REPLY_REPETITION_THRESHOLD,
+): string | null {
+  const previous = previousReplies
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (previous.length === 0) return null;
+
+  const duplicate = isNearDuplicate(reply, previous, threshold);
+  if (!duplicate.isDuplicate) return null;
+
+  const score = typeof duplicate.similarity === 'number'
+    ? `${Math.round(duplicate.similarity * 100)}%`
+    : 'high';
+  const preview = (duplicate.matchedContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+  return `Reply repetition gate: generated reply is ${score} similar to something this account already said in the thread${preview ? ` (“${preview}”)` : ''}.`;
+}
+
+// ─── Internal prompt leak detection ─────────────────────────────────────────
+
+const INTERNAL_PROMPT_LEAK_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  {
+    pattern: /(?:^|\n)\s*#{1,6}\s*(?:operator voice reference|manual\s*\/\s*operator voice anchors|manual topic priors|operator voice directives|style fingerprint|hard blocklist|learnings from account performance|prescriptive rules|soul\.md|voice profile|clawfable platform goal|critical safety rules|reply strategy|autonomy mode|bandit slot plan|creative lanes|post portfolio roles|media experiments|source-aware planner|recently posted|engagement data|audience context|active topic bias|exploration budget)\b/i,
+    label: 'an internal markdown heading',
+  },
+  {
+    pattern: /\bmanual\/operator-written tweets\b/i,
+    label: 'operator-written tweet calibration text',
+  },
+  {
+    pattern: /\bDerived from \d+ manually posted or operator-written tweets\b/i,
+    label: 'operator voice reference metadata',
+  },
+  {
+    pattern: /\bmatch voice, sentiment, tone, topic boundaries\b/i,
+    label: 'voice matching instructions',
+  },
+  {
+    pattern: /\bUse these as VOICE calibration examples\b/i,
+    label: 'voice calibration instructions',
+  },
+  {
+    pattern: /\bVoice anchors:\b/i,
+    label: 'voice anchor metadata',
+  },
+  {
+    pattern: /(?:^|\n)\s*Style analysis:\s*/i,
+    label: 'style analysis metadata',
+  },
+  {
+    pattern: /(?:^|\n)\s*-\s*(?:Tone|Topics|Communication style|Anti-goals|Creator):/i,
+    label: 'voice profile metadata',
+  },
+];
+
+export function getInternalPromptLeakIssue(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const match = INTERNAL_PROMPT_LEAK_PATTERNS.find(({ pattern }) => pattern.test(trimmed));
+  if (!match) return null;
+
+  return `Internal prompt leak gate: draft contains ${match.label}.`;
+}
+
+// ─── Draft completeness detection ──────────────────────────────────────────
+
+const TERMINAL_PUNCTUATION_RE = /[.!?…'")\]]$/;
+const TRAILING_DELIMITER_RE = /(?:[,:;\/\\([{]|[-–—])$/;
+const INCOMPLETE_FRAGMENT_RE = /^(?:the|a|an)\s+(?:only|best|worst|first|last|next|real|whole|same|main|biggest|smallest|hardest|easiest|most|least|key|problem|point|reason|question|answer|difference)\b|^(?:because|while|if|when|unless|until|although|though|where|which|who|whose|that|than|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across)\b/i;
+const SHORT_TRAILING_TOKEN_RE = /^[a-z]{1,3}$/;
+const PRECEDING_CONNECTOR_RE = /^(?:than|because|while|if|when|unless|until|although|though|where|which|who|whose|that|then|and|or|but|so|to|for|with|without|from|into|onto|about|around|through|under|over|between|across|against|inside|outside|toward|towards|via|like)$/i;
+const ALLOWED_SHORT_TRAILING_TOKENS = new Set([
+  'ai', 'vc', 'lp', 'gp', 'pm', 'am', 'gm', 'gn', 'us', 'uk', 'eu',
+  'it', 'me', 'him', 'her',
+]);
+
+function hasUnbalancedOpeningDelimiters(text: string): boolean {
+  const delimiterPairs: Array<[string, string]> = [
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+  ];
+
+  for (const [open, close] of delimiterPairs) {
+    const opens = (text.match(new RegExp(`\\${open}`, 'g')) || []).length;
+    const closes = (text.match(new RegExp(`\\${close}`, 'g')) || []).length;
+    if (opens > closes) return true;
+  }
+
+  const doubleQuotes = (text.match(/"/g) || []).length;
+  return doubleQuotes % 2 === 1;
+}
+
+export function getTweetCompletenessIssue(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return 'Draft is empty.';
+
+  if (hasUnbalancedOpeningDelimiters(trimmed)) {
+    return 'Draft ends with an unclosed parenthesis, bracket, or quote.';
+  }
+
+  const lines = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lastLine = lines[lines.length - 1] || trimmed;
+  const lastLineWords = lastLine.split(/\s+/).filter(Boolean);
+  const lastLineWordCount = lastLineWords.length;
+  const lastWord = lastLineWords[lastLineWords.length - 1] || '';
+  const previousWord = lastLineWords[lastLineWords.length - 2] || '';
+
+  if (TRAILING_DELIMITER_RE.test(lastLine)) {
+    return `Draft ends with an unfinished clause (“${lastLine}”).`;
+  }
+
+  if (
+    !TERMINAL_PUNCTUATION_RE.test(lastLine)
+    && lastLineWordCount <= 4
+    && INCOMPLETE_FRAGMENT_RE.test(lastLine)
+  ) {
+    return `Draft ends with an incomplete trailing fragment (“${lastLine}”).`;
+  }
+
+  if (
+    !TERMINAL_PUNCTUATION_RE.test(lastLine)
+    && trimmed.length >= 80
+    && SHORT_TRAILING_TOKEN_RE.test(lastWord)
+    && !ALLOWED_SHORT_TRAILING_TOKENS.has(lastWord.toLowerCase())
+    && PRECEDING_CONNECTOR_RE.test(previousWord)
+  ) {
+    return `Draft appears to end mid-word or mid-thought (“${lastLine}”).`;
+  }
+
+  return null;
+}
+
+export function isCompleteTweetDraft(text: string): boolean {
+  return getTweetCompletenessIssue(text) === null;
+}
+
+export function getTweetLengthIssue(
+  text: string,
+  surface: 'post' | 'reply' = 'post',
+): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length <= X_POST_TEXT_LIMIT) return null;
+
+  const label = surface === 'reply' ? 'Reply' : 'Draft';
+  return `${label} is ${trimmed.length} characters; X API posts must be ${X_POST_TEXT_LIMIT} characters or fewer.`;
+}
+
+const X_HANDLE_RE = /(^|[^\w])@([a-zA-Z0-9_]{1,15})\b/g;
+
+function normalizeHandle(value: string): string {
+  return value.replace(/^@/, '').trim().toLowerCase();
+}
+
+export function extractMentionHandles(text: string): string[] {
+  const handles = new Set<string>();
+  for (const match of text.matchAll(X_HANDLE_RE)) {
+    handles.add(match[2].toLowerCase());
+  }
+  return [...handles];
+}
+
+export function getAutopostPolicyIssue(
+  text: string,
+  options: {
+    allowedMentions?: string[];
+    allowLeadingMention?: boolean;
+  } = {},
+): string | null {
+  if (!options.allowLeadingMention && isLeadingXMention(text)) {
+    return 'Autopost blocked because an original post cannot start with an @mention; put the handle after ordinary feed text.';
+  }
+  const allowed = new Set((options.allowedMentions || []).map(normalizeHandle).filter(Boolean));
+  const unsolicited = extractMentionHandles(text)
+    .filter((handle) => !allowed.has(handle));
+
+  if (unsolicited.length === 0) return null;
+
+  return `Autopost blocked because original posts cannot contain unsolicited @mentions: ${unsolicited.map((handle) => `@${handle}`).join(', ')}.`;
+}
+
+export function getGeneratedTweetIssue(
+  text: string,
+  stopReason?: string | null,
+): string | null {
+  if (stopReason === 'max_tokens') {
+    return 'Model output hit the token limit before the draft finished.';
+  }
+  return getInternalPromptLeakIssue(text) || getTweetCompletenessIssue(text);
+}
+
 // ─── Queue selection with diversity ─────────────────────────────────────────
 
 /**
@@ -177,7 +420,7 @@ export function pickDiverseTweet(
 
     // Penalize repetitive format/topic
     const repetitive = isRepetitiveContent(
-      tweet.topic || 'unknown',
+      tweet.format || 'unknown',
       tweet.topic || 'general',
       recentPosts,
       2

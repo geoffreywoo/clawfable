@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProtocolSettings, updateProtocolSettings, getPostLog, getAnalysis, saveBaseline } from '@/lib/kv-storage';
+import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { clampPostsPerDay } from '@/lib/survivability';
+import { getBillingSummary } from '@/lib/billing';
+import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse, getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
+import { validateProtocolSettingsPatch } from '@/lib/request-validation';
 
 // GET /api/agents/[id]/protocol/settings
 export async function GET(
@@ -10,10 +13,12 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { user, agent } = await requireAgentAccess(id);
     const settings = await getProtocolSettings(id);
     const postLog = await getPostLog(id, 10);
-    return NextResponse.json({ settings, postLog });
+    const agentCount = await getAccessibleAgentCount(user);
+    const automationEntitlement = await getAgentAutomationEntitlement(id, { agent, user });
+    return NextResponse.json({ settings, postLog, billing: getBillingSummary(user, agentCount), automationEntitlement });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -27,24 +32,29 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
-    await requireAgentAccess(id);
+    const { user, agent } = await requireAgentAccess(id);
     const body = await request.json();
-
-    const allowed: (keyof Parameters<typeof updateProtocolSettings>[1])[] = [
-      'enabled', 'postsPerDay', 'minQueueSize',
-      'autoReply', 'maxRepliesPerRun', 'replyIntervalMins',
-      'lengthMix', 'enabledFormats',
-      'marketingEnabled', 'marketingMix', 'marketingRole',
-      'soulEvolutionMode',
-    ];
-    const updates: Record<string, unknown> = {};
-    for (const key of allowed) {
-      if (body[key] !== undefined) updates[key] = body[key];
+    const agentCount = await getAccessibleAgentCount(user);
+    const parsed = validateProtocolSettingsPatch(body);
+    if (!parsed.ok || !parsed.value) {
+      return NextResponse.json({ error: parsed.error || 'Invalid settings update' }, { status: 400 });
     }
+    const updates = parsed.value;
 
-    // Enforce safe posting limits
-    if (typeof updates.postsPerDay === 'number') {
-      updates.postsPerDay = clampPostsPerDay(updates.postsPerDay);
+    const isTryingToEnableAutomation = (
+      updates.enabled === true
+      || updates.autoReply === true
+      || updates.proactiveReplies === true
+      || updates.autoFollow === true
+      || updates.agentShoutouts === true
+      || updates.earlyVelocityFollowups === true
+      || updates.supervisedTrendDesk === true
+      || updates.relationshipQueueEnabled === true
+      || updates.portfolioOptimizerEnabled === true
+      || updates.marketingEnabled === true
+    );
+    if (isTryingToEnableAutomation) {
+      await assertAgentAutomationEntitlement(id, { agent, user });
     }
 
     // Freeze baseline on first autopilot enable
@@ -63,6 +73,9 @@ export async function PATCH(
     const settings = await updateProtocolSettings(id, updates);
     return NextResponse.json(settings);
   } catch (err) {
+    if (err instanceof AutomationEntitlementError) {
+      return NextResponse.json(entitlementErrorResponse(err), { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }

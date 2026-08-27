@@ -1,0 +1,246 @@
+export interface ClaimEvidenceAssessment {
+  risk: number;
+  hasPersonalExperienceClaim: boolean;
+  personalExperienceSupported: boolean;
+  unsupportedNumbers: string[];
+  crossClaimNumbers: string[];
+  unsupportedEvidenceConcepts: string[];
+  unsupportedQuotes: string[];
+  issue: string | null;
+}
+
+export interface ClaimEvidenceOptions {
+  lockEvidenceConcepts?: boolean;
+  allowForecastTimingNumbers?: boolean;
+}
+
+const PERSONAL_EXPERIENCE_PATTERNS = [
+  /\b(?:i|we)\s+(?:saw|watched|met|spoke|talked|visited|tested|measured|ran|run|built|bought|sold|funded|invested|backed|read|used|tried|hired|fired|remember|learned|had a call|got a demo)\b/i,
+  /\b(?:i|we)\s+(?:always|usually|never)\s+(?:ask|check|photograph|look|visit|tour|measure|test|write|save)\b/i,
+  /\b(?:showed|told|sent|walked)\s+(?:me|us)\b/i,
+  /\b(?:a|an|one|this)\s+(?:[a-z][a-z-]*\s+){0,3}(?:founder|owner|engineer|operator|customer|buyer|manager|technician|scientist|investor|machinist)\s+(?:showed|told|sent|walked|said|asked|called|emailed|replaced|ran|built)\b/i,
+  /^(?:personal|my|house)\s+rule\s*:/im,
+];
+
+const SUPPORT_STOPWORDS = new Set([
+  'about', 'after', 'again', 'against', 'because', 'before', 'being', 'between', 'could', 'founder',
+  'from', 'have', 'into', 'just', 'more', 'owner', 'said', 'showed', 'some', 'that', 'their', 'them',
+  'then', 'there', 'these', 'they', 'this', 'told', 'walked', 'what', 'when', 'where', 'which', 'while',
+  'with', 'would', 'your',
+]);
+
+const NON_QUANTITATIVE_NUMBER_PREFIX_RE = /\b(?:hut|gpt|claude|llama|gemini|qwen|mistral|iphone|pixel|windows)\s*$/i;
+
+const EVIDENCE_LOCKED_CONCEPTS = [
+  { name: 'processing or refining', pattern: /\b(?:process(?:ing|ed)?|refin(?:e|ed|ing|ery|eries)|smelt(?:ed|ing|er|ers))\b/i },
+  { name: 'industrial infrastructure', pattern: /\b(?:industrial\s+(?:capacity|infrastructure)|manufacturing\s+(?:capacity|base)|logistics\s+(?:network|capacity))\b/i },
+  { name: 'pricing or valuation', pattern: /\b(?:pric(?:e|ed|es|ing)|valu(?:e|ed|ation)|margin(?:s)?|revenue)\b/i },
+  { name: 'substitution or alternative sourcing', pattern: /\b(?:substitut(?:e|ed|es|ing|ion|ability)|alternative\s+sourc(?:e|es|ing)|friend-?shor(?:e|ing))\b/i },
+  { name: 'geopolitical or policy mechanism', pattern: /\b(?:geopolitic(?:al|s)?|policy\s+lever|export\s+(?:ban|control|restriction)|sanction(?:s|ed)?)\b/i },
+  { name: 'downstream semiconductor or defense use', pattern: /\b(?:semiconductor(?:s)?|defen[cs]e|military|ai\s+hardware|clean[- ]energy)\b/i },
+  { name: 'market demand or adoption', pattern: /\b(?:market\s+demand|buyer\s+behavior|customer\s+behavior|adoption\s+(?:rate|curve)|sales\s+growth)\b/i },
+  { name: 'supply timeline', pattern: /\b(?:near[- ]term|longer[- ]duration|supply\s+timeline|time\s+to\s+(?:build|qualify|scale))\b/i },
+  { name: 'capital-market mechanism', pattern: /\b(?:redemption(?:s|\s+window)?|illiquidity|liquidity|mark[- ]to[- ]market|daily\s+mark|covenants?|duration|multiples?|dilution|cash\s*flow|capex|project\s+finance|return\s+profile|regulated\s+bonds?|securities)\b/i },
+] as const;
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9.$%+/-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function evidenceTokens(value: string): Set<string> {
+  return new Set(
+    normalizeText(value)
+      .split(' ')
+      .filter((token) => token.length >= 4 && !SUPPORT_STOPWORDS.has(token) && !/^\d/.test(token)),
+  );
+}
+
+function personalClaimIsSupported(content: string, supportTexts: string[]): boolean {
+  const candidateTokens = evidenceTokens(content);
+  if (candidateTokens.size === 0) return false;
+
+  for (const source of supportTexts) {
+    if (!PERSONAL_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(source))) continue;
+    const sourceTokens = evidenceTokens(source);
+    const shared = [...candidateTokens].filter((token) => sourceTokens.has(token)).length;
+    const denominator = Math.max(1, Math.min(candidateTokens.size, sourceTokens.size));
+    if (shared >= 4 && shared / denominator >= 0.5) return true;
+  }
+
+  return false;
+}
+
+function numericClaims(content: string): string[] {
+  const claims: string[] = [];
+  const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:percentage\s+points?|percent(?:age)?|million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|samples?|models?|sensors?|chips?|racks?|boards?|incidents?|failures?|defects?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)?/gi;
+  const normalizedContent = content.replace(
+    /(\d[\d,]*(?:\.\d+)?)\s*([–—-])\s*(\d[\d,]*(?:\.\d+)?)\s*(percentage\s+points?|percent(?:age)?|%)/gi,
+    '$1$4$2$3$4',
+  );
+
+  for (const match of normalizedContent.matchAll(pattern)) {
+    const matchIndex = match.index || 0;
+    const before = normalizedContent.slice(Math.max(0, matchIndex - 2), matchIndex);
+    if (/[a-z0-9]-$/i.test(before) || /[a-z]$/i.test(before)) continue;
+    const namePrefix = normalizedContent.slice(Math.max(0, matchIndex - 24), matchIndex);
+    if (NON_QUANTITATIVE_NUMBER_PREFIX_RE.test(namePrefix)) continue;
+
+    const raw = match[0].trim();
+    if (!raw) continue;
+    const digits = raw.replace(/[^0-9.]/g, '');
+    if (!digits) continue;
+    const numeric = Number(digits);
+    if (/^20\d{2}$/.test(digits)) continue;
+    const lineStart = match.index === 0 || normalizedContent.slice(0, match.index).endsWith('\n');
+    const after = normalizedContent.slice((match.index || 0) + raw.length);
+    if (lineStart && /^\.?\s+/.test(after) && numeric >= 1 && numeric <= 20) continue;
+    claims.push(canonicalNumericClaim(raw));
+  }
+
+  const wordValues: Record<string, string> = {
+    one: '1',
+    two: '2',
+    three: '3',
+    four: '4',
+    five: '5',
+    six: '6',
+    seven: '7',
+    eight: '8',
+    nine: '9',
+    ten: '10',
+  };
+  const wordPattern = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|parts?|samples?|models?|sensors?|chips?|racks?|boards?|minutes?|hours?|days?|weeks?|months?|years?|shifts?|incidents?|failures?|defects?)\b/gi;
+  for (const match of content.matchAll(wordPattern)) {
+    const value = wordValues[match[1].toLowerCase()];
+    const unit = match[2].toLowerCase().replace(/\s+/g, '');
+    claims.push(`${value}${unit}`);
+  }
+
+  return [...new Set(claims)];
+}
+
+function forecastTimingClaims(content: string): Set<string> {
+  const claims = new Set<string>();
+  const pattern = /\b(?:next|within|in)\s+(?:the\s+next\s+)?(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s*(?:-|to)\s*(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))?\s+(?:months?|years?)\b/gi;
+  for (const match of content.matchAll(pattern)) {
+    for (const claim of numericClaims(match[0])) claims.add(claim);
+  }
+  return claims;
+}
+
+function canonicalNumericClaim(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\s,]+/g, '')
+    .replace(/percentagepoints?/g, 'pp')
+    .replace(/percent(?:age)?/g, '%')
+    .replace(/trillion/g, 't')
+    .replace(/billion|bn/g, 'b')
+    .replace(/million/g, 'm');
+}
+
+function numericClaimSupported(claim: string, supportTexts: string[]): boolean {
+  const canonical = claim.replace(/[$£€]/g, '');
+  if (!/[0-9]/.test(canonical)) return false;
+  return supportTexts.some((source) => numericClaims(source).some((sourceClaim) =>
+    sourceClaim.replace(/[$£€]/g, '') === canonical
+  ));
+}
+
+function crossClaimNumbers(content: string, supportTexts: string[]): string[] {
+  const claims = numericClaims(content);
+  if (claims.length < 2 || claims.some((claim) => !numericClaimSupported(claim, supportTexts))) return [];
+  const completeSupport = supportTexts.some((source) => {
+    const sourceClaims = new Set(numericClaims(source).map((claim) => claim.replace(/[$£€]/g, '')));
+    return claims.every((claim) => sourceClaims.has(claim.replace(/[$£€]/g, '')));
+  });
+  return completeSupport ? [] : claims;
+}
+
+function unsupportedEvidenceConcepts(content: string, supportTexts: string[]): string[] {
+  const combinedSupport = supportTexts.join(' ');
+  return EVIDENCE_LOCKED_CONCEPTS
+    .filter((concept) => concept.pattern.test(content) && !concept.pattern.test(combinedSupport))
+    .map((concept) => concept.name);
+}
+
+function quotedClaims(content: string): string[] {
+  const claims: string[] = [];
+  const pattern = /["“]([^"”\n]{4,220})["”]/g;
+  for (const match of content.matchAll(pattern)) {
+    const quote = match[1].replace(/\s+/g, ' ').trim();
+    const wordCount = (quote.match(/[a-z0-9]+(?:'[a-z0-9]+)?/gi) || []).length;
+    if (wordCount < 3) continue;
+
+    const index = match.index || 0;
+    const beforeLine = content.slice(content.lastIndexOf('\n', Math.max(0, index - 1)) + 1, index);
+    const afterIndex = index + match[0].length;
+    const nextNewline = content.indexOf('\n', afterIndex);
+    const afterLine = content.slice(afterIndex, nextNewline >= 0 ? nextNewline : content.length);
+    const standaloneLine = beforeLine.trim().length === 0 && afterLine.trim().length === 0;
+    const nearbyAttribution = /\b(?:said|says|asked|asks|called|calls|quote)\s*:?\s*$/i.test(content.slice(Math.max(0, index - 40), index));
+    if (standaloneLine || nearbyAttribution) claims.push(quote);
+  }
+  return [...new Set(claims)];
+}
+
+function quoteIsSupported(quote: string, supportTexts: string[]): boolean {
+  const normalizedQuote = normalizeText(quote);
+  return supportTexts.some((source) => normalizeText(source).includes(normalizedQuote));
+}
+
+export function assessClaimEvidence(
+  content: string,
+  supportTexts: Array<string | null | undefined> = [],
+  options: ClaimEvidenceOptions = {},
+): ClaimEvidenceAssessment {
+  const cleanSupport = supportTexts.map((text) => String(text || '').trim()).filter(Boolean);
+  const hasPersonalExperienceClaim = PERSONAL_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(content));
+  const personalExperienceSupported = !hasPersonalExperienceClaim || personalClaimIsSupported(content, cleanSupport);
+  const allowedForecastTiming = options.allowForecastTimingNumbers
+    ? forecastTimingClaims(content)
+    : new Set<string>();
+  const unsupportedNumbers = numericClaims(content).filter((claim) => (
+    !allowedForecastTiming.has(claim) && !numericClaimSupported(claim, cleanSupport)
+  ));
+  const crossClaimNumericSynthesis = crossClaimNumbers(content, cleanSupport);
+  const unsupportedConcepts = options.lockEvidenceConcepts
+    ? unsupportedEvidenceConcepts(content, cleanSupport)
+    : [];
+  const unsupportedQuotes = quotedClaims(content).filter((quote) => !quoteIsSupported(quote, cleanSupport));
+
+  const risk = clamp(
+    (!personalExperienceSupported ? 0.82 : 0)
+    + (unsupportedNumbers.length > 0 ? 0.48 + Math.min(0.42, unsupportedNumbers.length * 0.1) : 0)
+    + (crossClaimNumericSynthesis.length > 0 ? 0.72 : 0)
+    + (unsupportedConcepts.length > 0 ? 0.74 : 0)
+    + (unsupportedQuotes.length > 0 ? 0.64 : 0),
+  );
+
+  const reasons: string[] = [];
+  if (!personalExperienceSupported) reasons.push('personal anecdote is not present in supplied source evidence');
+  if (unsupportedNumbers.length > 0) reasons.push(`unsupported numeric claim${unsupportedNumbers.length === 1 ? '' : 's'}: ${unsupportedNumbers.slice(0, 4).join(', ')}`);
+  if (crossClaimNumericSynthesis.length > 0) reasons.push(`numeric comparison combines separate evidence claims: ${crossClaimNumericSynthesis.slice(0, 5).join(', ')}`);
+  if (unsupportedConcepts.length > 0) reasons.push(`evidence does not establish: ${unsupportedConcepts.join(', ')}`);
+  if (unsupportedQuotes.length > 0) reasons.push(`unsupported staged quote${unsupportedQuotes.length === 1 ? '' : 's'}: ${unsupportedQuotes.slice(0, 2).map((quote) => `"${quote}"`).join(', ')}`);
+
+  return {
+    risk: Number(risk.toFixed(3)),
+    hasPersonalExperienceClaim,
+    personalExperienceSupported,
+    unsupportedNumbers,
+    crossClaimNumbers: crossClaimNumericSynthesis,
+    unsupportedEvidenceConcepts: unsupportedConcepts,
+    unsupportedQuotes,
+    issue: reasons.length > 0 ? `Claim evidence gate: ${reasons.join('; ')}.` : null,
+  };
+}

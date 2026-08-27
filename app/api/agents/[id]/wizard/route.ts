@@ -7,7 +7,7 @@ import {
   checkRateLimit,
   logFunnelEvent,
 } from '@/lib/kv-storage';
-import { extractStyleSignals, generateSoulMd } from '@/lib/viral-generator';
+import { extractStyleSignals, generateSoulMd } from '@/lib/soul-generation';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import type { WizardData } from '@/lib/types';
 
@@ -54,7 +54,7 @@ export async function POST(
       await saveSoulBackup(id, agent.soulMd);
     }
 
-    // Parallel Claude calls: SOUL.md generation + style extraction
+    // Parallel model calls: SOUL.md generation + style extraction
     const [soulMd, styleSignals] = await Promise.all([
       generateSoulMd(archetype, topics, examples, agent.name),
       examples.length > 0

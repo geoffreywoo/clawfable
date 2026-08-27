@@ -1,0 +1,1302 @@
+import type {
+  AgentLearnings,
+  ContentSourceLane,
+  ManualExampleCuration,
+  ManualTopicCluster,
+  TrendTolerance,
+  TweetPerformance,
+} from './types';
+import type { VoiceProfile } from './soul-parser';
+import {
+  getTrendingTopicStableId,
+  type TopicEntityRole,
+  type TopicSemanticDomain,
+  type TrendingTopic,
+} from './trending';
+import { formatFrontierIdeaSeedBrief, pickFrontierIdeaSeed, pickGeoffreyIdeaSeed, type FrontierIdeaSeed } from './frontier-idea-seeds';
+import { isGeoffreyVoiceProfile } from './account-taste';
+import { isVoiceProfileTopicBlocked } from './account-topic-policy';
+import { inferContentSpreadMechanics } from './winner-learning';
+import { weightedSpreadEngagement } from './performance-signals';
+import { canonicalizeLearningTopic } from './learning-topic';
+
+export interface TrendFitScores {
+  freshness: number;
+  velocity: number;
+  soul: number;
+  manual: number;
+  identityFit?: number;
+  driftRisk?: number;
+  networkMomentum?: number;
+  operatorEngagement?: number;
+  sourceQuality?: number;
+  total: number;
+}
+
+export interface EnrichedTrendingTopic extends TrendingTopic {
+  fitScores: TrendFitScores;
+  sourceLane: ContentSourceLane | 'reject';
+  plannerReason: string;
+}
+
+export interface NativeTopicIdentityAssessment {
+  soul: number;
+  manual: number;
+  identityFit: number;
+  driftRisk: number;
+}
+
+export interface SourcePlannerSlot {
+  slot: number;
+  sourceLane: ContentSourceLane;
+  mode: 'exploit' | 'explore';
+  targetTopic: string;
+  trendTopicId: string | null;
+  trendHeadline: string | null;
+  ideaSeed: FrontierIdeaSeed | null;
+  ideaSeedBrief: string | null;
+  briefEvidence?: SourcePlannerBriefEvidence | null;
+  plannerReason: string;
+}
+
+export type SourcePlannerEvidenceMode =
+  | 'qualified_fact'
+  | 'operator_topic_signal'
+  | 'historical_operator'
+  | 'evergreen_seed';
+
+export interface SourcePlannerBriefEvidence {
+  mode: SourcePlannerEvidenceMode;
+  subject: string;
+  factualClaimAllowed: boolean;
+  provenanceId: string | null;
+  historicalAngle: string | null;
+  historicalAvgEngagement: number | null;
+  historicalSampleCount: number | null;
+  spreadMechanics: string[];
+  entityRoles?: TopicEntityRole[];
+  strippedEventTerms?: string[];
+  instruction: string;
+}
+
+export interface SourcePlannerPlan {
+  slots: SourcePlannerSlot[];
+  laneCounts: Record<ContentSourceLane, number>;
+  acceptedTrends: EnrichedTrendingTopic[];
+  rejectedTrends: EnrichedTrendingTopic[];
+  topicSignals?: EnrichedTrendingTopic[];
+}
+
+export interface OperatorTopicSignal {
+  id: string;
+  subject: string;
+  semanticAliases: string[];
+  entityRoles: TopicEntityRole[];
+  strippedEventTerms: string[];
+  domain: TopicSemanticDomain;
+  identityScore: number;
+  operatorEngagementScore: number;
+  topicConfidence: number;
+  sourceCount: number;
+}
+
+const PROMO_PATTERNS = [
+  'clawfable.com',
+  'sign up',
+  'waitlist',
+  'launching',
+  'announcing',
+  'available now',
+  'book a demo',
+  'try it here',
+];
+
+const IDENTITY_STOP_WORDS = new Set([
+  'about', 'account', 'after', 'against', 'also', 'before', 'being', 'between', 'could', 'current',
+  'deep', 'from', 'frontier', 'hard', 'ideas', 'into', 'more', 'native', 'other', 'posts', 'should',
+  'technical', 'technology', 'their', 'these', 'they', 'this', 'topics', 'voice', 'where', 'which',
+  'with', 'write', 'writing', 'would',
+]);
+
+const GENERIC_IDENTITY_BRIDGE_TOKENS = new Set([
+  'account', 'business', 'capacity', 'company', 'founder', 'founders', 'future', 'industry',
+  'industrial', 'infrastructure', 'investor', 'investors', 'market', 'markets', 'operator',
+  'operators', 'software', 'startup', 'startups', 'system', 'systems', 'tech', 'technical', 'technology',
+]);
+
+const BROAD_IDENTITY_TOPICS = new Set([
+  'ai',
+  'ai/ml',
+  'career',
+  'compute',
+  'culture',
+  'energy',
+  'finance',
+  'frontier tech',
+  'deep tech',
+  'hard tech',
+  'manufacturing',
+  'personal',
+  're industrialization',
+  'robotics',
+  'sports',
+  'space',
+  'startups',
+  'tech',
+  'technology',
+]);
+
+const GEOFFREY_RELEVANT_EVENT_PATTERN = /\b(?:accelerators?|agents?|aircraft|anduril|anthropic|apps?|archer|athletes?|automation|autonomous|batter(?:y|ies)|boxing|capital markets?|chatgpt|chips?|claude|college|companies|compute|culture|data centers?|defense|drones?|e2b|education|energy|factor(?:y|ies)|fighting|fintech|fission|founders?|funding|fusion|grids?|healthspan|hugging face|inference|investing|longevity|manufactur(?:e|ing)|markets?|merit|minerals?|models?|nepotis|nfl|nuclear|openai|power|prompts?|rare earth|reactors?|robots?|robotics|rockets?|semiconductors?|social status|space|startups?|stocks?|user scale|venture|vertical lift|xiaomi)\b/i;
+const GEOFFREY_AI_TOKEN_PATTERN = /(?:^|[\s/(])ai(?:$|[\s/),.:-])/i;
+const GEOFFREY_NAMED_TECH_PATTERN = /\b(?:anduril|anthropic|archer|chatgpt|claude|e2b|hugging face|nvidia|openai|spacex|tsmc|xiaomi)\b/i;
+const GEOFFREY_CONCRETE_EVENT_PATTERN = /\b(?:battlefield|benchmarks?|capacity|customers?|deployments?|factor(?:y|ies)|infrastructure|land|latency|payload|pricing|process|rate limits?|scale|supply|throttl(?:e|ed|ing)|throughput|training|vertical lift|yield)\b/i;
+const GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN = /\b(?:startups?|compan(?:y|ies)|founders?|funding|venture|investors?|investments?|capital|markets?|suppliers?|customers?|products?|margins?|unit economics|cost curve|valuations?)\b/i;
+const GENERIC_BREAKOUT_EVENT_PATTERN = /\b(?:big|breakout|future|huge|moment|taking off|the next big thing)\b/i;
+const CORE_GEOFFREY_DOMAINS = new Set<TopicSemanticDomain>([
+  'ai_compute',
+  'energy_nuclear',
+  'materials_minerals',
+  'robotics_automation',
+  'manufacturing_industrial',
+  'space_defense',
+  'browser_infrastructure',
+  'startups_markets',
+  'finance_investing',
+  'culture_status',
+  'health_performance',
+  'sports_competition',
+  'general_technology',
+]);
+const RESTRICTED_EXPLORATION_DOMAINS = new Set<TopicSemanticDomain>(['crypto', 'politics_geopolitics']);
+
+const AEROSPACE_LAUNCH_PATTERN = /\b(?:(?:rocket|space|orbital|satellite|payload) launch(?:es|ed|ing)?|launch(?:es|ed|ing)? (?:vehicle|provider|pad|manifest))\b/i;
+
+export function classifyGeoffreyTopicDomain(
+  value: string,
+  provided?: TopicSemanticDomain | null,
+): TopicSemanticDomain {
+  const text = value.toLowerCase();
+  const isServoWebPlatform = /\bservo\b/.test(text)
+    && /\b(?:acid ?3|browser|rendering|web compat|media quer(?:y|ies)|sharedworker|web platform|css|dom)\b/.test(text);
+  if (isServoWebPlatform || /\b(?:servo browser|servo web|mozilla servo|browser engine|rendering engine|web engine)\b/.test(text)) return 'browser_infrastructure';
+  if (GEOFFREY_AI_TOKEN_PATTERN.test(value)) return 'ai_compute';
+  if (/\b(?:bitcoin|ethereum|crypto|defi|token|stablecoin|blockchain)\b/.test(text)) return 'crypto';
+  if (/\b(?:election|president|congress|white house|democrat|republican|putin|russia|iran|israel|ukraine|geopolitic|military intelligence)\b/.test(text)) return 'politics_geopolitics';
+  if (/\b(?:boxing|boxer|mma|ufc|fight(?:er|ing)?|nfl|nba|football|basketball|soccer|tennis|padel|world cup|athlete|sports?)\b/.test(text)) return 'sports_competition';
+  if (/\b(?:longevity|lifespan|healthspan|ketone|metabolic|fitness|workout|exercise|sleep|biohacking|human performance)\b/.test(text)) return 'health_performance';
+  if (/\b(?:capital markets?|stock market|public markets?|ipo|initial public offering|go(?:es|ing)? public|public listing|investing|investor returns?|portfolio|hedge fund|private equity|buyout|qqq|leverage|banking|fintech)\b/.test(text)) return 'finance_investing';
+  if (/\b(?:status|culture|merit|nepotis|social climb|ambition|aura|college|education|elite|will to power|taste|city life|san francisco|burning man)\b/.test(text)) return 'culture_status';
+  if (/\b(?:energy|fusion|fission|nuclear|reactors?|tritium|tokamak|grid|transformer|power plant)\b/.test(text)) return 'energy_nuclear';
+  if (/\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy)\b/.test(text)) return 'materials_minerals';
+  if (/\b(?:robot|robotics|humanoid|actuator|servo motor|machine vision)\b/.test(text)) return 'robotics_automation';
+  if (/\b(?:factory|manufactur|machine tool|metrology|industrial automation|qualification)\b/.test(text)) return 'manufacturing_industrial';
+  if (/\b(?:space|rocket|satellite|orbital|payload|defense|military systems?|anduril)\b/.test(text)
+    || AEROSPACE_LAUNCH_PATTERN.test(text)) return 'space_defense';
+  if (/\b(?:asic|gpu|hbm|chip|semiconductor|inference|model serving|data center|compute|openai|anthropic|claude|chatgpt|e2b|hugging face|nvidia|tsmc)\b/.test(text)) return 'ai_compute';
+  if (provided) return provided;
+  if (/\b(?:startups?|founders?|venture|funding|valuation|products?|customers?|companies|company|markets?|career|talent|job market|hiring)\b/.test(text)) return 'startups_markets';
+  if (/\b(?:browser|database|developer tool|software|open source|programming|cloud|engineering|developer)\b/.test(text)) return 'general_technology';
+  return 'other';
+}
+
+export function isCoreGeoffreyTopicDomain(domain: TopicSemanticDomain): boolean {
+  return CORE_GEOFFREY_DOMAINS.has(domain);
+}
+
+export function isGeoffreyDeepTechnicalTopic(value: string): boolean {
+  const literalContext = value.replace(/\b(?:software|code|coding|content|idea|talent) factor(?:y|ies)\b/gi, '');
+  return /\b(?:fusion|fission|nuclear|reactor|tritium|tokamak|grid interconnect|transformer|power plant|rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|robot|robotics|humanoid|actuator|servo motor|machine vision|factory|manufactur|machine tool|metrology|industrial automation|space|rocket|satellite|orbital|payload|defense|military systems?|asic|gpu|hbm|chip|semiconductor|inference hardware|data center|rack power|packag(?:e|ing)|foundry|wafer|interconnect)\b/i.test(literalContext)
+    || AEROSPACE_LAUNCH_PATTERN.test(literalContext);
+}
+
+export function isGeoffreyManufacturingMaterialsTopic(value: string): boolean {
+  return /\b(?:rare earth|critical mineral|lithium|graphite|tungsten|rhenium|beryllium|magnet|metallurgy|grain-boundary|factory|manufactur|machine tool|metrology|industrial automation|qualification)\b/i.test(value);
+}
+
+const BASE_LANE_BUDGETS: Record<'safe' | 'balanced' | 'explore', Record<ContentSourceLane, number>> = {
+  safe: {
+    manual_core_exploit: 0.55,
+    trend_aligned_exploit: 0.25,
+    trend_adjacent_explore: 0.05,
+    core_explore_fallback: 0.15,
+  },
+  balanced: {
+    manual_core_exploit: 0.45,
+    trend_aligned_exploit: 0.3,
+    trend_adjacent_explore: 0.1,
+    core_explore_fallback: 0.15,
+  },
+  explore: {
+    manual_core_exploit: 0.3,
+    trend_aligned_exploit: 0.35,
+    trend_adjacent_explore: 0.15,
+    core_explore_fallback: 0.2,
+  },
+};
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeTopic(value: string | null | undefined): string {
+  return (value || 'general').trim().toLowerCase();
+}
+
+function parseDate(value: string | null | undefined): number {
+  const ts = value ? Date.parse(value) : NaN;
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function weightedEngagement(tweet: TweetPerformance): number {
+  return weightedSpreadEngagement(tweet);
+}
+
+function recencyWeight(isoDate: string): number {
+  const ageMs = Math.max(0, Date.now() - parseDate(isoDate));
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return Math.pow(0.5, ageDays / 30);
+}
+
+function engagementWeight(tweet: TweetPerformance): number {
+  const spreadMultiplier = 0.65 + (tweet.relativeSpreadScore ?? 0.5);
+  return weightedEngagement(tweet) * recencyWeight(tweet.postedAt || tweet.checkedAt) * spreadMultiplier;
+}
+
+function isPinned(curation: ManualExampleCuration | null | undefined, xTweetId: string): boolean {
+  return Boolean(curation?.pinnedXTweetIds.some((id) => String(id) === String(xTweetId)));
+}
+
+function isBlocked(curation: ManualExampleCuration | null | undefined, xTweetId: string): boolean {
+  return Boolean(curation?.blockedXTweetIds.some((id) => String(id) === String(xTweetId)));
+}
+
+function firstMeaningfulLine(content: string): string {
+  const line = content
+    .split('\n')
+    .map((item) => item.trim())
+    .find((item) => item.length > 0) || content.trim();
+  return line.replace(/^[@#]\S+\s*/, '').slice(0, 80).trim();
+}
+
+function isLikelyReply(tweet: TweetPerformance): boolean {
+  const trimmed = tweet.content.trim();
+  return /^@\w+/.test(trimmed);
+}
+
+function isLowSignalPromo(tweet: TweetPerformance): boolean {
+  const lower = tweet.content.toLowerCase();
+  return PROMO_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+function usableManualTweet(tweet: TweetPerformance, curation: ManualExampleCuration | null | undefined): boolean {
+  if (!tweet.content || tweet.content.trim().length < 25) return false;
+  if (isBlocked(curation, tweet.xTweetId)) return false;
+  if (isPinned(curation, tweet.xTweetId)) return true;
+  if (isLikelyReply(tweet)) return false;
+  if (isLowSignalPromo(tweet)) return false;
+  return true;
+}
+
+export function buildManualTopicProfile(
+  history: TweetPerformance[],
+  curation: ManualExampleCuration | null | undefined,
+): ManualTopicCluster[] {
+  const deduped = new Map<string, TweetPerformance>();
+  for (const tweet of history) {
+    if (!usableManualTweet(tweet, curation)) continue;
+    const key = String(tweet.xTweetId || tweet.tweetId || tweet.content);
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, tweet);
+      continue;
+    }
+    const existingTopic = normalizeTopic(existing.topic);
+    const nextTopic = normalizeTopic(tweet.topic);
+    const existingIsGeneric = existingTopic === 'general' || existingTopic === 'unknown';
+    const nextIsGeneric = nextTopic === 'general' || nextTopic === 'unknown';
+    if (
+      (existingIsGeneric && !nextIsGeneric)
+      || (existingIsGeneric === nextIsGeneric && engagementWeight(tweet) > engagementWeight(existing))
+    ) {
+      deduped.set(key, tweet);
+    }
+  }
+  const usable = [...deduped.values()];
+  if (usable.length === 0) return [];
+
+  const buckets = new Map<string, TweetPerformance[]>();
+  for (const tweet of usable) {
+    const key = canonicalizeLearningTopic(tweet);
+    if (key === 'general') continue;
+    const bucket = buckets.get(key) || [];
+    bucket.push(tweet);
+    buckets.set(key, bucket);
+  }
+
+  return [...buckets.entries()]
+    .map(([topic, tweets]) => {
+      const sorted = [...tweets].sort((a, b) => engagementWeight(b) - engagementWeight(a));
+      const totalWeight = sorted.reduce((sum, tweet) => sum + engagementWeight(tweet), 0);
+      const avgEngagement = Math.round(sorted.reduce((sum, tweet) => sum + weightedEngagement(tweet), 0) / Math.max(sorted.length, 1));
+      return {
+        topic,
+        angle: firstMeaningfulLine(sorted[0]?.thesis || sorted[0]?.content || topic),
+        weight: Number(totalWeight.toFixed(2)),
+        sampleCount: sorted.length,
+        avgEngagement,
+        topTweets: sorted.slice(0, 3),
+      } satisfies ManualTopicCluster;
+    })
+    .sort((a, b) => b.weight - a.weight || b.avgEngagement - a.avgEngagement || a.topic.localeCompare(b.topic))
+    .slice(0, 8);
+}
+
+function topicFitScore(label: string, topics: string[]): number {
+  if (!label) return 0;
+  const lower = label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const labelTokens = new Set(lower.split(/\s+/).filter(Boolean));
+  const normalizedTopics = topics.map((topic) => topic.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).filter(Boolean);
+  let best = 0;
+  for (const topic of normalizedTopics) {
+    const topicTokens = topic.split(/\s+/).filter(Boolean);
+    const distinctive = topicTokens.filter((token) => !GENERIC_IDENTITY_BRIDGE_TOKENS.has(token));
+    const exactMatch = topicTokens.length === 1
+      ? labelTokens.has(topicTokens[0])
+      : ` ${lower} `.includes(` ${topic} `);
+    if (exactMatch) {
+      // A broad category says where a post lives, not whether it belongs to
+      // this particular person. Narrow phrases and mechanisms remain strong.
+      best = Math.max(
+        best,
+        BROAD_IDENTITY_TOPICS.has(topic) || distinctive.length === 0 ? 0.16 : 1,
+      );
+      continue;
+    }
+    if (distinctive.length === 0) continue;
+    const overlap = distinctive.filter((token) => labelTokens.has(token)).length;
+    if (overlap >= 2) {
+      best = Math.max(best, Math.min(0.86, 0.58 + (overlap / distinctive.length) * 0.28));
+    } else if (overlap === 1 && distinctive.length === 1) {
+      best = Math.max(best, 0.5);
+    } else if (overlap === 1) {
+      best = Math.max(best, 0.18);
+    }
+  }
+  return best;
+}
+
+function identityTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter((token) => (
+        token.length >= 4
+        && !IDENTITY_STOP_WORDS.has(token)
+        && !GENERIC_IDENTITY_BRIDGE_TOKENS.has(token)
+        && !/^\d+$/.test(token)
+      )),
+  );
+}
+
+function profileContextFitScore(label: string, voiceProfile: VoiceProfile): number {
+  const candidate = identityTokens(label);
+  if (candidate.size === 0) return 0;
+  const nativeCommunicationStyle = voiceProfile.communicationStyle
+    .split(/\n## ACCOUNT (?:TOPIC|ANTI-SLOP) POLICY\b/i)[0];
+  const context = identityTokens(`${voiceProfile.summary} ${nativeCommunicationStyle}`);
+  const overlap = [...candidate].filter((token) => context.has(token)).length;
+  if (overlap >= 4) return 0.82;
+  if (overlap === 3) return 0.68;
+  if (overlap === 2) return 0.5;
+  if (overlap === 1) return 0.16;
+  return 0;
+}
+
+function manualFitScore(topic: Pick<TrendingTopic, 'category' | 'headline' | 'topTweet'>, clusters: ManualTopicCluster[]): number {
+  const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`.toLowerCase();
+  let best = 0;
+  for (const cluster of clusters) {
+    const topicMatch = topicFitScore(haystack, [cluster.topic]);
+    const angleMatch = topicFitScore(haystack, [cluster.angle]);
+    best = Math.max(best, Math.max(topicMatch, angleMatch * 0.85));
+  }
+  return best;
+}
+
+function freshnessScore(topic: TrendingTopic): number {
+  const ageHours = Math.max(0.25, (Date.now() - parseDate(topic.timestamp)) / (1000 * 60 * 60));
+  return clamp(1 - (ageHours / 72));
+}
+
+function velocityScore(topic: TrendingTopic): number {
+  const engagement = topic.engagementScore ?? topic.topTweet?.likes ?? 0;
+  const ageHours = Math.max(0.5, (Date.now() - parseDate(topic.timestamp)) / (1000 * 60 * 60));
+  const sourceScale = topic.sourceType === 'hacker_news' ? 12 : 250;
+  return clamp((engagement / ageHours) / sourceScale);
+}
+
+function sourceQualityScore(topic: TrendingTopic): number {
+  if (typeof topic.sourceQuality === 'number') return clamp(topic.sourceQuality);
+  let score = topic.sourceType === 'hacker_news' ? 0.62 : 0.58;
+  if (topic.sourceUrl) score += 0.12;
+  if (topic.publisher) score += 0.06;
+  if (topic.isPrimarySource) score += 0.12;
+  if ((topic.sourceCount || 1) > 1) score += 0.08;
+  return clamp(score);
+}
+
+function followedNetworkMomentumScore(topic: TrendingTopic): number {
+  if (topic.discoveryMethod !== 'followed_network') return 0;
+  const momentum = typeof topic.networkMomentumScore === 'number' ? topic.networkMomentumScore : 0;
+  const breakout = typeof topic.networkBreakoutScore === 'number' ? topic.networkBreakoutScore : 0;
+  const confidence = typeof topic.topicConfidence === 'number' ? topic.topicConfidence : 0.5;
+  const diversity = clamp((topic.sourceCount || 1) / 4);
+  return clamp(momentum * 0.55 + breakout * 0.2 + confidence * 0.15 + diversity * 0.1);
+}
+
+export function assessNativeTopicIdentity(
+  topic: Pick<TrendingTopic, 'category' | 'headline' | 'topTweet' | 'semanticDomain' | 'operatorEngagementScore'>,
+  voiceProfile: VoiceProfile,
+  learnings: AgentLearnings | null,
+): NativeTopicIdentityAssessment {
+  const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`;
+  const semanticDomain = classifyGeoffreyTopicDomain(haystack, topic.semanticDomain);
+  const operatorEngagementBridge = isGeoffreyVoiceProfile(voiceProfile)
+    && !RESTRICTED_EXPLORATION_DOMAINS.has(semanticDomain)
+    && Number(topic.operatorEngagementScore || 0) >= 0.7
+      ? 0.64
+      : 0;
+  const geoffreyConcreteBridge = (() => {
+    const relevantEvent = GEOFFREY_RELEVANT_EVENT_PATTERN.test(haystack)
+      || GEOFFREY_AI_TOKEN_PATTERN.test(haystack);
+    if (!isGeoffreyVoiceProfile(voiceProfile) || !relevantEvent) return 0;
+    const headline = topic.headline.trim();
+    const category = normalizeTopic(topic.category);
+    const broadCategory = BROAD_IDENTITY_TOPICS.has(category);
+    const namedTech = GEOFFREY_NAMED_TECH_PATTERN.test(haystack);
+    const concreteEvent = GEOFFREY_CONCRETE_EVENT_PATTERN.test(haystack);
+    const genericBreakout = GENERIC_BREAKOUT_EVENT_PATTERN.test(headline)
+      && !namedTech
+      && !concreteEvent;
+    const specificHeadline = headline.split(/\s+/).filter(Boolean).length >= 4
+      && normalizeTopic(headline) !== category
+      && !genericBreakout;
+    const namedProductLabel = namedTech && /[a-z]+[-/][a-z0-9-]+|\d/i.test(headline);
+
+    if (namedTech && (concreteEvent || specificHeadline || namedProductLabel)) return 0.72;
+    if (concreteEvent && specificHeadline) return 0.64;
+    if (!broadCategory && specificHeadline) return 0.54;
+    return 0;
+  })();
+  const soul = Math.max(
+    topicFitScore(haystack, voiceProfile.topics),
+    profileContextFitScore(haystack, voiceProfile),
+    geoffreyConcreteBridge,
+    operatorEngagementBridge,
+  );
+  const manual = manualFitScore(topic, learnings?.manualTopicProfile || []);
+  const identityFit = Math.max(soul, manual);
+  return {
+    soul: Number(soul.toFixed(3)),
+    manual: Number(manual.toFixed(3)),
+    identityFit: Number(identityFit.toFixed(3)),
+    driftRisk: Number(clamp(1 - identityFit).toFixed(3)),
+  };
+}
+
+export function formatTrendEvidence(
+  topic: TrendingTopic,
+  options: { includeRawSourceText?: boolean } = {},
+): string {
+  const includeRawSourceText = options.includeRawSourceText !== false;
+  const sourceType = topic.sourceType === 'hacker_news' ? 'Hacker News' : 'X';
+  const timestampLabel = topic.sourceType === 'hacker_news' ? 'discovered' : 'published';
+  const metadata = [
+    `source=${sourceType}`,
+    topic.publisher ? `publisher=${topic.publisher}` : null,
+    topic.timestamp ? `${timestampLabel}=${topic.timestamp}` : null,
+    topic.sourceUrl ? `url=${topic.sourceUrl}` : null,
+    topic.semanticDomain ? `domain=${topic.semanticDomain}` : null,
+    topic.topicUncertainty ? `uncertainty=${topic.topicUncertainty}` : null,
+  ].filter(Boolean).join('; ');
+  const sourceText = topic.topTweet?.text?.trim();
+  const additionalEvidence = includeRawSourceText && sourceText && sourceText !== topic.headline
+    ? ` Source text: ${sourceText.slice(0, 500)}`
+    : '';
+  const networkMetadata = topic.discoveryMethod === 'followed_network'
+    ? ` Followed-network topicId=${topic.networkTopicId || topic.id}; topic=${topic.category}; momentum=${Number(topic.networkMomentumScore || 0).toFixed(3)}; momentumDelta=${Number(topic.networkMomentumDelta || 0).toFixed(3)}; sourceAuthors=${topic.sourceCount || 1}; whyNow=${topic.topicWhyNow || 'breakout posts in the followed network'}.`
+    : '';
+  const networkEvidence = includeRawSourceText && topic.discoveryMethod === 'followed_network' && topic.evidence?.length
+    ? ` Evidence: ${topic.evidence.slice(0, 4).map((item) => (
+      `@${item.author} (${item.breakoutMultiple.toFixed(2)}x author baseline; score ${item.viralScore.toFixed(3)}; ${item.sourceUrl}): ${item.text.slice(0, 280)}`
+    )).join(' | ')}`
+    : '';
+  return `Current event [${metadata}]: ${topic.headline}${networkMetadata}${additionalEvidence}${networkEvidence}`;
+}
+
+export function getTrendSourceEvidenceTexts(topic: TrendingTopic): string[] {
+  const evidence = topic.discoveryMethod === 'followed_network'
+    ? (topic.evidence || []).map((item) => item.text)
+    : [topic.topTweet?.text];
+  return [...new Set(evidence.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean))]
+    .slice(0, 4)
+    .map((text) => text.slice(0, 420));
+}
+
+export function formatTrendProvenance(topic: TrendingTopic): string {
+  const sourceType = topic.sourceType === 'hacker_news' ? 'Hacker News' : 'X';
+  const stableId = getTrendingTopicStableId(topic);
+  const urls = [...new Set([
+    topic.sourceUrl,
+    ...(topic.evidence || []).map((item) => item.sourceUrl),
+  ].filter((value): value is string => Boolean(value)))].slice(0, 4);
+  const metadata = [
+    `source=${sourceType}`,
+    `topicId=${stableId}`,
+    `topic=${topic.category}`,
+    topic.timestamp ? `published=${topic.timestamp}` : null,
+    topic.observedAt ? `observed=${topic.observedAt}` : null,
+    topic.discoveryMethod === 'followed_network' ? `followed-network=true` : null,
+    topic.networkMomentumScore !== null && topic.networkMomentumScore !== undefined
+      ? `momentum=${Number(topic.networkMomentumScore).toFixed(3)}`
+      : null,
+    Number(topic.operatorEngagementScore || 0) > 0
+      ? `operator-liked-signal=${Number(topic.operatorEngagementScore).toFixed(3)}`
+      : null,
+    urls.length > 0 ? `urls=${urls.join(',')}` : null,
+  ].filter(Boolean).join('; ');
+  return `Current subject provenance [${metadata}]`;
+}
+
+export function enrichTrendingTopics(
+  trending: TrendingTopic[],
+  voiceProfile: VoiceProfile,
+  learnings: AgentLearnings | null,
+  tolerance: TrendTolerance = 'moderate',
+): EnrichedTrendingTopic[] {
+  return trending.map((topic) => {
+    const semanticDomain = classifyGeoffreyTopicDomain(
+      `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+      topic.semanticDomain,
+    );
+    const identity = assessNativeTopicIdentity(topic, voiceProfile, learnings);
+    const { soul, manual, identityFit, driftRisk } = identity;
+    const freshness = freshnessScore(topic);
+    const velocity = velocityScore(topic);
+    const sourceQuality = sourceQualityScore(topic);
+    const networkMomentum = followedNetworkMomentumScore(topic);
+    const operatorEngagement = clamp(Number(topic.operatorEngagementScore || 0));
+    const isFollowedNetworkTopic = topic.discoveryMethod === 'followed_network';
+    const total = clamp(isFollowedNetworkTopic
+      ? (freshness * 0.12)
+        + (velocity * 0.1)
+        + (soul * 0.18)
+        + (manual * 0.14)
+        + (identityFit * 0.16)
+        + (sourceQuality * 0.1)
+        + (networkMomentum * 0.2)
+        + (operatorEngagement * 0.12)
+      : (freshness * 0.25)
+        + (velocity * 0.2)
+        + (soul * 0.2)
+        + (manual * 0.2)
+        + (sourceQuality * 0.15));
+    const networkQualified = isFollowedNetworkTopic
+      && networkMomentum >= 0.62
+      && (topic.topicConfidence || 0) >= 0.45
+      && ((topic.sourceCount || 1) >= 2 || topic.isPrimarySource === true);
+    const factualSourceQualified = topic.isPrimarySource === true || (topic.sourceCount || 1) >= 2;
+    const isFactualLiveStory = Boolean(
+      topic.sourceUrl
+      || topic.topTweet?.id
+      || topic.discoveryMethod === 'followed_network'
+      || topic.discoveryMethod === 'publisher_feed',
+    );
+    const adjacentIdentityFloor = tolerance === 'adjacent' ? 0.32 : tolerance === 'aggressive' ? 0.18 : 0.24;
+    const hasAlignedIdentityBridge = identityFit >= 0.45;
+    const hasAdjacentIdentityBridge = identityFit >= adjacentIdentityFloor;
+    const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+    const restrictedExploration = geoffreyStrict && RESTRICTED_EXPLORATION_DOMAINS.has(semanticDomain);
+    const offCoreExploration = geoffreyStrict && !isCoreGeoffreyTopicDomain(semanticDomain);
+    const hasStartupInvestingImplication = GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(
+      `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+    );
+    const exceptionalBroadExploration = offCoreExploration
+      && networkQualified
+      && networkMomentum >= 0.8
+      && (topic.topicConfidence || 0) >= 0.75
+      && topic.topicUncertainty !== 'high'
+      && hasStartupInvestingImplication;
+    const incompleteNetworkEvidence = geoffreyStrict && (
+      (isFollowedNetworkTopic && !networkQualified)
+      || (!isFollowedNetworkTopic && isFactualLiveStory && !factualSourceQualified)
+      || topic.topicUncertainty === 'high'
+    );
+
+    let sourceLane: ContentSourceLane | 'reject' = 'reject';
+    let plannerReason = 'Trend is too stale or too far from the account voice.';
+
+    if (incompleteNetworkEvidence) {
+      plannerReason = 'Rejected: factual story lacks two independent authors or primary-source support, or remains high uncertainty.';
+    } else if (offCoreExploration && !exceptionalBroadExploration) {
+      plannerReason = restrictedExploration
+        ? 'Rejected: crypto or politics-led subject lacks exceptional evidence and a concrete startup or investing implication.'
+        : 'Rejected: off-core subject lacks exceptional network momentum and a concrete startup or investing implication.';
+    } else if (exceptionalBroadExploration) {
+      sourceLane = 'trend_adjacent_explore';
+      plannerReason = 'Exceptional off-core network signal with multiple sources; eligible for the tightly capped broad-exploration lane.';
+    } else if (total >= 0.55 && hasAlignedIdentityBridge) {
+      sourceLane = 'trend_aligned_exploit';
+      plannerReason = networkQualified
+        ? operatorEngagement >= 0.7
+          ? 'Followed-network subject has qualified momentum and direct operator-like evidence; use it as topic taste, never diction.'
+          : 'Followed-network subject has strong momentum and a concrete bridge to native account topics.'
+        : 'Hot trend with strong manual/core topic fit.';
+    } else if (
+      hasAdjacentIdentityBridge
+      && freshness >= 0.2
+      && total >= (tolerance === 'adjacent' ? 0.46 : tolerance === 'aggressive' ? 0.38 : 0.42)
+    ) {
+      sourceLane = 'trend_adjacent_explore';
+      plannerReason = tolerance === 'aggressive'
+        ? 'Trend has a defensible native bridge and enough momentum for one measured exploration slot.'
+        : 'Trend is adjacent to native account evidence and acceptable for limited exploration.';
+    } else if (identityFit < adjacentIdentityFloor) {
+      plannerReason = 'Rejected despite momentum: no concrete bridge to the account\'s native topics or manual writing history.';
+    }
+
+    return {
+      ...topic,
+      semanticDomain,
+      fitScores: {
+        freshness: Number(freshness.toFixed(3)),
+        velocity: Number(velocity.toFixed(3)),
+        soul: Number(soul.toFixed(3)),
+        manual: Number(manual.toFixed(3)),
+        identityFit: Number(identityFit.toFixed(3)),
+        driftRisk: Number(driftRisk.toFixed(3)),
+        networkMomentum: Number(networkMomentum.toFixed(3)),
+        operatorEngagement: Number(operatorEngagement.toFixed(3)),
+        sourceQuality: Number(sourceQuality.toFixed(3)),
+        total: Number(total.toFixed(3)),
+      },
+      sourceLane,
+      plannerReason,
+    } satisfies EnrichedTrendingTopic;
+  });
+}
+
+function distributeLanes(counts: Record<ContentSourceLane, number>): ContentSourceLane[] {
+  const entries = (Object.entries(counts) as Array<[ContentSourceLane, number]>)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  const lanes: ContentSourceLane[] = [];
+  let remaining = entries.reduce((sum, [, count]) => sum + count, 0);
+
+  while (remaining > 0) {
+    for (const entry of entries) {
+      if (entry[1] <= 0) continue;
+      lanes.push(entry[0]);
+      entry[1] -= 1;
+      remaining -= 1;
+    }
+  }
+
+  return lanes;
+}
+
+function pickManualTopics(learnings: AgentLearnings | null, fallbackTopics: string[]): string[] {
+  const manualTopics = (learnings?.manualTopicProfile || []).map((cluster) => cluster.topic);
+  return [...new Set([...manualTopics, ...fallbackTopics.map((topic) => normalizeTopic(topic)).filter(Boolean)])].filter(Boolean);
+}
+
+function findManualTopicCluster(
+  topic: string,
+  learnings: AgentLearnings | null,
+): ManualTopicCluster | null {
+  const normalized = normalizeTopic(topic);
+  return (learnings?.manualTopicProfile || []).find((cluster) => normalizeTopic(cluster.topic) === normalized) || null;
+}
+
+function buildHistoricalOperatorEvidence(cluster: ManualTopicCluster): SourcePlannerBriefEvidence {
+  const spreadMechanics = [...new Set(
+    (cluster.topTweets || [])
+      .slice(0, 3)
+      .flatMap((tweet) => inferContentSpreadMechanics(tweet.content, {
+        topic: tweet.topic,
+        thesis: tweet.thesis,
+        replies: tweet.replies,
+        retweets: tweet.retweets,
+      })),
+  )].slice(0, 5);
+  return {
+    mode: 'historical_operator',
+    subject: cluster.topic,
+    factualClaimAllowed: false,
+    provenanceId: null,
+    historicalAngle: cluster.angle || null,
+    historicalAvgEngagement: cluster.avgEngagement,
+    historicalSampleCount: cluster.sampleCount,
+    spreadMechanics,
+    instruction: 'Use this only as evidence of Geoffrey\'s topic taste and spread mechanics. Move to a fresh adjacent claim; do not reuse the historical post\'s names, premise, opening, or wording.',
+  };
+}
+
+const OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY = /^(?:intro|vcs?|venture capital|early-stage founders?|founders?|startups?|@?geoff(?:rey)?\s*woo|@?anti\s*fund)$/i;
+const OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO = /\b(?:sign up|join (?:the )?waitlist|book a demo|try it here|apply now|dm me|email me|contact me|personally show|we can help)\b|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
+const OPERATOR_TOPIC_SIGNAL_EVENT_TERMS = /\b(?:announc(?:e|ed|es|ing)|appoint(?:ed|s|ing)?|acquir(?:e|ed|es|ing)|bought|buys?|challeng(?:e|ed|es|ing)|depart(?:ed|s|ing)?|filed?|fund(?:ed|ing)|hir(?:e|ed|es|ing)|join(?:ed|s|ing)?|launch(?:ed|es|ing)?|leav(?:e|es|ing)|left|merg(?:e|ed|es|ing)|pitch(?:ed|es|ing)?|promot(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|resign(?:ed|s|ing)?|sign(?:ed|s|ing)?|steps?\s+down)\b/gi;
+
+function operatorTopicSignalEntities(topic: EnrichedTrendingTopic): string[] {
+  return [...new Set((topic.entities || [])
+    .map((entity) => entity.replace(/\s+/g, ' ').trim())
+    .filter((entity) => entity && !OPERATOR_TOPIC_SIGNAL_GENERIC_ENTITY.test(entity)))]
+    .slice(0, 4);
+}
+
+function operatorTopicSignalEntityRoles(
+  topic: EnrichedTrendingTopic,
+  subject = operatorTopicSignalSubject(topic),
+): TopicEntityRole[] {
+  const normalizedSubject = ` ${normalizeTopic(subject)} `;
+  const allowed = new Map(operatorTopicSignalEntities(topic)
+    .filter((entity) => normalizedSubject.includes(` ${normalizeTopic(entity)} `))
+    .map((entity) => [normalizeTopic(entity), entity]));
+  return (topic.entityRoles || []).flatMap((entry) => {
+    const name = allowed.get(normalizeTopic(entry.name));
+    return name ? [{ name, role: entry.role, ...(entry.xHandle ? { xHandle: entry.xHandle } : {}) }] : [];
+  }).slice(0, 4);
+}
+
+function operatorTopicSignalStrippedEventTerms(topic: EnrichedTrendingTopic): string[] {
+  return [...new Set((topic.category.match(OPERATOR_TOPIC_SIGNAL_EVENT_TERMS) || [])
+    .map((term) => term.toLowerCase().replace(/\s+/g, ' ').trim())
+    .filter(Boolean))].slice(0, 4);
+}
+
+function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean {
+  const category = normalizeTopic(topic.category);
+  const wordCount = category.split(/\s+/).filter(Boolean).length;
+  const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
+  return getOperatorTopicSignalRejectionCodes(topic, { category, wordCount, domain }).length === 0;
+}
+
+export type OperatorTopicSignalRejectionCode =
+  | 'not_followed_network'
+  | 'operator_engagement_below_floor'
+  | 'topic_confidence_below_floor'
+  | 'topic_uncertainty_high'
+  | 'identity_below_floor'
+  | 'off_core_domain'
+  | 'restricted_domain'
+  | 'culture_bridge_missing'
+  | 'named_entity_missing'
+  | 'category_too_broad'
+  | 'event_only_subject'
+  | 'promotional_source';
+
+export function getOperatorTopicSignalRejectionCodes(
+  topic: EnrichedTrendingTopic,
+  normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain },
+): OperatorTopicSignalRejectionCode[] {
+  const category = normalized?.category ?? normalizeTopic(topic.category);
+  const wordCount = normalized?.wordCount ?? category.split(/\s+/).filter(Boolean).length;
+  const domain = normalized?.domain
+    ?? classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
+  const codes: OperatorTopicSignalRejectionCode[] = [];
+  if (topic.discoveryMethod !== 'followed_network') codes.push('not_followed_network');
+  if (Number(topic.operatorEngagementScore || 0) < 0.7) codes.push('operator_engagement_below_floor');
+  if (Number(topic.topicConfidence || 0) < 0.55) codes.push('topic_confidence_below_floor');
+  if (topic.topicUncertainty === 'high') codes.push('topic_uncertainty_high');
+  if (topic.fitScores.identityFit < 0.45) codes.push('identity_below_floor');
+  if (!isCoreGeoffreyTopicDomain(domain)) codes.push('off_core_domain');
+  if (RESTRICTED_EXPLORATION_DOMAINS.has(domain)) codes.push('restricted_domain');
+  if (
+    domain === 'culture_status'
+    && topic.fitScores.manual < 0.12
+    && !GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN.test(`${topic.category} ${topic.headline}`)
+  ) codes.push('culture_bridge_missing');
+  if (operatorTopicSignalEntities(topic).length === 0) codes.push('named_entity_missing');
+  if (wordCount < 2 || BROAD_IDENTITY_TOPICS.has(category)) codes.push('category_too_broad');
+  if (
+    operatorTopicSignalStrippedEventTerms(topic).length > 0
+    && !operatorTopicSignalHasSurvivingObject(topic)
+  ) codes.push('event_only_subject');
+  if (OPERATOR_TOPIC_SIGNAL_DIRECT_PROMO.test(`${topic.headline} ${topic.topTweet?.text || ''}`)) {
+    codes.push('promotional_source');
+  }
+  return codes;
+}
+
+function isSpecificOperatorTopicSignal(topic: EnrichedTrendingTopic): boolean {
+  return topic.sourceLane === 'reject' && isSpecificOperatorSubjectSignal(topic);
+}
+
+function operatorTopicSignalSubject(topic: EnrichedTrendingTopic): string {
+  const classifiedSubject = topic.category
+    .replace(OPERATOR_TOPIC_SIGNAL_EVENT_TERMS, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const entities = operatorTopicSignalEntities(topic);
+  if (classifiedSubject) {
+    const descriptiveEntities = entities.filter((entity) => (
+      entity === entity.toLowerCase()
+      && !classifiedSubject.toLowerCase().includes(entity.toLowerCase())
+    ));
+    return [classifiedSubject, ...descriptiveEntities].join(' ');
+  }
+  return entities.join(', ');
+}
+
+function operatorTopicSignalHasSurvivingObject(topic: EnrichedTrendingTopic): boolean {
+  const subject = operatorTopicSignalSubject(topic);
+  const roles = operatorTopicSignalEntityRoles(topic, subject);
+  if (roles.some((entry) => entry.role === 'product' || entry.role === 'technology')) return true;
+  const entityTokens = new Set(operatorTopicSignalEntities(topic).flatMap((entity) => [...identityTokens(entity)]));
+  return [...identityTokens(subject)].some((token) => !entityTokens.has(token));
+}
+
+function operatorTopicSignalEntityDomainAlias(topic: EnrichedTrendingTopic): string {
+  const entities = operatorTopicSignalEntities(topic);
+  if (entities.length === 0) return '';
+  const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain)
+    .replace(/_/g, ' ');
+  return `${entities.join(', ')} in ${domain}`;
+}
+
+export function selectOperatorTopicSignals(
+  trending: TrendingTopic[],
+  voiceProfile: VoiceProfile,
+  learnings: AgentLearnings | null,
+  tolerance: TrendTolerance = 'moderate',
+  limit = 4,
+): OperatorTopicSignal[] {
+  const boundedLimit = Math.max(0, Math.min(12, Math.floor(limit)));
+  if (boundedLimit === 0) return [];
+  return enrichTrendingTopics(trending, voiceProfile, learnings, tolerance)
+    .filter(isSpecificOperatorSubjectSignal)
+    .filter((topic) => !isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+      topic.semanticDomain,
+    ))
+    .sort((left, right) => (
+      Number(isGeoffreyDeepTechnicalTopic(`${left.category} ${left.headline}`))
+      - Number(isGeoffreyDeepTechnicalTopic(`${right.category} ${right.headline}`))
+      || Number(right.operatorEngagementScore || 0) - Number(left.operatorEngagementScore || 0)
+      || right.fitScores.identityFit - left.fitScores.identityFit
+      || right.fitScores.total - left.fitScores.total
+    ))
+    .slice(0, boundedLimit)
+    .map((topic) => {
+      const subject = operatorTopicSignalSubject(topic);
+      const entityRoles = operatorTopicSignalEntityRoles(topic, subject);
+      const entityDomainAlias = operatorTopicSignalEntityDomainAlias(topic);
+      return {
+        id: getTrendingTopicStableId(topic),
+        subject,
+        semanticAliases: entityDomainAlias && entityDomainAlias !== subject ? [entityDomainAlias] : [],
+        entityRoles,
+        strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
+        domain: classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain),
+        identityScore: Number(topic.fitScores.identityFit.toFixed(3)),
+        operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
+        topicConfidence: Number(topic.topicConfidence || 0),
+        sourceCount: Number(topic.sourceCount || 1),
+      };
+    });
+}
+
+function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourcePlannerBriefEvidence {
+  const subject = operatorTopicSignalSubject(topic);
+  return {
+    mode: 'operator_topic_signal',
+    subject,
+    factualClaimAllowed: false,
+    provenanceId: getTrendingTopicStableId(topic),
+    historicalAngle: null,
+    historicalAvgEngagement: null,
+    historicalSampleCount: null,
+    spreadMechanics: [],
+    entityRoles: operatorTopicSignalEntityRoles(topic, subject),
+    strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
+    instruction: 'Geoffrey recently engaged with this subject. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim. Entity roles prevent actor swaps but do not establish a relationship between entities.',
+  };
+}
+
+function isBroadFrontierTopic(topic: string): boolean {
+  return /^(ai|frontier tech|deep tech|hard tech|re-industrialization|industrial capacity|critical minerals|rare earth minerals)$/i.test(topic.trim());
+}
+
+export function buildSourcePlannerPlan({
+  count,
+  autonomyMode,
+  trendMixTarget = 35,
+  trendTolerance = 'moderate',
+  voiceProfile,
+  learnings,
+  trending,
+  fallbackTopics = [],
+  excludedTrendTopicIds = [],
+}: {
+  count: number;
+  autonomyMode: 'safe' | 'balanced' | 'explore';
+  trendMixTarget?: number;
+  trendTolerance?: TrendTolerance;
+  voiceProfile: VoiceProfile;
+  learnings: AgentLearnings | null;
+  trending: TrendingTopic[] | null;
+  fallbackTopics?: string[];
+  excludedTrendTopicIds?: string[];
+}): SourcePlannerPlan {
+  const geoffreyStrict = isGeoffreyVoiceProfile(voiceProfile);
+  const excludedTrendIds = new Set(excludedTrendTopicIds.map((id) => String(id).trim()).filter(Boolean));
+  const classified = enrichTrendingTopics(trending || [], voiceProfile, learnings, trendTolerance)
+    .sort((a, b) => b.fitScores.total - a.fitScores.total || b.relevanceScore - a.relevanceScore);
+  const accountTopicAllowed = (topic: EnrichedTrendingTopic) => !isVoiceProfileTopicBlocked(
+    voiceProfile,
+    `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+    topic.semanticDomain,
+  );
+  const accepted = classified
+    .filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)))
+    .filter(accountTopicAllowed);
+  const acceptedAligned = accepted.filter((topic) => topic.sourceLane === 'trend_aligned_exploit');
+  const acceptedAdjacent = accepted.filter((topic) => topic.sourceLane === 'trend_adjacent_explore');
+  const rejectedTrends = classified.filter((topic) => topic.sourceLane === 'reject' || !accountTopicAllowed(topic));
+  const operatorTopicSignals = classified
+    .filter((topic) => !excludedTrendIds.has(getTrendingTopicStableId(topic)))
+    .filter(accountTopicAllowed)
+    .filter(isSpecificOperatorTopicSignal)
+    .sort((a, b) => (
+      Number(isGeoffreyDeepTechnicalTopic(`${a.category} ${a.headline}`))
+      - Number(isGeoffreyDeepTechnicalTopic(`${b.category} ${b.headline}`))
+      || Number(b.operatorEngagementScore || 0) - Number(a.operatorEngagementScore || 0)
+      || b.fitScores.total - a.fitScores.total
+    ));
+
+  const baseBudgets = BASE_LANE_BUDGETS[autonomyMode];
+  const configuredTrendShare = clamp((trendMixTarget || 0) / 100);
+  const networkSignals = accepted
+    .filter((topic) => topic.discoveryMethod === 'followed_network' && topic.sourceLane !== 'reject')
+    .map((topic) => (topic.fitScores.networkMomentum || 0) * (topic.topicConfidence || 0.5))
+    .sort((a, b) => b - a)
+    .slice(0, 5);
+  const networkStrength = networkSignals.length > 0
+    ? networkSignals.reduce((sum, score) => sum + score, 0) / networkSignals.length
+    : 0;
+  const maximumTrendShare = isGeoffreyVoiceProfile(voiceProfile)
+    ? 0.3
+    : autonomyMode === 'safe' ? 0.25 : autonomyMode === 'balanced' ? 0.35 : 0.45;
+  const adjustedTrendShare = Math.min(configuredTrendShare, maximumTrendShare);
+  const desiredTrendSlots = adjustedTrendShare <= 0 || count <= 0
+    ? 0
+    : Math.min(count, Math.max(1, Math.floor(count * adjustedTrendShare)));
+  const alignedPreference = clamp(
+    0.68 + networkStrength * 0.16,
+    0.62,
+    0.86,
+  );
+  let alignedQuota = Math.min(
+    acceptedAligned.length,
+    Math.min(desiredTrendSlots, Math.max(desiredTrendSlots > 0 ? 1 : 0, Math.round(desiredTrendSlots * alignedPreference))),
+  );
+  let adjacentQuota = Math.min(acceptedAdjacent.length, desiredTrendSlots - alignedQuota);
+  const unfilledTrendSlots = desiredTrendSlots - alignedQuota - adjacentQuota;
+  if (unfilledTrendSlots > 0) {
+    alignedQuota += Math.min(unfilledTrendSlots, Math.max(0, acceptedAligned.length - alignedQuota));
+  }
+  adjacentQuota += Math.min(
+    desiredTrendSlots - alignedQuota - adjacentQuota,
+    Math.max(0, acceptedAdjacent.length - adjacentQuota),
+  );
+
+  const actualTrendSlots = alignedQuota + adjacentQuota;
+  const nativeSlots = Math.max(0, count - actualTrendSlots);
+  const nativeBudgetTotal = baseBudgets.manual_core_exploit + baseBudgets.core_explore_fallback;
+  const manualPreference = nativeBudgetTotal > 0
+    ? baseBudgets.manual_core_exploit / nativeBudgetTotal
+    : 0.75;
+  const manualCoreSlots = Math.min(nativeSlots, Math.round(nativeSlots * manualPreference));
+  const laneCounts: Record<ContentSourceLane, number> = {
+    manual_core_exploit: manualCoreSlots,
+    trend_aligned_exploit: alignedQuota,
+    trend_adjacent_explore: adjacentQuota,
+    core_explore_fallback: nativeSlots - manualCoreSlots,
+  };
+
+  const orderedLanes = distributeLanes(laneCounts).slice(0, count);
+  const rawManualTopics = pickManualTopics(learnings, [...voiceProfile.topics, ...fallbackTopics]);
+  const rawFallbackPool = [...new Set([...fallbackTopics, ...voiceProfile.topics])].filter(Boolean);
+  const coreDefaults = [
+    'AI products and research',
+    'founders, venture, and company building',
+    'culture, status, merit, and ambition',
+    'investing and capital markets',
+    'career, ambition, talent, and agency',
+    'software, products, and technology shifts',
+    'health, longevity, and human performance',
+    'frontier technology',
+  ];
+  const manualTopics = geoffreyStrict
+    ? [...new Set([
+        ...rawManualTopics.filter((topic) => (
+          isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))
+          && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+        )),
+        ...coreDefaults,
+      ])]
+    : rawManualTopics;
+  const fallbackPool = geoffreyStrict
+    ? [...new Set([
+        ...rawFallbackPool.filter((topic) => (
+          isCoreGeoffreyTopicDomain(classifyGeoffreyTopicDomain(topic))
+          && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+        )),
+        ...manualTopics,
+        ...coreDefaults,
+      ])]
+    : rawFallbackPool;
+  if (geoffreyStrict && manualTopics.length === 0) manualTopics.push(...coreDefaults);
+  if (geoffreyStrict && fallbackPool.length === 0) fallbackPool.push(...coreDefaults);
+
+  const slots: SourcePlannerSlot[] = [];
+  let alignedIndex = 0;
+  let adjacentIndex = 0;
+  let manualIndex = 0;
+  let fallbackIndex = 0;
+  let operatorTopicSignalIndex = 0;
+  const usedIdeaSeedIds = new Set<string>();
+  const usedTargetTopics = new Set<string>();
+  const usedTopicDomainCounts = new Map<TopicSemanticDomain, number>();
+  const usedOperatorTopicSignalIds = new Set<string>();
+  let deepTechnicalBriefs = 0;
+  let manufacturingMaterialsBriefs = 0;
+  const maxDeepTechnicalBriefs = Math.max(1, Math.ceil(count / 5));
+  const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(count / 8));
+  const maxTopicDomainBriefs = Math.max(1, Math.ceil(count / 4));
+  const maxOperatorTopicSignalBriefs = Math.min(
+    operatorTopicSignals.length,
+    nativeSlots > 0 ? Math.max(1, Math.floor(nativeSlots / 2)) : 0,
+  );
+  const operatorTopicSignalSlotIndexes = new Set([
+    ...orderedLanes.map((lane, index) => lane === 'core_explore_fallback' ? index : -1).filter((index) => index >= 0),
+    ...orderedLanes.map((lane, index) => lane === 'manual_core_exploit' ? index : -1).filter((index) => index >= 0),
+  ].slice(0, maxOperatorTopicSignalBriefs));
+
+  for (let index = 0; index < orderedLanes.length; index++) {
+    let lane = orderedLanes[index];
+    let targetTopic = manualTopics[manualIndex % Math.max(manualTopics.length, 1)] || fallbackPool[0] || 'general';
+    let trendTopicId: string | null = null;
+    let trendHeadline: string | null = null;
+    let operatorTopicSignal: EnrichedTrendingTopic | null = null;
+    let plannerReason = 'Exploit proven manual topics and voice anchors.';
+    let mode: 'exploit' | 'explore' = lane === 'manual_core_exploit' || lane === 'trend_aligned_exploit' ? 'exploit' : 'explore';
+
+    if (lane === 'trend_aligned_exploit' && acceptedAligned[alignedIndex]) {
+      const trend = acceptedAligned[alignedIndex++];
+      targetTopic = trend.category || targetTopic;
+      trendTopicId = getTrendingTopicStableId(trend);
+      trendHeadline = trend.headline;
+      plannerReason = trend.plannerReason;
+    } else if (lane === 'trend_adjacent_explore' && acceptedAdjacent[adjacentIndex]) {
+      const trend = acceptedAdjacent[adjacentIndex++];
+      targetTopic = trend.category || targetTopic;
+      trendTopicId = getTrendingTopicStableId(trend);
+      trendHeadline = trend.headline;
+      plannerReason = trend.plannerReason;
+    } else if (lane === 'core_explore_fallback') {
+      targetTopic = fallbackPool[fallbackIndex % Math.max(fallbackPool.length, 1)] || targetTopic;
+      fallbackIndex++;
+      plannerReason = 'Trend slots were unavailable, so this slot explores an underused core topic instead.';
+    } else {
+      manualIndex++;
+    }
+
+    if (
+      geoffreyStrict
+      && !trendTopicId
+      && operatorTopicSignalSlotIndexes.has(index)
+      && usedOperatorTopicSignalIds.size < maxOperatorTopicSignalBriefs
+    ) {
+      while (operatorTopicSignalIndex < operatorTopicSignals.length) {
+        const candidate = operatorTopicSignals[operatorTopicSignalIndex++];
+        const candidateId = getTrendingTopicStableId(candidate);
+        const candidateDomain = classifyGeoffreyTopicDomain(
+          `${candidate.category} ${candidate.headline}`,
+          candidate.semanticDomain,
+        );
+        if (usedOperatorTopicSignalIds.has(candidateId)) continue;
+        if (usedTargetTopics.has(normalizeTopic(candidate.category))) continue;
+        if ((usedTopicDomainCounts.get(candidateDomain) || 0) >= maxTopicDomainBriefs) continue;
+        operatorTopicSignal = candidate;
+        usedOperatorTopicSignalIds.add(candidateId);
+        targetTopic = operatorTopicSignalSubject(candidate);
+        lane = lane === 'core_explore_fallback' ? lane : 'manual_core_exploit';
+        mode = lane === 'manual_core_exploit' ? 'exploit' : 'explore';
+        plannerReason = 'Recent operator-like supplies a specific subject cue. It is taste evidence only and cannot support factual claims about the source post.';
+        break;
+      }
+    }
+
+    if (geoffreyStrict) {
+      const topicContext = `${targetTopic} ${trendHeadline || ''}`;
+      const deepTechnical = isGeoffreyDeepTechnicalTopic(topicContext);
+      const manufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topicContext);
+      const topicDomain = classifyGeoffreyTopicDomain(topicContext);
+      const duplicateTopic = usedTargetTopics.has(normalizeTopic(targetTopic));
+      const duplicateDomain = topicDomain !== 'other'
+        && (usedTopicDomainCounts.get(topicDomain) || 0) >= maxTopicDomainBriefs;
+      const exceedsPortfolio = (
+        (deepTechnical && deepTechnicalBriefs >= maxDeepTechnicalBriefs)
+        || (manufacturingMaterials && manufacturingMaterialsBriefs >= maxManufacturingMaterialsBriefs)
+        || duplicateDomain
+      );
+      if (duplicateTopic || exceedsPortfolio) {
+        const replacement = [...manualTopics, ...fallbackPool, ...coreDefaults].find((topic) => {
+          const replacementDeepTechnical = isGeoffreyDeepTechnicalTopic(topic);
+          const replacementManufacturingMaterials = isGeoffreyManufacturingMaterialsTopic(topic);
+          const frontierCapacityAvailable = deepTechnicalBriefs < maxDeepTechnicalBriefs
+            && manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs;
+          return !usedTargetTopics.has(normalizeTopic(topic))
+            && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+            && (!replacementDeepTechnical || deepTechnicalBriefs < maxDeepTechnicalBriefs)
+            && (!replacementManufacturingMaterials || manufacturingMaterialsBriefs < maxManufacturingMaterialsBriefs)
+            && (!isBroadFrontierTopic(topic) || frontierCapacityAvailable)
+            && (usedTopicDomainCounts.get(classifyGeoffreyTopicDomain(topic)) || 0) < maxTopicDomainBriefs;
+        });
+        if (replacement) {
+          targetTopic = replacement;
+          trendTopicId = null;
+          trendHeadline = null;
+          operatorTopicSignal = null;
+          lane = lane === 'core_explore_fallback' ? lane : 'manual_core_exploit';
+          mode = lane === 'manual_core_exploit' ? 'exploit' : 'explore';
+          plannerReason = duplicateDomain
+            ? 'Rebalanced to a different native domain so the batch follows Geoffrey\'s broad historical portfolio.'
+            : exceedsPortfolio
+            ? 'Rebalanced toward Geoffrey\'s broader native portfolio; deep industrial topics are a minority lane.'
+            : 'Rebalanced to a distinct native topic so the batch does not repeat one subject.';
+        }
+      }
+    }
+
+    const preSeedHistoricalCluster = !trendTopicId && !operatorTopicSignal
+      ? findManualTopicCluster(targetTopic, learnings)
+      : null;
+    const shouldAttachIdeaSeed = !operatorTopicSignal && (
+      (geoffreyStrict && !trendHeadline)
+      || lane === 'core_explore_fallback'
+      || (lane === 'manual_core_exploit' && isBroadFrontierTopic(targetTopic))
+      || (!trendHeadline && isBroadFrontierTopic(targetTopic))
+    );
+    let ideaSeed = shouldAttachIdeaSeed
+      ? geoffreyStrict
+        ? pickGeoffreyIdeaSeed({ voiceProfile, targetTopic, slot: index + 1, usedSeedIds: usedIdeaSeedIds })
+        : pickFrontierIdeaSeed({ voiceProfile, targetTopic, slot: index + 1, usedSeedIds: usedIdeaSeedIds })
+      : null;
+    if (ideaSeed) {
+      usedIdeaSeedIds.add(ideaSeed.id);
+      if ((!preSeedHistoricalCluster && lane === 'core_explore_fallback') || isBroadFrontierTopic(targetTopic)) {
+        targetTopic = ideaSeed.topic;
+      }
+      plannerReason = `${plannerReason} ${ideaSeed.kind === 'frontier' ? 'Frontier' : 'Native topic'} seed: ${ideaSeed.technicalObject} / ${ideaSeed.hiddenConstraint}`;
+    }
+
+    if (geoffreyStrict && isVoiceProfileTopicBlocked(
+      voiceProfile,
+      `${targetTopic} ${trendHeadline || ''} ${ideaSeed?.topic || ''} ${ideaSeed?.technicalObject || ''}`,
+    )) {
+      const replacement = coreDefaults.find((topic) => (
+        !usedTargetTopics.has(normalizeTopic(topic))
+        && !isVoiceProfileTopicBlocked(voiceProfile, topic)
+      )) || coreDefaults[0];
+      targetTopic = replacement;
+      trendTopicId = null;
+      trendHeadline = null;
+      operatorTopicSignal = null;
+      ideaSeed = null;
+      lane = 'manual_core_exploit';
+      mode = 'exploit';
+      plannerReason = 'Replaced a subject excluded by the current account topic policy.';
+    }
+
+    if (geoffreyStrict) {
+      const finalTopicContext = `${targetTopic} ${trendHeadline || ''}`;
+      const finalTopicDomain = classifyGeoffreyTopicDomain(finalTopicContext);
+      if (isGeoffreyDeepTechnicalTopic(finalTopicContext)) deepTechnicalBriefs++;
+      if (isGeoffreyManufacturingMaterialsTopic(finalTopicContext)) manufacturingMaterialsBriefs++;
+      usedTargetTopics.add(normalizeTopic(targetTopic));
+      usedTopicDomainCounts.set(
+        finalTopicDomain,
+        (usedTopicDomainCounts.get(finalTopicDomain) || 0) + 1,
+      );
+    }
+
+    const historicalCluster = preSeedHistoricalCluster
+      || (!trendTopicId && !operatorTopicSignal ? findManualTopicCluster(targetTopic, learnings) : null);
+    const briefEvidence: SourcePlannerBriefEvidence | null = trendTopicId
+      ? {
+          mode: 'qualified_fact',
+          subject: trendHeadline || targetTopic,
+          factualClaimAllowed: true,
+          provenanceId: trendTopicId,
+          historicalAngle: null,
+          historicalAvgEngagement: null,
+          historicalSampleCount: null,
+          spreadMechanics: [],
+          instruction: 'Use only the supplied qualified current-event evidence for factual claims. Source prose is never a style reference.',
+        }
+      : operatorTopicSignal
+        ? buildOperatorTopicSignalEvidence(operatorTopicSignal)
+        : historicalCluster
+          ? buildHistoricalOperatorEvidence(historicalCluster)
+          : ideaSeed
+            ? {
+                mode: 'evergreen_seed',
+                subject: ideaSeed.technicalObject,
+                factualClaimAllowed: Boolean(ideaSeed.startupBackingFact.trim()),
+                provenanceId: ideaSeed.id,
+                historicalAngle: null,
+                historicalAvgEngagement: null,
+                historicalSampleCount: null,
+                spreadMechanics: [],
+                instruction: ideaSeed.startupBackingFact.trim()
+                  ? 'The supplied evergreen fact may ground one narrow judgment; do not add measurements, events, or source claims.'
+                  : 'This is an evergreen thought prompt, not evidence. State an opinion or question without inventing a current event or factual proof.',
+              }
+            : null;
+
+    slots.push({
+      slot: index + 1,
+      sourceLane: lane,
+      mode,
+      targetTopic,
+      trendTopicId,
+      trendHeadline,
+      ideaSeed,
+      ideaSeedBrief: ideaSeed ? formatFrontierIdeaSeedBrief(ideaSeed) : null,
+      briefEvidence,
+      plannerReason,
+    });
+  }
+
+  const finalLaneCounts: Record<ContentSourceLane, number> = {
+    manual_core_exploit: 0,
+    trend_aligned_exploit: 0,
+    trend_adjacent_explore: 0,
+    core_explore_fallback: 0,
+  };
+  for (const slot of slots) finalLaneCounts[slot.sourceLane] += 1;
+
+  return {
+    slots,
+    laneCounts: finalLaneCounts,
+    acceptedTrends: [...acceptedAligned, ...acceptedAdjacent],
+    rejectedTrends,
+    topicSignals: operatorTopicSignals,
+  };
+}

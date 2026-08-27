@@ -1,29 +1,100 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgents, getProtocolSettings, getAgent, createMention, getMentions, addPostLogEntry, getLearnings, getPerformanceHistory } from '@/lib/kv-storage';
+import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent, getQueuedTweets, quarantineAgentAutomation } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
 import type { AutopilotResult } from '@/lib/autopilot';
-import { decodeKeys, getMentionsFromTwitter } from '@/lib/twitter-client';
+import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
+import { decodeKeys, getLatestTwitterTweetIdCursor, getMentionsFromTwitter } from '@/lib/twitter-client';
 import { maybeEvolveSoul } from '@/lib/soul-evolution';
-import { checkPerformance, buildLearnings, autoAdjustSettings, maybeReanalyze } from '@/lib/performance';
+import { discoverAndFollow } from '@/lib/proactive-engagement';
+import { checkPerformance, buildLearnings, autoAdjustSettings, getLearningRefreshIntervalMs, maybeReanalyze } from '@/lib/performance';
+import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from '@/lib/twitter-debug';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
+import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
+import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
+import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
-// GET /api/cron/post — called by Vercel Cron every 30 minutes
+export const maxDuration = 800;
+export const CRON_AUTOPILOT_LOCK_TTL_SECONDS = 15 * 60;
+
 export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authBearer = request.headers.get('authorization');
-    if (authBearer !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);
+  if (authError) {
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
   }
+
+  // Fresh cache per cron tick — request-scoped memoization (cuts duplicate KV reads).
+  resetReadCache();
 
   try {
     const agents = await getAgents();
     const autopilotResults: AutopilotResult[] = [];
     let mentionsRefreshed = 0;
     let performanceTracked = 0;
+    let topicIntelligenceRefreshed = 0;
+    let networkTopicCandidates = 0;
 
     for (const agent of agents) {
       const isConnected = agent.isConnected && agent.apiKey && agent.apiSecret && agent.accessToken && agent.accessSecret && agent.xUserId;
+
+      // Early exit: if agent isn't connected AND has no autopilot config, skip everything.
+      // Saves KV commands on dormant or unconfigured agents.
+      const settings = await getProtocolSettings(agent.id);
+      const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
+      if (!entitlement.eligible) {
+        const queued = await getQueuedTweets(agent.id);
+        const hadAutomationState = (
+          settings.enabled
+          || settings.autoReply
+          || settings.proactiveReplies
+          || settings.proactiveLikes
+          || settings.autoFollow
+          || settings.agentShoutouts
+          || settings.earlyVelocityFollowups
+          || settings.supervisedTrendDesk
+          || settings.relationshipQueueEnabled
+          || settings.portfolioOptimizerEnabled
+          || settings.marketingEnabled
+          || queued.length > 0
+        );
+        if (hadAutomationState) {
+          await quarantineAgentAutomation(agent.id, entitlement.reason);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'billing_lock',
+            topic: 'billing',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'skipped',
+            reason: entitlement.reason,
+          });
+          await setAutopilotHealth({
+            agentId: agent.id,
+            status: 'blocked',
+            checkedAt: new Date().toISOString(),
+            reason: entitlement.reason,
+            details: ['A non-zero paid Stripe invoice is required before automation can be enabled.'],
+            lastPostedAt: settings.lastPostedAt,
+            expectedPostBy: null,
+            minutesOverdue: 0,
+            cadenceHours: 0,
+            queueDepth: 0,
+            postableQueueDepth: 0,
+            staleLowConfidenceDepth: 0,
+            maxConfidence: null,
+            externalBlocker: 'billing',
+            selfHealAttemptedAt: null,
+            selfHealAction: null,
+          });
+        }
+        continue;
+      }
+
+      if (!isConnected && !settings.enabled && !settings.autoReply) {
+        continue;
+      }
 
       if (isConnected) {
         // Refresh mentions
@@ -46,6 +117,20 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] mentions refresh failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_mentions_error',
+            topic: 'mentions',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'refresh_mentions', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Track performance of posted tweets
@@ -54,23 +139,56 @@ export async function GET(request: NextRequest) {
           performanceTracked += tracked;
         } catch (err) {
           console.error(`[cron] performance tracking failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_performance_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'check_performance', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
-        // Rebuild learnings once per day (or on first run when null)
+        // High-cadence accounts rebuild after each posting interval so fresh
+        // spread signals can steer the next batch. Other accounts stay daily.
         try {
           const existingLearnings = await getLearnings(agent.id);
           const hasPerformanceData = (await getPerformanceHistory(agent.id, 1)).length > 0;
           const learningsAge = existingLearnings?.updatedAt
             ? Date.now() - new Date(existingLearnings.updatedAt).getTime()
             : Infinity;
-          const oneDayMs = 24 * 60 * 60 * 1000;
+          const learningRefreshIntervalMs = getLearningRefreshIntervalMs(agent);
+          const needsVoiceCorpusMigration = (
+            !existingLearnings?.voiceCorpus
+            || existingLearnings.voiceCorpus.version !== VOICE_CORPUS_SCHEMA_VERSION
+          );
 
-          if (hasPerformanceData && (!existingLearnings || learningsAge > oneDayMs)) {
+          if (hasPerformanceData && (!existingLearnings || learningsAge > learningRefreshIntervalMs || needsVoiceCorpusMigration)) {
             const learnings = await buildLearnings(agent);
             await autoAdjustSettings(agent.id, learnings);
           }
         } catch (err) {
           console.error(`[cron] learnings build failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_learning_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'build_learnings', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Auto re-analyze if analysis is older than 7 days
@@ -78,6 +196,20 @@ export async function GET(request: NextRequest) {
           await maybeReanalyze(agent);
         } catch (err) {
           console.error(`[cron] re-analysis failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_reanalysis_error',
+            topic: 'analysis',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'reanalyze_account', {
+              handle: `@${agent.handle}`,
+            }),
+          });
         }
 
         // Evolve soul if conditions are met (weekly, 50+ tweets tracked)
@@ -88,41 +220,193 @@ export async function GET(request: NextRequest) {
           }
         } catch (err) {
           console.error(`[cron] soul evolution failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: '',
+            xTweetId: '',
+            content: '',
+            format: 'cron_soul_evolution_error',
+            topic: 'learning',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: 'error',
+            reason: formatActionError(err, 'evolve_soul', {
+              handle: `@${agent.handle}`,
+            }),
+          });
+        }
+
+        // Follow graph expansion. API replies into arbitrary conversations are disabled by X.
+        // Reuse `settings` from the early-exit check above instead of refetching.
+        if (settings.autoFollow) {
+          try {
+            const agentKeys = decodeKeys({
+              apiKey: agent.apiKey!,
+              apiSecret: agent.apiSecret!,
+              accessToken: agent.accessToken!,
+              accessSecret: agent.accessSecret!,
+            });
+            const follows = await discoverAndFollow(agent, agentKeys, settings);
+            if (follows > 0) {
+              console.log(`[cron] follow discovery for agent ${agent.id}: ${follows} follows`);
+            }
+          } catch (err) {
+            console.error(`[cron] follow discovery failed for agent ${agent.id}:`, err instanceof Error ? err.message : err);
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: '',
+              format: 'auto_follow_error',
+              topic: 'network_growth',
+              postedAt: new Date().toISOString(),
+              source: 'cron',
+              action: 'error',
+              reason: formatActionError(err, 'auto_follow', {
+                handle: `@${agent.handle}`,
+              }),
+            });
+          }
         }
       }
 
-      // Run autopilot if auto-post OR auto-reply is enabled
-      const settings = await getProtocolSettings(agent.id);
+      // Run autopilot if auto-post OR auto-reply is enabled (settings already loaded above)
       if (!settings.enabled && !settings.autoReply) continue;
 
-      const result = await runAutopilot(agent);
-      autopilotResults.push(result);
-
-      // Log the result to the agent's post log (skips, errors, etc.)
-      if (result.action !== 'posted') {
-        // Posted tweets are already logged by runAutopilot itself
+      const runId = `cron:${Date.now()}:${agent.id}`;
+      const lock = await acquireAutopilotLock(agent.id, runId, CRON_AUTOPILOT_LOCK_TTL_SECONDS, 'cron');
+      if (!lock.acquired) {
+        const reason = lock.lock
+          ? `Autopilot already running since ${lock.lock.acquiredAt}; lock expires ${lock.lock.expiresAt}.`
+          : 'Autopilot already running.';
+        const skipped: AutopilotResult = {
+          agentId: agent.id,
+          action: 'skipped',
+          reason,
+        };
+        autopilotResults.push(skipped);
         await addPostLogEntry(agent.id, {
           agentId: agent.id,
-          tweetId: result.tweetId || '',
-          xTweetId: result.xTweetId || '',
-          content: result.content || '',
-          format: 'cron',
-          topic: '',
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'autopilot_lock',
+          topic: 'autopilot',
           postedAt: new Date().toISOString(),
           source: 'cron',
-          action: result.action,
-          reason: result.reason,
+          action: 'skipped',
+          reason,
+          runId,
+          skipReason: 'lock_held',
         });
+        await addOutcomeEvent(agent.id, {
+          eventType: 'skipped',
+          source: 'cron',
+          idempotencyKey: `${runId}:lock_held`,
+          reason,
+          metadata: { skipReason: 'lock_held' },
+        }).catch(() => null);
+        continue;
+      }
+
+      try {
+        if (settings.enabled) {
+          const topicRefresh = await refreshAgentTopicIntelligence(agent);
+          if (topicRefresh.refreshed) {
+            topicIntelligenceRefreshed++;
+            networkTopicCandidates += topicRefresh.networkCandidateTweets;
+          }
+          if (topicRefresh.error) {
+            const resetAt = isRateLimitTwitterError(topicRefresh.error)
+              ? getTwitterRateLimitResetAt(topicRefresh.error)
+              : null;
+            await addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: '',
+              xTweetId: '',
+              content: '',
+              format: 'topic_intelligence_refresh_error',
+              topic: 'network_topics',
+              postedAt: new Date().toISOString(),
+              source: 'cron',
+              action: 'error',
+              reason: `${resetAt ? `X topic intelligence rate limited until ${resetAt}. ` : ''}${formatActionError(topicRefresh.error, 'refresh_topic_intelligence', {
+                handle: `@${agent.handle}`,
+              })}`,
+            });
+          }
+        }
+
+        if (settings.enabled) {
+          await runAutopilotWatchdog(agent, settings);
+        }
+
+        const result = await runAutopilot(agent);
+        autopilotResults.push(result);
+
+        // Log the result to the agent's post log (skips, errors, etc.)
+        if (result.action !== 'posted') {
+          // Posted tweets are already logged by runAutopilot itself
+          await addPostLogEntry(agent.id, {
+            agentId: agent.id,
+            tweetId: result.tweetId || '',
+            xTweetId: result.xTweetId || '',
+            content: result.content || '',
+            format: result.format || 'cron',
+            topic: result.topic || '',
+            postedAt: new Date().toISOString(),
+            source: 'cron',
+            action: result.action,
+            reason: result.reason,
+            runId,
+            skipReason: result.action === 'skipped' ? result.reason || 'skipped' : undefined,
+          });
+        }
+
+        if (settings.enabled) {
+          await refreshAutopilotHealth(agent, undefined, { clearExternalBlockers: result.action === 'posted' });
+        }
+      } catch (err) {
+        const reason = formatActionError(err, 'run_autopilot', {
+          handle: `@${agent.handle}`,
+        });
+        autopilotResults.push({
+          agentId: agent.id,
+          action: 'error',
+          reason,
+        });
+        await addPostLogEntry(agent.id, {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'cron_autopilot_error',
+          topic: 'autopilot',
+          postedAt: new Date().toISOString(),
+          source: 'cron',
+          action: 'error',
+          reason,
+          runId,
+          errorCode: 'run_autopilot',
+        });
+        await refreshAutopilotHealth(agent).catch(() => null);
+      } finally {
+        await releaseAutopilotLock(agent.id, lock.owner).catch(() => false);
       }
     }
 
-    return NextResponse.json({
+    const responsePayload = {
       timestamp: new Date().toISOString(),
       mentionsRefreshed,
       performanceTracked,
+      topicIntelligenceRefreshed,
+      networkTopicCandidates,
       autopilotProcessed: autopilotResults.length,
       results: autopilotResults,
-    });
+    };
+    await addCronLogEntry(responsePayload);
+
+    return NextResponse.json(responsePayload);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Cron failed';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -141,17 +425,60 @@ async function refreshMentions(agentId: string): Promise<number> {
   });
 
   // Use stored xUserId instead of burning an API call on getMe()
-  const stored = await getMentions(agentId);
+  const stored = await getRecentMentions(agentId, 500);
   // Coerce tweetId to string — Upstash auto-deserializes numeric-looking strings as numbers
   const storedTweetIds = new Set(stored.map((m) => String(m.tweetId)).filter(Boolean));
 
   // Pass sinceId to only fetch new mentions (saves API quota on busy accounts)
-  const latestStoredTweetId = stored.length > 0 ? String(stored[0].tweetId) : undefined;
+  const latestStoredTweetId = getLatestTwitterTweetIdCursor(stored);
 
   let rawMentions;
   try {
     rawMentions = await getMentionsFromTwitter(keys, String(agent.xUserId), latestStoredTweetId);
-  } catch {
+  } catch (err) {
+    if (isInvalidTwitterCredentialError(err)) {
+      await invalidateAgentConnection(agentId);
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'cron_mentions_error',
+        topic: 'mentions',
+        postedAt: new Date().toISOString(),
+        source: 'cron',
+        action: 'error',
+        reason: `X credentials rejected by X. Agent disconnected, reconnect in Settings. ${formatActionError(err, 'fetch_mentions', {
+          handle: `@${agent.handle}`,
+          xUserId: agent.xUserId,
+        })}`,
+      });
+      return 0;
+    }
+
+    const rateLimited = isRateLimitTwitterError(err);
+    if (rateLimited || isTransientTwitterError(err)) {
+      const resetAt = rateLimited ? getTwitterRateLimitResetAt(err) : null;
+      const retryReason = rateLimited
+        ? `X mention refresh rate limited${resetAt ? ` until ${resetAt}` : ''}; will retry on a later cron run.`
+        : 'Transient X mention refresh failure; will retry on a later cron run.';
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'cron_mentions_error',
+        topic: 'mentions',
+        postedAt: new Date().toISOString(),
+        source: 'cron',
+        action: 'error',
+        reason: `${retryReason} ${formatActionError(err, 'fetch_mentions', {
+          handle: `@${agent.handle}`,
+          xUserId: agent.xUserId,
+        })}`,
+        errorCode: rateLimited ? 'x_rate_limit' : 'x_transient',
+      });
+    }
     return 0;
   }
 

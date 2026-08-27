@@ -1,11 +1,24 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { Tweet, ProtocolSettings } from '@/lib/types';
+import { useState, useEffect, useCallback } from 'react';
+import { TweetDecisionPanel } from '@/app/components/tweet-decision-panel';
+import { getAutopilotScheduleStatus } from '@/lib/autopilot-status';
+import type { LearningSnapshot } from '@/lib/learning-snapshot';
+import type { QueueFeedbackReasonCode, Tweet, ProtocolSettings } from '@/lib/types';
 
 interface QueueTabProps {
   agentId: string;
 }
+
+const QUEUE_REFRESH_INTERVAL_MS = 15000;
+const DELETE_REASON_OPTIONS: Array<{ code: QueueFeedbackReasonCode; label: string }> = [
+  { code: 'bad_source_topic', label: 'Bad source/topic' },
+  { code: 'bad_premise', label: 'Bad premise' },
+  { code: 'bad_writing', label: 'Bad writing' },
+  { code: 'duplicate', label: 'Duplicate' },
+  { code: 'factual_risk', label: 'Factual risk' },
+  { code: 'other', label: 'Other' },
+];
 
 export function QueueTab({ agentId }: QueueTabProps) {
   const [queue, setQueue] = useState<Tweet[]>([]);
@@ -17,44 +30,118 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [isPostingAll, setIsPostingAll] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [autopilotSettings, setAutopilotSettings] = useState<ProtocolSettings | null>(null);
+  const [learningSnapshot, setLearningSnapshot] = useState<LearningSnapshot | null>(null);
   const [remixingId, setRemixingId] = useState<string | null>(null);
   const [remixOpenId, setRemixOpenId] = useState<string | null>(null);
+  const [openDecisionId, setOpenDecisionId] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Tweet | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReasonCode, setDeleteReasonCode] = useState<QueueFeedbackReasonCode | null>(null);
+  const [deletePermanent, setDeletePermanent] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deletionFeedback, setDeletionFeedback] = useState<Record<string, string>>({});
+  const [submittingDeletionId, setSubmittingDeletionId] = useState<string | null>(null);
 
-  const loadQueue = async () => {
+  const refreshQueueState = useCallback(async () => {
     try {
-      const res = await fetch(`/api/agents/${agentId}/queue`);
+      const res = await fetch(
+        `/api/agents/${agentId}/dashboard?sections=queue,agent,protocol,learning`,
+        { cache: 'no-store' }
+      );
       const data = await res.json();
-      setQueue(data);
-    } catch {}
-  };
+      const visibleTweets = Array.isArray(data.queue)
+        ? data.queue.filter((tweet: Tweet): tweet is Tweet =>
+            Boolean(tweet) && (
+              tweet.status === 'queued'
+              || tweet.status === 'quarantined'
+              || tweet.status === 'deleted_from_x'
+              || (tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId))
+            ))
+        : [];
+      setQueue(visibleTweets);
+      setAgentConnected(data.agent?.isConnected === 1);
+      setAutopilotSettings(data.protocol?.settings ?? null);
+      setLearningSnapshot(data.learning ?? null);
+    } catch {
+      // ignore
+    }
+  }, [agentId]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      await loadQueue();
-      try {
-        const a = await fetch(`/api/agents/${agentId}`).then((r) => r.json());
-        setAgentConnected(a.isConnected === 1);
-      } catch {}
-      try {
-        const p = await fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null);
-        if (p?.settings) setAutopilotSettings(p.settings);
-      } catch {}
-      setLoading(false);
+      await refreshQueueState();
+      if (!cancelled) setLoading(false);
     })();
-  }, [agentId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshQueueState]);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshQueueState();
+    };
+
+    const interval = window.setInterval(refreshIfVisible, QUEUE_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [refreshQueueState]);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   };
 
-  const handleCopy = async (text: string) => {
+  const resetDeleteFeedback = () => {
+    setDeleteTarget(null);
+    setDeleteReason('');
+    setDeleteReasonCode(null);
+    setDeletePermanent(false);
+  };
+
+  const openDeleteFeedback = (tweet: Tweet) => {
+    setDeleteReason('');
+    setDeleteReasonCode(null);
+    setDeletePermanent(false);
+    setDeleteTarget(tweet);
+  };
+
+  const trackSignal = async (
+    tweetId: string,
+    signalType: string,
+    rewardDelta: number,
+    metadata?: Record<string, string | number | boolean | null>,
+  ) => {
+    await fetch(`/api/agents/${agentId}/learning-signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tweetId,
+        signalType,
+        surface: 'queue',
+        rewardDelta,
+        metadata,
+      }),
+    }).catch(() => null);
+  };
+
+  const handleCopy = async (tweet: Tweet) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(tweet.content);
+      void trackSignal(tweet.id, 'copied_to_clipboard', 0.35, {
+        confidenceScore: tweet.confidenceScore ?? null,
+        candidateScore: tweet.candidateScore ?? null,
+        generationMode: tweet.generationMode ?? null,
+      });
       showToast('Copied');
     } catch {
       showToast('Copy failed');
@@ -62,11 +149,19 @@ export function QueueTab({ agentId }: QueueTabProps) {
   };
 
   const handleCopyAll = async () => {
-    if (!queue.length) return;
-    const all = queue.map((t, i) => `${i + 1}. ${t.content}`).join('\n\n');
+    const queuedTweets = queue.filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt);
+    if (!queuedTweets.length) return;
+    const all = queuedTweets.map((tweet, i) => `${i + 1}. ${tweet.content}`).join('\n\n');
     try {
       await navigator.clipboard.writeText(all);
-      showToast(`${queue.length} tweets copied`);
+      queuedTweets.slice(0, 10).forEach((tweet) => {
+        void trackSignal(tweet.id, 'copied_to_clipboard', 0.32, {
+          bulkCopy: true,
+          confidenceScore: tweet.confidenceScore ?? null,
+          candidateScore: tweet.candidateScore ?? null,
+        });
+      });
+      showToast(`${queuedTweets.length} tweets copied`);
     } catch {
       showToast('Copy failed');
     }
@@ -82,7 +177,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       });
       setEditingId(null);
       showToast('Tweet updated');
-      loadQueue();
+      void refreshQueueState();
     } catch {
       showToast('Save failed');
     }
@@ -96,7 +191,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
         body: JSON.stringify({ status: 'posted' }),
       });
       showToast('Marked as posted');
-      loadQueue();
+      void refreshQueueState();
     } catch {}
   };
 
@@ -107,19 +202,22 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const res = await fetch(`/api/agents/${agentId}/queue/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(skipReason ? {} : { reason: deleteReason.trim() }),
+        body: JSON.stringify(skipReason ? {} : {
+          reason: deleteReason.trim() || undefined,
+          reasonCode: deleteReasonCode || undefined,
+          permanent: deletePermanent,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Delete failed');
 
-      setDeleteTarget(null);
-      setDeleteReason('');
+      resetDeleteFeedback();
       showToast(
         data.feedbackSource === 'user'
           ? 'Removed from queue and saved to voice memory'
           : 'Removed from queue. Intent inferred for voice tuning'
       );
-      loadQueue();
+      void refreshQueueState();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Delete failed');
     } finally {
@@ -134,12 +232,18 @@ export function QueueTab({ agentId }: QueueTabProps) {
       const res = await fetch(`/api/agents/${agentId}/twitter/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
+        body: JSON.stringify({
+          content: tweet.content,
+          tweetId: tweet.id,
+          replyToId: tweet.type === 'reply'
+            ? (tweet.followupForTweetId || tweet.quoteTweetId || undefined)
+            : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       showToast('Posted to X!');
-      loadQueue();
+      void refreshQueueState();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Post failed');
     } finally {
@@ -174,27 +278,71 @@ export function QueueTab({ agentId }: QueueTabProps) {
     }
   };
 
+  const handleDeletionFeedback = async (tweetId: string) => {
+    const reason = deletionFeedback[tweetId]?.trim();
+    if (!reason) return;
+    setSubmittingDeletionId(tweetId);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/queue/${tweetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletionReason: reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save feedback');
+      setQueue((prev) => prev.filter((t) => t.id !== tweetId));
+      showToast('Feedback saved — voice will adapt');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to save feedback');
+    } finally {
+      setSubmittingDeletionId(null);
+    }
+  };
+
   const handlePostAll = async () => {
-    if (!queue.length || !agentConnected) return;
+    const postableTweets = queue.filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt);
+    if (!postableTweets.length || !agentConnected) return;
     setIsPostingAll(true);
     let posted = 0;
-    for (const tweet of queue) {
+    let failed = 0;
+    for (const tweet of postableTweets) {
       try {
-        await fetch(`/api/agents/${agentId}/twitter/post`, {
+        const res = await fetch(`/api/agents/${agentId}/twitter/post`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: tweet.content, tweetId: tweet.id }),
         });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Post failed');
         posted++;
-        showToast(`Posted ${posted}/${queue.length}`);
-      } catch {}
-      if (posted < queue.length) {
+        showToast(`Posted ${posted}/${postableTweets.length}`);
+      } catch {
+        failed++;
+      }
+      if (posted + failed < postableTweets.length) {
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
     setIsPostingAll(false);
-    loadQueue();
+    if (failed > 0) {
+      showToast(`Posted ${posted}/${postableTweets.length}. ${failed} failed.`);
+    } else if (postableTweets.length > 0) {
+      showToast(`Posted all ${postableTweets.length} queued tweets`);
+    }
+    void refreshQueueState();
   };
+
+  const queuedTweets = queue.filter((tweet) => tweet.status === 'queued');
+  const followupDrafts = queue.filter((tweet) => tweet.status === 'draft' && tweet.type === 'reply' && Boolean(tweet.followupForTweetId));
+  const activeQueuedTweets = [...followupDrafts, ...queuedTweets.filter((tweet) => !tweet.quarantinedAt)];
+  const quarantinedTweets = queue.filter((tweet) => tweet.status === 'quarantined' || Boolean(tweet.quarantinedAt));
+  const feedbackTweets = queue.filter((tweet) => tweet.status === 'deleted_from_x');
+  const scheduleStatus = autopilotSettings
+    ? getAutopilotScheduleStatus(autopilotSettings, {
+        activeQueueCount: activeQueuedTweets.length,
+        quarantinedCount: quarantinedTweets.length,
+      })
+    : null;
 
   if (loading) {
     return (
@@ -229,7 +377,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
       )}
 
       {/* Autopilot status banner */}
-      {autopilotSettings && (
+      {autopilotSettings && scheduleStatus && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '10px 14px', borderRadius: 'var(--radius)',
@@ -244,20 +392,14 @@ export function QueueTab({ agentId }: QueueTabProps) {
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: autopilotSettings.enabled ? '#22c55e' : 'var(--text-muted)' }}>
             {autopilotSettings.enabled ? (
               <>
-                <span style={{ fontWeight: 700 }}>AUTOPILOT ON</span>
-                {' — posting ~'}{autopilotSettings.postsPerDay}x/day from this queue.
-                {autopilotSettings.lastPostedAt && (
-                  <> Next post in ~{Math.max(0, Math.round(
-                    ((24 / autopilotSettings.postsPerDay) * 60) -
-                    ((Date.now() - new Date(autopilotSettings.lastPostedAt).getTime()) / 60000)
-                  ))} min.</>
-                )}
-                {' Queue auto-refills below '}{autopilotSettings.minQueueSize}{' items.'}
+                <span style={{ fontWeight: 700 }}>{scheduleStatus.title}</span>
+                {' — pulling approved tweets from this queue about '}{autopilotSettings.postsPerDay}{'x/day. '}
+                {scheduleStatus.summary}{' '}{scheduleStatus.queueDetail}
               </>
             ) : (
               <>
-                <span style={{ fontWeight: 700 }}>AUTOPILOT OFF</span>
-                {' — tweets in this queue must be posted manually. Enable in the Autopilot tab.'}
+                <span style={{ fontWeight: 700 }}>{scheduleStatus.title}</span>
+                {' — '}{scheduleStatus.summary}{' '}{scheduleStatus.queueDetail}
               </>
             )}
           </p>
@@ -267,21 +409,21 @@ export function QueueTab({ agentId }: QueueTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          <h2>TWEET QUEUE</h2>
-          <span className="section-count">{queue.length} items</span>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><line x1="3" y1="4" x2="13" y2="4" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="8" x2="13" y2="8" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="3" y1="12" x2="9" y2="12" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
+          <h2>Ready to post</h2>
+          <span className="section-count">{activeQueuedTweets.length} ready{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
         </div>
-        {queue.length > 0 && (
+        {activeQueuedTweets.length > 0 && (
           <div className="flex gap-2">
             <button className="btn btn-outline btn-sm" onClick={handleCopyAll} data-testid="button-copy-all">
-              COPY ALL
+              Copy all
             </button>
             <button
               className="btn btn-sm"
               style={{
-                border: agentConnected ? '1px solid rgba(239,68,68,0.4)' : '1px solid var(--border)',
-                color: agentConnected ? '#ef4444' : 'var(--text-dim)',
-                background: 'transparent',
+                border: agentConnected ? '1px solid var(--primary-border)' : '1px solid var(--border)',
+                color: agentConnected ? 'var(--primary)' : 'var(--text-dim)',
+                background: agentConnected ? 'var(--primary-soft)' : 'transparent',
                 opacity: agentConnected ? 1 : 0.4,
               }}
               disabled={!agentConnected || isPostingAll}
@@ -289,24 +431,134 @@ export function QueueTab({ agentId }: QueueTabProps) {
               data-testid="button-post-all"
               title={!agentConnected ? 'Connect X API in Settings first' : 'Post all queued tweets'}
             >
-              {isPostingAll ? 'POSTING...' : 'POST ALL'}
+              {isPostingAll ? 'Posting...' : 'Post all'}
             </button>
           </div>
         )}
       </div>
 
+      {/* Deleted from X — needs feedback */}
+      {feedbackTweets.length > 0 && (
+        <div style={{ marginBottom: '24px' }}>
+          <div className="section-header" style={{ marginBottom: '8px' }}>
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 2L14 14H2L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinejoin="round" />
+                <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
+                <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
+              </svg>
+              <h2>Removed from X</h2>
+              <span className="section-count">Explain the miss so future drafts improve</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {feedbackTweets.map((tweet) => (
+              <div key={tweet.id} style={{
+                background: 'rgba(245, 158, 11, 0.05)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '14px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '10px' }}>
+                  {tweet.content.slice(0, 200)}{tweet.content.length > 200 ? '...' : ''}
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Examples: off-brand, too generic, wrong topic, too salesy, bad timing"
+                    value={deletionFeedback[tweet.id] || ''}
+                    onChange={(e) => setDeletionFeedback((prev) => ({ ...prev, [tweet.id]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeletionFeedback(tweet.id); }}
+                    style={{ flex: 1, fontSize: '12px' }}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ background: '#f59e0b', flexShrink: 0 }}
+                    disabled={!deletionFeedback[tweet.id]?.trim() || submittingDeletionId === tweet.id}
+                    onClick={() => handleDeletionFeedback(tweet.id)}
+                  >
+                    {submittingDeletionId === tweet.id ? '...' : 'Save'}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: '9px', flexShrink: 0 }}
+                    onClick={async () => {
+                      const res = await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ deletionReason: 'skipped' }),
+                      }).catch(() => null);
+                      if (res?.ok) {
+                        setQueue((prev) => prev.filter((t) => t.id !== tweet.id));
+                        showToast('Skipped — inferred reason kept for learning');
+                      } else {
+                        showToast('Failed to skip');
+                      }
+                    }}
+                  >
+                    Infer
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {quarantinedTweets.length > 0 && (
+        <div style={{ marginBottom: '24px' }}>
+          <div className="section-header" style={{ marginBottom: '8px' }}>
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2.5" y="2.5" width="11" height="11" rx="2" stroke="#ef4444" strokeWidth="1.2" />
+                <line x1="5" y1="5" x2="11" y2="11" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="11" y1="5" x2="5" y2="11" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+              <h2>Needs rescue</h2>
+              <span className="section-count">Blocked or rejected drafts waiting for review</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {quarantinedTweets.map((tweet) => (
+              <div key={tweet.id} style={{
+                background: 'rgba(239, 68, 68, 0.05)',
+                border: '1px solid rgba(239, 68, 68, 0.18)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '14px',
+              }}>
+                <p className="tweet-content" style={{ marginBottom: '8px' }}>{tweet.content}</p>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#ef4444', lineHeight: 1.6, marginBottom: '10px' }}>
+                  {tweet.quarantineReason || 'This draft was quarantined after a posting rejection.'}
+                </p>
+                <div className="tweet-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => handleCopy(tweet)}>Copy</button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--primary)' }}
+                    onClick={() => { setEditingId(tweet.id); setEditContent(tweet.content); }}
+                  >
+                    Edit into new draft
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
-      {queue.length === 0 && (
+      {activeQueuedTweets.length === 0 && feedbackTweets.length === 0 && quarantinedTweets.length === 0 && (
         <div className="empty-state">
           <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><line x1="5" y1="8" x2="27" y2="8" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="16" x2="27" y2="16" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /><line x1="5" y1="24" x2="18" y2="24" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          <p>Queue empty</p>
-          <p>Generate takes from the FEED tab and queue them here</p>
+          <p>No approved tweets are waiting here yet.</p>
+          <p>Create drafts, finish the first setup review, or let automation refill once the queue minimum is set.</p>
         </div>
       )}
 
       {/* Queue items */}
       <div className="space-y-3">
-        {queue.map((tweet, idx) => (
+        {activeQueuedTweets.map((tweet, idx) => (
           <div key={tweet.id} className="tweet-card" data-testid={`card-queue-${tweet.id}`}>
             <div className="flex items-start gap-3">
               <span className="tweet-queue-num">{String(idx + 1).padStart(2, '0')}</span>
@@ -324,8 +576,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
                       <span className={`char-count ${editContent.length > 280 ? 'over' : ''}`}>
                         {editContent.length}/280
                       </span>
-                      <button className="btn btn-xs btn-success" onClick={handleSave} data-testid={`button-save-${tweet.id}`}>SAVE</button>
-                      <button className="btn btn-ghost btn-xs" onClick={() => setEditingId(null)} data-testid={`button-cancel-${tweet.id}`}>CANCEL</button>
+                      <button className="btn btn-xs btn-success" onClick={handleSave} data-testid={`button-save-${tweet.id}`}>Save</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => setEditingId(null)} data-testid={`button-cancel-${tweet.id}`}>Cancel</button>
                     </div>
                   </div>
                 ) : (
@@ -334,13 +586,31 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     <div className="flex items-center gap-3 flex-wrap">
                       <span className="badge">{tweet.status}</span>
                       {tweet.type !== 'original' && <span className="badge">{tweet.type}</span>}
+                      {tweet.generationMode && <span className="badge">{tweet.generationMode}</span>}
                       <span className="char-count">{tweet.content.length}/280</span>
+                      {typeof tweet.confidenceScore === 'number' && (
+                        <span className="label" style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                          confidence {(tweet.confidenceScore * 100).toFixed(0)}%
+                        </span>
+                      )}
                       {tweet.topic && (
                         <span className="label" style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)', fontFamily: 'var(--font-inter)' }}>
                           {tweet.topic}
                         </span>
                       )}
                     </div>
+                    <div className="decision-inline-actions">
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ paddingInline: 0, color: openDecisionId === tweet.id ? 'var(--primary)' : 'var(--text-muted)' }}
+                        onClick={() => setOpenDecisionId(openDecisionId === tweet.id ? null : tweet.id)}
+                      >
+                        {openDecisionId === tweet.id ? 'Hide why' : 'Why this draft'}
+                      </button>
+                    </div>
+                    {openDecisionId === tweet.id && (
+                      <TweetDecisionPanel tweet={tweet} snapshot={learningSnapshot} />
+                    )}
                   </>
                 )}
               </div>
@@ -352,8 +622,8 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)',
                 }}>
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                    REMIX DIRECTION
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    Remix direction
                   </p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '8px' }}>
                     {[
@@ -393,11 +663,11 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     />
                     <button
                       className="btn btn-primary btn-sm"
-                      style={{ background: '#8b5cf6', fontSize: '10px', height: '28px' }}
+                      style={{ background: 'var(--primary)', fontSize: '10px', height: '28px' }}
                       disabled={!customPrompt.trim() || remixingId === tweet.id}
                       onClick={() => handleRemix(tweet, 'custom', customPrompt.trim())}
                     >
-                      {remixingId === tweet.id ? '...' : 'REMIX'}
+                      {remixingId === tweet.id ? '...' : 'Remix'}
                     </button>
                   </div>
                 </div>
@@ -409,7 +679,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{
-                      color: agentConnected ? '#ef4444' : 'var(--text-dim)',
+                      color: agentConnected ? 'var(--primary)' : 'var(--text-dim)',
                       opacity: agentConnected ? 1 : 0.4,
                     }}
                     disabled={!agentConnected || postingId === tweet.id}
@@ -417,11 +687,11 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     data-testid={`button-post-x-${tweet.id}`}
                     title={!agentConnected ? 'Connect X API first' : 'Post to X'}
                   >
-                    {postingId === tweet.id ? 'POSTING...' : 'POST TO X'}
+                    {postingId === tweet.id ? 'Posting...' : 'Post to X'}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => handleCopy(tweet.content)}
+                    onClick={() => handleCopy(tweet)}
                     data-testid={`button-copy-queue-${tweet.id}`}
                     title="Copy"
                     style={{ padding: '4px 8px' }}
@@ -432,7 +702,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
                     className="btn btn-ghost btn-sm"
                     onClick={() => { setRemixOpenId(remixOpenId === tweet.id ? null : tweet.id); setCustomPrompt(''); }}
                     title="Remix"
-                    style={{ padding: '4px 8px', color: remixOpenId === tweet.id ? '#8b5cf6' : undefined }}
+                    style={{ padding: '4px 8px', color: remixOpenId === tweet.id ? 'var(--primary)' : undefined }}
                   >
                     <svg viewBox="0 0 14 14" width="13" height="13" fill="none"><path d="M2 10l3-3 2 2 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 4h4v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
@@ -456,7 +726,12 @@ export function QueueTab({ agentId }: QueueTabProps) {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => { setDeleteTarget(tweet); setDeleteReason(''); }}
+                    onClick={() => {
+                      openDeleteFeedback(tweet);
+                      setDeleteReason('');
+                      setDeleteReasonCode(null);
+                      setDeletePermanent(false);
+                    }}
                     data-testid={`button-delete-${tweet.id}`}
                     title="Remove"
                     style={{ padding: '4px 8px', color: '#ef4444' }}
@@ -471,12 +746,12 @@ export function QueueTab({ agentId }: QueueTabProps) {
       </div>
 
       {deleteTarget && (
-        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteSubmitting && setDeleteTarget(null)}>
-          <div className="modal" style={{ maxWidth: '460px' }}>
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteSubmitting && resetDeleteFeedback()}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="queue-delete-title" style={{ maxWidth: '460px' }}>
             <div className="wizard-body">
               <div className="wizard-step-header">
-                <h3>Why remove this tweet?</h3>
-                <p>We&apos;ll use this signal to tune the agent&apos;s voice. Skip if you want Clawfable to infer intent automatically.</p>
+                <h3 id="queue-delete-title">Why remove this draft?</h3>
+                <p>A short reason is the strongest signal. If you skip, Clawfable will infer likely intent and still use the delete as feedback.</p>
               </div>
 
               <div style={{
@@ -492,33 +767,64 @@ export function QueueTab({ agentId }: QueueTabProps) {
               </div>
 
               <div className="wizard-builder-section">
-                <div className="wizard-section-label">DELETE REASON (OPTIONAL)</div>
+                <div className="wizard-section-label">What failed?</div>
+                <div className="queue-feedback-reasons" role="group" aria-label="Draft rejection reason">
+                  {DELETE_REASON_OPTIONS.map((option) => (
+                    <button
+                      key={option.code}
+                      type="button"
+                      className={`queue-feedback-reason${deleteReasonCode === option.code ? ' is-selected' : ''}`}
+                      aria-pressed={deleteReasonCode === option.code}
+                      onClick={() => setDeleteReasonCode(option.code)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="wizard-builder-section">
+                <div className="wizard-section-label">Context (optional)</div>
                 <textarea
                   className="textarea"
                   value={deleteReason}
                   onChange={(event) => setDeleteReason(event.target.value)}
-                  placeholder="Examples: too generic, wrong tone, weak hook, not on-topic, sounds forced..."
-                  rows={4}
+                  placeholder="What specifically should the system learn?"
+                  rows={3}
                 />
                 <p className="wizard-section-hint">
-                  Explicit reasons are strongest. If you skip, we&apos;ll guess likely intent and still store the delete as feedback.
+                  The category routes feedback to research, premise selection, or writing instead of penalizing everything.
                 </p>
               </div>
 
+              {deleteTarget.pipelineVersion === 'v2' && (deleteReasonCode || deleteReason.trim()) && (
+                <label className="queue-feedback-permanent">
+                  <input
+                    type="checkbox"
+                    checked={deletePermanent}
+                    onChange={(event) => setDeletePermanent(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Do not regenerate this angle</strong>
+                    <small>Keep this semantic block indefinitely.</small>
+                  </span>
+                </label>
+              )}
+
               <div className="wizard-actions">
-                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => setDeleteTarget(null)}>
-                  CANCEL
+                <button className="btn btn-outline" disabled={deleteSubmitting} onClick={resetDeleteFeedback}>
+                  Cancel
                 </button>
                 <button className="btn btn-outline" disabled={deleteSubmitting} onClick={() => handleDelete(true)}>
-                  {deleteSubmitting ? 'REMOVING...' : 'SKIP + INFER'}
+                  {deleteSubmitting ? 'Removing...' : 'Skip and infer'}
                 </button>
                 <button
                   className="btn btn-primary"
-                  disabled={deleteSubmitting || !deleteReason.trim()}
+                  disabled={deleteSubmitting || (!deleteReasonCode && !deleteReason.trim())}
                   onClick={() => handleDelete(false)}
-                  style={{ background: deleteReason.trim() ? '#8b5cf6' : undefined }}
+                  style={{ background: deleteReasonCode || deleteReason.trim() ? 'var(--primary)' : undefined }}
                 >
-                  {deleteSubmitting ? 'REMOVING...' : 'SAVE REASON + REMOVE'}
+                  {deleteSubmitting ? 'Removing...' : 'Save feedback and remove'}
                 </button>
               </div>
             </div>

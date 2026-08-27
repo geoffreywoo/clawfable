@@ -6,6 +6,10 @@
  */
 
 import TwitterApi from 'twitter-api-v2';
+import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug';
+import { getInternalPromptLeakIssue } from './survivability';
+import { normalizeGeneratedTweetContent } from './tweet-text';
+import { isLeadingXMention } from './entity-mentions';
 
 export interface TwitterKeys {
   appKey: string;
@@ -14,82 +18,210 @@ export interface TwitterKeys {
   accessSecret: string;
 }
 
+interface TweetWriteOptions {
+  username?: string | null;
+}
+
+function normalizeKeyPart(value: string): string {
+  return value.trim();
+}
+
+function normalizeUsername(value: string | null | undefined): string | null {
+  const clean = value?.trim().replace(/^@/, '');
+  return clean || null;
+}
+
+function stripHallucinatedStatusUrls(text: string): string {
+  return text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
+}
+
 /**
  * Create a TwitterApi client from raw key strings.
  */
 export function createClient(keys: TwitterKeys): TwitterApi {
   return new TwitterApi({
-    appKey: keys.appKey,
-    appSecret: keys.appSecret,
-    accessToken: keys.accessToken,
-    accessSecret: keys.accessSecret,
+    appKey: normalizeKeyPart(keys.appKey),
+    appSecret: normalizeKeyPart(keys.appSecret),
+    accessToken: normalizeKeyPart(keys.accessToken),
+    accessSecret: normalizeKeyPart(keys.accessSecret),
   });
 }
 
-function handleApiError(error: unknown): never {
-  if (error instanceof Object && 'code' in error) {
-    const code = (error as { code: number }).code;
-    if (code === 429) {
-      throw new Error('Rate limit reached. Please wait before trying again.');
+function handleApiError(error: unknown, context: TwitterErrorContext): never {
+  throw normalizeTwitterError(error, context);
+}
+
+export function sanitizeTweetText(text: string): string {
+  return normalizeGeneratedTweetContent(text)
+    .replace(/\s*https?:\/\/(?:x|twitter)\.com\/(?:i\/web\/status|[^/\s]+\/status)\/\d+\S*/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function getSanitizedTweetTextIssue(
+  text: string,
+  surface: 'post' | 'reply' = 'post',
+): string | null {
+  const tweetText = sanitizeTweetText(text);
+  if (tweetText.length > 0) {
+    if (surface === 'post' && isLeadingXMention(tweetText)) {
+      return 'Original posts cannot start with an @mention; put the handle after ordinary feed text.';
     }
-    if (code === 403) {
-      // Extract detail from twitter-api-v2 error
-      const detail = 'data' in error ? JSON.stringify((error as { data: unknown }).data) : '';
-      throw new Error(`Request failed with code 403. ${detail || 'Your X API tier may not support this action.'}`);
+    return getInternalPromptLeakIssue(tweetText);
+  }
+
+  const label = surface === 'reply' ? 'Reply' : 'Tweet';
+  return `${label} text is empty after removing hallucinated X/Twitter status links.`;
+}
+
+export function getLatestTwitterTweetIdCursor(
+  items: Array<{ tweetId?: string | number | null }>,
+): string | undefined {
+  let latest: { raw: string; value: bigint } | null = null;
+
+  for (const item of items) {
+    const raw = String(item.tweetId ?? '').trim();
+    if (!/^\d+$/.test(raw)) continue;
+
+    const value = BigInt(raw);
+    if (!latest || value > latest.value) {
+      latest = { raw, value };
     }
   }
-  // For generic errors, try to extract a useful message
-  if (error instanceof Error) {
-    throw error;
-  }
-  throw new Error(String(error));
+
+  return latest?.raw;
+}
+
+export const MAX_MENTIONS_PER_FETCH = 300;
+
+function requireSanitizedTweetText(text: string, surface: 'post' | 'reply'): string {
+  const issue = getSanitizedTweetTextIssue(text, surface);
+  if (issue) throw new Error(issue);
+  return sanitizeTweetText(text);
 }
 
 export async function postTweet(
   keys: TwitterKeys,
   text: string,
+  options: TweetWriteOptions = {},
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
-    const me = await getMe(keys);
+    const tweetText = requireSanitizedTweetText(text, 'post');
+    const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    // Strip any hallucinated x.com/twitter.com status URLs from content
-    const tweetText = text.replace(/\s*https?:\/\/(x|twitter)\.com\/\w+\/status\/\d+\S*/gi, '').trim();
 
     const result = await rwClient.v2.tweet(tweetText);
 
     const tweetId = result.data.id;
     return {
-      tweetUrl: `https://x.com/${me.username}/status/${tweetId}`,
+      tweetUrl: `https://x.com/${username}/status/${tweetId}`,
       tweetId,
-      username: me.username,
+      username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'post_tweet',
+      preview: text,
+    });
   }
+}
+
+async function createAppReadClient(): Promise<TwitterApi> {
+  const { appKey, appSecret } = getConsumerKeys();
+  const client = new TwitterApi({ appKey, appSecret });
+  return client.appLogin();
 }
 
 
 export async function replyToTweet(
   keys: TwitterKeys,
   text: string,
-  replyToTweetId: string
+  replyToTweetId: string,
+  options: TweetWriteOptions = {},
 ): Promise<{ tweetUrl: string; tweetId: string; username: string }> {
   const client = createClient(keys);
   try {
-    const me = await getMe(keys);
+    const tweetText = requireSanitizedTweetText(text, 'reply');
+    const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
-    const result = await rwClient.v2.tweet(text, {
+    const result = await rwClient.v2.tweet(tweetText, {
       reply: { in_reply_to_tweet_id: replyToTweetId },
     });
     const newTweetId = result.data.id;
     return {
-      tweetUrl: `https://x.com/${me.username}/status/${newTweetId}`,
+      tweetUrl: `https://x.com/${username}/status/${newTweetId}`,
       tweetId: newTweetId,
-      username: me.username,
+      username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'reply_to_tweet',
+      preview: text,
+      replyToTweetId,
+    });
+  }
+}
+
+export async function fetchTweetById(
+  keys: TwitterKeys,
+  tweetId: string
+): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string; inReplyToId: string | null } | null> {
+  const client = createClient(keys);
+  try {
+    const result = await client.v2.singleTweet(tweetId, {
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'conversation_id'],
+      expansions: ['author_id'],
+      'user.fields': ['username'],
+    });
+    const tweet = result.data;
+    if (!tweet) return null;
+    const includes = (result as any).includes;
+    const author = includes?.users?.[0];
+    const refs = (tweet as any).referenced_tweets as Array<{ type: string; id: string }> | undefined;
+    const repliedTo = refs?.find((r) => r.type === 'replied_to');
+    return {
+      id: tweet.id,
+      text: tweet.text,
+      authorId: tweet.author_id || '',
+      authorUsername: author?.username || '',
+      likes: tweet.public_metrics?.like_count ?? 0,
+      createdAt: tweet.created_at || new Date().toISOString(),
+      inReplyToId: repliedTo?.id || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchTweetByIdApp(
+  tweetId: string
+): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string; inReplyToId: string | null } | null> {
+  try {
+    const client = await createAppReadClient();
+    const result = await client.v2.singleTweet(tweetId, {
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'conversation_id'],
+      expansions: ['author_id'],
+      'user.fields': ['username'],
+    });
+    const tweet = result.data;
+    if (!tweet) return null;
+    const includes = (result as any).includes;
+    const author = includes?.users?.[0];
+    const refs = (tweet as any).referenced_tweets as Array<{ type: string; id: string }> | undefined;
+    const repliedTo = refs?.find((r) => r.type === 'replied_to');
+    return {
+      id: tweet.id,
+      text: tweet.text,
+      authorId: tweet.author_id || '',
+      authorUsername: author?.username || '',
+      likes: tweet.public_metrics?.like_count ?? 0,
+      createdAt: tweet.created_at || new Date().toISOString(),
+      inReplyToId: repliedTo?.id || null,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -111,28 +243,38 @@ export async function searchRecentTweets(
       createdAt: tweet.created_at || new Date().toISOString(),
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'search_recent_tweets',
+      preview: query,
+    });
   }
 }
 
 export async function getMentionsFromTwitter(
   keys: TwitterKeys,
   userId: string,
-  sinceId?: string
+  sinceId?: string,
+  maxTotal = MAX_MENTIONS_PER_FETCH,
 ): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
   const client = createClient(keys);
   try {
+    const fetchLimit = Math.max(1, Math.min(MAX_MENTIONS_PER_FETCH, Math.floor(maxTotal)));
     const params: Record<string, unknown> = {
-      max_results: 100,
+      max_results: Math.min(100, fetchLimit),
       'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'conversation_id', 'in_reply_to_user_id', 'referenced_tweets'],
       expansions: ['author_id'],
       'user.fields': ['name', 'username'],
     };
     if (sinceId) params.since_id = sinceId;
-    const result = await client.v2.userMentionTimeline(
+    const timeline = await client.v2.userMentionTimeline(
       userId,
       params as Parameters<typeof client.v2.userMentionTimeline>[1]
     );
+    const initialCount = timeline.data.data?.length || 0;
+    if (initialCount < fetchLimit && !timeline.done) {
+      await timeline.fetchLast(fetchLimit - initialCount);
+    }
+    const result = timeline.data;
 
     // Build a map of author IDs to user info from expansions
     const userMap = new Map<string, { name: string; username: string }>();
@@ -143,7 +285,7 @@ export async function getMentionsFromTwitter(
       }
     }
 
-    return (result.data.data || []).map((tweet) => {
+    return (result.data || []).slice(0, fetchLimit).map((tweet) => {
       const authorId = tweet.author_id || '';
       const user = userMap.get(authorId);
       // Extract in_reply_to from referenced_tweets
@@ -161,7 +303,28 @@ export async function getMentionsFromTwitter(
       };
     });
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'fetch_mentions',
+      targetUserId: userId,
+    });
+  }
+}
+
+export async function followUser(
+  keys: TwitterKeys,
+  sourceUserId: string,
+  targetUserId: string
+): Promise<{ following: boolean }> {
+  const client = createClient(keys);
+  try {
+    const rwClient = client.readWrite;
+    const result = await rwClient.v2.follow(sourceUserId, targetUserId);
+    return { following: result.data.following };
+  } catch (error) {
+    return handleApiError(error, {
+      action: 'follow_user',
+      targetUserId,
+    });
   }
 }
 
@@ -176,7 +339,11 @@ export async function likeTweet(
     const result = await rwClient.v2.like(userId, tweetId);
     return { liked: result.data.liked };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'like_tweet',
+      targetTweetId: tweetId,
+      targetUserId: userId,
+    });
   }
 }
 
@@ -192,7 +359,7 @@ export async function getMe(
       username: result.data.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, { action: 'get_me' });
   }
 }
 
@@ -211,8 +378,38 @@ export async function getUserByUsername(
       username: result.data.username,
     };
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'resolve_user',
+      username,
+    });
   }
+}
+
+export interface TimelineSourceMetadata {
+  referenceType?: 'quoted' | 'replied_to' | 'retweeted' | null;
+  referencedTweetId?: string | null;
+  hasMedia?: boolean;
+  isTextComplete?: boolean;
+  lang?: string | null;
+}
+
+function timelineSourceMetadata(tweet: any): TimelineSourceMetadata {
+  const references = Array.isArray(tweet?.referenced_tweets) ? tweet.referenced_tweets : [];
+  const reference = references.find((item: any) => ['quoted', 'replied_to', 'retweeted'].includes(item?.type));
+  const noteText = typeof tweet?.note_tweet?.text === 'string' ? tweet.note_tweet.text.trim() : '';
+  const baseText = String(tweet?.text || '').trim();
+  return {
+    referenceType: reference?.type || null,
+    referencedTweetId: reference?.id ? String(reference.id) : null,
+    hasMedia: Array.isArray(tweet?.attachments?.media_keys) && tweet.attachments.media_keys.length > 0,
+    isTextComplete: Boolean(noteText || (baseText && !/(?:\.\.\.|\u2026)$/.test(baseText))),
+    lang: typeof tweet?.lang === 'string' ? tweet.lang : null,
+  };
+}
+
+function completeTweetText(tweet: any): string {
+  const noteText = typeof tweet?.note_tweet?.text === 'string' ? tweet.note_tweet.text.trim() : '';
+  return noteText || String(tweet?.text || '');
 }
 
 /**
@@ -233,18 +430,33 @@ export async function getUserTimeline(
     impressions: number;
     quotes: number;
     bookmarks: number;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
   }>
 > {
   const client = createClient(keys);
+  const totalLimit = Math.max(1, Math.min(300, Math.floor(maxResults)));
   try {
     const result = await client.v2.userTimeline(userId, {
-      max_results: Math.min(maxResults, 100),
-      'tweet.fields': ['created_at', 'public_metrics'],
+      max_results: Math.max(5, Math.min(totalLimit, 100)),
+      'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
       exclude: ['retweets', 'replies'],
     });
-    return (result.data.data || []).map((tweet) => ({
+    const initialTweets = Array.isArray((result as any).tweets)
+      ? (result as any).tweets
+      : (result.data.data || []);
+    if (initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
+      await (result as any).fetchLast(totalLimit - initialTweets.length);
+    }
+    const accumulatedTweets = Array.isArray((result as any).tweets)
+      ? (result as any).tweets
+      : (result.data.data || []);
+    return accumulatedTweets.slice(0, totalLimit).map((tweet: any) => ({
       id: tweet.id,
-      text: tweet.text,
+      text: completeTweetText(tweet),
       createdAt: tweet.created_at || new Date().toISOString(),
       likes: tweet.public_metrics?.like_count ?? 0,
       retweets: tweet.public_metrics?.retweet_count ?? 0,
@@ -252,9 +464,159 @@ export async function getUserTimeline(
       impressions: tweet.public_metrics?.impression_count ?? 0,
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+      ...timelineSourceMetadata(tweet),
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'get_user_timeline',
+      targetUserId: userId,
+    });
+  }
+}
+
+/**
+ * Fetch the authenticated user's reverse-chronological home feed. This is the
+ * most request-efficient official surface for reading recent original posts across the
+ * accounts they follow.
+ */
+export async function getHomeTimeline(
+  keys: TwitterKeys,
+  maxResults = 100,
+): Promise<
+  Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    likes: number;
+    retweets: number;
+    replies: number;
+    impressions: number;
+    quotes: number;
+    bookmarks: number;
+    authorId: string;
+    author: string;
+    authorName: string;
+    authorFollowersCount: number;
+    authorVerified: boolean;
+    authorProtected: boolean;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
+  }>
+> {
+  const client = createClient(keys);
+  const totalLimit = Math.max(10, Math.min(maxResults, 300));
+  try {
+    const result = await client.v2.homeTimeline({
+      max_results: Math.min(totalLimit, 100),
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
+      expansions: ['author_id'],
+      'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
+      exclude: ['retweets', 'replies'],
+    });
+    if (result.tweets.length < totalLimit && !result.done) {
+      await result.fetchLast(totalLimit - result.tweets.length);
+    }
+    return result.tweets.slice(0, totalLimit).map((tweet) => {
+      const author = result.includes.author(tweet);
+      return {
+        id: tweet.id,
+        text: completeTweetText(tweet),
+        createdAt: tweet.created_at || new Date().toISOString(),
+        likes: tweet.public_metrics?.like_count ?? 0,
+        retweets: tweet.public_metrics?.retweet_count ?? 0,
+        replies: tweet.public_metrics?.reply_count ?? 0,
+        impressions: tweet.public_metrics?.impression_count ?? 0,
+        quotes: tweet.public_metrics?.quote_count ?? 0,
+        bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+        authorId: tweet.author_id || author?.id || '',
+        author: author?.username || '',
+        authorName: author?.name || '',
+        authorFollowersCount: (author as any)?.public_metrics?.followers_count ?? 0,
+        authorVerified: (author as any)?.verified ?? false,
+        authorProtected: (author as any)?.protected ?? false,
+        ...timelineSourceMetadata(tweet),
+      };
+    }).filter((tweet) => Boolean(tweet.authorId && tweet.author));
+  } catch (error) {
+    return handleApiError(error, {
+      action: 'get_home_timeline',
+    });
+  }
+}
+
+/**
+ * Fetch recent posts the authenticated operator liked. These are topic-taste
+ * signals only; downstream code must never use their prose as voice evidence.
+ */
+export async function getLikedTweets(
+  keys: TwitterKeys,
+  userId: string,
+  maxResults = 100,
+): Promise<
+  Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    likes: number;
+    retweets: number;
+    replies: number;
+    impressions: number;
+    quotes: number;
+    bookmarks: number;
+    authorId: string;
+    author: string;
+    authorName: string;
+    authorFollowersCount: number;
+    authorVerified: boolean;
+    authorProtected: boolean;
+    referenceType?: TimelineSourceMetadata['referenceType'];
+    referencedTweetId?: string | null;
+    hasMedia?: boolean;
+    isTextComplete?: boolean;
+    lang?: string | null;
+  }>
+> {
+  const client = createClient(keys);
+  const totalLimit = Math.max(5, Math.min(maxResults, 300));
+  try {
+    const result = await client.v2.userLikedTweets(userId, {
+      max_results: Math.min(totalLimit, 100),
+      'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
+      expansions: ['author_id'],
+      'user.fields': ['name', 'username', 'protected', 'public_metrics', 'verified'],
+    });
+    if (result.tweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
+      await (result as any).fetchLast(totalLimit - result.tweets.length);
+    }
+    return result.tweets.slice(0, totalLimit).map((tweet) => {
+      const author = result.includes.author(tweet);
+      return {
+        id: tweet.id,
+        text: completeTweetText(tweet),
+        createdAt: tweet.created_at || new Date().toISOString(),
+        likes: tweet.public_metrics?.like_count ?? 0,
+        retweets: tweet.public_metrics?.retweet_count ?? 0,
+        replies: tweet.public_metrics?.reply_count ?? 0,
+        impressions: tweet.public_metrics?.impression_count ?? 0,
+        quotes: tweet.public_metrics?.quote_count ?? 0,
+        bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+        authorId: tweet.author_id || author?.id || '',
+        author: author?.username || '',
+        authorName: author?.name || '',
+        authorFollowersCount: (author as any)?.public_metrics?.followers_count ?? 0,
+        authorVerified: (author as any)?.verified ?? false,
+        authorProtected: (author as any)?.protected ?? false,
+        ...timelineSourceMetadata(tweet),
+      };
+    }).filter((tweet) => Boolean(tweet.authorId && tweet.author));
+  } catch (error) {
+    return handleApiError(error, {
+      action: 'get_liked_tweets',
+      targetUserId: userId,
+    });
   }
 }
 
@@ -268,7 +630,7 @@ type TimelineTweet = {
   impressions: number;
   quotes: number;
   bookmarks: number;
-};
+} & TimelineSourceMetadata;
 
 /**
  * Fetch deep tweet history with pagination. Gets up to maxTotal tweets.
@@ -287,7 +649,7 @@ export async function getDeepTimeline(
       const batchSize = Math.min(100, maxTotal - all.length);
       const params: Record<string, unknown> = {
         max_results: batchSize,
-        'tweet.fields': ['created_at', 'public_metrics'],
+        'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'],
         exclude: ['retweets', 'replies'],
       };
       if (paginationToken) params.pagination_token = paginationToken;
@@ -303,7 +665,7 @@ export async function getDeepTimeline(
       for (const tweet of tweets) {
         all.push({
           id: tweet.id,
-          text: tweet.text,
+          text: completeTweetText(tweet),
           createdAt: tweet.created_at || new Date().toISOString(),
           likes: tweet.public_metrics?.like_count ?? 0,
           retweets: tweet.public_metrics?.retweet_count ?? 0,
@@ -311,14 +673,21 @@ export async function getDeepTimeline(
           impressions: tweet.public_metrics?.impression_count ?? 0,
           quotes: tweet.public_metrics?.quote_count ?? 0,
           bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+          ...timelineSourceMetadata(tweet),
         });
       }
 
       paginationToken = (result.data as any).meta?.next_token;
       if (!paginationToken) break;
     }
-  } catch {
-    // Return what we got so far
+  } catch (error) {
+    if (all.length === 0) {
+      return handleApiError(error, {
+        action: 'get_user_timeline',
+        targetUserId: userId,
+      });
+    }
+    // Return what we got so far when a later page fails.
   }
 
   return all;
@@ -339,24 +708,34 @@ export async function getFollowing(
     description: string;
     followersCount: number;
     verified: boolean;
+    protected: boolean;
   }>
 > {
   const client = createClient(keys);
   try {
+    const totalLimit = Math.max(1, Math.min(maxResults, 5000));
     const result = await client.v2.following(userId, {
-      max_results: Math.min(maxResults, 1000),
-      'user.fields': ['description', 'public_metrics', 'verified'],
+      max_results: Math.min(totalLimit, 1000),
+      'user.fields': ['description', 'protected', 'public_metrics', 'verified'],
+      asPaginator: true,
     });
-    return (result.data || []).map((user) => ({
+    if (result.users.length < totalLimit && !result.done) {
+      await result.fetchLast(totalLimit - result.users.length);
+    }
+    return result.users.slice(0, totalLimit).map((user) => ({
       id: user.id,
       name: user.name,
       username: user.username,
       description: (user as any).description || '',
       followersCount: (user as any).public_metrics?.followers_count ?? 0,
       verified: (user as any).verified ?? false,
+      protected: (user as any).protected ?? false,
     }));
   } catch (error) {
-    return handleApiError(error);
+    return handleApiError(error, {
+      action: 'get_following',
+      targetUserId: userId,
+    });
   }
 }
 
@@ -370,18 +749,18 @@ export function decodeKeys(encoded: {
   accessSecret: string;
 }): TwitterKeys {
   return {
-    appKey: Buffer.from(encoded.apiKey, 'base64').toString('utf-8'),
-    appSecret: Buffer.from(encoded.apiSecret, 'base64').toString('utf-8'),
-    accessToken: Buffer.from(encoded.accessToken, 'base64').toString('utf-8'),
-    accessSecret: Buffer.from(encoded.accessSecret, 'base64').toString('utf-8'),
+    appKey: normalizeKeyPart(Buffer.from(encoded.apiKey, 'base64').toString('utf-8')),
+    appSecret: normalizeKeyPart(Buffer.from(encoded.apiSecret, 'base64').toString('utf-8')),
+    accessToken: normalizeKeyPart(Buffer.from(encoded.accessToken, 'base64').toString('utf-8')),
+    accessSecret: normalizeKeyPart(Buffer.from(encoded.accessSecret, 'base64').toString('utf-8')),
   };
 }
 
 // ─── OAuth 1.0a 3-legged flow ───────────────────────────────────────────────
 
 function getConsumerKeys(): { appKey: string; appSecret: string } {
-  const appKey = process.env.TWITTER_CONSUMER_KEY;
-  const appSecret = process.env.TWITTER_CONSUMER_SECRET;
+  const appKey = process.env.TWITTER_CONSUMER_KEY?.trim();
+  const appSecret = process.env.TWITTER_CONSUMER_SECRET?.trim();
   if (!appKey || !appSecret) {
     throw new Error('TWITTER_CONSUMER_KEY and TWITTER_CONSUMER_SECRET env vars are required');
   }

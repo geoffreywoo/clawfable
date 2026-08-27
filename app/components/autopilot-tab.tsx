@@ -1,10 +1,20 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
+import type { AutopilotHealthSnapshot, BillingSummary, ProtocolSettings, PostLogEntry, Metric } from '@/lib/types';
+import type { LearningSnapshot } from '@/lib/learning-snapshot';
 
 interface AutopilotTabProps {
   agentId: string;
+  initialData?: {
+    agentConnected: boolean;
+    agentHandle: string;
+    settings: ProtocolSettings;
+    billing: BillingSummary;
+    postLog: PostLogEntry[];
+    metrics: Metric[];
+    autopilotHealth?: AutopilotHealthSnapshot | null;
+  };
 }
 
 function getTimeAgo(ts: string): string {
@@ -17,36 +27,155 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function AutopilotTab({ agentId }: AutopilotTabProps) {
+function formatLaneLabel(lane: string): string {
+  return lane.replace(/_/g, ' ');
+}
+
+function getHealthTone(status: AutopilotHealthSnapshot['status'] | undefined): { label: string; color: string; bg: string } {
+  if (status === 'blocked') return { label: 'Blocked', color: '#d65c5c', bg: 'rgba(214, 92, 92, 0.12)' };
+  if (status === 'degraded') return { label: 'Self-healing', color: '#c78528', bg: 'rgba(199, 133, 40, 0.14)' };
+  if (status === 'watch') return { label: 'Watching', color: '#4f84c4', bg: 'rgba(79, 132, 196, 0.12)' };
+  return { label: 'Healthy', color: '#2f9a5f', bg: 'rgba(47, 154, 95, 0.12)' };
+}
+
+export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   const [settings, setSettings] = useState<ProtocolSettings | null>(null);
+  const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [postLog, setPostLog] = useState<PostLogEntry[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [autopilotHealth, setAutopilotHealth] = useState<AutopilotHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningAutopilot, setRunningAutopilot] = useState(false);
+  const [connectingX, setConnectingX] = useState(false);
+  const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [agentHandle, setAgentHandle] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+  // Voice coaching chat
+  const [voiceChat, setVoiceChat] = useState<Array<{ id: string; role: string; content: string; directive?: string; ts: string }>>([]);
+  const [voiceDirectives, setVoiceDirectives] = useState<string[]>([]);
+  const [voiceInput, setVoiceInput] = useState('');
+  const [voiceSending, setVoiceSending] = useState(false);
+  const [voiceChatOpen, setVoiceChatOpen] = useState(false);
+  // Learned rules
+  const [learnedInsights, setLearnedInsights] = useState<string[]>([]);
+  const [antiPatterns, setAntiPatterns] = useState<string[]>([]);
+  const [remixPatterns, setRemixPatterns] = useState<string[]>([]);
+  const [learningSnapshot, setLearningSnapshot] = useState<LearningSnapshot | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/agents/${agentId}`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/agents/${agentId}/protocol/settings`).then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/agents/${agentId}/metrics`).then((r) => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([agent, protocolData, metricsData]) => {
-      setAgentConnected(agent?.isConnected === 1);
-      setAgentHandle(agent?.handle || '');
-      if (protocolData) {
-        setSettings(protocolData.settings);
-        setPostLog(protocolData.postLog || []);
-      }
-      if (Array.isArray(metricsData)) setMetrics(metricsData);
+    let cancelled = false;
+
+    const applyInitialData = () => {
+      if (!initialData) return false;
+      setAgentConnected(initialData.agentConnected);
+      setAgentHandle(initialData.agentHandle);
+      setSettings(initialData.settings);
+      setBilling(initialData.billing);
+      setPostLog(initialData.postLog);
+      setMetrics(initialData.metrics);
+      setAutopilotHealth(initialData.autopilotHealth || null);
       setLoading(false);
-    });
-  }, [agentId]);
+      return true;
+    };
+
+    const loadPrimaryData = async () => {
+      try {
+        const res = await fetch(`/api/agents/${agentId}/dashboard?sections=agent,protocol,metrics`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+        setAgentConnected(data.agent?.isConnected === 1);
+        setAgentHandle(data.agent?.handle || '');
+        if (data.protocol) {
+          setSettings(data.protocol.settings);
+          setBilling(data.protocol.billing || null);
+          setPostLog(data.protocol.postLog || []);
+          setAutopilotHealth(data.protocol.autopilotHealth || null);
+        }
+        if (Array.isArray(data.metrics)) setMetrics(data.metrics);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const loadSecondaryData = async () => {
+      try {
+        const [voiceChatData, learningsData, learningSnapshotData] = await Promise.all([
+          fetch(`/api/agents/${agentId}/voice-chat`).then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/agents/${agentId}/learnings`).then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/agents/${agentId}/learning`).then((r) => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (voiceChatData?.chat) setVoiceChat(voiceChatData.chat);
+        if (voiceChatData?.directives) setVoiceDirectives(voiceChatData.directives);
+        if (learningsData?.insights) setLearnedInsights(learningsData.insights);
+        if (learningsData?.styleFingerprint?.antiPatterns) setAntiPatterns(learningsData.styleFingerprint.antiPatterns);
+        if (learningsData?.styleFingerprint?.remixPatterns) setRemixPatterns(learningsData.styleFingerprint.remixPatterns);
+        if (learningSnapshotData?.planner) setLearningSnapshot(learningSnapshotData);
+      } catch {
+        // ignore
+      }
+    };
+
+    const hasInitialData = applyInitialData();
+    if (!hasInitialData) {
+      void loadPrimaryData();
+    }
+
+    const usedIdleCallback = 'requestIdleCallback' in window;
+    const idleLoader = usedIdleCallback
+      ? window.requestIdleCallback(() => {
+          void loadSecondaryData();
+        })
+      : window.setTimeout(() => {
+          void loadSecondaryData();
+        }, 150);
+
+    return () => {
+      cancelled = true;
+      if (usedIdleCallback && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleLoader);
+      } else {
+        window.clearTimeout(idleLoader);
+      }
+    };
+  }, [agentId, initialData]);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const handleVoiceSend = async () => {
+    if (!voiceInput.trim() || voiceSending) return;
+    const msg = voiceInput.trim();
+    setVoiceInput('');
+    setVoiceSending(true);
+    // Optimistic: add operator message immediately
+    setVoiceChat((prev) => [...prev, { id: `op-${Date.now()}`, role: 'operator', content: msg, ts: new Date().toISOString() }]);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/voice-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Add agent response
+      setVoiceChat((prev) => [...prev, {
+        id: `agent-${Date.now()}`,
+        role: 'agent',
+        content: data.reply,
+        directive: data.directive || undefined,
+        ts: new Date().toISOString(),
+      }]);
+      if (data.directives) setVoiceDirectives(data.directives);
+      if (data.directive) showToast(`New directive locked in: ${data.directive.slice(0, 60)}`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Voice chat failed');
+    } finally {
+      setVoiceSending(false);
+    }
   };
 
   const handleUpdateSettings = async (updates: Partial<ProtocolSettings>) => {
@@ -58,7 +187,8 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setSettings(data);
+      setSettings(data.settings || data);
+      if (data.billing) setBilling(data.billing);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Update failed');
     }
@@ -74,11 +204,18 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         ? `Posted: "${(data.content || '').slice(0, 60)}..."`
         : `${data.action}: ${data.reason}`);
       // Refresh
-      const logRes = await fetch(`/api/agents/${agentId}/protocol/settings`);
-      if (logRes.ok) {
-        const logData = await logRes.json();
-        setSettings(logData.settings);
-        setPostLog(logData.postLog || []);
+      const snapshotRes = await fetch(`/api/agents/${agentId}/dashboard?sections=agent,protocol,metrics`, { cache: 'no-store' });
+      if (snapshotRes.ok) {
+        const snapshot = await snapshotRes.json();
+        setAgentConnected(snapshot.agent?.isConnected === 1);
+        setAgentHandle(snapshot.agent?.handle || '');
+        if (snapshot.protocol) {
+          setSettings(snapshot.protocol.settings);
+          setBilling(snapshot.protocol.billing || null);
+          setPostLog(snapshot.protocol.postLog || []);
+          setAutopilotHealth(snapshot.protocol.autopilotHealth || null);
+        }
+        if (Array.isArray(snapshot.metrics)) setMetrics(snapshot.metrics);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Run failed');
@@ -87,10 +224,90 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
     }
   };
 
+  const handleCheckout = async () => {
+    setBillingLoading('checkout');
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'pro' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to open checkout');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Billing failed');
+      setBillingLoading(null);
+    }
+  };
+
+  const handlePortal = async () => {
+    setBillingLoading('portal');
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to open billing portal');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Billing failed');
+      setBillingLoading(null);
+    }
+  };
+
+  const handleOAuthConnect = async () => {
+    setConnectingX(true);
+    try {
+      const res = await fetch('/api/auth/twitter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start X connection');
+      window.location.href = data.url;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to start X connection');
+      setConnectingX(false);
+    }
+  };
+
   const getMetricValue = (name: string): number => {
     const m = metrics.find((m) => m.metricName === name);
     return m?.value ?? 0;
   };
+
+  const getMetric = (name: string): Metric | null => metrics.find((m) => m.metricName === name) || null;
+
+  const metricContext = (name: string): string | null => {
+    const metric = getMetric(name);
+    const status = metric?.availability?.status;
+    if (!status || status === 'available') return null;
+    if (status === 'not_connected') return 'Connect X';
+    if (status === 'waiting_for_cron') return 'Waiting for cron';
+    if (status === 'metric_unavailable') return 'Unavailable';
+    if (status === 'no_posts_yet') return 'No posts yet';
+    if (status === 'no_data_in_window') return 'No data in window';
+    return metric?.availability?.reason || null;
+  };
+
+  const whyNoPosts = (): string[] => {
+    const reasons: string[] = [];
+    if (!agentConnected) reasons.push('X is not connected.');
+    if (automationLocked) reasons.push('Automation is locked by the current billing plan.');
+    if (!settings?.enabled) reasons.push('Auto-posting is off.');
+    if (getMetricValue('tweets_queued') === 0) reasons.push('Queue is empty.');
+    if (autopilotHealth?.externalBlocker) reasons.push(autopilotHealth.reason);
+    const lastLock = postLog.find((entry) => entry.format === 'autopilot_lock');
+    if (lastLock?.reason) reasons.push(lastLock.reason);
+    const recentError = postLog.find((entry) => entry.action === 'error');
+    if (recentError?.reason) reasons.push(recentError.reason);
+    if (settings?.enabled && agentConnected && reasons.length === 0 && getMetricValue('tweets_posted') === 0) {
+      reasons.push('Waiting for the next cron/manual run to clear queue and taste gates.');
+    }
+    return [...new Set(reasons)].slice(0, 5);
+  };
+
+  const automationLocked = billing ? !billing.canUseAutopilot : false;
 
   if (loading) {
     return (
@@ -118,19 +335,283 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
       {/* ─── Metrics Summary ─────────────────────────────────────────────── */}
       <div className="protocol-stats-grid">
         {[
-          { label: 'GENERATED', value: getMetricValue('tweets_generated'), color: undefined },
-          { label: 'POSTED', value: getMetricValue('tweets_posted'), color: '#22c55e' },
-          { label: 'QUEUED', value: getMetricValue('tweets_queued'), color: '#8b5cf6' },
-          { label: 'AUTO-POSTED', value: getMetricValue('auto_posted'), color: '#22c55e' },
-          { label: 'AUTO-REPLIED', value: getMetricValue('auto_replied'), color: '#3b82f6' },
-          { label: 'MENTIONS', value: getMetricValue('mentions'), color: '#3b82f6' },
+          { key: 'tweets_generated', label: 'Generated', value: getMetricValue('tweets_generated'), color: undefined },
+          { key: 'tweets_posted', label: 'Posted', value: getMetricValue('tweets_posted'), color: '#22c55e' },
+          { key: 'tweets_queued', label: 'Approved', value: getMetricValue('tweets_queued'), color: 'var(--primary)' },
+          { key: 'auto_posted', label: 'Auto-posted', value: getMetricValue('auto_posted'), color: '#22c55e' },
+          { key: 'auto_replied', label: 'Auto-replied', value: getMetricValue('auto_replied'), color: '#3b82f6' },
+          { key: 'mentions', label: 'Mentions', value: getMetricValue('mentions'), color: '#3b82f6' },
         ].map((m) => (
           <div key={m.label} className="protocol-stat">
             <span className="protocol-stat-value" style={m.color ? { color: m.color } : undefined}>{m.value}</span>
             <span className="protocol-stat-label">{m.label}</span>
+            {metricContext(m.key) && (
+              <span style={{
+                marginTop: '6px',
+                fontSize: '11px',
+                color: 'var(--text-dim)',
+                textAlign: 'center',
+                minHeight: '16px',
+              }}>
+                {metricContext(m.key)}
+              </span>
+            )}
           </div>
         ))}
       </div>
+
+      {!agentConnected && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--primary-border)',
+          borderRadius: '10px',
+          padding: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: '16px',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ minWidth: '240px', flex: 1 }}>
+            <p style={{
+              margin: 0,
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0',
+              color: 'var(--primary)',
+            }}>Connect X to start learning</p>
+            <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6 }}>
+              Authorize the X account this agent should represent. You will return here after X approves the connection.
+            </p>
+          </div>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleOAuthConnect}
+            disabled={connectingX}
+            data-testid="button-connect-x-today"
+          >
+            {connectingX ? 'Connecting...' : 'Connect X'}
+          </button>
+        </div>
+      )}
+
+      {getMetricValue('tweets_posted') === 0 && whyNoPosts().length > 0 && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: '10px',
+          padding: '16px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div>
+              <p style={{
+                margin: 0,
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '0',
+                color: 'var(--primary)',
+              }}>Why no posts yet</p>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: '14px' }}>
+                These are the current blockers or waiting states the system can see.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+            {whyNoPosts().map((reason) => (
+              <div key={reason} style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: 'var(--surface-3)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+                fontSize: '13px',
+              }}>
+                {reason}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {automationLocked && billing && (
+        <div style={{
+          padding: '14px 16px',
+          borderRadius: '10px',
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          background: 'rgba(245, 158, 11, 0.06)',
+        }}>
+          <p style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            fontWeight: 700,
+            letterSpacing: '0',
+            color: '#f59e0b',
+            marginBottom: '6px',
+          }}>
+            Automation is a paid layer
+          </p>
+          <p style={{
+            fontFamily: 'var(--font-body)',
+            fontSize: '13px',
+            color: 'var(--text)',
+            lineHeight: 1.6,
+          }}>
+            {billing.grandfathered
+              ? 'This account has grandfathered full access. Automation stays unlocked without an active paid subscription.'
+              : 'Free keeps manual compose, queue review, and the learning surfaces open. Paid plans unlock auto-posting, auto-replies, supervised engagement workflows, and hands-off queue execution.'}
+          </p>
+          <p style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            color: 'var(--text-dim)',
+            marginTop: '8px',
+          }}>
+            Current access: {billing.label} · {billing.agentCount}/{billing.maxAgents} agents
+          </p>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+            {billing.checkoutReady && (
+              <button className="btn btn-sm" onClick={handleCheckout} disabled={billingLoading !== null}>
+                {billingLoading === 'checkout' ? 'Loading...' : 'Unlock automation'}
+              </button>
+            )}
+            {billing.portalReady && (
+              <button className="btn btn-outline btn-sm" onClick={handlePortal} disabled={billingLoading !== null}>
+                {billingLoading === 'portal' ? 'Loading...' : 'Manage billing'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {settings && (
+        <div className="control-room-intro">
+          <div className="control-room-intro-head">
+            <div>
+              <p className="control-room-intro-label">Today</p>
+              <h2 className="control-room-intro-title">See what is ready, blocked, or learning from the latest run.</h2>
+            </div>
+            <span className="control-room-intro-chip">
+              {(settings.autonomyMode || 'balanced')} mode
+            </span>
+          </div>
+          <div className="control-room-intro-grid">
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">Approved queue</p>
+              <p className="control-room-intro-card-copy">Approved drafts wait there until you post them or the schedule pulls them live.</p>
+            </div>
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">Learning loop</p>
+              <p className="control-room-intro-card-copy">Operator edits, deletes, and live performance all feed the next generation cycle.</p>
+            </div>
+            <div className="control-room-intro-card">
+              <p className="control-room-intro-card-label">Draft review</p>
+              <p className="control-room-intro-card-copy">Ask for fresh drafts whenever you want a new angle, topic, or experiment lane.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settings && (
+        <section className="growth-loop-panel">
+          <div className="growth-loop-head">
+            <div>
+              <p className="growth-loop-kicker">Growth loop</p>
+              <h2>Catch live attention, publish a sharper take, then double down on what moves.</h2>
+            </div>
+            <span className="growth-loop-mode">Engagement manual</span>
+          </div>
+          <div className="growth-loop-grid">
+            {[
+              {
+                step: '1',
+                label: 'Find waves',
+                value: `${settings.trendMixTarget ?? 35}% trend mix`,
+                copy: learningSnapshot?.planner.acceptedTrends.length
+                  ? `${learningSnapshot.planner.acceptedTrends.length} accepted trend candidate${learningSnapshot.planner.acceptedTrends.length === 1 ? '' : 's'} in the next planner pass.`
+                  : 'The follow graph is scanned for fresh, relevant conversations before the next batch.',
+              },
+              {
+                step: '2',
+                label: 'Draft takes',
+                value: settings.shitpoastEnabled ? 'Sharp mode capped' : 'Standard mode',
+                copy: `Hot takes, short punches, and observations compete with ${settings.explorationRate}% exploration reserved for learning.`,
+              },
+              {
+                step: '3',
+                label: 'Engage early',
+                value: 'Browser supervised',
+                copy: 'Use Engage for supervised visibility in live threads. Direct API replies into arbitrary conversations are blocked by X.',
+              },
+              {
+                step: '4',
+                label: 'Learn fast',
+                value: learningSnapshot?.overview.trainingSource === 'autopilot' ? 'Autopilot data' : 'Mixed data',
+                copy: learningSnapshot
+                  ? `${Math.round(learningSnapshot.overview.localEvidenceWeight * 100)}% local evidence weight. Outcomes feed the next ranking pass.`
+                  : 'Approvals, edits, deletes, and performance will update the next ranking pass.',
+              },
+            ].map((item) => (
+              <article key={item.step} className="growth-loop-card">
+                <div className="growth-loop-step">{item.step}</div>
+                <p className="growth-loop-label">{item.label}</p>
+                <strong>{item.value}</strong>
+                <p>{item.copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {settings && agentConnected && autopilotHealth && (
+        <div className="protocol-card" style={{
+          padding: '14px 16px',
+          borderColor: autopilotHealth.status === 'healthy' ? 'var(--border)' : getHealthTone(autopilotHealth.status).color,
+          background: autopilotHealth.status === 'healthy' ? 'var(--surface)' : getHealthTone(autopilotHealth.status).bg,
+          marginBottom: '16px',
+        }}>
+          <div className="flex items-center justify-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
+            <div>
+              <div className="flex items-center gap-2" style={{ marginBottom: '4px' }}>
+                <span style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  letterSpacing: '0',
+                  color: getHealthTone(autopilotHealth.status).color,
+                  textTransform: 'none',
+                }}>
+                  Automation check · {getHealthTone(autopilotHealth.status).label}
+                </span>
+              </div>
+              <p style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}>
+                {autopilotHealth.reason}
+              </p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                {autopilotHealth.postableQueueDepth}/{autopilotHealth.queueDepth} postable · cadence {autopilotHealth.cadenceHours}h
+                {autopilotHealth.minutesOverdue > 0 ? ` · ${autopilotHealth.minutesOverdue}m overdue` : ''}
+                {autopilotHealth.selfHealAction ? ` · last heal: ${autopilotHealth.selfHealAction}` : ''}
+              </p>
+            </div>
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '9px',
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+            }}>
+              checked {getTimeAgo(autopilotHealth.checkedAt)}
+            </span>
+          </div>
+          {autopilotHealth.details.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+              {autopilotHealth.details.slice(0, 3).map((detail) => (
+                <span key={detail} className="chip" style={{ fontSize: '10px' }}>{detail}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── Background Jobs ─────────────────────────────────────────────── */}
       {settings && agentConnected && (
@@ -138,16 +619,16 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <circle cx="8" cy="8" r="6" stroke={settings.enabled || settings.autoReply ? '#22c55e' : '#8b5cf6'} strokeWidth="1.5" />
+                <circle cx="8" cy="8" r="6" stroke={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--primary)'} strokeWidth="1.5" />
                 <circle cx="8" cy="8" r="2" fill={settings.enabled || settings.autoReply ? '#22c55e' : 'var(--text-dim)'} />
               </svg>
-              <h2>BACKGROUND JOBS</h2>
-              <span className="section-count">cron every 10 min</span>
+              <h2>Publishing automation</h2>
+              <span className="section-count">runs every 10 min</span>
             </div>
             <button className="btn btn-outline btn-sm" onClick={handleRunAutopilot}
-              disabled={runningAutopilot || (!settings.enabled && !settings.autoReply)}
+              disabled={automationLocked || runningAutopilot || (!settings.enabled && !settings.autoReply)}
             >
-              {runningAutopilot ? 'RUNNING...' : 'RUN ALL NOW'}
+              {runningAutopilot ? 'Running...' : 'Run now'}
             </button>
           </div>
 
@@ -161,13 +642,13 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.enabled ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.enabled ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}>
-                    {settings.enabled ? 'ON' : 'OFF'}
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ enabled: !settings.enabled })}>
+                    {settings.enabled ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-POST</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-posting</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Generate + post tweets · {settings.totalAutoPosted} posted
+                      Pull from approved queue and post on schedule · {settings.totalAutoPosted} posted
                       {settings.lastPostedAt && ` · last ${getTimeAgo(settings.lastPostedAt)}`}
                     </p>
                   </div>
@@ -175,14 +656,16 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               </div>
               {settings.enabled && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                  <div className="field"><label>POSTS/DAY</label>
+                  <div className="field"><label>Posts per day</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.postsPerDay}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ postsPerDay: Number(e.target.value) })}>
-                      {[1, 2, 3, 4, 6, 8, 12, 24, 48].map((n) => <option key={n} value={n}>{n}{n === 48 ? ' (every 30m)' : ''}</option>)}
+                      {[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}{n === 12 ? ' (max)' : ''}</option>)}
                     </select>
                   </div>
-                  <div className="field"><label>MIN QUEUE</label>
+                  <div className="field"><label>Minimum queue</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }} value={settings.minQueueSize}
+                      disabled={automationLocked}
                       onChange={(e) => handleUpdateSettings({ minQueueSize: Number(e.target.value) })}>
                       {[3, 5, 10, 15, 20].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
@@ -200,46 +683,132 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     color: settings.autoReply ? '#fff' : 'var(--text-muted)',
                     border: `1px solid ${settings.autoReply ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
-                  }} onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}>
-                    {settings.autoReply ? 'ON' : 'OFF'}
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoReply: !settings.autoReply })}>
+                    {settings.autoReply ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>AUTO-REPLY</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-replies</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
-                      Reply to new mentions · {settings.totalAutoReplied || 0} replied
+                      Watch mentions and answer on schedule · {settings.totalAutoReplied || 0} replied
                       {settings.lastRepliedAt && ` · last ${getTimeAgo(settings.lastRepliedAt)}`}
                     </p>
                   </div>
                 </div>
               </div>
               {settings.autoReply && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
-                  <div className="field">
-                    <label>CHECK EVERY</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
-                      value={settings.replyIntervalMins || 30}
-                      onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
-                      {[
-                        { v: 10, l: '10 min' },
-                        { v: 30, l: '30 min' },
-                        { v: 60, l: '1 hour' },
-                        { v: 120, l: '2 hours' },
-                        { v: 240, l: '4 hours' },
-                        { v: 480, l: '8 hours' },
-                        { v: 720, l: '12 hours' },
-                      ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-                    </select>
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
+                    <div className="field">
+                      <label>Check every</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.replyIntervalMins || 30}
+                        disabled={automationLocked}
+                        onChange={(e) => handleUpdateSettings({ replyIntervalMins: Number(e.target.value) })}>
+                        {[
+                          { v: 10, l: '10 min' },
+                          { v: 30, l: '30 min' },
+                          { v: 60, l: '1 hour' },
+                          { v: 120, l: '2 hours' },
+                          { v: 240, l: '4 hours' },
+                          { v: 480, l: '8 hours' },
+                          { v: 720, l: '12 hours' },
+                        ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Max replies per run</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.maxRepliesPerRun || 3}
+                        disabled={automationLocked}
+                        onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
+                        {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label>MAX REPLIES/RUN</label>
-                    <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
-                      value={settings.maxRepliesPerRun || 3}
-                      onChange={(e) => handleUpdateSettings({ maxRepliesPerRun: Number(e.target.value) })}>
-                      {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: '8px', marginTop: '8px' }}>
+                    <div className="field">
+                      <label>Reply mode</label>
+                      <button className="btn btn-sm" style={{
+                        width: '100%',
+                        justifyContent: 'center',
+                        background: settings.highValueReplyMode ? 'var(--primary-soft)' : 'var(--surface-2)',
+                        color: settings.highValueReplyMode ? 'var(--primary)' : 'var(--text-muted)',
+                        border: `1px solid ${settings.highValueReplyMode ? 'var(--primary-border)' : 'var(--border)'}`,
+                      }} disabled={automationLocked} onClick={() => handleUpdateSettings({ highValueReplyMode: !settings.highValueReplyMode })}>
+                        {settings.highValueReplyMode ? 'High-value only' : 'All mentions'}
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label>Quality bar</label>
+                      <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
+                        value={settings.minReplyValueScore ?? 0.58}
+                        disabled={automationLocked || !settings.highValueReplyMode}
+                        onChange={(e) => handleUpdateSettings({ minReplyValueScore: Number(e.target.value) })}>
+                        {[
+                          { v: 0.5, l: 'Loose' },
+                          { v: 0.58, l: 'Balanced' },
+                          { v: 0.68, l: 'Strict' },
+                          { v: 0.78, l: 'Elite' },
+                        ].map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
+            </div>
+
+            {/* Growth Loops */}
+            <div className="protocol-card" style={{ padding: '12px 14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '8px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Growth helpers</p>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                    Balance portfolio roles, surface opportunities, and draft follow-ups from momentum
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                {[
+                  { key: 'portfolioOptimizerEnabled', label: 'Portfolio', on: settings.portfolioOptimizerEnabled !== false },
+                  { key: 'earlyVelocityFollowups', label: 'Follow-ups', on: settings.earlyVelocityFollowups !== false },
+                  { key: 'supervisedTrendDesk', label: 'Trend desk', on: settings.supervisedTrendDesk !== false },
+                  { key: 'relationshipQueueEnabled', label: 'Relationships', on: settings.relationshipQueueEnabled !== false },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    className="btn btn-sm"
+                    style={{
+                      justifyContent: 'center',
+                      background: item.on ? 'var(--primary-soft)' : 'var(--surface-2)',
+                      color: item.on ? 'var(--primary)' : 'var(--text-muted)',
+                      border: `1px solid ${item.on ? 'var(--primary-border)' : 'var(--border)'}`,
+                    }}
+                    disabled={automationLocked}
+                    onClick={() => handleUpdateSettings({ [item.key]: !item.on } as Partial<ProtocolSettings>)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="field" style={{ marginTop: '8px' }}>
+                <label>Media test rate</label>
+                <select
+                  className="input"
+                  style={{ fontSize: '11px', padding: '4px 6px' }}
+                  value={settings.mediaExperimentRate ?? 15}
+                  disabled={automationLocked || settings.portfolioOptimizerEnabled === false}
+                  onChange={(e) => handleUpdateSettings({ mediaExperimentRate: Number(e.target.value) })}
+                >
+                  {[
+                    { v: 0, l: 'Off' },
+                    { v: 10, l: '10%' },
+                    { v: 15, l: '15%' },
+                    { v: 25, l: '25%' },
+                    { v: 35, l: '35%' },
+                    { v: 50, l: '50%' },
+                  ].map((option) => <option key={option.v} value={option.v}>{option.l}</option>)}
+                </select>
+              </div>
             </div>
 
             {/* Marketing Track — only for spokesperson accounts */}
@@ -253,10 +822,10 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                     border: `1px solid ${settings.marketingEnabled ? '#22c55e' : 'var(--border)'}`,
                     minWidth: '40px',
                   }} onClick={() => handleUpdateSettings({ marketingEnabled: !settings.marketingEnabled })}>
-                    {settings.marketingEnabled ? 'ON' : 'OFF'}
+                    {settings.marketingEnabled ? 'On' : 'Off'}
                   </button>
                   <div>
-                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>MARKETING</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Marketing</p>
                     <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                       Auto-generate promotional tweets for clawfable.com
                     </p>
@@ -265,14 +834,14 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
               </div>
               {settings.marketingEnabled && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                  <div className="field"><label>MIX %</label>
+                  <div className="field"><label>Mix</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.marketingMix || 20}
                       onChange={(e) => handleUpdateSettings({ marketingMix: Number(e.target.value) })}>
                       {[10, 20, 30, 40, 50].map((n) => <option key={n} value={n}>{n}% promotional</option>)}
                     </select>
                   </div>
-                  <div className="field"><label>ROLE</label>
+                  <div className="field"><label>Role</label>
                     <select className="input" style={{ fontSize: '11px', padding: '4px 6px' }}
                       value={settings.marketingRole || 'product'}
                       onChange={(e) => handleUpdateSettings({ marketingRole: e.target.value })}>
@@ -288,10 +857,335 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
 
             {/* Always-on jobs */}
             <div className="protocol-card" style={{ padding: '10px 14px', display: 'flex', gap: '12px' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>ALWAYS ON</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>Always on</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
                 Mention sync (every 10 min) · Self-learning (daily)
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settings && (
+        <details className="today-advanced">
+          <summary>
+            <span>Advanced controls and learning details</span>
+            <small>Voice coaching, audience growth, idea mix, and style experiments</small>
+          </summary>
+          <div className="today-advanced-body">
+
+      {/* ─── Voice Coaching ─────────────────────────────────────────────── */}
+      {settings && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--primary)" strokeWidth="1.3" />
+                <line x1="6" y1="14" x2="10" y2="14" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+              <h2>Coach the voice</h2>
+              <span className="section-count">{voiceDirectives.length} active directive{voiceDirectives.length !== 1 ? 's' : ''}</span>
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={() => setVoiceChatOpen(!voiceChatOpen)}>
+              {voiceChatOpen ? 'Close' : 'Open chat'}
+            </button>
+          </div>
+
+          {/* Active directives */}
+          {voiceDirectives.length > 0 && !voiceChatOpen && (
+            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {voiceDirectives.slice(0, 5).map((d, i) => (
+                <span key={i} style={{
+                  fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--primary)',
+                  background: 'rgba(74,139,103,0.1)', border: '1px solid rgba(74,139,103,0.3)',
+                  borderRadius: '4px', padding: '3px 8px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {d.slice(0, 60)}{d.length > 60 ? '...' : ''}
+                </span>
+              ))}
+              {voiceDirectives.length > 5 && (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>
+                  +{voiceDirectives.length - 5} more
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Chat interface */}
+          {voiceChatOpen && (
+            <div style={{
+              marginTop: '12px',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}>
+              {/* Chat messages */}
+              <div style={{ maxHeight: '300px', overflowY: 'auto', padding: '12px' }}>
+                {voiceChat.length === 0 && (
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-dim)', textAlign: 'center', padding: '20px 0' }}>
+                    Tell the agent how to adjust its voice. Each message becomes a permanent directive.
+                  </p>
+                )}
+                {voiceChat.map((msg) => (
+                  <div key={msg.id} style={{
+                    marginBottom: '10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: msg.role === 'operator' ? 'flex-end' : 'flex-start',
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      background: msg.role === 'operator' ? 'rgba(74,139,103,0.15)' : 'var(--surface-2)',
+                      border: `1px solid ${msg.role === 'operator' ? 'rgba(74,139,103,0.3)' : 'var(--border)'}`,
+                    }}>
+                      <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text)', lineHeight: 1.5 }}>
+                        {msg.content}
+                      </p>
+                      {msg.directive && (
+                        <p style={{
+                          fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#22c55e',
+                          marginTop: '6px', padding: '3px 6px',
+                          background: 'rgba(34,197,94,0.1)', borderRadius: '4px',
+                        }}>
+                          Locked in: {msg.directive}
+                        </p>
+                      )}
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      {msg.role === 'operator' ? 'you' : agentHandle ? `@${agentHandle}` : 'agent'}
+                    </span>
+                  </div>
+                ))}
+                {voiceSending && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0' }}>
+                    <div className="wizard-spinner" style={{ width: '14px', height: '14px' }} />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>thinking...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
+              <div style={{
+                display: 'flex', gap: '8px', padding: '10px 12px',
+                borderTop: '1px solid var(--border)',
+              }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g. Be more contrarian, use more data points, stop saying 'democratizing'..."
+                  value={voiceInput}
+                  onChange={(e) => setVoiceInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleVoiceSend(); } }}
+                  disabled={voiceSending}
+                  style={{ flex: 1, fontSize: '12px' }}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ background: 'var(--primary)', flexShrink: 0 }}
+                  disabled={!voiceInput.trim() || voiceSending}
+                  onClick={handleVoiceSend}
+                >
+                  Send
+                </button>
+              </div>
+
+              {/* Active directives list */}
+              {voiceDirectives.length > 0 && (
+                <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'rgba(74,139,103,0.03)' }}>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0', marginBottom: '6px' }}>
+                    Active directives ({voiceDirectives.length})
+                  </p>
+                  {voiceDirectives.map((d, i) => (
+                    <p key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--primary)', marginBottom: '3px' }}>
+                      {i + 1}. {d}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Active Rules (all learned + coached) ──────────────────────── */}
+      {(voiceDirectives.length > 0 || learnedInsights.length > 0 || antiPatterns.length > 0) && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+                <polyline points="5,8 7,10 11,6" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <h2>Current rules</h2>
+              <span className="section-count">{voiceDirectives.length + learnedInsights.length + antiPatterns.length} total</span>
+            </div>
+          </div>
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {/* Voice coaching directives (operator-directed) */}
+            {voiceDirectives.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid var(--primary)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: 'var(--primary)', marginBottom: '8px' }}>
+                  From voice coaching ({voiceDirectives.length})
+                </p>
+                {voiceDirectives.map((d, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(74,139,103,0.3)' }}>
+                    {d}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Learned insights (from performance data) */}
+            {learnedInsights.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid #22c55e',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: '#22c55e', marginBottom: '8px' }}>
+                  From performance data ({learnedInsights.length})
+                </p>
+                {learnedInsights.map((insight, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(34,197,94,0.3)' }}>
+                    {insight}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Anti-patterns (from worst performers) */}
+            {antiPatterns.length > 0 && (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid #ef4444',
+                borderRadius: 'var(--radius-lg)',
+                padding: '12px 16px',
+              }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 700, letterSpacing: '0', color: '#ef4444', marginBottom: '8px' }}>
+                  Avoid ({antiPatterns.length})
+                </p>
+                {antiPatterns.map((ap, i) => (
+                  <p key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '4px', paddingLeft: '12px', borderLeft: '2px solid rgba(239,68,68,0.3)' }}>
+                    {ap}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Proactive Engagement ──────────────────────────────────────── */}
+      {settings && agentConnected && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="M8 1l2.5 5H15l-4 3.5L12.5 15 8 11.5 3.5 15 5 9.5 1 6h4.5L8 1z" stroke="var(--primary)" strokeWidth="1.3" fill="none" />
+              </svg>
+              <h2>Audience growth</h2>
+            </div>
+          </div>
+          <div className="space-y-2" style={{ marginTop: '8px' }}>
+            {/* Proactive replies */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: 'var(--surface-2)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
+                    minWidth: '40px',
+                  }} disabled>
+                    Off
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Reply to outside threads</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      API replies are disabled because X blocks arbitrary conversation replies. Use Engage for supervised replies.
+                    </p>
+                  </div>
+                </div>
+                <span className="learning-source-chip">API disabled</span>
+              </div>
+            </div>
+
+            {/* Proactive likes */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: 'var(--surface-2)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
+                    minWidth: '40px',
+                  }} disabled>
+                    Off
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Auto-like unavailable</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      X blocks the API like endpoint for this app. Use supervised Engage likes through the browser companion.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Auto-follow */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.autoFollow ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.autoFollow ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.autoFollow ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ autoFollow: !settings.autoFollow })}>
+                    {settings.autoFollow ? 'On' : 'Off'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Follow for better signals</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Follow relevant accounts for better trending data and inspiration (max 3/run)
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Agent shoutouts */}
+            <div className="protocol-card" style={{ padding: '10px 14px' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button className="btn btn-sm" style={{
+                    background: settings.agentShoutouts ? '#22c55e' : 'var(--surface-2)',
+                    color: settings.agentShoutouts ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${settings.agentShoutouts ? '#22c55e' : 'var(--border)'}`,
+                    minWidth: '40px',
+                  }} disabled={automationLocked} onClick={() => handleUpdateSettings({ agentShoutouts: !settings.agentShoutouts })}>
+                    {settings.agentShoutouts ? 'On' : 'Off'}
+                  </button>
+                  <div>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--text)' }}>Cross-promote agents</p>
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                      Cross-promote other Clawfable agents (~15% chance per queue refill)
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -303,20 +1197,82 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
           <div className="section-header">
             <div className="section-title">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-                <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-                <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+                <line x1="5" y1="6" x2="11" y2="6" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="5" y1="10" x2="9" y2="10" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
-              <h2>CONTENT STYLE</h2>
-              <span className="section-count">controls generation output</span>
+              <h2>Draft style</h2>
+              <span className="section-count">controls the next generation batch</span>
             </div>
           </div>
 
           <div className="space-y-3" style={{ marginTop: '8px' }}>
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
+                  Autonomy mode
+                </p>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                  choose how cautious or curious the agent should be
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'safe', label: 'Safe', hint: 'mostly proven bets with the lowest surprise level' },
+                  { id: 'balanced', label: 'Balanced', hint: 'blend proven patterns with measured exploration' },
+                  { id: 'explore', label: 'Explore', hint: 'push into new formats and topics to learn faster' },
+                ].map((mode) => {
+                  const active = (settings.autonomyMode || 'balanced') === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      className="protocol-tag"
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        padding: '8px 10px',
+                        background: active ? 'rgba(74,139,103,0.15)' : 'var(--surface)',
+                        borderColor: active ? 'rgba(74,139,103,0.4)' : 'var(--border)',
+                        color: active ? 'var(--primary)' : 'var(--text-dim)',
+                        opacity: active ? 1 : 0.7,
+                      }}
+                      onClick={() => handleUpdateSettings({ autonomyMode: mode.id as ProtocolSettings['autonomyMode'] })}
+                      title={mode.hint}
+                    >
+                      {mode.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="protocol-card" style={{ padding: '14px', borderColor: settings.shitpoastEnabled ? 'var(--primary-border)' : 'var(--border)', background: settings.shitpoastEnabled ? 'var(--primary-soft)' : 'var(--surface)' }}>
+              <div className="flex items-center justify-between" style={{ gap: '12px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: settings.shitpoastEnabled ? 'var(--primary)' : 'var(--text-muted)' }}>
+                    Wild-card style
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.5 }}>
+                    Sharper, weirder, higher-chaos takes. Capped and still filtered before posting.
+                  </p>
+                </div>
+                <button
+                  className={settings.shitpoastEnabled ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                  onClick={() => handleUpdateSettings({ shitpoastEnabled: !settings.shitpoastEnabled })}
+                  aria-pressed={Boolean(settings.shitpoastEnabled)}
+                >
+                  {settings.shitpoastEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '10px' }}>
+                Max 20% of generated slots. If no wild draft passes quality gates, that slot falls back to standard posting.
+              </p>
+            </div>
+
             {/* Length mix */}
             <div className="protocol-card" style={{ padding: '14px' }}>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                LENGTH MIX
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                Length mix
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                 <div className="field">
@@ -332,7 +1288,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                         const ratio = current.medium + current.long > 0 ? current.medium / (current.medium + current.long) : 0.5;
                         handleUpdateSettings({ lengthMix: { short, medium: Math.round(remaining * ratio), long: Math.round(remaining * (1 - ratio)) } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.short ?? 30}%
@@ -352,7 +1308,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                         const ratio = current.short + current.long > 0 ? current.short / (current.short + current.long) : 0.5;
                         handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium, long: Math.round(remaining * (1 - ratio)) } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.medium ?? 30}%
@@ -372,7 +1328,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                         const ratio = current.short + current.medium > 0 ? current.short / (current.short + current.medium) : 0.5;
                         handleUpdateSettings({ lengthMix: { short: Math.round(remaining * ratio), medium: Math.round(remaining * (1 - ratio)), long } });
                       }}
-                      style={{ flex: 1, accentColor: '#8b5cf6' }}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
                     />
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '32px', textAlign: 'right' }}>
                       {settings.lengthMix?.long ?? 40}%
@@ -385,15 +1341,15 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
             {/* Format toggles */}
             <div className="protocol-card" style={{ padding: '14px' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
-                  ALLOWED FORMATS
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
+                  Allowed formats
                 </p>
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ fontSize: '9px' }}
                   onClick={() => handleUpdateSettings({ enabledFormats: [] })}
                 >
-                  {(settings.enabledFormats?.length || 0) === 0 ? 'ALL ENABLED' : 'RESET TO ALL'}
+                  {(settings.enabledFormats?.length || 0) === 0 ? 'All enabled' : 'Reset to all'}
                 </button>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -414,9 +1370,9 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                       style={{
                         cursor: 'pointer',
                         fontSize: '10px',
-                        background: enabled ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
-                        borderColor: enabled ? 'rgba(139,92,246,0.4)' : 'var(--border)',
-                        color: enabled ? '#8b5cf6' : 'var(--text-dim)',
+                        background: enabled ? 'rgba(74,139,103,0.15)' : 'var(--surface)',
+                        borderColor: enabled ? 'rgba(74,139,103,0.4)' : 'var(--border)',
+                        color: enabled ? 'var(--primary)' : 'var(--text-dim)',
                         opacity: enabled ? 1 : 0.5,
                       }}
                       onClick={() => {
@@ -439,8 +1395,128 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                 })}
               </div>
             </div>
+
+            <div className="protocol-card" style={{ padding: '14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '10px' }}>
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
+                    Idea mix
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Balance proven manual voice against timely follow-graph trends.
+                  </p>
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
+                  tuned in Insights
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div className="field">
+                  <label>Trend mix target</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="70"
+                      step="5"
+                      value={settings.trendMixTarget ?? 35}
+                      onChange={(e) => handleUpdateSettings({ trendMixTarget: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--primary)' }}
+                    />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text)', width: '36px', textAlign: 'right' }}>
+                      {settings.trendMixTarget ?? 35}%
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    Trend tolerance
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'adjacent', label: 'Adjacent', hint: 'stay close to core topics' },
+                      { id: 'moderate', label: 'Moderate', hint: 'allow measured adjacent bets' },
+                      { id: 'aggressive', label: 'Aggressive', hint: 'push further when network momentum is strong' },
+                    ].map((option) => {
+                      const active = (settings.trendTolerance || 'moderate') === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          className="protocol-tag"
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '10px',
+                            padding: '8px 10px',
+                            background: active ? 'var(--primary-soft)' : 'var(--surface)',
+                            borderColor: active ? 'var(--primary-border)' : 'var(--border)',
+                            color: active ? 'var(--primary)' : 'var(--text-dim)',
+                            opacity: active ? 1 : 0.75,
+                          }}
+                          title={option.hint}
+                          onClick={() => handleUpdateSettings({ trendTolerance: option.id as ProtocolSettings['trendTolerance'] })}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {learningSnapshot?.planner && (
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: learningSnapshot.planner.shitpoast.enabled ? 'var(--primary-soft)' : 'var(--surface-3)' }}>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>Wild-card</p>
+                        <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>
+                          {learningSnapshot.planner.shitpoast.enabled ? `${learningSnapshot.planner.shitpoast.plannedSlots}` : 'Off'}
+                        </div>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          {learningSnapshot.planner.shitpoast.posts > 0
+                            ? `avg ${learningSnapshot.planner.shitpoast.avgEngagement} across ${learningSnapshot.planner.shitpoast.posts} posts`
+                            : `cap ${learningSnapshot.planner.shitpoast.capPercent}% of slots`}
+                        </p>
+                      </div>
+                      {learningSnapshot.planner.nextBatchMix.map((lane) => (
+                        <div key={lane.lane} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: 'var(--surface-3)' }}>
+                          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px' }}>{formatLaneLabel(lane.lane)}</p>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>{lane.plannedSlots}</div>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                            avg {lane.avgEngagement || 0} engagement across {lane.posts} posts
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {learningSnapshot.planner.acceptedTrends.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>
+                          Accepted trend candidates
+                        </p>
+                        {learningSnapshot.planner.acceptedTrends.slice(0, 3).map((trend) => (
+                          <div key={trend.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px', background: 'var(--surface)' }}>
+                            <div className="flex items-center justify-between" style={{ gap: '8px', marginBottom: '4px' }}>
+                              <p style={{ fontWeight: 600, color: 'var(--text)' }}>{trend.category}</p>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--primary)' }}>
+                                {trend.lane} · {trend.fit}%
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{trend.headline}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+          </div>
+        </details>
       )}
 
       {/* ─── Activity Log ─────────────────────────────────────────────────── */}
@@ -448,25 +1524,25 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
         <div className="section-header">
           <div className="section-title">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <rect x="2" y="2" width="12" height="12" rx="2" stroke="#8b5cf6" strokeWidth="1.5" />
-              <line x1="5" y1="6" x2="11" y2="6" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
-              <line x1="5" y1="10" x2="9" y2="10" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="var(--primary)" strokeWidth="1.5" />
+              <line x1="5" y1="6" x2="11" y2="6" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
+              <line x1="5" y1="10" x2="9" y2="10" stroke="var(--primary)" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
-            <h2>ACTIVITY LOG</h2>
+              <h2>Recent activity</h2>
             <span className="section-count">{postLog.length} events</span>
           </div>
         </div>
         {postLog.length === 0 ? (
           <div style={{ padding: '24px 16px', textAlign: 'center', background: 'var(--surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.7' }}>
-              No activity yet. Enable auto-post or auto-reply, or hit RUN ALL NOW.
+              No activity yet. Enable auto-posting or auto-replies, or run automation now.
             </p>
           </div>
         ) : (
           <div className="space-y-2">
             {postLog.map((entry) => {
               const isPost = entry.action === 'posted' || (!entry.action && entry.xTweetId);
-              const tagLabel = entry.source === 'cron' ? 'CRON' : entry.source === 'autopilot' ? 'AUTO' : 'MANUAL';
+              const tagLabel = entry.source === 'cron' ? 'Cron' : entry.source === 'autopilot' ? 'Auto' : 'Manual';
               const tagColor = entry.action === 'posted' ? '#22c55e'
                 : entry.action === 'replied' ? '#3b82f6'
                 : entry.action === 'error' ? '#ef4444'
@@ -482,7 +1558,7 @@ export function AutopilotTab({ agentId }: AutopilotTabProps) {
                         fontSize: '9px', background: `${tagColor}15`, borderColor: `${tagColor}40`, color: tagColor,
                       }}>{tagLabel}</span>
                       {entry.action && entry.action !== 'posted' && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: tagColor, textTransform: 'uppercase' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: tagColor, textTransform: 'none' }}>
                           {entry.action.replace(/_/g, ' ')}
                         </span>
                       )}

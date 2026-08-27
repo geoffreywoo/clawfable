@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Metric, AgentLearnings } from '@/lib/types';
+import type { AutopilotHealthSnapshot, Metric, AgentLearnings } from '@/lib/types';
+import type { VoiceTuningAnalytics, VoiceSentiment } from '@/lib/voice-tuning-analytics';
 
 interface MetricsTabProps {
   agentId: string;
@@ -14,6 +15,22 @@ interface TimeseriesData {
   daily: Array<{ date: string; tweetsPosted: number; avgLikes: number }>;
   formatBreakdown: Array<{ format: string; count: number; avgEngagement: number }>;
   topicBreakdown: Array<{ topic: string; count: number; avgEngagement: number }>;
+  voiceTuning?: VoiceTuningAnalytics;
+  compounding?: {
+    approvalRate: { currentWeek: number; previousWeek: number };
+    deleteRate: { currentWeek: number; previousWeek: number };
+    copiedWithoutPost: number;
+    topLearnedRules: string[];
+    weeklyChanges: string[];
+    memory: {
+      alwaysDoMoreOfThis: string[];
+      neverDoThisAgain: string[];
+      topicsWithMomentum: string[];
+      formatsUnderTested: string[];
+      operatorHiddenPreferences: string[];
+      identityConstraints: string[];
+    } | null;
+  };
   dataReady: boolean;
 }
 
@@ -24,7 +41,7 @@ const METRIC_CONFIG: Record<string, {
 }> = {
   tweets_generated: { label: 'Total Generated', format: (v) => String(v) },
   tweets_posted: { label: 'Posted to X', format: (v) => String(v), color: '#22c55e' },
-  tweets_queued: { label: 'In Queue', format: (v) => String(v), color: '#8b5cf6' },
+  tweets_queued: { label: 'In Queue', format: (v) => String(v), color: 'var(--primary)' },
   tweets_draft: { label: 'Drafts', format: (v) => String(v) },
   mentions: { label: 'Mentions', format: (v) => String(v), color: '#3b82f6' },
   auto_posted: { label: 'Auto-Posted', format: (v) => String(v), color: '#22c55e' },
@@ -49,11 +66,28 @@ function getTimeAgo(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatLabel(value: string | null | undefined): string {
+  if (!value) return 'Not enough data';
+  return value.replace(/_/g, ' ');
+}
+
+function formatNullablePercent(value: number | null): string {
+  return value === null ? 'n/a' : `${value}%`;
+}
+
+const SENTIMENT_COPY: Record<VoiceSentiment, string> = {
+  positive: 'Positive',
+  neutral: 'Neutral',
+  spicy: 'Spicy',
+  negative: 'Critical',
+};
+
 export function MetricsTab({ agentId }: MetricsTabProps) {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [learnings, setLearnings] = useState<AgentLearnings | null>(null);
   const [timeseries, setTimeseries] = useState<TimeseriesData | null>(null);
   const [healthScore, setHealthScore] = useState<number>(0);
+  const [autopilotHealth, setAutopilotHealth] = useState<AutopilotHealthSnapshot | null>(null);
   const [funnel, setFunnel] = useState<{ milestones: Array<{ event: string; reached: boolean; ts: string | null }>; currentStage: string; completionPct: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -67,6 +101,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         if (Array.isArray(metricsData)) setMetrics(metricsData);
         else if (metricsData?.metrics && Array.isArray(metricsData.metrics)) setMetrics(metricsData.metrics);
         if (metricsData?.healthScore !== undefined) setHealthScore(metricsData.healthScore);
+        if (metricsData?.autopilotHealth) setAutopilotHealth(metricsData.autopilotHealth);
         if (metricsData?.funnel) setFunnel(metricsData.funnel);
         if (learningsData && typeof learningsData === 'object' && learningsData.totalTracked > 0) {
           setLearnings(learningsData);
@@ -93,6 +128,10 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
   const maxDailyLikes = timeseries ? Math.max(...timeseries.daily.map((d) => d.avgLikes), 1) : 1;
   const maxFormatEng = learnings?.formatRankings.length ? Math.max(...learnings.formatRankings.map((f) => f.avgEngagement), 1) : 1;
   const maxTopicEng = learnings?.topicRankings.length ? Math.max(...learnings.topicRankings.map((t) => t.avgEngagement), 1) : 1;
+  const voiceTuning = timeseries?.voiceTuning || null;
+  const maxToneEng = Math.max(...(voiceTuning?.toneBreakdown.map((row) => row.avgEngagement) || [1]), 1);
+  const maxShapeEng = Math.max(...(voiceTuning?.voiceShapeBreakdown.map((row) => row.avgEngagement) || [1]), 1);
+  const maxTuningTopicEng = Math.max(...(voiceTuning?.topicMatrix.map((row) => row.avgEngagement) || [1]), 1);
 
   // Compute weekly comparison from timeseries
   const thisWeek = timeseries?.daily.slice(0, 7) || [];
@@ -127,7 +166,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
             fontWeight: 700,
             color: healthScore >= 70 ? '#22c55e' : healthScore >= 40 ? '#f59e0b' : '#ef4444',
           }}>{healthScore}</p>
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>HEALTH SCORE</p>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0' }}>Health score</p>
         </div>
 
         {/* Weekly comparison */}
@@ -144,21 +183,44 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
             minWidth: '280px',
           }}>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>POSTS</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>Posts</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekPosts}</p>
               {lastWeekPosts > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekPosts >= lastWeekPosts ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekPosts, lastWeekPosts)}% vs last week</p>}
             </div>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>AVG LIKES</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>Avg likes</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>{thisWeekAvgLikes}</p>
               {lastWeekAvgLikes > 0 && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: thisWeekAvgLikes >= lastWeekAvgLikes ? '#22c55e' : '#ef4444' }}>{pctChange(thisWeekAvgLikes, lastWeekAvgLikes)}% vs last week</p>}
             </div>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: '4px' }}>THIS WEEK</p>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '4px' }}>This week</p>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 {thisWeek.filter((d) => d.tweetsPosted > 0).length} active days
               </p>
             </div>
+          </div>
+        )}
+
+        {autopilotHealth && (
+          <div style={{
+            flex: 1,
+            background: 'var(--surface)',
+            border: `1px solid ${autopilotHealth.status === 'healthy' ? 'var(--border)' : autopilotHealth.status === 'blocked' ? '#d65c5c' : '#c78528'}`,
+            borderRadius: 'var(--radius-lg)',
+            padding: '14px 20px',
+            minWidth: '260px',
+          }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0', marginBottom: '6px' }}>Automation health</p>
+            <p style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: autopilotHealth.status === 'healthy' ? '#2f9a5f' : autopilotHealth.status === 'blocked' ? '#d65c5c' : '#c78528' }}>
+              {autopilotHealth.status}
+            </p>
+            <p style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              {autopilotHealth.reason}
+            </p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '8px' }}>
+              {autopilotHealth.postableQueueDepth}/{autopilotHealth.queueDepth} postable
+              {autopilotHealth.selfHealAction ? ` · ${autopilotHealth.selfHealAction}` : ''}
+            </p>
           </div>
         )}
       </div>
@@ -172,7 +234,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
           padding: '14px 20px',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-muted)' }}>ACTIVATION FUNNEL</p>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 700, letterSpacing: '0', color: 'var(--text-muted)' }}>Setup progress</p>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>{funnel.completionPct}% complete</p>
           </div>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -182,16 +244,16 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
                   width: '100%',
                   height: '6px',
                   borderRadius: '3px',
-                  background: m.reached ? '#8b5cf6' : 'var(--surface-2)',
+                  background: m.reached ? 'var(--primary)' : 'var(--surface-2)',
                 }} />
                 <span style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '8px',
-                  color: m.reached ? '#8b5cf6' : 'var(--text-dim)',
-                  letterSpacing: '0.05em',
+                  color: m.reached ? 'var(--primary)' : 'var(--text-dim)',
+                  letterSpacing: '0',
                   textAlign: 'center',
                 }}>
-                  {m.event.replace(/_/g, ' ').replace('wizard ', '').toUpperCase()}
+                  {m.event.replace(/_/g, ' ').replace('wizard ', '')}
                 </span>
               </div>
             ))}
@@ -199,15 +261,186 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         </div>
       )}
 
+      {/* ─── 1. Tuning Cockpit ──────────────────────────────────────────── */}
+      {voiceTuning && (
+        <section className="tuning-cockpit">
+          <div className="tuning-cockpit-head">
+            <div>
+              <p className="tuning-kicker">Writing mix control</p>
+              <h2>Tune the voice, topics, and sentiment</h2>
+              <p>
+                Use this panel to decide what to push next: sharper tone, better topic allocation,
+                or a different sentiment mix.
+              </p>
+            </div>
+            <div className="tuning-sample-badge">
+              <span>{voiceTuning.summary.totalSamples}</span>
+              <small>tracked samples</small>
+            </div>
+          </div>
+
+          {voiceTuning.summary.totalSamples > 0 ? (
+            <>
+              <div className="tuning-summary-grid">
+                <article className="tuning-summary-card">
+                  <span>Best tone</span>
+                  <strong>{formatLabel(voiceTuning.summary.bestTone)}</strong>
+                  <p>Lead with this voice when the next batch needs reliability.</p>
+                </article>
+                <article className="tuning-summary-card">
+                  <span>Topic to push</span>
+                  <strong>{formatLabel(voiceTuning.summary.topicOpportunity)}</strong>
+                  <p>Highest current opportunity by weighted engagement.</p>
+                </article>
+                <article className="tuning-summary-card">
+                  <span>Spice mix</span>
+                  <strong>{voiceTuning.summary.sentimentBalance.spicy}%</strong>
+                  <p>Share of recent posts classified as spicy or contrarian.</p>
+                </article>
+                <article className="tuning-summary-card muted">
+                  <span>Watchlist</span>
+                  <strong>{formatLabel(voiceTuning.summary.riskiestTone)}</strong>
+                  <p>Reduce or reshape this tone if deletion risk keeps rising.</p>
+                </article>
+              </div>
+
+              <div className="tuning-sentiment-panel">
+                <div className="tuning-panel-head">
+                  <div>
+                    <h3>Sentiment balance</h3>
+                    <p>Keep the account spicy without letting one emotional register flatten the voice.</p>
+                  </div>
+                </div>
+                <div className="tuning-sentiment-bar" aria-label="Sentiment mix">
+                  {voiceTuning.sentimentBreakdown.filter((row) => row.share > 0).map((row) => (
+                    <span
+                      key={row.sentiment}
+                      className={`tuning-sentiment-fill sentiment-${row.sentiment}`}
+                      style={{ width: `${Math.max(row.share, 4)}%` }}
+                      title={`${SENTIMENT_COPY[row.sentiment]} ${row.share}%`}
+                    />
+                  ))}
+                </div>
+                <div className="tuning-sentiment-legend">
+                  {voiceTuning.sentimentBreakdown.map((row) => (
+                    <span key={row.sentiment}>
+                      <i className={`sentiment-dot sentiment-${row.sentiment}`} />
+                      {SENTIMENT_COPY[row.sentiment]} {row.share}%
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="tuning-analytics-grid">
+                <section className="tuning-panel">
+                  <div className="tuning-panel-head">
+                    <div>
+                      <h3>Tone performance</h3>
+                      <p>Engagement plus operator acceptance signals.</p>
+                    </div>
+                  </div>
+                  <div className="tuning-rows">
+                    {voiceTuning.toneBreakdown.map((row) => (
+                      <div key={row.tone} className="tuning-row">
+                        <div className="tuning-row-main">
+                          <span className="tuning-row-label">{formatLabel(row.tone)}</span>
+                          <span className="tuning-row-meta">{row.count} posts</span>
+                        </div>
+                        <div className="tuning-row-bar-track">
+                          <div className="tuning-row-bar" style={{ width: `${(row.avgEngagement / maxToneEng) * 100}%` }} />
+                        </div>
+                        <div className="tuning-row-stats">
+                          <strong>{row.avgEngagement}</strong>
+                          <span>{formatNullablePercent(row.approvalRate)} approved</span>
+                          <span>{formatNullablePercent(row.deleteRate)} deleted</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="tuning-panel">
+                  <div className="tuning-panel-head">
+                    <div>
+                      <h3>Voice shapes</h3>
+                      <p>Which rhetorical containers are carrying the voice.</p>
+                    </div>
+                  </div>
+                  <div className="tuning-shape-list">
+                    {voiceTuning.voiceShapeBreakdown.map((row) => (
+                      <article key={row.shape} className="tuning-shape-card">
+                        <div>
+                          <strong>{formatLabel(row.shape)}</strong>
+                          <span>{row.share}% of mix</span>
+                        </div>
+                        <div className="tuning-shape-meter">
+                          <span style={{ width: `${(row.avgEngagement / maxShapeEng) * 100}%` }} />
+                        </div>
+                        <small>{row.avgEngagement} avg engagement</small>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <section className="tuning-panel">
+                <div className="tuning-panel-head">
+                  <div>
+                    <h3>Topic tuning matrix</h3>
+                    <p>For each topic, the UI shows the tone and sentiment that should guide the next batch.</p>
+                  </div>
+                </div>
+                <div className="tuning-topic-grid">
+                  {voiceTuning.topicMatrix.map((row) => (
+                    <article key={row.topic} className="tuning-topic-card">
+                      <div className="tuning-topic-topline">
+                        <strong>{formatLabel(row.topic)}</strong>
+                        <span>{row.count} posts</span>
+                      </div>
+                      <div className="tuning-topic-meter">
+                        <span style={{ width: `${(row.avgEngagement / maxTuningTopicEng) * 100}%` }} />
+                      </div>
+                      <div className="tuning-topic-tags">
+                        {row.topTone && <span>{formatLabel(row.topTone)}</span>}
+                        {row.sentiment && <span>{SENTIMENT_COPY[row.sentiment]}</span>}
+                        <span>{row.avgEngagement} avg eng</span>
+                      </div>
+                      <p>{row.recommendation}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="tuning-recommendation-panel">
+                <div>
+                  <p className="tuning-kicker">Recommended moves</p>
+                  <h3>What to change next</h3>
+                </div>
+                <ul>
+                  {voiceTuning.recommendations.map((recommendation, index) => (
+                    <li key={`${recommendation}-${index}`}>{recommendation}</li>
+                  ))}
+                </ul>
+              </section>
+            </>
+          ) : (
+            <div className="tuning-empty-state">
+              <strong>No tuning sample yet</strong>
+              <p>Post a few tweets or refresh timeline learning, then this panel will show tone, topic, and sentiment recommendations.</p>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ─── 1. Learning Digest Hero ──────────────────────────────────────── */}
       {learnings && learnings.insights.length > 0 ? (
         <div className="learning-digest">
           <div className="learning-digest-header">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="#8b5cf6" strokeWidth="1.3" />
-              <line x1="6" y1="14" x2="10" y2="14" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--primary)" strokeWidth="1.3" />
+              <line x1="6" y1="14" x2="10" y2="14" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
-            <h2>WHAT THE SYSTEM IS LEARNING</h2>
+            <h2>What the system is learning</h2>
             <span className="section-count">updated {getTimeAgo(learnings.updatedAt)}</span>
           </div>
           <ul className="learning-insights">
@@ -226,7 +459,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
               <path d="M8 1C5.2 1 3 3.2 3 6c0 1.9 1 3.5 2.5 4.3V12a1 1 0 001 1h3a1 1 0 001-1v-1.7C12 9.5 13 7.9 13 6c0-2.8-2.2-5-5-5z" stroke="var(--text-dim)" strokeWidth="1.3" />
               <line x1="6" y1="14" x2="10" y2="14" stroke="var(--text-dim)" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
-            <h2>LEARNING</h2>
+            <h2>Learning</h2>
           </div>
           <div className="learning-progress">
             <p className="learning-progress-label">
@@ -245,16 +478,122 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         </div>
       )}
 
+      {/* ─── 1B. Visible Compounding ─────────────────────────────────────── */}
+      {timeseries?.compounding && (
+        <div className="space-y-4">
+          <div className="section-title">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <polyline points="2,11 6,7 9,8.5 14,3" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="10,3 14,3 14,7" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <h2>Compounding</h2>
+            <span className="section-count">how the system is improving from operator feedback</span>
+          </div>
+
+          <div className="rankings-grid">
+            <div className="perf-block">
+              <p className="perf-block-label">APPROVAL RATE</p>
+              <div className="perf-rows">
+                <div className="perf-row">
+                  <span className="perf-row-name">This week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.approvalRate.currentWeek}%</span>
+                </div>
+                <div className="perf-row">
+                  <span className="perf-row-name">Last week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.approvalRate.previousWeek}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="perf-block">
+              <p className="perf-block-label">DELETE RATE</p>
+              <div className="perf-rows">
+                <div className="perf-row">
+                  <span className="perf-row-name">This week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.deleteRate.currentWeek}%</span>
+                </div>
+                <div className="perf-row">
+                  <span className="perf-row-name">Last week</span>
+                  <span className="perf-row-stat">{timeseries.compounding.deleteRate.previousWeek}%</span>
+                </div>
+                {timeseries.compounding.copiedWithoutPost > 0 && (
+                  <div className="perf-row">
+                    <span className="perf-row-name">Copied, not posted</span>
+                    <span className="perf-row-stat">{timeseries.compounding.copiedWithoutPost}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {timeseries.compounding.topLearnedRules.length > 0 && (
+            <div className="learning-digest">
+              <div className="learning-digest-header">
+                <h2>Top learned rules</h2>
+              </div>
+              <ul className="learning-insights">
+                {timeseries.compounding.topLearnedRules.map((rule, index) => (
+                  <li key={index} className="learning-insight">{rule}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {timeseries.compounding.weeklyChanges.length > 0 && (
+            <div className="perf-block">
+              <p className="perf-block-label">What changed this week</p>
+              <div className="perf-tweets">
+                {timeseries.compounding.weeklyChanges.map((change, index) => (
+                  <div key={index} className="perf-tweet">
+                    <p className="perf-tweet-content">{change}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {timeseries.compounding.memory && (
+            <div className="comparison-grid">
+              {timeseries.compounding.memory.alwaysDoMoreOfThis.length > 0 && (
+                <div className="perf-block">
+                  <p className="perf-block-label">DO MORE OF THIS</p>
+                  <div className="perf-tweets">
+                    {timeseries.compounding.memory.alwaysDoMoreOfThis.map((item, index) => (
+                      <div key={index} className="perf-tweet perf-tweet-best">
+                        <p className="perf-tweet-content">{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {timeseries.compounding.memory.neverDoThisAgain.length > 0 && (
+                <div className="perf-block">
+                  <p className="perf-block-label">NEVER DO THIS AGAIN</p>
+                  <div className="perf-tweets">
+                    {timeseries.compounding.memory.neverDoThisAgain.map((item, index) => (
+                      <div key={index} className="perf-tweet perf-tweet-worst">
+                        <p className="perf-tweet-content">{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ─── 2. What's Working / What Isn't ──────────────────────────────── */}
       {learnings && (learnings.formatRankings.length > 0 || learnings.topicRankings.length > 0) && (
         <div>
           <div className="section-title mb-4">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <rect x="1" y="8" width="3" height="7" rx="1" fill="#8b5cf6" />
-              <rect x="6" y="5" width="3" height="10" rx="1" fill="#8b5cf6" />
-              <rect x="11" y="2" width="3" height="13" rx="1" fill="#8b5cf6" />
+              <rect x="1" y="8" width="3" height="7" rx="1" fill="var(--primary)" />
+              <rect x="6" y="5" width="3" height="10" rx="1" fill="var(--primary)" />
+              <rect x="11" y="2" width="3" height="13" rx="1" fill="var(--primary)" />
             </svg>
-            <h2>WHAT PERFORMS</h2>
+            <h2>What performs</h2>
             <span className="section-count">ranked by avg engagement</span>
           </div>
 
@@ -336,11 +675,11 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
         <div className="lift-section">
           <div className="section-title mb-4">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <polyline points="2,12 6,7 9,9 14,3" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline points="10,3 14,3 14,7" stroke="#8b5cf6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="2,12 6,7 9,9 14,3" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="10,3 14,3 14,7" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <h2>AUTOPILOT LIFT</h2>
-            <span className="section-count">vs. pre-autopilot baseline</span>
+            <h2>Automation lift</h2>
+            <span className="section-count">vs. pre-automation baseline</span>
           </div>
           {timeseries.lift.likesPercent >= 0 ? (
             <div className="lift-hero lift-positive">
@@ -382,7 +721,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       {timeseries && timeseries.daily.some((d) => d.tweetsPosted > 0) && (
         <div className="trend-section">
           <div className="section-title mb-4">
-            <h2>POSTING ACTIVITY</h2>
+            <h2>Posting activity</h2>
             <span className="section-count">last 14 days</span>
           </div>
           <div className="trend-bars">
@@ -407,7 +746,7 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
       {timeseries && timeseries.daily.some((d) => d.avgLikes > 0) && (
         <div className="trend-section">
           <div className="section-title mb-4">
-            <h2>ENGAGEMENT TREND</h2>
+            <h2>Engagement trend</h2>
             <span className="section-count">avg likes per day</span>
           </div>
           <div className="trend-bars">
@@ -435,13 +774,13 @@ export function MetricsTab({ agentId }: MetricsTabProps) {
           <rect x="6" y="5" width="3" height="10" rx="1" fill="var(--text-dim)" />
           <rect x="11" y="2" width="3" height="13" rx="1" fill="var(--text-dim)" />
         </svg>
-        <h2>COUNTERS</h2>
+        <h2>Counters</h2>
       </div>
 
       {metrics.length === 0 ? (
         <div style={{ padding: '40px 20px', textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-            No data yet. Generate tweets, run analysis, or enable autopilot to see metrics.
+            No data yet. Generate tweets, run analysis, or enable automation to see metrics.
           </p>
         </div>
       ) : (

@@ -1,22 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateTweet } from '@/lib/kv-storage';
+import { addRemixEntry, checkRateLimit, getAnalysis, getTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic();
+import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { buildGenerationContext } from '@/lib/generation-context';
+import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
+import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import type { GenerationEvidenceReference } from '@/lib/types';
 
 const REMIX_DIRECTIONS: Record<string, string> = {
-  shorter: 'Make it shorter and punchier. Cut the fat. Under 200 chars if possible.',
-  longer: 'Expand into a longer, more detailed post. Add analysis, context, or a structured breakdown. 500-1500 chars. Use line breaks.',
-  spicier: 'Make it more provocative, controversial, and attention-grabbing. Sharper edge. More snark.',
-  softer: 'Make it less aggressive. More thoughtful and nuanced. Keep the point but dial down the heat.',
-  funnier: 'Make it funnier. Add wit, irony, or absurdist humor. Should make people laugh or screenshot.',
-  data: 'Reframe around data, numbers, or specific evidence. Add a stat, percentage, or concrete example.',
-  question: 'Reframe as a provocative question that sparks replies and debate.',
-  contrarian: 'Flip the take. Argue the opposite angle with conviction.',
+  shorter: 'Make it shorter and punchier without changing the claim.',
+  longer: 'Expand the analysis using only inherited evidence.',
+  spicier: 'Sharpen the delivery without strengthening or changing the claim.',
+  softer: 'Make the delivery more thoughtful and nuanced without changing the claim.',
+  funnier: 'Add wit without changing the claim or factual scope.',
+  data: 'Reframe around concrete evidence that already exists in the inherited sources.',
+  question: 'Express the same claim as a useful question.',
+  contrarian: 'Forge and qualify a new opposing judgment.',
 };
 
-// POST /api/agents/[id]/remix — remix a tweet in a direction
+const COPY_ONLY_DIRECTIONS = new Set(['shorter', 'spicier', 'softer', 'funnier', 'question']);
+
+function inheritedEvidence(tweet: NonNullable<Awaited<ReturnType<typeof getTweet>>>): GenerationEvidenceReference[] {
+  const evidence: GenerationEvidenceReference[] = [
+    {
+      id: `remix-parent:${tweet.id}`,
+      kind: 'remix_parent',
+      sourceDocumentId: null,
+      url: tweet.xTweetId ? `https://x.com/i/status/${tweet.xTweetId}` : null,
+      title: 'Parent draft',
+      publisher: null,
+      content: tweet.content,
+      publishedAt: tweet.postedAt || tweet.createdAt,
+      verifiedAt: new Date().toISOString(),
+      expiresAt: null,
+      trustTier: 'primary',
+    },
+    ...(tweet.generationEvidenceReferences || []),
+    ...(tweet.evidenceReferences || []).map((entry) => ({
+      id: `source:${entry.sourceDocumentId}`,
+      kind: 'research_source' as const,
+      sourceDocumentId: entry.sourceDocumentId,
+      url: entry.url,
+      title: entry.title,
+      publisher: entry.publisher,
+      content: entry.claim || entry.title,
+      publishedAt: entry.publishedAt,
+      verifiedAt: entry.publishedAt,
+      expiresAt: null,
+      trustTier: entry.trustTier,
+    })),
+  ];
+  return evidence.filter((entry, index) => evidence.findIndex((candidate) => candidate.id === entry.id) === index);
+}
+
+// POST /api/agents/[id]/remix
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -24,41 +63,97 @@ export async function POST(
   const { id } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-
     const body = await request.json();
-    const { tweetId, content, direction, customPrompt } = body;
-    if (!content) return NextResponse.json({ error: 'content required' }, { status: 400 });
+    const tweetId = typeof body?.tweetId === 'string' ? body.tweetId : '';
+    const direction = typeof body?.direction === 'string' ? body.direction : '';
+    const customPrompt = typeof body?.customPrompt === 'string' ? body.customPrompt.trim() : '';
+    if (!tweetId) return NextResponse.json({ error: 'tweetId required' }, { status: 400 });
 
-    // Build the remix instruction
-    let instruction: string;
-    if (customPrompt) {
-      instruction = customPrompt;
-    } else if (direction && REMIX_DIRECTIONS[direction]) {
-      instruction = REMIX_DIRECTIONS[direction];
-    } else {
+    const existingTweet = await getTweet(tweetId);
+    if (!existingTweet || String(existingTweet.agentId) !== String(id)) {
+      return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
+    }
+    const parentLineageIssue = getGeneratedPublishIssue(existingTweet);
+    if (parentLineageIssue) {
+      return NextResponse.json({
+        error: `This draft cannot seed a V2 remix: ${parentLineageIssue}`,
+        code: 'invalid_remix_parent_lineage',
+      }, { status: 409 });
+    }
+    const instruction = customPrompt || REMIX_DIRECTIONS[direction];
+    if (!instruction) {
       return NextResponse.json({ error: 'direction or customPrompt required' }, { status: 400 });
     }
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: `You remix tweets. Keep the same core voice and identity but transform the tweet based on the instruction. Output ONLY the new tweet text — no quotes, no commentary, no "Here's the remix:" prefix.${agent.soulMd ? `\n\nVoice reference:\n${agent.soulMd.slice(0, 1000)}` : ''}`,
-      messages: [{ role: 'user', content: `Original tweet:\n"${content}"\n\nInstruction: ${instruction}` }],
+    const analysis = await getAnalysis(id);
+    if (!analysis) {
+      return NextResponse.json({ error: 'Run account analysis before remixing drafts.' }, { status: 409 });
+    }
+    const context = await buildGenerationContext(agent, {
+      negativeLimit: 6,
+      directiveLimit: 10,
     });
-
-    const remixed = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
-      .replace(/^["']|["']$/g, '');
-
-    // If tweetId provided, update the tweet in place
-    if (tweetId) {
-      await updateTweet(String(tweetId), { content: remixed });
+    const entitlement = await getAgentAutomationEntitlement(id, { agent });
+    if (!entitlement.eligible && !(await checkRateLimit(id, 'unpaid_preview_generation', 5))) {
+      return NextResponse.json({ error: 'Free preview limit reached. Try again later.' }, { status: 429 });
+    }
+    const changesClaim = Boolean(customPrompt) || !COPY_ONLY_DIRECTIONS.has(direction);
+    const [candidate] = await generatePublishingBatchV2({
+      agentId: id,
+      count: 1,
+      request: {
+        surface: 'remix',
+        triggerId: `${tweetId}:${direction || 'custom'}:${instruction}`,
+        parentTweetId: tweetId,
+        parentIdeaId: existingTweet.ideaId || null,
+        parentDraftId: existingTweet.draftCandidateId || null,
+        direction: instruction,
+        changesClaim,
+        inheritedEvidence: inheritedEvidence(existingTweet),
+      },
+      voiceProfile: context.voiceProfile,
+      analysis,
+      learnings: context.learnings,
+      style: context.style,
+      recentPosts: context.recentPosts,
+      allTweets: context.allTweets,
+      memory: context.memory,
+      signals: context.signals,
+      trending: null,
+      modelStack: PUBLISHING_V2_MODEL_STACK,
+      mode: entitlement.eligible ? 'manual' : 'preview',
+      entitlement,
+    });
+    if (!candidate) {
+      return NextResponse.json({
+        error: 'No remix cleared the inherited-evidence, originality, and voice gates.',
+        code: 'no_qualified_remix',
+      }, { status: 422 });
     }
 
-    return NextResponse.json({ content: remixed, direction: direction || 'custom' });
+    const child = await createTweetFromGeneratedCandidate(id, candidate, {
+      status: entitlement.eligible ? 'draft' : 'preview',
+      type: existingTweet.type === 'reply' || existingTweet.type === 'quote' ? existingTweet.type : 'original',
+      topic: existingTweet.topic || 'remix',
+      followupForTweetId: existingTweet.followupForTweetId || null,
+      replyConversationId: existingTweet.replyConversationId || null,
+    });
+    await addRemixEntry(id, {
+      direction: direction || 'custom',
+      customPrompt: customPrompt || undefined,
+      originalContent: existingTweet.content,
+      remixedContent: child.content,
+      ts: new Date().toISOString(),
+    });
+
+    return NextResponse.json({
+      content: child.content,
+      direction: direction || 'custom',
+      tweet: child,
+      parentTweetId: tweetId,
+      changesClaim,
+      previewLimited: !entitlement.eligible,
+    });
   } catch (err) {
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Remix failed';

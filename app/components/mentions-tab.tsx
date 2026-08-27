@@ -44,47 +44,113 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
   };
 
   useEffect(() => {
-    (async () => {
-      // Load stored mentions first
-      await loadMentions();
-      let connected = false;
-      try {
-        const a = await fetch(`/api/agents/${agentId}`).then((r) => r.json());
-        connected = a.isConnected === 1;
-        setAgentConnected(connected);
-      } catch {}
-      setLoading(false);
+    let cancelled = false;
 
-      // If connected and no stored mentions, auto-fetch from X
-      if (connected && mentions.length === 0) {
-        setIsRefreshing(true);
-        try {
-          const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data)) setMentions(data);
-          }
-        } catch {}
-        setIsRefreshing(false);
+    (async () => {
+      const [storedMentions] = await Promise.all([
+        fetch(`/api/agents/${agentId}/mentions`)
+          .then((r) => r.ok ? r.json() : [])
+          .catch(() => []),
+        fetch(`/api/agents/${agentId}`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((agent) => {
+            if (!cancelled) {
+              setAgentConnected(agent?.isConnected === 1);
+            }
+          })
+          .catch(() => null),
+      ]);
+
+      if (!cancelled && Array.isArray(storedMentions)) {
+        setMentions(storedMentions);
+      }
+
+      if (!cancelled) {
+        setLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [agentId]);
+
+  const refreshFromTwitter = async () => {
+    if (!agentConnected) {
+      showToast('Connect X API in Settings first');
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch mentions');
+      if (Array.isArray(data)) {
+        setMentions(data);
+        showToast(`${data.length} mentions loaded`);
+      } else {
+        await loadMentions();
+        showToast('Mentions refreshed');
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   };
 
+  const trackSignal = async (
+    tweetId: string,
+    signalType: string,
+    rewardDelta: number,
+    metadata?: Record<string, string | number | boolean | null>,
+  ) => {
+    await fetch(`/api/agents/${agentId}/learning-signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tweetId,
+        signalType,
+        surface: 'mentions',
+        rewardDelta,
+        metadata,
+      }),
+    }).catch(() => null);
+  };
+
   const handleGenerate = async (mention: Mention) => {
     setGeneratingId(mention.id);
     try {
+      const existingDraft = replyDrafts[mention.id];
+      if (existingDraft) {
+        void trackSignal(existingDraft.id, 'reply_rejected', -0.45, {
+          reason: 'Operator regenerated instead of posting the previous reply',
+        });
+      }
       const res = await fetch(`/api/agents/${agentId}/generate-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: mention.content, authorHandle: mention.authorHandle }),
+        body: JSON.stringify({
+          content: mention.content,
+          authorHandle: mention.authorHandle,
+          targetTweetId: mention.tweetId,
+          conversationId: mention.conversationId || mention.tweetId,
+        }),
       });
       const tweet = await res.json();
       setReplyDrafts((prev) => ({ ...prev, [mention.id]: tweet }));
+      if (tweet?.id) {
+        void trackSignal(tweet.id, 'reply_generated', 0.1, {
+          confidenceScore: tweet.confidenceScore ?? null,
+          candidateScore: tweet.candidateScore ?? null,
+        });
+      }
     } catch {
       showToast('Failed to generate reply');
     } finally {
@@ -105,36 +171,18 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     }
   };
 
-  const handleCopy = async (text: string) => {
+  const handleCopy = async (tweet: Tweet) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(tweet.content);
+      void trackSignal(tweet.id, 'copied_to_clipboard', 0.35, {
+        confidenceScore: tweet.confidenceScore ?? null,
+        candidateScore: tweet.candidateScore ?? null,
+      });
       showToast('Copied');
     } catch {}
   };
 
-  const handleRefresh = async () => {
-    if (!agentConnected) {
-      showToast('Connect X API in Settings first');
-      return;
-    }
-    setIsRefreshing(true);
-    try {
-      const res = await fetch(`/api/agents/${agentId}/twitter/mentions`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch mentions');
-      if (Array.isArray(data)) {
-        setMentions(data);
-        showToast(`${data.length} mentions loaded`);
-      } else {
-        await loadMentions();
-        showToast('Mentions refreshed');
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Refresh failed');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  const handleRefresh = refreshFromTwitter;
 
   const handlePostReply = async (mention: Mention) => {
     const draft = replyDrafts[mention.id];
@@ -147,6 +195,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
         body: JSON.stringify({
           content: draft.content,
           replyToId: mention.tweetId || undefined,
+          conversationId: mention.conversationId || mention.tweetId || undefined,
           tweetId: draft.id,
         }),
       });
@@ -200,8 +249,8 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
       {/* Header */}
       <div className="section-header">
         <div className="section-title">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="#8b5cf6" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="#8b5cf6" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
-          <h2>MENTIONS</h2>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2a7 7 0 1 0 0 14A7 7 0 0 0 8 2z" stroke="var(--primary)" strokeWidth="1.5" /><text x="8" y="11" textAnchor="middle" fill="var(--primary)" fontSize="8" fontFamily="monospace" fontWeight="700">@</text></svg>
+          <h2>Inbox</h2>
           <span className="section-count">{mentions.length} items</span>
         </div>
         <button
@@ -221,7 +270,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
           >
             <path d="M12 7A5 5 0 1 1 7 2M12 2v5l-5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {isRefreshing ? 'REFRESHING...' : 'REFRESH'}
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
@@ -243,7 +292,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
           return (
           <div key={mention.id} className="space-y-2">
             {/* Mention card */}
-            <div className="mention-card" data-testid={`card-mention-${mention.id}`} style={isThread ? { borderLeft: '3px solid #8b5cf6' } : undefined}>
+            <div className="mention-card" data-testid={`card-mention-${mention.id}`} style={isThread ? { borderLeft: '3px solid var(--primary)' } : undefined}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
@@ -251,9 +300,9 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                       <span style={{
                         fontFamily: 'var(--font-mono)',
                         fontSize: '9px',
-                        color: '#8b5cf6',
-                        background: 'rgba(139,92,246,0.1)',
-                        border: '1px solid rgba(139,92,246,0.3)',
+                        color: 'var(--primary)',
+                        background: 'rgba(74,139,103,0.1)',
+                        border: '1px solid rgba(74,139,103,0.3)',
                         borderRadius: '4px',
                         padding: '1px 6px',
                         flexShrink: 0,
@@ -285,7 +334,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                         rel="noopener noreferrer"
                         style={{ color: 'var(--primary)', fontSize: '10px', fontFamily: 'var(--font-mono)' }}
                       >
-                        VIEW ON X
+                        View on X
                       </a>
                     )}
                   </div>
@@ -297,7 +346,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                   onClick={() => handleGenerate(mention)}
                   data-testid={`button-reply-${mention.id}`}
                 >
-                  {generatingId === mention.id ? 'GENERATING...' : 'GENERATE REPLY'}
+                  {generatingId === mention.id ? 'Generating...' : 'Draft reply'}
                 </button>
               </div>
             </div>
@@ -305,7 +354,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
             {/* Reply draft */}
             {replyDrafts[mention.id] && (
               <div className="reply-draft" data-testid={`card-reply-${mention.id}`}>
-                <div className="reply-draft-label">REPLY DRAFT</div>
+                <div className="reply-draft-label">Reply draft</div>
                 <p style={{ fontSize: '13px', color: 'var(--text)', lineHeight: '1.65', marginBottom: '10px' }}>
                   {replyDrafts[mention.id].content}
                 </p>
@@ -313,19 +362,29 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
                   <span className={`char-count ${replyDrafts[mention.id].content.length > 280 ? 'over' : ''}`}>
                     {replyDrafts[mention.id].content.length}/280
                   </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {replyDrafts[mention.id].generationMode && (
+                      <span className="badge">{replyDrafts[mention.id].generationMode}</span>
+                    )}
+                    {typeof replyDrafts[mention.id].confidenceScore === 'number' && (
+                      <span className="label" style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                        confidence {(replyDrafts[mention.id].confidenceScore * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
                   <div className="tweet-actions">
-                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id].content)} data-testid={`button-copy-reply-${mention.id}`}>COPY</button>
-                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(replyDrafts[mention.id])} data-testid={`button-queue-reply-${mention.id}`}>QUEUE</button>
+                    <button className="btn btn-ghost btn-xs" onClick={() => handleCopy(replyDrafts[mention.id])} data-testid={`button-copy-reply-${mention.id}`}>Copy</button>
+                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--primary)' }} onClick={() => handleQueue(replyDrafts[mention.id])} data-testid={`button-queue-reply-${mention.id}`}>Approve</button>
                     <button
                       className="btn btn-ghost btn-xs"
-                      style={{ color: agentConnected ? '#ef4444' : 'var(--text-dim)', opacity: agentConnected ? 1 : 0.4 }}
+                      style={{ color: agentConnected ? 'var(--primary)' : 'var(--text-dim)', opacity: agentConnected ? 1 : 0.4 }}
                       disabled={!agentConnected || postingId === mention.id}
                       onClick={() => handlePostReply(mention)}
                       data-testid={`button-post-reply-${mention.id}`}
                     >
-                      {postingId === mention.id ? 'POSTING...' : 'POST REPLY'}
+                      {postingId === mention.id ? 'Posting...' : 'Post reply'}
                     </button>
-                    <button className="btn btn-ghost btn-xs" onClick={() => handleGenerate(mention)} data-testid={`button-regen-reply-${mention.id}`}>REGEN</button>
+                    <button className="btn btn-ghost btn-xs" onClick={() => handleGenerate(mention)} data-testid={`button-regen-reply-${mention.id}`}>Regenerate</button>
                   </div>
                 </div>
               </div>
@@ -337,4 +396,3 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
     </div>
   );
 }
-

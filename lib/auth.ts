@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getSession, getUser, getUserAgentIds, getAgent } from './kv-storage';
+import { getSession, getUser, getAgent, resetReadCache } from './kv-storage';
+import { canAccessAgent } from './account-access';
 import type { User, Agent } from './types';
 
 const COOKIE_NAME = 'clawfable_session';
@@ -18,6 +19,7 @@ export class NotFoundError extends Error {
  * Throws AuthError if not logged in.
  */
 export async function requireUser(): Promise<User> {
+  resetReadCache();
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) throw new AuthError();
@@ -34,8 +36,11 @@ export async function requireUser(): Promise<User> {
 export async function getCurrentUser(): Promise<User | null> {
   try {
     return await requireUser();
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -47,8 +52,7 @@ export async function requireAgentAccess(agentId: string): Promise<{ user: User;
   const user = await requireUser();
   const agent = await getAgent(agentId);
   if (!agent) throw new NotFoundError('Agent not found');
-  const agentIds = await getUserAgentIds(user.id);
-  if (!agentIds.map(String).includes(String(agentId))) throw new AuthError();
+  if (!(await canAccessAgent(user, agentId, agent))) throw new AuthError();
   return { user, agent };
 }
 
