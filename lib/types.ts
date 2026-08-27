@@ -241,6 +241,7 @@ export interface CandidateJudgeBreakdown {
   generatedPatternRisk?: number;
   sourceCopyRisk?: number;
   qualityMargin?: number;
+  viralityUpside?: number;
 }
 
 export interface CandidateCriticScores {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk } from '@/lib/virality-signals';
+import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -202,6 +202,32 @@ describe('virality signals', () => {
     expect(formulaic.hits).toContain('not-x-but-y');
     expect(concrete.score).toBeLessThan(0.2);
     expect(concrete.hasConcreteAnchor).toBe(true);
+  });
+
+  it('scores conversational contrarian drafts above flat statements for virality upside', () => {
+    const tags = (overrides: Partial<Parameters<typeof scoreViralityUpside>[1]> = {}) => ({
+      hook: 'observation',
+      tone: 'direct',
+      specificity: 'concrete',
+      structure: 'single_claim',
+      riskFlags: [] as string[],
+      ...overrides,
+    }) as Parameters<typeof scoreViralityUpside>[1];
+
+    const debate = scoreViralityUpside(
+      'Serious question: if coding agents already write 40% of production commits, why is every AI IDE still priced per seat? What am I missing about the margin math when usage decouples from headcount?',
+      tags({ hook: 'question' }),
+    );
+    const flat = scoreViralityUpside(
+      'Enterprise software pricing continues to evolve as the market matures.',
+      tags({ specificity: 'abstract' }),
+    );
+
+    expect(debate).toBeGreaterThan(flat);
+    expect(debate).toBeGreaterThan(0.5);
+    expect(flat).toBeLessThanOrEqual(0.45);
+    expect(debate).toBeLessThanOrEqual(1);
+    expect(flat).toBeGreaterThanOrEqual(0);
   });
 
   it('holds embarrassing replies while allowing sharp substantive posts', () => {

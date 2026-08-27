@@ -72,6 +72,7 @@ import {
   inferPromptStrategy,
   scoreReplyPotential,
   scoreSlopRisk,
+  scoreViralityUpside,
 } from './virality-signals';
 import {
   getAutopostPolicyIssue,
@@ -153,6 +154,11 @@ export const V2_MIN_GEOFFREY_AI_BULLISHNESS = 0.68;
 export const V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION = 0.72;
 export const V2_MIN_GEOFFREY_FORECAST_GROUNDING = 0.6;
 export const V2_MIN_GEOFFREY_EXPONENTIAL_INTUITION = 0.58;
+// Bounded bonus applied to viral upside when ordering drafts that already
+// passed every quality gate. At 0.06, a full-range upside difference moves a
+// draft by at most 0.06 margin points — enough to break ties toward the more
+// conversational draft, never enough to outrank a materially better one.
+export const V2_VIRALITY_SELECTION_WEIGHT = 0.06;
 const V2_MIN_STORY_IDENTITY_FIT = 0.55;
 const V2_MIN_STORY_CONSEQUENCE = 0.35;
 const V2_MIN_STORY_TOTAL = 0.58;
@@ -2943,15 +2949,18 @@ function isCuratedOperatorReference(
 }
 
 function ideaSemanticMemory(input: GenerateTweetBatchV2Input): string[] {
-  const viralOutcomes = (input.analysis.viralTweets || []).map((entry) => entry.text);
-  const committedPremises = input.allTweets
-    .filter(isCommittedTweet)
-    .slice(0, 80)
-    .map((tweet) => tweet.content);
-  return uniqueStrings([
-    ...committedPremises,
-    ...viralOutcomes,
-  ], 140);
+  // Committed posts only. Historical viral tweets are deliberately excluded:
+  // treating the account's proven winners as a novelty penalty steered ideas
+  // away from exactly the premises the audience already rewarded. Near-term
+  // repetition of winners is still guarded by committed posts, story publish
+  // memory, and operator premise exclusions.
+  return uniqueStrings(
+    input.allTweets
+      .filter(isCommittedTweet)
+      .slice(0, 80)
+      .map((tweet) => tweet.content),
+    140,
+  );
 }
 
 function ideaPromptPremiseMemory(input: GenerateTweetBatchV2Input): string[] {
@@ -5003,6 +5012,7 @@ function finalCriticBreakdown(
     statusTextureRisk: taste.statusTextureRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
     sourceCopyRisk: taste.sourceCopyRisk,
+    viralityUpside: scoreViralityUpside(evaluation.draft.content, featureTags),
   };
 }
 
@@ -5373,11 +5383,19 @@ async function selectFinalTweets({
     }
     selectionPool.push(evaluation);
   }
+  // Every draft in the pool has already cleared the full gate stack, so the
+  // sort may reward viral upside (reply/conversation potential) as a bounded
+  // bonus on top of quality margin. Raw margin and upside are both persisted
+  // in judgeBreakdown so the adjustment stays auditable.
+  const selectionPriority = (score: CopyJudgeScore, evaluation: DraftEvaluation): number => (
+    finalQualityPriority(score, evaluation, input)
+    + (evaluation.draft.judgeBreakdown?.viralityUpside ?? 0) * V2_VIRALITY_SELECTION_WEIGHT
+  );
   selectionPool.sort((left, right) => {
     const leftScore = judge.scores.get(left.draft.id);
     const rightScore = judge.scores.get(right.draft.id);
     if (!leftScore || !rightScore) return 0;
-    return finalQualityPriority(rightScore, right, input) - finalQualityPriority(leftScore, left, input)
+    return selectionPriority(rightScore, right) - selectionPriority(leftScore, left)
       || (judgeOrder.get(left.draft.id) ?? Number.MAX_SAFE_INTEGER)
         - (judgeOrder.get(right.draft.id) ?? Number.MAX_SAFE_INTEGER);
   });

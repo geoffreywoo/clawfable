@@ -38,7 +38,7 @@ import {
   upsertIdeaCandidates,
 } from './kv-storage';
 import { getAuthorityProofIssue } from './virality-signals';
-import { inferAudienceSegment, inferPromptStrategy, scoreReplyPotential, scoreSlopRisk } from './virality-signals';
+import { inferAudienceSegment, inferPromptStrategy, scoreReplyPotential, scoreSlopRisk, scoreViralityUpside } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
 import { getAutopostPolicyIssue, getGeneratedTweetIssue, getTweetLengthIssue, isNearDuplicate } from './survivability';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
@@ -369,6 +369,7 @@ function contextualCriticBreakdown(
     statusTextureRisk: taste.statusTextureRisk,
     generatedPatternRisk: taste.generatedPatternRisk,
     sourceCopyRisk: taste.sourceCopyRisk,
+    viralityUpside: scoreViralityUpside(draft.content, featureTags),
   };
 }
 

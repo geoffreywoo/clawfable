@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { extractCandidateFeatureTags } from './tweet-features';
 import { computeActionRewards } from './virality-signals';
+import { weightedSpreadEngagement } from './performance-signals';
 import { assessAccountTaste, assessTechnicalCredibility } from './account-taste';
 
 export interface EditDeltaSummary {
@@ -34,8 +35,13 @@ function readNumber(value: unknown): number | null {
   return null;
 }
 
-function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+// Spread-weighted engagement (quotes and bookmarks carry the strongest virality
+// signal) so lift rewards optimize the same objective the rest of the learning
+// stack measures. Both sides of every lift comparison use this same function.
+function weightedEngagement(
+  entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies' | 'quotes' | 'bookmarks'>,
+): number {
+  return weightedSpreadEngagement(entry);
 }
 
 function sameUtcHour(left: string, right: string): boolean {
@@ -265,7 +271,7 @@ export function computePerformanceLiftReward(
 ): number {
   if (!performance) return 0;
   const accountBaseline = baseline
-    ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2))
+    ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 3))
     : 12;
   const topicBaseline = cohortAverage(
     performance,

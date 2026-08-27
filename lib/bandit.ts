@@ -229,7 +229,9 @@ function collectEpisodeObservations(
     const historicalEntry = performanceByTweetId.get(String(episode.tweetId))
       || (episode.xTweetId ? performanceByXId.get(String(episode.xTweetId)) : null);
     const reward = clamp((episode.reward.total + 1) / 2, 0.02, 0.98);
-    const qualityEvidenceWeight = historicalEntry && reward >= 0.5
+    // Applied symmetrically to wins and losses: discounting only wins made
+    // pattern-flagged styles unlearnable even when they kept outperforming.
+    const qualityEvidenceWeight = historicalEntry
       ? historicalPerformanceEvidenceWeight(historicalEntry)
       : 1;
     const weight = recencyWeight(episode.observedAt)
@@ -262,7 +264,7 @@ function collectFallbackPerformanceObservations(
   for (const entry of performanceHistory) {
     if (entry.tweetId && coveredTweetIds.has(String(entry.tweetId))) continue;
     const reward = performanceReward(entry, baseline);
-    const qualityEvidenceWeight = reward >= 0.5 ? historicalPerformanceEvidenceWeight(entry) : 1;
+    const qualityEvidenceWeight = historicalPerformanceEvidenceWeight(entry);
     const weight = recencyWeight(entry.checkedAt)
       * sourceSignalWeight(entry.source)
       * qualityEvidenceWeight;
@@ -476,7 +478,6 @@ export function buildBanditPolicy({
   const trainingSource: BanditTrainingSource = operatorHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
   const qualityDiscountedSystemHistory = autopilotHistory.filter((entry) =>
     assessHistoricalWinner(entry).evidenceWeight < 1
-    && performanceReward(entry, baseline) >= 0.5
   );
 
   const scoreThreshold = median(trainingHistory.map((entry) => entry.likes + (entry.retweets * 2) + (entry.replies * 1.5)));
@@ -539,7 +540,7 @@ export function buildBanditPolicy({
   const summary = [
     `Learning evidence: ${collapsed.uniquePosts} unique posts (${operatorHistory.length} operator, ${autopilotHistory.length} system); ${collapsed.collapsedSnapshots} repeated checkpoints collapsed`,
     qualityDiscountedSystemHistory.length > 0
-      ? `Quality-adjusted ${qualityDiscountedSystemHistory.length} successful system post${qualityDiscountedSystemHistory.length === 1 ? '' : 's'} with obsolete generated patterns; failed patterns retain full negative weight`
+      ? `Quality-adjusted ${qualityDiscountedSystemHistory.length} system post${qualityDiscountedSystemHistory.length === 1 ? '' : 's'} with obsolete generated patterns; discount applies to wins and losses symmetrically`
       : '',
     exploitFormat ? `Exploit format: ${exploitFormat.arm} (${Math.round(exploitFormat.meanReward * 100)}% reward)` : '',
     exploitTopic ? `Exploit topic: ${exploitTopic.arm} (${Math.round(exploitTopic.meanReward * 100)}% reward)` : '',

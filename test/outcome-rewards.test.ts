@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutcomeEpisode, summarizeEditDelta } from '@/lib/outcome-rewards';
+import { buildOutcomeEpisode, computePerformanceLiftReward, summarizeEditDelta } from '@/lib/outcome-rewards';
 import type { LearningSignal, Tweet, TweetPerformance } from '@/lib/types';
 
 function tweet(overrides: Partial<Tweet> = {}): Tweet {
@@ -53,6 +53,8 @@ function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformanc
     likes: overrides.likes ?? 40,
     retweets: overrides.retweets ?? 8,
     replies: overrides.replies ?? 6,
+    quotes: overrides.quotes,
+    bookmarks: overrides.bookmarks,
     impressions: overrides.impressions ?? 1000,
     engagementRate: overrides.engagementRate ?? 5.4,
     wasViral: overrides.wasViral ?? true,
@@ -100,5 +102,32 @@ describe('buildOutcomeEpisode', () => {
     expect(episode.reward.delayedTotal).toBeGreaterThan(0);
     expect(episode.reward.total).toBeGreaterThan(0.9);
     expect(episode.stage).toBe('final');
+  });
+
+  it('credits quotes and bookmarks as spread signals in the lift reward', () => {
+    const history = Array.from({ length: 6 }, (_, index) => performance({
+      tweetId: `hist-${index}`,
+      xTweetId: `x-hist-${index}`,
+      likes: 12,
+      retweets: 2,
+      replies: 2,
+      quotes: 0,
+      bookmarks: 0,
+      wasViral: false,
+    }));
+    const base = { avgLikes: 12, avgRetweets: 2 };
+    const quietSpread = computePerformanceLiftReward(
+      performance({ likes: 14, retweets: 2, replies: 2, quotes: 0, bookmarks: 0 }),
+      base,
+      history,
+    );
+    const heavySpread = computePerformanceLiftReward(
+      performance({ likes: 14, retweets: 2, replies: 2, quotes: 6, bookmarks: 10 }),
+      base,
+      history,
+    );
+
+    // Same likes; quote/bookmark spread must now raise the reward.
+    expect(heavySpread).toBeGreaterThan(quietSpread);
   });
 });

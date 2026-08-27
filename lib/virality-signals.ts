@@ -312,6 +312,18 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
   return Number(clamp(score).toFixed(3));
 }
 
+/**
+ * Deterministic upside estimate for how likely a draft is to earn replies,
+ * quotes, and conversation. Used as a ranked tiebreaker among drafts that have
+ * already cleared every quality and safety gate — it never loosens a gate.
+ */
+export function scoreViralityUpside(content: string, featureTags: CandidateFeatureTags): number {
+  return Number(clamp(
+    (scoreReplyPotential(content, featureTags) * 0.55)
+    + (scoreConversationValue(content, featureTags) * 0.45),
+  ).toFixed(3));
+}
+
 export function scoreHighValueReply(mention: {
   text: string;
   authorUsername?: string | null;

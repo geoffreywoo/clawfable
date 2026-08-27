@@ -275,8 +275,12 @@ describe('bandit policy', () => {
       candidateTopics: ['AI'],
       baseline: { avgLikes: 20, avgRetweets: 2 },
     });
+    // Symmetric evidence weighting: a pattern-flagged miss is discounted the
+    // same way a pattern-flagged win is, so flagged styles can still be
+    // relearned when they outperform instead of accumulating only failures.
     expect(failedPolicy.formatArms.find((arm) => arm.arm === 'story')?.localPulls)
-      .toBe(failedPolicy.formatArms.find((arm) => arm.arm === 'analysis')?.localPulls);
+      .toBeLessThan(failedPolicy.formatArms.find((arm) => arm.arm === 'analysis')?.localPulls || 0);
+    expect(failedPolicy.formatArms.find((arm) => arm.arm === 'story')?.localPulls).toBeGreaterThan(0);
   });
 
   it('penalizes strategies that operators delete', () => {
