@@ -28,6 +28,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const [editContent, setEditContent] = useState('');
   const [postingId, setPostingId] = useState<string | null>(null);
   const [isPostingAll, setIsPostingAll] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [autopilotSettings, setAutopilotSettings] = useState<ProtocolSettings | null>(null);
   const [learningSnapshot, setLearningSnapshot] = useState<LearningSnapshot | null>(null);
@@ -145,6 +146,32 @@ export function QueueTab({ agentId }: QueueTabProps) {
       showToast('Copied');
     } catch {
       showToast('Copy failed');
+    }
+  };
+
+  const handleRegenerateQueue = async () => {
+    const queuedCount = queue.filter((tweet) => tweet.status === 'queued' && !tweet.quarantinedAt).length;
+    const confirmed = window.confirm(
+      queuedCount > 0
+        ? `Archive all ${queuedCount} queued draft${queuedCount === 1 ? '' : 's'} and regenerate the queue fresh with current ranking rules? Autopilot keeps refilling until the queue is full.`
+        : 'Start generating a fresh queue with current ranking rules?'
+    );
+    if (!confirmed) return;
+    setIsRegenerating(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/queue/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Refresh failed');
+      showToast(`Archived ${data.archived}, generated ${data.generatedNow} fresh — autopilot keeps filling to ${data.minQueueSize}`);
+      await refreshQueueState();
+    } catch {
+      showToast('Queue refresh failed');
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -413,8 +440,18 @@ export function QueueTab({ agentId }: QueueTabProps) {
           <h2>Ready to post</h2>
           <span className="section-count">{activeQueuedTweets.length} ready{quarantinedTweets.length > 0 ? ` · ${quarantinedTweets.length} quarantined` : ''}</span>
         </div>
-        {activeQueuedTweets.length > 0 && (
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          <button
+            className="btn btn-outline btn-sm"
+            disabled={isRegenerating}
+            onClick={handleRegenerateQueue}
+            data-testid="button-regenerate-queue"
+            title="Archive queued drafts and regenerate fresh with current ranking rules"
+          >
+            {isRegenerating ? 'Regenerating...' : 'Regenerate fresh'}
+          </button>
+          {activeQueuedTweets.length > 0 && (
+            <>
             <button className="btn btn-outline btn-sm" onClick={handleCopyAll} data-testid="button-copy-all">
               Copy all
             </button>
@@ -433,8 +470,9 @@ export function QueueTab({ agentId }: QueueTabProps) {
             >
               {isPostingAll ? 'Posting...' : 'Post all'}
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Deleted from X — needs feedback */}

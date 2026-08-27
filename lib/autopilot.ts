@@ -573,6 +573,79 @@ export async function refreshQueuedTweetsForCurrentQualityPolicy(
     quarantined: before.length - valid.length,
   };
 }
+
+export interface QueueRegenerationResult {
+  archived: number;
+  generatedNow: number;
+  postsPerDay: number;
+  minQueueSize: number;
+}
+
+/**
+ * Operator-initiated hard queue refresh: archives every queued draft (with a
+ * mild negative learning signal and full audit trail), optionally updates the
+ * posting cadence, then starts a refill through the normal autopilot path so
+ * fresh drafts are ranked by current rules. refillQueue generates at most 2
+ * drafts per call by design; the 10-minute autopilot cron keeps refilling
+ * until the queue reaches minQueueSize.
+ */
+export async function regenerateAgentQueue(
+  agent: Agent,
+  options: { postsPerDay?: number } = {},
+): Promise<QueueRegenerationResult> {
+  const now = new Date().toISOString();
+  const queued = await getQueuedTweets(agent.id);
+
+  await Promise.all(queued.map((tweet) => updateTweet(tweet.id, {
+    status: 'quarantined',
+    preQuarantineStatus: tweet.status === 'quarantined'
+      ? (tweet.preQuarantineStatus || 'queued')
+      : tweet.status,
+    quarantinedAt: now,
+    quarantineReason: 'Operator queue refresh: archived so autopilot can regenerate the queue with current ranking rules.',
+  })));
+  // Sequential on purpose: signal storage is a read-modify-write list, so
+  // concurrent appends can drop entries.
+  for (const tweet of queued) {
+    await addLearningSignal(agent.id, {
+      tweetId: tweet.id,
+      signalType: 'deleted_from_queue',
+      surface: 'queue',
+      rewardDelta: -0.2,
+      reason: 'Archived in an operator-initiated full queue refresh; softer than a targeted per-draft deletion.',
+    });
+  }
+
+  let settings = await getProtocolSettings(agent.id);
+  if (typeof options.postsPerDay === 'number' && Number.isFinite(options.postsPerDay)) {
+    settings = await updateProtocolSettings(agent.id, {
+      postsPerDay: clampPostsPerDay(options.postsPerDay),
+    });
+  }
+
+  if (queued.length > 0) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'queue_refresh',
+      topic: 'generation',
+      postedAt: now,
+      source: 'manual',
+      action: 'skipped',
+      reason: `Operator refresh archived ${queued.length} queued draft${queued.length === 1 ? '' : 's'}; regenerating fresh at ${settings.postsPerDay}/day.`,
+    });
+  }
+
+  const generatedNow = await refillQueue(agent, Math.max(settings.minQueueSize, 2));
+  return {
+    archived: queued.length,
+    generatedNow,
+    postsPerDay: settings.postsPerDay,
+    minQueueSize: settings.minQueueSize,
+  };
+}
 async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[], recentPostedContent: string[] = []): Promise<Tweet[]> {
   const nativeContext = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
   const semanticHistoryContent = [...new Set([
