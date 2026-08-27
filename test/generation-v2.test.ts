@@ -23,6 +23,7 @@ import {
   getRequiredFinalQualityMarginV2,
   getV2BoundedRepairCharacterLimit,
   getV2IdeaJudgeRejectionCodes,
+  ideaJudgePriorityScore,
   getV2RescueRevisionStrategy,
   meetsV2RescueMarginFloor,
   getSourceAttributionIssueV2,
@@ -408,6 +409,32 @@ describe('Tweet Generation V2', () => {
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(50))).toBe(98);
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(300))).toBe(360);
     expect(getV2BoundedRepairCharacterLimit('x'.repeat(1100))).toBe(1200);
+  });
+
+  it('ranks floor-passing ideas by blended strength, not their weakest off-lane dimension', () => {
+    const bold = {
+      evidenceFidelity: 0.62,
+      authorFit: 0.86,
+      consequence: 0.88,
+      distinctiveness: 0.95,
+      nativeReactionPotential: 0.9,
+      publicMoveStrength: 0.94,
+      sharePotential: 0.92,
+    };
+    const flat = {
+      evidenceFidelity: 0.8,
+      authorFit: 0.78,
+      consequence: 0.72,
+      distinctiveness: 0.7,
+      nativeReactionPotential: 0.78,
+      publicMoveStrength: 0.76,
+      sharePotential: 0.7,
+    };
+
+    // Under min-aggregation, bold would score 0.62 and lose to flat's 0.7.
+    expect(ideaJudgePriorityScore(bold)).toBeGreaterThan(ideaJudgePriorityScore(flat));
+    expect(ideaJudgePriorityScore(bold)).toBeGreaterThan(0.85);
+    expect(ideaJudgePriorityScore(flat)).toBeLessThan(0.8);
   });
 
   it('requires stronger idea consequence and native reaction before spending Geoffrey copy calls', () => {

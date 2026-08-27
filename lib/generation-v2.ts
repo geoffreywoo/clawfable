@@ -3348,6 +3348,32 @@ function rejectIdeasAfterJudgment(
   }
 }
 
+/**
+ * Ranking key for ideas that already cleared every judge floor. Safety and
+ * lane requirements live exclusively in getV2IdeaJudgeRejectionCodes; this
+ * blend only orders the survivors. The previous Math.min aggregation ranked
+ * every idea by its weakest dimension — including frontierLead/aiBullishness,
+ * which are only meaningful (and separately floor-gated) in the Geoffrey AI
+ * lane — so one flat, off-lane dimension buried otherwise exceptional ideas.
+ */
+export function ideaJudgePriorityScore(
+  breakdown: Pick<
+    IdeaJudgeBreakdown,
+    'evidenceFidelity' | 'authorFit' | 'consequence' | 'distinctiveness'
+    | 'nativeReactionPotential' | 'publicMoveStrength' | 'sharePotential'
+  >,
+): number {
+  return clampResearchScore(
+    breakdown.publicMoveStrength * 0.22
+    + breakdown.distinctiveness * 0.18
+    + breakdown.sharePotential * 0.16
+    + breakdown.consequence * 0.14
+    + breakdown.authorFit * 0.12
+    + breakdown.nativeReactionPotential * 0.1
+    + breakdown.evidenceFidelity * 0.08,
+  );
+}
+
 export function getV2IdeaJudgeRejectionCodes(
   breakdown: IdeaJudgeBreakdown,
   voiceProfile: VoiceProfile,
@@ -3647,17 +3673,7 @@ Score sharePotential for whether a relevant founder, investor, or operator would
     for (const idea of eligible) {
       const breakdown = scores.get(idea.id)!;
       idea.judgeBreakdown = breakdown;
-      idea.judgeScore = Math.min(
-        breakdown.evidenceFidelity,
-        breakdown.authorFit,
-        breakdown.consequence,
-        breakdown.distinctiveness,
-        breakdown.nativeReactionPotential,
-        breakdown.publicMoveStrength,
-        breakdown.sharePotential,
-        breakdown.frontierLead,
-        breakdown.aiBullishness,
-      );
+      idea.judgeScore = ideaJudgePriorityScore(breakdown);
       idea.rejectionCodes = uniqueStrings([
         ...idea.rejectionCodes,
         ...getV2IdeaJudgeRejectionCodes(
