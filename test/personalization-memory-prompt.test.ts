@@ -18,6 +18,21 @@ function memory(overrides: Partial<PersonalizationMemory> = {}): Personalization
 }
 
 describe('buildPersonalizationMemoryPrompt', () => {
+  it('surfaces live what-is-working lessons and under-tested formats to the model', () => {
+    const prompt = buildPersonalizationMemoryPrompt(memory({
+      whatIsWorkingNow: [
+        'Format "hot_take" is earning 72% mean reward across 5 recent posts. Lean into it when the idea fits.',
+      ],
+      formatsUnderTested: ['long_form needs more data'],
+    }));
+
+    expect(prompt).toContain("WHAT'S WORKING RIGHT NOW");
+    expect(prompt).toContain('hot_take');
+    expect(prompt).toContain('UNDER-TESTED FORMATS');
+    expect(prompt).toContain('long_form needs more data');
+  });
+
+
   it('caps model-facing lessons while preserving high-signal learning categories', () => {
     const prompt = buildPersonalizationMemoryPrompt(memory({
       alwaysDoMoreOfThis: [

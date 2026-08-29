@@ -296,11 +296,17 @@ function collectFeedbackObservations(
   const observations: BanditObservation[] = [];
 
   for (const entry of feedback) {
-    if (entry.rating !== 'down' || !entry.tweetId) continue;
+    if (!entry.tweetId || (entry.rating !== 'down' && entry.rating !== 'up')) continue;
     const tweet = tweetById.get(String(entry.tweetId));
     if (!tweet) continue;
-    const weight = recencyWeight(entry.generatedAt) * (entry.userProvidedReason ? 1.2 : 1);
-    const reward = 0.02;
+    // Thumbs-up is observed too: without it the bandit only ever learned what
+    // the operator disliked and had no direct signal about what they endorsed.
+    // Positive votes carry slightly less weight than negative ones because an
+    // approval is cheaper to give than a rejection.
+    const weight = recencyWeight(entry.generatedAt)
+      * (entry.userProvidedReason ? 1.2 : 1)
+      * (entry.rating === 'up' ? 0.85 : 1);
+    const reward = entry.rating === 'up' ? 0.9 : 0.02;
     const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, {
       topic: tweet.topic,
       thesisHint: tweet.thesis,
@@ -317,6 +323,40 @@ function collectFeedbackObservations(
   }
 
   return observations.filter((entry): entry is BanditObservation => Boolean(entry));
+}
+
+/**
+ * Human-readable "what's working" lessons from arms with real local evidence,
+ * for injection into the generation prompt via personalization memory. Only
+ * arms with enough recent pulls and an above-baseline mean reward qualify, so
+ * the prompt reflects live outcomes instead of cold-start noise.
+ */
+export function summarizeBanditExploitLessons(
+  policy: Pick<BanditPolicy, 'formatArms' | 'hookArms' | 'toneArms' | 'structureArms'> | null | undefined,
+  limit = 4,
+): string[] {
+  if (!policy) return [];
+  const families: Array<{ label: string; arms: BanditArmScore[] }> = [
+    { label: 'Format', arms: policy.formatArms || [] },
+    { label: 'Hook', arms: policy.hookArms || [] },
+    { label: 'Tone', arms: policy.toneArms || [] },
+    { label: 'Structure', arms: policy.structureArms || [] },
+  ];
+  const lessons: Array<{ line: string; strength: number }> = [];
+  for (const { label, arms } of families) {
+    const proven = arms
+      .filter((arm) => arm.localPulls >= 3 && arm.meanReward >= 0.55)
+      .sort((left, right) => right.meanReward - left.meanReward)[0];
+    if (!proven) continue;
+    lessons.push({
+      line: `${label} "${proven.arm}" is earning ${Math.round(proven.meanReward * 100)}% mean reward across ${Math.round(proven.localPulls)} recent posts. Lean into it when the idea fits.`,
+      strength: proven.meanReward * Math.min(1, proven.localPulls / 6),
+    });
+  }
+  return lessons
+    .sort((left, right) => right.strength - left.strength)
+    .slice(0, limit)
+    .map((lesson) => lesson.line);
 }
 
 function buildPriorLookup(prior: BanditGlobalPrior | null | undefined, family: BanditArmFamily): Map<string, BanditPriorArm> {

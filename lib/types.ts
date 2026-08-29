@@ -1892,6 +1892,7 @@ export interface PersonalizationMemory {
   rejectedDrafts?: string[];
   topicsWithMomentum: string[];
   formatsUnderTested: string[];
+  whatIsWorkingNow?: string[];
   operatorHiddenPreferences: string[];
   fallbackShapeOutcomes?: FallbackShapeOutcomeCounter[];
   editTransformations: string[];

@@ -18,6 +18,18 @@ const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
   { key: 'alwaysDoMoreOfThis', title: 'ALWAYS DO MORE OF THIS', limit: 3 },
   { key: 'neverDoThisAgain', title: 'NEVER DO THIS AGAIN', limit: 3 },
   {
+    key: 'whatIsWorkingNow',
+    title: "WHAT'S WORKING RIGHT NOW",
+    limit: 3,
+    intro: 'Live outcome evidence from this account. Prefer these proven moves when they genuinely fit the idea; never force one onto a mismatched subject.',
+  },
+  {
+    key: 'formatsUnderTested',
+    title: 'UNDER-TESTED FORMATS',
+    limit: 2,
+    intro: 'These formats lack outcome data. When two drafts are otherwise equal, prefer the under-tested format so the learning loop gets signal.',
+  },
+  {
     key: 'rejectedDrafts',
     title: 'RECENT REJECTED DRAFTS',
     limit: 3,

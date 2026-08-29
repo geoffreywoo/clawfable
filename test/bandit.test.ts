@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBanditPolicy, buildBanditSlotPlan } from '@/lib/bandit';
+import { buildBanditPolicy, buildBanditSlotPlan, summarizeBanditExploitLessons } from '@/lib/bandit';
 import type { FeedbackEntry, Tweet, TweetPerformance } from '@/lib/types';
 
 function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: string; family: import('@/lib/bandit').BanditArmScore['family'] }): import('@/lib/bandit').BanditArmScore {
@@ -342,6 +342,85 @@ describe('bandit policy', () => {
 
     expect(questionArm?.failures).toBeGreaterThan(0);
     expect(questionArm?.meanReward).toBeLessThan(hotTakeArm?.meanReward || 1);
+  });
+
+  it('reinforces strategies the operator endorses with thumbs-up feedback', () => {
+    const questionTweet = tweetEntry({
+      id: 'question-up',
+      content: 'Should every startup raise now?',
+      format: 'question',
+      topic: 'Startups',
+    });
+    const hotTakeTweet = tweetEntry({
+      id: 'hot-up',
+      content: 'Distribution beats product longer than founders admit.',
+      format: 'hot_take',
+      topic: 'Startups',
+    });
+    const feedback: FeedbackEntry[] = [{
+      tweetId: 'question-up',
+      tweetText: questionTweet.content,
+      rating: 'up',
+      generatedAt: '2026-04-02T00:00:00.000Z',
+      intentSummary: 'Exactly my voice',
+      source: 'preview_feedback',
+      userProvidedReason: true,
+    }];
+
+    const policy = buildBanditPolicy({
+      performanceHistory: [],
+      feedback,
+      signals: [],
+      allTweets: [questionTweet, hotTakeTweet],
+      allowedFormats: ['question', 'hot_take'],
+      candidateTopics: ['Startups'],
+      baseline: null,
+    });
+
+    const questionArm = policy.formatArms.find((arm) => arm.arm === 'question');
+    const hotTakeArm = policy.formatArms.find((arm) => arm.arm === 'hot_take');
+
+    // The endorsed format gains local evidence and outranks the unobserved one.
+    expect(questionArm?.localPulls).toBeGreaterThan(0);
+    expect(questionArm?.meanReward).toBeGreaterThan(hotTakeArm?.meanReward || 1);
+  });
+
+  it('summarizes proven arms as what-is-working lessons and skips cold-start noise', () => {
+    const arm = (overrides: Record<string, unknown>) => ({
+      arm: 'hot_take',
+      family: 'format',
+      pulls: 6,
+      localPulls: 6,
+      globalPulls: 0,
+      priorPulls: 2,
+      successes: 5,
+      failures: 1,
+      meanReward: 0.7,
+      globalMeanReward: 0.5,
+      explorationBonus: 0.02,
+      uncertainty: 0.05,
+      alpha: 5,
+      beta: 2,
+      ucbScore: 0.72,
+      thompsonScore: 0.72,
+      localShare: 1,
+      coldStart: false,
+      ...overrides,
+    }) as any;
+
+    const lessons = summarizeBanditExploitLessons({
+      formatArms: [arm({ arm: 'hot_take', meanReward: 0.72, localPulls: 5 })],
+      hookArms: [arm({ arm: 'contrarian', family: 'hook', meanReward: 0.66, localPulls: 4 })],
+      toneArms: [arm({ arm: 'direct', family: 'tone', meanReward: 0.4, localPulls: 8 })],
+      structureArms: [arm({ arm: 'single_claim', family: 'structure', meanReward: 0.8, localPulls: 1 })],
+    });
+
+    expect(lessons.some((line) => line.includes('hot_take'))).toBe(true);
+    expect(lessons.some((line) => line.includes('contrarian'))).toBe(true);
+    // Below the reward floor and below the pull floor respectively.
+    expect(lessons.some((line) => line.includes('"direct"'))).toBe(false);
+    expect(lessons.some((line) => line.includes('single_claim'))).toBe(false);
+    expect(summarizeBanditExploitLessons(null)).toEqual([]);
   });
 
   it('allocates explicit explore slots without repeating the same bet', () => {

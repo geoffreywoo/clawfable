@@ -10,6 +10,7 @@ import type {
 } from './types';
 import type { RemixEntry } from './kv-storage';
 import type { BanditPolicy } from './bandit';
+import { summarizeBanditExploitLessons } from './bandit';
 import type { VoiceProfile } from './soul-parser';
 import { summarizeEditDelta, type EditDeltaSummary } from './outcome-rewards';
 import {
@@ -411,6 +412,7 @@ export function buildPersonalizationMemory({
     .filter((arm) => arm.coldStart || arm.pulls < 3)
     .slice(0, 4)
     .map((arm) => `${arm.arm} needs more data`);
+  const whatIsWorkingNow = summarizeBanditExploitLessons(banditPolicy);
 
   const operatorHiddenPreferences = unique([
     ...summarizeOperatorPreferences(signals, remixPatterns),
@@ -442,6 +444,7 @@ export function buildPersonalizationMemory({
     rejectedDrafts,
     topicsWithMomentum,
     formatsUnderTested,
+    whatIsWorkingNow,
     operatorHiddenPreferences,
     editTransformations,
     referenceBank,
