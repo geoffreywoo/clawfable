@@ -2596,6 +2596,12 @@ const ACQUISITION_CEO_SENTENCE_SKELETON = /\b(?:should\s+)?(?:buy|acquire)\b.{0,
 const DIRECT_ACQUISITION_RECOMMENDATION = /\bshould\s+(?:just\s+)?(?:buy|acquire)\b/i;
 const LEADERSHIP_INSTALLATION_CALL = /\b(?:make|name|install|hand|give|put)\b.{0,80}\b(?:ceo|chief executive|control|in charge|run(?:ning)?)\b/i;
 
+// Buckets whose trigger words are everyday startup vocabulary ("team",
+// "hire", "ship", "build", "ambitious"). A pair match that leans on one of
+// these is weak evidence of a shared premise; the precise buckets
+// (leverage, timing, failure, acquisition skeletons, ...) stay decisive.
+const BROAD_PREMISE_CONCEPTS = new Set(['team_headcount', 'benchmark_shipping', 'ambition_scale']);
+
 function premiseConceptIds(value: string): string[] {
   return PREMISE_CONCEPT_RULES.filter((rule) => rule.pattern.test(value)).map((rule) => rule.id);
 }
@@ -2603,7 +2609,9 @@ function premiseConceptIds(value: string): string[] {
 function canonicalPremiseSimilarity(left: string, right: string): number {
   const leftConcepts = new Set(premiseConceptIds(left));
   const rightConcepts = new Set(premiseConceptIds(right));
-  const shared = [...leftConcepts].filter((concept) => rightConcepts.has(concept)).length;
+  const sharedConcepts = [...leftConcepts].filter((concept) => rightConcepts.has(concept));
+  const shared = sharedConcepts.length;
+  const sharedPrecise = sharedConcepts.filter((concept) => !BROAD_PREMISE_CONCEPTS.has(concept)).length;
   if (ACQUISITION_CEO_SENTENCE_SKELETON.test(left) && ACQUISITION_CEO_SENTENCE_SKELETON.test(right)) return 0.64;
   if (LEADERSHIP_INSTALLATION_CALL.test(left) && LEADERSHIP_INSTALLATION_CALL.test(right)) return 0.64;
   if (DIRECT_ACQUISITION_RECOMMENDATION.test(left) && DIRECT_ACQUISITION_RECOMMENDATION.test(right)) return 0.64;
@@ -2613,7 +2621,13 @@ function canonicalPremiseSimilarity(left: string, right: string): number {
     && /\b(?:back|backed|bet on|fund|funded|long|support|second chance|another chance|come back|be back)\b/i.test(`${left} ${right}`)
   ) return 0.64;
   if (shared >= 3) return 0.78;
-  if (shared >= 2) return 0.66;
+  // A two-bucket match only hard-rejects when both buckets are precise. When
+  // one of them is broad everyday vocabulary, 0.44 still lowers graded
+  // novelty but stays below every hard-reject threshold (0.64 operator
+  // reskin, 0.48 preflight floor, 0.62 novelty-gate equivalence), so two
+  // unrelated takes that both mention teams and shipping are no longer
+  // declared the same premise.
+  if (shared >= 2) return sharedPrecise >= 2 ? 0.66 : 0.44;
   return 0;
 }
 
@@ -4841,6 +4855,20 @@ function copyScore(entry: Record<string, unknown>, validIds: Set<string>): CopyJ
 }
 
 async function judgeDrafts(
+  evaluations: DraftEvaluation[],
+  input: GenerateTweetBatchV2Input,
+  calls: GenerationModelCallTrace[],
+  blocks: SemanticBlock[],
+): Promise<CopyJudgeResult> {
+  // One retry on a malformed or failed judgment: a single formatting hiccup
+  // previously rejected every draft in the run, fed the failure circuit
+  // breaker, and could silence the account for hours.
+  const first = await judgeDraftsOnce(evaluations, input, calls, blocks);
+  if (!first.failureCode) return first;
+  return judgeDraftsOnce(evaluations, input, calls, blocks);
+}
+
+async function judgeDraftsOnce(
   evaluations: DraftEvaluation[],
   input: GenerateTweetBatchV2Input,
   calls: GenerationModelCallTrace[],

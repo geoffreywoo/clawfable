@@ -2120,6 +2120,20 @@ describe('Tweet Generation V2', () => {
     expect(retainsPersonalTopicSubjectV2('any subject is valid', ['capital:market'])).toBe(true);
   });
 
+  it('does not declare two takes the same premise just for sharing everyday startup vocabulary', () => {
+    // Shares team_headcount + benchmark_shipping buckets ("team"/"hire",
+    // "ship"/"build") but the premises are unrelated.
+    expect(isOperatorPremiseReskinV2(
+      'a tiny team shipped a production agent in six weeks',
+      ['stop hiring engineers to chase model quality leaderboards'],
+    )).toBe(false);
+    // Two precise buckets (leverage + timing) still reject as a reskin.
+    expect(isOperatorPremiseReskinV2(
+      'the margin agreement killed that trade before the market ever moved',
+      ['he scaled too fast with leverage and got liquidated by timing'],
+    )).toBe(true);
+  });
+
   it('allows a new premise on the same native subject while preserving rare-premise blocks', () => {
     const cognitionHistory = 'i had a call to invest in @cognition while @ScottWu46 visited a founder\'s parents';
     const salpHistory = 'SALP @leopoldasch scaled too fast with leverage. i am long Leopold.';
