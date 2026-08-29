@@ -64,7 +64,10 @@ import {
   buildGeoffreyNativeV2WriterContract,
   isGeoffreyVoiceProfile,
 } from './account-taste';
-import { getVoiceProfileTopicPolicyIssue, isVoiceProfileTopicBlocked } from './account-topic-policy';
+import { getVoiceProfileTopicPolicyIssue } from './account-topic-policy';
+import {
+  getGeoffreyVoiceProfileCompanyAmplificationIssue,
+} from './geoffrey-company-amplification';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
@@ -125,7 +128,9 @@ import {
   buildAntiFundPortfolioContext,
   findAntiFundPortfolioCompanies,
   findSingleAntiFundPortfolioCompany,
+  getAntiFundAutonomousPromotionPolicyIssue,
   getAntiFundPortfolioPolicyIssues,
+  isAntiFundAutonomousPromotionEligible,
   isQualifiedSportsPortfolioContext,
   isAntiFundPortfolioBriefDue,
   isAntiFundPortfolioPromotionEligible,
@@ -149,6 +154,27 @@ export const V2_MIN_COPY_INSIGHT = 0.5;
 export const V2_MIN_COPY_VOICE_FIT = 0.72;
 export const V2_MIN_FINAL_QUALITY_MARGIN = PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN;
 export const V2_MIN_GEOFFREY_FINAL_NOVELTY = 0.62;
+
+function getGenerationSubjectPolicyIssue(
+  voiceProfile: VoiceProfile,
+  value: string,
+  portfolioCompanyContext: PortfolioCompanyGenerationContext | null | undefined = null,
+): string | null {
+  return getVoiceProfileTopicPolicyIssue(
+    voiceProfile,
+    value,
+    null,
+    portfolioCompanyContext,
+  ) || getGeoffreyVoiceProfileCompanyAmplificationIssue(voiceProfile, value);
+}
+
+function isGenerationSubjectBlocked(
+  voiceProfile: VoiceProfile,
+  value: string,
+  portfolioCompanyContext: PortfolioCompanyGenerationContext | null | undefined = null,
+): boolean {
+  return Boolean(getGenerationSubjectPolicyIssue(voiceProfile, value, portfolioCompanyContext));
+}
 export const V2_MIN_GEOFFREY_AI_FRONTIER_LEAD = 0.72;
 export const V2_MIN_GEOFFREY_AI_BULLISHNESS = 0.68;
 export const V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION = 0.72;
@@ -755,14 +781,14 @@ function antiFundPortfolioBrief(
     sourceLane: 'manual_core_exploit',
     storyClusterId: null,
     title: company.name,
-    summary: `${company.name} is in the flagship Anti Fund promotion set. The public portfolio description is supplied only to identify the company and category, not as evidence for a current event or private experience.`,
+    summary: `${company.name} is in the current autonomous Anti Fund promotion priority set. The public portfolio description is supplied only to identify the company and category, not as evidence for a current event or private experience.`,
     authorOpportunity,
     evidenceMode: 'operator_opinion',
     evidenceIds: [],
     sourceDocumentIds: [],
     qualifiedClaimIds: [],
     evidence: [],
-    sourceBrief: `ANTI FUND FLAGSHIP PORTFOLIO SUBJECT [company=${company.name}; category=${company.category}; promotionPolicy=${ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION}; snapshot=${ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION}; policy=${ANTIFUND_PORTFOLIO_POLICY_VERSION}; source=${ANTIFUND_PORTFOLIO_SOURCE_URL}] Subject and relationship provenance only. Never claim a private interaction or restate the description as current evidence.`,
+    sourceBrief: `ANTI FUND AUTONOMOUS PROMOTION PRIORITY [company=${company.name}; category=${company.category}; promotionPolicy=${ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION}; snapshot=${ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION}; policy=${ANTIFUND_PORTFOLIO_POLICY_VERSION}; source=${ANTIFUND_PORTFOLIO_SOURCE_URL}] Subject and relationship provenance only. Never claim a private interaction or restate the description as current evidence.`,
     trendTopicId: null,
     trendHeadline: null,
     identityScore: 0.94,
@@ -1402,7 +1428,12 @@ function getPortfolioPolicyIssuesForVoiceProfile(
   context: PortfolioCompanyGenerationContext | null | undefined,
 ): string[] {
   if (!isGeoffreyVoiceProfile(voiceProfile) && !context) return [];
-  return getAntiFundPortfolioPolicyIssues(content, context);
+  return [
+    ...getAntiFundPortfolioPolicyIssues(content, context),
+    ...(isGeoffreyVoiceProfile(voiceProfile) && getAntiFundAutonomousPromotionPolicyIssue(context)
+      ? ['portfolio_company_not_autonomous_priority']
+      : []),
+  ];
 }
 
 function topicKey(value: string): string {
@@ -1754,10 +1785,11 @@ export function buildGenerationBriefsV2({
     exactEntities: string[] = [],
   ): boolean => {
     if (!geoffreyPortfolio) return true;
-    if (findAntiFundPortfolioCompanies(value, { exactEntities }).some((company) => (
+    const mentionedPortfolioCompanies = findAntiFundPortfolioCompanies(value, { exactEntities });
+    if (mentionedPortfolioCompanies.some((company) => (
       company.promotionTier === 'excluded'
     ))) return false;
-    if (isVoiceProfileTopicBlocked(voiceProfile, value, null, portfolioCompanyContext)) return false;
+    if (isGenerationSubjectBlocked(voiceProfile, value, portfolioCompanyContext)) return false;
     if (
       isGeoffreyDeepTechnicalTopic(value)
       && briefs.filter((brief) => isGeoffreyDeepTechnicalTopic(briefTechnicalContext(brief))).length >= maxDeepTechnicalBriefs
@@ -1777,7 +1809,7 @@ export function buildGenerationBriefsV2({
 
   const requested = requestedTopic?.replace(/\s+/g, ' ').trim().slice(0, 280);
   if (requested) {
-    if (isVoiceProfileTopicBlocked(voiceProfile, requested)) return [];
+    if (isGenerationSubjectBlocked(voiceProfile, requested)) return [];
     const seed = pickGeoffreyIdeaSeed({
       voiceProfile,
       targetTopic: requested,
@@ -1787,7 +1819,13 @@ export function buildGenerationBriefsV2({
     const requestedCompany = findSingleAntiFundPortfolioCompany(requested, {
       exactEntities: [requested],
     });
-    if (requestedCompany && !isAntiFundPortfolioPromotionEligible(requestedCompany)) return [];
+    if (
+      requestedCompany
+      && (
+        !isAntiFundPortfolioPromotionEligible(requestedCompany)
+        || (geoffreyPortfolio && !isAntiFundAutonomousPromotionEligible(requestedCompany))
+      )
+    ) return [];
     briefs.push({
       id: stableResearchId('brief', 'operator-request', requested),
       topic: requested,
@@ -1846,6 +1884,13 @@ export function buildGenerationBriefsV2({
     return true;
   };
 
+  const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
+    .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
+    .filter((candidate) => !isGenerationSubjectBlocked(
+      voiceProfile,
+      `${candidate.topic} ${candidate.historicalAngle || ''} ${(candidate.personalTopicSignals || []).join(' ')}`,
+    ));
+
   // A source portfolio is useful for freshness, but it cannot crowd the
   // operator's durable subjects out of the batch. This keeps the majority of
   // ideation grounded in native topic taste while retaining sourced openings.
@@ -1870,6 +1915,11 @@ export function buildGenerationBriefsV2({
         ...committedTweets.map((tweet) => `${tweet.topic || ''} ${tweet.content}`),
         ...recentIdeas.map((idea) => `${idea.topic} ${ideaText(idea)}`),
         ...(trending || []).flatMap((topic) => [topic.headline, ...(topic.entities || [])]),
+        ...operatorCandidates.map((candidate) => [
+          candidate.topic,
+          candidate.historicalAngle,
+          ...(candidate.personalTopicSignals || []),
+        ].filter(Boolean).join(' ')),
       ],
       `${seedRotationKey}:${now.toISOString().slice(0, 10)}`,
     )
@@ -1974,12 +2024,6 @@ export function buildGenerationBriefsV2({
 
   const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
   const recentAttemptedSubjects = recentOperatorAttemptIdeas(recentIdeas, now).map(ideaText);
-  const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
-    .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
-    .filter((candidate) => !isVoiceProfileTopicBlocked(
-      voiceProfile,
-      `${candidate.topic} ${candidate.historicalAngle || ''} ${(candidate.personalTopicSignals || []).join(' ')}`,
-    ));
   const rankedOperatorCandidates = rankOperatorTopicCandidates(
     operatorCandidates,
     recentTopicKeys,
@@ -2078,10 +2122,9 @@ export function buildGenerationBriefsV2({
   }
 
   return briefs
-    .filter((brief) => !isVoiceProfileTopicBlocked(
+    .filter((brief) => !isGenerationSubjectBlocked(
       voiceProfile,
       `${brief.topic} ${brief.title} ${brief.creativeSeed?.object || ''}`,
-      null,
       brief.portfolioCompanyContext,
     ))
     .slice(0, briefCount);
@@ -2110,7 +2153,7 @@ export function buildIdeaGenerationPromptV2(
     author: {
       tone: voiceProfile.tone,
       topics: voiceProfile.topics
-        .filter((topic) => !isVoiceProfileTopicBlocked(voiceProfile, topic))
+        .filter((topic) => !isGenerationSubjectBlocked(voiceProfile, topic))
         .slice(0, 16),
       worldview: voiceProfile.summary.slice(0, 900),
       communicationStyle: voiceProfile.communicationStyle.slice(0, 600),
@@ -2126,7 +2169,7 @@ export function buildIdeaGenerationPromptV2(
       operatorOpinionContract: 'Source-free operator ideas must remain personal judgments, questions, predictions, or explicitly modal speculation. publicMove, claim, tension, and implication must each be factual-safe on their own. A modal phrase cannot license an asserted current event, measured or current number, quote, customer, measured behavior, or personal experience in another field. A future mechanism is allowed only inside an explicit prediction no more than 12 months out; every field that names it must preserve that future or conditional posture. A number is allowed only as an unmistakably subjective valuation, price, timing forecast, or amount the author would pay or bet, and every field containing it must preserve that forecast posture.',
       operatorOwnershipContract: 'For every operator brief, make at least one proposition explicitly first-person and subjective. The others may be blunt assertions, predictions, desires, or questions, but never third-person advice using "an investor/founder should." Do not bolt "I would underwrite," "I judge," or "I want" onto analyst prose to satisfy this contract.',
       operatorSpecificityContract: 'Do not manufacture a hypothetical call, dinner, panel, conference, allocation, customer, portfolio, founder test, diligence process, or product wishlist to make an abstract topic concrete. Do not force a binary choice. A direct prediction, valuation opinion, named-company desire, socially legible disagreement, or strong worldview claim can be the whole proposition.',
-      portfolioCompanyContract: 'When portfolioCompanyContext is present, the company is in the explicit flagship Anti Fund promotion set and the purpose is constructive amplification. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
+      portfolioCompanyContract: 'When portfolioCompanyContext has constructive_conviction intent, the company must be OpenAI or Cognition, the current autonomous promotion priority set. A live_development context may cover another flagship portfolio company only when the sourced development itself qualifies. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
       geoffreyNativeMoveContract: isGeoffreyVoiceProfile(voiceProfile)
         ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, capital, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, disagreement, or self-implicating decision; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Geoffrey often makes the interesting part socially risky, funny, numerically ambitious, or personally costly; preserve that energy when the packet supports it instead of retreating to a safe product wish or evaluation framework. Do not manufacture holdings, status objects, status assets, status signals, new status games, or flexes to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, benchmark comparisons, or generic demands for what a company should ship. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
         : null,
@@ -2854,6 +2897,12 @@ export function normalizeIdeaCandidatesV2({
     )) {
       candidate.rejectionCodes.push('account_topic_blocked');
     }
+    if (getGeoffreyVoiceProfileCompanyAmplificationIssue(
+      voiceProfile,
+      `${brief.topic} ${brief.title} ${ideaText(candidate)}`,
+    )) {
+      candidate.rejectionCodes.push('company_amplification_blocked');
+    }
     candidate.rejectionCodes.push(...getPortfolioPolicyIssuesForVoiceProfile(
       voiceProfile,
       ideaText(candidate),
@@ -3466,10 +3515,9 @@ export function selectRankedIdeaPortfolioV2({
       verifiedSource: brief?.evidenceMode === 'verified_source',
       deepTechnical: isGeoffreyDeepTechnicalTopic(topicContext),
       manufacturingMaterials: isGeoffreyManufacturingMaterialsTopic(topicContext),
-      accountTopicBlocked: isVoiceProfileTopicBlocked(
+      accountTopicBlocked: isGenerationSubjectBlocked(
         voiceProfile,
         topicContext,
-        null,
         brief?.portfolioCompanyContext,
       ),
     };
@@ -3596,7 +3644,7 @@ async function selectIdeas({
     author: {
       tone: input.voiceProfile.tone,
       topics: input.voiceProfile.topics
-        .filter((topic) => !isVoiceProfileTopicBlocked(input.voiceProfile, topic))
+        .filter((topic) => !isGenerationSubjectBlocked(input.voiceProfile, topic))
         .slice(0, 16),
       worldview: input.voiceProfile.summary.slice(0, 900),
       communicationStyle: input.voiceProfile.communicationStyle.slice(0, 600),
@@ -4502,6 +4550,10 @@ function preflightDraft({
     null,
     brief.portfolioCompanyContext,
   );
+  const companyAmplificationIssue = getGeoffreyVoiceProfileCompanyAmplificationIssue(
+    input.voiceProfile,
+    `${brief.topic} ${brief.title} ${ideaText(idea)} ${content}`,
+  );
   const portfolioPolicyIssues = getPortfolioPolicyIssuesForVoiceProfile(
     input.voiceProfile,
     content,
@@ -4515,6 +4567,7 @@ function preflightDraft({
   if (lengthIssue) codes.push('over_x_length');
   if (policyIssue) codes.push('autopost_policy');
   if (accountTopicIssue) codes.push('account_topic_blocked');
+  if (companyAmplificationIssue) codes.push('company_amplification_blocked');
   codes.push(...portfolioPolicyIssues);
   if (authorityIssue) codes.push('unearned_authority');
   if (brief.evidenceMode === 'verified_source' && claimIssue) codes.push('claim_evidence');

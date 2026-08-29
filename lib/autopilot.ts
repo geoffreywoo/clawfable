@@ -83,7 +83,13 @@ import { assertAgentAutomationEntitlement } from './automation-entitlement';
 import { createTweetFromGeneratedCandidate } from './tweet-persistence';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
 import {
+  GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
+  getGeoffreyCompanyAmplificationIssue,
+} from './geoffrey-company-amplification';
+import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
+  getAntiFundAutonomousPromotionPolicyIssue,
   getAntiFundPortfolioPolicyIssue,
 } from './antifund-portfolio';
 import {
@@ -202,6 +208,13 @@ function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): b
   const portfolioCompanyIssue = isGeoffreyAccount(agent?.handle) || tweet.portfolioCompanyContext
     ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
     : null;
+  const companyAmplificationIssue = getGeoffreyCompanyAmplificationIssue(
+    agent?.handle,
+    `${tweet.topic || ''} ${tweet.content}`,
+  );
+  const autonomousPromotionIssue = isGeoffreyAccount(agent?.handle)
+    ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
+    : null;
   return isAutopostableQueuedTweet(tweet)
     && !getGeneratedPublishIssue(tweet)
     && !getAccountTopicPolicyIssue(
@@ -210,7 +223,9 @@ function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): b
       null,
       tweet.portfolioCompanyContext,
     )
+    && !companyAmplificationIssue
     && !portfolioCompanyIssue
+    && !autonomousPromotionIssue
     && !getQueuedEntityMentionPolicyIssue(tweet);
 }
 
@@ -256,8 +271,15 @@ function getQueuedAutopostPolicyIssue(agent: Agent, tweet: Tweet): string | null
     null,
     tweet.portfolioCompanyContext,
   )
+    || getGeoffreyCompanyAmplificationIssue(
+      agent.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+    )
     || (isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+      : null)
+    || (isGeoffreyAccount(agent.handle)
+      ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
       : null)
     || getQueuedEntityMentionPolicyIssue(tweet)
     || getAutopostPolicyIssue(tweet.content, {
@@ -460,7 +482,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
-    policyGate: 'account_topic_policy' | 'portfolio_company_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
+    policyGate: 'account_topic_policy' | 'company_amplification_policy' | 'portfolio_company_policy' | 'portfolio_promotion_priority_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
@@ -471,11 +493,21 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       null,
       tweet.portfolioCompanyContext,
     );
+    const companyAmplificationIssue = getGeoffreyCompanyAmplificationIssue(
+      agent.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+    );
     const originIssue = getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion });
     const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null;
-    const entityMentionIssue = !accountTopicIssue && !portfolioCompanyIssue
+    const autonomousPromotionIssue = isGeoffreyAccount(agent.handle)
+      ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
+      : null;
+    const entityMentionIssue = !accountTopicIssue
+      && !companyAmplificationIssue
+      && !portfolioCompanyIssue
+      && !autonomousPromotionIssue
       ? getQueuedEntityMentionPolicyIssue(tweet)
       : null;
     const accountMarginIssue = (
@@ -487,19 +519,29 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     )
       ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
       : null;
-    const issue = accountTopicIssue || portfolioCompanyIssue || entityMentionIssue || originIssue || accountMarginIssue;
+    const issue = accountTopicIssue
+      || companyAmplificationIssue
+      || portfolioCompanyIssue
+      || autonomousPromotionIssue
+      || entityMentionIssue
+      || originIssue
+      || accountMarginIssue;
     if (issue) invalid.push({
       tweet,
       issue,
       policyGate: accountTopicIssue
         ? 'account_topic_policy'
-        : portfolioCompanyIssue
-          ? 'portfolio_company_policy'
-          : entityMentionIssue
-            ? 'entity_mention_policy'
-            : originIssue
-              ? 'generation_origin'
-              : 'autopost_quality_margin',
+        : companyAmplificationIssue
+          ? 'company_amplification_policy'
+          : portfolioCompanyIssue
+            ? 'portfolio_company_policy'
+            : autonomousPromotionIssue
+              ? 'portfolio_promotion_priority_policy'
+              : entityMentionIssue
+                ? 'entity_mention_policy'
+                : originIssue
+                  ? 'generation_origin'
+                  : 'autopost_quality_margin',
     });
     else valid.push(tweet);
   }
@@ -511,6 +553,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   })));
   const learningInvalid = invalid.filter(({ policyGate }) => (
     policyGate === 'account_topic_policy'
+    || policyGate === 'company_amplification_policy'
     || policyGate === 'portfolio_company_policy'
     || policyGate === 'entity_mention_policy'
     || policyGate === 'autopost_quality_margin'
@@ -521,23 +564,38 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       xTweetId: tweet.xTweetId || undefined,
       signalType: 'x_post_rejected',
       surface: 'queue',
-      rewardDelta: policyGate === 'account_topic_policy' ? -0.9 : policyGate === 'portfolio_company_policy' ? -0.85 : -0.7,
+      rewardDelta: policyGate === 'company_amplification_policy'
+        ? -0.95
+        : policyGate === 'account_topic_policy'
+          ? -0.9
+          : policyGate === 'portfolio_company_policy'
+            ? -0.85
+            : -0.7,
       reason: issue,
       inferred: true,
       metadata: {
         pipelineVersion: tweet.pipelineVersion || null,
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
         accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
+        companyAmplificationPolicyVersion: GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
         portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
+        portfolioCompanyPromotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
         entityMentionPolicyVersion: ENTITY_MENTION_POLICY_VERSION,
         feedbackReasonCode: policyGate === 'account_topic_policy'
           ? 'bad_source_topic'
+          : policyGate === 'company_amplification_policy'
+            ? 'bad_source_topic'
           : policyGate === 'portfolio_company_policy'
             ? 'bad_premise'
             : 'bad_writing',
         policyGate,
         blockedDomain: policyGate === 'account_topic_policy' ? 'sports_competition' : null,
-        operatorDirective: policyGate === 'account_topic_policy' ? 'stop_posting_sports' : null,
+        blockedEntity: policyGate === 'company_amplification_policy' ? 'cursor' : null,
+        operatorDirective: policyGate === 'account_topic_policy'
+          ? 'stop_posting_sports'
+          : policyGate === 'company_amplification_policy'
+            ? 'stop_pumping_cursor_prefer_cognition_openai'
+            : null,
         portfolioCompanyId: tweet.portfolioCompanyContext?.companyId || null,
         qualityMargin: tweet.finalCriticScores?.qualityMargin ?? null,
       },
@@ -2738,11 +2796,26 @@ export async function refillQueue(
           await rejectCandidate(item, 'account_topic_blocked', accountTopicIssue);
           continue;
         }
+        const companyAmplificationIssue = getGeoffreyCompanyAmplificationIssue(
+          agent.handle,
+          `${item.targetTopic || ''} ${item.content}`,
+        );
+        if (companyAmplificationIssue) {
+          await rejectCandidate(item, 'company_amplification_policy', companyAmplificationIssue);
+          continue;
+        }
         const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || item.portfolioCompanyContext
           ? getAntiFundPortfolioPolicyIssue(item.content, item.portfolioCompanyContext)
           : null;
         if (portfolioCompanyIssue) {
           await rejectCandidate(item, 'portfolio_company_policy', portfolioCompanyIssue);
+          continue;
+        }
+        const autonomousPromotionIssue = isGeoffreyAccount(agent.handle)
+          ? getAntiFundAutonomousPromotionPolicyIssue(item.portfolioCompanyContext)
+          : null;
+        if (autonomousPromotionIssue) {
+          await rejectCandidate(item, 'portfolio_promotion_priority_policy', autonomousPromotionIssue);
           continue;
         }
         const entityMentionIssue = getCuratedEntityMentionPolicyIssue(item.content);
