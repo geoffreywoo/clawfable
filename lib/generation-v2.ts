@@ -69,6 +69,7 @@ import {
   getGeoffreyVoiceProfileCompanyAmplificationIssue,
 } from './geoffrey-company-amplification';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
+import { isUnderTestedBanditArm } from './bandit';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
   inferAudienceSegment,
@@ -5273,6 +5274,27 @@ export function calculateV2FinalQualityMargin(
   );
 }
 
+/**
+ * Deterministically flags roughly one third of quality-passing drafts whose
+ * format or hook lacks local outcome evidence as exploration holdouts. The
+ * flag never loosens a gate — it labels the experiment so the reward path
+ * (holdout lift bonus) protects the bet and the learning loop gets clean
+ * evidence on arms it has not tested. Deterministic on draft id so re-runs
+ * and rescoring stay stable.
+ */
+export function shouldFlagExplorationHoldoutV2(
+  draftId: string,
+  format: string | null | undefined,
+  hook: string | null | undefined,
+  policy: Parameters<typeof isUnderTestedBanditArm>[0],
+): boolean {
+  const underTested = isUnderTestedBanditArm(policy, 'format', format)
+    || isUnderTestedBanditArm(policy, 'hook', hook);
+  if (!underTested) return false;
+  const hash = [...String(draftId)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 0);
+  return hash % 3 === 0;
+}
+
 function toRankedTweet(
   evaluation: DraftEvaluation,
   score: CopyJudgeScore,
@@ -5391,7 +5413,12 @@ function toRankedTweet(
     draftExperimentId: draft.id,
     experimentBatchId: draft.generationRunId,
     experimentHypothesis: ideaPublicMove(idea),
-    experimentHoldout: false,
+    experimentHoldout: shouldFlagExplorationHoldoutV2(
+      draft.id,
+      draft.format,
+      featureTags.hook,
+      input.style.banditPolicy,
+    ),
     promptVariant: 'evidence_idea_voice_v4',
     targetAudienceSegment: audience,
     segmentHypothesis: `Test whether ${audience} responds to this evidence-backed operator judgment.`,

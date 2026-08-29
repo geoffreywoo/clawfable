@@ -359,6 +359,23 @@ export function summarizeBanditExploitLessons(
     .map((lesson) => lesson.line);
 }
 
+/**
+ * True when the arm lacks meaningful local outcome evidence. Used to flag
+ * exploration holdouts: drafts on under-tested arms get the experimentHoldout
+ * marker so the reward path shields them from lift punishment while the
+ * learning loop gathers the data it is missing.
+ */
+export function isUnderTestedBanditArm(
+  policy: Pick<BanditPolicy, 'formatArms' | 'hookArms'> | null | undefined,
+  family: 'format' | 'hook',
+  arm: string | null | undefined,
+): boolean {
+  if (!policy || !arm) return false;
+  const arms = family === 'format' ? policy.formatArms : policy.hookArms;
+  const match = (arms || []).find((entry) => entry.arm === arm);
+  return Boolean(match && (match.coldStart || match.localPulls < 3));
+}
+
 function buildPriorLookup(prior: BanditGlobalPrior | null | undefined, family: BanditArmFamily): Map<string, BanditPriorArm> {
   return new Map((prior?.families[family] || []).map((entry) => [entry.arm, entry]));
 }

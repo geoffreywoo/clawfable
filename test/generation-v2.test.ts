@@ -38,6 +38,7 @@ import {
   isQuestionDraftV2,
   isGenericOperatorProductWishlistV2,
   isOperatorPremiseReskinV2,
+  shouldFlagExplorationHoldoutV2,
   isStoryAlreadyCommittedV2,
   isStoryInEditorialCooldownV2,
   isStoryEditoriallyQualifiedV2,
@@ -2168,6 +2169,50 @@ describe('Tweet Generation V2', () => {
       ['leopoldasch:salp:leverage', 'qqq'],
     )).toBe(true);
     expect(retainsPersonalTopicSubjectV2('any subject is valid', ['capital:market'])).toBe(true);
+  });
+
+  it('flags a bounded share of under-tested-arm drafts as exploration holdouts', () => {
+    const arm = (name: string, overrides: Record<string, unknown> = {}) => ({
+      arm: name,
+      family: 'format',
+      pulls: 10,
+      localPulls: 10,
+      globalPulls: 0,
+      priorPulls: 2,
+      successes: 6,
+      failures: 1,
+      meanReward: 0.6,
+      globalMeanReward: 0.5,
+      explorationBonus: 0.02,
+      uncertainty: 0.05,
+      alpha: 5,
+      beta: 2,
+      ucbScore: 0.6,
+      thompsonScore: 0.6,
+      localShare: 1,
+      coldStart: false,
+      ...overrides,
+    }) as any;
+    const policy = {
+      formatArms: [arm('hot_take'), arm('long_form', { localPulls: 0, coldStart: true })],
+      hookArms: [arm('question', { family: 'hook' })],
+    } as any;
+
+    // Proven arms never become holdouts.
+    for (let index = 0; index < 30; index++) {
+      expect(shouldFlagExplorationHoldoutV2(`draft-${index}`, 'hot_take', 'question', policy)).toBe(false);
+    }
+    // Under-tested arms are flagged for a deterministic subset of draft ids.
+    const flagged = Array.from({ length: 30 }, (_, index) =>
+      shouldFlagExplorationHoldoutV2(`draft-${index}`, 'long_form', 'question', policy));
+    const flaggedCount = flagged.filter(Boolean).length;
+    expect(flaggedCount).toBeGreaterThan(0);
+    expect(flaggedCount).toBeLessThan(30);
+    // Deterministic: same id, same answer.
+    expect(shouldFlagExplorationHoldoutV2('draft-0', 'long_form', 'question', policy))
+      .toBe(flagged[0]);
+    // No policy, no experiments.
+    expect(shouldFlagExplorationHoldoutV2('draft-1', 'long_form', 'question', null)).toBe(false);
   });
 
   it('does not declare two takes the same premise just for sharing everyday startup vocabulary', () => {
