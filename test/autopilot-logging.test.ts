@@ -952,7 +952,7 @@ describe('autopilot remote debug logging', () => {
     ]);
   });
 
-  it('keeps a qualified Betr company-business draft eligible while the sports ban remains active', async () => {
+  it('keeps a qualified Betr live-development draft eligible while standing promotion stays narrow', async () => {
     const portfolioDraft = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -972,7 +972,7 @@ describe('autopilot remote debug logging', () => {
         sportsAdjacent: true,
         promotionTier: 'flagship',
         relationship: 'antifund_selected_investment',
-        intent: 'constructive_conviction',
+        intent: 'live_development',
         sourceUrl: 'https://antifund.com/#portfolio',
       },
     };
@@ -982,6 +982,72 @@ describe('autopilot remote debug logging', () => {
 
     expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
     expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+  });
+
+  it('quarantines Cursor promotion for @geoffwoo and records the replacement preference', async () => {
+    const cursorDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-cursor-promotion',
+      content: 'i would value @cursor_ai above every independent ai model startup',
+      topic: 'Cursor startup valuation',
+      allowedMentionHandles: ['cursor_ai'],
+    };
+    mocks.getQueuedTweets.mockResolvedValue([cursorDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith(cursorDraft.id, expect.objectContaining({
+      status: 'quarantined',
+      quarantineReason: expect.stringContaining('suppresses Cursor'),
+    }));
+    expect(mocks.addLearningSignal).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      rewardDelta: -0.95,
+      metadata: expect.objectContaining({
+        companyAmplificationPolicyVersion: 'geoffrey-company-amplification-1',
+        feedbackReasonCode: 'bad_source_topic',
+        policyGate: 'company_amplification_policy',
+        blockedEntity: 'cursor',
+        operatorDirective: 'stop_pumping_cursor_prefer_cognition_openai',
+      }),
+    }));
+  });
+
+  it('quarantines stale non-priority conviction drafts without teaching a negative company lesson', async () => {
+    const elevenLabsDraft = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'v2-elevenlabs-standing-promotion',
+      content: 'i think @elevenlabs will own the voice layer for every ai product.',
+      topic: 'ElevenLabs startup conviction',
+      allowedMentionHandles: ['elevenlabs'],
+      portfolioCompanyContext: {
+        policyVersion: 'antifund-portfolio-alignment-3',
+        snapshotVersion: 'antifund-portfolio-2026-08-21',
+        snapshotExpiresAt: '2026-11-19T00:00:00.000Z',
+        companyId: 'elevenlabs',
+        companyName: 'ElevenLabs',
+        companyUrl: 'https://elevenlabs.io/',
+        category: 'software_finance_applied_ai',
+        description: 'AI voice research and products.',
+        sportsAdjacent: false,
+        promotionTier: 'flagship',
+        relationship: 'antifund_selected_investment',
+        intent: 'constructive_conviction',
+        sourceUrl: 'https://antifund.com/#portfolio',
+      },
+    };
+    mocks.getQueuedTweets.mockResolvedValue([elevenLabsDraft]);
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(mocks.updateTweet).toHaveBeenCalledWith(elevenLabsDraft.id, expect.objectContaining({
+      status: 'quarantined',
+      quarantineReason: expect.stringContaining('prioritize OpenAI and Cognition'),
+    }));
     expect(mocks.addLearningSignal).not.toHaveBeenCalled();
   });
 

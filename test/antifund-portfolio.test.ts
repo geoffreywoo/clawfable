@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES,
   ANTIFUND_PORTFOLIO_COMPANIES,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
@@ -10,7 +11,9 @@ import {
   findSingleAntiFundPortfolioCompany,
   findOfficialAntiFundPortfolioPublisher,
   getAntiFundPortfolioContextIssues,
+  getAntiFundAutonomousPromotionPolicyIssue,
   getAntiFundPortfolioPolicyIssues,
+  isAntiFundAutonomousPromotionEligible,
   isAntiFundPortfolioBriefDue,
   isAntiFundPortfolioPromotionEligible,
   resolveAntiFundPortfolioContext,
@@ -85,14 +88,33 @@ describe('Anti Fund portfolio generation policy', () => {
     )).toEqual([]);
   });
 
-  it('rotates only across the flagship promotion set', () => {
+  it('retains the broad flagship set but rotates autonomous promotion only across OpenAI and Cognition', () => {
     const selected = new Set(Array.from({ length: 250 }, (_, index) => (
       selectAntiFundPortfolioCompany([], `rotation-${index}`)?.id
     )).filter(Boolean));
 
-    expect(selected.has('natural')).toBe(false);
-    expect([...selected].every((id) => ANTIFUND_PROMOTION_COMPANIES.some((company) => company.id === id))).toBe(true);
-    expect(ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION).toBe('antifund-flagship-promotion-1');
+    expect(ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES.map((company) => company.name)).toEqual([
+      'OpenAI',
+      'Cognition',
+    ]);
+    expect(selected).toEqual(new Set(['openai', 'cognition']));
+    expect(ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION).toBe('antifund-priority-promotion-2');
+  });
+
+  it('limits standing conviction promotion without blocking a qualified live development', () => {
+    const openai = ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'openai')!;
+    const cognition = ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'cognition')!;
+    const elevenLabs = ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'elevenlabs')!;
+
+    expect(isAntiFundAutonomousPromotionEligible(openai)).toBe(true);
+    expect(isAntiFundAutonomousPromotionEligible(cognition)).toBe(true);
+    expect(isAntiFundAutonomousPromotionEligible(elevenLabs)).toBe(false);
+    expect(getAntiFundAutonomousPromotionPolicyIssue(
+      buildAntiFundPortfolioContext(elevenLabs, 'constructive_conviction'),
+    )).toContain('prioritize OpenAI and Cognition');
+    expect(getAntiFundAutonomousPromotionPolicyIssue(
+      buildAntiFundPortfolioContext(elevenLabs, 'live_development'),
+    )).toBeNull();
   });
 
   it('recognizes exact official company accounts as first-party portfolio sources', () => {
@@ -218,14 +240,14 @@ describe('Anti Fund portfolio generation policy', () => {
       base('5', 'a market question'),
     ])).toBe(true);
     expect(isAntiFundPortfolioBriefDue([
-      base('1', 'i think Etched gets there faster'),
+      base('1', 'i think OpenAI gets there faster'),
       base('2', 'Cognition will be a massive company'),
       base('3', 'founder capital markets'),
       base('4', 'software company quality'),
       base('5', 'a market question'),
     ])).toBe(false);
     expect(isAntiFundPortfolioBriefDue([
-      { ...base('1', 'i think Etched gets there faster'), status: 'deleted_from_x' },
+      { ...base('1', 'i think OpenAI gets there faster'), status: 'deleted_from_x' },
       base('2', 'Cognition will be a massive company'),
       base('3', 'founder capital markets'),
       base('4', 'software company quality'),
@@ -243,7 +265,21 @@ describe('Anti Fund portfolio generation policy', () => {
       surface: 'queue',
       rewardDelta: -0.75,
       createdAt: '2026-08-21T12:00:00.000Z',
-      metadata: { portfolioCompanyId: 'betr' },
+      metadata: { portfolioCompanyId: 'cognition' },
     }], new Date('2026-08-21T18:00:00.000Z'))).toBe(false);
+    expect(isAntiFundPortfolioBriefDue([
+      base('1', 'generic AI prediction'),
+      base('2', 'another startup thought'),
+      base('3', 'founder capital markets'),
+    ], [{
+      id: 'signal-betr',
+      agentId: 'agent-1',
+      tweetId: 'deleted-betr-draft',
+      signalType: 'deleted_from_queue',
+      surface: 'queue',
+      rewardDelta: -0.75,
+      createdAt: '2026-08-21T12:00:00.000Z',
+      metadata: { portfolioCompanyId: 'betr' },
+    }], new Date('2026-08-21T18:00:00.000Z'))).toBe(true);
   });
 });

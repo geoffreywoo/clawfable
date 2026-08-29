@@ -66,9 +66,16 @@ import {
 } from './voice-corpus';
 import { ACCOUNT_TOPIC_POLICY_VERSION, getAccountTopicPolicyIssue } from './account-topic-policy';
 import { GEOFFREY_AI_HORIZON_POLICY_VERSION } from './account-taste';
+import {
+  GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
+  GEOFFREY_PREFERRED_AUTONOMOUS_COMPANIES,
+  GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES,
+  getGeoffreyCompanyAmplificationIssue,
+} from './geoffrey-company-amplification';
 import { FRONTIER_FORECAST_LEARNING_VERSION } from './frontier-forecast-learning';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
+  ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES,
   ANTIFUND_PROMOTION_COMPANIES,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
@@ -78,6 +85,7 @@ import {
   buildAntiFundPortfolioContext,
   findAntiFundPortfolioCompanies,
   findSingleAntiFundPortfolioCompany,
+  getAntiFundAutonomousPromotionPolicyIssue,
   getAntiFundPortfolioPolicyIssue,
   isAntiFundPortfolioBriefDue,
 } from './antifund-portfolio';
@@ -89,7 +97,7 @@ import {
   usedCuratedVerifiedMentionHandles,
 } from './entity-mentions';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 46;
+export const GENERATION_QUALITY_AUDIT_VERSION = 47;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -1329,8 +1337,15 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       null,
       tweet.portfolioCompanyContext,
     );
+    const companyAmplificationIssue = getGeoffreyCompanyAmplificationIssue(
+      agent.handle,
+      `${tweet.topic || ''} ${tweet.content}`,
+    );
     const portfolioCompanyIssue = isGeoffrey || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
+      : null;
+    const autonomousPromotionIssue = isGeoffrey
+      ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
       : null;
     const mentionPolicyIssue = getCuratedEntityMentionPolicyIssue(tweet.content)
       || getAutopostPolicyIssue(tweet.content, {
@@ -1343,7 +1358,15 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const matchedPortfolioCompanies = findAntiFundPortfolioCompanies(
       `${tweet.topic || ''} ${tweet.content}`,
     );
-    const qualityIssues = [accountTopicIssue, portfolioCompanyIssue, mentionPolicyIssue, originIssue, tweet.quarantineReason]
+    const qualityIssues = [
+      accountTopicIssue,
+      companyAmplificationIssue,
+      portfolioCompanyIssue,
+      autonomousPromotionIssue,
+      mentionPolicyIssue,
+      originIssue,
+      tweet.quarantineReason,
+    ]
       .filter((value): value is string => Boolean(value));
     return {
       id: tweet.id,
@@ -1354,7 +1377,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       sourceEvidenceCount: tweet.sourceEvidenceTexts?.length || 0,
       portfolioCompanyContext: tweet.portfolioCompanyContext || null,
       portfolioCompanyMatches: matchedPortfolioCompanies.map((company) => company.id),
+      accountTopicIssue,
+      companyAmplificationIssue,
       portfolioCompanyIssue,
+      autonomousPromotionIssue,
       mentionPolicyIssue,
       allowedMentionHandles: tweet.allowedMentionHandles || [],
       curatedMentionHandles: usedCuratedVerifiedMentionHandles(tweet.content),
@@ -1399,11 +1425,16 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       null,
       portfolioCompany ? buildAntiFundPortfolioContext(portfolioCompany, 'live_development') : null,
     );
+    const companyAmplificationBlocked = getGeoffreyCompanyAmplificationIssue(
+      agent.handle,
+      storyText,
+    );
     return {
       story,
       rejectionCodes: uniqueStrings([
         ...getStoryEditorialRejectionCodesV2(story, storyEditorialOptions),
         accountTopicBlocked ? 'account_topic_blocked' : null,
+        companyAmplificationBlocked ? 'company_amplification_blocked' : null,
       ]),
       planningRejectionCodes: uniqueStrings([
         ...getStoryGenerationPlanningRejectionCodesV2(story, {
@@ -1413,6 +1444,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
           recentIdeas,
         }),
         accountTopicBlocked ? 'account_topic_blocked' : null,
+        companyAmplificationBlocked ? 'company_amplification_blocked' : null,
       ]),
     };
   });
@@ -1431,6 +1463,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
         `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
         topic.semanticDomain,
       ) ? 'account_topic_blocked' : null,
+      getGeoffreyCompanyAmplificationIssue(
+        agent.handle,
+        `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
+      ) ? 'company_amplification_blocked' : null,
     ]),
   }));
   const selectedOperatorTopicSignals = selectOperatorTopicSignals(
@@ -1516,9 +1552,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     snapshotExpiresAt: ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
     sourceUrl: ANTIFUND_PORTFOLIO_SOURCE_URL,
     companyCount: ANTIFUND_PORTFOLIO_COMPANIES.length,
-    generationEligibleCompanyCount: ANTIFUND_PROMOTION_COMPANIES.length,
+    generationEligibleCompanyCount: ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES.length,
     promotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
     flagshipPromotionCompanies: ANTIFUND_PROMOTION_COMPANIES.map((company) => company.name),
+    autonomousPromotionCompanies: ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES.map((company) => company.name),
     promotionExcludedCompanies: ANTIFUND_PORTFOLIO_COMPANIES
       .filter((company) => company.promotionTier === 'excluded')
       .map((company) => company.name),
@@ -1532,7 +1569,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     nextBriefCompanies: portfolioNextBriefs.map((brief) => brief.portfolioCompanyContext?.companyName).filter(Boolean),
     queuedCount: portfolioQueueItems.length,
     queueShare: ratio(portfolioQueueItems.length, activeQueueItems.length),
-    queuePolicyIssueCount: portfolioQueueItems.filter((item) => Boolean(item.portfolioCompanyIssue)).length,
+    queuePolicyIssueCount: portfolioQueueItems.filter((item) => Boolean(
+      item.portfolioCompanyIssue || item.autonomousPromotionIssue,
+    )).length,
     queuedCompanyCounts: countBy(portfolioQueueItems.flatMap((item) => (
       item.portfolioCompanyContext
         ? [item.portfolioCompanyContext.companyId]
@@ -1798,6 +1837,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       pipelineVersion,
       accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
       blockedTopicDomains: ['sports_competition'],
+      companyAmplificationPolicyVersion: GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
+      suppressedAutonomousCompanies: [...GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES],
+      preferredAutonomousCompanies: [...GEOFFREY_PREFERRED_AUTONOMOUS_COMPANIES],
       portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
       portfolioCompanyPromotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
       portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,

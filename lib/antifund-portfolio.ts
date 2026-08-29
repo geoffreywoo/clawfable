@@ -3,7 +3,7 @@ import type { LearningSignal, PortfolioCompanyGenerationContext, Tweet } from '.
 export const ANTIFUND_PORTFOLIO_SOURCE_URL = 'https://antifund.com/#portfolio';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION = 'antifund-portfolio-2026-08-21';
 export const ANTIFUND_PORTFOLIO_POLICY_VERSION = 'antifund-portfolio-alignment-3';
-export const ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION = 'antifund-flagship-promotion-1';
+export const ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION = 'antifund-priority-promotion-2';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT = '2026-11-19T00:00:00.000Z';
 
 export const ANTIFUND_FLAGSHIP_PROMOTION_COMPANY_IDS = [
@@ -28,8 +28,11 @@ export const ANTIFUND_FLAGSHIP_PROMOTION_COMPANY_IDS = [
 
 export const ANTIFUND_PROMOTION_EXCLUDED_COMPANY_IDS = ['natural'] as const;
 
+export const ANTIFUND_AUTONOMOUS_PROMOTION_COMPANY_IDS = ['openai', 'cognition'] as const;
+
 const FLAGSHIP_PROMOTION_COMPANY_IDS = new Set<string>(ANTIFUND_FLAGSHIP_PROMOTION_COMPANY_IDS);
 const PROMOTION_EXCLUDED_COMPANY_IDS = new Set<string>(ANTIFUND_PROMOTION_EXCLUDED_COMPANY_IDS);
+const AUTONOMOUS_PROMOTION_COMPANY_IDS = new Set<string>(ANTIFUND_AUTONOMOUS_PROMOTION_COMPANY_IDS);
 
 export type AntiFundPortfolioCategory =
   | 'ai_infrastructure_national_resilience'
@@ -146,10 +149,29 @@ export const ANTIFUND_PROMOTION_COMPANIES = ANTIFUND_PORTFOLIO_COMPANIES.filter(
   company.promotionTier === 'flagship'
 ));
 
+export const ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES = ANTIFUND_PORTFOLIO_COMPANIES.filter((company) => (
+  AUTONOMOUS_PROMOTION_COMPANY_IDS.has(company.id)
+));
+
 export function isAntiFundPortfolioPromotionEligible(
   company: AntiFundPortfolioCompany | null | undefined,
 ): company is AntiFundPortfolioCompany {
   return company?.promotionTier === 'flagship';
+}
+
+export function isAntiFundAutonomousPromotionEligible(
+  company: AntiFundPortfolioCompany | null | undefined,
+): boolean {
+  return Boolean(company && AUTONOMOUS_PROMOTION_COMPANY_IDS.has(company.id));
+}
+
+export function getAntiFundAutonomousPromotionPolicyIssue(
+  context: PortfolioCompanyGenerationContext | null | undefined,
+): string | null {
+  if (!context || context.intent !== 'constructive_conviction') return null;
+  const company = getAntiFundPortfolioCompany(context.companyId);
+  if (isAntiFundAutonomousPromotionEligible(company)) return null;
+  return `Autonomous Anti Fund company-conviction posts currently prioritize OpenAI and Cognition; ${company?.name || context.companyName || 'this company'} remains eligible only for a qualified live development.`;
 }
 
 const GENERIC_COMPANY_NAMES = new Set([
@@ -385,18 +407,23 @@ export function isAntiFundPortfolioBriefDue(
     .filter((tweet) => !tweet.quarantinedAt && ['queued', 'posted'].includes(tweet.status))
     .slice(0, 5);
   const portfolioCount = recent.filter((tweet) => (
-    Boolean(
+    (
       tweet.portfolioCompanyContext
       && getAntiFundPortfolioContextIssues(tweet.portfolioCompanyContext, now).length === 0
+      && isAntiFundAutonomousPromotionEligible(
+        getAntiFundPortfolioCompany(tweet.portfolioCompanyContext.companyId),
+      )
     )
     || findAntiFundPortfolioCompanies(`${tweet.topic || ''} ${tweet.content}`)
-      .some(isAntiFundPortfolioPromotionEligible)
+      .some(isAntiFundAutonomousPromotionEligible)
   )).length;
   if (!(recent.length < 3 || portfolioCount < 2)) return false;
   const retryBlocked = signals.some((signal) => (
     ['deleted_from_queue', 'deleted_from_x', 'edited_before_queue', 'edited_before_post'].includes(signal.signalType)
     && typeof signal.metadata?.portfolioCompanyId === 'string'
-    && signal.metadata.portfolioCompanyId.length > 0
+    && isAntiFundAutonomousPromotionEligible(
+      getAntiFundPortfolioCompany(signal.metadata.portfolioCompanyId),
+    )
     && now.getTime() - Date.parse(signal.createdAt) < PORTFOLIO_RETRY_COOLDOWN_MS
   ));
   return !retryBlocked;
@@ -407,10 +434,10 @@ export function selectAntiFundPortfolioCompany(
   rotationKey: string,
 ): AntiFundPortfolioCompany | null {
   const recent = recentContent.join('\n');
-  const eligible = ANTIFUND_PROMOTION_COMPANIES.filter((company) => (
+  const eligible = ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES.filter((company) => (
     !isAntiFundPortfolioCompanyMentioned(recent, company)
   ));
-  const pool = eligible.length > 0 ? eligible : ANTIFUND_PROMOTION_COMPANIES;
+  const pool = eligible.length > 0 ? eligible : ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES;
   if (pool.length === 0) return null;
   const hash = [...rotationKey].reduce((value, character) => (
     ((value * 31) + character.charCodeAt(0)) >>> 0

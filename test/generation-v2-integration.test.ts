@@ -263,7 +263,7 @@ const input = {
 } as any;
 
 const portfolioSatisfiedTweets = [
-  { id: 'portfolio-1', agentId: 'agent-1', content: 'Etched will matter for inference.', status: 'queued', type: 'original', topic: 'AI', createdAt: '2026-08-01T00:00:00.000Z' },
+  { id: 'portfolio-1', agentId: 'agent-1', content: 'OpenAI will matter for every software market.', status: 'queued', type: 'original', topic: 'AI', createdAt: '2026-08-01T00:00:00.000Z' },
   { id: 'portfolio-2', agentId: 'agent-1', content: 'Cognition can become a massive company.', status: 'queued', type: 'original', topic: 'startups', createdAt: '2026-08-01T00:00:00.000Z' },
   { id: 'portfolio-3', agentId: 'agent-1', content: 'founders notice constraints early.', status: 'queued', type: 'original', topic: 'founders', createdAt: '2026-08-01T00:00:00.000Z' },
 ] as any;

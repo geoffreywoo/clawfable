@@ -1241,6 +1241,55 @@ describe('Tweet Generation V2', () => {
     expect(requested).toEqual([]);
   });
 
+  it('refuses Cursor and non-priority portfolio promotion requests for Geoffrey', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const buildRequested = (requestedTopic: string) => buildGenerationBriefsV2({
+      count: 1,
+      requestedTopic,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['AI', 'startups'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,
+      trending: null,
+      allTweets: [],
+    });
+
+    expect(buildRequested('Cursor')).toEqual([]);
+    expect(buildRequested('cursor startup valuation')).toEqual([]);
+    expect(buildRequested('ElevenLabs')).toEqual([]);
+    expect(buildRequested('OpenAI')).toHaveLength(1);
+    expect(buildRequested('Cognition')).toHaveLength(1);
+  });
+
+  it('rejects Cursor when a fallback idea introduces it on a broad Geoffrey brief', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const startupBrief = brief('startup-brief', 'AI startups');
+    const [idea] = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        startupBrief.id,
+        'i would value @cursor_ai above every independent ai model startup within 12 months.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-cursor-fallback',
+      briefs: [startupBrief],
+      voiceProfile: geoffreyVoiceProfile,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-08-29T00:00:00.000Z',
+    });
+
+    expect(idea.status).toBe('rejected');
+    expect(idea.rejectionCodes).toContain('company_amplification_blocked');
+  });
+
   it('does not build or normalize sports ideas for the Geoffrey account', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
@@ -1313,6 +1362,7 @@ describe('Tweet Generation V2', () => {
       relationship: 'antifund_selected_investment',
       intent: 'constructive_conviction',
     });
+    expect(portfolioBriefs[0].portfolioCompanyContext?.companyId).toMatch(/^(?:openai|cognition)$/);
     expect(portfolioBriefs[0].sourceBrief).toContain(ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION);
     if (portfolioBriefs[0].portfolioCompanyContext?.sportsAdjacent) {
       expect(portfolioBriefs[0].authorOpportunity).toContain('as a company');
@@ -1357,14 +1407,14 @@ describe('Tweet Generation V2', () => {
     ]));
   });
 
-  it('keeps Betr and Kings League eligible only through a company-building brief', () => {
+  it('does not use Betr or Kings League as standing autonomous promotion subjects', () => {
     const geoffreyVoiceProfile = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
     };
-    let sportsPortfolioBrief: ReturnType<typeof buildGenerationBriefsV2>[number] | undefined;
-    for (let index = 0; index < 200 && !sportsPortfolioBrief; index += 1) {
-      sportsPortfolioBrief = buildGenerationBriefsV2({
+    const autonomousCompanyIds = new Set<string>();
+    for (let index = 0; index < 40; index += 1) {
+      const portfolioBrief = buildGenerationBriefsV2({
         count: 1,
         stories: [],
         documents: [],
@@ -1377,12 +1427,12 @@ describe('Tweet Generation V2', () => {
         seedRotationKey: `sports-portfolio-${index}`,
         now: new Date('2026-08-21T00:00:00.000Z'),
       }).find((entry) => entry.portfolioCompanyContext?.sportsAdjacent);
+      if (portfolioBrief?.portfolioCompanyContext) {
+        autonomousCompanyIds.add(portfolioBrief.portfolioCompanyContext.companyId);
+      }
     }
 
-    expect(sportsPortfolioBrief?.portfolioCompanyContext?.companyId).toMatch(/^(?:betr|kings-league)$/);
-    expect(sportsPortfolioBrief?.authorOpportunity).toContain('as a company');
-    expect(sportsPortfolioBrief?.authorOpportunity).toMatch(/Do not write about a game, matchup, athlete, player, score, or betting pick/i);
-    expect(buildIdeaGenerationPromptV2([sportsPortfolioBrief!], geoffreyVoiceProfile)).toContain('company-building');
+    expect(autonomousCompanyIds).toEqual(new Set());
   });
 
   it('admits sports-adjacent portfolio stories only when the source itself is company news', () => {
