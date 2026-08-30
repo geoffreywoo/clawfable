@@ -204,6 +204,44 @@ describe('virality signals', () => {
     expect(concrete.hasConcreteAnchor).toBe(true);
   });
 
+  it('rewards profile-click rate above baseline and ignores it when unavailable', () => {
+    const base = (overrides: Partial<TweetPerformance> = {}): TweetPerformance => ({
+      tweetId: 't-1',
+      xTweetId: 'x-1',
+      content: 'a take with some substance about startups and capital allocation.',
+      format: 'hot_take',
+      topic: 'startups',
+      hook: 'bold_claim',
+      tone: 'direct',
+      specificity: 'concrete',
+      structure: 'single_punch',
+      thesis: 'startups capital',
+      postedAt: '2026-08-29T00:00:00.000Z',
+      checkedAt: '2026-08-30T00:00:00.000Z',
+      likes: 20,
+      retweets: 3,
+      replies: 2,
+      impressions: 10000,
+      engagementRate: 3,
+      wasViral: false,
+      source: 'autopilot',
+      ...overrides,
+    } as TweetPerformance);
+
+    const strong = computeActionRewards(base({ profileClicks: 120 }));
+    const weak = computeActionRewards(base({ profileClicks: 10 }));
+    const absent = computeActionRewards(base({ profileClicks: null }));
+    const thinReach = computeActionRewards(base({ profileClicks: 50, impressions: 150 }));
+
+    // 1.2% click rate clears the 0.4% baseline; 0.1% lands below it.
+    expect(strong.profileClickReward).toBeGreaterThan(0.2);
+    expect(weak.profileClickReward).toBeLessThan(0);
+    expect(strong.total).toBeGreaterThan(absent.total);
+    // Missing metrics and sub-200-impression samples contribute nothing.
+    expect(absent.profileClickReward).toBe(0);
+    expect(thinReach.profileClickReward).toBe(0);
+  });
+
   it('blends cringe estimators so one mild outlier cannot veto two clean reads', () => {
     // One mildly elevated estimator, two clean: passes the 0.32 gate.
     expect(blendedCringeRisk([0.35, 0.08, 0.08])).toBeLessThan(0.32);
