@@ -255,7 +255,7 @@ export async function getMentionsFromTwitter(
   userId: string,
   sinceId?: string,
   maxTotal = MAX_MENTIONS_PER_FETCH,
-): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
+): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; authorFollowers: number | null; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
   const client = createClient(keys);
   try {
     const fetchLimit = Math.max(1, Math.min(MAX_MENTIONS_PER_FETCH, Math.floor(maxTotal)));
@@ -263,7 +263,7 @@ export async function getMentionsFromTwitter(
       max_results: Math.min(100, fetchLimit),
       'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'conversation_id', 'in_reply_to_user_id', 'referenced_tweets'],
       expansions: ['author_id'],
-      'user.fields': ['name', 'username'],
+      'user.fields': ['name', 'username', 'public_metrics'],
     };
     if (sinceId) params.since_id = sinceId;
     const timeline = await client.v2.userMentionTimeline(
@@ -277,11 +277,15 @@ export async function getMentionsFromTwitter(
     const result = timeline.data;
 
     // Build a map of author IDs to user info from expansions
-    const userMap = new Map<string, { name: string; username: string }>();
+    const userMap = new Map<string, { name: string; username: string; followers: number | null }>();
     const includes = (result as any).includes;
     if (includes?.users) {
       for (const u of includes.users) {
-        userMap.set(u.id, { name: u.name || u.id, username: u.username || u.id });
+        userMap.set(u.id, {
+          name: u.name || u.id,
+          username: u.username || u.id,
+          followers: typeof u.public_metrics?.followers_count === 'number' ? u.public_metrics.followers_count : null,
+        });
       }
     }
 
@@ -297,6 +301,7 @@ export async function getMentionsFromTwitter(
         authorId,
         authorName: user?.name || authorId,
         authorUsername: user?.username || authorId,
+        authorFollowers: user?.followers ?? null,
         createdAt: tweet.created_at || new Date().toISOString(),
         conversationId: (tweet as any).conversation_id || null,
         inReplyToTweetId: repliedTo?.id || null,

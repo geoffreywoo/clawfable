@@ -319,6 +319,7 @@ async function storeMentionIfNeeded(
     inReplyToTweetId: mention.inReplyToTweetId || null,
     engagementLikes: 0,
     engagementRetweets: 0,
+    authorFollowers: mention.authorFollowers ?? null,
     createdAt: mention.createdAt,
   });
   storedTweetIds.add(String(mention.id));
@@ -336,6 +337,7 @@ function storedMentionToTwitterMention(mention: Mention): TwitterMention | null 
     authorId: handle || fallbackAuthor,
     authorName: fallbackAuthor,
     authorUsername: handle || fallbackAuthor,
+    authorFollowers: mention.authorFollowers ?? null,
     createdAt: mention.createdAt,
     conversationId: mention.conversationId || null,
     inReplyToTweetId: mention.inReplyToTweetId || null,

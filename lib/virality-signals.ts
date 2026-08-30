@@ -347,6 +347,7 @@ export function scoreHighValueReply(mention: {
   text: string;
   authorUsername?: string | null;
   authorName?: string | null;
+  authorFollowers?: number | null;
   createdAt?: string | null;
 }, context: {
   topics?: string[];
@@ -408,6 +409,14 @@ export function scoreHighValueReply(mention: {
   if (relationship) {
     score += Math.min(0.18, 0.08 + (relationship.interactions || 0) * 0.015 + (relationship.avgEngagement || 0) / 600);
     reasons.push('known relationship target');
+  }
+  // A reply under a large account's mention is one of the highest-leverage
+  // discovery surfaces on X: the author's audience sees the exchange. Reach
+  // adds a log-scaled bonus from 10k followers up (10k +0.05, 100k +0.11,
+  // 1M +0.16); small accounts are never penalized for being small.
+  if (typeof mention.authorFollowers === 'number' && mention.authorFollowers >= 10_000) {
+    score += Math.min(0.16, Math.log10(mention.authorFollowers / 1_000) * 0.053);
+    reasons.push(`large audience (${Math.round(mention.authorFollowers / 1000)}k followers)`);
   }
   if (/\b(interesting|curious|nuance|tradeoff|edge case|example)\b/i.test(text)) {
     score += 0.08;
