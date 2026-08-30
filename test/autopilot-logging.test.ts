@@ -912,6 +912,69 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
+  it('quarantines excess company-led drafts without teaching a negative company lesson', async () => {
+    const standalone = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'standalone-agent-labor',
+      content: 'software agents should kill the weekly status meeting within 12 months',
+      topic: 'software work',
+    };
+    const companyDrafts = [{
+      ...standalone,
+      id: 'company-devin',
+      content: "within 12 months Devin's biggest scaling cost will be failed context recovery",
+      topic: 'Devin cloud agent costs',
+    }, {
+      ...standalone,
+      id: 'company-openai',
+      content: 'i would still value @OpenAI above a trillion dollars',
+      topic: 'OpenAI startup conviction',
+      allowedMentionHandles: ['openai'],
+    }, {
+      ...standalone,
+      id: 'company-spacex',
+      content: 'i would pay a stupid price for @SpaceX ownership',
+      topic: 'SpaceX startup conviction',
+      allowedMentionHandles: ['spacex'],
+    }];
+    const recentMicrosoftPost = {
+      ...standalone,
+      id: 'posted-microsoft',
+      status: 'posted' as const,
+      xTweetId: 'x-posted-microsoft',
+      postedAt: '2026-08-30T21:00:00.000Z',
+      createdAt: '2026-08-30T21:00:00.000Z',
+      content: 'i would buy @Microsoft for the next 12 months',
+      topic: 'Microsoft AI distribution',
+    };
+    mocks.getQueuedTweets.mockResolvedValue([standalone, ...companyDrafts]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI', 'startups'],
+        antiGoals: ['generic consultant prose'],
+        communicationStyle: 'compressed native voice',
+        summary: 'Geoffrey writes from technical constraints.',
+      },
+      learnings: { voiceCorpus: activeGeoffreyCorpus },
+      memory: null,
+      allTweets: [recentMicrosoftPost],
+    });
+
+    const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
+
+    expect(result).toEqual({ before: 4, after: 1, certified: 1, quarantined: 3 });
+    expect(mocks.updateTweet).toHaveBeenCalledTimes(3);
+    for (const draft of companyDrafts) {
+      expect(mocks.updateTweet).toHaveBeenCalledWith(draft.id, expect.objectContaining({
+        status: 'quarantined',
+        quarantineReason: expect.stringContaining('at most 1 company-led original in any 5 posts'),
+      }));
+    }
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+  });
+
   it('quarantines queued sports for @geoffwoo and records structured topic feedback', async () => {
     const sportsDraft = {
       ...validQueuedTweet,

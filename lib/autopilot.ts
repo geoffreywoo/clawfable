@@ -87,6 +87,11 @@ import {
   getGeoffreyCompanyAmplificationIssue,
 } from './geoffrey-company-amplification';
 import {
+  GEOFFREY_CONTENT_MIX_POLICY_VERSION,
+  evaluateGeoffreyQueueContentMix,
+  getGeoffreyContentMixDecision,
+} from './geoffrey-content-mix';
+import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   getAntiFundAutonomousPromotionPolicyIssue,
@@ -391,7 +396,7 @@ function isTerminalAutoReplyPostError(error: unknown): boolean {
 
 type QueuedNativeVoiceContext = Pick<
   Awaited<ReturnType<typeof buildGenerationContext>>,
-  'voiceProfile' | 'learnings' | 'memory'
+  'voiceProfile' | 'learnings' | 'memory' | 'allTweets'
 >;
 
 function queuedOperatorEvidence(context: QueuedNativeVoiceContext | null): string[] {
@@ -450,6 +455,10 @@ function clearsQueuedPostPreflight(
     && !getTweetLengthIssue(tweet.content, 'post')
     && !getTweetCompletenessIssue(tweet.content)
     && !getQueuedAutopostPolicyIssue(agent, tweet)
+    && !(isGeoffreyAccount(agent.handle) && getGeoffreyContentMixDecision(
+      tweet,
+      nativeContext?.allTweets || [],
+    ).issue)
     && !getAuthorityProofIssue(tweet.content)
     && !getQueuedClaimEvidenceIssue(tweet, queuedOperatorEvidence(nativeContext))
     && !getQueuedSourceCopyIssue(tweet)
@@ -480,11 +489,11 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   queuedTweets: Tweet[],
   context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
 ): Promise<Tweet[]> {
-  const valid: Tweet[] = [];
+  let valid: Tweet[] = [];
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
-    policyGate: 'account_topic_policy' | 'company_amplification_policy' | 'portfolio_company_policy' | 'portfolio_promotion_priority_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
+    policyGate: 'account_topic_policy' | 'company_amplification_policy' | 'company_content_mix_policy' | 'portfolio_company_policy' | 'portfolio_promotion_priority_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
@@ -547,6 +556,25 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     });
     else valid.push(tweet);
   }
+  if (isGeoffreyAccount(agent.handle) && valid.length > 0) {
+    const contentMixDecisions = evaluateGeoffreyQueueContentMix(
+      valid,
+      context?.allTweets || [],
+    );
+    const contentMixInvalid = valid.flatMap((tweet) => {
+      const decision = contentMixDecisions.get(String(tweet.id));
+      return decision?.issue ? [{
+        tweet,
+        issue: decision.issue,
+        policyGate: 'company_content_mix_policy' as const,
+      }] : [];
+    });
+    if (contentMixInvalid.length > 0) {
+      const blockedIds = new Set(contentMixInvalid.map(({ tweet }) => tweet.id));
+      valid = valid.filter((tweet) => !blockedIds.has(tweet.id));
+      invalid.push(...contentMixInvalid);
+    }
+  }
   await Promise.all(invalid.map(({ tweet, issue }) => updateTweet(tweet.id, {
     status: 'quarantined',
     preQuarantineStatus: 'queued',
@@ -580,6 +608,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
         qualityPolicyVersion: tweet.qualityPolicyVersion || null,
         accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
         companyAmplificationPolicyVersion: GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
+        contentMixPolicyVersion: GEOFFREY_CONTENT_MIX_POLICY_VERSION,
         portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
         portfolioCompanyPromotionPolicyVersion: ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
         entityMentionPolicyVersion: ENTITY_MENTION_POLICY_VERSION,
@@ -2723,6 +2752,7 @@ export async function refillQueue(
       ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
       ...(learnings?.operatorVoiceReference?.bestPerformers || []),
     ].map((entry) => entry.content);
+    const contentMixHistory = [...allTweets];
 
     const addBatchItems = async (items: typeof allBatch): Promise<number> => {
       let addedFromBatch = 0;
@@ -2867,11 +2897,23 @@ export async function refillQueue(
           await rejectCandidate(item, 'recent_semantic_duplicate');
           continue;
         }
+        const contentMixIssue = isGeoffreyAccount(agent.handle)
+          ? getGeoffreyContentMixDecision({
+            content: item.content,
+            targetTopic: item.targetTopic,
+            portfolioCompanyContext: item.portfolioCompanyContext,
+          }, contentMixHistory).issue
+          : null;
+        if (contentMixIssue) {
+          await rejectCandidate(item, 'company_content_mix_policy', contentMixIssue);
+          continue;
+        }
         recentContent.unshift(item.content);
-        await createTweetFromGeneratedCandidate(agent.id, item, {
+        const persistedTweet = await createTweetFromGeneratedCandidate(agent.id, item, {
           status: 'queued',
           topic: item.targetTopic,
         });
+        contentMixHistory.push(persistedTweet);
         await recordQueueDecision(item, 'persisted').catch(() => null);
         addedFromBatch++;
       }

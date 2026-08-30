@@ -69,6 +69,10 @@ import { getVoiceProfileTopicPolicyIssue } from './account-topic-policy';
 import {
   getGeoffreyVoiceProfileCompanyAmplificationIssue,
 } from './geoffrey-company-amplification';
+import {
+  getGeoffreyContentMixDecision,
+  isCompanyLedGeoffreyPost,
+} from './geoffrey-content-mix';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import { isUnderTestedBanditArm } from './bandit';
 import { pruneExpiredDynamicSeeds } from './seed-synthesis';
@@ -1757,7 +1761,6 @@ export function buildGenerationBriefsV2({
   const editorialStories = stories.filter((story) => (
     isStoryEditoriallyQualifiedV2(story, { minConsequence: geoffreyPortfolio ? 0.55 : undefined })
   ));
-  const portfolioStoryCompany = (story: StoryCluster) => portfolioCompanyForStory(story, documents);
   const storyCandidates = editorialStories
     .filter((story) => getStoryGenerationPlanningRejectionCodesV2(story, {
       minConsequence: geoffreyPortfolio ? 0.55 : undefined,
@@ -1766,10 +1769,7 @@ export function buildGenerationBriefsV2({
       recentIdeas,
       now,
     }).length === 0)
-    .sort((left, right) => (
-      Number(Boolean(portfolioStoryCompany(right))) - Number(Boolean(portfolioStoryCompany(left)))
-      || right.scores.total - left.scores.total
-    ));
+    .sort((left, right) => right.scores.total - left.scores.total);
   const briefs: GenerationBriefV2[] = [];
   const usedTopics = new Set<string>();
   const usedStorySubjects: string[] = [];
@@ -1777,6 +1777,11 @@ export function buildGenerationBriefsV2({
   const maxDeepTechnicalBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 5));
   const maxManufacturingMaterialsBriefs = Math.max(1, Math.ceil(Math.max(1, count) / 8));
   const maxTopicDomainBriefs = Math.max(2, Math.ceil(briefCount / 4));
+  const briefIsCompanyLed = (brief: GenerationBriefV2) => isCompanyLedGeoffreyPost({
+    content: `${brief.title} ${brief.summary} ${(brief.personalTopicSignals || []).join(' ')}`,
+    topic: brief.topic,
+    portfolioCompanyContext: brief.portfolioCompanyContext,
+  });
   const briefTopicContext = (brief: GenerationBriefV2) => `${brief.topic} ${brief.title}`;
   const briefTechnicalContext = (brief: GenerationBriefV2) => [
     brief.topic,
@@ -1789,6 +1794,7 @@ export function buildGenerationBriefsV2({
     domainValue = value,
     portfolioCompanyContext: PortfolioCompanyGenerationContext | null | undefined = null,
     exactEntities: string[] = [],
+    companySubjectValue = value,
   ): boolean => {
     if (!geoffreyPortfolio) return true;
     const mentionedPortfolioCompanies = findAntiFundPortfolioCompanies(value, { exactEntities });
@@ -1796,6 +1802,13 @@ export function buildGenerationBriefsV2({
       company.promotionTier === 'excluded'
     ))) return false;
     if (isGenerationSubjectBlocked(voiceProfile, value, portfolioCompanyContext)) return false;
+    const companyMixDecision = getGeoffreyContentMixDecision({
+      content: companySubjectValue,
+      topic: domainValue,
+      portfolioCompanyContext,
+    }, committedTweets);
+    if (!companyMixDecision.allowed) return false;
+    if (companyMixDecision.companyLed && briefs.some(briefIsCompanyLed)) return false;
     if (
       isGeoffreyDeepTechnicalTopic(value)
       && briefs.filter((brief) => isGeoffreyDeepTechnicalTopic(briefTechnicalContext(brief))).length >= maxDeepTechnicalBriefs
@@ -1833,6 +1846,15 @@ export function buildGenerationBriefsV2({
         || (geoffreyPortfolio && !isAntiFundAutonomousPromotionEligible(requestedCompany))
       )
     ) return [];
+    const requestedPortfolioContext = requestedCompany
+      ? buildAntiFundPortfolioContext(requestedCompany, 'constructive_conviction')
+      : null;
+    if (!portfolioAllowsTopic(
+      requested,
+      requested,
+      requestedPortfolioContext,
+      [requested],
+    )) return [];
     briefs.push({
       id: stableResearchId('brief', 'operator-request', requested),
       topic: requested,
@@ -1867,6 +1889,7 @@ export function buildGenerationBriefsV2({
         nonConsensusDirection: seed.nonConsensusImplication,
         reactionPrompt: seed.reactionPrompt || null,
       } : null,
+      portfolioCompanyContext: requestedPortfolioContext,
     });
     usedTopics.add(topicKey(requested));
     return briefs;
@@ -1912,9 +1935,8 @@ export function buildGenerationBriefsV2({
     if (briefs.filter((brief) => brief.evidenceMode === 'verified_source').length >= desiredStoryBriefs) break;
   }
 
-  const pendingPortfolioCompany = (
+  const pendingPortfolioCandidate = (
     geoffreyPortfolio
-    && !briefs.some((brief) => Boolean(brief.portfolioCompanyContext))
     && isAntiFundPortfolioBriefDue(allTweets, signals, now)
   )
     ? selectAntiFundPortfolioCompany(
@@ -1931,6 +1953,7 @@ export function buildGenerationBriefsV2({
       `${seedRotationKey}:${now.toISOString().slice(0, 10)}`,
     )
     : null;
+  const pendingPortfolioCompany = pendingPortfolioCandidate;
 
   // Followed-network engagement can choose a subject, never wording or facts.
   // Geoffrey gets two current-interest briefs in a four-brief batch; the
@@ -2019,10 +2042,33 @@ export function buildGenerationBriefsV2({
     operatorTopicSignalBriefs += 1;
   }
 
-  // Portfolio promotion is an additive account objective, not a substitute for
-  // the fresh subjects Geoffrey is engaging with. Add it after those signals so
-  // it replaces an evergreen filler slot when the batch is otherwise full.
-  if (pendingPortfolioCompany && briefs.length < briefCount) {
+  const nativeCompanySubjectPending = operatorCandidates.some((candidate) => (
+    isCompanyLedGeoffreyPost({
+      content: [
+        candidate.topic,
+        candidate.historicalAngle,
+        ...(candidate.personalTopicSignals || []),
+      ].filter(Boolean).join(' '),
+      topic: candidate.topic,
+    })
+  ));
+  // A sparse standing-conviction slot can count toward the core business-tech
+  // floor, but it never competes with a native company subject already present
+  // in operator taste or current engagement.
+  if (
+    pendingPortfolioCompany
+    && briefs.length < briefCount
+    && !nativeCompanySubjectPending
+    && !briefs.some(briefIsCompanyLed)
+    && getGeoffreyContentMixDecision({
+      content: pendingPortfolioCompany.name,
+      topic: pendingPortfolioCompany.category,
+      portfolioCompanyContext: buildAntiFundPortfolioContext(
+        pendingPortfolioCompany,
+        'constructive_conviction',
+      ),
+    }, committedTweets).allowed
+  ) {
     const portfolioBrief = antiFundPortfolioBrief(pendingPortfolioCompany, briefs.length);
     briefs.push(portfolioBrief);
     usedTopics.add(topicKey(portfolioBrief.topic));
@@ -2077,6 +2123,7 @@ export function buildGenerationBriefsV2({
     const seededTopicContext = [
       candidate.topic,
       candidate.historicalAngle,
+      ...personalTopicSignals,
       seed?.topic,
       seed?.technicalObject,
       seed?.hiddenConstraint,
@@ -2084,6 +2131,9 @@ export function buildGenerationBriefsV2({
     if (!portfolioAllowsTopic(
       seededTopicContext,
       `${candidate.topic} ${candidate.historicalAngle || ''}`,
+      null,
+      [],
+      [candidate.topic, candidate.historicalAngle, ...personalTopicSignals].filter(Boolean).join(' '),
     )) return false;
     const brief = operatorTopicBrief(
       candidate.topic,
@@ -2180,6 +2230,9 @@ export function buildIdeaGenerationPromptV2(
       portfolioCompanyContract: 'When portfolioCompanyContext has constructive_conviction intent, the company must be OpenAI or Cognition, the current autonomous promotion priority set. A live_development context may cover another flagship portfolio company only when the sourced development itself qualifies. Every proposition must name that exact company and make a positive or constructively ambitious company-specific judgment. The relationship and description support subject selection only. Never mention the portfolio relationship, invent a meeting, call, investment scene, founder interaction, product use, ownership detail, or private knowledge. Never criticize, short, dismiss, warn against, or write generic ad copy about the company. Do not use the reusable company-plus-modal affect forecast "X can/could/should/will make Y feel Z"; state the actual company or product judgment.',
       geoffreyNativeMoveContract: isGeoffreyVoiceProfile(voiceProfile)
         ? 'Across the three propositions for each source-free brief, use materially different native move families: (1) a blunt named valuation, timing, capital, or company-quality bet with one subject-specific reason; (2) a real first-person question, desire, disagreement, or self-implicating decision; and (3) a weird but coherent causal implication or prediction about what a specific person, founder, company, or market does next. Geoffrey often makes the interesting part socially risky, funny, numerically ambitious, or personally costly; preserve that energy when the packet supports it instead of retreating to a safe product wish or evaluation framework. Do not manufacture holdings, status objects, status assets, status signals, new status games, or flexes to make a thin idea feel social. Do not collapse AI topics into permissions, authority, workflows, handoffs, release gates, implementation options, task-continuity tests, benchmark comparisons, or generic demands for what a company should ship. Do not use "the first X I would trust," "if true I would watch," or product-governance abstractions as a substitute for a belief.'
+        : null,
+      geoffreyCompanyMixContract: isGeoffreyVoiceProfile(voiceProfile)
+        ? 'Most briefs intentionally have no named company or product. Do not introduce one unless the brief concrete subject requires it. A company-led brief must express a real judgment or consequence, not praise, valuation theater, ownership signaling, or portfolio promotion.'
         : null,
       geoffreyAIFutureHorizonContract: isGeoffreyVoiceProfile(voiceProfile)
         ? 'For every AI or robotics proposition, first identify the current frontier baseline, then make the publicMove about the next 6-12 month organizational, economic, capital, software, labor, power, or cultural consequence. HARD SHAPE: publicMove itself must literally include an explicit window no more than 12 months out, an owned will/could/expect/bet prediction, one capability, cost, reliability, fleet-data, adoption, or deployment mechanism, one subject-specific nonlinear cue, and the second-order consequence. These are semantic constraints, not a sentence template. Never stack them as "subject will outcome within N months as each model generation..." or a polished causal checklist. Let the native reaction mode determine order and rhythm; the timing can be a separate fragment, line, or coda. Treat OpenAI at trillion-dollar scale, ChatGPT verb-like usage, frontier engineers using coding agents on hard work, and robots already piloting in real factories and warehouses as present baselines, not predictions. Geoffrey is ultra bullish on AI and robotic deployment. Keep every source-free mechanism explicitly future or conditional. A forecast horizon does not license a second number: never invent a headcount, multiplier, market size, rate, or measured data.'
@@ -3521,6 +3574,7 @@ export function selectRankedIdeaPortfolioV2({
   let selectedVerifiedSources = 0;
   let selectedDeepTechnical = 0;
   let selectedManufacturingMaterials = 0;
+  let selectedCompanyLed = 0;
 
   const portfolioTraits = (idea: IdeaCandidate) => {
     const brief = briefsById.get(idea.briefId);
@@ -3529,6 +3583,11 @@ export function selectRankedIdeaPortfolioV2({
       verifiedSource: brief?.evidenceMode === 'verified_source',
       deepTechnical: isGeoffreyDeepTechnicalTopic(topicContext),
       manufacturingMaterials: isGeoffreyManufacturingMaterialsTopic(topicContext),
+      companyLed: isCompanyLedGeoffreyPost({
+        content: topicContext,
+        topic: brief?.topic,
+        portfolioCompanyContext: brief?.portfolioCompanyContext,
+      }),
       accountTopicBlocked: isGenerationSubjectBlocked(
         voiceProfile,
         topicContext,
@@ -3542,22 +3601,31 @@ export function selectRankedIdeaPortfolioV2({
     if (traits.verifiedSource) selectedVerifiedSources += 1;
     if (traits.deepTechnical) selectedDeepTechnical += 1;
     if (traits.manufacturingMaterials) selectedManufacturingMaterials += 1;
+    if (traits.companyLed) selectedCompanyLed += 1;
   }
 
   const add = (idea: IdeaCandidate): boolean => {
     if (selectedBriefs.has(idea.briefId)) return false;
-    const { verifiedSource, deepTechnical, manufacturingMaterials, accountTopicBlocked } = portfolioTraits(idea);
+    const {
+      verifiedSource,
+      deepTechnical,
+      manufacturingMaterials,
+      companyLed,
+      accountTopicBlocked,
+    } = portfolioTraits(idea);
     if (accountTopicBlocked) return false;
     if (geoffreyPortfolio && (
       (verifiedSource && selectedVerifiedSources >= 1)
       || (deepTechnical && selectedDeepTechnical >= 1)
       || (manufacturingMaterials && selectedManufacturingMaterials >= 1)
+      || (companyLed && selectedCompanyLed >= 1)
     )) return false;
     selected.push(idea);
     selectedBriefs.add(idea.briefId);
     if (verifiedSource) selectedVerifiedSources += 1;
     if (deepTechnical) selectedDeepTechnical += 1;
     if (manufacturingMaterials) selectedManufacturingMaterials += 1;
+    if (companyLed) selectedCompanyLed += 1;
     return true;
   };
 
@@ -4573,6 +4641,23 @@ function preflightDraft({
     content,
     brief.portfolioCompanyContext,
   );
+  const briefCompanyLed = isCompanyLedGeoffreyPost({
+    content: `${brief.title} ${brief.summary} ${(brief.personalTopicSignals || []).join(' ')}`,
+    topic: brief.topic,
+    portfolioCompanyContext: brief.portfolioCompanyContext,
+  });
+  const draftCompanyLed = isCompanyLedGeoffreyPost({
+    content,
+    topic: idea.topic,
+    portfolioCompanyContext: brief.portfolioCompanyContext,
+  });
+  const contentMixDecision = isGeoffreyVoiceProfile(input.voiceProfile)
+    ? getGeoffreyContentMixDecision({
+      content,
+      topic: idea.topic,
+      portfolioCompanyContext: brief.portfolioCompanyContext,
+    }, input.allTweets)
+    : null;
 
   if (generatedIssue) codes.push('incomplete_or_prompt_leak');
   if (deprecatedVerifiedEntityHandleIssue) codes.push('deprecated_verified_entity_handle');
@@ -4582,6 +4667,10 @@ function preflightDraft({
   if (policyIssue) codes.push('autopost_policy');
   if (accountTopicIssue) codes.push('account_topic_blocked');
   if (companyAmplificationIssue) codes.push('company_amplification_blocked');
+  if (isGeoffreyVoiceProfile(input.voiceProfile) && draftCompanyLed && !briefCompanyLed) {
+    codes.push('company_subject_introduced');
+  }
+  if (contentMixDecision?.issue) codes.push('company_content_mix');
   codes.push(...portfolioPolicyIssues);
   if (authorityIssue) codes.push('unearned_authority');
   if (brief.evidenceMode === 'verified_source' && claimIssue) codes.push('claim_evidence');
@@ -5551,6 +5640,7 @@ async function selectFinalTweets({
   let selectedQuestions = 0;
   let selectedTrends = 0;
   let selectedPortfolioCompanies = 0;
+  let selectedCompanyLed = 0;
   const portfolioBriefDue = isGeoffreyVoiceProfile(input.voiceProfile)
     && isAntiFundPortfolioBriefDue(input.allTweets, input.signals);
 
@@ -5558,6 +5648,19 @@ async function selectFinalTweets({
     if (selectedIdeas.has(evaluation.idea.id)) return false;
     if (evaluation.idea.storyClusterId && selectedStories.has(evaluation.idea.storyClusterId)) return false;
     if (evaluation.brief.portfolioCompanyContext && selectedPortfolioCompanies >= 1) return false;
+    const companyLed = isCompanyLedGeoffreyPost({
+      content: evaluation.draft.content,
+      topic: evaluation.idea.topic,
+      portfolioCompanyContext: evaluation.brief.portfolioCompanyContext,
+    });
+    const contentMixDecision = isGeoffreyVoiceProfile(input.voiceProfile)
+      ? getGeoffreyContentMixDecision({
+        content: evaluation.draft.content,
+        topic: evaluation.idea.topic,
+        portfolioCompanyContext: evaluation.brief.portfolioCompanyContext,
+      }, input.allTweets)
+      : null;
+    if (contentMixDecision?.issue || (companyLed && selectedCompanyLed >= 1)) return false;
     const score = judge.scores.get(evaluation.draft.id);
     if (!score) return false;
     const isQuestion = isQuestionDraftV2(evaluation.draft.content);
@@ -5580,6 +5683,7 @@ async function selectFinalTweets({
     if (isQuestion) selectedQuestions += 1;
     if (isTrend) selectedTrends += 1;
     if (evaluation.brief.portfolioCompanyContext) selectedPortfolioCompanies += 1;
+    if (companyLed) selectedCompanyLed += 1;
     return true;
   };
 
