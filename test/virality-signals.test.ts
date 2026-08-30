@@ -245,6 +245,23 @@ describe('virality signals', () => {
     expect(measured.hits).not.toContain('neat-numbered-scaffold');
   });
 
+  it('boosts reply value for large-audience authors without penalizing small ones', () => {
+    const base = {
+      text: 'this take undersells how brutal the unit economics get at scale for these labs',
+      authorUsername: 'somebody',
+      createdAt: '2026-08-30T00:00:00.000Z',
+    };
+    const context = { topics: ['inference pricing'] };
+    const small = scoreHighValueReply({ ...base, authorFollowers: 300 }, context);
+    const unknown = scoreHighValueReply({ ...base, authorFollowers: null }, context);
+    const big = scoreHighValueReply({ ...base, authorFollowers: 250_000 }, context);
+
+    expect(big.score).toBeGreaterThan(small.score);
+    // No penalty for small or unknown audiences: same score as no data.
+    expect(small.score).toBe(unknown.score);
+    expect(big.reason).toContain('large audience');
+  });
+
   it('rewards profile-click rate above baseline and ignores it when unavailable', () => {
     const base = (overrides: Partial<TweetPerformance> = {}): TweetPerformance => ({
       tweetId: 't-1',

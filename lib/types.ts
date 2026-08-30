@@ -599,6 +599,7 @@ export interface Mention {
   inReplyToTweetId: string | null;
   engagementLikes: number;
   engagementRetweets: number;
+  authorFollowers?: number | null;  // author's follower count at fetch time; null for legacy rows
   createdAt: string;
 }
 
