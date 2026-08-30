@@ -72,6 +72,16 @@ import {
   GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES,
   getGeoffreyCompanyAmplificationIssue,
 } from './geoffrey-company-amplification';
+import {
+  GEOFFREY_COMPANY_LED_WINDOW,
+  GEOFFREY_CONTENT_MIX_POLICY_VERSION,
+  GEOFFREY_MAX_COMPANY_LED_IN_WINDOW,
+  GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW,
+  GEOFFREY_STANDING_PROMOTION_WINDOW,
+  evaluateGeoffreyQueueContentMix,
+  isCompanyLedGeoffreyPost,
+  isStandingCompanyPromotionGeoffreyPost,
+} from './geoffrey-content-mix';
 import { FRONTIER_FORECAST_LEARNING_VERSION } from './frontier-forecast-learning';
 import {
   ANTIFUND_PORTFOLIO_COMPANIES,
@@ -97,7 +107,7 @@ import {
   usedCuratedVerifiedMentionHandles,
 } from './entity-mentions';
 
-export const GENERATION_QUALITY_AUDIT_VERSION = 47;
+export const GENERATION_QUALITY_AUDIT_VERSION = 48;
 
 export type GenerationAuditFindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type GenerationAuditFindingScope = 'live_state' | 'current_policy' | 'historical_window';
@@ -520,6 +530,14 @@ interface AuditFindingInput {
     queuedCount: number;
     postedLast7Count: number;
   };
+  contentMix?: {
+    queuePolicyIssueCount: number;
+    queuedCompanyLedCount: number;
+    queuedStandingPromotionCount: number;
+    nextBriefCompanyLedCount: number;
+    postedLast5CompanyLedCount: number;
+    postedLast10StandingPromotionCount: number;
+  };
 }
 
 export function buildGenerationAuditFindings(input: AuditFindingInput): GenerationAuditFinding[] {
@@ -530,6 +548,40 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
     .flatMap((group) => group.topRejectionCodes || [])
     .filter((entry) => entry.value === 'final_source_copy_risk')
     .reduce((sum, entry) => sum + entry.count, 0) || 0;
+
+  if ((input.contentMix?.queuePolicyIssueCount || 0) > 0) {
+    add({
+      code: 'company_content_mix_queue_failure',
+      severity: 'critical',
+      scope: 'live_state',
+      title: 'The active queue is over the company-led content ceiling',
+      evidence: input.contentMix || {},
+      action: 'Quarantine excess company-led drafts and refill with standalone ideas before the next autonomous post.',
+    });
+  }
+  if ((input.contentMix?.nextBriefCompanyLedCount || 0) > GEOFFREY_MAX_COMPANY_LED_IN_WINDOW) {
+    add({
+      code: 'company_content_mix_generation_plan_failure',
+      severity: 'high',
+      scope: 'current_policy',
+      title: 'The next generation plan over-allocates named companies',
+      evidence: input.contentMix || {},
+      action: 'Keep at most one company-led brief and let the remaining briefs begin from behaviors, markets, people, or predictions.',
+    });
+  }
+  if (
+    (input.contentMix?.postedLast5CompanyLedCount || 0) > GEOFFREY_MAX_COMPANY_LED_IN_WINDOW
+    || (input.contentMix?.postedLast10StandingPromotionCount || 0) > GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW
+  ) {
+    add({
+      code: 'company_content_mix_historical_breach',
+      severity: 'medium',
+      scope: 'historical_window',
+      title: 'Recent originals over-indexed on companies or explicit promotion',
+      evidence: input.contentMix || {},
+      action: 'Publish only standalone ideas until the rolling company and promotion windows return under their ceilings.',
+    });
+  }
 
   if (
     input.learning
@@ -1327,6 +1379,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
   const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
   const isGeoffrey = ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle);
+  const activeQueueForContentMix = queue.filter((tweet) => (
+    tweet.status === 'queued' && !tweet.quarantinedAt
+  ));
+  const queueContentMixDecisions = isGeoffrey
+    ? evaluateGeoffreyQueueContentMix(activeQueueForContentMix, allTweets)
+    : new Map();
   const queueItems = queue.map((tweet) => {
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
@@ -1347,6 +1405,9 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const autonomousPromotionIssue = isGeoffrey
       ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
       : null;
+    const contentMixDecision = isGeoffrey
+      ? queueContentMixDecisions.get(String(tweet.id)) || null
+      : null;
     const mentionPolicyIssue = getCuratedEntityMentionPolicyIssue(tweet.content)
       || getAutopostPolicyIssue(tweet.content, {
         allowedMentions: [
@@ -1363,6 +1424,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       companyAmplificationIssue,
       portfolioCompanyIssue,
       autonomousPromotionIssue,
+      contentMixDecision?.issue || null,
       mentionPolicyIssue,
       originIssue,
       tweet.quarantineReason,
@@ -1381,6 +1443,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       companyAmplificationIssue,
       portfolioCompanyIssue,
       autonomousPromotionIssue,
+      companyLed: contentMixDecision?.companyLed ?? isCompanyLedGeoffreyPost(tweet),
+      standingPromotion: contentMixDecision?.standingPromotion
+        ?? isStandingCompanyPromotionGeoffreyPost(tweet),
+      contentMixPolicyVersion: isGeoffrey ? GEOFFREY_CONTENT_MIX_POLICY_VERSION : null,
+      contentMixIssue: contentMixDecision?.issue || null,
       mentionPolicyIssue,
       allowedMentionHandles: tweet.allowedMentionHandles || [],
       curatedMentionHandles: usedCuratedVerifiedMentionHandles(tweet.content),
@@ -1537,6 +1604,45 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     const postedAt = Date.parse(tweet.postedAt || tweet.createdAt);
     return Number.isFinite(postedAt) && postedAt >= sevenDaysAgo;
   });
+  const recentPublishedOriginals = allTweets
+    .filter((tweet) => (
+      tweet.type !== 'reply'
+      && Boolean(tweet.xTweetId)
+      && ['posted', 'deleted_from_x'].includes(tweet.status)
+    ))
+    .sort((left, right) => (
+      Date.parse(right.postedAt || right.createdAt) - Date.parse(left.postedAt || left.createdAt)
+    ));
+  const contentMixSummary = {
+    policyVersion: GEOFFREY_CONTENT_MIX_POLICY_VERSION,
+    companyLedWindow: GEOFFREY_COMPANY_LED_WINDOW,
+    maxCompanyLedInWindow: GEOFFREY_MAX_COMPANY_LED_IN_WINDOW,
+    standingPromotionWindow: GEOFFREY_STANDING_PROMOTION_WINDOW,
+    maxStandingPromotionInWindow: GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW,
+    queuePolicyIssueCount: queueItems.filter((item) => Boolean(item.contentMixIssue)).length,
+    queuedCompanyLedCount: activeQueueItems.filter((item) => item.companyLed).length,
+    queuedCompanyLedShare: ratio(
+      activeQueueItems.filter((item) => item.companyLed).length,
+      activeQueueItems.length,
+    ),
+    queuedStandingPromotionCount: activeQueueItems.filter((item) => item.standingPromotion).length,
+    nextBriefCompanyLedCount: nextBriefPlan.filter((brief) => isCompanyLedGeoffreyPost({
+      content: `${brief.title} ${brief.summary} ${(brief.personalTopicSignals || []).join(' ')}`,
+      topic: brief.topic,
+      portfolioCompanyContext: brief.portfolioCompanyContext,
+    })).length,
+    postedLast5CompanyLedCount: recentPublishedOriginals
+      .slice(0, GEOFFREY_COMPANY_LED_WINDOW)
+      .filter(isCompanyLedGeoffreyPost).length,
+    postedLast10StandingPromotionCount: recentPublishedOriginals
+      .slice(0, GEOFFREY_STANDING_PROMOTION_WINDOW)
+      .filter(isStandingCompanyPromotionGeoffreyPost).length,
+    postedLast7CompanyLedCount: postedLast7.filter(isCompanyLedGeoffreyPost).length,
+    postedLast7CompanyLedShare: ratio(
+      postedLast7.filter(isCompanyLedGeoffreyPost).length,
+      postedLast7.length,
+    ),
+  };
   const portfolioPostedLast7 = postedLast7.flatMap((tweet) => {
     const matches = tweet.portfolioCompanyContext
       ? [tweet.portfolioCompanyContext.companyId]
@@ -1808,6 +1914,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       operatorTopicSignalRejectionCounts: topCounts(operatorTopicSignalDecisions.flatMap((decision) => decision.rejectionCodes)),
     },
     portfolio: portfolioSummary,
+    contentMix: isGeoffrey ? contentMixSummary : undefined,
   });
   const findingCounts = {
     critical: findingItems.filter((finding) => finding.severity === 'critical').length,
@@ -1838,6 +1945,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       accountTopicPolicyVersion: ACCOUNT_TOPIC_POLICY_VERSION,
       blockedTopicDomains: ['sports_competition'],
       companyAmplificationPolicyVersion: GEOFFREY_COMPANY_AMPLIFICATION_POLICY_VERSION,
+      contentMixPolicyVersion: GEOFFREY_CONTENT_MIX_POLICY_VERSION,
+      companyLedWindow: GEOFFREY_COMPANY_LED_WINDOW,
+      maxCompanyLedInWindow: GEOFFREY_MAX_COMPANY_LED_IN_WINDOW,
+      standingPromotionWindow: GEOFFREY_STANDING_PROMOTION_WINDOW,
+      maxStandingPromotionInWindow: GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW,
       suppressedAutonomousCompanies: [...GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES],
       preferredAutonomousCompanies: [...GEOFFREY_PREFERRED_AUTONOMOUS_COMPANIES],
       portfolioCompanyPolicyVersion: ANTIFUND_PORTFOLIO_POLICY_VERSION,
@@ -1876,6 +1988,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     },
     corpus: corpusSummary,
     queue: queueSummary,
+    contentMix: isGeoffrey ? contentMixSummary : null,
     portfolio: portfolioSummary,
     sources: {
       nextBriefPlan: {
