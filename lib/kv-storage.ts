@@ -613,6 +613,7 @@ const KEYS = {
   agentProtocol: (id: string) => `agent:${id}:protocol`,
   agentPostLog: (id: string) => `agent:${id}:postlog`,
   agentFollowerSnapshots: (id: string) => `agent:${id}:follower-snapshots`,
+  agentDynamicSeeds: (id: string) => `agent:${id}:dynamic-seeds`,
   agentPerformance: (id: string) => `agent:${id}:performance`,
   agentExperiments: (id: string) => `agent:${id}:experiments`,
   draftExperiment: (id: string) => `experiment:${id}`,
@@ -916,6 +917,7 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentProtocol(id));
   await kvDel(KEYS.agentPostLog(id));
   await kvDel(KEYS.agentFollowerSnapshots(id));
+  await kvDel(KEYS.agentDynamicSeeds(id));
   await kvDel(KEYS.agentLearnings(id));
   await kvDel(KEYS.agentPerformance(id));
   await kvDel(KEYS.agentTrendOpportunities(id));
@@ -1938,6 +1940,23 @@ export async function addFollowerSnapshot(agentId: string, snapshot: FollowerSna
 export async function getFollowerSnapshots(agentId: string, limit = 100): Promise<FollowerSnapshot[]> {
   const raw = await kvLrange(KEYS.agentFollowerSnapshots(agentId), 0, limit - 1);
   return raw.map((s) => parseListEntry<FollowerSnapshot>(s)).filter((e): e is FollowerSnapshot => e !== null);
+}
+
+// ─── Dynamic idea seeds ──────────────────────────────────────────────────────
+// Research-synthesized premises for generation, replacing the ceiling of a
+// purely hand-written seed pool. Type lives in seed-synthesis.ts (type-only
+// import; no runtime cycle).
+
+export async function getDynamicIdeaSeeds(agentId: string): Promise<import('./seed-synthesis').DynamicIdeaSeed[]> {
+  const stored = await kvGet<import('./seed-synthesis').DynamicIdeaSeed[]>(KEYS.agentDynamicSeeds(agentId));
+  return Array.isArray(stored) ? stored : [];
+}
+
+export async function saveDynamicIdeaSeeds(
+  agentId: string,
+  seeds: import('./seed-synthesis').DynamicIdeaSeed[],
+): Promise<void> {
+  await kvSet(KEYS.agentDynamicSeeds(agentId), seeds);
 }
 
 // ─── Cron log storage ─────────────────────────────────────────────────────────

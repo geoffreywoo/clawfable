@@ -521,16 +521,19 @@ export function pickGeoffreyIdeaSeed({
   targetTopic,
   slot,
   usedSeedIds = new Set<string>(),
+  extraSeeds = [],
 }: {
   voiceProfile?: VoiceProfile | null;
   targetTopic: string;
   slot: number;
   usedSeedIds?: Set<string>;
+  /** Research-synthesized dynamic seeds; merged ahead of the curated pool so a fresh, relevant premise beats an evergreen one at equal relevance. */
+  extraSeeds?: FrontierIdeaSeed[];
 }): FrontierIdeaSeed | null {
   if (!voiceProfile || !isGeoffreyVoiceProfile(voiceProfile)) return null;
   const preferredKinds = preferredGeoffreySeedKinds(targetTopic);
   const frontier = FRONTIER_CHOKEPOINT_SEEDS.map((seed) => ({ ...seed, kind: 'frontier' as const }));
-  const allSeeds = [...GEOFFREY_BROAD_SEEDS, ...frontier];
+  const allSeeds = [...extraSeeds, ...GEOFFREY_BROAD_SEEDS, ...frontier];
   const preferred = allSeeds.filter((seed) => preferredKinds.includes(seed.kind || 'frontier'));
   const kindPool = preferred.length > 0 ? preferred : allSeeds;
   const scored = kindPool

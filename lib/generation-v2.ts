@@ -49,6 +49,7 @@ import {
   type GenerateTextResult,
 } from './ai';
 import {
+  getDynamicIdeaSeeds,
   getIdeaCandidates,
   getSemanticBlocks,
   getGenerationRuns,
@@ -1727,6 +1728,7 @@ export function buildGenerationBriefsV2({
   blocks = [],
   recentIdeas = [],
   seedRotationKey = '',
+  dynamicIdeaSeeds = [],
   now = new Date(),
 }: {
   count: number;
@@ -1743,6 +1745,7 @@ export function buildGenerationBriefsV2({
   blocks?: SemanticBlock[];
   recentIdeas?: IdeaCandidate[];
   seedRotationKey?: string;
+  dynamicIdeaSeeds?: FrontierIdeaSeed[];
   now?: Date;
 }): GenerationBriefV2[] {
   const briefCount = Math.max(4, Math.min(8, count * 2));
@@ -1817,6 +1820,7 @@ export function buildGenerationBriefsV2({
       targetTopic: requested,
       slot: seedRotation,
       usedSeedIds: usedIdeaSeedIds,
+      extraSeeds: dynamicIdeaSeeds,
     });
     const requestedCompany = findSingleAntiFundPortfolioCompany(requested, {
       exactEntities: [requested],
@@ -2067,6 +2071,7 @@ export function buildGenerationBriefsV2({
       targetTopic: seedTarget,
       slot: index + seedRotation,
       usedSeedIds: usedIdeaSeedIds,
+      extraSeeds: dynamicIdeaSeeds,
     });
     const seededTopicContext = [
       candidate.topic,
@@ -6204,11 +6209,12 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       await publishTrace();
       return [];
     }
-    const [documents, stories, blocks, recentIdeas] = await Promise.all([
+    const [documents, stories, blocks, recentIdeas, dynamicIdeaSeeds] = await Promise.all([
       getSourceDocuments(input.agentId, 300),
       getStoryClusters(input.agentId, 200),
       getSemanticBlocks(input.agentId),
       getIdeaCandidates(input.agentId, 300),
+      getDynamicIdeaSeeds(input.agentId).catch(() => []),
     ]);
     const builtBriefs = buildGenerationBriefsV2({
       count: input.count,
@@ -6225,6 +6231,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       blocks,
       recentIdeas,
       seedRotationKey: runId,
+      dynamicIdeaSeeds,
     });
     // Verified stories require claim-level evidence. Native operator briefs are
     // allowed to carry opinion only; deterministic idea and copy gates reject

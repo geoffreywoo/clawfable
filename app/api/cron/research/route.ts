@@ -3,6 +3,7 @@ import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { getAgents, getProtocolSettings, resetReadCache } from '@/lib/kv-storage';
 import { refreshAgentResearch } from '@/lib/research-pipeline';
+import { refreshDynamicIdeaSeeds } from '@/lib/seed-synthesis';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 
 export const maxDuration = 800;
@@ -21,9 +22,15 @@ export async function GET(request: NextRequest) {
     if (!settings.enabled) continue;
     const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
     if (!entitlement.eligible) continue;
-    results.push(await refreshAgentResearch(agent, {
+    const result = await refreshAgentResearch(agent, {
       modelStack: PUBLISHING_V2_MODEL_STACK,
-    }));
+    });
+    results.push(result);
+    // Distill fresh idea seeds from the corpus that was just refreshed. A
+    // failed synthesis must never fail the research cycle.
+    if (result.refreshed) {
+      await refreshDynamicIdeaSeeds(agent).catch(() => null);
+    }
   }
 
   return NextResponse.json({
