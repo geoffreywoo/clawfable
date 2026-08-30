@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, hasConcreteNumericAnchor, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
+import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, hasConcreteNumericAnchor, hasSpecificQuantity, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -204,16 +204,30 @@ describe('virality signals', () => {
     expect(concrete.hasConcreteAnchor).toBe(true);
   });
 
-  it('does not treat listicle counts or bare digits as concrete anchors', () => {
+  it('does not treat listicle counts, bare digits, or label numbers as concrete anchors', () => {
     expect(hasConcreteNumericAnchor('5 things I learned about distribution')).toBe(false);
     expect(hasConcreteNumericAnchor('3 reasons your startup will fail')).toBe(false);
     expect(hasConcreteNumericAnchor('1. build\n2. ship\n3. learn')).toBe(false);
     expect(hasConcreteNumericAnchor('I have 3 rules for hiring')).toBe(false);
+    expect(hasConcreteNumericAnchor('version 12 shipped today')).toBe(false);
+    expect(hasConcreteNumericAnchor('3 big shifts are coming for founders')).toBe(false);
 
+    expect(hasConcreteNumericAnchor('churn dropped 8% after the pricing change')).toBe(true);
     expect(hasConcreteNumericAnchor('churn dropped 12% after the pricing change')).toBe(true);
     expect(hasConcreteNumericAnchor('a $40 dispute took 3 hours of support time')).toBe(true);
     expect(hasConcreteNumericAnchor('inference cost fell 3.5x in a year')).toBe(true);
-    expect(hasConcreteNumericAnchor('we shipped 47 drafts before one landed')).toBe(true);
+    expect(hasConcreteNumericAnchor('the eval ran for 24-hour cycles')).toBe(true);
+  });
+
+  it('separates specific quantities from measured factual proof', () => {
+    expect(hasConcreteNumericAnchor('we talked to 8 founders about pricing')).toBe(false);
+    expect(hasSpecificQuantity('we talked to 8 founders about pricing')).toBe(true);
+    expect(hasSpecificQuantity('we shipped 47 drafts before one landed')).toBe(true);
+    expect(hasSpecificQuantity('churn dropped 8%')).toBe(true);
+
+    expect(hasSpecificQuantity('5 things I learned about distribution')).toBe(false);
+    expect(hasSpecificQuantity('version 12 shipped today')).toBe(false);
+    expect(hasSpecificQuantity('1. build\n2. ship\n3. learn')).toBe(false);
   });
 
   it('flags abstract listicles that previously hid behind their own count numbers', () => {

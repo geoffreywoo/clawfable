@@ -75,21 +75,43 @@ export function inferPromptStrategy({
   return 'baseline';
 }
 
-const LISTICLE_COUNT_PATTERN = /\b\d+\s+(?:things?|reasons?|ways|lessons?|rules?|tips?|steps?|signs?|mistakes?|takeaways?|truths?|ideas?|questions?|frameworks?|principles?|habits?|traits?|hot takes?)\b/gi;
+const LISTICLE_COUNT_PATTERN = /\b\d+\s+(?:(?:big|key|main|major|quick|simple|hard|brutal|honest|underrated|contrarian)\s+)?(?:things?|reasons?|ways|lessons?|rules?|tips?|steps?|signs?|mistakes?|takeaways?|truths?|ideas?|questions?|frameworks?|principles?|habits?|traits?|shifts?|trends?|takes?|points?|thoughts?|predictions?|observations?|hot takes?)\b/gi;
 const NUMBERED_LIST_MARKER_PATTERN = /^\s*\d+[.)]\s+/gm;
-const CONCRETE_NUMBER_PATTERN = /\b\d+(?:[.,]\d+)+\s?[a-z%$]*\b|\b\d+\s?(?:%|x|k|m|b|hrs?|hours?|days?|weeks?|months?|years?|minutes?|seconds?|ms|nm|mm|cm|kg|tons?|kw|mw|gw|kv|amps?|watts?|cycles?)\b|\$\d|\b\d{2,}\b/i;
+const NUMBER_LABEL_PATTERN = /\b(?:version|ver|v|chapter|part|phase|step|section|no|number|top|q)\s*\.?\s*\d+(?:[.,]\d+)*\b|#\d+\b/gi;
+const MEASURED_NUMBER_PATTERN = new RegExp([
+  '\\$\\s?\\d',
+  '\\b\\d+(?:[.,]\\d+)*\\s?%',
+  '\\b\\d+(?:[.,]\\d+)+\\b',
+  '\\b\\d+(?:[.,]\\d+)*[\\s-]?(?:x|k|m|b|bn|hrs?|hours?|days?|weeks?|months?|years?|yrs?|mins?|minutes?|secs?|seconds?|ms|nm|mm|cm|km|kg|lbs?|tons?|kw|mw|gw|kwh|kv|amps?|watts?|cycles?)\\b',
+].join('|'), 'i');
+const QUANTIFIED_NOUN_PATTERN = /\b\d+(?:[.,]\d+)*\s+[a-z][a-z-]{2,}\b/i;
+
+function stripNonEvidenceNumbers(content: string): string {
+  return content
+    .replace(NUMBERED_LIST_MARKER_PATTERN, '')
+    .replace(LISTICLE_COUNT_PATTERN, '')
+    .replace(NUMBER_LABEL_PATTERN, '');
+}
 
 /**
- * A number only counts as a concrete anchor when it carries real magnitude:
- * a unit, currency, decimal precision, or two-plus digits. Listicle counts
- * ("5 things", "3 reasons") and numbered-list markers never count — they are
- * scaffolding, not evidence.
+ * A number counts as factual proof only when it carries a measured magnitude:
+ * currency, percentage, decimal precision, or a unit of time/size/power.
+ * Listicle counts ("5 things"), numbered-list markers, and version/label
+ * numbers ("version 12", "#3") never count — they are scaffolding, not
+ * evidence.
  */
 export function hasConcreteNumericAnchor(content: string): boolean {
-  const stripped = content
-    .replace(NUMBERED_LIST_MARKER_PATTERN, '')
-    .replace(LISTICLE_COUNT_PATTERN, '');
-  return CONCRETE_NUMBER_PATTERN.test(stripped);
+  return MEASURED_NUMBER_PATTERN.test(stripNonEvidenceNumbers(content));
+}
+
+/**
+ * Weaker signal than hasConcreteNumericAnchor: a number attached to a real
+ * noun ("8 founders", "47 drafts") shows specificity even without a measured
+ * unit. Used to soften abstraction penalties, never to suppress cadence hits.
+ */
+export function hasSpecificQuantity(content: string): boolean {
+  const stripped = stripNonEvidenceNumbers(content);
+  return MEASURED_NUMBER_PATTERN.test(stripped) || QUANTIFIED_NOUN_PATTERN.test(stripped);
 }
 
 export function assessFormulaicCadence(content: string): FormulaicCadenceAssessment {
@@ -285,6 +307,7 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   if (technicalElevation.hasHardTechAnchor) score -= technicalElevation.technicalScore * 0.6;
   if (featureTags.structure === 'story_arc' || featureTags.structure === 'comparison') score -= 0.06;
   if (hasConcreteAnchor && cadence.hits.length <= 1 && genericHits <= 2) score -= 0.08;
+  if (!hasConcreteAnchor && hasSpecificQuantity(content)) score -= 0.06;
   return clamp(score);
 }
 
@@ -317,6 +340,7 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
   if (hasQuestion) score += 0.1;
   if (hasMechanism) score += 0.16;
   if (hasSpecificProof || ['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)) score += 0.16;
+  else if (hasSpecificQuantity(text)) score += 0.08;
   if (hasDistinction || featureTags.structure === 'comparison') score += 0.12;
   if (asksForUsefulInput) score += 0.12;
   if (featureTags.hook === 'contrarian' && hasMechanism) score += 0.08;
