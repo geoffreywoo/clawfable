@@ -226,7 +226,10 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
     case 'copied_not_posted':
       return { copySignal: 0.18 };
     case 'deleted_from_queue':
-      return { deletionPenalty: -0.78 };
+      // A wholesale operator queue refresh is not a targeted editorial
+      // rejection; honor the soft-archive marker so one bulk refresh does not
+      // mass-punish every arm that happened to be queued.
+      return { deletionPenalty: signal.metadata?.softArchive === true ? -0.2 : -0.78 };
     case 'deleted_from_x':
       return { deletionPenalty: -0.96 };
     case 'reply_generated':
@@ -272,9 +275,21 @@ export function computePerformanceLiftReward(
   history: TweetPerformance[] = [],
 ): number {
   if (!performance) return 0;
-  const accountBaseline = baseline
-    ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 3))
-    : 12;
+  // The account baseline must live on the same spread-weighted scale as
+  // weightedEngagement. With enough history, derive it directly from history
+  // (identical function on both sides). Otherwise, uplift the like/retweet
+  // baseline by a conservative factor standing in for the reply/quote/bookmark
+  // terms it cannot see — without this, a median post reads as a large
+  // positive lift and the bandit's failure signal goes dead.
+  const historyBaselineSample = history
+    .filter((entry) => entry.xTweetId !== performance.xTweetId)
+    .slice(0, 40);
+  const SPREAD_SCALE_UPLIFT = 1.35;
+  const accountBaseline = historyBaselineSample.length >= 5
+    ? Math.max(1, average(historyBaselineSample.map(weightedEngagement)))
+    : baseline
+      ? Math.max(1, (baseline.avgLikes + (baseline.avgRetweets * 3)) * SPREAD_SCALE_UPLIFT)
+      : 16;
   const topicBaseline = cohortAverage(
     performance,
     history,

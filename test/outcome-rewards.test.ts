@@ -125,6 +125,48 @@ describe('buildOutcomeEpisode', () => {
     expect(slow).toBe(medium);
   });
 
+  it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
+    // 8 typical rows; the post under test matches them exactly. With the
+    // baseline derived from history on the same spread scale, lift must be
+    // near zero - the old like/RT-only baseline read this as a big win.
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `median-${index}`,
+      xTweetId: `x-median-${index}`,
+      likes: 12,
+      retweets: 2,
+      replies: 3,
+      quotes: 2,
+      bookmarks: 4,
+      wasViral: false,
+    }));
+    const lift = computePerformanceLiftReward(
+      performance({ tweetId: 'median-x', xTweetId: 'x-median-x', likes: 12, retweets: 2, replies: 3, quotes: 2, bookmarks: 4 }),
+      { avgLikes: 12, avgRetweets: 2 },
+      rows,
+    );
+    expect(Math.abs(lift)).toBeLessThan(0.15);
+  });
+
+  it('honors the soft-archive marker instead of full deletion penalty', () => {
+    const episode = (metadata?: Record<string, boolean>) => buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({
+        signalType: 'deleted_from_queue',
+        rewardDelta: -0.2,
+        metadata,
+      })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    const soft = episode({ softArchive: true }).reward.immediateTotal;
+    const hard = episode().reward.immediateTotal;
+    expect(soft).toBeGreaterThan(hard);
+    expect(soft).toBe(-0.2);
+    expect(hard).toBe(-0.78);
+  });
+
   it('credits quotes and bookmarks as spread signals in the lift reward', () => {
     const history = Array.from({ length: 6 }, (_, index) => performance({
       tweetId: `hist-${index}`,

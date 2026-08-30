@@ -440,7 +440,8 @@ function completeTweetText(tweet: any): string {
 export async function getUserTimeline(
   keys: TwitterKeys,
   userId: string,
-  maxResults = 100
+  maxResults = 100,
+  options: { includePrivateMetrics?: boolean } = {},
 ): Promise<
   Array<{
     id: string;
@@ -470,15 +471,20 @@ export async function getUserTimeline(
       exclude: ['retweets', 'replies'],
     });
     // non_public_metrics (user_profile_clicks) is only served for the
-    // authenticated user's own tweets on some API tiers; fall back to the
+    // authenticated user's own tweets on some API tiers. Request it only when
+    // the caller asks (own-account performance checks) so reads of other
+    // accounts never pay a guaranteed-403 first attempt, and fall back to the
     // public field set rather than failing the whole timeline read.
-    const result = await fetchTimeline([...baseFields, 'non_public_metrics'])
-      .catch(() => fetchTimeline(baseFields));
+    const result = options.includePrivateMetrics
+      ? await fetchTimeline([...baseFields, 'non_public_metrics']).catch(() => fetchTimeline(baseFields))
+      : await fetchTimeline(baseFields);
     const initialTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets
       : (result.data.data || []);
     if (initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
-      await (result as any).fetchLast(totalLimit - initialTweets.length);
+      // Pagination reuses the first page's params; a mid-pagination failure
+      // must degrade to the tweets already accumulated, not fail the read.
+      await (result as any).fetchLast(totalLimit - initialTweets.length).catch(() => null);
     }
     const accumulatedTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets

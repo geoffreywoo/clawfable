@@ -673,6 +673,7 @@ export async function regenerateAgentQueue(
       surface: 'queue',
       rewardDelta: -0.2,
       reason: 'Archived in an operator-initiated full queue refresh; softer than a targeted per-draft deletion.',
+      metadata: { softArchive: true },
     });
   }
 
