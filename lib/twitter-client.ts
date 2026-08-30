@@ -363,6 +363,23 @@ export async function getMe(
   }
 }
 
+export async function getAccountPublicMetrics(
+  keys: TwitterKeys
+): Promise<{ followersCount: number; followingCount: number; tweetCount: number }> {
+  const client = createClient(keys);
+  try {
+    const result = await client.v2.me({ 'user.fields': ['public_metrics'] });
+    const metrics = result.data.public_metrics;
+    return {
+      followersCount: metrics?.followers_count ?? 0,
+      followingCount: metrics?.following_count ?? 0,
+      tweetCount: metrics?.tweet_count ?? 0,
+    };
+  } catch (error) {
+    return handleApiError(error, { action: 'get_account_public_metrics' });
+  }
+}
+
 export async function getUserByUsername(
   keys: TwitterKeys,
   username: string

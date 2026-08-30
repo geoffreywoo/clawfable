@@ -3,6 +3,7 @@ import {
   buildPerformanceSignalBaseline,
   confidenceAdjustedPerformanceAverage,
   computeRelativeSpreadSignal,
+  summarizeFollowerGrowth,
   weightedSpreadEngagement,
 } from '@/lib/performance-signals';
 import type { TweetPerformance } from '@/lib/types';
@@ -98,5 +99,42 @@ describe('relative performance signals', () => {
     ];
 
     expect(buildPerformanceSignalBaseline(history).likes).toBe(10);
+  });
+});
+
+describe('summarizeFollowerGrowth', () => {
+  it('summarizes a 7-day trend only with enough span', () => {
+    const lines = summarizeFollowerGrowth([
+      { capturedAt: '2026-08-30T00:00:00.000Z', followersCount: 1240 },
+      { capturedAt: '2026-08-27T00:00:00.000Z', followersCount: 1190 },
+      { capturedAt: '2026-08-24T00:00:00.000Z', followersCount: 1180 },
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('gained 60');
+    expect(lines[0]).toContain('now 1240');
+  });
+
+  it('refuses to fabricate a trend from a single snapshot or a short span', () => {
+    expect(summarizeFollowerGrowth([])).toEqual([]);
+    expect(summarizeFollowerGrowth([
+      { capturedAt: '2026-08-30T00:00:00.000Z', followersCount: 1240 },
+    ])).toEqual([]);
+    expect(summarizeFollowerGrowth([
+      { capturedAt: '2026-08-30T06:00:00.000Z', followersCount: 1240 },
+      { capturedAt: '2026-08-30T00:00:00.000Z', followersCount: 1200 },
+    ])).toEqual([]);
+  });
+
+  it('reports losses and flat periods honestly', () => {
+    const lost = summarizeFollowerGrowth([
+      { capturedAt: '2026-08-30T00:00:00.000Z', followersCount: 1100 },
+      { capturedAt: '2026-08-25T00:00:00.000Z', followersCount: 1150 },
+    ]);
+    expect(lost[0]).toContain('lost 50');
+    const flat = summarizeFollowerGrowth([
+      { capturedAt: '2026-08-30T00:00:00.000Z', followersCount: 1100 },
+      { capturedAt: '2026-08-25T00:00:00.000Z', followersCount: 1100 },
+    ]);
+    expect(flat[0]).toContain('flat');
   });
 });

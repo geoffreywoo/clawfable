@@ -29,7 +29,7 @@ import {
   summarizeViralityPostmortemMemory,
 } from './growth-engine';
 import { classifyTasteFeedbackReason } from './account-taste';
-import { weightedSpreadEngagement } from './performance-signals';
+import { summarizeFollowerGrowth, weightedSpreadEngagement } from './performance-signals';
 
 export { summarizeEditDelta };
 export type { EditDeltaSummary };
@@ -370,6 +370,7 @@ export interface BuildPersonalizationMemoryOptions {
   allTweets?: Tweet[];
   baselineLikes?: number;
   mentions?: Mention[];
+  followerSnapshots?: Array<{ capturedAt: string; followersCount: number }>;
 }
 
 function isDuplicateOnlyRejection(entry: FeedbackEntry): boolean {
@@ -390,6 +391,7 @@ export function buildPersonalizationMemory({
   allTweets = [],
   baselineLikes = 0,
   mentions = [],
+  followerSnapshots = [],
 }: BuildPersonalizationMemoryOptions): PersonalizationMemory {
   const alwaysDoMoreOfThis = unique([
     ...(learnings?.insights.slice(0, 3) || []),
@@ -413,6 +415,7 @@ export function buildPersonalizationMemory({
     .slice(0, 4)
     .map((arm) => `${arm.arm} needs more data`);
   const whatIsWorkingNow = summarizeBanditExploitLessons(banditPolicy);
+  const followerGrowth = summarizeFollowerGrowth(followerSnapshots);
 
   const operatorHiddenPreferences = unique([
     ...summarizeOperatorPreferences(signals, remixPatterns),
@@ -445,6 +448,7 @@ export function buildPersonalizationMemory({
     topicsWithMomentum,
     formatsUnderTested,
     whatIsWorkingNow,
+    followerGrowth,
     operatorHiddenPreferences,
     editTransformations,
     referenceBank,

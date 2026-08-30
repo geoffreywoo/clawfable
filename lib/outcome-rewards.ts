@@ -254,14 +254,16 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
   }
 }
 
+// Fast approval is weak positive evidence of instant resonance; slow approval
+// is not negative evidence of anything. The old negative tail (-0.06/-0.12
+// past 4h/12h) taught the system to prefer instantly-familiar drafts over
+// ones worth deliberating on — an approval after thought is still an approval.
 function latencyReward(signal: LearningSignal): number {
   const mins = readNumber(signal.metadata?.timeToApprovalMins);
   if (mins === null) return 0;
-  if (mins <= 15) return 0.16;
-  if (mins <= 60) return 0.08;
-  if (mins <= 240) return 0;
-  if (mins <= 720) return -0.06;
-  return -0.12;
+  if (mins <= 15) return 0.12;
+  if (mins <= 60) return 0.06;
+  return 0;
 }
 
 export function computePerformanceLiftReward(

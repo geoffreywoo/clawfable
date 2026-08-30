@@ -399,6 +399,22 @@ async function kvLpush(key: string, ...values: string[]): Promise<void> {
   }
 }
 
+async function kvLtrim(key: string, start: number, stop: number): Promise<void> {
+  invalidateCached(`list:${key}`);
+  try {
+    const client = await getKvClient();
+    if (!client) {
+      const list = (memStore.get(key) as string[]) ?? [];
+      memStore.set(key, stop === -1 ? list.slice(start) : list.slice(start, stop + 1));
+      return;
+    }
+    await client.ltrim(key, start, stop);
+  } catch {
+    const list = (memStore.get(key) as string[]) ?? [];
+    memStore.set(key, stop === -1 ? list.slice(start) : list.slice(start, stop + 1));
+  }
+}
+
 async function kvLrange(key: string, start: number, stop: number): Promise<string[]> {
   // Cache the full list once per request and slice in-memory for subsequent reads.
   // This collapses N range reads of the same list into a single KV command.
@@ -596,6 +612,7 @@ const KEYS = {
   oauthTemp: (oauthToken: string) => `oauth:${oauthToken}`,
   agentProtocol: (id: string) => `agent:${id}:protocol`,
   agentPostLog: (id: string) => `agent:${id}:postlog`,
+  agentFollowerSnapshots: (id: string) => `agent:${id}:follower-snapshots`,
   agentPerformance: (id: string) => `agent:${id}:performance`,
   agentExperiments: (id: string) => `agent:${id}:experiments`,
   draftExperiment: (id: string) => `experiment:${id}`,
@@ -607,7 +624,6 @@ const KEYS = {
   agentTopicIntelligence: (id: string) => `agent:${id}:topic_intelligence`,
   agentEngagementSessions: (id: string) => `agent:${id}:engage_sessions`,
   agentSoulVersions: (id: string) => `agent:${id}:soul_versions`,
-  agentFollowerHistory: (id: string) => `agent:${id}:followers`,
   agentRemixMemory: (id: string) => `agent:${id}:remix_memory`,
   agentVoiceChat: (id: string) => `agent:${id}:voice_chat`,
   agentVoiceDirectives: (id: string) => `agent:${id}:voice_directives`,
@@ -899,6 +915,7 @@ export async function deleteAgent(id: string): Promise<void> {
   // Cascade: delete protocol, post log, learnings, performance, baseline, jobs
   await kvDel(KEYS.agentProtocol(id));
   await kvDel(KEYS.agentPostLog(id));
+  await kvDel(KEYS.agentFollowerSnapshots(id));
   await kvDel(KEYS.agentLearnings(id));
   await kvDel(KEYS.agentPerformance(id));
   await kvDel(KEYS.agentTrendOpportunities(id));
@@ -1898,6 +1915,29 @@ export async function addPostLogEntry(agentId: string, entry: Omit<PostLogEntry,
 export async function getPostLog(agentId: string, limit = 20): Promise<PostLogEntry[]> {
   const raw = await kvLrange(KEYS.agentPostLog(agentId), 0, limit - 1);
   return raw.map((s) => parseListEntry<PostLogEntry>(s)).filter((e): e is PostLogEntry => e !== null);
+}
+
+// ─── Follower snapshots ──────────────────────────────────────────────────────
+// Account-level follower time series so the learning loop can see growth, the
+// outcome the product actually optimizes for. Newest first; capped.
+
+export interface FollowerSnapshot {
+  capturedAt: string;
+  followersCount: number;
+  followingCount: number;
+  tweetCount: number;
+}
+
+const MAX_FOLLOWER_SNAPSHOTS = 500;
+
+export async function addFollowerSnapshot(agentId: string, snapshot: FollowerSnapshot): Promise<void> {
+  await kvLpush(KEYS.agentFollowerSnapshots(agentId), JSON.stringify(snapshot));
+  await kvLtrim(KEYS.agentFollowerSnapshots(agentId), 0, MAX_FOLLOWER_SNAPSHOTS - 1);
+}
+
+export async function getFollowerSnapshots(agentId: string, limit = 100): Promise<FollowerSnapshot[]> {
+  const raw = await kvLrange(KEYS.agentFollowerSnapshots(agentId), 0, limit - 1);
+  return raw.map((s) => parseListEntry<FollowerSnapshot>(s)).filter((e): e is FollowerSnapshot => e !== null);
 }
 
 // ─── Cron log storage ─────────────────────────────────────────────────────────
@@ -3526,23 +3566,6 @@ export async function getRemixPatterns(agentId: string): Promise<string[]> {
   }
 
   return patterns;
-}
-
-// ─── Follower tracking ──────────────────────────────────────────────────────
-
-export interface FollowerSnapshot {
-  count: number;
-  ts: string;
-}
-
-export async function addFollowerSnapshot(agentId: string, count: number): Promise<void> {
-  const entry: FollowerSnapshot = { count, ts: new Date().toISOString() };
-  await kvLpush(KEYS.agentFollowerHistory(agentId), JSON.stringify(entry));
-}
-
-export async function getFollowerHistory(agentId: string, limit = 30): Promise<FollowerSnapshot[]> {
-  const raw = await kvLrange(KEYS.agentFollowerHistory(agentId), 0, limit - 1);
-  return raw.map((s) => parseListEntry<FollowerSnapshot>(s)).filter((e): e is FollowerSnapshot => e !== null);
 }
 
 // ─── Trending cache ─────────────────────────────────────────────────────────

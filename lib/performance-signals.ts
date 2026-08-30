@@ -145,3 +145,30 @@ export function computeRelativeSpreadSignal(
     projectedTo24Hours,
   };
 }
+
+/**
+ * 7-day follower growth summary lines for personalization memory. Requires at
+ * least two snapshots spanning 24h so a single fetch never fabricates a trend.
+ * Snapshots are newest first.
+ */
+export function summarizeFollowerGrowth(
+  snapshots: Array<{ capturedAt: string; followersCount: number }>,
+): string[] {
+  if (snapshots.length < 2) return [];
+  const newest = snapshots[0];
+  const newestAt = Date.parse(newest.capturedAt);
+  if (!Number.isFinite(newestAt)) return [];
+  const weekAgo = newestAt - 7 * 24 * 60 * 60 * 1000;
+  const baselineEntry = [...snapshots].reverse().find((entry) => {
+    const at = Date.parse(entry.capturedAt);
+    return Number.isFinite(at) && at >= weekAgo;
+  });
+  if (!baselineEntry || baselineEntry === newest) return [];
+  const spanHours = (newestAt - Date.parse(baselineEntry.capturedAt)) / (60 * 60 * 1000);
+  if (spanHours < 24) return [];
+  const delta = newest.followersCount - baselineEntry.followersCount;
+  const spanDays = Math.max(1, Math.round(spanHours / 24));
+  if (delta === 0) return [`Followers flat at ${newest.followersCount} over the last ${spanDays}d.`];
+  const direction = delta > 0 ? 'gained' : 'lost';
+  return [`Account ${direction} ${Math.abs(delta)} follower${Math.abs(delta) === 1 ? '' : 's'} over the last ${spanDays}d (now ${newest.followersCount}).`];
+}

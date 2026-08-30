@@ -1893,6 +1893,7 @@ export interface PersonalizationMemory {
   topicsWithMomentum: string[];
   formatsUnderTested: string[];
   whatIsWorkingNow?: string[];
+  followerGrowth?: string[];
   operatorHiddenPreferences: string[];
   fallbackShapeOutcomes?: FallbackShapeOutcomeCounter[];
   editTransformations: string[];

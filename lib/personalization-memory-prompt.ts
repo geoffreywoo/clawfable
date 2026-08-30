@@ -30,6 +30,12 @@ const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
     intro: 'These formats lack outcome data. When two drafts are otherwise equal, prefer the under-tested format so the learning loop gets signal.',
   },
   {
+    key: 'followerGrowth',
+    title: 'FOLLOWER TREND',
+    limit: 1,
+    intro: 'The audience-growth outcome the account is optimizing for. Context only; never mention follower counts in a post.',
+  },
+  {
     key: 'rejectedDrafts',
     title: 'RECENT REJECTED DRAFTS',
     limit: 3,
