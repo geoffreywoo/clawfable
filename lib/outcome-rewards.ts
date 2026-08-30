@@ -328,12 +328,19 @@ export function computePerformanceLiftReward(
     : 0;
   const replyShare = performance.replies / Math.max(1, performance.likes + performance.retweets + performance.replies);
   const replyBonus = Math.min(0.16, replyShare * 0.45);
-  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.1 ? 0.06 : 0;
+  // Exploration holdouts are shielded, not just tipped: a deliberate bet on an
+  // under-tested arm has its downside softened (negative lift halved) plus a
+  // small bonus unless it flopped badly, so the learning loop can afford the
+  // experiments it schedules. Real disasters still register.
+  const holdoutShield = performance.experimentHoldout && engagementLift < 0
+    ? -engagementLift * 0.5 * 0.45
+    : 0;
+  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.35 ? 0.06 : 0;
   const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
     ? Math.min(0.08, replyBonus)
     : 0;
 
-  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus, -0.6, 0.8));
+  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus + holdoutShield, -0.6, 0.8));
 }
 
 function addBreakdown(target: RewardBreakdown, delta: Partial<RewardBreakdown>) {

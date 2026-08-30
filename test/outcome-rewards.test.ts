@@ -55,6 +55,7 @@ function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformanc
     replies: overrides.replies ?? 6,
     quotes: overrides.quotes,
     bookmarks: overrides.bookmarks,
+    experimentHoldout: overrides.experimentHoldout,
     impressions: overrides.impressions ?? 1000,
     engagementRate: overrides.engagementRate ?? 5.4,
     wasViral: overrides.wasViral ?? true,
@@ -123,6 +124,39 @@ describe('buildOutcomeEpisode', () => {
     expect(fast).toBeGreaterThan(slow);
     // A day-later approval scores the same as a 5-hour one: no deliberation penalty.
     expect(slow).toBe(medium);
+  });
+
+  it('shields exploration holdouts from negative lift without hiding disasters', () => {
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `hold-base-${index}`,
+      xTweetId: `x-hold-base-${index}`,
+      likes: 30,
+      retweets: 5,
+      replies: 4,
+      quotes: 3,
+      bookmarks: 5,
+      wasViral: false,
+    }));
+    const flop = (experimentHoldout: boolean) => computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-x',
+        xTweetId: 'x-hold-x',
+        likes: 6,
+        retweets: 1,
+        replies: 1,
+        quotes: 0,
+        bookmarks: 0,
+        experimentHoldout,
+      }),
+      { avgLikes: 30, avgRetweets: 5 },
+      rows,
+    );
+
+    const shielded = flop(true);
+    const unshielded = flop(false);
+    expect(shielded).toBeGreaterThan(unshielded);
+    // The shield softens, it does not erase: a real flop still reads negative.
+    expect(shielded).toBeLessThan(0);
   });
 
   it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
