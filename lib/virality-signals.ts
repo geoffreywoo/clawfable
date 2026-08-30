@@ -75,11 +75,29 @@ export function inferPromptStrategy({
   return 'baseline';
 }
 
+const LISTICLE_COUNT_PATTERN = /\b\d+\s+(?:things?|reasons?|ways|lessons?|rules?|tips?|steps?|signs?|mistakes?|takeaways?|truths?|ideas?|questions?|frameworks?|principles?|habits?|traits?|hot takes?)\b/gi;
+const NUMBERED_LIST_MARKER_PATTERN = /^\s*\d+[.)]\s+/gm;
+const CONCRETE_NUMBER_PATTERN = /\b\d+(?:[.,]\d+)+\s?[a-z%$]*\b|\b\d+\s?(?:%|x|k|m|b|hrs?|hours?|days?|weeks?|months?|years?|minutes?|seconds?|ms|nm|mm|cm|kg|tons?|kw|mw|gw|kv|amps?|watts?|cycles?)\b|\$\d|\b\d{2,}\b/i;
+
+/**
+ * A number only counts as a concrete anchor when it carries real magnitude:
+ * a unit, currency, decimal precision, or two-plus digits. Listicle counts
+ * ("5 things", "3 reasons") and numbered-list markers never count — they are
+ * scaffolding, not evidence.
+ */
+export function hasConcreteNumericAnchor(content: string): boolean {
+  const stripped = content
+    .replace(NUMBERED_LIST_MARKER_PATTERN, '')
+    .replace(LISTICLE_COUNT_PATTERN, '');
+  return CONCRETE_NUMBER_PATTERN.test(stripped);
+}
+
 export function assessFormulaicCadence(content: string): FormulaicCadenceAssessment {
   const text = content.trim();
   const lower = text.toLowerCase();
   const hits: string[] = [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|hr|hrs|hour|hours|day|days|week|weeks|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|churned|deleted|approval|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(text);
+  const hasConcreteAnchor = hasConcreteNumericAnchor(text)
+    || /\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|churned|deleted|approval|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(text);
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook|distribution)\b/g) || [];
 
   const patterns: Array<[RegExp, string]> = [
@@ -247,7 +265,8 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   score += Math.min(0.42, genericHits * 0.08);
 
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook)\b/g) || [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(content);
+  const hasConcreteAnchor = hasConcreteNumericAnchor(content)
+    || /\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(content);
   score += Math.min(0.42, cadence.score * 0.72);
   if (abstractPowerWords.length >= 4 && !hasConcreteAnchor) score += 0.18;
   if (abstractPowerWords.length >= 6) score += 0.1;
@@ -289,7 +308,8 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
 
   const hasQuestion = /\?/.test(text) || featureTags.hook === 'question';
   const hasMechanism = /\b(because|when|if|after|before|until|tradeoff|constraint|failure mode|recovery path|example|for instance)\b/i.test(text);
-  const hasSpecificProof = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
+  const hasSpecificProof = hasConcreteNumericAnchor(text)
+    || /\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
   const hasDistinction = /\b(not|isn't|aren't)\b.{0,80}\b(but|because)\b|\bvs\b| versus | compared to |\binstead of\b/i.test(text);
   const asksForUsefulInput = /\b(where does this break|what am i missing|what would you change|which part is wrong|what would make this fail|edge case)\b/i.test(text);
   const genericBait = /\b(thoughts\??|what do you think\??|agree or disagree\??|reply below|drop your|hot take\??)\b/i.test(text);
