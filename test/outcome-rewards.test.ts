@@ -104,6 +104,26 @@ describe('buildOutcomeEpisode', () => {
     expect(episode.stage).toBe('final');
   });
 
+  it('no longer punishes slow approvals in the latency reward', () => {
+    const episode = (mins: number) => buildOutcomeEpisode({
+      tweet: tweet(),
+      signals: [signal({
+        signalType: 'approved_without_edit',
+        metadata: { timeToApprovalMins: mins },
+      })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    const fast = episode(10).reward.immediateTotal;
+    const slow = episode(1440).reward.immediateTotal;
+    const medium = episode(300).reward.immediateTotal;
+
+    expect(fast).toBeGreaterThan(slow);
+    // A day-later approval scores the same as a 5-hour one: no deliberation penalty.
+    expect(slow).toBe(medium);
+  });
+
   it('credits quotes and bookmarks as spread signals in the lift reward', () => {
     const history = Array.from({ length: 6 }, (_, index) => performance({
       tweetId: `hist-${index}`,

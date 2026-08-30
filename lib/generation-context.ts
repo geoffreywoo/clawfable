@@ -4,6 +4,7 @@ import {
   getFeedback,
   getLearningSignals,
   getLearnings,
+  getFollowerSnapshots,
   getPerformanceHistory,
   getProtocolSettings,
   getRecentMentions,
@@ -172,6 +173,7 @@ export async function buildGenerationContext(
     baseline,
     globalPrior,
     mentions,
+    followerSnapshots,
   ] = await Promise.all([
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
@@ -187,6 +189,7 @@ export async function buildGenerationContext(
     getBaseline(agent.id),
     getGlobalBanditPrior(),
     getRecentMentions(agent.id, 100).catch(() => []),
+    getFollowerSnapshots(agent.id, 40).catch(() => []),
   ]);
 
   const effectiveLearnings = learnings;
@@ -262,6 +265,7 @@ export async function buildGenerationContext(
     allTweets,
     baselineLikes: baseline?.avgLikes || 0,
     mentions,
+    followerSnapshots,
   });
 
   const memoryPrompt = buildPersonalizationMemoryPrompt(memory);

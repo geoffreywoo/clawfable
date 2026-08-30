@@ -29,8 +29,11 @@ import {
   saveViralityPostmortems,
   saveVoiceCorpusSnapshot,
   backfillAudienceVoiceComplaints,
+  addFollowerSnapshot,
+  getFollowerSnapshots,
+  type FollowerSnapshot,
 } from './kv-storage';
-import { getDeepTimeline, getUserTimeline, decodeKeys, getFollowing, type TwitterKeys } from './twitter-client';
+import { getDeepTimeline, getUserTimeline, decodeKeys, getFollowing, getAccountPublicMetrics, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
 import { inferDeleteIntent } from './delete-intent';
 import { generateText, PUBLISHING_V2_MODEL_STACK } from './ai';
@@ -708,6 +711,28 @@ export interface CheckPerformanceOptions {
   classificationBacklogLimit?: number;
 }
 
+const FOLLOWER_SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+export async function captureFollowerSnapshotIfDue(
+  agentId: string,
+  keys: TwitterKeys,
+  now = Date.now(),
+): Promise<boolean> {
+  const [latest] = await getFollowerSnapshots(agentId, 1);
+  if (latest) {
+    const lastAt = Date.parse(latest.capturedAt);
+    if (Number.isFinite(lastAt) && now - lastAt < FOLLOWER_SNAPSHOT_INTERVAL_MS) return false;
+  }
+  const metrics = await getAccountPublicMetrics(keys);
+  await addFollowerSnapshot(agentId, {
+    capturedAt: new Date(now).toISOString(),
+    followersCount: metrics.followersCount,
+    followingCount: metrics.followingCount,
+    tweetCount: metrics.tweetCount,
+  });
+  return true;
+}
+
 export async function checkPerformance(
   agent: Agent,
   options: CheckPerformanceOptions = {},
@@ -737,6 +762,11 @@ export async function checkPerformance(
   if (hasRecentReadEndpointFailure(postLog, 'performance_timeline_error')) {
     return 0;
   }
+
+  // Follower time series: one lightweight snapshot per ~6h so the learning
+  // loop can see the growth outcome the product optimizes for. Failures are
+  // silent — a missed snapshot must never block performance checks.
+  await captureFollowerSnapshotIfDue(agent.id, keys).catch(() => null);
 
   const timelineLimit = Math.max(1, Math.min(1000, Math.floor(options.timelineLimit || 300)));
   const classificationBacklogLimit = Math.max(
