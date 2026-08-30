@@ -313,6 +313,25 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
 }
 
 /**
+ * Blend of the three independent cringe estimators (deterministic slop scorer,
+ * account-taste heuristic, judge model). The previous Math.max meant one
+ * mildly elevated estimator vetoed a draft even when the other two read it as
+ * clean — and since status-bearing, combative, high-affect writing is exactly
+ * what raises those heuristics, the max() was a structural bias against the
+ * boldness the writer contract asks for. The blend still honors conviction:
+ * half the weight rides on the highest estimator, so a single confident signal
+ * or any cross-estimator agreement keeps rejecting. The deterministic slop
+ * score separately remains its own hard gate, unaffected by this blend.
+ */
+export function blendedCringeRisk(components: number[]): number {
+  const clamped = components.map((value) => clamp(value));
+  if (clamped.length === 0) return 0;
+  const max = Math.max(...clamped);
+  const mean = clamped.reduce((sum, value) => sum + value, 0) / clamped.length;
+  return Number(((max * 0.5) + (mean * 0.5)).toFixed(3));
+}
+
+/**
  * Deterministic upside estimate for how likely a draft is to earn replies,
  * quotes, and conversation. Used as a ranked tiebreaker among drafts that have
  * already cleared every quality and safety gate — it never loosens a gate.

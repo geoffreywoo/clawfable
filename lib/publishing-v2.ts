@@ -38,7 +38,7 @@ import {
   upsertIdeaCandidates,
 } from './kv-storage';
 import { getAuthorityProofIssue } from './virality-signals';
-import { inferAudienceSegment, inferPromptStrategy, scoreReplyPotential, scoreSlopRisk, scoreViralityUpside } from './virality-signals';
+import { blendedCringeRisk, inferAudienceSegment, inferPromptStrategy, scoreReplyPotential, scoreSlopRisk, scoreViralityUpside } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
 import { getAutopostPolicyIssue, getGeneratedTweetIssue, getTweetLengthIssue, isNearDuplicate } from './survivability';
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
@@ -362,7 +362,7 @@ function contextualCriticBreakdown(
     nativeVoice: Math.min(taste.nativeVoiceScore, score.operatorPlausibility),
     casualStartupFit: taste.casualStartupScore,
     stiffnessRisk: taste.stiffnessRisk,
-    cringeRisk: Math.max(scoreSlopRisk(draft.content, featureTags), taste.cringeRisk, score.cringeRisk),
+    cringeRisk: blendedCringeRisk([scoreSlopRisk(draft.content, featureTags), taste.cringeRisk, score.cringeRisk]),
     technicalCredibility: taste.technicalCredibilityScore,
     manualAnchorReskinRisk: score.manualAnchorReskinRisk,
     voiceDriftRisk: taste.voiceDriftRisk,

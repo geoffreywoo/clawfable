@@ -77,6 +77,7 @@ import {
   scoreReplyPotential,
   scoreSlopRisk,
   scoreViralityUpside,
+  blendedCringeRisk,
 } from './virality-signals';
 import {
   getAutopostPolicyIssue,
@@ -5103,7 +5104,7 @@ function finalCriticBreakdown(
     nativeVoice: Math.min(taste.nativeVoiceScore, score.operatorPlausibility),
     casualStartupFit: taste.casualStartupScore,
     stiffnessRisk: taste.stiffnessRisk,
-    cringeRisk: Math.max(slop, taste.cringeRisk, score.cringeRisk),
+    cringeRisk: blendedCringeRisk([slop, taste.cringeRisk, score.cringeRisk]),
     technicalCredibility: taste.technicalCredibilityScore,
     manualAnchorReskinRisk: score.manualAnchorReskinRisk,
     voiceDriftRisk: taste.voiceDriftRisk,

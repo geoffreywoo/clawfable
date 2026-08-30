@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
+import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
 import type { TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -202,6 +202,17 @@ describe('virality signals', () => {
     expect(formulaic.hits).toContain('not-x-but-y');
     expect(concrete.score).toBeLessThan(0.2);
     expect(concrete.hasConcreteAnchor).toBe(true);
+  });
+
+  it('blends cringe estimators so one mild outlier cannot veto two clean reads', () => {
+    // One mildly elevated estimator, two clean: passes the 0.32 gate.
+    expect(blendedCringeRisk([0.35, 0.08, 0.08])).toBeLessThan(0.32);
+    // Cross-estimator agreement still rejects.
+    expect(blendedCringeRisk([0.36, 0.34, 0.3])).toBeGreaterThanOrEqual(0.32);
+    // A single confident estimator still rejects on its own.
+    expect(blendedCringeRisk([0.62, 0.05, 0.05])).toBeGreaterThanOrEqual(0.32);
+    expect(blendedCringeRisk([])).toBe(0);
+    expect(blendedCringeRisk([1.4, -0.2])).toBeLessThanOrEqual(1);
   });
 
   it('scores conversational contrarian drafts above flat statements for virality upside', () => {
