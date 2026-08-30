@@ -402,9 +402,19 @@ export function buildPersonalizationMemory({
     ...feedback.map((entry) => entry.intentSummary || entry.reason || '').filter(Boolean),
     ...(learnings?.styleFingerprint?.antiPatterns || []),
   ]).slice(0, 5);
+  // Rejections expire after 21 days: the exclusion corpus previously only
+  // grew, so every rejection permanently shrank the addressable idea space.
+  // Old rejections keep influencing style via neverDoThisAgain lessons; only
+  // the verbatim do-not-resemble corpus is time-bounded.
+  const rejectionCutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
   const rejectedDrafts = unique(
     feedback
-      .filter((entry) => entry.rating === 'down' && entry.tweetText.trim() && !isDuplicateOnlyRejection(entry))
+      .filter((entry) => (
+        entry.rating === 'down'
+        && entry.tweetText.trim()
+        && !isDuplicateOnlyRejection(entry)
+        && Date.parse(entry.generatedAt) >= rejectionCutoff
+      ))
       .map((entry) => entry.tweetText.trim())
       .reverse(),
   ).slice(0, 20);
