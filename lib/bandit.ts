@@ -472,25 +472,55 @@ function toCandidateList(values: Array<string | null | undefined>): string[] {
   return unique(values);
 }
 
+/**
+ * Per-account engagement baseline for global-prior reward normalization. With
+ * fewer than 5 rows the account keeps the default constant baseline — a tiny
+ * sample should not define "normal" for that account.
+ */
+function accountBaselineFromHistory(
+  history: TweetPerformance[],
+): { avgLikes: number; avgRetweets: number } | null {
+  if (history.length < 5) return null;
+  const avg = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  return {
+    avgLikes: Math.max(1, avg(history.map((entry) => entry.likes || 0))),
+    avgRetweets: Math.max(0, avg(history.map((entry) => entry.retweets || 0))),
+  };
+}
+
 export function buildBanditGlobalPrior({
   performanceHistory,
+  accountHistories,
   sourceAccounts = 0,
 }: {
-  performanceHistory: TweetPerformance[];
+  /** Legacy flat history; scored against the default constant baseline. */
+  performanceHistory?: TweetPerformance[];
+  /** One history per account; each account's rewards are normalized against its own baseline so a large account's ordinary post and a small account's breakout stop scoring identically. */
+  accountHistories?: TweetPerformance[][];
   sourceAccounts?: number;
 }): BanditGlobalPrior {
   const prior = createDefaultGlobalPrior();
-  const uniqueHistory = collapsePerformanceSnapshotsWithStats(performanceHistory).entries;
-  const observations = collectFallbackPerformanceObservations(uniqueHistory, new Set(), null);
+  const groups = accountHistories && accountHistories.length > 0
+    ? accountHistories
+    : [performanceHistory || []];
   const totals = new Map<string, { pulls: number; rewardSum: number; failures: number }>();
+  let totalSamples = 0;
 
-  for (const observation of observations) {
-    const key = `${observation.family}::${observation.arm}`;
-    const current = totals.get(key) || { pulls: 0, rewardSum: 0, failures: 0 };
-    current.pulls += observation.weight;
-    current.rewardSum += observation.reward * observation.weight;
-    if (observation.reward <= 0.35) current.failures += observation.weight;
-    totals.set(key, current);
+  for (const group of groups) {
+    const uniqueHistory = collapsePerformanceSnapshotsWithStats(group).entries;
+    totalSamples += uniqueHistory.length;
+    const baseline = accountHistories && accountHistories.length > 0
+      ? accountBaselineFromHistory(uniqueHistory)
+      : null;
+    const observations = collectFallbackPerformanceObservations(uniqueHistory, new Set(), baseline);
+    for (const observation of observations) {
+      const key = `${observation.family}::${observation.arm}`;
+      const current = totals.get(key) || { pulls: 0, rewardSum: 0, failures: 0 };
+      current.pulls += observation.weight;
+      current.rewardSum += observation.reward * observation.weight;
+      if (observation.reward <= 0.35) current.failures += observation.weight;
+      totals.set(key, current);
+    }
   }
 
   for (const [key, stats] of totals.entries()) {
@@ -509,7 +539,7 @@ export function buildBanditGlobalPrior({
   }
 
   prior.sourceAccounts = sourceAccounts;
-  prior.totalSamples = uniqueHistory.length;
+  prior.totalSamples = totalSamples;
   return prior;
 }
 
