@@ -447,6 +447,7 @@ export async function getUserTimeline(
     impressions: number;
     quotes: number;
     bookmarks: number;
+    profileClicks?: number | null;
     referenceType?: TimelineSourceMetadata['referenceType'];
     referencedTweetId?: string | null;
     hasMedia?: boolean;
@@ -457,11 +458,17 @@ export async function getUserTimeline(
   const client = createClient(keys);
   const totalLimit = Math.max(1, Math.min(300, Math.floor(maxResults)));
   try {
-    const result = await client.v2.userTimeline(userId, {
+    const baseFields = ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'];
+    const fetchTimeline = (fields: string[]) => client.v2.userTimeline(userId, {
       max_results: Math.max(5, Math.min(totalLimit, 100)),
-      'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
+      'tweet.fields': fields as any,
       exclude: ['retweets', 'replies'],
     });
+    // non_public_metrics (user_profile_clicks) is only served for the
+    // authenticated user's own tweets on some API tiers; fall back to the
+    // public field set rather than failing the whole timeline read.
+    const result = await fetchTimeline([...baseFields, 'non_public_metrics'])
+      .catch(() => fetchTimeline(baseFields));
     const initialTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets
       : (result.data.data || []);
@@ -481,6 +488,9 @@ export async function getUserTimeline(
       impressions: tweet.public_metrics?.impression_count ?? 0,
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+      profileClicks: typeof tweet.non_public_metrics?.user_profile_clicks === 'number'
+        ? tweet.non_public_metrics.user_profile_clicks
+        : null,
       ...timelineSourceMetadata(tweet),
     }));
   } catch (error) {

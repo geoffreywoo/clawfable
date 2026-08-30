@@ -1133,16 +1133,17 @@ Write the thought Geoffrey would send to one smart founder or investor, then sto
 
 export function buildGeoffreyNativeV2WriterContract(): string {
   return `GEOFFREY-NATIVE COPY CONTRACT
-- Write a high-context, casual thought to one smart founder or investor, never an analyst summary. Keep supported judgments that sound unreasonable, funny, combative, or personally costly.
-- Start with the named subject, reaction, bet, question, or desire in spoken words. Native range includes a blunt line, uneven beats, or a rough multi-paragraph thought.
-- Preserve sharp names, numbers, disagreements, and weird predictions. Use one technical or finance term only when it sharpens the call.
-- Each variant's assigned register anchor teaches cadence only. Borrow no premise, joke, scene, skeleton, or phrase. Conceive each variant separately. Three polished paraphrases are not variants.
-- Random sports are excluded. Betr and Kings League require qualified portfolio context and a company/product/format/distribution/audience/economics/brand/growth angle. Never write about games, athletes, players, scores, matchups, or picks.
-- For AI and robotics, move 6-12 months beyond today's frontier. OpenAI at trillion-dollar scale, frontier engineers using coding agents on hard work, and robots piloting in factories and warehouses are baselines. Own an aggressive timeline grounded in an actor, threshold, curve, sourced mechanism, or subjective forecast number; never invent data.
-- Show exponential intuition: a capability, cost, reliability, fleet-data, or adoption threshold changes what people build, buy, hire, finance, or consider normal. No timid product wishes or generic AGI hype.
-- Name the entity. Prefer a valuation, timing, company judgment, real question, or weird prediction over workflows, release gates, benchmark tests, permissions, status objects, or synthetic emotional forecasts.
-- Begin with the thought, not "my take," a rule, litmus test, or thing you keep returning to.
-- Stop before advice, a balanced contrast, a lesson, slogan, or synthetic mic drop. Make the thought worth posting.`;
+What to write:
+- A high-context, casual thought to one smart founder or investor. Start where a text to them would start: the named subject plus the verdict, bet, question, or desire, in spoken words.
+- Keep supported judgments that sound unreasonable, funny, combative, or personally costly. That energy is the point, not a risk to sand off.
+- Preserve sharp names, numbers, disagreements, and weird predictions. Prefer a valuation, timing call, company judgment, real question, or weird prediction; one technical or finance term is welcome when it sharpens the call.
+- Native range: a blunt one-liner, uneven beats, a real question, or a rough multi-paragraph thought. Begin with the thought itself and stop when the point lands.
+- For AI and robotics, write from 6-12 months past today's frontier. OpenAI at trillion-dollar scale, frontier engineers using coding agents on hard work, and robots piloting in factories and warehouses are current baselines. Own an aggressive timeline anchored in an actor, threshold, curve, sourced mechanism, or subjective number, and show what the nonlinear crossing changes about what people build, buy, hire, or finance.
+Hard rules:
+- Each variant's register anchor teaches cadence only: borrow no premise, joke, scene, skeleton, or phrase, and conceive each variant separately. Three polished paraphrases are not variants.
+- Never invent access, conversations, customers, quotes, measurements, benchmarks, names, numbers, or events.
+- Random sports are excluded. Betr and Kings League are the only exception, with qualified portfolio context and a company/product/format/distribution/audience/economics/brand/growth angle. Never write about games, athletes, players, scores, matchups, or picks.
+- Workflow, release-gate, permission, and benchmark-test designs are not posts; neither are lessons, advice, balanced closers, slogans, "my take" openings, or manufactured mic drops.`;
 }
 
 export function buildGeoffreyNativeWritingBrief(): string {

@@ -1300,6 +1300,7 @@ export interface TweetPerformance {
   replies: number;
   quotes?: number;
   bookmarks?: number;
+  profileClicks?: number | null;  // non_public_metrics.user_profile_clicks; null when the API tier does not serve it
   impressions: number;
   engagementRate: number;  // (likes+RTs+replies+quotes+bookmarks) / impressions when available
   wasViral: boolean;       // exceeded the viral threshold

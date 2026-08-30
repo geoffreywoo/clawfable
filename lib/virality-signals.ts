@@ -696,7 +696,14 @@ export function computeActionRewards(
   const replyReward = clamp(entry.replies / Math.max(2, baselineLikes * 0.35) * 0.18, 0, 0.32);
   const impressionReward = entry.impressions > 0 ? clamp(Math.log10(entry.impressions + 1) / 12, 0, 0.28) : 0;
   const engagementRateReward = clamp((entry.engagementRate - 2) / 20, -0.1, 0.25);
-  const profileClickReward = 0;
+  // Profile clicks are the measurable top of the follow funnel. Reward the
+  // click-through RATE above a ~0.4%-of-impressions baseline so reach alone
+  // earns nothing; requires non_public_metrics from the API (null otherwise).
+  const profileClickReward = typeof entry.profileClicks === 'number' && entry.impressions >= 200
+    ? clamp(((entry.profileClicks / entry.impressions) - 0.004) * 30, -0.08, 0.3)
+    : 0;
+  // Per-tweet follow attribution is not served by the API; account-level
+  // follower trend reaches the prompt via personalization memory instead.
   const followReward = 0;
   const replyShare = entry.replies / Math.max(1, entry.likes + entry.retweets + entry.replies);
   const highQualityReplyReward = clamp((entry.replies / Math.max(2, baselineLikes * 0.25)) * 0.16 + replyShare * 0.16, 0, 0.34);
@@ -734,6 +741,7 @@ export function computeActionRewards(
     + (repostReward * 0.9)
     + (quoteReward * 1.05)
     + (bookmarkReward * 0.88)
+    + (profileClickReward * 0.9)
     + highQualityReplyReward
     + relationshipReward
     + targetAudienceReward

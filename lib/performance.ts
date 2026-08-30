@@ -930,6 +930,7 @@ export async function checkPerformance(
       replies: timelineTweet.replies ?? 0,
       quotes: timelineTweet.quotes ?? 0,
       bookmarks: timelineTweet.bookmarks ?? 0,
+      profileClicks: timelineTweet.profileClicks ?? null,
       impressions: timelineTweet.impressions ?? 0,
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,

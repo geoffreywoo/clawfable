@@ -13,9 +13,8 @@ export async function getGlobalBanditPrior(): Promise<BanditGlobalPrior> {
 
   const agents = await getAgents();
   const histories = await Promise.all(agents.map((agent) => getPerformanceHistory(agent.id, 80)));
-  const performanceHistory = histories.flat();
   const prior = buildBanditGlobalPrior({
-    performanceHistory,
+    accountHistories: histories,
     sourceAccounts: agents.length,
   });
 
