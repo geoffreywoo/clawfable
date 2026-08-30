@@ -106,6 +106,7 @@ describe('buildOutcomeEpisode', () => {
 
   it('no longer punishes slow approvals in the latency reward', () => {
     const episode = (mins: number) => buildOutcomeEpisode({
+      agentId: 'agent-1',
       tweet: tweet(),
       signals: [signal({
         signalType: 'approved_without_edit',

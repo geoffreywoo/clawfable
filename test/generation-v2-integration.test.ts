@@ -25,6 +25,7 @@ vi.mock('@/lib/ai', () => ({
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
+  getDynamicIdeaSeeds: async () => [],
   getGenerationRuns: mocks.getGenerationRuns,
   getIdeaCandidates: mocks.getIdeaCandidates,
   getSemanticBlocks: mocks.getSemanticBlocks,
