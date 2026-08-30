@@ -290,11 +290,21 @@ export function buildRelationshipOpportunities({
       const latest = [...entry.mentions].sort((a, b) => parseDate(b.createdAt) - parseDate(a.createdAt))[0] || null;
       const cluster = latest ? inferAudienceSegment(latest.content, recentWinningTopics[0] || latest.content) : 'reply_regulars';
       const questionBoost = latest?.content.includes('?') ? 0.14 : 0;
+      // Same reach weighting as reply scoring: a recurring interactor with a
+      // large audience is the highest-leverage relationship target. Small and
+      // unknown audiences are never penalized.
+      const authorFollowers = entry.mentions
+        .map((mention) => mention.authorFollowers)
+        .find((value): value is number => typeof value === 'number' && value > 0) ?? null;
+      const reachBoost = typeof authorFollowers === 'number' && authorFollowers >= 10_000
+        ? Math.min(0.16, Math.log10(authorFollowers / 1_000) * 0.053)
+        : 0;
       const score = clamp(
         0.28
         + Math.min(0.24, entry.mentions.length * 0.06)
         + Math.min(0.22, (entry.likes + entry.retweets * 2) / 80)
         + questionBoost
+        + reachBoost
       );
       const suggestedAction: RelationshipOpportunity['suggestedAction'] =
         latest?.tweetId ? 'reply' : entry.mentions.length >= 2 ? 'study' : 'follow';
