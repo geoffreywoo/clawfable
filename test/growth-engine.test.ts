@@ -103,6 +103,35 @@ describe('growth-engine', () => {
     })[0].suggestedAction).toBe('reply');
   });
 
+  it('ranks a large-audience interactor above an equal small-audience one', () => {
+    const mention = (id: string, handle: string, authorFollowers: number | null): Mention => ({
+      id,
+      agentId: 'agent-1',
+      author: handle,
+      authorHandle: handle,
+      content: 'Can you give a concrete example of this?',
+      tweetId: `x-${id}`,
+      conversationId: null,
+      inReplyToTweetId: null,
+      engagementLikes: 5,
+      engagementRetweets: 1,
+      authorFollowers,
+      createdAt: new Date().toISOString(),
+    });
+
+    const opportunities = buildRelationshipOpportunities({
+      agentId: 'agent-1',
+      mentions: [mention('m-big', 'bigaccount', 180_000), mention('m-small', 'smallaccount', 250)],
+      postLog: [],
+      performanceHistory: [perf()],
+    });
+
+    const big = opportunities.find((entry) => entry.handle === 'bigaccount');
+    const small = opportunities.find((entry) => entry.handle === 'smallaccount');
+    expect(big!.score).toBeGreaterThan(small!.score);
+    expect(opportunities[0].handle).toBe('bigaccount');
+  });
+
   it('does not turn voice complaints into reply-mined idea prompts', () => {
     const complaints: Mention[] = [{
       id: 'm-complaint',

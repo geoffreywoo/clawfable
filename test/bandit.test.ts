@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBanditPolicy, buildBanditSlotPlan, summarizeBanditExploitLessons } from '@/lib/bandit';
+import { buildBanditGlobalPrior, buildBanditPolicy, buildBanditSlotPlan, summarizeBanditExploitLessons } from '@/lib/bandit';
 import type { FeedbackEntry, Tweet, TweetPerformance } from '@/lib/types';
 
 function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: string; family: import('@/lib/bandit').BanditArmScore['family'] }): import('@/lib/bandit').BanditArmScore {
@@ -421,6 +421,48 @@ describe('bandit policy', () => {
     expect(lessons.some((line) => line.includes('"direct"'))).toBe(false);
     expect(lessons.some((line) => line.includes('single_claim'))).toBe(false);
     expect(summarizeBanditExploitLessons(null)).toEqual([]);
+  });
+
+  it('normalizes global-prior rewards against each accounts own baseline', () => {
+    const row = (id: string, format: string, likes: number) => performanceEntry({
+      tweetId: id,
+      xTweetId: `x-${id}`,
+      content: `post ${id} with some real content about startups and capital.`,
+      format,
+      likes,
+      retweets: Math.round(likes / 10),
+      replies: 2,
+    });
+    // Big account: ~100-like baseline; its 30-like hot_take posts are BELOW its normal.
+    const bigAccount = [
+      ...Array.from({ length: 6 }, (_, i) => row(`big-base-${i}`, 'analysis', 100)),
+      ...Array.from({ length: 3 }, (_, i) => row(`big-flop-${i}`, 'hot_take', 30)),
+    ];
+    // Small account: ~5-like baseline; its 30-like question posts are breakouts.
+    const smallAccount = [
+      ...Array.from({ length: 6 }, (_, i) => row(`small-base-${i}`, 'analysis', 5)),
+      ...Array.from({ length: 3 }, (_, i) => row(`small-hit-${i}`, 'question', 30)),
+    ];
+
+    const prior = buildBanditGlobalPrior({
+      accountHistories: [bigAccount, smallAccount],
+      sourceAccounts: 2,
+    });
+    const arm = (name: string) => prior.families.format.find((entry) => entry.arm === name);
+
+    // Same raw 30 likes: a breakout on the small account must outscore a
+    // below-baseline post on the big account.
+    expect(arm('question')!.meanReward).toBeGreaterThan(arm('hot_take')!.meanReward);
+    expect(prior.totalSamples).toBe(bigAccount.length + smallAccount.length);
+
+    // Legacy flat input keeps the old constant-baseline behavior.
+    const flat = buildBanditGlobalPrior({
+      performanceHistory: [...bigAccount, ...smallAccount],
+      sourceAccounts: 2,
+    });
+    const flatQuestion = flat.families.format.find((entry) => entry.arm === 'question');
+    const flatHotTake = flat.families.format.find((entry) => entry.arm === 'hot_take');
+    expect(Math.abs(flatQuestion!.meanReward - flatHotTake!.meanReward)).toBeLessThan(0.05);
   });
 
   it('allocates explicit explore slots without repeating the same bet', () => {

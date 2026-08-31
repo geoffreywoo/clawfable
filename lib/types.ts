@@ -599,6 +599,7 @@ export interface Mention {
   inReplyToTweetId: string | null;
   engagementLikes: number;
   engagementRetweets: number;
+  authorFollowers?: number | null;  // author's follower count at fetch time; null for legacy rows
   createdAt: string;
 }
 
@@ -1300,6 +1301,7 @@ export interface TweetPerformance {
   replies: number;
   quotes?: number;
   bookmarks?: number;
+  profileClicks?: number | null;  // non_public_metrics.user_profile_clicks; null when the API tier does not serve it
   impressions: number;
   engagementRate: number;  // (likes+RTs+replies+quotes+bookmarks) / impressions when available
   wasViral: boolean;       // exceeded the viral threshold

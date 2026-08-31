@@ -55,6 +55,7 @@ function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformanc
     replies: overrides.replies ?? 6,
     quotes: overrides.quotes,
     bookmarks: overrides.bookmarks,
+    experimentHoldout: overrides.experimentHoldout,
     impressions: overrides.impressions ?? 1000,
     engagementRate: overrides.engagementRate ?? 5.4,
     wasViral: overrides.wasViral ?? true,
@@ -125,6 +126,81 @@ describe('buildOutcomeEpisode', () => {
     expect(slow).toBe(medium);
   });
 
+  it('shields exploration holdouts from negative lift without hiding disasters', () => {
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `hold-base-${index}`,
+      xTweetId: `x-hold-base-${index}`,
+      likes: 30,
+      retweets: 5,
+      replies: 4,
+      quotes: 3,
+      bookmarks: 5,
+      wasViral: false,
+    }));
+    const flop = (experimentHoldout: boolean) => computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-x',
+        xTweetId: 'x-hold-x',
+        likes: 6,
+        retweets: 1,
+        replies: 1,
+        quotes: 0,
+        bookmarks: 0,
+        experimentHoldout,
+      }),
+      { avgLikes: 30, avgRetweets: 5 },
+      rows,
+    );
+
+    const shielded = flop(true);
+    const unshielded = flop(false);
+    expect(shielded).toBeGreaterThan(unshielded);
+    // The shield softens, it does not erase: a real flop still reads negative.
+    expect(shielded).toBeLessThan(0);
+  });
+
+  it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
+    // 8 typical rows; the post under test matches them exactly. With the
+    // baseline derived from history on the same spread scale, lift must be
+    // near zero - the old like/RT-only baseline read this as a big win.
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `median-${index}`,
+      xTweetId: `x-median-${index}`,
+      likes: 12,
+      retweets: 2,
+      replies: 3,
+      quotes: 2,
+      bookmarks: 4,
+      wasViral: false,
+    }));
+    const lift = computePerformanceLiftReward(
+      performance({ tweetId: 'median-x', xTweetId: 'x-median-x', likes: 12, retweets: 2, replies: 3, quotes: 2, bookmarks: 4 }),
+      { avgLikes: 12, avgRetweets: 2 },
+      rows,
+    );
+    expect(Math.abs(lift)).toBeLessThan(0.15);
+  });
+
+  it('honors the soft-archive marker instead of full deletion penalty', () => {
+    const episode = (metadata?: Record<string, boolean>) => buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({
+        signalType: 'deleted_from_queue',
+        rewardDelta: -0.2,
+        metadata,
+      })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    const soft = episode({ softArchive: true }).reward.immediateTotal;
+    const hard = episode().reward.immediateTotal;
+    expect(soft).toBeGreaterThan(hard);
+    expect(soft).toBe(-0.2);
+    expect(hard).toBe(-0.78);
+  });
+
   it('credits quotes and bookmarks as spread signals in the lift reward', () => {
     const history = Array.from({ length: 6 }, (_, index) => performance({
       tweetId: `hist-${index}`,
@@ -150,5 +226,67 @@ describe('buildOutcomeEpisode', () => {
 
     // Same likes; quote/bookmark spread must now raise the reward.
     expect(heavySpread).toBeGreaterThan(quietSpread);
+  });
+
+  it('counts a duplicated signal record only once in the reward', () => {
+    const single = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({ signalType: 'approved_without_edit' })],
+      performance: undefined,
+      baseline: null,
+    });
+    const duplicated = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [
+        signal({ signalType: 'approved_without_edit' }),
+        signal({ signalType: 'approved_without_edit' }),
+        signal({ signalType: 'approved_without_edit' }),
+      ],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(duplicated.reward.approval).toBe(single.reward.approval);
+    expect(duplicated.reward.immediateTotal).toBe(single.reward.immediateTotal);
+  });
+
+  it('still counts distinct signal records of the same type separately', () => {
+    const twoEdits = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [
+        signal({ id: 'edit-1', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } }),
+        signal({ id: 'edit-2', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } }),
+      ],
+      performance: undefined,
+      baseline: null,
+    });
+    const oneEdit = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({ id: 'edit-1', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(twoEdits.reward.editBurden).toBeLessThan(oneEdit.reward.editBurden);
+  });
+
+  it('ignores malformed negative approval latency instead of treating it as instant', () => {
+    const episode = (mins: number) => buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({
+        signalType: 'approved_without_edit',
+        metadata: { timeToApprovalMins: mins },
+      })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(episode(-30).reward.timeToApproval).toBe(0);
+    expect(episode(10).reward.timeToApproval).toBeGreaterThan(0);
   });
 });

@@ -508,6 +508,20 @@ describe('account taste scoring', () => {
     expect(feedback.preferenceHints.join(' ')).toContain('nonlinear capability');
   });
 
+  it('keeps the live writer contract positive-first with a bounded hard-rule section', () => {
+    const contract = buildGeoffreyNativeV2WriterContract();
+    const whatIndex = contract.indexOf('What to write:');
+    const rulesIndex = contract.indexOf('Hard rules');
+    expect(whatIndex).toBeGreaterThan(-1);
+    expect(rulesIndex).toBeGreaterThan(whatIndex);
+    expect(contract).toContain('unreasonable, funny, combative, or personally costly');
+    expect(contract).toContain('not a risk to sand off');
+    // Prohibition density stays bounded: the hard-rule section is the minority
+    // of the contract, not the bulk of it.
+    const ruleSection = contract.slice(rulesIndex);
+    expect(ruleSection.length).toBeLessThan(contract.length / 2);
+  });
+
   it('keeps the narrow portfolio sports exception in every Geoffrey writing contract', () => {
     for (const contract of [
       buildGeoffreyNativeGenerationBrief(),

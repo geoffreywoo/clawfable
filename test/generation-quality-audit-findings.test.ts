@@ -343,6 +343,31 @@ describe('generation quality audit findings', () => {
     ]));
   });
 
+  it('surfaces a company-heavy live queue separately from historical mix recovery', () => {
+    const input = healthyInput() as any;
+    input.contentMix = {
+      queuePolicyIssueCount: 3,
+      queuedCompanyLedCount: 3,
+      queuedStandingPromotionCount: 2,
+      nextBriefCompanyLedCount: 0,
+      postedLast5CompanyLedCount: 4,
+      postedLast10StandingPromotionCount: 3,
+    };
+
+    expect(buildGenerationAuditFindings(input)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'company_content_mix_queue_failure',
+        severity: 'critical',
+        scope: 'live_state',
+      }),
+      expect.objectContaining({
+        code: 'company_content_mix_historical_breach',
+        severity: 'medium',
+        scope: 'historical_window',
+      }),
+    ]));
+  });
+
   it('fails visibly when a portfolio-company queue entry violates constructive alignment', () => {
     const input = healthyInput() as any;
     input.portfolio = {

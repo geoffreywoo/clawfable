@@ -226,7 +226,10 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
     case 'copied_not_posted':
       return { copySignal: 0.18 };
     case 'deleted_from_queue':
-      return { deletionPenalty: -0.78 };
+      // A wholesale operator queue refresh is not a targeted editorial
+      // rejection; honor the soft-archive marker so one bulk refresh does not
+      // mass-punish every arm that happened to be queued.
+      return { deletionPenalty: signal.metadata?.softArchive === true ? -0.2 : -0.78 };
     case 'deleted_from_x':
       return { deletionPenalty: -0.96 };
     case 'reply_generated':
@@ -260,7 +263,7 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
 // ones worth deliberating on — an approval after thought is still an approval.
 function latencyReward(signal: LearningSignal): number {
   const mins = readNumber(signal.metadata?.timeToApprovalMins);
-  if (mins === null) return 0;
+  if (mins === null || mins < 0) return 0;
   if (mins <= 15) return 0.12;
   if (mins <= 60) return 0.06;
   return 0;
@@ -272,9 +275,21 @@ export function computePerformanceLiftReward(
   history: TweetPerformance[] = [],
 ): number {
   if (!performance) return 0;
-  const accountBaseline = baseline
-    ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 3))
-    : 12;
+  // The account baseline must live on the same spread-weighted scale as
+  // weightedEngagement. With enough history, derive it directly from history
+  // (identical function on both sides). Otherwise, uplift the like/retweet
+  // baseline by a conservative factor standing in for the reply/quote/bookmark
+  // terms it cannot see — without this, a median post reads as a large
+  // positive lift and the bandit's failure signal goes dead.
+  const historyBaselineSample = history
+    .filter((entry) => entry.xTweetId !== performance.xTweetId)
+    .slice(0, 40);
+  const SPREAD_SCALE_UPLIFT = 1.35;
+  const accountBaseline = historyBaselineSample.length >= 5
+    ? Math.max(1, average(historyBaselineSample.map(weightedEngagement)))
+    : baseline
+      ? Math.max(1, (baseline.avgLikes + (baseline.avgRetweets * 3)) * SPREAD_SCALE_UPLIFT)
+      : 16;
   const topicBaseline = cohortAverage(
     performance,
     history,
@@ -313,12 +328,19 @@ export function computePerformanceLiftReward(
     : 0;
   const replyShare = performance.replies / Math.max(1, performance.likes + performance.retweets + performance.replies);
   const replyBonus = Math.min(0.16, replyShare * 0.45);
-  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.1 ? 0.06 : 0;
+  // Exploration holdouts are shielded, not just tipped: a deliberate bet on an
+  // under-tested arm has its downside softened (negative lift halved) plus a
+  // small bonus unless it flopped badly, so the learning loop can afford the
+  // experiments it schedules. Real disasters still register.
+  const holdoutShield = performance.experimentHoldout && engagementLift < 0
+    ? -engagementLift * 0.5 * 0.45
+    : 0;
+  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.35 ? 0.06 : 0;
   const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
     ? Math.min(0.08, replyBonus)
     : 0;
 
-  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus, -0.6, 0.8));
+  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus + holdoutShield, -0.6, 0.8));
 }
 
 function addBreakdown(target: RewardBreakdown, delta: Partial<RewardBreakdown>) {
@@ -363,7 +385,15 @@ export function buildOutcomeEpisode({
     notes: [],
   };
 
-  for (const signal of signals) {
+  const seenSignalIds = new Set<string>();
+  const uniqueSignals = signals.filter((signal) => {
+    if (!signal.id) return true;
+    if (seenSignalIds.has(signal.id)) return false;
+    seenSignalIds.add(signal.id);
+    return true;
+  });
+
+  for (const signal of uniqueSignals) {
     addBreakdown(breakdown, signalBaseReward(signal));
     const latency = latencyReward(signal);
     if (latency !== 0) breakdown.timeToApproval += latency;
@@ -407,9 +437,9 @@ export function buildOutcomeEpisode({
     topic: tweet.topic,
     featureTags,
     reward: breakdown,
-    signals: [...new Set(signals.map((signal) => signal.signalType))],
+    signals: [...new Set(uniqueSignals.map((signal) => signal.signalType))],
     stage: performance ? 'final' : 'immediate',
-    observedAt: performance?.checkedAt || signals[0]?.createdAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt,
+    observedAt: performance?.checkedAt || uniqueSignals[0]?.createdAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt,
   };
 }
 

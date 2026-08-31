@@ -73,6 +73,7 @@ import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
 } from '@/lib/antifund-portfolio';
+import { isCompanyLedGeoffreyPost } from '@/lib/geoffrey-content-mix';
 
 const voiceProfile = {
   tone: 'casual and direct',
@@ -1369,6 +1370,44 @@ describe('Tweet Generation V2', () => {
       expect(portfolioBriefs[0].authorOpportunity).toContain('as a company');
     }
     expect(buildIdeaGenerationPromptV2([portfolioBriefs[0]], geoffreyVoiceProfile)).toContain('portfolioCompanyContext');
+  });
+
+  it('allocates no company-led brief while a recent company post occupies the rolling slot', () => {
+    const geoffreyVoiceProfile = {
+      ...voiceProfile,
+      topics: ['AI', 'startups', 'investing', 'consumer'],
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const briefs = buildGenerationBriefsV2({
+      count: 2,
+      stories: [],
+      documents: [],
+      voiceProfile: geoffreyVoiceProfile,
+      analysis: { engagementPatterns: { topTopics: ['startups', 'AI', 'consumer'] } } as any,
+      learnings: null,
+      style: { autonomyMode: 'balanced', trendMixTarget: 30, trendTolerance: 'moderate', exploration: { underusedTopics: ['consumer'] } } as any,
+      trending: null,
+      allTweets: [{
+        id: 'recent-microsoft',
+        agentId: 'agent-1',
+        content: 'i would buy @Microsoft for the next 12 months.',
+        topic: 'Microsoft AI distribution',
+        type: 'original',
+        status: 'posted',
+        xTweetId: 'x-recent-microsoft',
+        postedAt: '2026-08-30T21:00:00.000Z',
+        createdAt: '2026-08-30T21:00:00.000Z',
+      } as Tweet],
+      seedRotationKey: 'company-mix-recent-post',
+      now: new Date('2026-08-30T22:00:00.000Z'),
+    });
+
+    expect(briefs).toHaveLength(4);
+    expect(briefs.filter((brief) => isCompanyLedGeoffreyPost({
+      content: `${brief.title} ${brief.summary} ${(brief.personalTopicSignals || []).join(' ')}`,
+      topic: brief.topic,
+      portfolioCompanyContext: brief.portfolioCompanyContext,
+    }))).toEqual([]);
   });
 
   it('rejects a negative or fabricated portfolio-company idea before model judgment', () => {

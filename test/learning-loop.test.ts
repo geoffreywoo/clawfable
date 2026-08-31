@@ -37,7 +37,7 @@ describe('buildPersonalizationMemory', () => {
         tweetId: 'tweet-1',
         tweetText: 'The best AI teams know the product is working when the Slack channel gets quieter.',
         rating: 'down',
-        generatedAt: '2026-06-07T12:00:00.000Z',
+        generatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
         reason: 'lame, too Slack, not elevated or technical enough, sounds like AI slop, does not sound like me, and the content is drifting',
         intentSummary: 'does not sound like me and the content is drifting too far',
         source: 'queue_delete',
@@ -74,6 +74,39 @@ describe('buildPersonalizationMemory', () => {
       expect.stringContaining('native content identity'),
     ]));
     expect(memory.rejectedDrafts).toContain('The best AI teams know the product is working when the Slack channel gets quieter.');
+  });
+
+  it('expires rejected-draft exclusions after 21 days so the idea space reopens', () => {
+    const staleText = 'An old rejected take about pricing that should no longer be excluded.';
+    const freshText = 'A recent rejected take about hiring that should still be excluded.';
+    const entry = (tweetText: string, ageDays: number) => ({
+      tweetId: `tweet-${ageDays}`,
+      tweetText,
+      rating: 'down' as const,
+      generatedAt: new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000).toISOString(),
+      reason: 'not my voice',
+      source: 'queue_delete' as const,
+      userProvidedReason: true,
+    });
+    const memory = buildPersonalizationMemory({
+      feedback: [entry(staleText, 40), entry(freshText, 3)],
+      signals: [],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+      voiceProfile: {
+        tone: 'operator',
+        topics: ['startups'],
+        antiGoals: [],
+        communicationStyle: 'direct',
+        summary: 'Startup takes.',
+      },
+    });
+
+    expect(memory.rejectedDrafts).toContain(freshText);
+    expect(memory.rejectedDrafts).not.toContain(staleText);
   });
 
   it('does not let a duplicate-only rejection poison the preserved premise', () => {

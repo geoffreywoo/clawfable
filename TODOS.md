@@ -32,6 +32,28 @@ No open P1 items.
 **Priority:** P3
 **Depends on:** Activation funnel metrics and retention evidence
 
+## Learning and Growth (data-gated)
+
+### Verify the new learning signals populate in production
+
+**What:** Confirm exploration holdouts, per-tweet profileClicks, follower snapshots, reach-weighted mentions, and dynamic idea seeds are appearing in KV with sane values after real cron cycles.
+
+**Why:** All five mechanisms shipped 2026-08-30 with tests but no production observation; a silent tier restriction (non_public_metrics) or empty research corpus would degrade them invisibly (all degrade to null/absent by design).
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** ~24h of autopilot/research cron cycles; network access to production KV or the metrics API
+
+### Attribute follower-growth windows to posts
+
+**What:** Once follower snapshots span 1-2 weeks, join per-window follower deltas against posts live in each window (weighted by relative spread) and feed a bounded account-growth term into delayed rewards.
+
+**Why:** Follower growth is the objective; today it reaches generation only as a prompt-level trend line. Per-tweet follows are not served by the API, so window attribution is the honest next step.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** Follower snapshot history (6h cadence, started 2026-08-30)
+
 ## Completed
 
 - **Launch orchestration** — Already server-side in `lib/setup-launch.ts` (single atomic endpoint)
