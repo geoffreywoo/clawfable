@@ -203,8 +203,9 @@ function median(values: number[]): number {
 function performanceReward(
   entry: TweetPerformance,
   baseline?: { avgLikes: number; avgRetweets: number } | null,
+  history: TweetPerformance[] = [],
 ): number {
-  const lift = computePerformanceLiftReward(entry, baseline);
+  const lift = computePerformanceLiftReward(entry, baseline, history);
   return clamp((lift + 1) / 2, 0.05, 0.98);
 }
 
@@ -263,7 +264,7 @@ function collectFallbackPerformanceObservations(
 
   for (const entry of performanceHistory) {
     if (entry.tweetId && coveredTweetIds.has(String(entry.tweetId))) continue;
-    const reward = performanceReward(entry, baseline);
+    const reward = performanceReward(entry, baseline, performanceHistory);
     const qualityEvidenceWeight = historicalPerformanceEvidenceWeight(entry);
     const weight = recencyWeight(entry.checkedAt)
       * sourceSignalWeight(entry.source)

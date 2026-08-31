@@ -405,7 +405,7 @@ export function isAntiFundPortfolioBriefDue(
 ): boolean {
   const recent = tweets
     .filter((tweet) => !tweet.quarantinedAt && ['queued', 'posted'].includes(tweet.status))
-    .slice(0, 5);
+    .slice(0, 10);
   const portfolioCount = recent.filter((tweet) => (
     (
       tweet.portfolioCompanyContext
@@ -417,7 +417,9 @@ export function isAntiFundPortfolioBriefDue(
     || findAntiFundPortfolioCompanies(`${tweet.topic || ''} ${tweet.content}`)
       .some(isAntiFundAutonomousPromotionEligible)
   )).length;
-  if (!(recent.length < 3 || portfolioCount < 2)) return false;
+  // Standing portfolio conviction is a sparse accent, not a batch quota.
+  // One OpenAI or Cognition subject reserves the next ten committed slots.
+  if (portfolioCount >= 1) return false;
   const retryBlocked = signals.some((signal) => (
     ['deleted_from_queue', 'deleted_from_x', 'edited_before_queue', 'edited_before_post'].includes(signal.signalType)
     && typeof signal.metadata?.portfolioCompanyId === 'string'

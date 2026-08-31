@@ -140,10 +140,12 @@ export async function synthesizeDynamicIdeaSeeds({
   for (const raw of rawSeeds) {
     if (!raw || typeof raw !== 'object') continue;
     const entry = raw as Record<string, unknown>;
-    const topic = String(entry.topic || '').trim();
-    const technicalObject = String(entry.technicalObject || '').trim();
-    const hiddenConstraint = String(entry.hiddenConstraint || '').trim();
-    const nonConsensusImplication = String(entry.nonConsensusImplication || '').trim();
+    // Length caps: these strings are stored and re-injected into generation
+    // prompts, so model output must not be able to smuggle unbounded text.
+    const topic = String(entry.topic || '').trim().slice(0, 120);
+    const technicalObject = String(entry.technicalObject || '').trim().slice(0, 200);
+    const hiddenConstraint = String(entry.hiddenConstraint || '').trim().slice(0, 260);
+    const nonConsensusImplication = String(entry.nonConsensusImplication || '').trim().slice(0, 260);
     const kind = SEED_KINDS.includes(entry.kind as typeof SEED_KINDS[number])
       ? entry.kind as FrontierIdeaSeed['kind']
       : 'startup';
@@ -201,6 +203,11 @@ export async function refreshDynamicIdeaSeeds(
     now,
   }).catch(() => [] as DynamicIdeaSeed[]);
   const merged = [...fresh, ...retained].slice(0, MAX_DYNAMIC_SEEDS);
+  // Never overwrite the stored pool with nothing: a transient KV read blip
+  // that surfaced as an empty current list must not wipe seeds we still have.
+  if (merged.length === 0 && current.length > 0) {
+    return { synthesized: 0, retained: 0 };
+  }
   await saveDynamicIdeaSeeds(agent.id, merged);
   return { synthesized: fresh.length, retained: retained.length };
 }

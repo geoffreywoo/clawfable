@@ -780,7 +780,7 @@ export async function checkPerformance(
   try {
     timeline = timelineLimit > 300
       ? await getDeepTimeline(keys, String(agent.xUserId), timelineLimit)
-      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit);
+      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit, { includePrivateMetrics: true });
   } catch (err) {
     const invalidCredentials = isInvalidTwitterCredentialError(err);
     if (invalidCredentials) {

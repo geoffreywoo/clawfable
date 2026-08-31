@@ -335,7 +335,7 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
     || /\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
   const hasDistinction = /\b(not|isn't|aren't)\b.{0,80}\b(but|because)\b|\bvs\b| versus | compared to |\binstead of\b/i.test(text);
   const asksForUsefulInput = /\b(where does this break|what am i missing|what would you change|which part is wrong|what would make this fail|edge case)\b/i.test(text);
-  const genericBait = /\b(thoughts\??|what do you think\??|agree or disagree\??|reply below|drop your|hot take\??)\b/i.test(text);
+  const genericBait = /\bthoughts(?:\s+on\s+[^?.!\n]{0,60})?\?|\bwhat do you think\b|\bagree or disagree\b|\breply below\b|\bdrop your\b|\bhot take\s*[:?]/i.test(text);
 
   if (hasQuestion) score += 0.1;
   if (hasMechanism) score += 0.16;
@@ -696,15 +696,25 @@ export function computeActionRewards(
   const baselineRetweets = Math.max(1, baseline?.avgRetweets || 2);
   const likeReward = clamp((entry.likes - baselineLikes) / baselineLikes * 0.22, -0.28, 0.42);
   const repostReward = clamp((entry.retweets - baselineRetweets) / baselineRetweets * 0.2, -0.24, 0.42);
+  // Quote/bookmark counts only go negative against a real account baseline.
+  // Without one, a typical 0-quote post measured against the default divisor
+  // would take a constant penalty purely for having the metric available.
+  const quoteBaseline = Math.max(1, baseline?.avgQuotes || 1);
   const quoteReward = typeof entry.quotes === 'number'
-    ? clamp((entry.quotes - Math.max(1, baseline?.avgQuotes || 1)) / Math.max(1, baseline?.avgQuotes || 1) * 0.24, -0.2, 0.46)
+    ? clamp((entry.quotes - quoteBaseline) / quoteBaseline * 0.24, typeof baseline?.avgQuotes === 'number' ? -0.2 : 0, 0.46)
     : 0;
+  const bookmarkBaseline = Math.max(1, baseline?.avgBookmarks || 1);
   const bookmarkReward = typeof entry.bookmarks === 'number'
-    ? clamp((entry.bookmarks - Math.max(1, baseline?.avgBookmarks || 1)) / Math.max(1, baseline?.avgBookmarks || 1) * 0.2, -0.16, 0.4)
+    ? clamp((entry.bookmarks - bookmarkBaseline) / bookmarkBaseline * 0.2, typeof baseline?.avgBookmarks === 'number' ? -0.16 : 0, 0.4)
     : 0;
   const replyReward = clamp(entry.replies / Math.max(2, baselineLikes * 0.35) * 0.18, 0, 0.32);
   const impressionReward = entry.impressions > 0 ? clamp(Math.log10(entry.impressions + 1) / 12, 0, 0.28) : 0;
-  const engagementRateReward = clamp((entry.engagementRate - 2) / 20, -0.1, 0.25);
+  // Engagement rate is only evidence when impressions were actually measured;
+  // a missing-impressions row reports rate 0 and must stay neutral, not read
+  // as a below-baseline post.
+  const engagementRateReward = entry.impressions > 0
+    ? clamp((entry.engagementRate - 2) / 20, -0.1, 0.25)
+    : 0;
   // Profile clicks are the measurable top of the follow funnel. Reward the
   // click-through RATE above a ~0.4%-of-impressions baseline so reach alone
   // earns nothing; requires non_public_metrics from the API (null otherwise).
