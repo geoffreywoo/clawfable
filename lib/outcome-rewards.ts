@@ -340,7 +340,14 @@ export function computePerformanceLiftReward(
     ? Math.min(0.08, replyBonus)
     : 0;
 
-  return round(clamp((engagementLift * 0.45) + (rateLift * 0.18) + replyBonus + creativeReplyBonus + holdoutBonus + holdoutShield, -0.6, 0.8));
+  // Low-reach posts carry noisy counts: a couple of likes on 40 impressions
+  // can read as a huge lift or collapse. Scale the lift terms by a reach
+  // confidence factor so sparse observations move the learning loop less.
+  const reachConfidence = performance.impressions > 0
+    ? Math.min(1, performance.impressions / 300)
+    : 0.7;
+
+  return round(clamp(((engagementLift * 0.45) + (rateLift * 0.18)) * reachConfidence + replyBonus + creativeReplyBonus + holdoutBonus + holdoutShield, -0.6, 0.8));
 }
 
 function addBreakdown(target: RewardBreakdown, delta: Partial<RewardBreakdown>) {
@@ -468,7 +475,11 @@ export function buildOutcomeEpisodes({
   const performanceByTweetId = new Map<string, TweetPerformance>();
   for (const entry of performanceHistory) {
     if (!entry.tweetId) continue;
-    performanceByTweetId.set(String(entry.tweetId), entry);
+    const key = String(entry.tweetId);
+    const existing = performanceByTweetId.get(key);
+    if (!existing || Date.parse(entry.checkedAt) >= Date.parse(existing.checkedAt) || Number.isNaN(Date.parse(existing.checkedAt))) {
+      performanceByTweetId.set(key, entry);
+    }
   }
 
   return tweets
@@ -480,5 +491,5 @@ export function buildOutcomeEpisodes({
       performanceHistory,
       baseline,
     }))
-    .filter((episode) => episode.signals.length > 0 || episode.reward.engagementLift !== 0);
+    .filter((episode) => episode.signals.length > 0 || episode.stage === 'final');
 }
