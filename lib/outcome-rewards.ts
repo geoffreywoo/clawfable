@@ -263,7 +263,7 @@ function signalBaseReward(signal: LearningSignal): Partial<RewardBreakdown> {
 // ones worth deliberating on — an approval after thought is still an approval.
 function latencyReward(signal: LearningSignal): number {
   const mins = readNumber(signal.metadata?.timeToApprovalMins);
-  if (mins === null) return 0;
+  if (mins === null || mins < 0) return 0;
   if (mins <= 15) return 0.12;
   if (mins <= 60) return 0.06;
   return 0;
@@ -385,7 +385,15 @@ export function buildOutcomeEpisode({
     notes: [],
   };
 
-  for (const signal of signals) {
+  const seenSignalIds = new Set<string>();
+  const uniqueSignals = signals.filter((signal) => {
+    if (!signal.id) return true;
+    if (seenSignalIds.has(signal.id)) return false;
+    seenSignalIds.add(signal.id);
+    return true;
+  });
+
+  for (const signal of uniqueSignals) {
     addBreakdown(breakdown, signalBaseReward(signal));
     const latency = latencyReward(signal);
     if (latency !== 0) breakdown.timeToApproval += latency;
@@ -429,9 +437,9 @@ export function buildOutcomeEpisode({
     topic: tweet.topic,
     featureTags,
     reward: breakdown,
-    signals: [...new Set(signals.map((signal) => signal.signalType))],
+    signals: [...new Set(uniqueSignals.map((signal) => signal.signalType))],
     stage: performance ? 'final' : 'immediate',
-    observedAt: performance?.checkedAt || signals[0]?.createdAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt,
+    observedAt: performance?.checkedAt || uniqueSignals[0]?.createdAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt,
   };
 }
 

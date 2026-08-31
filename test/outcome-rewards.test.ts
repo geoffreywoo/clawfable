@@ -227,4 +227,66 @@ describe('buildOutcomeEpisode', () => {
     // Same likes; quote/bookmark spread must now raise the reward.
     expect(heavySpread).toBeGreaterThan(quietSpread);
   });
+
+  it('counts a duplicated signal record only once in the reward', () => {
+    const single = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({ signalType: 'approved_without_edit' })],
+      performance: undefined,
+      baseline: null,
+    });
+    const duplicated = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [
+        signal({ signalType: 'approved_without_edit' }),
+        signal({ signalType: 'approved_without_edit' }),
+        signal({ signalType: 'approved_without_edit' }),
+      ],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(duplicated.reward.approval).toBe(single.reward.approval);
+    expect(duplicated.reward.immediateTotal).toBe(single.reward.immediateTotal);
+  });
+
+  it('still counts distinct signal records of the same type separately', () => {
+    const twoEdits = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [
+        signal({ id: 'edit-1', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } }),
+        signal({ id: 'edit-2', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } }),
+      ],
+      performance: undefined,
+      baseline: null,
+    });
+    const oneEdit = buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({ id: 'edit-1', signalType: 'edited_before_queue', metadata: { changedFeatureCount: 1 } })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(twoEdits.reward.editBurden).toBeLessThan(oneEdit.reward.editBurden);
+  });
+
+  it('ignores malformed negative approval latency instead of treating it as instant', () => {
+    const episode = (mins: number) => buildOutcomeEpisode({
+      agentId: 'agent-1',
+      tweet: tweet(),
+      signals: [signal({
+        signalType: 'approved_without_edit',
+        metadata: { timeToApprovalMins: mins },
+      })],
+      performance: undefined,
+      baseline: null,
+    });
+
+    expect(episode(-30).reward.timeToApproval).toBe(0);
+    expect(episode(10).reward.timeToApproval).toBeGreaterThan(0);
+  });
 });
