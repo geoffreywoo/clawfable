@@ -168,9 +168,20 @@ When changing models, routing, reasoning effort, or fallback behavior, update an
 - `twitter-client.ts`, `twitter-debug.ts`, `twitter-read-backoff.ts`, `x-account-conflicts.ts` - X API access, OAuth credentials, diagnostics, and read backoff.
 - `soul-parser.ts`, `soul-from-tweets.ts`, `voice-directives.ts`, `style-mode.ts` - SOUL.md parsing, generated voice profiles, and voice rules.
 - `analysis.ts`, `tweet-features.ts`, `generation-context.ts`, `source-planner.ts`, `trending.ts` - Account/content analysis and source planning.
-- `generation-v2.ts`, `publishing-v2.ts`, `research-pipeline.ts`, `virality-signals.ts`, `global-bandit-prior.ts`, `bandit.ts` - Evidence-backed public-copy generation, deterministic gates, and outcome priors.
+- `generation-v2.ts`, `publishing-v2.ts`, `research-pipeline.ts`, `virality-signals.ts`, `global-bandit-prior.ts`, `bandit.ts`, `seed-synthesis.ts`, `frontier-idea-seeds.ts` - Evidence-backed public-copy generation, deterministic gates, outcome priors, and idea premises (curated seeds plus research-synthesized dynamic seeds with provenance and a 14-day TTL).
 - `survivability.ts`, `autopilot.ts`, `autopilot-status.ts`, `autopilot-health.ts`, `queue-healing.ts`, `setup-launch.ts` - Launch, posting loop, cadence, safety, queue repair, and health.
 - `learning-loop.ts`, `learning-snapshot.ts`, `soul-evolution.ts`, `taste-calibration.ts`, `outcome-rewards.ts`, `performance.ts`, `metrics-snapshot.ts`, `voice-tuning-analytics.ts` - Feedback and learning pipeline.
+
+Learning/ranking invariants to preserve (added 2026-08-30):
+
+- Engagement lift is spread-weighted (`weightedSpreadEngagement`: quotes x5, bookmarks x4, retweets x3, replies x2) and every baseline it is compared against must live on that same scale; do not reintroduce a likes+RT-only baseline anywhere in `outcome-rewards.ts` or `bandit.ts`.
+- Final draft selection sorts by quality margin plus a bounded viral-upside bonus (`V2_VIRALITY_SELECTION_WEIGHT`); gates never loosen, only ordering among passing drafts changes.
+- Idea ranking uses `ideaJudgePriorityScore` (weighted blend); safety lives exclusively in judge floors. Do not restore min-aggregation.
+- The bandit observes thumbs-up and thumbs-down, discounts pattern-flagged evidence symmetrically for wins and losses, and normalizes the cross-account global prior per account baseline.
+- Quality-passing drafts on under-tested format/hook arms are deterministically flagged `experimentHoldout` (~1 in 3); the reward path shields those experiments from negative lift instead of punishing exploration.
+- `cringeRisk` is `blendedCringeRisk` (half weight on the max estimator); the deterministic slop score keeps its own separate hard gate.
+- Rejected-draft exclusions expire after 21 days; historical viral tweets are positive references, never novelty penalties.
+- Follower snapshots (6h cadence, `agent:${'{'}id{'}'}:follower-snapshots`) and per-tweet `profileClicks` (non-public metrics, opt-in on own-timeline reads) feed growth signals; missing metrics store as null, never fabricated zeros.
 - `engagement.ts`, `proactive-engagement.ts`, `growth-engine.ts`, `job-suggestions.ts` - Engagement and growth opportunity workflows.
 - `browser-companion.ts` - Browser companion pairing and actions.
 - `request-validation.ts`, `request-origin.ts`, `delete-intent.ts`, `oauth-start-error.ts` - Route validation and defensive request handling.

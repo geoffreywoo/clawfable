@@ -420,7 +420,7 @@ describe('generateTweetBatchV2 integration', () => {
     ]);
     expect(String(writerCall.system)).toContain('not short, medium, and long versions');
     expect(String(writerCall.system)).toContain('Begin with the thought itself');
-    expect(String(writerCall.system)).toContain("Each variant's assigned register anchor");
+    expect(String(writerCall.system)).toContain("Each variant's register anchor teaches cadence only");
     const copyJudgePrompt = JSON.parse(copyJudgeCall.prompt);
     expect(copyJudgePrompt.voiceAnchors.length).toBeGreaterThanOrEqual(3);
     expect(copyJudgePrompt.ideaContexts.every((context: any) => context.voiceAnchorIds.length >= 3)).toBe(true);
@@ -1462,8 +1462,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem).toContain('Write the live reaction, not a compressed brief');
     expect(writerSystem).toContain('approved idea packet is the concrete fact ceiling');
     expect(writerSystem).toContain('Never turn attributed evidence into an unqualified fact');
-    expect(writerSystem).toContain('Conceive each variant separately');
-    expect(writerSystem).toContain('Stop before advice, a balanced contrast');
+    expect(writerSystem).toContain('conceive each variant separately');
+    expect(writerSystem).toContain('neither are lessons, advice, balanced closers');
     expect(writerSystem).toContain('rough multi-paragraph thought');
     expect(writerSystem).toContain('Three polished paraphrases are not');
     expect(writerSystem).not.toContain('at most 190 characters');

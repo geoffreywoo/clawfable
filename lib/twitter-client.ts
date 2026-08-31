@@ -255,7 +255,7 @@ export async function getMentionsFromTwitter(
   userId: string,
   sinceId?: string,
   maxTotal = MAX_MENTIONS_PER_FETCH,
-): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
+): Promise<Array<{ id: string; text: string; authorId: string; authorName: string; authorUsername: string; authorFollowers: number | null; createdAt: string; conversationId: string | null; inReplyToTweetId: string | null }>> {
   const client = createClient(keys);
   try {
     const fetchLimit = Math.max(1, Math.min(MAX_MENTIONS_PER_FETCH, Math.floor(maxTotal)));
@@ -263,7 +263,7 @@ export async function getMentionsFromTwitter(
       max_results: Math.min(100, fetchLimit),
       'tweet.fields': ['created_at', 'author_id', 'public_metrics', 'conversation_id', 'in_reply_to_user_id', 'referenced_tweets'],
       expansions: ['author_id'],
-      'user.fields': ['name', 'username'],
+      'user.fields': ['name', 'username', 'public_metrics'],
     };
     if (sinceId) params.since_id = sinceId;
     const timeline = await client.v2.userMentionTimeline(
@@ -277,11 +277,15 @@ export async function getMentionsFromTwitter(
     const result = timeline.data;
 
     // Build a map of author IDs to user info from expansions
-    const userMap = new Map<string, { name: string; username: string }>();
+    const userMap = new Map<string, { name: string; username: string; followers: number | null }>();
     const includes = (result as any).includes;
     if (includes?.users) {
       for (const u of includes.users) {
-        userMap.set(u.id, { name: u.name || u.id, username: u.username || u.id });
+        userMap.set(u.id, {
+          name: u.name || u.id,
+          username: u.username || u.id,
+          followers: typeof u.public_metrics?.followers_count === 'number' ? u.public_metrics.followers_count : null,
+        });
       }
     }
 
@@ -297,6 +301,7 @@ export async function getMentionsFromTwitter(
         authorId,
         authorName: user?.name || authorId,
         authorUsername: user?.username || authorId,
+        authorFollowers: user?.followers ?? null,
         createdAt: tweet.created_at || new Date().toISOString(),
         conversationId: (tweet as any).conversation_id || null,
         inReplyToTweetId: repliedTo?.id || null,
@@ -435,7 +440,8 @@ function completeTweetText(tweet: any): string {
 export async function getUserTimeline(
   keys: TwitterKeys,
   userId: string,
-  maxResults = 100
+  maxResults = 100,
+  options: { includePrivateMetrics?: boolean } = {},
 ): Promise<
   Array<{
     id: string;
@@ -447,6 +453,7 @@ export async function getUserTimeline(
     impressions: number;
     quotes: number;
     bookmarks: number;
+    profileClicks?: number | null;
     referenceType?: TimelineSourceMetadata['referenceType'];
     referencedTweetId?: string | null;
     hasMedia?: boolean;
@@ -457,16 +464,27 @@ export async function getUserTimeline(
   const client = createClient(keys);
   const totalLimit = Math.max(1, Math.min(300, Math.floor(maxResults)));
   try {
-    const result = await client.v2.userTimeline(userId, {
+    const baseFields = ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'];
+    const fetchTimeline = (fields: string[]) => client.v2.userTimeline(userId, {
       max_results: Math.max(5, Math.min(totalLimit, 100)),
-      'tweet.fields': ['created_at', 'public_metrics', 'referenced_tweets', 'attachments', 'note_tweet', 'lang'] as any,
+      'tweet.fields': fields as any,
       exclude: ['retweets', 'replies'],
     });
+    // non_public_metrics (user_profile_clicks) is only served for the
+    // authenticated user's own tweets on some API tiers. Request it only when
+    // the caller asks (own-account performance checks) so reads of other
+    // accounts never pay a guaranteed-403 first attempt, and fall back to the
+    // public field set rather than failing the whole timeline read.
+    const result = options.includePrivateMetrics
+      ? await fetchTimeline([...baseFields, 'non_public_metrics']).catch(() => fetchTimeline(baseFields))
+      : await fetchTimeline(baseFields);
     const initialTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets
       : (result.data.data || []);
     if (initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
-      await (result as any).fetchLast(totalLimit - initialTweets.length);
+      // Pagination reuses the first page's params; a mid-pagination failure
+      // must degrade to the tweets already accumulated, not fail the read.
+      await (result as any).fetchLast(totalLimit - initialTweets.length).catch(() => null);
     }
     const accumulatedTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets
@@ -481,6 +499,9 @@ export async function getUserTimeline(
       impressions: tweet.public_metrics?.impression_count ?? 0,
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+      profileClicks: typeof tweet.non_public_metrics?.user_profile_clicks === 'number'
+        ? tweet.non_public_metrics.user_profile_clicks
+        : null,
       ...timelineSourceMetadata(tweet),
     }));
   } catch (error) {

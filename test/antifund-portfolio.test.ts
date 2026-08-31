@@ -220,7 +220,7 @@ describe('Anti Fund portfolio generation policy', () => {
     )).toContain('portfolio_sports_business_relevance_missing');
   });
 
-  it('targets two portfolio subjects in the last five without forcing every slot', () => {
+  it('keeps standing portfolio promotion to one subject in the last ten', () => {
     const base = (id: string, content: string) => ({
       id,
       agentId: 'agent-1',
@@ -241,14 +241,14 @@ describe('Anti Fund portfolio generation policy', () => {
     ])).toBe(true);
     expect(isAntiFundPortfolioBriefDue([
       base('1', 'i think OpenAI gets there faster'),
-      base('2', 'Cognition will be a massive company'),
+      base('2', 'another startup thought'),
       base('3', 'founder capital markets'),
       base('4', 'software company quality'),
       base('5', 'a market question'),
     ])).toBe(false);
     expect(isAntiFundPortfolioBriefDue([
       { ...base('1', 'i think OpenAI gets there faster'), status: 'deleted_from_x' },
-      base('2', 'Cognition will be a massive company'),
+      base('2', 'another startup thought'),
       base('3', 'founder capital markets'),
       base('4', 'software company quality'),
       base('5', 'a market question'),

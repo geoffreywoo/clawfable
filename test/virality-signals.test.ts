@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
-import type { TweetPerformance } from '@/lib/types';
+import type { CandidateFeatureTags, TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
   return {
@@ -96,6 +96,63 @@ describe('virality signals', () => {
     expect(rewards.quoteReward).toBeGreaterThan(0);
     expect(rewards.bookmarkReward).toBeGreaterThan(0);
     expect(rewards.bookmarkProxyReward).toBe(0);
+  });
+
+  it('keeps missing engagement metrics neutral instead of reading them as bad outcomes', () => {
+    const unmeasured = computeActionRewards(performance({
+      likes: 20,
+      retweets: 4,
+      replies: 6,
+      impressions: 0,
+      engagementRate: 0,
+    }), { avgLikes: 12, avgRetweets: 2 });
+    expect(unmeasured.engagementRateReward).toBe(0);
+
+    // Zero quotes/bookmarks against the default divisor (no account baseline)
+    // must not penalize a post just because the metrics were available.
+    const zeroCounts = computeActionRewards(performance({ quotes: 0, bookmarks: 0 }), { avgLikes: 12, avgRetweets: 2 });
+    const absentCounts = computeActionRewards(performance({}), { avgLikes: 12, avgRetweets: 2 });
+    expect(zeroCounts.quoteReward).toBe(0);
+    expect(zeroCounts.bookmarkReward).toBe(0);
+
+    // With a real account baseline, below-baseline quotes still read negative.
+    const belowBaseline = computeActionRewards(performance({ quotes: 0, bookmarks: 0 }), {
+      avgLikes: 12,
+      avgRetweets: 2,
+      avgQuotes: 4,
+      avgBookmarks: 6,
+    });
+    expect(belowBaseline.quoteReward).toBeLessThan(0);
+    expect(belowBaseline.bookmarkReward).toBeLessThan(0);
+    expect(absentCounts.quoteReward).toBe(0);
+  });
+
+  it('only penalizes bait-shaped phrasing, not substantive posts that mention thoughts or hot takes', () => {
+    const featureTags: CandidateFeatureTags = {
+      hook: 'observation',
+      tone: 'analytical',
+      specificity: 'concrete',
+      structure: 'single_punch',
+      thesis: 'inference pricing',
+      riskFlags: [],
+    };
+    const substantive = scoreConversationValue(
+      'wrote up my thoughts on inference pricing after 3 weeks in production: the eval budget, not the model bill, was the constraint',
+      featureTags,
+    );
+    const hotTakeReference = scoreConversationValue(
+      'the hot take everyone reposts about inference pricing is wrong because the eval budget dominates after week 3',
+      featureTags,
+    );
+    const bait = scoreConversationValue('Thoughts on inference pricing?', {
+      ...featureTags,
+      specificity: 'abstract',
+      riskFlags: ['thin'],
+    });
+
+    expect(substantive).toBeGreaterThan(0.6);
+    expect(hotTakeReference).toBeGreaterThan(0.6);
+    expect(bait).toBeLessThan(0.35);
   });
 
   it('boosts known relationship targets in reply scoring', () => {
@@ -202,6 +259,61 @@ describe('virality signals', () => {
     expect(formulaic.hits).toContain('not-x-but-y');
     expect(concrete.score).toBeLessThan(0.2);
     expect(concrete.hasConcreteAnchor).toBe(true);
+  });
+
+  it('boosts reply value for large-audience authors without penalizing small ones', () => {
+    const base = {
+      text: 'this take undersells how brutal the unit economics get at scale for these labs',
+      authorUsername: 'somebody',
+      createdAt: '2026-08-30T00:00:00.000Z',
+    };
+    const context = { topics: ['inference pricing'] };
+    const small = scoreHighValueReply({ ...base, authorFollowers: 300 }, context);
+    const unknown = scoreHighValueReply({ ...base, authorFollowers: null }, context);
+    const big = scoreHighValueReply({ ...base, authorFollowers: 250_000 }, context);
+
+    expect(big.score).toBeGreaterThan(small.score);
+    // No penalty for small or unknown audiences: same score as no data.
+    expect(small.score).toBe(unknown.score);
+    expect(big.reason).toContain('large audience');
+  });
+
+  it('rewards profile-click rate above baseline and ignores it when unavailable', () => {
+    const base = (overrides: Partial<TweetPerformance> = {}): TweetPerformance => ({
+      tweetId: 't-1',
+      xTweetId: 'x-1',
+      content: 'a take with some substance about startups and capital allocation.',
+      format: 'hot_take',
+      topic: 'startups',
+      hook: 'bold_claim',
+      tone: 'direct',
+      specificity: 'concrete',
+      structure: 'single_punch',
+      thesis: 'startups capital',
+      postedAt: '2026-08-29T00:00:00.000Z',
+      checkedAt: '2026-08-30T00:00:00.000Z',
+      likes: 20,
+      retweets: 3,
+      replies: 2,
+      impressions: 10000,
+      engagementRate: 3,
+      wasViral: false,
+      source: 'autopilot',
+      ...overrides,
+    } as TweetPerformance);
+
+    const strong = computeActionRewards(base({ profileClicks: 120 }));
+    const weak = computeActionRewards(base({ profileClicks: 10 }));
+    const absent = computeActionRewards(base({ profileClicks: null }));
+    const thinReach = computeActionRewards(base({ profileClicks: 50, impressions: 150 }));
+
+    // 1.2% click rate clears the 0.4% baseline; 0.1% lands below it.
+    expect(strong.profileClickReward).toBeGreaterThan(0.2);
+    expect(weak.profileClickReward).toBeLessThan(0);
+    expect(strong.total).toBeGreaterThan(absent.total);
+    // Missing metrics and sub-200-impression samples contribute nothing.
+    expect(absent.profileClickReward).toBe(0);
+    expect(thinReach.profileClickReward).toBe(0);
   });
 
   it('blends cringe estimators so one mild outlier cannot veto two clean reads', () => {
