@@ -80,6 +80,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getUser: mocks.getUser,
   updateProtocolSettings: mocks.updateProtocolSettings,
   getQueuedTweets: mocks.getQueuedTweets,
+  getTweets: async () => [],
   getAnalysis: mocks.getAnalysis,
   createTweet: mocks.createTweet,
   updateTweet: mocks.updateTweet,
@@ -2392,16 +2393,21 @@ describe('autopilot remote debug logging', () => {
         reason: expect.stringContaining('already sent 1 auto-reply in this conversation'),
       }),
     );
-    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+    // A conversation-level cap must not poison the skipped author: no
+    // reply_rejected signal and no rejected relationship state for merely
+    // replying in an already-answered thread.
+    expect(mocks.addLearningSignal).not.toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
         xTweetId: skippedMentionId,
         signalType: 'reply_rejected',
-        metadata: expect.objectContaining({
-          qualityGate: 'conversation_reply_limit',
-          conversationId: 'root-conversation',
-          maxDepth: 1,
-        }),
+      }),
+    );
+    expect(mocks.upsertRelationshipProfile).not.toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        mentionId: skippedMentionId,
+        rejected: true,
       }),
     );
   });

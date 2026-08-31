@@ -414,7 +414,18 @@ export function scoreHighValueReply(mention: {
   // discovery surfaces on X: the author's audience sees the exchange. Reach
   // adds a log-scaled bonus from 10k followers up (10k +0.05, 100k +0.11,
   // 1M +0.16); small accounts are never penalized for being small.
-  if (typeof mention.authorFollowers === 'number' && mention.authorFollowers >= 10_000) {
+  // Reach amplifies substance, it cannot substitute for it: the bonus needs
+  // at least one strong content signal and never applies to spam/promo or
+  // generic-praise mentions, so follower count alone cannot clear the reply
+  // gate or claw back a spam penalty.
+  const hasStrongContentSignal = hasQuestion || asksForDepth || substantiveDisagreement || topicMatch;
+  if (
+    typeof mention.authorFollowers === 'number'
+    && mention.authorFollowers >= 10_000
+    && hasStrongContentSignal
+    && !hasLinkOrSpam
+    && !genericPraise
+  ) {
     score += Math.min(0.16, Math.log10(mention.authorFollowers / 1_000) * 0.053);
     reasons.push(`large audience (${Math.round(mention.authorFollowers / 1000)}k followers)`);
   }

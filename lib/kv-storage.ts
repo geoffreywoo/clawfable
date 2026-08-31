@@ -1717,6 +1717,7 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
     inReplyToTweetId: data.inReplyToTweetId ?? null,
     engagementLikes: data.engagementLikes ?? 0,
     engagementRetweets: data.engagementRetweets ?? 0,
+    authorFollowers: data.authorFollowers ?? null,
     createdAt: data.createdAt || new Date().toISOString(),
   };
   await kvHset(KEYS.mention(id), mention as unknown as Record<string, unknown>);

@@ -14,6 +14,7 @@ import {
   getAgent,
   updateProtocolSettings,
   getQueuedTweets,
+  getTweets,
   getAnalysis,
   updateTweet,
   createMention,
@@ -1719,6 +1720,25 @@ async function runAutoReply(
       .filter((conversationId): conversationId is string => Boolean(conversationId))
   );
 
+  // Durable replied markers: the post log is a sliding window (~1-3 weeks of
+  // entries), so an old reply can fall out of it while its mention is still in
+  // the stored-mention window and get re-replied. Persisted reply tweets carry
+  // the mention's X id as generationTriggerId and never expire, so they are
+  // the authoritative record.
+  const persistedTweetsForReplies = await getTweets(agent.id);
+  for (const tweet of persistedTweetsForReplies) {
+    if (
+      tweet.generationSurface === 'reply'
+      && tweet.generationTriggerId
+      && (tweet.status === 'posted' || tweet.status === 'deleted_from_x')
+    ) {
+      const triggerId = String(tweet.generationTriggerId);
+      repliedToTweetIds.add(triggerId);
+      const conversationId = storedConversationByTweetId.get(triggerId);
+      if (conversationId) repliedConversationIds.add(conversationId);
+    }
+  }
+
   const storedUnrepliedMentions = storedMentions
     .filter((mention) => mention.tweetId && !repliedToTweetIds.has(String(mention.tweetId)))
     .map(storedMentionToTwitterMention)
@@ -1794,6 +1814,7 @@ async function runAutoReply(
           inReplyToTweetId: mention.inReplyToTweetId || null,
           engagementLikes: 0,
           engagementRetweets: 0,
+          authorFollowers: mention.authorFollowers ?? null,
           createdAt: mention.createdAt,
         });
         storedTweetIds.add(String(mention.id));
@@ -1834,6 +1855,7 @@ async function runAutoReply(
         inReplyToTweetId: mention.inReplyToTweetId || null,
         engagementLikes: 0,
         engagementRetweets: 0,
+        authorFollowers: mention.authorFollowers ?? null,
         createdAt: mention.createdAt,
       });
       storedTweetIds.add(String(mention.id));
@@ -1987,7 +2009,11 @@ async function runAutoReply(
   let lastReplyCheckedAt: string | null = null;
   const contextTweets = Array.isArray(generationContext.allTweets) ? generationContext.allTweets : [];
 
-  for (const scored of scoredMentions.slice(0, maxReplies)) {
+  // Iterate the full ranked list and count actual replies against the budget:
+  // a mention skipped by a gate must not burn a budget slot, or one hot
+  // conversation in the top slots can waste the whole run.
+  for (const scored of scoredMentions) {
+    if (repliesSent >= maxReplies) break;
     const { mention } = scored;
     let replyContent = '';
     let replyCandidate: RankedProtocolTweet | null = null;
@@ -2014,31 +2040,10 @@ async function runAutoReply(
           action: 'skipped',
           reason,
         });
-        await upsertRelationshipProfile(agent.id, {
-          handle: mentionHandle,
-          displayName: String(mention.authorName || mention.authorUsername || mention.authorId),
-          mentionId: mention.id,
-          topic: scored.value.responseStrategy,
-          outcome: 'rejected',
-          rejected: true,
-          cooldownMins: 24 * 60,
-        }).catch(() => null);
-        await addLearningSignal(agent.id, {
-          xTweetId: mention.id,
-          signalType: 'reply_rejected',
-          surface: 'autopilot',
-          rewardDelta: -0.18,
-          reason,
-          inferred: true,
-          metadata: {
-            qualityGate: 'conversation_reply_limit',
-            highValueReplyMode: settings.highValueReplyMode === true,
-            replyValueScore: scored.value.score,
-            targetMentionId: mention.id,
-            conversationId: mention.conversationId,
-            maxDepth: MAX_AUTO_REPLIES_PER_CONVERSATION,
-          },
-        });
+        // A conversation-level cap is not a judgment about this author: do not
+        // mark their relationship rejected, apply a 24h cooldown, or emit a
+        // negative learning signal for merely replying in an already-answered
+        // thread. The skip is logged above; the mention stays stored.
         continue;
       }
 
@@ -2062,6 +2067,7 @@ async function runAutoReply(
           inReplyToTweetId: mention.inReplyToTweetId || null,
           engagementLikes: 0,
           engagementRetweets: 0,
+          authorFollowers: mention.authorFollowers ?? null,
           createdAt: mention.createdAt,
         });
       }
