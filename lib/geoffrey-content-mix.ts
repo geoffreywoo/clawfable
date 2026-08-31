@@ -21,6 +21,7 @@ export interface GeoffreyContentMixItem {
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   finalCriticScores?: CandidateJudgeBreakdown | null;
   candidateScore?: number | null;
+  contentProvenance?: string | null;
   confidenceScore?: number | null;
 }
 
@@ -158,6 +159,10 @@ export function getGeoffreyContentMixDecision(
 }
 
 function queuePriority(item: GeoffreyContentMixItem): number {
+  // Operator intent is the highest signal: a post the operator wrote must
+  // never lose the mix slot to the bot's own generated draft (operator posts
+  // carry no critic scores, which previously ranked them at 0).
+  if (item.contentProvenance === 'operator_written') return 1_000_000;
   const margin = item.finalCriticScores?.qualityMargin;
   if (typeof margin === 'number') return margin * 1000;
   if (typeof item.candidateScore === 'number') return item.candidateScore;

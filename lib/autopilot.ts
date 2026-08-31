@@ -562,18 +562,30 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       valid,
       context?.allTweets || [],
     );
-    const contentMixInvalid = valid.flatMap((tweet) => {
+    // Every content-mix reason code is a transient scheduling constraint (a
+    // recent-post window or a queue-slot reservation), not a content defect:
+    // the same draft is postable again once the window clears. Defer it -
+    // hold it out of this tick's postable set - instead of quarantining it
+    // and punishing its arms.
+    const contentMixDeferred = valid.flatMap((tweet) => {
       const decision = contentMixDecisions.get(String(tweet.id));
-      return decision?.issue ? [{
-        tweet,
-        issue: decision.issue,
-        policyGate: 'company_content_mix_policy' as const,
-      }] : [];
+      return decision?.issue ? [{ tweet, issue: decision.issue }] : [];
     });
-    if (contentMixInvalid.length > 0) {
-      const blockedIds = new Set(contentMixInvalid.map(({ tweet }) => tweet.id));
-      valid = valid.filter((tweet) => !blockedIds.has(tweet.id));
-      invalid.push(...contentMixInvalid);
+    if (contentMixDeferred.length > 0) {
+      const deferredIds = new Set(contentMixDeferred.map(({ tweet }) => tweet.id));
+      valid = valid.filter((tweet) => !deferredIds.has(tweet.id));
+      await addPostLogEntry(agent.id, {
+        agentId: agent.id,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'queue_refresh',
+        topic: 'content_mix',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'skipped',
+        reason: `Deferred ${contentMixDeferred.length} queued draft${contentMixDeferred.length === 1 ? '' : 's'} for the company content-mix window; they stay queued and become postable when the window clears.`,
+      }).catch(() => null);
     }
   }
   await Promise.all(invalid.map(({ tweet, issue }) => updateTweet(tweet.id, {
@@ -2899,7 +2911,10 @@ export async function refillQueue(
         if (recentContent.some((content) => semanticIdeaSimilarity(
           { content: item.content, topic: item.targetTopic },
           { content },
-        ) >= 0.52)) {
+        // Aligned with the autopost-time semantic gate (0.48): queueing into
+        // the [0.48, 0.52) band produced drafts that were deterministically
+        // quarantined at post time with a spurious negative learning signal.
+        ) >= 0.48)) {
           await rejectCandidate(item, 'recent_semantic_duplicate');
           continue;
         }

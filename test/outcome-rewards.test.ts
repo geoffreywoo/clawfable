@@ -147,6 +147,8 @@ describe('buildOutcomeEpisode', () => {
         quotes: 0,
         bookmarks: 0,
         experimentHoldout,
+        // Within the 30-day experiment window; the shield expires after it.
+        postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       }),
       { avgLikes: 30, avgRetweets: 5 },
       rows,
@@ -157,6 +159,23 @@ describe('buildOutcomeEpisode', () => {
     expect(shielded).toBeGreaterThan(unshielded);
     // The shield softens, it does not erase: a real flop still reads negative.
     expect(shielded).toBeLessThan(0);
+    // Outside the 30-day window the same row reads unshielded.
+    const expired = computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-old',
+        xTweetId: 'x-hold-old',
+        likes: 6,
+        retweets: 1,
+        replies: 1,
+        quotes: 0,
+        bookmarks: 0,
+        experimentHoldout: true,
+        postedAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      { avgLikes: 30, avgRetweets: 5 },
+      rows,
+    );
+    expect(expired).toBe(unshielded);
   });
 
   it('scores a median post as near-neutral lift on the spread-weighted scale', () => {

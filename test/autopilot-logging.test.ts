@@ -913,7 +913,7 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
-  it('quarantines excess company-led drafts without teaching a negative company lesson', async () => {
+  it('defers excess company-led drafts for the mix window without quarantining them', async () => {
     const standalone = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -966,13 +966,14 @@ describe('autopilot remote debug logging', () => {
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
     expect(result).toEqual({ before: 4, after: 1, certified: 1, quarantined: 3 });
-    expect(mocks.updateTweet).toHaveBeenCalledTimes(3);
-    for (const draft of companyDrafts) {
-      expect(mocks.updateTweet).toHaveBeenCalledWith(draft.id, expect.objectContaining({
-        status: 'quarantined',
-        quarantineReason: expect.stringContaining('at most 1 company-led original in any 5 posts'),
-      }));
-    }
+    // The mix window is a transient scheduling constraint: the excess drafts
+    // are held out of this tick's postable set but stay queued - no
+    // quarantine, no learning penalty - and become postable when the window
+    // clears.
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'quarantined' }),
+    );
     expect(mocks.addLearningSignal).not.toHaveBeenCalled();
   });
 

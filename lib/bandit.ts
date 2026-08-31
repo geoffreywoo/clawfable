@@ -299,7 +299,13 @@ function collectFeedbackObservations(
   for (const entry of feedback) {
     if (!entry.tweetId || (entry.rating !== 'down' && entry.rating !== 'up')) continue;
     const tweet = tweetById.get(String(entry.tweetId));
-    if (!tweet) continue;
+    // A queue rejection hard-deletes the Tweet record, which previously
+    // dropped the strongest negative operator signal here entirely. The
+    // feedback entry keeps the draft text, so style arms can still be
+    // observed from it; only format/topic (not derivable from text alone)
+    // are skipped for deleted tweets.
+    const content = tweet?.content || entry.tweetText || '';
+    if (!content.trim()) continue;
     // Thumbs-up is observed too: without it the bandit only ever learned what
     // the operator disliked and had no direct signal about what they endorsed.
     // Positive votes carry slightly less weight than negative ones because an
@@ -308,14 +314,14 @@ function collectFeedbackObservations(
       * (entry.userProvidedReason ? 1.2 : 1)
       * (entry.rating === 'up' ? 0.85 : 1);
     const reward = entry.rating === 'up' ? 0.9 : 0.02;
-    const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, {
-      topic: tweet.topic,
-      thesisHint: tweet.thesis,
+    const featureTags = tweet?.featureTags || extractCandidateFeatureTags(content, {
+      topic: tweet?.topic,
+      thesisHint: tweet?.thesis,
     });
     observations.push(
-      buildFamilyObservation('format', tweet.format, reward, weight),
-      buildFamilyObservation('topic', tweet.topic, reward, weight),
-      buildFamilyObservation('length', getLengthBucketFromText(tweet.content), reward, weight),
+      buildFamilyObservation('format', tweet?.format, reward, weight),
+      buildFamilyObservation('topic', tweet?.topic, reward, weight),
+      buildFamilyObservation('length', getLengthBucketFromText(content), reward, weight),
       buildFamilyObservation('hook', featureTags.hook, reward, weight),
       buildFamilyObservation('tone', featureTags.tone, reward, weight),
       buildFamilyObservation('specificity', featureTags.specificity, reward, weight),
@@ -579,16 +585,14 @@ export function buildBanditPolicy({
     performanceHistory: uniqueHistory,
     baseline,
   });
-  const manualPerformanceTweetIds = new Set(
-    uniqueHistory
-      .filter((entry) => entry.source !== 'autopilot' && entry.tweetId)
-      .map((entry) => String(entry.tweetId)),
-  );
-  const coveredTweetIds = new Set(
-    episodes
-      .map((episode) => String(episode.tweetId))
-      .filter((tweetId) => !manualPerformanceTweetIds.has(tweetId)),
-  );
+  // Every tweet with an episode is covered: its performance lift is already
+  // inside the episode reward. Excluding manual tweets here double-counted
+  // the identical outcome (episode + x2-weighted fallback observation) and,
+  // because the fallback re-extracts feature tags from posted text, could
+  // train different arms with the same outcome. Manual emphasis still
+  // applies via sourceSignalWeight for rows with no episode (e.g. timeline
+  // imports predating Clawfable).
+  const coveredTweetIds = new Set(episodes.map((episode) => String(episode.tweetId)));
   const observations = [
     ...collectEpisodeObservations(episodes, allTweets, uniqueHistory),
     ...collectFallbackPerformanceObservations(uniqueHistory, coveredTweetIds, baseline),

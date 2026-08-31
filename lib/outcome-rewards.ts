@@ -331,11 +331,19 @@ export function computePerformanceLiftReward(
   // Exploration holdouts are shielded, not just tipped: a deliberate bet on an
   // under-tested arm has its downside softened (negative lift halved) plus a
   // small bonus unless it flopped badly, so the learning loop can afford the
-  // experiments it schedules. Real disasters still register.
-  const holdoutShield = performance.experimentHoldout && engagementLift < 0
+  // experiments it schedules. Real disasters still register. The protection
+  // is scoped to the experiment's evaluation window: after 30 days the row
+  // reads unshielded, so holdout-origin arms cannot keep a permanently
+  // rosier record than straight-measured arms in future policies and the
+  // cross-account global prior.
+  const holdoutAgeMs = Date.now() - Date.parse(performance.postedAt);
+  const holdoutActive = performance.experimentHoldout === true
+    && Number.isFinite(holdoutAgeMs)
+    && holdoutAgeMs <= 30 * 24 * 60 * 60 * 1000;
+  const holdoutShield = holdoutActive && engagementLift < 0
     ? -engagementLift * 0.5 * 0.45
     : 0;
-  const holdoutBonus = performance.experimentHoldout && engagementLift > -0.35 ? 0.06 : 0;
+  const holdoutBonus = holdoutActive && engagementLift > -0.35 ? 0.06 : 0;
   const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
     ? Math.min(0.08, replyBonus)
     : 0;

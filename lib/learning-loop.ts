@@ -98,6 +98,14 @@ function buildMomentumTopics(
   baselineLikes: number,
 ): string[] {
   const recentCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  // Momentum must be judged on the same spread-weighted scale as the topic
+  // averages below. The stored baseline is likes-only, so prefer the
+  // account's actual spread-weighted mean from history; fall back to an
+  // uplifted likes baseline when history is thin.
+  const spreadSamples = performanceHistory.slice(0, 60).map(weightedScore);
+  const spreadBaseline = spreadSamples.length >= 5
+    ? spreadSamples.reduce((sum, value) => sum + value, 0) / spreadSamples.length
+    : Math.max(1, baselineLikes) * 1.35;
   const topicStats = new Map<string, { total: number; count: number }>();
 
   for (const entry of performanceHistory) {
@@ -115,7 +123,7 @@ function buildMomentumTopics(
       avg: stats.total / Math.max(stats.count, 1),
       count: stats.count,
     }))
-    .filter((entry) => entry.count >= 2 && entry.avg >= Math.max(1, baselineLikes))
+    .filter((entry) => entry.count >= 2 && entry.avg >= Math.max(1, spreadBaseline))
     .sort((a, b) => b.avg - a.avg || b.count - a.count || a.topic.localeCompare(b.topic))
     .slice(0, 4)
     .map((entry) => entry.topic);

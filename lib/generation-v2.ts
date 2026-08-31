@@ -6810,6 +6810,31 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         }
       }
     }
+    // The main, trim, rescue, and alternate selection passes each reset their
+    // per-batch caps, so the MERGED selection can exceed the learned question
+    // budget (e.g. two question drafts against a budget of one). Enforce the
+    // cap once over the merged result, demoting the lowest-priority excess.
+    const questionBudget = buildGenerationWritingConstraintsV2(input).maxQuestionDraftsInBatch;
+    const selectedQuestionEntries = selected
+      .map((candidate, index) => ({ candidate, index }))
+      .filter(({ candidate }) => isQuestionDraftV2(candidate.content));
+    if (selectedQuestionEntries.length > questionBudget) {
+      const demote = new Set(
+        selectedQuestionEntries
+          .sort((left, right) => (right.candidate.confidenceScore ?? 0) - (left.candidate.confidenceScore ?? 0))
+          .slice(questionBudget)
+          .map(({ index }) => index),
+      );
+      for (const index of demote) {
+        const candidate = selected[index];
+        const draft = evaluations.find((entry) => entry.draft.id === candidate.draftCandidateId)?.draft;
+        if (draft) {
+          draft.status = 'rejected';
+          draft.rejectionCodes = uniqueStrings([...draft.rejectionCodes, 'learned_question_budget']);
+        }
+      }
+      selected = selected.filter((_, index) => !demote.has(index));
+    }
     const finalDrafts = evaluations.map((entry) => entry.draft);
     trace.ideaCandidateIds = ideas.map((idea) => idea.id);
     trace.draftCandidateIds = finalDrafts.map((draft) => draft.id);
