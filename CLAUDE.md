@@ -182,6 +182,9 @@ Learning/ranking invariants to preserve (added 2026-08-30):
 - `cringeRisk` is `blendedCringeRisk` (half weight on the max estimator); the deterministic slop score keeps its own separate hard gate.
 - Rejected-draft exclusions expire after 21 days; historical viral tweets are positive references, never novelty penalties.
 - Follower snapshots (6h cadence, `agent:${'{'}id{'}'}:follower-snapshots`) and per-tweet `profileClicks` (non-public metrics, opt-in on own-timeline reads) feed growth signals; missing metrics store as null, never fabricated zeros.
+- Content-mix window violations defer queued drafts (hold from the tick, stay queued); they are scheduling constraints, never quarantine or learning penalties. Operator-written posts always hold the mix slot over generated drafts.
+- Queue-delete feedback observes style arms from the feedback entry's preserved text (the Tweet is hard-deleted); episode-covered tweets are never also fallback-observed. Replied-mention state derives from persisted reply tweets, not only the sliding post log.
+- Queue-insert semantic dedup uses the same 0.48 threshold as the autopost gate; do not let the two drift apart.
 - `engagement.ts`, `proactive-engagement.ts`, `growth-engine.ts`, `job-suggestions.ts` - Engagement and growth opportunity workflows.
 - `browser-companion.ts` - Browser companion pairing and actions.
 - `request-validation.ts`, `request-origin.ts`, `delete-intent.ts`, `oauth-start-error.ts` - Route validation and defensive request handling.
