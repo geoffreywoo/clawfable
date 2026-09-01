@@ -95,6 +95,9 @@ describe('Stripe billing reconciliation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Fixtures are dated around a 2026-09-01 period end; pin the clock so
+    // eligibility checks against "now" do not rot once that date passes.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-08-15T12:00:00.000Z') });
     process.env.STRIPE_PRICE_PRO_MONTHLY = 'price_pro';
     currentUser = user();
     mocks.getUser.mockImplementation(async () => currentUser);
@@ -110,6 +113,7 @@ describe('Stripe billing reconciliation', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     delete process.env.STRIPE_PRICE_PRO_MONTHLY;
   });
 
