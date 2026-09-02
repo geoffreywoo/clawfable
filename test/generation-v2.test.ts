@@ -509,11 +509,16 @@ describe('Tweet Generation V2', () => {
       expect.arrayContaining([
         'idea_judge_lagging_frontier_baseline',
         'idea_judge_timid_ai_posture',
-        'idea_judge_weak_trajectory_conviction',
-        'idea_judge_weak_forecast_grounding',
-        'idea_judge_linear_extrapolation',
       ]),
     );
+    expect(getV2IdeaJudgeRejectionCodes(
+      lagging,
+      geoffreyVoice,
+      'within 9 months OpenAI coding agents will own software creation',
+    )).toEqual(expect.arrayContaining([
+      'idea_judge_weak_trajectory_conviction',
+      'idea_judge_weak_forecast_grounding',
+    ]));
     expect(getV2IdeaJudgeRejectionCodes(lagging, geoffreyVoice, 'fusion reactor')).toEqual([]);
     expect(getGeoffreyAIFutureRejectionCodesV2({
       voiceProfile: geoffreyVoice,
@@ -527,9 +532,19 @@ describe('Tweet Generation V2', () => {
     })).toEqual(expect.arrayContaining([
       'final_frontier_lead_below_floor',
       'final_ai_bullishness_below_floor',
+    ]));
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'OpenAI coding agents',
+      content: 'within 9 months OpenAI coding agents will own software creation',
+      frontierLead: 0.9,
+      aiBullishness: 0.9,
+      trajectoryConviction: 0.4,
+      forecastGrounding: 0.4,
+      exponentialIntuition: 0.4,
+    })).toEqual(expect.arrayContaining([
       'final_trajectory_conviction_below_floor',
       'final_forecast_grounding_below_floor',
-      'final_exponential_intuition_below_floor',
     ]));
     expect(getGeoffreyAIFutureRejectionCodesV2({
       voiceProfile: geoffreyVoice,
@@ -553,7 +568,7 @@ describe('Tweet Generation V2', () => {
     })).toContain('final_frontier_baseline_lag');
   });
 
-  it('does not let high model scores turn a current AI reaction into a frontier forecast', () => {
+  it('allows direct AI reactions without forcing a visible forecast worksheet', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
@@ -566,13 +581,7 @@ describe('Tweet Generation V2', () => {
       topicContext: 'Anthropic AI acquisition',
       content: reaction,
       stage: 'idea',
-    })).toEqual(expect.arrayContaining([
-      'idea_frontier_forecast_missing',
-      'idea_frontier_owned_prediction_missing',
-      'idea_frontier_near_term_horizon_missing',
-      'idea_frontier_grounding_shape_missing',
-      'idea_frontier_exponential_mechanism_missing',
-    ]));
+    })).toEqual([]);
     expect(getGeoffreyAIFutureRejectionCodesV2({
       voiceProfile: geoffreyVoice,
       topicContext: 'Anthropic AI acquisition',
@@ -582,11 +591,7 @@ describe('Tweet Generation V2', () => {
       trajectoryConviction: 0.95,
       forecastGrounding: 0.95,
       exponentialIntuition: 0.95,
-    })).toEqual(expect.arrayContaining([
-      'final_frontier_forecast_missing',
-      'final_frontier_near_term_horizon_missing',
-      'final_frontier_exponential_mechanism_missing',
-    ]));
+    })).toEqual([]);
     expect(getGeoffreyFrontierForecastShapeRejectionCodesV2({
       voiceProfile: geoffreyVoice,
       topicContext: 'Anthropic AI acquisition',
@@ -599,9 +604,18 @@ describe('Tweet Generation V2', () => {
       content: reaction,
       stage: 'idea',
     })).toEqual([]);
+    expect(getGeoffreyFrontierForecastShapeRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'OpenAI coding agents',
+      content: 'within 24 months OpenAI will own software creation',
+      stage: 'idea',
+    })).toEqual(expect.arrayContaining([
+      'idea_frontier_near_term_horizon_missing',
+      'idea_frontier_grounding_shape_missing',
+    ]));
   });
 
-  it('rejects reaction-only Geoffrey AI ideas before copy generation', () => {
+  it('does not force reaction-only Geoffrey AI ideas into forecast syntax', () => {
     const geoffreyVoice = {
       ...voiceProfile,
       summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
@@ -633,8 +647,8 @@ describe('Tweet Generation V2', () => {
       now: '2026-08-22T00:00:00.000Z',
     })[0];
 
-    expect(reaction.rejectionCodes).toContain('idea_frontier_forecast_missing');
-    expect(reaction.rejectionCodes).toContain('idea_frontier_exponential_mechanism_missing');
+    expect(reaction.rejectionCodes.some((code) => code.startsWith('idea_frontier_'))).toBe(false);
+    expect(reaction.rejectionCodes).toContain('unsupported_operator_fact');
     expect(forecast.rejectionCodes.some((code) => code.startsWith('idea_frontier_'))).toBe(false);
     expect(forecast.rejectionCodes).not.toContain('unsupported_operator_fact');
   });
@@ -4422,24 +4436,47 @@ describe('Tweet Generation V2', () => {
       false,
       geoffreyVoice,
     ));
+    const geoffreyTimedWritingPrompt = JSON.parse(buildTweetWritingPromptV2(
+      {
+        ...idea,
+        publicMove: 'within 9 months OpenAI will own where new software starts once Codex reliability crosses the threshold',
+        claim: 'within 9 months OpenAI will own where new software starts once Codex reliability crosses the threshold',
+        briefId: 'operator',
+        storyClusterId: null,
+        topic: 'OpenAI coding agents',
+        evidenceIds: [],
+      },
+      brief('operator', 'OpenAI coding agents'),
+      [],
+      [],
+      undefined,
+      undefined,
+      undefined,
+      'reconceive',
+      3,
+      null,
+      false,
+      geoffreyVoice,
+    ));
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('6-12');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('trillion-dollar scale');
     expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('robots already piloting');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('nonlinear');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('HARD SHAPE');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('literally include an explicit window');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('semantic constraints, not a sentence template');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('subject will outcome within N months');
-    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('does not license a second number');
-    expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
-    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
-      lead: expect.stringContaining('6-12 months'),
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('at most one may print a literal');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('Being ahead is the idea');
+    expect(geoffreyIdeaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('horizon + if/as reliability');
+    expect(geoffreyIdeaPrompt.requirements.verifiedSourceReactionContract).toContain('plain high-context reaction can be complete');
+    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon).toBeNull();
+    expect(geoffreyTimedWritingPrompt.geoffreyAIFutureHorizon).toEqual(expect.objectContaining({
+      lead: expect.stringContaining('Preserve the approved explicit horizon'),
       currentBaselines: expect.arrayContaining([expect.stringContaining('robots already pilot')]),
-      instruction: expect.stringContaining('HARD SHAPE'),
+      instruction: expect.stringContaining('do not treat mechanism, nonlinear cue, and second-order consequence as required prose fields'),
     }));
-    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('semantic atoms, never prose order');
-    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('supplied slot voice anchor');
-    expect(geoffreyWritingPrompt.geoffreyAIFutureHorizon.instruction).toContain('never add illustrative headcount');
+    expect(geoffreyTimedWritingPrompt.responseContract.variantMoves.map((move: any) => move.consequenceRole)).toEqual([
+      'reaction_only',
+      'reaction_only',
+      'approved_consequence',
+    ]);
+    expect(geoffreyTimedWritingPrompt.responseContract.diversityContract).toContain('Never combine all three');
     expect(geoffreyWritingPrompt.factualWritingContract).toContain('future or conditional');
     expect(geoffreyWritingPrompt.factualWritingContract).toContain('Never convert a qualitative scale claim');
     expect(writingPrompt.verifiedSourceReactionContract.forbiddenAnalystMoves).toEqual(expect.arrayContaining([
@@ -4463,6 +4500,8 @@ describe('Tweet Generation V2', () => {
       "i'm genuinely moved by how fast this benchmark crossed humans.",
       'the benchmark is the one i keep coming back to.',
       'my take on openai: the valuation is the whole argument.',
+      'within 6 months @openai could make Codex where software starts if reliability on longer builds compounds\n\n@github becomes where finished code lands',
+      'within 12 months better fleet data could make robot failures predictable\n\nthen the person everyone needs is the technician who can swap an actuator before the shift starts',
       'my dream acquisition right now: openai buys linear.',
       'my litmus test for robotics companies going commercial: ask about reducers.',
       'owning OpenAI can be the status purchase and the investment at the same time. that is exactly when the price deserves more scrutiny, not less.',

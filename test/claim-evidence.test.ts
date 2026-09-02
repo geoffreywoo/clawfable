@@ -202,6 +202,22 @@ describe('generated writing patterns', () => {
     )).toMatchObject({ primarySignature: null, score: 0 });
   });
 
+  it('blocks horizon-first rubric compliance that resolves into a tidy consequence', () => {
+    for (const content of [
+      'within 6 months @openai could make Codex where software starts if reliability on longer builds compounds\n\n@github becomes where finished code lands',
+      'within 12 months better fleet data could make robot failures predictable\n\nthen the person everyone needs is the technician who can swap an actuator before the shift starts',
+    ]) {
+      expect(assessGeneratedWritingPatterns(content)).toMatchObject({
+        primarySignature: 'horizon-mechanism-consequence-checklist',
+        score: 0.58,
+      });
+    }
+
+    expect(assessGeneratedWritingPatterns(
+      'within 6 months i think people stop opening github to start new software.',
+    )).toMatchObject({ primarySignature: null, score: 0 });
+  });
+
   it('blocks the generic X is just Y with Z quip mold', () => {
     expect(assessGeneratedWritingPatterns(
       'hiring fast before product truth is just anxiety with a payroll attached.',

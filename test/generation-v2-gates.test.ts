@@ -201,7 +201,7 @@ describe('generation-v2 gate and prompt fixes', () => {
     expect(writerPrompt.responseContract.variantMoves[0].instruction).toContain('Do not add the consequence in this slot');
 
     const geoffreyPrompt = JSON.parse(buildIdeaGenerationPromptV2([brief('operator', 'sleep', 'verified_source')], geoffreyProfile));
-    expect(geoffreyPrompt.requirements.verifiedSourceReactionContract).toContain('takes precedence');
+    expect(geoffreyPrompt.requirements.verifiedSourceReactionContract).toContain('plain high-context reaction can be complete');
     expect(JSON.parse(buildTweetWritingPromptV2(
       idea('operator', 'sleep', 'i would fix sleep first'),
       brief('operator', 'sleep'),
@@ -230,7 +230,7 @@ describe('generation-v2 gate and prompt fixes', () => {
     expect(JSON.parse(buildIdeaGenerationPromptV2([brief('operator', 'sleep')], coachProfile)).provenSpreadMechanics).toBeNull();
   });
 
-  it('keeps the mechanism and consequence in every Geoffrey AI-lane variant instead of reaction-only slots', () => {
+  it('keeps timed Geoffrey AI variants singular instead of exposing the whole rubric', () => {
     const aiIdea = idea(
       'operator',
       'OpenAI coding agents',
@@ -252,11 +252,15 @@ describe('generation-v2 gate and prompt fixes', () => {
     ));
     expect(lanePrompt.geoffreyAIFutureHorizon).not.toBeNull();
     const laneInstructions = lanePrompt.responseContract.variantMoves.map((move: any) => move.instruction).join(' ');
-    expect(laneInstructions).not.toContain('Do not add the consequence in this slot');
-    expect(laneInstructions).not.toContain('Stop at the direct reaction and do not add a consequence');
-    expect(laneInstructions).toContain('second-order consequence');
-    expect(lanePrompt.responseContract.variantMoves.every((move: any) => move.consequenceRole === 'approved_consequence')).toBe(true);
-    expect(lanePrompt.responseContract.diversityContract).toContain('never in whether the consequence is present');
+    expect(laneInstructions).toContain('Do not add a mechanism or consequence in this slot');
+    expect(laneInstructions).toContain('at most one mechanism');
+    expect(laneInstructions).toContain('exactly one consequence');
+    expect(lanePrompt.responseContract.variantMoves.map((move: any) => move.consequenceRole)).toEqual([
+      'reaction_only',
+      'reaction_only',
+      'approved_consequence',
+    ]);
+    expect(lanePrompt.responseContract.diversityContract).toContain('Never combine all three');
 
     const singleLanePrompt = JSON.parse(buildTweetWritingPromptV2(
       aiIdea,
@@ -272,7 +276,7 @@ describe('generation-v2 gate and prompt fixes', () => {
       false,
       geoffreyProfile,
     ));
-    expect(singleLanePrompt.responseContract.variantMoves[0].instruction).toContain('second-order consequence');
+    expect(singleLanePrompt.responseContract.variantMoves[0].instruction).toContain('at most one mechanism or consequence');
 
     const otherLanePrompt = JSON.parse(buildTweetWritingPromptV2(
       idea('operator', 'founder financing', 'i would take the smaller round from the founder who already has a customer'),

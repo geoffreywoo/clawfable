@@ -2159,7 +2159,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(systemFor('copy_judgment')[0]).toContain('Candidate order carries no signal');
   });
 
-  it('keeps the frontier mechanism and consequence in every AI-lane writer variant', async () => {
+  it('keeps timed AI variants from all exposing the same forecast checklist', async () => {
     await generateTweetBatchV2(input);
     const writerCalls = mocks.generateText.mock.calls
       .filter(([options]) => options.task === 'tweet_writing')
@@ -2171,9 +2171,12 @@ describe('generateTweetBatchV2 integration', () => {
     for (const call of laneCalls) {
       expect(call.system).not.toContain('stop at the direct reaction');
       expect(call.system).not.toContain('only the direct reaction');
-      expect(call.system).toContain('never consequence presence');
-      expect(call.prompt.responseContract.variantMoves.every((move: any) => move.consequenceRole === 'approved_consequence')).toBe(true);
-      expect(JSON.stringify(call.prompt.responseContract)).not.toContain('Do not add the consequence in this slot');
+      expect(call.system).toContain('one bare call');
+      expect(call.system).toContain('Never combine all of them into visible rubric compliance');
+      const roles = call.prompt.responseContract.variantMoves.map((move: any) => move.consequenceRole);
+      expect(roles.filter((role: string) => role === 'approved_consequence')).toHaveLength(1);
+      expect(roles.filter((role: string) => role === 'reaction_only')).toHaveLength(roles.length - 1);
+      expect(JSON.stringify(call.prompt.responseContract)).toContain('Do not add a mechanism or consequence in this slot');
     }
     for (const call of otherCalls) {
       expect(call.system).toContain('stop at the direct reaction');
