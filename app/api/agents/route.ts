@@ -10,7 +10,7 @@ import { canAccessAgent, getAccessibleAgentCount } from '@/lib/account-access';
 import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
 import { assertCanCreateAgent, BillingError } from '@/lib/billing';
-import { getAgentSummariesForUser } from '@/lib/dashboard-data';
+import { getAgentSummariesForUser, serializeAgentDetail } from '@/lib/dashboard-data';
 
 // GET /api/agents — list current user's agents
 export async function GET() {
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (existingAgent) {
       if (await canAccessAgent(user, existingAgent.id, existingAgent)) {
         await addAgentToUser(user.id, existingAgent.id);
-        return NextResponse.json({ ...existingAgent, created: false, reused: true });
+        return NextResponse.json({ ...serializeAgentDetail(existingAgent), created: false, reused: true });
       }
 
       return NextResponse.json({
@@ -71,13 +71,13 @@ export async function POST(request: NextRequest) {
     // Funnel: wizard started
     await logFunnelEvent(agent.id, 'wizard_start', { handle: cleanHandle });
 
-    return NextResponse.json({ ...agent, created: true, reused: false });
+    return NextResponse.json({ ...serializeAgentDetail(agent), created: true, reused: false });
   } catch (err) {
     if (err instanceof AgentHandleConflictError) {
       const existingAgent = await getAgentByHandle(err.handle);
       if (user && existingAgent && await canAccessAgent(user, existingAgent.id, existingAgent)) {
         await addAgentToUser(user.id, existingAgent.id);
-        return NextResponse.json({ ...existingAgent, created: false, reused: true });
+        return NextResponse.json({ ...serializeAgentDetail(existingAgent), created: false, reused: true });
       }
 
       return NextResponse.json({
