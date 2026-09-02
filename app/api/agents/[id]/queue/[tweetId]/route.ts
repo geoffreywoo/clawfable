@@ -17,6 +17,7 @@ import { readJsonObjectBody, validateQueueDeleteRequest, validateQueueUpdateRequ
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { classifyTasteFeedbackReason } from '@/lib/account-taste';
+import { parseSoulMd } from '@/lib/soul-parser';
 import {
   buildSemanticBlockFromQueueFeedback,
   feedbackStage,
@@ -234,7 +235,7 @@ export async function PATCH(
     if (deletionReason !== undefined && tweet.status === 'deleted_from_x') {
       const trimmedReason = typeof deletionReason === 'string' ? deletionReason.trim() : '';
       if (trimmedReason && trimmedReason !== 'skipped') {
-        const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content);
+        const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
         const reasonCode = inferQueueFeedbackReasonCode(trimmedReason);
         const stage = feedbackStage(reasonCode);
         const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
@@ -292,7 +293,7 @@ export async function PATCH(
           soulMd: agent.soulMd,
           tweetText: tweet.content,
         });
-        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content);
+        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
         await saveFeedback(id, {
           tweetId: tweet.id,
           tweetText: tweet.content,
@@ -365,7 +366,7 @@ export async function DELETE(
     const reasonCode = parsed.value.reasonCode || inferQueueFeedbackReasonCode(intentSummary);
     const stage = feedbackStage(reasonCode);
     const userProvidedFeedback = Boolean(userReason || parsed.value.reasonCode);
-    const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content);
+    const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
     const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
       ? (await getIdeaCandidates(id, 500)).find((candidate) => candidate.id === tweet.ideaId) || null
       : null;

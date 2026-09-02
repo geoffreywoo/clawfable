@@ -226,6 +226,8 @@ describe('performance tracking X API failures', () => {
       {
         format: 'cron_reanalysis_error',
         action: 'error',
+        errorCode: 'x_rate_limit',
+        reason: 'get_user_timeline: rate limited by X.',
         postedAt: new Date().toISOString(),
       },
     ]);

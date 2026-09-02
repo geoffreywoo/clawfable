@@ -27,6 +27,19 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [soulEvolutionMode, setSoulEvolutionMode] = useState<string>('auto');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/agents/${agentId}/protocol/settings`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const mode = data?.settings?.soulEvolutionMode;
+        if (!cancelled && typeof mode === 'string' && mode) setSoulEvolutionMode(mode);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [agentId]);
 
   // A bfcache restore (Back from X's authorize page) revives React state, so
   // the OAuth-start flag must reset or the connect button stays disabled.
@@ -380,15 +393,18 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           <select
             className="input"
             style={{ fontSize: '11px', padding: '4px 8px', width: 'auto' }}
-            value={(agent as unknown as Record<string, unknown>).soulEvolutionMode as string || 'auto'}
+            value={soulEvolutionMode}
             onChange={async (e) => {
+              const mode = e.target.value;
               try {
-                await fetch(`/api/agents/${agentId}/protocol/settings`, {
+                const res = await fetch(`/api/agents/${agentId}/protocol/settings`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ soulEvolutionMode: e.target.value }),
+                  body: JSON.stringify({ soulEvolutionMode: mode }),
                 });
-                showToast(`Soul evolution: ${e.target.value}`);
+                if (!res.ok) throw new Error('update failed');
+                setSoulEvolutionMode(mode);
+                showToast(`Soul evolution: ${mode}`);
               } catch {
                 showToast('Failed to update');
               }

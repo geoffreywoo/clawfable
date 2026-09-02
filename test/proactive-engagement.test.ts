@@ -246,7 +246,8 @@ describe('proactive engagement', () => {
         postedAt: new Date().toISOString(),
         source: 'autopilot',
         action: 'error',
-        reason: 'get_following: Request failed.',
+        errorCode: 'x_rate_limit',
+        reason: 'get_following: rate limited by X.',
       },
     ]);
 
@@ -255,6 +256,30 @@ describe('proactive engagement', () => {
     expect(followed).toBe(0);
     expect(mocks.getFollowing).not.toHaveBeenCalled();
     expect(mocks.followUser).not.toHaveBeenCalled();
+  });
+
+  it('does not pause auto-follow for hours after a non-rate-limit lookup failure', async () => {
+    mocks.getPostLog.mockResolvedValueOnce([
+      {
+        id: 'log-1',
+        agentId: agent.id,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'auto_follow_error',
+        topic: 'network_growth',
+        postedAt: new Date().toISOString(),
+        source: 'autopilot',
+        action: 'error',
+        errorCode: 'x_unknown',
+        reason: 'get_following: Request failed.',
+      },
+    ]);
+    mocks.getFollowing.mockResolvedValue([]);
+
+    await discoverAndFollow(agent, keys, { ...settings, autoFollow: true } as ProtocolSettings);
+
+    expect(mocks.getFollowing).toHaveBeenCalled();
   });
 
   it('keeps proactive likes disabled even when a legacy setting is true', async () => {
