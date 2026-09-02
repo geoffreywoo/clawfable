@@ -340,13 +340,6 @@ export function computePerformanceLiftReward(
   const holdoutActive = performance.experimentHoldout === true
     && Number.isFinite(holdoutAgeMs)
     && holdoutAgeMs <= 30 * 24 * 60 * 60 * 1000;
-  const holdoutShield = holdoutActive && engagementLift < 0
-    ? -engagementLift * 0.5 * 0.45
-    : 0;
-  const holdoutBonus = holdoutActive && engagementLift > -0.35 ? 0.06 : 0;
-  const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
-    ? Math.min(0.08, replyBonus)
-    : 0;
 
   // Low-reach posts carry noisy counts: a couple of likes on 40 impressions
   // can read as a huge lift or collapse. Scale the lift terms by a reach
@@ -354,6 +347,18 @@ export function computePerformanceLiftReward(
   const reachConfidence = performance.impressions > 0
     ? Math.min(1, performance.impressions / 300)
     : 0.7;
+
+  // The shield cancels half of the damped penalty, so it scales by the same
+  // reach confidence as the lift terms; otherwise a low-reach flop on a
+  // holdout would net positive and teach the bandit that under-tested arms
+  // win by flopping quietly.
+  const holdoutShield = holdoutActive && engagementLift < 0
+    ? -engagementLift * reachConfidence * 0.5 * 0.45
+    : 0;
+  const holdoutBonus = holdoutActive && engagementLift > -0.35 ? 0.06 : 0;
+  const creativeReplyBonus = performance.creativeLane === 'weird_memetic' || performance.creativeLane === 'contrarian_angle'
+    ? Math.min(0.08, replyBonus)
+    : 0;
 
   return round(clamp(((engagementLift * 0.45) + (rateLift * 0.18)) * reachConfidence + replyBonus + creativeReplyBonus + holdoutBonus + holdoutShield, -0.6, 0.8));
 }

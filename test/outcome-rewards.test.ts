@@ -178,6 +178,43 @@ describe('buildOutcomeEpisode', () => {
     expect(expired).toBe(unshielded);
   });
 
+  it('keeps a low-reach shielded flop negative instead of flipping it positive', () => {
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `hold-thin-base-${index}`,
+      xTweetId: `x-hold-thin-base-${index}`,
+      likes: 40,
+      retweets: 6,
+      replies: 5,
+      wasViral: false,
+    }));
+    const flop = (impressions: number, experimentHoldout: boolean) => computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-thin',
+        xTweetId: 'x-hold-thin',
+        likes: 0,
+        retweets: 0,
+        replies: 0,
+        quotes: 0,
+        bookmarks: 0,
+        impressions,
+        engagementRate: 0,
+        wasViral: false,
+        experimentHoldout,
+        postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      { avgLikes: 40, avgRetweets: 6 },
+      rows,
+    );
+
+    for (const impressions of [40, 100, 300]) {
+      const shielded = flop(impressions, true);
+      const unshielded = flop(impressions, false);
+      // The shield softens the damped penalty; it never flips a flop positive.
+      expect(shielded).toBeLessThan(0);
+      expect(shielded).toBeGreaterThan(unshielded);
+    }
+  });
+
   it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
     // 8 typical rows; the post under test matches them exactly. With the
     // baseline derived from history on the same spread scale, lift must be
