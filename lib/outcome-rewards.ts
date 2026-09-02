@@ -473,10 +473,16 @@ export function buildOutcomeEpisodes({
     signalsByTweetId.set(key, current);
   }
 
+  // History arrives newest-first with one row per checkpoint; a tweet's episode
+  // must use its latest read, not whichever row happens to be iterated last.
   const performanceByTweetId = new Map<string, TweetPerformance>();
   for (const entry of performanceHistory) {
     if (!entry.tweetId) continue;
-    performanceByTweetId.set(String(entry.tweetId), entry);
+    const key = String(entry.tweetId);
+    const existing = performanceByTweetId.get(key);
+    if (!existing || Date.parse(entry.checkedAt) >= Date.parse(existing.checkedAt)) {
+      performanceByTweetId.set(key, entry);
+    }
   }
 
   return tweets

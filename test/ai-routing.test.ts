@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const ENV_KEYS = [
   'OPENAI_API_KEY',
   'OPENAI_REASONING_EFFORT',
-  'OPENAI_REASONING_EFFORT_TWEET_GENERATION',
+  'OPENAI_REASONING_EFFORT_TWEET_WRITING',
   'ANTHROPIC_API_KEY',
 ] as const;
 
@@ -342,12 +342,12 @@ describe('AI model routing', () => {
       output: [{ content: [{ type: 'output_text', text: 'ok' }] }],
     });
     process.env.OPENAI_REASONING_EFFORT = 'low';
-    process.env.OPENAI_REASONING_EFFORT_TWEET_GENERATION = 'high';
+    process.env.OPENAI_REASONING_EFFORT_TWEET_WRITING = 'high';
     const { generateText } = await loadGeneratorWithOpenAiMock(create);
 
     await generateText({
       modelChain: [{ provider: 'openai', model: 'gpt-5.5' }],
-      task: 'tweet_generation',
+      task: 'tweet_writing',
       system: 'Return exactly: ok',
       prompt: 'probe',
       maxTokens: 64,
@@ -612,5 +612,103 @@ describe('AI model routing', () => {
 
     expect(create).toHaveBeenCalledOnce();
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe('provider request hygiene', () => {
+  it('strips schema keywords the Anthropic structured-output grammar rejects', async () => {
+    const openAiCreate = vi.fn();
+    const anthropicCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '{"content":"ok"}' }],
+      stop_reason: 'end_turn',
+    });
+    const { generateText } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    await generateText({
+      modelChain: [{ provider: 'anthropic', model: 'claude-sonnet-4-6' }],
+      system: 'Return JSON.',
+      prompt: 'probe',
+      maxTokens: 64,
+      jsonSchema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['content'],
+        properties: { content: { type: 'string', maxLength: 280 } },
+      },
+    });
+
+    expect(anthropicCreate).toHaveBeenCalledTimes(1);
+    const request = anthropicCreate.mock.calls[0][0];
+    const schema = request.output_config.format.schema;
+    expect(request.output_config.format.type).toBe('json_schema');
+    expect(schema.properties.content).not.toHaveProperty('maxLength');
+    expect(schema.properties.content.type).toBe('string');
+    expect(String(schema.properties.content.description || '')).toContain('280');
+    expect(openAiCreate).not.toHaveBeenCalled();
+  });
+
+  it('drops temperature when a reasoning effort is configured for GPT-5 models', async () => {
+    const create = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: 'ok' }] }],
+    });
+    process.env.OPENAI_REASONING_EFFORT = 'high';
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+
+    await generateText({
+      modelChain: [{ provider: 'openai', model: 'gpt-5.6' }],
+      task: 'tweet_writing',
+      system: 'Return exactly: ok',
+      prompt: 'probe',
+      maxTokens: 64,
+      temperature: 0.8,
+    });
+
+    const request = create.mock.calls[0][0];
+    expect(request.reasoning).toEqual({ effort: 'high' });
+    expect(request).not.toHaveProperty('temperature');
+  });
+
+  it('keeps temperature when GPT-5 reasoning is off', async () => {
+    const create = vi.fn().mockResolvedValue({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: 'ok' }] }],
+    });
+    delete process.env.OPENAI_REASONING_EFFORT;
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+
+    await generateText({
+      modelChain: [{ provider: 'openai', model: 'gpt-5.6' }],
+      task: 'tweet_writing',
+      system: 'Return exactly: ok',
+      prompt: 'probe',
+      maxTokens: 64,
+      temperature: 0.8,
+    });
+
+    expect(create.mock.calls[0][0]).toEqual(expect.objectContaining({
+      reasoning: { effort: 'none' },
+      temperature: 0.8,
+    }));
+  });
+
+  it('gives Fable enough max_tokens to think and still return copy', async () => {
+    const openAiCreate = vi.fn();
+    const anthropicCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'draft' }],
+      stop_reason: 'end_turn',
+    });
+    const { generateText } = await loadGeneratorWithAiMocks(openAiCreate, anthropicCreate);
+
+    await generateText({
+      task: 'tweet_writing',
+      modelStack: 'publishing_v2_fable_control',
+      system: 'Write one draft.',
+      prompt: 'probe',
+      maxTokens: 600,
+    });
+
+    expect(anthropicCreate.mock.calls[0][0].max_tokens).toBeGreaterThanOrEqual(4000);
+    expect(anthropicCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
   });
 });

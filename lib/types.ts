@@ -423,6 +423,7 @@ export type PerformanceCheckpoint =
   | 'initial_15m'
   | 'early_30m'
   | 'momentum_2h'
+  | 'settling_6h'
   | 'full_24h'
   | 'late';
 

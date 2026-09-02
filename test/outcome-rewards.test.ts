@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutcomeEpisode, computePerformanceLiftReward, summarizeEditDelta } from '@/lib/outcome-rewards';
+import { buildOutcomeEpisode, buildOutcomeEpisodes, computePerformanceLiftReward, summarizeEditDelta } from '@/lib/outcome-rewards';
 import type { LearningSignal, Tweet, TweetPerformance } from '@/lib/types';
 
 function tweet(overrides: Partial<Tweet> = {}): Tweet {
@@ -307,5 +307,33 @@ describe('buildOutcomeEpisode', () => {
 
     expect(episode(-30).reward.timeToApproval).toBe(0);
     expect(episode(10).reward.timeToApproval).toBeGreaterThan(0);
+  });
+});
+
+describe('buildOutcomeEpisodes checkpoint selection', () => {
+  it('uses the latest checkpoint row for a tweet, not the oldest row in a newest-first list', () => {
+    const history: TweetPerformance[] = [
+      performance({ checkedAt: '2026-04-02T00:00:00.000Z', likes: 120, retweets: 20, replies: 10, performanceCheckpoint: 'full_24h' }),
+      performance({ checkedAt: '2026-04-01T00:15:00.000Z', likes: 2, retweets: 0, replies: 0, performanceCheckpoint: 'initial_15m' }),
+      ...Array.from({ length: 6 }, (_, index) => performance({
+        tweetId: `baseline-${index}`,
+        xTweetId: `x-baseline-${index}`,
+        likes: 40,
+        retweets: 8,
+        replies: 6,
+        performanceCheckpoint: 'full_24h',
+      })),
+    ];
+    const [episode] = buildOutcomeEpisodes({
+      agentId: 'agent-1',
+      tweets: [tweet()],
+      signals: [signal()],
+      performanceHistory: history,
+      baseline: { avgLikes: 40, avgRetweets: 8 },
+    });
+
+    expect(episode.stage).toBe('final');
+    expect(episode.observedAt).toBe('2026-04-02T00:00:00.000Z');
+    expect(episode.reward.engagementLift).toBeGreaterThan(0);
   });
 });
