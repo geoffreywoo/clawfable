@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBanditGlobalPrior, buildBanditPolicy, buildBanditSlotPlan, summarizeBanditExploitLessons } from '@/lib/bandit';
-import type { FeedbackEntry, Tweet, TweetPerformance } from '@/lib/types';
+import type { FeedbackEntry, LearningSignal, LearningSignalType, Tweet, TweetPerformance } from '@/lib/types';
 
 function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: string; family: import('@/lib/bandit').BanditArmScore['family'] }): import('@/lib/bandit').BanditArmScore {
   return {
@@ -8,6 +8,7 @@ function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: 
     family: overrides.family,
     pulls: overrides.pulls ?? 3,
     localPulls: overrides.localPulls ?? overrides.pulls ?? 3,
+    outcomePulls: overrides.outcomePulls ?? overrides.localPulls ?? overrides.pulls ?? 3,
     globalPulls: overrides.globalPulls ?? 2,
     priorPulls: overrides.priorPulls ?? 3,
     successes: overrides.successes ?? 2,
@@ -65,6 +66,50 @@ function tweetEntry(overrides: Partial<Tweet> = {}): Tweet {
     deletionReason: overrides.deletionReason ?? null,
     createdAt: overrides.createdAt || new Date().toISOString(),
   };
+}
+
+function signalEntry(overrides: Partial<LearningSignal> & { tweetId: string; signalType: LearningSignalType }): LearningSignal {
+  return {
+    id: overrides.id || crypto.randomUUID(),
+    agentId: overrides.agentId || 'agent-1',
+    tweetId: overrides.tweetId,
+    xTweetId: overrides.xTweetId,
+    signalType: overrides.signalType,
+    surface: overrides.surface || 'queue',
+    rewardDelta: overrides.rewardDelta ?? 0,
+    createdAt: overrides.createdAt || new Date().toISOString(),
+    metadata: overrides.metadata,
+  };
+}
+
+/** One approved, cron-posted tweet plus its measured performance row: the supervised production path. */
+function approvedPostedTweet(id: string, overrides: { format: string; topic: string; content: string; likes: number; engagementRate: number }) {
+  const tweet = tweetEntry({
+    id,
+    content: overrides.content,
+    format: overrides.format,
+    topic: overrides.topic,
+    status: 'posted',
+    xTweetId: `x-${id}`,
+  });
+  const signals = [
+    signalEntry({ tweetId: id, signalType: 'approved_without_edit', surface: 'queue' }),
+    signalEntry({ tweetId: id, signalType: 'x_post_succeeded', surface: 'cron' }),
+  ];
+  const performance = performanceEntry({
+    tweetId: id,
+    xTweetId: `x-${id}`,
+    content: overrides.content,
+    format: overrides.format,
+    topic: overrides.topic,
+    likes: overrides.likes,
+    retweets: Math.round(overrides.likes / 10),
+    replies: Math.round(overrides.likes / 20),
+    impressions: 1000,
+    engagementRate: overrides.engagementRate,
+    source: 'autopilot',
+  });
+  return { tweet, signals, performance };
 }
 
 describe('bandit policy', () => {
@@ -283,13 +328,10 @@ describe('bandit policy', () => {
     expect(failedPolicy.formatArms.find((arm) => arm.arm === 'story')?.localPulls).toBeGreaterThan(0);
   });
 
-  it('penalizes strategies that operators delete', () => {
-    const questionTweet = tweetEntry({
-      id: 'question-1',
-      content: 'Should every startup raise now?',
-      format: 'question',
-      topic: 'Startups',
-    });
+  it('penalizes strategies that operators delete from the queue using the preserved feedback text', () => {
+    // A queue rejection hard-deletes the Tweet record, so the deleted draft is
+    // deliberately absent from allTweets and only the feedback entry's text
+    // survives. Style arms come from that text; format/topic cannot.
     const hotTakeTweet = tweetEntry({
       id: 'hot-1',
       content: 'Distribution beats product longer than founders admit.',
@@ -298,59 +340,40 @@ describe('bandit policy', () => {
     });
     const feedback: FeedbackEntry[] = [{
       tweetId: 'question-1',
-      tweetText: questionTweet.content,
+      tweetText: 'Should every startup raise now?',
       rating: 'down',
-      generatedAt: '2026-04-02T00:00:00.000Z',
+      generatedAt: new Date().toISOString(),
       intentSummary: 'Too generic',
       source: 'queue_delete',
       userProvidedReason: true,
     }];
 
     const policy = buildBanditPolicy({
-      performanceHistory: [
-        performanceEntry({
-          tweetId: 'question-1',
-          xTweetId: 'x-question-1',
-          content: questionTweet.content,
-          format: 'question',
-          topic: 'Startups',
-          likes: 30,
-          retweets: 5,
-          replies: 3,
-        }),
-        performanceEntry({
-          tweetId: 'hot-1',
-          xTweetId: 'x-hot-1',
-          content: hotTakeTweet.content,
-          format: 'hot_take',
-          topic: 'Startups',
-          likes: 30,
-          retweets: 5,
-          replies: 3,
-        }),
-      ],
+      performanceHistory: [],
       feedback,
       signals: [],
-      allTweets: [questionTweet, hotTakeTweet],
+      allTweets: [hotTakeTweet],
       allowedFormats: ['question', 'hot_take'],
       candidateTopics: ['Startups'],
       baseline: null,
     });
 
-    const questionArm = policy.formatArms.find((arm) => arm.arm === 'question');
-    const hotTakeArm = policy.formatArms.find((arm) => arm.arm === 'hot_take');
+    const questionHook = policy.hookArms.find((arm) => arm.arm === 'question');
+    const boldClaimHook = policy.hookArms.find((arm) => arm.arm === 'bold_claim');
+    const questionLed = policy.structureArms.find((arm) => arm.arm === 'question_led');
 
-    expect(questionArm?.failures).toBeGreaterThan(0);
-    expect(questionArm?.meanReward).toBeLessThan(hotTakeArm?.meanReward || 1);
+    expect(questionHook?.failures).toBeGreaterThan(0);
+    expect(questionHook?.localPulls).toBeCloseTo(1.2, 1);
+    expect(questionHook?.meanReward).toBeLessThan(boldClaimHook?.meanReward || 1);
+    expect(questionLed?.failures).toBeGreaterThan(0);
+    // Without a Tweet record there is nothing to attribute a format or topic to.
+    expect(policy.formatArms.every((arm) => arm.localPulls === 0)).toBe(true);
+    expect(policy.topicArms.every((arm) => arm.localPulls === 0)).toBe(true);
   });
 
   it('reinforces strategies the operator endorses with thumbs-up feedback', () => {
-    const questionTweet = tweetEntry({
-      id: 'question-up',
-      content: 'Should every startup raise now?',
-      format: 'question',
-      topic: 'Startups',
-    });
+    // The setup wizard saves first-batch preview votes without a tweetId; the
+    // vote must still reach the style arms from the preserved text.
     const hotTakeTweet = tweetEntry({
       id: 'hot-up',
       content: 'Distribution beats product longer than founders admit.',
@@ -358,10 +381,9 @@ describe('bandit policy', () => {
       topic: 'Startups',
     });
     const feedback: FeedbackEntry[] = [{
-      tweetId: 'question-up',
-      tweetText: questionTweet.content,
+      tweetText: 'Should every startup raise now?',
       rating: 'up',
-      generatedAt: '2026-04-02T00:00:00.000Z',
+      generatedAt: new Date().toISOString(),
       intentSummary: 'Exactly my voice',
       source: 'preview_feedback',
       userProvidedReason: true,
@@ -371,18 +393,237 @@ describe('bandit policy', () => {
       performanceHistory: [],
       feedback,
       signals: [],
-      allTweets: [questionTweet, hotTakeTweet],
+      allTweets: [hotTakeTweet],
       allowedFormats: ['question', 'hot_take'],
       candidateTopics: ['Startups'],
       baseline: null,
     });
 
-    const questionArm = policy.formatArms.find((arm) => arm.arm === 'question');
-    const hotTakeArm = policy.formatArms.find((arm) => arm.arm === 'hot_take');
+    const questionHook = policy.hookArms.find((arm) => arm.arm === 'question');
+    const boldClaimHook = policy.hookArms.find((arm) => arm.arm === 'bold_claim');
 
-    // The endorsed format gains local evidence and outranks the unobserved one.
-    expect(questionArm?.localPulls).toBeGreaterThan(0);
-    expect(questionArm?.meanReward).toBeGreaterThan(hotTakeArm?.meanReward || 1);
+    // The endorsed hook gains local evidence and outranks the unobserved one.
+    expect(questionHook?.localPulls).toBeGreaterThan(0);
+    expect(questionHook?.failures).toBe(0);
+    expect(questionHook?.meanReward).toBeGreaterThan(boldClaimHook?.meanReward || 1);
+    // Thumbs are operator taste, not measured outcomes.
+    expect(questionHook?.outcomePulls).toBe(0);
+  });
+
+  it('observes first-batch preview thumbs-down that arrive without a tweetId', () => {
+    const policy = buildBanditPolicy({
+      performanceHistory: [],
+      feedback: [{
+        tweetText: 'Should every startup raise now?',
+        rating: 'down',
+        generatedAt: new Date().toISOString(),
+        source: 'preview_feedback',
+      }],
+      signals: [],
+      allTweets: [],
+      allowedFormats: ['question', 'hot_take'],
+      candidateTopics: ['Startups'],
+      baseline: null,
+    });
+
+    const questionHook = policy.hookArms.find((arm) => arm.arm === 'question');
+    expect(questionHook?.localPulls).toBeGreaterThan(0);
+    expect(questionHook?.failures).toBeGreaterThan(0);
+    expect(policy.totalPulls).toBe(1);
+  });
+
+  it('lets measured flops on approved posts register as failures and keeps strong lifts near the top', () => {
+    const baselineRows = Array.from({ length: 6 }, (_, index) =>
+      performanceEntry({
+        tweetId: `base-${index}`,
+        xTweetId: `x-base-${index}`,
+        content: `substations and transformers determine when AI compute can come online ${index}.`,
+        format: 'analysis',
+        topic: 'Infra',
+        likes: 40,
+        retweets: 2,
+        replies: 1,
+        impressions: 1000,
+        engagementRate: 13,
+      })
+    );
+    const build = (likes: number, engagementRate: number) => {
+      const posts = Array.from({ length: 3 }, (_, index) =>
+        approvedPostedTweet(`hot-${index}`, {
+          format: 'hot_take',
+          topic: 'Markets',
+          content: `Distribution beats product longer than founders admit ${index}.`,
+          likes,
+          engagementRate,
+        })
+      );
+      return buildBanditPolicy({
+        performanceHistory: [...baselineRows, ...posts.map((post) => post.performance)],
+        feedback: [],
+        signals: posts.flatMap((post) => post.signals),
+        allTweets: posts.map((post) => post.tweet),
+        allowedFormats: ['hot_take', 'analysis'],
+        candidateTopics: ['Markets', 'Infra'],
+        baseline: null,
+      });
+    };
+
+    // Operator approved three hot takes, cron posted them, each landed at zero
+    // against a ~40-like baseline. Approval + posting must not outvote that.
+    const flopPolicy = build(0, 0);
+    const flopArm = flopPolicy.formatArms.find((arm) => arm.arm === 'hot_take');
+    expect(flopArm?.failures).toBeGreaterThan(0);
+    expect(flopArm?.outcomePulls).toBeGreaterThanOrEqual(3);
+    expect(flopArm?.meanReward).toBeLessThan(0.5);
+    expect(summarizeBanditExploitLessons(flopPolicy).some((line) => line.includes('"hot_take"'))).toBe(false);
+
+    // The same three posts at 10x baseline still discriminate upward.
+    const winPolicy = build(400, 50);
+    const winArm = winPolicy.formatArms.find((arm) => arm.arm === 'hot_take');
+    expect(winArm?.failures).toBe(0);
+    expect(winArm?.meanReward).toBeGreaterThan(0.65);
+    expect(winArm?.meanReward).toBeGreaterThan(flopArm?.meanReward || 1);
+    expect(summarizeBanditExploitLessons(winPolicy).some((line) => line.includes('"hot_take"') && line.includes('with outcome data'))).toBe(true);
+  });
+
+  it('observes a live deletion once when the episode already carries the signal, and once via feedback when the tweet is gone', () => {
+    const content = 'Distribution beats product longer than founders admit.';
+    const deleted = tweetEntry({
+      id: 'live-1',
+      content,
+      format: 'hot_take',
+      topic: 'Startups',
+      status: 'deleted_from_x',
+      xTweetId: 'x-live-1',
+    });
+    const signals = [
+      signalEntry({ tweetId: 'live-1', signalType: 'approved_without_edit' }),
+      signalEntry({ tweetId: 'live-1', signalType: 'x_post_succeeded', surface: 'cron' }),
+      signalEntry({ tweetId: 'live-1', signalType: 'deleted_from_x', surface: 'cron' }),
+    ];
+    const feedback: FeedbackEntry[] = [{
+      tweetId: 'live-1',
+      tweetText: content,
+      rating: 'down',
+      generatedAt: new Date().toISOString(),
+      source: 'queue_delete',
+      userProvidedReason: false,
+    }];
+    const options = {
+      performanceHistory: [],
+      allowedFormats: ['hot_take', 'question'],
+      candidateTopics: ['Startups'],
+      baseline: null,
+    };
+
+    // Tweet record survives (status deleted_from_x): episode wins, feedback entry is not re-observed.
+    const episodePolicy = buildBanditPolicy({ ...options, feedback, signals, allTweets: [deleted] });
+    const episodeHook = episodePolicy.hookArms.find((arm) => arm.arm === 'bold_claim');
+    expect(episodeHook?.localPulls).toBeCloseTo(0.9, 1);
+    expect(episodeHook?.failures).toBeGreaterThan(0);
+    expect(episodePolicy.formatArms.find((arm) => arm.arm === 'hot_take')?.failures).toBeGreaterThan(0);
+    expect(episodePolicy.totalPulls).toBe(1);
+
+    // Tweet record hard-deleted: only the feedback entry remains and it still trains the style arms.
+    const feedbackPolicy = buildBanditPolicy({ ...options, feedback, signals, allTweets: [] });
+    const feedbackHook = feedbackPolicy.hookArms.find((arm) => arm.arm === 'bold_claim');
+    expect(feedbackHook?.localPulls).toBeCloseTo(1, 1);
+    expect(feedbackHook?.failures).toBeGreaterThan(0);
+    expect(feedbackPolicy.totalPulls).toBe(1);
+
+    // Feedback whose tweet has an episode without a matching signal is a separate event and stays observed.
+    const unrelatedPolicy = buildBanditPolicy({
+      ...options,
+      feedback,
+      signals: [signalEntry({ tweetId: 'live-1', signalType: 'approved_without_edit' })],
+      allTweets: [tweetEntry({ ...deleted, status: 'posted' })],
+    });
+    expect(unrelatedPolicy.totalPulls).toBe(2);
+  });
+
+  it('never fallback-observes a tweet whose outcome is already an episode', () => {
+    const post = approvedPostedTweet('covered-1', {
+      format: 'analysis',
+      topic: 'Infra',
+      content: 'substations and transformers determine when AI compute can come online.',
+      likes: 30,
+      engagementRate: 12,
+    });
+    const options = {
+      feedback: [],
+      allowedFormats: ['analysis', 'hot_take'],
+      candidateTopics: ['Infra'],
+      baseline: null,
+    };
+
+    const episodePolicy = buildBanditPolicy({
+      ...options,
+      performanceHistory: [post.performance],
+      signals: post.signals,
+      allTweets: [post.tweet],
+    });
+    const fallbackPolicy = buildBanditPolicy({
+      ...options,
+      performanceHistory: [post.performance],
+      signals: [],
+      allTweets: [],
+    });
+
+    const episodeArm = episodePolicy.formatArms.find((arm) => arm.arm === 'analysis');
+    const fallbackArm = fallbackPolicy.formatArms.find((arm) => arm.arm === 'analysis');
+    // Exactly one observation per family: the final-stage episode (weight 1.1),
+    // never episode plus the performance row again.
+    expect(episodeArm?.localPulls).toBeCloseTo(1.1, 1);
+    expect(episodeArm?.outcomePulls).toBeCloseTo(1.1, 1);
+    expect(fallbackArm?.localPulls).toBeCloseTo(1, 1);
+    expect(episodePolicy.totalPulls).toBe(1);
+    expect(fallbackPolicy.totalPulls).toBe(1);
+  });
+
+  it('counts evidence events for totalPulls, not per-family observations', () => {
+    const post = approvedPostedTweet('event-1', {
+      format: 'hot_take',
+      topic: 'Startups',
+      content: 'Distribution beats product longer than founders admit.',
+      likes: 30,
+      engagementRate: 12,
+    });
+    const policy = buildBanditPolicy({
+      performanceHistory: [],
+      feedback: [],
+      signals: post.signals,
+      allTweets: [post.tweet],
+      allowedFormats: ['hot_take'],
+      candidateTopics: ['Startups'],
+      baseline: null,
+    });
+    expect(policy.hookArms.find((arm) => arm.arm === 'bold_claim')?.localPulls).toBeGreaterThan(0);
+    expect(policy.totalPulls).toBe(1);
+  });
+
+  it('does not promote approvals-only arms as what-is-working outcome evidence', () => {
+    const tweets = Array.from({ length: 4 }, (_, index) => tweetEntry({
+      id: `approved-${index}`,
+      content: `Distribution beats product longer than founders admit ${index}.`,
+      format: 'analysis',
+      topic: 'Startups',
+    }));
+    const policy = buildBanditPolicy({
+      performanceHistory: [],
+      feedback: [],
+      signals: tweets.map((tweet) => signalEntry({ tweetId: tweet.id, signalType: 'approved_without_edit' })),
+      allTweets: tweets,
+      allowedFormats: ['analysis', 'hot_take'],
+      candidateTopics: ['Startups'],
+      baseline: null,
+    });
+    const analysis = policy.formatArms.find((arm) => arm.arm === 'analysis');
+    // The approvals still count as local evidence for ordering...
+    expect(analysis?.localPulls).toBeGreaterThanOrEqual(3);
+    expect(analysis?.meanReward).toBeGreaterThan(0.55);
+    expect(analysis?.outcomePulls).toBe(0);
+    // ...but nothing has been measured on X, so there is no outcome lesson.
+    expect(summarizeBanditExploitLessons(policy)).toEqual([]);
   });
 
   it('summarizes proven arms as what-is-working lessons and skips cold-start noise', () => {
@@ -409,17 +650,22 @@ describe('bandit policy', () => {
     }) as any;
 
     const lessons = summarizeBanditExploitLessons({
-      formatArms: [arm({ arm: 'hot_take', meanReward: 0.72, localPulls: 5 })],
-      hookArms: [arm({ arm: 'contrarian', family: 'hook', meanReward: 0.66, localPulls: 4 })],
-      toneArms: [arm({ arm: 'direct', family: 'tone', meanReward: 0.4, localPulls: 8 })],
-      structureArms: [arm({ arm: 'single_claim', family: 'structure', meanReward: 0.8, localPulls: 1 })],
+      formatArms: [arm({ arm: 'hot_take', meanReward: 0.72, localPulls: 5, outcomePulls: 5 })],
+      hookArms: [arm({ arm: 'contrarian', family: 'hook', meanReward: 0.66, localPulls: 4, outcomePulls: 3.2 })],
+      toneArms: [
+        arm({ arm: 'direct', family: 'tone', meanReward: 0.4, localPulls: 8, outcomePulls: 8 }),
+        arm({ arm: 'earnest', family: 'tone', meanReward: 0.74, localPulls: 6, outcomePulls: 0 }),
+      ],
+      structureArms: [arm({ arm: 'single_claim', family: 'structure', meanReward: 0.8, localPulls: 1, outcomePulls: 1 })],
     });
 
-    expect(lessons.some((line) => line.includes('hot_take'))).toBe(true);
+    expect(lessons.some((line) => line.includes('hot_take') && line.includes('5 recent posts with outcome data'))).toBe(true);
     expect(lessons.some((line) => line.includes('contrarian'))).toBe(true);
     // Below the reward floor and below the pull floor respectively.
     expect(lessons.some((line) => line.includes('"direct"'))).toBe(false);
     expect(lessons.some((line) => line.includes('single_claim'))).toBe(false);
+    // Plenty of approvals/thumbs but nothing measured on X: not outcome evidence.
+    expect(lessons.some((line) => line.includes('"earnest"'))).toBe(false);
     expect(summarizeBanditExploitLessons(null)).toEqual([]);
   });
 
