@@ -431,6 +431,68 @@ export function summarizeBanditExploitLessons(
     .map((lesson) => lesson.line);
 }
 
+export interface LearnedArmPrior {
+  /**
+   * Bounded [-1, 1]. Positive means this account's own measured posts on these
+   * arms beat its baseline; zero means no arm carried enough outcome evidence.
+   */
+  prior: number;
+  /** Families that contributed measured evidence; zero means a neutral prior. */
+  evidenceArms: number;
+  /** Which families contributed, so the adjustment stays explainable. */
+  families: BanditArmFamily[];
+}
+
+/**
+ * How this account's own measured outcomes read on a draft's arms.
+ *
+ * Only arms with enough performance-backed pulls contribute, so an arm the
+ * operator has merely approved — or one the account has never tested — scores
+ * neutral rather than negative. Exploration therefore costs a draft nothing:
+ * a cold arm carries no evidence instead of a penalty. Each contribution is
+ * scaled by how much evidence stands behind it, so three measured posts nudge
+ * ordering less than a dozen do.
+ */
+export function scoreLearnedArmPrior(
+  policy: Pick<BanditPolicy, 'formatArms' | 'hookArms' | 'toneArms' | 'structureArms'> | null | undefined,
+  tags: {
+    format?: string | null;
+    hook?: string | null;
+    tone?: string | null;
+    structure?: string | null;
+  },
+): LearnedArmPrior {
+  if (!policy) return { prior: 0, evidenceArms: 0, families: [] };
+  const lookups: Array<{ family: BanditArmFamily; arms: BanditArmScore[]; tag: string | null | undefined }> = [
+    { family: 'format', arms: policy.formatArms || [], tag: tags.format },
+    { family: 'hook', arms: policy.hookArms || [], tag: tags.hook },
+    { family: 'tone', arms: policy.toneArms || [], tag: tags.tone },
+    { family: 'structure', arms: policy.structureArms || [], tag: tags.structure },
+  ];
+
+  const signals: number[] = [];
+  const families: BanditArmFamily[] = [];
+  for (const { family, arms, tag } of lookups) {
+    if (!tag) continue;
+    const match = arms.find((entry) => entry.arm === tag);
+    const outcomePulls = match?.outcomePulls || 0;
+    if (!match || outcomePulls < EXPLOIT_LESSON_MIN_OUTCOME_PULLS) continue;
+    // meanReward is centered on 0.5, so this maps an arm that matches the
+    // account baseline to 0 and only real over/under-performance moves it.
+    const centered = clamp((match.meanReward - 0.5) * 2, -1, 1);
+    signals.push(centered * Math.min(1, outcomePulls / 6));
+    families.push(family);
+  }
+
+  if (signals.length === 0) return { prior: 0, evidenceArms: 0, families: [] };
+  const prior = signals.reduce((sum, value) => sum + value, 0) / signals.length;
+  return {
+    prior: Number(clamp(prior, -1, 1).toFixed(4)),
+    evidenceArms: signals.length,
+    families,
+  };
+}
+
 /**
  * True when the arm lacks meaningful local outcome evidence. Used to flag
  * exploration holdouts: drafts on under-tested arms get the experimentHoldout

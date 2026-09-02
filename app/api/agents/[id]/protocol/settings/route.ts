@@ -4,7 +4,7 @@ import { getAccessibleAgentCount } from '@/lib/account-access';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getBillingSummary } from '@/lib/billing';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse, getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
-import { validateProtocolSettingsPatch } from '@/lib/request-validation';
+import { readJsonObjectBody, validateProtocolSettingsPatch } from '@/lib/request-validation';
 
 // GET /api/agents/[id]/protocol/settings
 export async function GET(
@@ -33,7 +33,11 @@ export async function PATCH(
   const { id } = await params;
   try {
     const { user, agent } = await requireAgentAccess(id);
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const agentCount = await getAccessibleAgentCount(user);
     const parsed = validateProtocolSettingsPatch(body);
     if (!parsed.ok || !parsed.value) {

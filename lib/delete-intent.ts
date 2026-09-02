@@ -44,7 +44,6 @@ export async function inferDeleteIntent({
   try {
     const response = await generateText({
       task: 'classification',
-      tier: 'fast',
       maxTokens: 48,
       temperature: 0,
       system: `You infer why a human operator removed a queued tweet. Return one short sentence under 18 words. Focus on voice, clarity, angle, credibility, usefulness, or timing. Do not mention being an AI.`,

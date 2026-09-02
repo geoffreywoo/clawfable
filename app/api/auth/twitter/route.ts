@@ -4,6 +4,7 @@ import { formatOAuthStartError } from '@/lib/oauth-start-error';
 import { resolveOAuthCallbackOrigin } from '@/lib/request-origin';
 import { generateOAuthLink } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError, type ConnectOAuthTempData } from '@/lib/auth';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/auth/twitter — start OAuth flow to connect an agent to X
 // Requires login. Verifies the user owns the agent.
@@ -11,7 +12,11 @@ export async function POST(request: NextRequest) {
   let agentId: string | null = null;
   let callbackUrl: string | null = null;
   try {
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     agentId = body.agentId ? String(body.agentId) : null;
     if (!agentId) {
       return NextResponse.json({ error: 'agentId is required' }, { status: 400 });

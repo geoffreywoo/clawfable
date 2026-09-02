@@ -1066,7 +1066,6 @@ async function batchClassifyTweets(
 
     const response = await generateText({
       task: 'classification',
-      tier: 'fast',
       maxTokens: getTweetClassificationMaxTokens(tweets.length),
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
 - "idx": the tweet index number
@@ -1773,7 +1772,6 @@ async function generateInsights(
   try {
     const response = await generateText({
       task: 'learning',
-      tier: 'quality',
       maxTokens: getLearningInsightMaxTokens(history.length),
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")

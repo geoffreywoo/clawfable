@@ -14,6 +14,7 @@ import {
   getAgent,
   updateProtocolSettings,
   getQueuedTweets,
+  getQueueVersion,
   getTweet,
   getTweets,
   getAnalysis,
@@ -1620,6 +1621,11 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // in between), and operator delete/edit/refresh routes do not take the
   // autopilot lock. Re-read the pick from storage and skip it if it is no
   // longer the queued draft we ranked, falling through to the next candidate.
+  // The re-read below still leaves a window: an operator delete or edit that
+  // lands after it would otherwise be published anyway. Every queue write bumps
+  // the agent's queue version, so capture it before the re-read and re-check it
+  // as the last step before the X call.
+  const queueVersionBeforeSelection = await getQueueVersion(agentId);
   const selectionPool = [...rankedQueue];
   let tweet: Tweet | null = null;
   while (selectionPool.length > 0) {
@@ -1650,6 +1656,33 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       reason: repliesSent > 0
         ? `Sent ${repliesSent} replies. Every ranked draft changed in storage before posting; nothing was posted.`
         : 'Every ranked draft changed in storage before posting; nothing was posted.',
+      repliesSent,
+    };
+  }
+
+  const queueVersionBeforePost = await getQueueVersion(agentId);
+  if (queueVersionBeforePost !== queueVersionBeforeSelection) {
+    const mutationReason = `Queue mutation gate: the queue changed (version ${queueVersionBeforeSelection} -> ${queueVersionBeforePost}) after draft ${tweet.id} was re-read, so the post was cancelled rather than racing an operator delete or edit. The queue is re-validated next tick.`;
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: tweet.id,
+      xTweetId: tweet.xTweetId || '',
+      content: tweet.content,
+      format: 'queue_mutation_gate',
+      topic: tweet.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: mutationReason,
+    }).catch(() => null);
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0 ? `Sent ${repliesSent} replies. ${mutationReason}` : mutationReason,
+      tweetId: tweet.id,
+      content: tweet.content,
+      format: tweet.format || 'unknown',
+      topic: tweet.topic || 'general',
       repliesSent,
     };
   }

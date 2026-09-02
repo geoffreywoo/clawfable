@@ -13,6 +13,7 @@ import {
   updateTweet,
 } from '@/lib/kv-storage';
 import type { EngagementAction, EngagementProof } from '@/lib/types';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 type ReportStatus = 'progress' | 'succeeded' | 'failed' | 'skipped' | 'aborted';
 
@@ -177,7 +178,11 @@ export async function POST(
 
   try {
     const pairing = await requireBrowserCompanionPairing(request);
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
     const status = typeof body?.status === 'string' ? body.status as ReportStatus : null;
     const failureReason = typeof body?.failureReason === 'string' ? body.failureReason : null;

@@ -117,6 +117,31 @@ describe('AI model routing', () => {
     ]);
   });
 
+  it('routes the previously fast-tier tasks through the same quality chain', async () => {
+    const {
+      PUBLISHING_V2_CONTROL_MODEL_STACK,
+      getModelChainForTask,
+    } = await loadDefaultRouter();
+
+    const qualityChain = [
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ];
+    // delete-intent, soul-generation style extraction, and research enrichment
+    // used to ask for a cheap tier that never existed in the configured chains.
+    expect(getModelChainForTask('classification')).toEqual(qualityChain);
+    expect(getModelChainForTask('source_enrichment')).toEqual(qualityChain);
+    expect(getModelChainForTask('default_quality')).toEqual(qualityChain);
+
+    // The second positional argument is the model stack, not a tier.
+    expect(getModelChainForTask('tweet_writing', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'openai', model: 'gpt-5.6' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]);
+  });
+
   it('keeps GPT-5.6 judgment while isolating Fable and GPT writer stacks', async () => {
     const {
       PUBLISHING_V2_CONTROL_MODEL_STACK,
@@ -125,41 +150,41 @@ describe('AI model routing', () => {
     } = await loadDefaultRouter();
 
     expect(PUBLISHING_V2_CONTROL_MODEL_STACK).toBe('publishing_v2_fable_control');
-    expect(getModelChainForTask('tweet_generation', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
+    expect(getModelChainForTask('tweet_generation', PUBLISHING_V2_MODEL_STACK)).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('final_judgment', 'quality', PUBLISHING_V2_MODEL_STACK)).toEqual([
+    expect(getModelChainForTask('final_judgment', PUBLISHING_V2_MODEL_STACK)).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('idea_generation', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
+    expect(getModelChainForTask('idea_generation', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
-    expect(getModelChainForTask('idea_judgment', 'quality', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
+    expect(getModelChainForTask('idea_judgment', PUBLISHING_V2_MODEL_STACK)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
-    expect(getModelChainForTask('tweet_writing', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
+    expect(getModelChainForTask('tweet_writing', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual([
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual(
-      getModelChainForTask('copy_judgment', 'quality', PUBLISHING_V2_MODEL_STACK),
+    expect(getModelChainForTask('copy_judgment', PUBLISHING_V2_CONTROL_MODEL_STACK)).toEqual(
+      getModelChainForTask('copy_judgment', PUBLISHING_V2_MODEL_STACK),
     );
-    expect(getModelChainForTask('tweet_writing', 'quality', 'publishing_v2_fable_control')).toEqual([
+    expect(getModelChainForTask('tweet_writing', 'publishing_v2_fable_control')).toEqual([
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'openai', model: 'gpt-5.5' },
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     ]);
-    expect(getModelChainForTask('tweet_writing', 'quality', 'publishing_v2_gpt_control')).toEqual([
+    expect(getModelChainForTask('tweet_writing', 'publishing_v2_gpt_control')).toEqual([
       { provider: 'openai', model: 'gpt-5.6' },
       { provider: 'anthropic', model: 'claude-fable-5' },
       { provider: 'openai', model: 'gpt-5.5' },
@@ -188,15 +213,15 @@ describe('AI model routing', () => {
       shadowStack: 'publishing_v2_fable_control',
       reason: 'default_gpt_primary',
     });
-    expect(getModelChainForTask('tweet_writing', 'quality', current.activeStack)[0]).toEqual({
+    expect(getModelChainForTask('tweet_writing', current.activeStack)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
-    expect(getModelChainForTask('copy_judgment', 'quality', current.activeStack)[0]).toEqual({
+    expect(getModelChainForTask('copy_judgment', current.activeStack)[0]).toEqual({
       provider: 'openai',
       model: 'gpt-5.6',
     });
-    expect(getModelChainForTask('tweet_writing', 'quality', current.shadowStack)[0]).toEqual({
+    expect(getModelChainForTask('tweet_writing', current.shadowStack)[0]).toEqual({
       provider: 'anthropic',
       model: 'claude-fable-5',
     });

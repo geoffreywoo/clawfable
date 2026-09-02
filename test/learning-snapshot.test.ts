@@ -336,6 +336,7 @@ describe('buildLearningSnapshot', () => {
         expiresAt: '2026-04-24T09:00:00.000Z',
         changeSummary: 'sharpen the openings',
         soulMd: '# SOUL\n\nSharper.',
+        diff: { added: ['Sharper.'], removed: ['Softer.'], addedCount: 1, removedCount: 1 },
       },
       cooldownUntil: '2026-04-18T09:00:00.000Z',
       holdReason: 'Soul evolution proposal v4 (proposed 2026-04-17T09:00:00.000Z) is awaiting operator review',
@@ -353,6 +354,12 @@ describe('buildLearningSnapshot', () => {
     });
 
     expect(snapshot.soulEvolution?.pendingProposal?.changeSummary).toBe('sharpen the openings');
+    expect(snapshot.soulEvolution?.pendingProposal?.diff).toEqual({
+      added: ['Sharper.'],
+      removed: ['Softer.'],
+      addedCount: 1,
+      removedCount: 1,
+    });
     expect(snapshot.soulEvolution?.holdReason).toContain('awaiting operator review');
 
     const bare = buildLearningSnapshot({

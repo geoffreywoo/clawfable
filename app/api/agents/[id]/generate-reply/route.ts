@@ -9,6 +9,7 @@ import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitleme
 import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 import type { GenerationEvidenceReference } from '@/lib/types';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/generate-reply
 export async function POST(
@@ -20,7 +21,11 @@ export async function POST(
     const { agent, user } = await requireAgentAccess(id);
     const entitlement = await assertAgentAutomationEntitlement(id, { agent, user });
 
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const content = typeof body?.content === 'string' ? body.content.trim() : '';
     const authorHandle = typeof body?.authorHandle === 'string' ? body.authorHandle.trim() : '';
     const targetTweetId = normalizeTweetTarget(body?.targetTweetId || body?.tweetId || body?.replyToId);

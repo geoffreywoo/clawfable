@@ -75,7 +75,7 @@ import {
   isCompanyLedGeoffreyPost,
 } from './geoffrey-content-mix';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
-import { isUnderTestedBanditArm } from './bandit';
+import { isUnderTestedBanditArm, scoreLearnedArmPrior } from './bandit';
 import { pruneExpiredDynamicSeeds } from './seed-synthesis';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
@@ -194,6 +194,13 @@ export const V2_MIN_GEOFFREY_EXPONENTIAL_INTUITION = 0.58;
 // draft by at most 0.06 margin points — enough to break ties toward the more
 // conversational draft, never enough to outrank a materially better one.
 export const V2_VIRALITY_SELECTION_WEIGHT = 0.06;
+/**
+ * Weight on the account's own measured outcomes when ordering drafts that have
+ * already cleared every gate. Deliberately of the same small magnitude as the
+ * viral-upside bonus: measured history should break ties and near-ties between
+ * publishable drafts, never overturn a clear quality gap or reopen a gate.
+ */
+export const V2_LEARNED_PRIOR_SELECTION_WEIGHT = 0.05;
 const V2_MIN_STORY_IDENTITY_FIT = 0.55;
 const V2_MIN_STORY_CONSEQUENCE = 0.35;
 const V2_MIN_STORY_TOTAL = 0.58;
@@ -2512,7 +2519,8 @@ export function isQuestionDraftV2(content: string): boolean {
 /**
  * Indices of merged-selection question drafts that exceed the learned question
  * budget. Ranks by the same key every selection pass uses (quality margin plus
- * the bounded viral-upside bonus), falling back to selection order on ties, so
+ * the bounded viral-upside and learned-outcome bonuses), falling back to
+ * selection order on ties, so
  * the merged enforcement never demotes the draft selection ranked first.
  */
 export function selectQuestionBudgetDemotionsV2(
@@ -2522,6 +2530,7 @@ export function selectQuestionBudgetDemotionsV2(
   const selectionKey = (candidate: Pick<RankedProtocolTweet, 'judgeBreakdown'>): number => (
     (candidate.judgeBreakdown?.qualityMargin ?? 0)
     + (candidate.judgeBreakdown?.viralityUpside ?? 0) * V2_VIRALITY_SELECTION_WEIGHT
+    + (candidate.judgeBreakdown?.learnedArmPrior ?? 0) * V2_LEARNED_PRIOR_SELECTION_WEIGHT
   );
   const questionEntries = selected
     .map((candidate, index) => ({ candidate, index }))
@@ -5446,6 +5455,12 @@ function finalCriticBreakdown(
     generatedPatternRisk: taste.generatedPatternRisk,
     sourceCopyRisk: taste.sourceCopyRisk,
     viralityUpside: scoreViralityUpside(evaluation.draft.content, featureTags),
+    learnedArmPrior: scoreLearnedArmPrior(input.style.banditPolicy, {
+      format: evaluation.draft.format,
+      hook: featureTags.hook,
+      tone: featureTags.tone,
+      structure: featureTags.structure,
+    }).prior,
   };
 }
 
@@ -5852,12 +5867,15 @@ async function selectFinalTweets({
     selectionPool.push(evaluation);
   }
   // Every draft in the pool has already cleared the full gate stack, so the
-  // sort may reward viral upside (reply/conversation potential) as a bounded
-  // bonus on top of quality margin. Raw margin and upside are both persisted
-  // in judgeBreakdown so the adjustment stays auditable.
+  // sort may reward viral upside (reply/conversation potential) and the
+  // account's own measured outcomes on this draft's arms as bounded bonuses on
+  // top of quality margin. Raw margin, upside, and the learned prior are all
+  // persisted in judgeBreakdown so the adjustment stays auditable. Arms the
+  // account has never measured contribute zero, so exploration is not demoted.
   const selectionPriority = (score: CopyJudgeScore, evaluation: DraftEvaluation): number => (
     finalQualityPriority(score, evaluation, input)
     + (evaluation.draft.judgeBreakdown?.viralityUpside ?? 0) * V2_VIRALITY_SELECTION_WEIGHT
+    + (evaluation.draft.judgeBreakdown?.learnedArmPrior ?? 0) * V2_LEARNED_PRIOR_SELECTION_WEIGHT
   );
   selectionPool.sort((left, right) => {
     const leftScore = judge.scores.get(left.draft.id);

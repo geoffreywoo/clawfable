@@ -31,12 +31,26 @@ export const SOUL_PROPOSAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const SOUL_PROPOSAL_REVIEW_WINDOW_MS = SEVEN_DAYS_MS;
 const PENDING_PROPOSAL_PREFIX = 'PENDING: ';
 
+/**
+ * Bounded before/after of a proposed SOUL.md so the operator can see what the
+ * change actually does without reading the whole file. Totals are kept next to
+ * the truncated samples so the UI never implies the diff is complete when it
+ * is not.
+ */
+export interface SoulProposalDiff {
+  added: string[];
+  removed: string[];
+  addedCount: number;
+  removedCount: number;
+}
+
 export interface PendingSoulProposal {
   version: number;
   proposedAt: string;
   expiresAt: string;
   changeSummary: string;
   soulMd: string;
+  diff: SoulProposalDiff;
 }
 
 export interface SoulEvolutionState {
@@ -47,6 +61,49 @@ export interface SoulEvolutionState {
   cooldownUntil: string | null;
   /** Why approval-mode regeneration is currently skipped; null when eligible. */
   holdReason: string | null;
+}
+
+const SOUL_DIFF_LINE_LIMIT = 8;
+const SOUL_DIFF_LINE_CHARS = 240;
+
+function significantSoulLines(soulMd: string): string[] {
+  return soulMd.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+/**
+ * Line-level diff between the live soul and a proposed one. Identical lines are
+ * consumed pairwise so a repeated line is not reported as both added and
+ * removed. Line order follows each document, and the samples are capped for
+ * display while the true counts are preserved.
+ */
+export function diffSoulLines(currentSoulMd: string, proposedSoulMd: string): SoulProposalDiff {
+  const unmatched = new Map<string, number>();
+  for (const line of significantSoulLines(currentSoulMd)) {
+    unmatched.set(line, (unmatched.get(line) ?? 0) + 1);
+  }
+
+  const added: string[] = [];
+  for (const line of significantSoulLines(proposedSoulMd)) {
+    const remaining = unmatched.get(line) ?? 0;
+    if (remaining > 0) unmatched.set(line, remaining - 1);
+    else added.push(line);
+  }
+
+  const removed: string[] = [];
+  for (const [line, count] of unmatched) {
+    for (let i = 0; i < count; i += 1) removed.push(line);
+  }
+
+  const sample = (lines: string[]): string[] => lines
+    .slice(0, SOUL_DIFF_LINE_LIMIT)
+    .map((line) => (line.length > SOUL_DIFF_LINE_CHARS ? `${line.slice(0, SOUL_DIFF_LINE_CHARS)}\u2026` : line));
+
+  return {
+    added: sample(added),
+    removed: sample(removed),
+    addedCount: added.length,
+    removedCount: removed.length,
+  };
 }
 
 function parseTime(iso: string | null | undefined): number | null {
@@ -98,6 +155,7 @@ export function resolveSoulEvolutionState({
       expiresAt: new Date(proposedMs + SOUL_PROPOSAL_REVIEW_WINDOW_MS).toISOString(),
       changeSummary: proposal.reason.slice(PENDING_PROPOSAL_PREFIX.length).trim(),
       soulMd: proposal.soulMd,
+      diff: diffSoulLines(currentSoulMd, proposal.soulMd),
     }
     : null;
 
@@ -232,7 +290,6 @@ async function evolveSoul(
 
     const response = await generateText({
       task: 'learning',
-      tier: 'quality',
       maxTokens: getSoulEvolutionMaxTokens(currentSoul.length),
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.
 
@@ -365,4 +422,134 @@ Evolve this SOUL.md to incorporate what actually works. Respect operator directi
     const msg = err instanceof Error ? err.message : 'Unknown error';
     return { evolved: false, reason: `Evolution failed: ${msg}` };
   }
+}
+
+// ─── Operator review of a pending proposal ──────────────────────────────────
+
+export type SoulProposalDecision = 'approve' | 'dismiss';
+
+export type SoulProposalResolutionStatus = 'applied' | 'dismissed' | 'no_pending_proposal';
+
+export interface SoulProposalResolution {
+  decision: SoulProposalDecision;
+  status: SoulProposalResolutionStatus;
+  applied: boolean;
+  version: number | null;
+  changeSummary: string | null;
+  reason: string;
+  state: SoulEvolutionState;
+}
+
+const MAX_DECISION_REASON_CHARS = 300;
+const DEFAULT_DISMISS_REASON = 'Operator kept the current voice';
+
+async function readSoulEvolutionState(agent: Agent, currentSoulMd: string): Promise<SoulEvolutionState> {
+  const [settings, versions] = await Promise.all([
+    getProtocolSettings(agent.id),
+    getSoulVersions(agent.id),
+  ]);
+  return resolveSoulEvolutionState({ settings, versions, currentSoulMd });
+}
+
+/**
+ * Apply or dismiss the proposal the approval-mode loop is holding.
+ *
+ * Applying writes the proposed SOUL.md onto the agent and records two honest
+ * version entries: the soul it replaced, then the applied soul under an
+ * approved (not `PENDING:`) reason. Dismissing leaves the soul alone and
+ * records the current soul under a dismissal reason. Either way the proposal
+ * stops being the newest version, so `resolveSoulEvolutionState` no longer
+ * reports it as pending and the next cooldown window can propose again.
+ *
+ * Both paths are idempotent: once a proposal has been applied, dismissed, or
+ * left to lapse there is nothing pending, so a repeated decision reports
+ * `no_pending_proposal` and changes nothing.
+ */
+export async function resolvePendingSoulProposal(
+  agent: Agent,
+  decision: SoulProposalDecision,
+  options: { reason?: string } = {},
+): Promise<SoulProposalResolution> {
+  const currentSoulMd = agent.soulMd || '';
+  const state = await readSoulEvolutionState(agent, currentSoulMd);
+  const pending = state.pendingProposal;
+
+  if (!pending) {
+    return {
+      decision,
+      status: 'no_pending_proposal',
+      applied: false,
+      version: null,
+      changeSummary: null,
+      reason: 'No voice change is waiting for review',
+      state,
+    };
+  }
+
+  const operatorReason = (options.reason || '').trim().slice(0, MAX_DECISION_REASON_CHARS);
+  const changeSummary = pending.changeSummary || 'Soul evolved based on performance data';
+  const decidedAt = new Date().toISOString();
+
+  if (decision === 'approve') {
+    if (currentSoulMd.trim()) {
+      await pushSoulVersion(agent.id, currentSoulMd, `Replaced by approved proposal v${pending.version}`);
+    }
+    await pushSoulVersion(agent.id, pending.soulMd, `Approved by operator: ${changeSummary}`);
+
+    const voiceProfile = parseSoulMd(agent.name, pending.soulMd);
+    await updateAgent(agent.id, {
+      soulMd: pending.soulMd,
+      soulSummary: voiceProfile.summary,
+    });
+    await updateProtocolSettings(agent.id, { lastEvolvedAt: decidedAt });
+
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: `Soul evolution approved: ${changeSummary}`,
+      format: 'soul_evolution',
+      topic: 'soul',
+      postedAt: decidedAt,
+      source: 'manual',
+      action: 'mentions_refreshed', // reusing as system event
+      reason: operatorReason || `Operator approved proposal v${pending.version}`,
+    });
+
+    return {
+      decision,
+      status: 'applied',
+      applied: true,
+      version: pending.version,
+      changeSummary,
+      reason: operatorReason || `Operator approved proposal v${pending.version}`,
+      state: await readSoulEvolutionState(agent, pending.soulMd),
+    };
+  }
+
+  const dismissReason = operatorReason || DEFAULT_DISMISS_REASON;
+  await pushSoulVersion(agent.id, currentSoulMd, `Dismissed proposal v${pending.version}: ${dismissReason}`);
+
+  await addPostLogEntry(agent.id, {
+    agentId: agent.id,
+    tweetId: '',
+    xTweetId: '',
+    content: `Soul evolution dismissed: ${changeSummary}`,
+    format: 'soul_evolution',
+    topic: 'soul',
+    postedAt: decidedAt,
+    source: 'manual',
+    action: 'skipped',
+    reason: dismissReason,
+  });
+
+  return {
+    decision,
+    status: 'dismissed',
+    applied: false,
+    version: pending.version,
+    changeSummary,
+    reason: dismissReason,
+    state: await readSoulEvolutionState(agent, currentSoulMd),
+  };
 }

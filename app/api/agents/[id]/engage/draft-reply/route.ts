@@ -10,6 +10,7 @@ import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/repl
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 function validCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): candidate is EngagementCandidate {
   return !!candidate
@@ -31,7 +32,11 @@ export async function POST(
   try {
     const { agent, user } = await requireAgentAccess(id);
     const entitlement = await assertAgentAutomationEntitlement(id, { agent, user });
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const candidate = body?.candidate as Partial<EngagementCandidate> | undefined;
 
     if (!validCandidate(candidate, id)) {

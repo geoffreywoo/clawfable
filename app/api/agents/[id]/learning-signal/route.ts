@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addLearningSignal, getTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { metadataWithStyleMode } from '@/lib/style-mode';
-import { validateLearningSignalRequest } from '@/lib/request-validation';
+import { readJsonObjectBody, validateLearningSignalRequest } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/learning-signal
 export async function POST(
@@ -12,7 +12,11 @@ export async function POST(
   const { id } = await params;
   try {
     await requireAgentAccess(id);
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const parsed = validateLearningSignalRequest(body);
     if (!parsed.ok || !parsed.value) {
       return NextResponse.json({ error: parsed.error || 'Invalid learning signal' }, { status: 400 });
