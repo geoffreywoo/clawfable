@@ -144,6 +144,9 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
         }),
       });
       const tweet = await res.json();
+      if (!res.ok || typeof tweet?.content !== 'string') {
+        throw new Error(tweet?.error || 'Failed to generate reply');
+      }
       setReplyDrafts((prev) => ({ ...prev, [mention.id]: tweet }));
       if (tweet?.id) {
         void trackSignal(tweet.id, 'reply_generated', 0.1, {
@@ -151,8 +154,8 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
           candidateScore: tweet.candidateScore ?? null,
         });
       }
-    } catch {
-      showToast('Failed to generate reply');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to generate reply');
     } finally {
       setGeneratingId(null);
     }
@@ -160,14 +163,16 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
 
   const handleQueue = async (tweet: Tweet) => {
     try {
-      await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
+      const res = await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'queued' }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Queue failed');
       showToast('Reply added to queue');
-    } catch {
-      showToast('Queue failed');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Queue failed');
     }
   };
 
@@ -227,21 +232,7 @@ export function MentionsTab({ agentId }: MentionsTabProps) {
   return (
     <div className="space-y-4" style={{ position: 'relative' }}>
       {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            background: '#1a1a1a',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            padding: '8px 16px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--text)',
-            zIndex: 200,
-          }}
-        >
+        <div className="engage-toast" role="status">
           {toast}
         </div>
       )}

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addVoiceDirective,
   createAgent,
+  getSoulVersions,
   saveFeedback,
   saveLearnings,
   updateProtocolSettings,
@@ -34,7 +35,39 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 
-import { formatSoulForEvolutionPrompt, getSoulEvolutionMaxTokens, maybeEvolveSoul } from '@/lib/soul-evolution';
+import {
+  formatSoulForEvolutionPrompt,
+  getSoulEvolutionMaxTokens,
+  maybeEvolveSoul,
+  resolveSoulEvolutionState,
+  SOUL_PROPOSAL_COOLDOWN_MS,
+  SOUL_PROPOSAL_REVIEW_WINDOW_MS,
+} from '@/lib/soul-evolution';
+
+const HOUR_MS = 60 * 60 * 1000;
+
+function learningsFixture(agentId: string) {
+  return {
+    agentId,
+    updatedAt: new Date().toISOString(),
+    totalTracked: 60,
+    avgLikes: 20,
+    avgRetweets: 5,
+    bestPerformers: [],
+    worstPerformers: [],
+    formatRankings: [{ format: 'hot_take', avgEngagement: 110, count: 10 }],
+    topicRankings: [{ topic: 'AI', avgEngagement: 110, count: 10 }],
+    insights: ['Use sharper hooks'],
+    styleFingerprint: undefined,
+    sourceBreakdown: {
+      autopilot: 60,
+      manual: 0,
+      timeline: 0,
+      trainingCount: 60,
+      trainingSource: 'autopilot',
+    },
+  } as any;
+}
 
 describe('soul evolution smoke', () => {
   it('budgets SOUL evolution prompts and completions by current soul size', () => {
@@ -147,5 +180,89 @@ Primary objective: Write thoughtful tweets.`,
     expect(prompt).toContain('Lead with concrete observations.');
     expect(prompt).toContain('Lesson: Concrete openings feel more native to the operator than abstract framing.');
     expect(prompt).toContain('generic filler tweet (why it was rejected: Too generic)');
+  });
+
+  it('does not regenerate an approval proposal while one is pending', async () => {
+    const agent = await createAgent({
+      handle: 'soul-evolution-pending-agent',
+      name: 'Soul Evolution Pending Agent',
+      soulMd: `# SOUL.md
+
+I am an agent with a sufficiently long current soul so evolution is allowed.
+
+## 1) Objective Function
+Primary objective: Write thoughtful tweets.`,
+    } as any);
+    await updateProtocolSettings(agent.id, { soulEvolutionMode: 'approval' });
+    await saveLearnings(agent.id, learningsFixture(agent.id));
+    const callsBefore = (createMock as any).mock.calls.length;
+
+    const first = await maybeEvolveSoul(agent);
+    const second = await maybeEvolveSoul(agent);
+    const versions = await getSoulVersions(agent.id);
+
+    expect(first.reason).toContain('awaiting approval');
+    expect(second.evolved).toBe(false);
+    expect(second.reason).toContain('awaiting operator review');
+    expect(second.changeSummary).toContain('tightened the voice');
+    expect((createMock as any).mock.calls.length - callsBefore).toBe(1);
+    expect(versions.filter((version) => version.reason.startsWith('PENDING:'))).toHaveLength(1);
+  });
+
+  it('resolves pending, applied, cooled-down, and lapsed proposals from the version stack', () => {
+    const proposedAt = new Date('2026-09-01T00:00:00.000Z');
+    const versions = [{
+      version: 3,
+      soulMd: '# SOUL\n\nProposed soul text.',
+      updatedAt: proposedAt.toISOString(),
+      reason: 'PENDING: tighten the openings',
+    }];
+    const settings = { soulEvolutionMode: 'approval' as const, lastEvolvedAt: null };
+
+    const pending = resolveSoulEvolutionState({
+      settings,
+      versions,
+      currentSoulMd: '# SOUL\n\nCurrent soul text.',
+      now: proposedAt.getTime() + HOUR_MS,
+    });
+    expect(pending.pendingProposal).toMatchObject({ version: 3, changeSummary: 'tighten the openings' });
+    expect(pending.holdReason).toContain('awaiting operator review');
+    expect(pending.cooldownUntil).toBe(new Date(proposedAt.getTime() + SOUL_PROPOSAL_COOLDOWN_MS).toISOString());
+
+    const applied = resolveSoulEvolutionState({
+      settings,
+      versions,
+      currentSoulMd: '# SOUL\n\nProposed soul text.',
+      now: proposedAt.getTime() + HOUR_MS,
+    });
+    expect(applied.pendingProposal).toBeNull();
+    expect(applied.holdReason).toContain('cooldown');
+
+    const cooled = resolveSoulEvolutionState({
+      settings,
+      versions,
+      currentSoulMd: '# SOUL\n\nProposed soul text.',
+      now: proposedAt.getTime() + SOUL_PROPOSAL_COOLDOWN_MS + HOUR_MS,
+    });
+    expect(cooled.pendingProposal).toBeNull();
+    expect(cooled.holdReason).toBeNull();
+
+    const lapsed = resolveSoulEvolutionState({
+      settings,
+      versions,
+      currentSoulMd: '# SOUL\n\nCurrent soul text.',
+      now: proposedAt.getTime() + SOUL_PROPOSAL_REVIEW_WINDOW_MS + HOUR_MS,
+    });
+    expect(lapsed.pendingProposal).toBeNull();
+    expect(lapsed.holdReason).toBeNull();
+    expect(lapsed.lastProposedAt).toBe(proposedAt.toISOString());
+
+    const autoMode = resolveSoulEvolutionState({
+      settings: { soulEvolutionMode: 'auto', lastEvolvedAt: null },
+      versions,
+      currentSoulMd: '# SOUL\n\nCurrent soul text.',
+      now: proposedAt.getTime() + HOUR_MS,
+    });
+    expect(autoMode.holdReason).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
 import OpenAI from 'openai';
 import type { GenerationModelStackId } from './types';
 import { estimateAiUsageCostUsd } from './ai-pricing';
@@ -113,6 +114,10 @@ const OPENAI_COPY_MODEL = 'gpt-5.6';
 const OPENAI_QUALITY_MODEL = 'gpt-5.5';
 const ANTHROPIC_FABLE_MODEL = 'claude-fable-5';
 const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
+// Fable thinks before every answer and that thinking is billed against
+// max_tokens without being returned, so the short copy budgets callers pass
+// (600-1400) can be consumed entirely by reasoning and yield no text block.
+const ANTHROPIC_FABLE_MIN_MAX_TOKENS = 4000;
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
 const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL };
@@ -380,7 +385,12 @@ async function generateWithOpenAi(
       },
     } : {}),
     ...(reasoning ? { reasoning } : {}),
-    ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
+    // GPT-5 reasoning models reject temperature unless reasoning is off, so an
+    // operator raising OPENAI_REASONING_EFFORT must not turn every copy call
+    // into a 400. Dropping the sampling knob is the documented tradeoff.
+    ...(typeof options.temperature === 'number' && (!reasoning || reasoning.effort === 'none')
+      ? { temperature: options.temperature }
+      : {}),
   };
   const response = signal
     ? await openai.responses.create(request, { signal })
@@ -416,19 +426,27 @@ async function generateWithAnthropic(
     : options.task === 'tweet_writing'
       ? 'medium' as const
       : 'medium' as const;
+  // The SDK helper deep-clones the schema and rewrites keywords the Anthropic
+  // structured-output grammar does not accept (maxLength and friends become
+  // description hints), so the same schemas that work on OpenAI do not 400 here.
+  const anthropicFormat = options.jsonSchema
+    ? jsonSchemaOutputFormat(options.jsonSchema as Parameters<typeof jsonSchemaOutputFormat>[0])
+    : null;
   const outputConfig = {
     ...(useFableEffort ? { effort: fableEffort } : {}),
-    ...(options.jsonSchema ? {
+    ...(anthropicFormat ? {
       format: {
         type: 'json_schema' as const,
-        schema: options.jsonSchema,
+        schema: anthropicFormat.schema,
       },
     } : {}),
   };
 
   const request = {
     model,
-    max_tokens: options.maxTokens,
+    max_tokens: model === ANTHROPIC_FABLE_MODEL
+      ? Math.max(options.maxTokens, ANTHROPIC_FABLE_MIN_MAX_TOKENS)
+      : options.maxTokens,
     system: options.system,
     messages: getInputMessages(options).map((message) => ({
       role: message.role,

@@ -11,7 +11,7 @@ import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
 import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import type { TrendingTopic } from '@/lib/trending';
-import { validateGenerationRequest } from '@/lib/request-validation';
+import { readJsonObjectBody, validateGenerationRequest } from '@/lib/request-validation';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
@@ -25,19 +25,11 @@ export async function POST(
   try {
     const { agent } = await requireAgentAccess(id);
 
-    // Rate limit: 20 generations per hour per agent
-    const allowed = await checkRateLimit(id, 'generate', 20);
-    if (!allowed) {
-      return NextResponse.json({ error: 'Rate limit exceeded. Try again later.' }, { status: 429 });
+    const body = await readJsonObjectBody(request);
+    if (!body.ok || !body.value) {
+      return NextResponse.json({ error: body.error || 'Invalid JSON body' }, { status: 400 });
     }
-
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-    const parsed = validateGenerationRequest(body, { maxCount: 5, requireTopicOrCount: true });
+    const parsed = validateGenerationRequest(body.value, { maxCount: 5, requireTopicOrCount: true });
     if (!parsed.ok || !parsed.value) {
       return NextResponse.json({ error: parsed.error || 'Invalid generation request' }, { status: 400 });
     }
@@ -48,21 +40,23 @@ export async function POST(
       replaceTweetId,
     } = parsed.value;
     const isPreviewRequest = batchCount !== undefined && !topic && !headline;
+    if (!isPreviewRequest && !batchCount && !topic && !headline) {
+      return NextResponse.json({ error: 'topic or headline required' }, { status: 400 });
+    }
+
+    // Rate limits are consumed only after the request has validated, so a
+    // rejected body never burns a generation or free-preview slot.
+    const allowed = await checkRateLimit(id, 'generate', 20);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Rate limit exceeded. Try again later.' }, { status: 429 });
+    }
     const entitlement = await getAgentAutomationEntitlement(id, { agent });
     if (!entitlement.eligible && !(await checkRateLimit(id, 'unpaid_preview_generation', 5))) {
       return NextResponse.json({ error: 'Free preview limit reached. Try again later.' }, { status: 429 });
     }
-    if (!entitlement.eligible && isPreviewRequest && (batchCount || 1) > 2) {
-      return NextResponse.json({
-        error: 'Free previews are limited to two drafts per request.',
-        code: 'payment_required',
-        entitlement,
-      }, { status: 402 });
-    }
-
-    if (!isPreviewRequest && !batchCount && !topic && !headline) {
-      return NextResponse.json({ error: 'topic or headline required' }, { status: 400 });
-    }
+    // Free previews are clamped to two drafts (mirrors protocol/generate) and
+    // flagged with previewLimited instead of rejecting the first batch outright.
+    const previewLimited = !entitlement.eligible;
 
     if (isPreviewRequest) {
       const analysis = await getAnalysis(id);
@@ -80,7 +74,8 @@ export async function POST(
         return NextResponse.json({ error: 'Preview tweet not found' }, { status: 404 });
       }
 
-      const previewCount = batchCount ?? 1;
+      const requestedCount = batchCount ?? 1;
+      const previewCount = previewLimited ? Math.min(requestedCount, 2) : requestedCount;
       const cachedTrending = await getTrendingCache(id);
       const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : null;
       const batch = await generatePublishingBatchV2({
@@ -119,7 +114,7 @@ export async function POST(
         : existingPreviewTweets.map((tweet) => tweet.id);
       await Promise.all(stalePreviewIds.map((tweetId) => deleteTweet(tweetId)));
 
-      return NextResponse.json({ tweets });
+      return NextResponse.json({ tweets, previewLimited });
     }
 
     const analysis = await getAnalysis(id);

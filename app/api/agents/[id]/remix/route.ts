@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addRemixEntry, checkRateLimit, getAnalysis, getTweet } from '@/lib/kv-storage';
+import { addRemixEntry, checkRateLimit, getAnalysis, getTweet, updateTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
@@ -7,6 +7,9 @@ import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
+import { getTweetCompletenessIssue } from '@/lib/survivability';
+import { readJsonObjectBody } from '@/lib/request-validation';
 import type { GenerationEvidenceReference } from '@/lib/types';
 
 const REMIX_DIRECTIONS: Record<string, string> = {
@@ -63,10 +66,14 @@ export async function POST(
   const { id } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-    const body = await request.json();
-    const tweetId = typeof body?.tweetId === 'string' ? body.tweetId : '';
-    const direction = typeof body?.direction === 'string' ? body.direction : '';
-    const customPrompt = typeof body?.customPrompt === 'string' ? body.customPrompt.trim() : '';
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
+    const tweetId = typeof body.tweetId === 'string' ? body.tweetId : '';
+    const direction = typeof body.direction === 'string' ? body.direction : '';
+    const customPrompt = typeof body.customPrompt === 'string' ? body.customPrompt.trim() : '';
     if (!tweetId) return NextResponse.json({ error: 'tweetId required' }, { status: 400 });
 
     const existingTweet = await getTweet(tweetId);
@@ -131,13 +138,43 @@ export async function POST(
       }, { status: 422 });
     }
 
+    // A remix of a queued draft inherits the parent's lifecycle: the child
+    // becomes the queued item and the parent is quarantined, mirroring the
+    // immutable-child rule for operator edits. Queue gates run first so a
+    // remix can never bypass them.
+    const supersedeQueuedParent = existingTweet.status === 'queued' && entitlement.eligible;
+    if (supersedeQueuedParent) {
+      const completenessIssue = getTweetCompletenessIssue(candidate.content);
+      if (completenessIssue) {
+        return NextResponse.json({ error: completenessIssue, code: 'remix_incomplete' }, { status: 422 });
+      }
+      if (existingTweet.type !== 'reply') {
+        const publishingPolicyIssue = getAccountPublishingPolicyIssue({
+          handle: agent.handle,
+          content: candidate.content,
+          topic: existingTweet.topic,
+          portfolioCompanyContext: candidate.portfolioCompanyContext ?? existingTweet.portfolioCompanyContext,
+        });
+        if (publishingPolicyIssue) {
+          return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
+        }
+      }
+    }
     const child = await createTweetFromGeneratedCandidate(id, candidate, {
-      status: entitlement.eligible ? 'draft' : 'preview',
+      status: supersedeQueuedParent ? 'queued' : entitlement.eligible ? 'draft' : 'preview',
       type: existingTweet.type === 'reply' || existingTweet.type === 'quote' ? existingTweet.type : 'original',
       topic: existingTweet.topic || 'remix',
       followupForTweetId: existingTweet.followupForTweetId || null,
       replyConversationId: existingTweet.replyConversationId || null,
     });
+    if (supersedeQueuedParent) {
+      await updateTweet(existingTweet.id, {
+        status: 'quarantined',
+        preQuarantineStatus: 'queued',
+        quarantinedAt: new Date().toISOString(),
+        quarantineReason: `Superseded by remix child ${child.id}.`,
+      });
+    }
     await addRemixEntry(id, {
       direction: direction || 'custom',
       customPrompt: customPrompt || undefined,
@@ -151,6 +188,7 @@ export async function POST(
       direction: direction || 'custom',
       tweet: child,
       parentTweetId: tweetId,
+      supersededParent: supersedeQueuedParent,
       changesClaim,
       previewLimited: !entitlement.eligible,
     });

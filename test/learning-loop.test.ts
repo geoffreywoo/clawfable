@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildGenerationLearningMetadata, buildPersonalizationMemory, summarizeEditDelta } from '@/lib/learning-loop';
-import type { LearningSignal } from '@/lib/types';
+import {
+  buildGenerationLearningMetadata,
+  buildPersonalizationMemory,
+  selectRecentRejectionLines,
+  summarizeEditDelta,
+} from '@/lib/learning-loop';
+import type { FeedbackEntry, LearningSignal } from '@/lib/types';
 
 function learningSignal(overrides: Partial<LearningSignal>): LearningSignal {
   return {
@@ -107,6 +112,90 @@ describe('buildPersonalizationMemory', () => {
 
     expect(memory.rejectedDrafts).toContain(freshText);
     expect(memory.rejectedDrafts).not.toContain(staleText);
+  });
+
+  it('keeps Geoffrey wording and tweet-text topic words out of hidden preferences for other accounts', () => {
+    const feedback = [{
+      tweetId: 'tweet-dash',
+      tweetText: 'Our support dashboard shows the robotics workflow handoff got faster this week.',
+      rating: 'down' as const,
+      generatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      reason: 'not me',
+      source: 'queue_delete' as const,
+      userProvidedReason: true,
+    }, {
+      tweetId: 'tweet-dup',
+      tweetText: 'Frontier manufacturing and space launch cadence both double when the technical bottleneck clears.',
+      rating: 'down' as const,
+      generatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+      reason: 'This repeats an angle already used or rejected.',
+      source: 'queue_delete' as const,
+      userProvidedReason: true,
+    }];
+    const base = {
+      feedback,
+      signals: [],
+      remixPatterns: [],
+      directiveRules: [],
+      learnings: null,
+      performanceHistory: [],
+      banditPolicy: null,
+    };
+
+    const generic = buildPersonalizationMemory({
+      ...base,
+      voiceProfile: {
+        tone: 'direct',
+        topics: ['support', 'saas'],
+        antiGoals: [],
+        communicationStyle: 'plain founder notes',
+        summary: 'A SaaS founder writing about support.',
+      },
+    });
+    const genericHints = generic.operatorHiddenPreferences.join(' | ');
+    expect(genericHints).not.toMatch(/geoffrey|geoffwoo/i);
+    expect(genericHints).not.toContain('technical depth');
+    expect(genericHints).not.toContain('Slack/support/workflow texture');
+    expect(genericHints).toContain("account's native voice");
+
+    const geoffrey = buildPersonalizationMemory({
+      ...base,
+      voiceProfile: {
+        tone: 'technical operator/investor',
+        topics: ['AI'],
+        antiGoals: [],
+        communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: compressed native voice.',
+        summary: 'Geoffrey.',
+      },
+    });
+    const geoffreyHints = geoffrey.operatorHiddenPreferences.join(' | ');
+    expect(geoffreyHints).toContain('native Geoffrey voice');
+    expect(geoffreyHints).not.toContain('technical depth');
+  });
+
+  it('selects quotable rejection lines under the 21-day and duplicate-only rules', () => {
+    const entry = (tweetId: string, tweetText: string, ageDays: number, reason: string): FeedbackEntry => ({
+      tweetId,
+      tweetText,
+      rating: 'down',
+      generatedAt: new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000).toISOString(),
+      reason,
+      source: 'queue_delete',
+      userProvidedReason: true,
+    });
+    const lines = selectRecentRejectionLines([
+      entry('stale', 'stale rejected take', 25, 'too vague'),
+      entry('dup', 'duplicate rejected take', 2, 'Duplicate premise: keep the sharper original.'),
+      entry('old-fresh', 'older fresh rejected take', 6, 'too generic'),
+      entry('fresh', 'fresh rejected take', 3, 'not my voice'),
+      { ...entry('up', 'approved take', 1, ''), rating: 'up' },
+    ], 1);
+
+    expect(lines).toEqual(['fresh rejected take (why it was rejected: not my voice)']);
+    expect(selectRecentRejectionLines([
+      entry('stale', 'stale rejected take', 25, 'too vague'),
+      entry('fresh', 'fresh rejected take', 3, 'not my voice'),
+    ], 5)).toEqual(['fresh rejected take (why it was rejected: not my voice)']);
   });
 
   it('does not let a duplicate-only rejection poison the preserved premise', () => {

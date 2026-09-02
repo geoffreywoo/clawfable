@@ -165,6 +165,7 @@ const CHECKPOINT_ORDER: Array<NonNullable<TweetPerformance['performanceCheckpoin
   'initial_15m',
   'early_30m',
   'momentum_2h',
+  'settling_6h',
   'full_24h',
   'late',
 ];
@@ -724,6 +725,9 @@ export async function captureFollowerSnapshotIfDue(
     if (Number.isFinite(lastAt) && now - lastAt < FOLLOWER_SNAPSHOT_INTERVAL_MS) return false;
   }
   const metrics = await getAccountPublicMetrics(keys);
+  // No public_metrics on the response means no reading, not a zero-follower
+  // account; skipping keeps the growth summary honest.
+  if (!metrics) return false;
   await addFollowerSnapshot(agentId, {
     capturedAt: new Date(now).toISOString(),
     followersCount: metrics.followersCount,

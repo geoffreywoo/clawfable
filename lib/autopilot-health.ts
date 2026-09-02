@@ -9,7 +9,7 @@ import {
   updateProtocolSettings,
 } from './kv-storage';
 import { inspectAutopilotQueue, selfHealAutopilotQueue } from './autopilot';
-import { clampPostsPerDay } from './survivability';
+import { effectivePostsPerDay } from './survivability';
 import { decodeKeys, getMe } from './twitter-client';
 import { formatActionError, isInvalidTwitterCredentialError } from './twitter-debug';
 
@@ -72,7 +72,7 @@ function postBackoffDetails(settings: ProtocolSettings, nowMs: number): string |
 }
 
 export function getAutopilotCadenceMs(settings: ProtocolSettings, now = new Date()): number {
-  const baseIntervalMs = (24 / clampPostsPerDay(settings.postsPerDay)) * 60 * 60 * 1000;
+  const baseIntervalMs = (24 / effectivePostsPerDay(settings.postsPerDay)) * 60 * 60 * 1000;
   const hasPeakHours = settings.peakHours && settings.peakHours.length > 0;
   const isPeakHour = hasPeakHours && settings.peakHours.includes(now.getUTCHours());
   const cooldownMultiplier = hasPeakHours ? (isPeakHour ? 0.4 : 3.0) : 1.0;

@@ -102,11 +102,32 @@ describe('getAutopilotScheduleStatus', () => {
     expect(status.summary).toContain('posting window opening now');
   });
 
+  it('uses the five-per-day automated clamp so a 12/day setting is still cooling down at 2.5h', () => {
+    // runAutopilot never posts faster than 5/day (4.8h base, 4.08h earliest),
+    // so the card must not promise an eligible window at the uncapped 2h cadence.
+    const status = getAutopilotScheduleStatus(
+      makeSettings({
+        postsPerDay: 12,
+        lastPostedAt: '2026-04-09T22:30:00.000Z',
+      }),
+      {
+        activeQueueCount: 5,
+        quarantinedCount: 0,
+        now: new Date('2026-04-10T01:00:00.000Z'),
+      },
+    );
+
+    expect(status.state).toBe('cooldown');
+    expect(status.summary).toContain('cooling down for ~1h 35m');
+  });
+
   it('reports eligible once the latest jitter bound has passed', () => {
+    // 6/day clamps to the 5/day automated cadence: 4.8h x3 off-peak = 14.4h,
+    // latest jitter bound 16.56h, so 17h since the last post is eligible.
     const status = getAutopilotScheduleStatus(
       makeSettings({
         peakHours: [17, 18, 19],
-        lastPostedAt: '2026-04-09T09:00:00.000Z',
+        lastPostedAt: '2026-04-09T08:00:00.000Z',
       }),
       {
         activeQueueCount: 12,

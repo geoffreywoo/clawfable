@@ -138,3 +138,48 @@ describe('summarizeFollowerGrowth', () => {
     expect(flat[0]).toContain('flat');
   });
 });
+
+describe('baseline and projection honesty', () => {
+  it('keeps a zero quote median at zero instead of inventing a baseline of one', () => {
+    const history = Array.from({ length: 10 }, (_, index) => performance({
+      tweetId: `zero-${index}`,
+      xTweetId: `x-zero-${index}`,
+      quotes: 0,
+      bookmarks: 0,
+    }));
+    const baseline = buildPerformanceSignalBaseline(history);
+    expect(baseline.quotes).toBe(0);
+    expect(baseline.bookmarks).toBe(0);
+  });
+
+  it('does not project engagement rate to 24h for a young post', () => {
+    const history = Array.from({ length: 10 }, (_, index) => performance({
+      tweetId: `base-${index}`,
+      xTweetId: `x-base-${index}`,
+    }));
+    const baseline = buildPerformanceSignalBaseline(history);
+    const rateOnly = {
+      likes: 0,
+      retweets: 0,
+      replies: 0,
+      quotes: 0,
+      bookmarks: 0,
+      impressions: 0,
+      engagementRate: 12,
+    };
+    const young = computeRelativeSpreadSignal(performance({
+      ...rateOnly,
+      postedAt: '2026-08-20T00:00:00.000Z',
+      checkedAt: '2026-08-20T01:00:00.000Z',
+      performanceCheckpoint: 'initial_15m',
+    }), baseline);
+    const mature = computeRelativeSpreadSignal(performance({
+      ...rateOnly,
+      postedAt: '2026-08-20T00:00:00.000Z',
+      checkedAt: '2026-08-21T00:00:00.000Z',
+      performanceCheckpoint: 'full_24h',
+    }), baseline);
+
+    expect(young.score).toBeCloseTo(mature.score, 6);
+  });
+});

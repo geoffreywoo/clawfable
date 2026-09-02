@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { getAgents, getProtocolSettings, resetReadCache } from '@/lib/kv-storage';
-import { refreshAgentResearch } from '@/lib/research-pipeline';
+import { refreshAgentResearch, type ResearchRefreshResult } from '@/lib/research-pipeline';
 import { refreshDynamicIdeaSeeds } from '@/lib/seed-synthesis';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 
@@ -16,20 +16,38 @@ export async function GET(request: NextRequest) {
 
   resetReadCache();
   const agents = await getAgents();
-  const results = [];
+  const results: ResearchRefreshResult[] = [];
   for (const agent of agents) {
-    const settings = await getProtocolSettings(agent.id);
-    if (!settings.enabled) continue;
-    const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
-    if (!entitlement.eligible) continue;
-    const result = await refreshAgentResearch(agent, {
-      modelStack: PUBLISHING_V2_MODEL_STACK,
-    });
-    results.push(result);
-    // Distill fresh idea seeds from the corpus that was just refreshed. A
-    // failed synthesis must never fail the research cycle.
-    if (result.refreshed) {
-      await refreshDynamicIdeaSeeds(agent).catch(() => null);
+    // One agent's failure is recorded as its own result and never aborts the
+    // tick for the agents after it.
+    try {
+      const settings = await getProtocolSettings(agent.id);
+      if (!settings.enabled) continue;
+      const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
+      if (!entitlement.eligible) continue;
+      const result = await refreshAgentResearch(agent, {
+        modelStack: PUBLISHING_V2_MODEL_STACK,
+      });
+      results.push(result);
+      // Distill fresh idea seeds from the corpus that was just refreshed. A
+      // failed synthesis must never fail the research cycle.
+      if (result.refreshed) {
+        await refreshDynamicIdeaSeeds(agent).catch(() => null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Research refresh failed';
+      console.error(`[cron/research] agent ${agent.id} failed:`, message);
+      results.push({
+        agentId: agent.id,
+        attempted: true,
+        refreshed: false,
+        busy: false,
+        documentsFetched: 0,
+        documentsStored: 0,
+        storiesStored: 0,
+        storiesQualified: 0,
+        errors: [message],
+      });
     }
   }
 

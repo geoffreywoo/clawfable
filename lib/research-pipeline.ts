@@ -516,6 +516,22 @@ export function selectSourceDocumentsForEnrichment(
   return selected;
 }
 
+/**
+ * The deterministic story gate every consumer of the research corpus shares:
+ * generation briefs, the refresh qualification count, and dynamic idea-seed
+ * synthesis. A story that is evidence-unqualified (including political drift)
+ * or carries a block reason from the agenda or operator feedback must not
+ * become a premise anywhere.
+ */
+export function isStoryClusterEligibleForGeneration(story: StoryCluster, nowMs = Date.now()): boolean {
+  if (!story.evidenceQualified || story.blockReason) return false;
+  if (story.blockedUntil) {
+    const blockedUntil = Date.parse(story.blockedUntil);
+    if (Number.isFinite(blockedUntil) && blockedUntil > nowMs) return false;
+  }
+  return true;
+}
+
 export function isResearchDocumentEligibleForClustering(
   document: SourceDocument,
   observedNetworkDocumentIds?: Set<string>,
@@ -923,7 +939,7 @@ export async function refreshAgentResearch(
       performance,
       feedback,
       tweets,
-      semanticBlocks,
+      semanticBlocks: effectiveSemanticBlocks,
       current: currentAgenda,
       operatorTopicSignals: engagedOperatorTopics,
     });
@@ -976,7 +992,7 @@ export async function refreshAgentResearch(
       now,
     });
     const storedClusters = await upsertStoryClusters(agent.id, clusters);
-    const qualified = storedClusters.filter((cluster) => cluster.evidenceQualified && !cluster.blockReason);
+    const qualified = storedClusters.filter((cluster) => isStoryClusterEligibleForGeneration(cluster, now.getTime()));
     const completedState: ResearchRefreshState = {
       ...runningState,
       lastCompletedAt: new Date().toISOString(),

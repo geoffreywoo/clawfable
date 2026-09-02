@@ -1,5 +1,6 @@
 import type {
   FeedbackBlockScope,
+  FeedbackEntry,
   LearningSignal,
   ProtocolSettings,
   QueueFeedbackReasonCode,
@@ -52,6 +53,12 @@ const QUEUE_FEEDBACK_REASONS = new Set<QueueFeedbackReasonCode>([
   'other',
 ]);
 const FEEDBACK_BLOCK_SCOPES = new Set<FeedbackBlockScope>(['copy', 'idea', 'story', 'topic']);
+const FEEDBACK_RATINGS = new Set<FeedbackEntry['rating']>(['up', 'down']);
+const FEEDBACK_SOURCES = new Set<NonNullable<FeedbackEntry['source']>>([
+  'preview_feedback',
+  'queue_delete',
+  'taste_calibration',
+]);
 
 function fail<T>(error: string): ValidationResult<T> {
   return { ok: false, error };
@@ -78,6 +85,61 @@ function optionalString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
+}
+
+/**
+ * Parse a request body as a JSON object. Malformed JSON and non-object bodies
+ * (null, arrays, primitives) fail with the same 'Invalid JSON body' error so
+ * mutation routes can answer 400 instead of surfacing a parser 500.
+ */
+export async function readJsonObjectBody(request: Request): Promise<ValidationResult<Record<string, unknown>>> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return fail('Invalid JSON body');
+  }
+  if (!isRecord(body)) return fail('Invalid JSON body');
+  return ok(body);
+}
+
+export interface FeedbackEntryRequest {
+  tweetId?: string;
+  tweetText?: string;
+  rating: FeedbackEntry['rating'];
+  reason?: string;
+  intentSummary?: string;
+  source?: FeedbackEntry['source'];
+}
+
+/**
+ * Validate an operator feedback entry before it is persisted. A stored entry
+ * must carry a rating and either the draft text or a tweetId the route can
+ * resolve to text; generatedAt is always set server-side.
+ */
+export function validateFeedbackEntry(body: unknown): ValidationResult<FeedbackEntryRequest> {
+  if (!isRecord(body)) return fail('Invalid feedback entry');
+  if (typeof body.rating !== 'string' || !FEEDBACK_RATINGS.has(body.rating as FeedbackEntry['rating'])) {
+    return fail('Feedback rating must be "up" or "down"');
+  }
+  const tweetId = optionalString(body.tweetId, 80);
+  const tweetText = optionalString(body.tweetText, 1000);
+  if (!tweetId && !tweetText) return fail('Feedback needs tweetText or tweetId');
+  let source: FeedbackEntry['source'] | undefined;
+  if (body.source !== undefined) {
+    if (typeof body.source !== 'string' || !FEEDBACK_SOURCES.has(body.source as NonNullable<FeedbackEntry['source']>)) {
+      return fail('Invalid feedback source');
+    }
+    source = body.source as FeedbackEntry['source'];
+  }
+  return ok({
+    tweetId,
+    tweetText,
+    rating: body.rating as FeedbackEntry['rating'],
+    reason: optionalString(body.reason, 500),
+    intentSummary: optionalString(body.intentSummary, 500),
+    source,
+  });
 }
 
 export function sanitizeMetadata(value: unknown): Record<string, string | number | boolean | null> | undefined {

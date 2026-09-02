@@ -1180,11 +1180,33 @@ For @geoffwoo, write like a startup investor/operator reacting in public, not an
 - If the wording could plausibly come from any AI/startup account after swapping one noun, reject it.`;
 }
 
-export function classifyTasteFeedbackReason(reason: string | null | undefined, content = ''): TasteFeedbackClassification {
-  const text = normalizeText(`${reason || ''} ${content}`);
+export interface TasteFeedbackClassificationOptions {
+  voiceProfile?: VoiceProfile | null;
+}
+
+/**
+ * Turn an operator's stated rejection reason into reusable preference hints.
+ *
+ * Only the operator's reason is classified. The rejected tweet text is still
+ * accepted (call sites pass it positionally) but never matched: a draft that
+ * merely mentioned "dashboard" or "robotics" used to generate standing
+ * preferences regardless of why it was rejected.
+ *
+ * Account-specific wording (Geoffrey's native-voice, texture, and sports
+ * policy) is only emitted when the voice profile is Geoffrey's; every other
+ * account receives account-neutral hints.
+ */
+export function classifyTasteFeedbackReason(
+  reason: string | null | undefined,
+  _content = '',
+  options: TasteFeedbackClassificationOptions = {},
+): TasteFeedbackClassification {
   const reasonText = normalizeText(reason || '');
+  const text = reasonText;
+  const geoffrey = isGeoffreyVoiceProfile(options.voiceProfile);
   const metadata: Record<string, string | number | boolean | null> = {};
   const preferenceHints: string[] = [];
+  if (geoffrey) metadata.accountSpecificHints = 'geoffrey';
 
   if (/\b(ai slop|slop|generated|bot|template|formulaic|generic)\b|sounds? like (?:ai|chatgpt)|chatgpt[- ]?(?:y|ish)/.test(reasonText)) {
     metadata.aiSlopComplaint = true;
@@ -1205,7 +1227,9 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(slack|support queue|support ticket|dashboard|calendar|workflow|handoff|zendesk|loom)\b/.test(text)) {
     metadata.lowStatusTextureComplaint = true;
-    preferenceHints.push('Operator rejects Slack/support/workflow texture as insufficient proof for Geoffrey; use a concrete high-context object, behavior, incentive, or mechanism appropriate to the subject.');
+    preferenceHints.push(geoffrey
+      ? 'Operator rejects Slack/support/workflow texture as insufficient proof for Geoffrey; use a concrete high-context object, behavior, incentive, or mechanism appropriate to the subject.'
+      : 'Operator rejects Slack/support/workflow texture as weak proof; use a concrete object, behavior, incentive, or mechanism appropriate to the subject.');
   }
   if (/\b(elevated|elite|technical|hard tech|frontier|asic|fusion|fission|rare earth|robotics|manufacturing|space|industrial)\b/.test(text)) {
     metadata.technicalElevationRequested = true;
@@ -1213,7 +1237,9 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(my voice|not me|off voice|does not sound like me|doesn'?t sound like me|native)\b/.test(text)) {
     metadata.nativeVoiceComplaint = true;
-    preferenceHints.push('Operator prioritizes native Geoffrey voice over generic viral-post optimization.');
+    preferenceHints.push(geoffrey
+      ? 'Operator prioritizes native Geoffrey voice over generic viral-post optimization.'
+      : 'Operator prioritizes the account\'s native voice over generic viral-post optimization.');
   }
   if (/\b(stiff|formal|analyst(?: note| memo| voice)?|research summary|industry report|corporate diction)\b/.test(text)) {
     metadata.stiffDictionComplaint = true;
@@ -1245,7 +1271,9 @@ export function classifyTasteFeedbackReason(reason: string | null | undefined, c
   }
   if (/\b(?:stop|don'?t|do not|no more|not)\b[^.]{0,48}\b(?:sports?|boxing|nba|nfl|athletes?)\b|\b(?:sports?|boxing|nba|nfl|athletes?)\b[^.]{0,48}\b(?:not my style|off voice)\b/.test(reasonText)) {
     metadata.sportsTopicOptOut = true;
-    preferenceHints.push('Random sports and competitive-sports subjects are excluded for @geoffwoo regardless of momentum. Betr and Kings League are allowed only as qualified portfolio-company business subjects, never as game, athlete, player, score, matchup, or betting-pick content.');
+    preferenceHints.push(geoffrey
+      ? 'Random sports and competitive-sports subjects are excluded for @geoffwoo regardless of momentum. Betr and Kings League are allowed only as qualified portfolio-company business subjects, never as game, athlete, player, score, matchup, or betting-pick content.'
+      : 'Sports and competitive-sports subjects are excluded for this account regardless of momentum.');
   }
 
   if (preferenceHints.length > 0) {

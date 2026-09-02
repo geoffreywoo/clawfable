@@ -4,10 +4,30 @@ import { saveAnalysis } from '@/lib/kv-storage';
 const {
   buildGenerationContextMock,
   generatePublishingBatchV2Mock,
+  checkRateLimitMock,
+  getAgentAutomationEntitlementMock,
 } = vi.hoisted(() => ({
   buildGenerationContextMock: vi.fn(),
   generatePublishingBatchV2Mock: vi.fn(),
+  checkRateLimitMock: vi.fn(async () => true),
+  getAgentAutomationEntitlementMock: vi.fn(),
 }));
+
+vi.mock('@/lib/kv-storage', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/kv-storage')>('@/lib/kv-storage');
+  return {
+    ...actual,
+    checkRateLimit: checkRateLimitMock,
+  };
+});
+
+vi.mock('@/lib/automation-entitlement', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/automation-entitlement')>('@/lib/automation-entitlement');
+  return {
+    ...actual,
+    getAgentAutomationEntitlement: getAgentAutomationEntitlementMock,
+  };
+});
 
 vi.mock('@/lib/auth', () => ({
   requireAgentAccess: vi.fn(async (id: string) => ({
@@ -55,10 +75,61 @@ function makeAnalysis(agentId: string) {
   };
 }
 
+function freeEntitlement() {
+  return {
+    source: 'billing',
+    eligible: false,
+    reason: 'A paid plan is required for automation.',
+    verifiedAt: null,
+    paidThrough: null,
+    paidInvoiceId: null,
+    paidAmountCents: null,
+    paidCurrency: null,
+  };
+}
+
+function generatedCandidate(overrides: Record<string, unknown>) {
+  return {
+    content: 'Generated tweet',
+    format: 'hot_take',
+    targetTopic: 'AI',
+    rationale: 'good',
+    pipelineVersion: 'v2',
+    generationSurface: 'original',
+    contentProvenance: 'generated_v2',
+    generationRunId: 'run-route',
+    ideaId: 'idea-route',
+    draftCandidateId: 'draft-route',
+    evidenceReferences: [{
+      sourceDocumentId: 'source-route',
+      url: 'https://example.com/source',
+      title: 'Source',
+      publisher: 'Example',
+      publishedAt: new Date().toISOString(),
+      trustTier: 'primary',
+      claim: 'Evidence for generated tweet.',
+    }],
+    generationMode: 'balanced',
+    candidateScore: 82,
+    confidenceScore: 0.74,
+    voiceScore: 0.7,
+    noveltyScore: 0.8,
+    predictedEngagementScore: 0.76,
+    freshnessScore: 0.68,
+    repetitionRiskScore: 0.12,
+    policyRiskScore: 0.1,
+    ...overrides,
+  };
+}
+
 describe('generation route wiring', () => {
   beforeEach(() => {
     buildGenerationContextMock.mockReset();
     generatePublishingBatchV2Mock.mockReset();
+    checkRateLimitMock.mockReset();
+    checkRateLimitMock.mockResolvedValue(true);
+    getAgentAutomationEntitlementMock.mockReset();
+    getAgentAutomationEntitlementMock.mockResolvedValue(freeEntitlement());
 
     buildGenerationContextMock.mockResolvedValue({
       voiceProfile: {
@@ -235,6 +306,60 @@ describe('generation route wiring', () => {
       memory: expect.objectContaining({ alwaysDoMoreOfThis: ['Lead with specifics'] }),
       mode: 'preview',
     }));
+  });
+
+  it('clamps a free first-batch preview to two drafts instead of rejecting it', async () => {
+    const agentId = 'route-preview-free-clamp-agent';
+    await saveAnalysis(agentId, makeAnalysis(agentId));
+    generatePublishingBatchV2Mock.mockResolvedValueOnce([
+      generatedCandidate({ content: 'First free preview draft.', draftCandidateId: 'draft-free-1' }),
+      generatedCandidate({ content: 'Second free preview draft.', draftCandidateId: 'draft-free-2' }),
+    ]);
+
+    const response = await generateTweetPOST(
+      new Request('http://localhost/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 5 }),
+      }) as any,
+      { params: Promise.resolve({ id: agentId }) }
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.previewLimited).toBe(true);
+    expect(data.tweets).toHaveLength(2);
+    expect(generatePublishingBatchV2Mock).toHaveBeenCalledWith(expect.objectContaining({
+      agentId,
+      count: 2,
+      mode: 'preview',
+    }));
+  });
+
+  it('does not consume generation or free-preview rate limits for a rejected body', async () => {
+    const agentId = 'route-preview-rate-limit-agent';
+
+    const malformed = await generateTweetPOST(
+      new Request('http://localhost/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      }) as any,
+      { params: Promise.resolve({ id: agentId }) }
+    );
+    expect(malformed.status).toBe(400);
+
+    const invalid = await generateTweetPOST(
+      new Request('http://localhost/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 'five' }),
+      }) as any,
+      { params: Promise.resolve({ id: agentId }) }
+    );
+    expect(invalid.status).toBe(400);
+
+    expect(checkRateLimitMock).not.toHaveBeenCalled();
   });
 
   it('refuses to persist incomplete generated drafts from the batch layer', async () => {
