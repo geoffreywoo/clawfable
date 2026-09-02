@@ -141,6 +141,18 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
     };
   }, [agentId, initialData]);
 
+  // A bfcache restore (Back from X's authorize page or Stripe) revives React
+  // state, so the redirect-in-flight flags must reset or the CTAs stay disabled.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setConnectingX(false);
+      setBillingLoading(null);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
@@ -322,12 +334,7 @@ export function AutopilotTab({ agentId, initialData }: AutopilotTabProps) {
   return (
     <div className="space-y-6" style={{ position: 'relative' }}>
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24, background: '#1a1a1a',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px',
-          padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px',
-          color: 'var(--text)', zIndex: 200,
-        }}>
+        <div className="engage-toast" role="status">
           {toast}
         </div>
       )}

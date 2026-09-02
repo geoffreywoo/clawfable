@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AgentDetail } from '@/lib/types';
 
 interface SettingsTabProps {
@@ -27,6 +27,16 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // A bfcache restore (Back from X's authorize page) revives React state, so
+  // the OAuth-start flag must reset or the connect button stays disabled.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setConnecting(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
 
   const isConnected = agent.isConnected === 1;
   const soulChanged = soulMd !== agent.soulMd || agentName !== agent.name || agentHandle !== agent.handle;
@@ -68,11 +78,12 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: agentName, handle: agentHandle, soulMd }),
       });
-      if (!res.ok) throw new Error('Failed to save');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Save failed');
       showToast('Agent configuration saved');
       onAgentUpdated?.();
-    } catch {
-      showToast('Save failed');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSavingSoul(false);
     }
@@ -128,21 +139,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
   return (
     <div style={{ maxWidth: '640px', position: 'relative' }} className="space-y-8">
       {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            background: '#1a1a1a',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            padding: '8px 16px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--text)',
-            zIndex: 200,
-          }}
-        >
+        <div className="engage-toast" role="status">
           {toast}
         </div>
       )}
@@ -258,7 +255,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               {isConnected ? (
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="#22c55e" strokeWidth="1.5" /><polyline points="4,8 7,11 12,5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--green)" strokeWidth="1.5" /><polyline points="4,8 7,11 12,5" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               ) : (
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--primary)" strokeWidth="1.5" /><line x1="5" y1="5" x2="11" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /><line x1="11" y1="5" x2="5" y2="11" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" /></svg>
               )}
@@ -268,7 +265,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontSize: '11px',
                   fontWeight: 700,
                   letterSpacing: '0',
-                  color: isConnected ? '#22c55e' : 'var(--primary)',
+                  color: isConnected ? 'var(--green)' : 'var(--primary)',
                 }}
               >
                 {isConnected ? 'X API CONNECTED' : 'X API DISCONNECTED'}
@@ -300,7 +297,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
             style={{
               fontFamily: 'var(--font-mono)',
               fontSize: '11px',
-              color: isConnected ? '#86efac' : 'var(--text-muted)',
+              color: isConnected ? 'var(--green)' : 'var(--text-muted)',
             }}
           >
             {isConnected
@@ -323,7 +320,7 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
                   fontSize: '10px',
                   fontWeight: 700,
                   letterSpacing: '0',
-                  color: '#c4b5fd',
+                  color: 'var(--primary)',
                   marginBottom: '6px',
                 }}
               >
@@ -430,9 +427,9 @@ export function SettingsTab({ agentId, agent, onAgentDeleted, onAgentUpdated }: 
           <button
             className="btn btn-sm"
             style={{
-              background: soulPublic ? '#22c55e' : 'var(--surface-2)',
+              background: soulPublic ? 'var(--green)' : 'var(--surface-2)',
               color: soulPublic ? '#fff' : 'var(--text-muted)',
-              border: `1px solid ${soulPublic ? '#22c55e' : 'var(--border)'}`,
+              border: `1px solid ${soulPublic ? 'var(--green)' : 'var(--border)'}`,
               minWidth: '40px',
             }}
             onClick={async () => {
