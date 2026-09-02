@@ -8,9 +8,9 @@ import {
   getPerformanceHistory,
   getProtocolSettings,
   getRecentMentions,
-  getRecentNegativeFeedback,
   getRemixMemory,
   getRemixPatterns,
+  getSoulVersions,
   getStyleSignals,
   getTweets,
   getVoiceDirectiveRules,
@@ -18,7 +18,8 @@ import {
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './content-style';
 import { buildBanditPolicy } from './bandit';
-import { buildPersonalizationMemory } from './learning-loop';
+import { buildPersonalizationMemory, selectRecentRejectionLines } from './learning-loop';
+import { resolveSoulEvolutionState, type SoulEvolutionState } from './soul-evolution';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
@@ -51,12 +52,21 @@ interface BuildGenerationContextOptions {
   directiveLimit?: number;
 }
 
+/**
+ * Personalization memory plus the soul-evolution state (pending approval
+ * proposal, cooldown). It rides on memory so the learning snapshot receives it
+ * through the existing dashboard path without a new plumbing field.
+ */
+export type GenerationMemory = PersonalizationMemory & {
+  soulEvolution: SoulEvolutionState;
+};
+
 export interface GenerationContext {
   voiceProfile: VoiceProfile;
   learnings: AgentLearnings | null;
   settings: ProtocolSettings;
   style: ContentStyleConfig;
-  memory: PersonalizationMemory;
+  memory: GenerationMemory;
   recentPosts: string[];
   allTweets: Tweet[];
   signals: LearningSignal[];
@@ -162,7 +172,7 @@ export async function buildGenerationContext(
     learnings,
     settings,
     styleSignals,
-    negatives,
+    soulVersions,
     remixMemory,
     remixPatterns,
     directiveRules,
@@ -178,7 +188,7 @@ export async function buildGenerationContext(
     getLearnings(agent.id),
     getProtocolSettings(agent.id),
     getStyleSignals(agent.id),
-    getRecentNegativeFeedback(agent.id, negativeLimit),
+    getSoulVersions(agent.id).catch(() => []),
     getRemixMemory(agent.id).catch(() => []),
     getRemixPatterns(agent.id).catch(() => []),
     getVoiceDirectiveRules(agent.id).catch(() => []),
@@ -187,7 +197,7 @@ export async function buildGenerationContext(
     getFeedback(agent.id),
     getLearningSignals(agent.id, 200),
     getBaseline(agent.id),
-    getGlobalBanditPrior(),
+    getGlobalBanditPrior(agent.id),
     getRecentMentions(agent.id, 100).catch(() => []),
     getFollowerSnapshots(agent.id, 40).catch(() => []),
   ]);
@@ -201,6 +211,9 @@ export async function buildGenerationContext(
     voiceProfile.communicationStyle += `\nStyle analysis: ${styleSignals.rawExtraction}`;
   }
 
+  // Same 21-day / duplicate-only window as memory.rejectedDrafts: a lapsed
+  // rejection must not keep shrinking the idea space through this block.
+  const negatives = selectRecentRejectionLines(feedback, negativeLimit);
   if (negatives.length > 0) {
     voiceProfile.communicationStyle += `\n\n## RECENT OPERATOR REJECTIONS (avoid similar content)\n${negatives.map((item) => `- "${item}"`).join('\n')}`;
   }
@@ -253,20 +266,28 @@ export async function buildGenerationContext(
     baseline,
     globalPrior,
   });
-  const memory = buildPersonalizationMemory({
-    feedback,
-    signals,
-    remixPatterns: remixMemory,
-    directiveRules: activeDirectiveRules,
-    learnings: effectiveLearnings,
-    performanceHistory: normalizedPerformanceHistory,
-    banditPolicy,
-    voiceProfile,
-    allTweets,
-    baselineLikes: baseline?.avgLikes || 0,
-    mentions,
-    followerSnapshots,
+  const soulEvolution = resolveSoulEvolutionState({
+    settings,
+    versions: soulVersions,
+    currentSoulMd: agent.soulMd || '',
   });
+  const memory: GenerationMemory = {
+    ...buildPersonalizationMemory({
+      feedback,
+      signals,
+      remixPatterns: remixMemory,
+      directiveRules: activeDirectiveRules,
+      learnings: effectiveLearnings,
+      performanceHistory: normalizedPerformanceHistory,
+      banditPolicy,
+      voiceProfile,
+      allTweets,
+      baselineLikes: baseline?.avgLikes || 0,
+      mentions,
+      followerSnapshots,
+    }),
+    soulEvolution,
+  };
 
   const memoryPrompt = buildPersonalizationMemoryPrompt(memory);
   if (memoryPrompt) {

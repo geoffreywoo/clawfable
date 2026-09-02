@@ -4,25 +4,130 @@
  * The soul is the agent's identity — it should grow, not stay frozen.
  */
 
-import type { Agent, AgentLearnings } from './types';
+import type { Agent, AgentLearnings, ProtocolSettings, SoulVersion } from './types';
 import {
   getAgent,
+  getFeedback,
   getLearnings,
   getProtocolSettings,
+  getSoulVersions,
   updateProtocolSettings,
   updateAgent,
   pushSoulVersion,
   getVoiceDirectiveRules,
-  getRecentNegativeFeedback,
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
 import { generateText } from './ai';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
+import { selectRecentRejectionLines } from './learning-loop';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_TRACKED_FOR_EVOLUTION = 50;
 const SOUL_EVOLUTION_PROMPT_SOUL_LIMIT = 6000;
+/** Approval mode: no new proposal for a day after the last one, even if it was resolved. */
+export const SOUL_PROPOSAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+/** Approval mode: an unreviewed proposal blocks regeneration for one evolution cycle, then lapses. */
+export const SOUL_PROPOSAL_REVIEW_WINDOW_MS = SEVEN_DAYS_MS;
+const PENDING_PROPOSAL_PREFIX = 'PENDING: ';
+
+export interface PendingSoulProposal {
+  version: number;
+  proposedAt: string;
+  expiresAt: string;
+  changeSummary: string;
+  soulMd: string;
+}
+
+export interface SoulEvolutionState {
+  mode: ProtocolSettings['soulEvolutionMode'];
+  lastEvolvedAt: string | null;
+  lastProposedAt: string | null;
+  pendingProposal: PendingSoulProposal | null;
+  cooldownUntil: string | null;
+  /** Why approval-mode regeneration is currently skipped; null when eligible. */
+  holdReason: string | null;
+}
+
+function parseTime(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Derive approval-mode state from the persisted soul version stack. The
+ * pending proposal is the newest `PENDING:` version (it carries its own
+ * timestamp) as long as it has not been applied to the agent, superseded by a
+ * later version, evolved past, or left unreviewed for a full cycle.
+ */
+export function resolveSoulEvolutionState({
+  settings,
+  versions,
+  currentSoulMd,
+  now = Date.now(),
+}: {
+  settings: Pick<ProtocolSettings, 'soulEvolutionMode' | 'lastEvolvedAt'>;
+  versions: SoulVersion[];
+  currentSoulMd: string;
+  now?: number;
+}): SoulEvolutionState {
+  const ordered = [...versions].sort((a, b) => (parseTime(b.updatedAt) ?? 0) - (parseTime(a.updatedAt) ?? 0) || b.version - a.version);
+  const newest = ordered[0] || null;
+  const proposal = ordered.find((version) => version.reason.startsWith(PENDING_PROPOSAL_PREFIX)) || null;
+  const proposedMs = parseTime(proposal?.updatedAt);
+  const lastEvolvedMs = parseTime(settings.lastEvolvedAt);
+
+  const cooldownUntilMs = proposedMs !== null && proposedMs + SOUL_PROPOSAL_COOLDOWN_MS > now
+    ? proposedMs + SOUL_PROPOSAL_COOLDOWN_MS
+    : null;
+
+  const isPending = Boolean(
+    proposal
+    && proposedMs !== null
+    && newest === proposal
+    && proposal.soulMd.trim() !== currentSoulMd.trim()
+    && (lastEvolvedMs === null || lastEvolvedMs < proposedMs)
+    && now - proposedMs < SOUL_PROPOSAL_REVIEW_WINDOW_MS,
+  );
+
+  const pendingProposal: PendingSoulProposal | null = isPending && proposal && proposedMs !== null
+    ? {
+      version: proposal.version,
+      proposedAt: proposal.updatedAt,
+      expiresAt: new Date(proposedMs + SOUL_PROPOSAL_REVIEW_WINDOW_MS).toISOString(),
+      changeSummary: proposal.reason.slice(PENDING_PROPOSAL_PREFIX.length).trim(),
+      soulMd: proposal.soulMd,
+    }
+    : null;
+
+  let holdReason: string | null = null;
+  if (settings.soulEvolutionMode === 'approval') {
+    if (pendingProposal) {
+      holdReason = `Soul evolution proposal v${pendingProposal.version} (proposed ${pendingProposal.proposedAt}) is awaiting operator review`;
+    } else if (cooldownUntilMs !== null) {
+      const hoursLeft = Math.max(1, Math.ceil((cooldownUntilMs - now) / (60 * 60 * 1000)));
+      holdReason = `Soul evolution proposal cooldown: next proposal in ${hoursLeft}h`;
+    }
+  }
+
+  return {
+    mode: settings.soulEvolutionMode,
+    lastEvolvedAt: settings.lastEvolvedAt || null,
+    lastProposedAt: proposal?.updatedAt || null,
+    pendingProposal,
+    cooldownUntil: cooldownUntilMs !== null ? new Date(cooldownUntilMs).toISOString() : null,
+    holdReason,
+  };
+}
+
+export async function getSoulEvolutionState(agent: Agent): Promise<SoulEvolutionState> {
+  const [settings, versions] = await Promise.all([
+    getProtocolSettings(agent.id),
+    getSoulVersions(agent.id),
+  ]);
+  return resolveSoulEvolutionState({ settings, versions, currentSoulMd: agent.soulMd || '' });
+}
 
 export function formatSoulForEvolutionPrompt(soulMd: string): string {
   const trimmed = soulMd.trim();
@@ -63,6 +168,20 @@ export async function maybeEvolveSoul(agent: Agent): Promise<EvolutionResult> {
     }
   }
 
+  // Approval mode: a proposal that is still awaiting review, or one made
+  // within the last day, must not be regenerated on every cron tick.
+  if (settings.soulEvolutionMode === 'approval') {
+    const versions = await getSoulVersions(agent.id);
+    const state = resolveSoulEvolutionState({ settings, versions, currentSoulMd: agent.soulMd || '' });
+    if (state.holdReason) {
+      return {
+        evolved: false,
+        reason: state.holdReason,
+        changeSummary: state.pendingProposal?.changeSummary,
+      };
+    }
+  }
+
   // Check if we have enough data
   const learnings = await getLearnings(agent.id);
   if (!learnings || learnings.totalTracked < MIN_TRACKED_FOR_EVOLUTION) {
@@ -95,10 +214,11 @@ async function evolveSoul(
     const promptSoul = formatSoulForEvolutionPrompt(currentSoul);
 
     // Gather operator signals that soul evolution should respect
-    const [directiveRules, negFeedback] = await Promise.all([
+    const [directiveRules, feedback] = await Promise.all([
       getVoiceDirectiveRules(agent.id),
-      getRecentNegativeFeedback(agent.id, 5),
+      getFeedback(agent.id),
     ]);
+    const negFeedback = selectRecentRejectionLines(feedback, 5);
     const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
 
     // Build the evolution prompt
@@ -221,8 +341,10 @@ Evolve this SOUL.md to incorporate what actually works. Respect operator directi
 
       return { evolved: true, reason: 'Soul evolved automatically', changeSummary };
     } else {
-      // Approval mode — store the proposed evolution for operator review
-      await pushSoulVersion(agent.id, newSoul, `PENDING: ${changeSummary}`);
+      // Approval mode — store the proposed evolution for operator review.
+      // The version entry is the persisted proposal (timestamped); it is
+      // surfaced through resolveSoulEvolutionState until applied or lapsed.
+      await pushSoulVersion(agent.id, newSoul, `${PENDING_PROPOSAL_PREFIX}${changeSummary}`);
 
       await addPostLogEntry(agent.id, {
         agentId: agent.id,
