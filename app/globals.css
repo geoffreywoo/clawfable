@@ -3573,6 +3573,100 @@ h1, h2, h3, h4 {
   gap: 8px;
 }
 
+.learning-soul-panel {
+  border-color: var(--primary-border);
+  background: linear-gradient(180deg, rgba(74, 139, 103, 0.06), var(--surface));
+}
+
+.learning-soul-diff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.learning-soul-diff-col {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+}
+
+.learning-soul-lines {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.learning-soul-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 8px;
+  border-left: 3px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.learning-soul-line-added {
+  border-left-color: var(--green-border);
+  background: var(--green-dim);
+}
+
+.learning-soul-line-removed {
+  border-left-color: var(--red-border);
+  background: var(--red-dim);
+}
+
+.learning-soul-more {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.learning-soul-full {
+  margin-top: 14px;
+}
+
+.learning-soul-source {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.learning-soul-reason-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+.learning-soul-chip-active {
+  --tone-color: var(--primary);
+  --tone-bg: var(--primary-soft);
+  --tone-border: var(--primary-border);
+  color: var(--primary);
+}
+
+.learning-soul-actions {
+  margin-top: 14px;
+}
+
+.learning-soul-actions .btn {
+  min-height: 44px;
+}
+
 .learning-impact-chip,
 .learning-state-chip,
 .learning-confidence-pill,
@@ -7347,6 +7441,10 @@ h1, h2, h3, h4 {
 
   .growth-loop-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learning-soul-diff {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .souls-section-head,

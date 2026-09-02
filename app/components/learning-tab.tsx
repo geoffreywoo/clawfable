@@ -758,11 +758,165 @@ function TasteCalibrationPanel({
   );
 }
 
+type PendingSoulProposalView = NonNullable<NonNullable<LearningSnapshot['soulEvolution']>['pendingProposal']>;
+
+const SOUL_DISMISS_REASONS = ['not my voice', 'too generic', 'loses something I like', 'not right now'];
+
+function formatLapse(expiresAt: string): string {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 'Lapses today if you do nothing';
+  const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+  if (days <= 1) {
+    const hours = Math.max(1, Math.ceil(ms / (60 * 60 * 1000)));
+    return `Lapses in ${hours}h if you do nothing`;
+  }
+  return `Lapses in ${days}d if you do nothing`;
+}
+
+function SoulLineList({
+  label,
+  lines,
+  total,
+  emptyCopy,
+  variant,
+}: {
+  label: string;
+  lines: string[];
+  total: number;
+  emptyCopy: string;
+  variant: 'added' | 'removed';
+}) {
+  const hidden = total - lines.length;
+  return (
+    <div className="learning-soul-diff-col">
+      <p className="learning-story-kicker">{label}</p>
+      {lines.length === 0 ? (
+        <p className="learning-story-empty">{emptyCopy}</p>
+      ) : (
+        <ul className="learning-soul-lines">
+          {lines.map((line, index) => (
+            <li key={`${variant}-${index}`} className={`learning-soul-line learning-soul-line-${variant}`}>
+              {line}
+            </li>
+          ))}
+        </ul>
+      )}
+      {hidden > 0 && (
+        <p className="learning-soul-more">{`${hidden} more line${hidden === 1 ? '' : 's'} not shown`}</p>
+      )}
+    </div>
+  );
+}
+
+function SoulEvolutionPanel({
+  proposal,
+  pendingDecision,
+  dismissReason,
+  onSelectDismissReason,
+  onDecide,
+}: {
+  proposal: PendingSoulProposalView;
+  pendingDecision: 'approve' | 'dismiss' | null;
+  dismissReason: string | null;
+  onSelectDismissReason: (reason: string | null) => void;
+  onDecide: (decision: 'approve' | 'dismiss', reason?: string) => void;
+}) {
+  const busy = pendingDecision !== null;
+  return (
+    <section className="learning-story-panel learning-soul-panel">
+      <div className="learning-story-head">
+        <div>
+          <p className="learning-story-kicker">Voice profile</p>
+          <h3 className="learning-story-title">Your voice profile wants to change.</h3>
+          <p className="learning-story-item-summary">{proposal.changeSummary}</p>
+        </div>
+        <span className="learning-source-chip">Your call</span>
+      </div>
+
+      <div className="learning-story-item-meta learning-calibration-actions">
+        <span className="learning-source-chip">{`Suggested ${getTimeAgo(proposal.proposedAt)}`}</span>
+        <span className="learning-source-chip">{formatLapse(proposal.expiresAt)}</span>
+        <span className="learning-source-chip">
+          {`${proposal.diff.addedCount} added / ${proposal.diff.removedCount} dropped`}
+        </span>
+      </div>
+
+      <div className="learning-soul-diff">
+        <SoulLineList
+          label="What it adds"
+          lines={proposal.diff.added}
+          total={proposal.diff.addedCount}
+          emptyCopy="Nothing new. This change only trims."
+          variant="added"
+        />
+        <SoulLineList
+          label="What it drops"
+          lines={proposal.diff.removed}
+          total={proposal.diff.removedCount}
+          emptyCopy="Nothing is removed. This change only adds."
+          variant="removed"
+        />
+      </div>
+
+      <details className="learning-advanced learning-soul-full">
+        <summary>Read the full proposed SOUL.md</summary>
+        <div className="learning-advanced-body">
+          <pre className="learning-soul-source">{proposal.soulMd}</pre>
+        </div>
+      </details>
+
+      <div className="learning-story-item-meta learning-calibration-actions">
+        <span className="learning-soul-reason-label">If you keep your current voice, say why so it learns:</span>
+        {SOUL_DISMISS_REASONS.map((reason) => (
+          <button
+            key={reason}
+            type="button"
+            className={`learning-source-chip${dismissReason === reason ? ' learning-soul-chip-active' : ''}`}
+            disabled={busy}
+            aria-pressed={dismissReason === reason}
+            onClick={() => onSelectDismissReason(dismissReason === reason ? null : reason)}
+            style={{ cursor: busy ? 'default' : 'pointer' }}
+          >
+            {reason}
+          </button>
+        ))}
+      </div>
+
+      <div className="learning-calibration-actions learning-soul-actions">
+        <button
+          type="button"
+          className="btn btn-success btn-sm"
+          disabled={busy}
+          onClick={() => onDecide('approve')}
+        >
+          {pendingDecision === 'approve' ? 'Updating your voice...' : 'Use this voice'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-danger btn-sm"
+          disabled={busy}
+          onClick={() => onDecide('dismiss', dismissReason || undefined)}
+        >
+          {pendingDecision === 'dismiss' ? 'Keeping your voice...' : 'Keep my current voice'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function LearningTab({ agentId }: LearningTabProps) {
   const [snapshot, setSnapshot] = useState<LearningSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingExampleId, setPendingExampleId] = useState<string | null>(null);
   const [pendingTasteId, setPendingTasteId] = useState<string | null>(null);
+  const [pendingSoulDecision, setPendingSoulDecision] = useState<'approve' | 'dismiss' | null>(null);
+  const [soulDismissReason, setSoulDismissReason] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 3500);
+  }, []);
 
   const loadSnapshot = useCallback(async () => {
     const res = await fetch(`/api/agents/${agentId}/dashboard?sections=learning`, { cache: 'no-store' });
@@ -849,6 +1003,35 @@ export function LearningTab({ agentId }: LearningTabProps) {
     }
   }, [agentId, loadSnapshot]);
 
+  const decideSoulProposal = useCallback(async (
+    decision: 'approve' | 'dismiss',
+    reason?: string,
+  ) => {
+    setPendingSoulDecision(decision);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/soul-evolution`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reason ? { decision, reason } : { decision }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || 'Could not save that decision');
+      if (data?.status === 'no_pending_proposal') {
+        showToast('That voice change was already settled.');
+      } else if (data?.status === 'applied') {
+        showToast('Voice profile updated. New drafts will use it.');
+      } else {
+        showToast('Kept your current voice. It will try again later.');
+      }
+      setSoulDismissReason(null);
+      await loadSnapshot();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not save that decision');
+    } finally {
+      setPendingSoulDecision(null);
+    }
+  }, [agentId, loadSnapshot, showToast]);
+
   const groupedEvents = useMemo(() => {
     const groups = {
       approvals: [] as LearningEventEntry[],
@@ -904,8 +1087,26 @@ export function LearningTab({ agentId }: LearningTabProps) {
     1,
   );
 
+  const pendingSoulProposal = snapshot.soulEvolution?.pendingProposal ?? null;
+
   return (
     <div className="learning-surface">
+      {toast && (
+        <div className="engage-toast" role="status">
+          {toast}
+        </div>
+      )}
+
+      {pendingSoulProposal && (
+        <SoulEvolutionPanel
+          proposal={pendingSoulProposal}
+          pendingDecision={pendingSoulDecision}
+          dismissReason={soulDismissReason}
+          onSelectDismissReason={setSoulDismissReason}
+          onDecide={decideSoulProposal}
+        />
+      )}
+
       <section className="learning-scoreboard-shell">
         <div className="learning-scoreboard">
           <div className="learning-scoreboard-top">
