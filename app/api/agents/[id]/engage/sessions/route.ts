@@ -10,12 +10,27 @@ import {
   updateEngagementSession,
   updateTweet,
 } from '@/lib/kv-storage';
+import { createOperatorChildDraft, isImmutableGeneratedDraft } from '@/lib/draft-lineage';
+import { readJsonObjectBody } from '@/lib/request-validation';
+import { getTweetCompletenessIssue } from '@/lib/survivability';
 import type {
   EngagementAction,
   EngagementActionType,
   EngagementCandidate,
   EngagementDraft,
 } from '@/lib/types';
+
+class EngageRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'EngageRequestError';
+    this.status = status;
+  }
+}
+
+const SETTLED_ACTION_STATUSES = new Set<EngagementAction['status']>(['running', 'succeeded', 'failed', 'skipped', 'aborted']);
 
 function normalizeCandidate(candidate: Partial<EngagementCandidate> | null | undefined, agentId: string): EngagementCandidate | null {
   if (
@@ -62,12 +77,21 @@ async function normalizeDraft(agentId: string, draft: Partial<EngagementDraft> |
 
   const stored = await getTweet(String(draft.tweetId));
   if (!stored || String(stored.agentId) !== String(agentId)) {
-    throw new Error('Reply draft tweet not found');
+    throw new EngageRequestError('Reply draft tweet not found', 404);
   }
 
   let latest = stored;
-  if (typeof draft.content === 'string' && draft.content.trim() && draft.content !== stored.content) {
-    latest = await updateTweet(stored.id, { content: draft.content.trim() });
+  const nextContent = typeof draft.content === 'string' ? draft.content.trim() : '';
+  if (nextContent && nextContent !== stored.content) {
+    const completenessIssue = getTweetCompletenessIssue(nextContent);
+    if (completenessIssue) {
+      throw new EngageRequestError(completenessIssue, 422);
+    }
+    // V2 reply drafts are immutable: the edit becomes an operator-written
+    // child (with its edit learning signal) and the action points at the child.
+    latest = isImmutableGeneratedDraft(stored)
+      ? await createOperatorChildDraft(stored, nextContent, { status: 'draft', surface: 'engage' })
+      : await updateTweet(stored.id, { content: nextContent });
   }
 
   return buildEngagementDraft(latest);
@@ -81,12 +105,17 @@ async function normalizeAction(
   const type = rawAction.type === 'reply' ? 'reply' : rawAction.type === 'like' ? 'like' : null;
   const candidate = normalizeCandidate(rawAction.candidate, agentId);
   if (!type || !candidate) {
-    throw new Error('Each engagement action needs a valid type and candidate');
+    throw new EngageRequestError('Each engagement action needs a valid type and candidate', 400);
   }
 
   const existing = existingActions.get(String(rawAction.id || actionKey({ type, candidate })))
     || existingActions.get(actionKey({ type, candidate }))
     || null;
+  // An action that already ran keeps its outcome; re-syncing the session
+  // must never put a posted reply back in the companion's queue.
+  if (existing && SETTLED_ACTION_STATUSES.has(existing.status)) {
+    return existing;
+  }
   const draft = type === 'reply'
     ? await normalizeDraft(agentId, rawAction.draft)
     : null;
@@ -115,9 +144,13 @@ export async function POST(
 
   try {
     await requireAgentAccess(id);
-    const body = await request.json();
-    const requestedSessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
-    const rawActions = Array.isArray(body?.actions) ? body.actions : [];
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
+    const requestedSessionId = typeof body.sessionId === 'string' ? body.sessionId : null;
+    const rawActions = Array.isArray(body.actions) ? body.actions : [];
 
     const [activeSession, draftSession, requestedSession] = await Promise.all([
       getActiveEngagementSession(id),
@@ -133,6 +166,13 @@ export async function POST(
     if (activeSession && activeSession.id !== workingSession?.id && activeSession.state !== 'draft') {
       return NextResponse.json({
         error: 'Finish or abort the active Engage session before creating another one',
+      }, { status: 409 });
+    }
+
+    if (workingSession?.state === 'running') {
+      return NextResponse.json({
+        error: 'This Engage session is running. Wait for it to finish or abort it before changing its actions.',
+        code: 'engage_session_running',
       }, { status: 409 });
     }
 
@@ -170,6 +210,9 @@ export async function POST(
 
     return NextResponse.json({ session });
   } catch (err) {
+    if (err instanceof EngageRequestError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     try { return handleAuthError(err); } catch {}
     const message = err instanceof Error ? err.message : 'Failed to save Engage session';
     return NextResponse.json({ error: message }, { status: 500 });

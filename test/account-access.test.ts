@@ -71,3 +71,38 @@ describe('internal shared account access', () => {
     expect(await canAccessAgent(geoffrey, canonicalAgent.id)).toBe(true);
   });
 });
+
+describe('handle equality versus verified X identity', () => {
+  it('does not grant access by handle when the agent is bound to a different X user', async () => {
+    const original = await getOrCreateUser('recycled-owner-111', 'recycledhandle', 'Original Owner');
+    const newcomer = await getOrCreateUser('recycled-newcomer-222', 'recycledhandle', 'Newcomer');
+
+    const agent = await createAgent({
+      handle: 'recycledhandle',
+      name: 'Recycled Handle Agent',
+      soulMd: '# soul',
+      xUserId: original.id,
+      isConnected: 1,
+      setupStep: 'ready',
+    } as any);
+    await addAgentToUser(original.id, agent.id);
+
+    expect(await canAccessAgent(newcomer, agent.id)).toBe(false);
+    expect(await canAccessAgent(original, agent.id)).toBe(true);
+  });
+
+  it('still recovers access by handle when the agent has no verified X user', async () => {
+    const user = await getOrCreateUser('unbound-user-333', 'unboundhandle', 'Unbound User');
+
+    const agent = await createAgent({
+      handle: 'unboundhandle',
+      name: 'Unbound Handle Agent',
+      soulMd: '# soul',
+      xUserId: null,
+      isConnected: 0,
+      setupStep: 'oauth',
+    } as any);
+
+    expect(await canAccessAgent(user, agent.id)).toBe(true);
+  });
+});

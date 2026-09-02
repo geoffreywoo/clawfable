@@ -98,6 +98,14 @@ function buildMomentumTopics(
   baselineLikes: number,
 ): string[] {
   const recentCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  // Momentum must be judged on the same spread-weighted scale as the topic
+  // averages below. The stored baseline is likes-only, so prefer the
+  // account's actual spread-weighted mean from history; fall back to an
+  // uplifted likes baseline when history is thin.
+  const spreadSamples = performanceHistory.slice(0, 60).map(weightedScore);
+  const spreadBaseline = spreadSamples.length >= 5
+    ? spreadSamples.reduce((sum, value) => sum + value, 0) / spreadSamples.length
+    : Math.max(1, baselineLikes) * 1.35;
   const topicStats = new Map<string, { total: number; count: number }>();
 
   for (const entry of performanceHistory) {
@@ -115,7 +123,7 @@ function buildMomentumTopics(
       avg: stats.total / Math.max(stats.count, 1),
       count: stats.count,
     }))
-    .filter((entry) => entry.count >= 2 && entry.avg >= Math.max(1, baselineLikes))
+    .filter((entry) => entry.count >= 2 && entry.avg >= Math.max(1, spreadBaseline))
     .sort((a, b) => b.avg - a.avg || b.count - a.count || a.topic.localeCompare(b.topic))
     .slice(0, 4)
     .map((entry) => entry.topic);
@@ -142,11 +150,18 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   return sortCounts(counts).slice(0, 4);
 }
 
-function summarizeNativeTasteComplaints(signals: LearningSignal[], feedback: FeedbackEntry[]): string[] {
+function summarizeNativeTasteComplaints(
+  signals: LearningSignal[],
+  feedback: FeedbackEntry[],
+  voiceProfile: VoiceProfile,
+): string[] {
   const counts: Record<string, number> = {};
 
+  // Classify the operator's stated reason only; the rejected tweet text is
+  // never evidence of a preference, and account-specific wording is gated on
+  // the voice profile.
   for (const entry of feedback) {
-    const classified = classifyTasteFeedbackReason(entry.intentSummary || entry.reason, entry.tweetText);
+    const classified = classifyTasteFeedbackReason(entry.intentSummary || entry.reason, '', { voiceProfile });
     for (const hint of classified.preferenceHints) {
       counts[hint] = (counts[hint] || 0) + 1;
     }
@@ -154,12 +169,12 @@ function summarizeNativeTasteComplaints(signals: LearningSignal[], feedback: Fee
 
   for (const signal of signals) {
     const reason = signal.reason || '';
-    const classified = classifyTasteFeedbackReason(reason);
+    const classified = classifyTasteFeedbackReason(reason, '', { voiceProfile });
     for (const hint of classified.preferenceHints) {
       counts[hint] = (counts[hint] || 0) + 1;
     }
     for (const hint of readPreferenceHints(signal.metadata)) {
-      if (/native Geoffrey|native content identity|technical depth|Slack\/support|generated-post cadence|interchangeable/i.test(hint)) {
+      if (/native Geoffrey|native voice|native content identity|technical depth|Slack\/support|generated-post cadence|interchangeable/i.test(hint)) {
         counts[hint] = (counts[hint] || 0) + 1;
       }
     }
@@ -373,10 +388,41 @@ export interface BuildPersonalizationMemoryOptions {
   followerSnapshots?: Array<{ capturedAt: string; followersCount: number }>;
 }
 
-function isDuplicateOnlyRejection(entry: FeedbackEntry): boolean {
+export function isDuplicateOnlyRejection(entry: FeedbackEntry): boolean {
   const reason = `${entry.intentSummary || ''} ${entry.reason || ''}`.toLowerCase();
   return /\bduplicate premise\b/.test(reason)
     && /\bkeep (?:the )?(?:sharper |stronger )?(?:original|draft)\b/.test(reason);
+}
+
+/**
+ * Rejections stop shaping the verbatim exclusion corpus after 21 days. Every
+ * prompt block that quotes rejected text must use this same window so the
+ * idea space actually reopens when the window closes.
+ */
+export const REJECTED_DRAFT_EXPIRY_MS = 21 * 24 * 60 * 60 * 1000;
+
+function isActiveRejection(entry: FeedbackEntry, cutoffMs: number): boolean {
+  return entry.rating === 'down'
+    && Boolean(entry.tweetText?.trim())
+    && !isDuplicateOnlyRejection(entry)
+    && Date.parse(entry.generatedAt) >= cutoffMs;
+}
+
+/**
+ * The most recent operator rejections as quotable prompt lines, oldest to
+ * newest, under the same 21-day / duplicate-only rules as
+ * `PersonalizationMemory.rejectedDrafts`.
+ */
+export function selectRecentRejectionLines(feedback: FeedbackEntry[], limit: number, now = Date.now()): string[] {
+  if (limit <= 0) return [];
+  const cutoff = now - REJECTED_DRAFT_EXPIRY_MS;
+  return feedback
+    .filter((entry) => isActiveRejection(entry, cutoff))
+    .slice(-limit)
+    .map((entry) => {
+      const reason = entry.intentSummary?.trim() || entry.reason?.trim();
+      return reason ? `${entry.tweetText.trim()} (why it was rejected: ${reason})` : entry.tweetText.trim();
+    });
 }
 
 export function buildPersonalizationMemory({
@@ -406,15 +452,10 @@ export function buildPersonalizationMemory({
   // grew, so every rejection permanently shrank the addressable idea space.
   // Old rejections keep influencing style via neverDoThisAgain lessons; only
   // the verbatim do-not-resemble corpus is time-bounded.
-  const rejectionCutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
+  const rejectionCutoff = Date.now() - REJECTED_DRAFT_EXPIRY_MS;
   const rejectedDrafts = unique(
     feedback
-      .filter((entry) => (
-        entry.rating === 'down'
-        && entry.tweetText.trim()
-        && !isDuplicateOnlyRejection(entry)
-        && Date.parse(entry.generatedAt) >= rejectionCutoff
-      ))
+      .filter((entry) => isActiveRejection(entry, rejectionCutoff))
       .map((entry) => entry.tweetText.trim())
       .reverse(),
   ).slice(0, 20);
@@ -429,7 +470,7 @@ export function buildPersonalizationMemory({
 
   const operatorHiddenPreferences = unique([
     ...summarizeOperatorPreferences(signals, remixPatterns),
-    ...summarizeNativeTasteComplaints(signals, feedback),
+    ...summarizeNativeTasteComplaints(signals, feedback, voiceProfile),
   ]).slice(0, 7);
   const editTransformations = summarizeEditTransformations(signals);
   const referenceBank = summarizeReferenceBank(performanceHistory);

@@ -1,15 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, createMention, getAgentByHandle, getAgent, updateAgent } from '@/lib/kv-storage';
+import { getOAuthTemp, deleteOAuthTemp, getOrCreateUser, createSession, getUserAgentIds, createAgent, addAgentToUser, addPostLogEntry, createMention, getAgentByHandle, getAgent, getAgentOwnerId, updateAgent } from '@/lib/kv-storage';
 import { getMentionsFromTwitter } from '@/lib/twitter-client';
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { CONTROL_ROOM_PATH } from '@/lib/app-routes';
+import { getAccessibleUserIds } from '@/lib/account-access';
 import { COOKIE_NAME } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { getPresetSoulProfile } from '@/lib/open-source-souls';
 import { resolveRequestOrigin } from '@/lib/request-origin';
 import { getSessionCookieOptions } from '@/lib/session-cookie';
+import type { Agent, User } from '@/lib/types';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
+
+type HandleAgentClaim =
+  | { attachable: true; reason: 'unowned' | 'owned_by_user' }
+  | { attachable: false; reason: 'foreign_owner' | 'foreign_x_user' };
+
+/**
+ * An agent that merely carries the login handle may only receive this user's
+ * tokens when nobody else owns it and it is not bound to a different verified
+ * X account. Otherwise the login gets its own agent instead.
+ */
+async function evaluateHandleAgentClaim(agent: Agent, user: User): Promise<HandleAgentClaim> {
+  const userId = String(user.id);
+  if (agent.xUserId && String(agent.xUserId) !== userId) {
+    return { attachable: false, reason: 'foreign_x_user' };
+  }
+
+  const ownerId = await getAgentOwnerId(String(agent.id));
+  if (!ownerId) {
+    return { attachable: true, reason: 'unowned' };
+  }
+
+  const accessibleUserIds = await getAccessibleUserIds(user);
+  if (accessibleUserIds.includes(String(ownerId))) {
+    return { attachable: true, reason: 'owned_by_user' };
+  }
+
+  return { attachable: false, reason: 'foreign_owner' };
+}
+
+/**
+ * Frees a handle held by someone else's agent so the X account that just
+ * proved ownership of that handle can create its own agent under it.
+ */
+async function releaseForeignHandleAgent(agent: Agent, screenName: string, reason: HandleAgentClaim['reason']): Promise<void> {
+  const releasedHandle = `${screenName}-${agent.id}`;
+  await updateAgent(String(agent.id), { handle: releasedHandle });
+  await addPostLogEntry(String(agent.id), {
+    agentId: String(agent.id),
+    tweetId: '',
+    xTweetId: '',
+    content: '',
+    format: 'x_auth_handle_released',
+    topic: 'auth',
+    postedAt: new Date().toISOString(),
+    source: 'manual',
+    reason: `@${screenName} logged in with X and verified that handle, but this agent belongs to a different account (${reason}). Renamed this agent to @${releasedHandle}; no tokens were attached to it.`,
+  }).catch(() => null);
+}
+
+function isPublicSoul(agent: Pick<Agent, 'soulPublic'>): boolean {
+  return Number(agent.soulPublic ?? 1) === 1;
+}
 
 async function seedMentions(agentId: string, consumerKey: string, consumerSecret: string, accessToken: string, accessSecret: string, userId: string): Promise<void> {
   try {
@@ -93,7 +147,7 @@ export async function GET(request: NextRequest) {
     );
 
     // Create or get user
-    await getOrCreateUser(userId, screenName, screenName);
+    const user = await getOrCreateUser(userId, screenName, screenName);
 
     // Create session
     const sessionToken = await createSession(userId);
@@ -117,12 +171,19 @@ export async function GET(request: NextRequest) {
 
     const handleAgent = await getAgentByHandle(screenName);
     if (handleAgent) {
-      await addAgentToUser(userId, handleAgent.id);
-      await connectLoginAgent(handleAgent.id, screenName, userId, accessToken, accessSecret);
-      redirectPath = `/agent/${handleAgent.id}?oauth=success&username=${screenName}`;
-      const response = NextResponse.redirect(new URL(redirectPath, origin));
-      response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
-      return response;
+      const claim = await evaluateHandleAgentClaim(handleAgent, user);
+      if (claim.attachable) {
+        await addAgentToUser(userId, handleAgent.id);
+        await connectLoginAgent(handleAgent.id, screenName, userId, accessToken, accessSecret);
+        redirectPath = `/agent/${handleAgent.id}?oauth=success&username=${screenName}`;
+        const response = NextResponse.redirect(new URL(redirectPath, origin));
+        response.cookies.set(COOKIE_NAME, sessionToken, getSessionCookieOptions(origin, { maxAge: THIRTY_DAYS }));
+        return response;
+      }
+
+      if (existingAgents.length === 0) {
+        await releaseForeignHandleAgent(handleAgent, screenName, claim.reason);
+      }
     }
 
     if (existingAgents.length === 0) {
@@ -135,7 +196,7 @@ export async function GET(request: NextRequest) {
       let setupStep: 'soul' | 'analyze' = 'soul';
       if (temp.forkHandle) {
         const sourceAgent = await getAgentByHandle(temp.forkHandle);
-        if (sourceAgent && sourceAgent.soulMd && sourceAgent.soulMd.length > 50) {
+        if (sourceAgent && isPublicSoul(sourceAgent) && sourceAgent.soulMd && sourceAgent.soulMd.length > 50) {
           soulMd = sourceAgent.soulMd;
           soulSummary = sourceAgent.soulSummary;
           setupStep = 'analyze'; // skip voice definition, go straight to analysis

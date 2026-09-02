@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSoulMd } from '@/lib/soul-parser';
+import { DEFAULT_TONE, parseSoulMd } from '@/lib/soul-parser';
 
 describe('parseSoulMd', () => {
   describe('tone detection', () => {
@@ -74,9 +74,19 @@ Do not become a generic AI commentator. Broad AI posts underperform when they la
       expect(profile.summary).toContain('Do not become a generic AI commentator');
     });
 
-    it('defaults to contrarian when no tone signals', () => {
+    it('falls back to the neutral default tone when no tone signals', () => {
       const profile = parseSoulMd('EmptyBot', '# SOUL.md\nJust some text.');
-      expect(profile.tone).toBe('contrarian');
+      expect(profile.tone).toBe(DEFAULT_TONE);
+      expect(profile.tone).not.toBe('contrarian');
+    });
+
+    it('does not read a casual register as a provocateur stance', () => {
+      const soul = `# SOUL.md
+## Communication Style
+Casual, plain-spoken notes from a strength coach. Keep it friendly.`;
+      const profile = parseSoulMd('CoachBot', soul);
+      expect(profile.tone).not.toBe('provocateur');
+      expect(profile.tone).toBe(DEFAULT_TONE);
     });
   });
 
@@ -96,6 +106,47 @@ I cover AI, crypto, and startup news.`;
 Primary objective: analyze blockchain infrastructure and decentralized protocols.`;
       const profile = parseSoulMd('ObjBot', soul);
       expect(profile.topics.length).toBeGreaterThan(0);
+    });
+
+    it('does not infer ai from words that merely contain the substring', () => {
+      const soul = `# SOUL.md
+## Communication Style
+Write plainly. Explain the why behind every training block and maintain a calm cadence.
+
+## Objective
+Help lifters train consistently.`;
+      const profile = parseSoulMd('CoachBot', soul);
+      expect(profile.topics).not.toContain('ai');
+      expect(profile.summary).not.toContain('ai,');
+      expect(profile.summary).not.toContain('technology and AI');
+    });
+
+    it('never mines the anti-goals section as the objective agenda', () => {
+      const soul = `# SOUL.md
+## Communication Style
+Write plainly and explain the why.
+
+## Anti-goals
+- Never sell supplements.
+- Avoid shaming people.`;
+      const profile = parseSoulMd('CoachBot', soul);
+      expect(profile.topics).not.toContain('supplements');
+      expect(profile.topics).not.toContain('avoid');
+      expect(profile.topics).not.toContain('shaming');
+      expect(profile.summary).not.toContain('You focus on');
+      expect(profile.antiGoals).toEqual(['Never sell supplements.', 'Avoid shaming people.']);
+    });
+
+    it('still reads a real goals heading that precedes the anti-goals', () => {
+      const soul = `# SOUL.md
+## Goals
+Document powerlifting programming decisions.
+
+## Anti-goals
+- Never sell supplements.`;
+      const profile = parseSoulMd('CoachBot', soul);
+      expect(profile.topics).toContain('powerlifting');
+      expect(profile.topics).not.toContain('supplements');
     });
 
     it('caps topics at 8', () => {
@@ -205,7 +256,7 @@ Do not optimize for: engagement bait`;
 
     it('handles empty SOUL.md gracefully', () => {
       const profile = parseSoulMd('EmptyBot', '');
-      expect(profile.tone).toBe('contrarian');
+      expect(profile.tone).toBe(DEFAULT_TONE);
       expect(profile.topics).toEqual([]);
       expect(profile.antiGoals).toEqual([]);
       expect(profile.communicationStyle).toBe('direct and concise');

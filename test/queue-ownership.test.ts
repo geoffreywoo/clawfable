@@ -46,6 +46,39 @@ import { DELETE, PATCH } from '@/app/api/agents/[id]/queue/[tweetId]/route';
 import { ANTIFUND_PORTFOLIO_COMPANIES, buildAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
 
 describe('queue ownership route guard', () => {
+  it('answers 400 for a malformed JSON body instead of a parser 500', async () => {
+    const agent = await createAgent({
+      handle: 'queue-malformed-json',
+      name: 'Queue Malformed',
+      soulMd: '# soul',
+    } as any);
+    const queuedTweet = await createTweet({
+      agentId: agent.id,
+      content: 'A complete queued draft with a concrete claim.',
+      type: 'original',
+      status: 'queued',
+      topic: 'AI',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const response = await PATCH(
+      new Request('http://localhost/api/queue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      }) as any,
+      { params: Promise.resolve({ id: agent.id, tweetId: queuedTweet.id }) },
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe('Invalid JSON body');
+    expect((await getTweet(queuedTweet.id))?.status).toBe('queued');
+  });
+
   it('preserves canonical portfolio provenance when an operator edits a qualified sports-adjacent draft', async () => {
     const agent = await createAgent({
       handle: 'portfolio-edit-qualified',

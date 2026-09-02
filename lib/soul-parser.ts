@@ -12,6 +12,32 @@ export interface VoiceProfile {
 }
 
 /**
+ * Neutral fallback when the SOUL carries no recognizable tone signal. It must
+ * not be one of the scored stances (contrarian, provocateur, ...) because the
+ * default used to bias every signal-less account toward a contrarian posture.
+ */
+export const DEFAULT_TONE = 'direct';
+
+const OBJECTIVE_STOPWORDS = new Set([
+  'that', 'this', 'with', 'from', 'into', 'have', 'will', 'their', 'these', 'those', 'which', 'where',
+  'about', 'would', 'could', 'should', 'being', 'other', 'every', 'under', 'never', 'primary', 'spread',
+  'value', 'improve', 'state', 'default', 'without', 'because', 'always', 'people', 'things', 'while',
+  'through', 'before', 'after', 'there', 'often', 'something', 'anything', 'everything', 'really',
+]);
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function topicKeywordPattern(keyword: string): RegExp {
+  return new RegExp(`\\b${escapeRegExp(keyword)}s?\\b`, 'i');
+}
+
+function isNegativeHeading(key: string): boolean {
+  return /anti|avoid|never|not\b/.test(key);
+}
+
+/**
  * Parse a SOUL.md document and return a structured voice profile.
  */
 export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
@@ -21,6 +47,7 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   const sections: Record<string, string> = {};
   let currentSection = '';
   let currentContent: string[] = [];
+  let preambleKey = '';
 
   for (const line of lines) {
     const heading = line.match(/^#{1,3}\s+(.+)/);
@@ -29,6 +56,7 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
         sections[currentSection.toLowerCase()] = currentContent.join('\n').trim();
       }
       currentSection = heading[1].trim();
+      if (!preambleKey) preambleKey = currentSection.toLowerCase();
       currentContent = [];
     } else {
       currentContent.push(line);
@@ -43,10 +71,13 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   );
   const identitySection = sectionContaining('identity');
   const commsSection = sectionContaining('communication', 'protocol', 'style', 'voice');
+  // The body under the document title ("# SOUL.md ...") usually carries the
+  // one-line identity statement, so it counts as identity evidence for tone.
+  const preambleSection = preambleKey ? sections[preambleKey] || '' : '';
 
   // ─── Determine tone ───────────────────────────────────────────────────────
   const allText = soulMd.toLowerCase();
-  const toneText = `${identitySection}\n${commsSection}`.trim().toLowerCase() || allText;
+  const toneText = `${preambleSection}\n${identitySection}\n${commsSection}`.trim().toLowerCase() || allText;
 
   const toneScores: Record<string, number> = {
     contrarian: 0,
@@ -78,7 +109,6 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   if (toneText.includes('provocat')) toneScores.provocateur += 5;
   if (toneText.includes('controversial')) toneScores.provocateur += 4;
   if (toneText.includes('hot take')) toneScores.provocateur += 4;
-  if (toneText.includes('casual')) toneScores.provocateur += 3;
   if (toneText.includes('high-context')) toneScores.provocateur += 2;
 
   if (toneText.includes('educat')) toneScores.educator += 5;
@@ -90,7 +120,7 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   if (toneText.includes('signal density')) toneScores.contrarian += 2;
   if (toneText.includes('no filler')) toneScores.contrarian += 2;
 
-  let tone = 'contrarian';
+  let tone = DEFAULT_TONE;
   let maxScore = 0;
   for (const [t, score] of Object.entries(toneScores)) {
     if (score > maxScore) {
@@ -108,14 +138,18 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
     'machine learning', 'crypto', 'funding', 'regulation', 'policy', 'google',
     'jobs', 'productivity', 'economics', 'engineering', 'llm',
   ];
+  // Whole-word matching only: a substring test made 'ai' a topic for any SOUL
+  // that merely contained "train", "explain", or "maintain".
   for (const kw of topicKeywords) {
-    if (allText.includes(kw)) {
+    if (topicKeywordPattern(kw).test(allText)) {
       topics.push(kw);
     }
   }
 
+  // Objective/goal headings feed the topic agenda; anti-goal and avoid
+  // headings are boundaries, never subjects to write about.
   const objectiveSection = Object.entries(sections).find(([k]) =>
-    k.includes('objective') || k.includes('goal')
+    (k.includes('objective') || k.includes('goal')) && !isNegativeHeading(k)
   )?.[1] || '';
   if (objectiveSection) {
     const words = objectiveSection.split(/\s+/);
@@ -123,7 +157,7 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
       const cleaned = word.replace(/[^a-z]/gi, '').toLowerCase();
       if (
         cleaned.length > 4 &&
-        !['that', 'this', 'with', 'from', 'into', 'have', 'will', 'their', 'these', 'those', 'which', 'where', 'about', 'would', 'could', 'should', 'being', 'other', 'every', 'under', 'never', 'primary', 'spread', 'value', 'improve', 'state', 'default'].includes(cleaned)
+        !OBJECTIVE_STOPWORDS.has(cleaned)
       ) {
         if (!topics.includes(cleaned)) topics.push(cleaned);
         if (topics.length >= 10) break;
@@ -182,7 +216,9 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
   }
 
   // ─── Build summary ────────────────────────────────────────────────────────
-  const topicStr = topics.slice(0, 3).join(', ') || 'technology and AI';
+  // No invented focus: a SOUL with no detectable topics gets no topic clause
+  // rather than a default "technology and AI" agenda.
+  const topicClause = topics.length > 0 ? `You focus on ${topics.slice(0, 3).join(', ')}. ` : '';
   const antiSummary = antiGoals.length > 0
     ? antiGoals[0].split(/[.!?]/)[0].slice(0, 120)
     : 'Avoid optimizing for optics over outcomes';
@@ -191,7 +227,7 @@ export function parseSoulMd(agentName: string, soulMd: string): VoiceProfile {
     : `Your communication style is ${communicationStyle}`;
 
   const summary =
-    `You are ${agentName}. Your voice is ${tone}. You focus on ${topicStr}. ` +
+    `You are ${agentName}. Your voice is ${tone}. ${topicClause}` +
     `${communicationSummary}. ${antiSummary}.`;
 
   return {

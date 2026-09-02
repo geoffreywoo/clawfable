@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   addLearningSignal,
   addSemanticBlock,
-  createTweet,
   deleteTweet,
   getIdeaCandidates,
   getTweet,
@@ -14,10 +13,11 @@ import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
 import { buildGenerationLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
-import { validateQueueDeleteRequest, validateQueueUpdateRequest } from '@/lib/request-validation';
+import { readJsonObjectBody, validateQueueDeleteRequest, validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
 import { assessTasteRisk } from '@/lib/virality-signals';
 import { classifyTasteFeedbackReason } from '@/lib/account-taste';
+import { parseSoulMd } from '@/lib/soul-parser';
 import {
   buildSemanticBlockFromQueueFeedback,
   feedbackStage,
@@ -28,6 +28,7 @@ import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
 import { resolveAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
+import { createOperatorChildDraft, isImmutableGeneratedDraft } from '@/lib/draft-lineage';
 
 // PATCH /api/agents/[id]/queue/[tweetId]
 export async function PATCH(
@@ -42,15 +43,18 @@ export async function PATCH(
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
     }
 
-    const body = await request.json();
-    const parsed = validateQueueUpdateRequest(body);
+    const body = await readJsonObjectBody(request);
+    if (!body.ok || !body.value) {
+      return NextResponse.json({ error: body.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const parsed = validateQueueUpdateRequest(body.value);
     if (!parsed.ok || !parsed.value) {
       return NextResponse.json({ error: parsed.error || 'Invalid queue update' }, { status: 400 });
     }
     const { content, status, scheduledAt, deletionReason } = parsed.value;
     const immutableV2Edit = content !== undefined
       && content !== tweet.content
-      && tweet.pipelineVersion === 'v2';
+      && isImmutableGeneratedDraft(tweet);
     const updates: Record<string, unknown> = {};
     if (content !== undefined) updates.content = content;
     if (status !== undefined) {
@@ -137,50 +141,11 @@ export async function PATCH(
           return NextResponse.json({ error: publishingPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
         }
       }
-      const child = await createTweet({
-        agentId: id,
-        content,
-        type: tweet.type,
+      const child = await createOperatorChildDraft(tweet, content, {
         status: childStatus,
-        format: tweet.format,
-        topic: tweet.topic,
-        rationale: 'Operator-authored immutable child of a V2 draft.',
-        contentProvenance: 'operator_written',
-        generationSurface: tweet.generationSurface,
-        parentTweetId: tweet.id,
-        parentIdeaId: tweet.ideaId,
-        parentDraftCandidateId: tweet.draftCandidateId,
-        portfolioCompanyContext,
-        quoteTweetId: tweet.quoteTweetId,
-        quoteTweetAuthor: tweet.quoteTweetAuthor,
-        followupForTweetId: tweet.followupForTweetId,
-        replyConversationId: tweet.replyConversationId,
-        xTweetId: null,
         scheduledAt: scheduledAt ?? tweet.scheduledAt,
+        portfolioCompanyContext,
       });
-      await updateTweet(tweet.id, {
-        status: 'quarantined',
-        preQuarantineStatus: tweet.status === 'quarantined' ? tweet.preQuarantineStatus : tweet.status,
-        quarantinedAt: new Date().toISOString(),
-        quarantineReason: `Superseded by operator-written child ${child.id}.`,
-      });
-      const editSummary = summarizeEditDelta(tweet.content, content);
-      await addLearningSignal(id, {
-        tweetId: child.id,
-        signalType: childStatus === 'queued' ? 'edited_before_queue' : 'edited_before_post',
-        surface: tweet.type === 'reply' ? 'mentions' : 'queue',
-        rewardDelta: editSummary.rewardDelta,
-        reason: editSummary.summary,
-        metadata: metadataWithStyleMode(tweet, {
-          ...buildGenerationLearningMetadata(tweet),
-          ...editSummary.metadata,
-          parentTweetId: tweet.id,
-          parentIdeaId: tweet.ideaId || null,
-          parentDraftCandidateId: tweet.draftCandidateId || null,
-          operatorProvenance: true,
-        }),
-      });
-      await recordV2CandidateOutcomeForTweet(tweet, 'edited', ['operator_immutable_child'], { updateIdea: false });
       return NextResponse.json({ ...child, immutableParentId: tweet.id });
     }
 
@@ -270,7 +235,7 @@ export async function PATCH(
     if (deletionReason !== undefined && tweet.status === 'deleted_from_x') {
       const trimmedReason = typeof deletionReason === 'string' ? deletionReason.trim() : '';
       if (trimmedReason && trimmedReason !== 'skipped') {
-        const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content);
+        const tasteFeedback = classifyTasteFeedbackReason(trimmedReason, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
         const reasonCode = inferQueueFeedbackReasonCode(trimmedReason);
         const stage = feedbackStage(reasonCode);
         const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
@@ -328,7 +293,7 @@ export async function PATCH(
           soulMd: agent.soulMd,
           tweetText: tweet.content,
         });
-        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content);
+        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
         await saveFeedback(id, {
           tweetId: tweet.id,
           tweetText: tweet.content,
@@ -401,7 +366,7 @@ export async function DELETE(
     const reasonCode = parsed.value.reasonCode || inferQueueFeedbackReasonCode(intentSummary);
     const stage = feedbackStage(reasonCode);
     const userProvidedFeedback = Boolean(userReason || parsed.value.reasonCode);
-    const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content);
+    const tasteFeedback = classifyTasteFeedbackReason(intentSummary, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
     const idea = tweet.pipelineVersion === 'v2' && tweet.ideaId
       ? (await getIdeaCandidates(id, 500)).find((candidate) => candidate.id === tweet.ideaId) || null
       : null;

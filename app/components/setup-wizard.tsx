@@ -143,6 +143,16 @@ export function SetupWizard({
     setName('');
   }, [open, resumeAgentId, initialStep]);
 
+  // A bfcache restore (Back from X's authorize page) revives React state, so
+  // the OAuth-start flag must reset or the connect CTA stays disabled.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setLoading(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   useEffect(() => {
     if (!previewTweets.length) {
       if (regeneratingId) setRegeneratingId(null);
@@ -382,6 +392,7 @@ export function SetupWizard({
       body: JSON.stringify({
         action: 'feedback',
         feedback: {
+          tweetId,
           tweetText: tweet.content,
           rating,
           generatedAt: new Date().toISOString(),

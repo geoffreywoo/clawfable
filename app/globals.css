@@ -20,6 +20,9 @@
   --red: #d65c5c;
   --red-dim: rgba(214, 92, 92, 0.12);
   --red-border: rgba(214, 92, 92, 0.25);
+  --warning: #c78528;
+  --warning-dim: rgba(199, 133, 40, 0.12);
+  --warning-border: rgba(199, 133, 40, 0.24);
   --blue: #4f84c4;
   --blue-dim: rgba(79, 132, 196, 0.12);
   --blue-border: rgba(79, 132, 196, 0.24);
@@ -975,7 +978,9 @@ h1, h2, h3, h4 {
   }
 
   .site-header-cta {
-    display: none;
+    height: 40px;
+    padding: 0 12px;
+    font-size: 12px;
   }
 
   .pricing-compare-row {
@@ -1227,7 +1232,7 @@ h1, h2, h3, h4 {
 
 .btn-danger:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
+  color: var(--red);
 }
 
 .btn-success {
@@ -1714,6 +1719,7 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
 }
@@ -1743,6 +1749,7 @@ h1, h2, h3, h4 {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   background: var(--bg);
 }
 
@@ -2031,7 +2038,7 @@ h1, h2, h3, h4 {
 }
 
 .metric-delta.up { color: var(--green); }
-.metric-delta.down { color: #f87171; }
+.metric-delta.down { color: var(--red); }
 
 /* ─── Voice tuning cockpit ─────────────────────────────────────────────────── */
 .tuning-cockpit {
@@ -2926,7 +2933,7 @@ h1, h2, h3, h4 {
 }
 
 .experiment-card-explore {
-  --tone-color: #f59e0b;
+  --tone-color: var(--warning);
   --tone-bg: rgba(245, 158, 11, 0.08);
   --tone-border: rgba(245, 158, 11, 0.24);
 }
@@ -3961,7 +3968,7 @@ h1, h2, h3, h4 {
 }
 
 .perf-tweet-best .perf-tweet-stat { color: #22c55e; }
-.perf-tweet-worst .perf-tweet-stat { color: #f87171; }
+.perf-tweet-worst .perf-tweet-stat { color: var(--red); }
 
 /* ─── Health alerts ──────────────────────────────────────────────────────────── */
 .health-alert {
@@ -3974,15 +3981,15 @@ h1, h2, h3, h4 {
 }
 
 .health-alert.error {
-  background: rgba(239, 68, 68, 0.08);
-  color: #f87171;
-  border-bottom-color: rgba(239, 68, 68, 0.2);
+  background: var(--red-dim);
+  color: var(--red);
+  border-bottom-color: var(--red-border);
 }
 
 .health-alert.warning {
-  background: rgba(245, 158, 11, 0.08);
-  color: #f59e0b;
-  border-bottom-color: rgba(245, 158, 11, 0.2);
+  background: var(--warning-dim);
+  color: var(--warning);
+  border-bottom-color: var(--warning-border);
 }
 
 .health-alert-content {
@@ -4052,7 +4059,7 @@ h1, h2, h3, h4 {
   font-family: var(--font-mono);
   font-size: 20px;
   font-weight: 600;
-  color: #f59e0b;
+  color: var(--warning);
   display: block;
 }
 
@@ -4508,6 +4515,7 @@ h1, h2, h3, h4 {
 
 .wizard-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 20px;
   justify-content: flex-end;
@@ -4658,7 +4666,7 @@ h1, h2, h3, h4 {
 }
 
 .status-label.setup {
-  color: #f59e0b;
+  color: var(--warning);
 }
 
 /* ─── Protocol Tab ─────────────────────────────────────────────────────────── */
@@ -5340,9 +5348,22 @@ h1, h2, h3, h4 {
     width: 100vw !important;
     max-width: 100vw !important;
     height: 100dvh;
+    padding: 16px;
     border-radius: 0 !important;
     max-height: 100dvh;
     overflow-y: auto;
+  }
+
+  /* Action rows stack inside the full-screen modal so Cancel is never
+     clipped on the unscrollable start side. Primary action stays on top. */
+  .wizard-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .wizard-actions .btn {
+    width: 100%;
+    justify-content: center;
   }
 
   .tweet-preview-scroll {
@@ -5526,8 +5547,24 @@ h1, h2, h3, h4 {
   h3 { font-size: 14px; }
 
   /* Touch targets: minimum 44px */
-  .btn, .tab-btn, .tweet-action, .wizard-tag-selectable {
+  .btn, .tab-btn, .tweet-action, .wizard-tag-selectable,
+  .workflow-view-btn, .insights-view-btn, .queue-feedback-reason, .back-btn {
     min-height: 44px;
+  }
+
+  .health-alert-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin: -8px;
+  }
+
+  /* 16px form controls stop iOS focus-zoom now that the viewport allows user
+     scaling; !important is needed to beat the compact inline sizes on selects. */
+  .input, .textarea, .engage-input, .engage-textarea, select.input {
+    font-size: 16px !important;
   }
 }
 
@@ -7339,6 +7376,20 @@ h1, h2, h3, h4 {
     display: none;
   }
 
+  .site-header-text p {
+    display: none;
+  }
+
+  .site-header-cta {
+    min-height: 44px;
+  }
+
+  .engage-toast {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+
   .landing-panel,
   .landing-proof-card,
   .landing-command,
@@ -7453,6 +7504,7 @@ h1, h2, h3, h4 {
 @media (max-width: 768px) {
   .dashboard-content {
     padding: 16px 12px 32px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   }
 
   .dashboard-context-card {

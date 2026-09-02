@@ -103,6 +103,8 @@ function isConnectionStatusLog(entry: PostLogEntry): boolean {
     'x_auth_denied',
     'x_auth_duplicate',
     'x_auth_callback_error',
+    'x_auth_handle_released',
+    'x_auth_session_mismatch',
   ].includes(entry.format) || /agent disconnected|connection preserved/i.test(entry.reason || '');
 }
 

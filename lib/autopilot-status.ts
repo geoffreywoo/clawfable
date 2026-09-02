@@ -1,5 +1,5 @@
 import type { ProtocolSettings } from './types';
-import { clampPostsPerDay, POST_INTERVAL_JITTER_FRACTION } from './survivability';
+import { effectivePostsPerDay, POST_INTERVAL_JITTER_FRACTION } from './survivability';
 
 export type AutopilotScheduleState =
   | 'paused'
@@ -127,7 +127,7 @@ export function getAutopilotScheduleStatus(
     };
   }
 
-  const safePostsPerDay = clampPostsPerDay(settings.postsPerDay);
+  const safePostsPerDay = effectivePostsPerDay(settings.postsPerDay);
   const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
   const nominalIntervalMs = Math.round(baseIntervalMs * cadence.cooldownMultiplier);
   const earliestIntervalMs = Math.round(nominalIntervalMs * (1 - POST_INTERVAL_JITTER_FRACTION));

@@ -30,7 +30,7 @@ import {
   getIdeaCandidates,
   getPostLog,
 } from './kv-storage';
-import { clampPostsPerDay, getAutopostPolicyIssue } from './survivability';
+import { clampPostsPerDay, getAutopostPolicyIssue, effectivePostsPerDay as capAutomatedPostsPerDay } from './survivability';
 import { loadGenerationV2Metrics } from './generation-v2-metrics';
 import {
   buildFailedStoryAttemptDiagnosticsV2,
@@ -556,7 +556,7 @@ export function buildGenerationAuditFindings(input: AuditFindingInput): Generati
       scope: 'live_state',
       title: 'The active queue is over the company-led content ceiling',
       evidence: input.contentMix || {},
-      action: 'Quarantine excess company-led drafts and refill with standalone ideas before the next autonomous post.',
+      action: 'Excess company-led drafts are deferred until the mix window clears; refill with standalone ideas before the next autonomous post.',
     });
   }
   if ((input.contentMix?.nextBriefCompanyLedCount || 0) > GEOFFREY_MAX_COMPANY_LED_IN_WINDOW) {
@@ -1376,7 +1376,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     priced: hasAiModelPricing(target.model),
   }));
   const configuredPostsPerDay = clampPostsPerDay(context.settings.postsPerDay);
-  const effectivePostsPerDay = Math.min(5, configuredPostsPerDay);
+  const effectivePostsPerDay = capAutomatedPostsPerDay(configuredPostsPerDay);
   const normalizedHandle = agent.handle.replace(/^@/, '').toLowerCase();
   const isGeoffrey = ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle);
   const activeQueueForContentMix = queue.filter((tweet) => (

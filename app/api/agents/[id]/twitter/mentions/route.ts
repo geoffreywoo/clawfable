@@ -106,6 +106,7 @@ export async function GET(
         inReplyToTweetId: m.inReplyToTweetId || null,
         engagementLikes: 0,
         engagementRetweets: 0,
+        authorFollowers: m.authorFollowers ?? null,
         createdAt: m.createdAt,
       });
       added++;

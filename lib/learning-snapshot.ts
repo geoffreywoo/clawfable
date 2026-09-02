@@ -16,6 +16,8 @@ import { buildTasteCalibrationQueue, type TasteCalibrationSnapshot } from './tas
 import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
 import { getShitpoastSlotCount, SHITPOAST_STYLE_MODE } from './style-mode';
 import { getTrendingTopicStableId } from './trending';
+import { weightedSpreadEngagement } from './performance-signals';
+import type { SoulEvolutionState } from './soul-evolution';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
 type LearningItemTone = 'positive' | 'neutral' | 'warning' | 'danger';
@@ -88,9 +90,17 @@ export interface LearningScoreboard {
   cards: LearningScoreboardCard[];
 }
 
+/**
+ * How a lane's posterior reaches generation. Only format and hook arms drive
+ * behavior today (quality-passing drafts on under-tested arms get the
+ * experimentHoldout flag); every other family is observed from outcomes only.
+ */
+export type LearningLaneSteering = 'holdout_flag' | 'observed_only';
+
 export interface LearningExperimentLane {
   id: 'formats' | 'topics' | 'lengths' | 'hooks' | 'tones' | 'specificity' | 'structure';
   title: string;
+  steering: LearningLaneSteering;
   belief: string;
   hypothesis: string;
   nextCheck: string;
@@ -257,6 +267,7 @@ export interface LearningSnapshot {
   decisionInsights: Record<string, LearningDecisionInsight>;
   planner: LearningPlannerPreview;
   tasteCalibration: TasteCalibrationSnapshot;
+  soulEvolution: SoulEvolutionState | null;
 }
 
 interface WindowMetrics {
@@ -303,8 +314,27 @@ function median(values: number[]): number {
     : sorted[middle];
 }
 
-function weightedEngagement(entry: Pick<TweetPerformance, 'likes' | 'retweets' | 'replies'>): number {
-  return entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
+// Lift is measured on the spread-weighted scale (weightedSpreadEngagement) and
+// the baseline must live on that same scale: derive it from history with the
+// identical function when enough rows exist, otherwise uplift the likes/RT
+// baseline by the same conservative factor outcome-rewards uses. A likes+2RT
+// baseline made a post exactly at the account average read as positive lift.
+const SPREAD_SCALE_UPLIFT = 1.35;
+
+function performanceKey(entry: TweetPerformance): string {
+  return entry.xTweetId || entry.tweetId || `${entry.postedAt}|${entry.content}`;
+}
+
+function resolveSpreadBaseline(
+  history: TweetPerformance[],
+  baseline: { avgLikes: number; avgRetweets: number } | null | undefined,
+  window: TweetPerformance[],
+): number | null {
+  const windowKeys = new Set(window.map(performanceKey));
+  const sample = history.filter((entry) => !windowKeys.has(performanceKey(entry))).slice(0, 40);
+  if (sample.length >= 5) return Math.max(1, average(sample.map(weightedSpreadEngagement)));
+  if (!baseline) return null;
+  return Math.max(1, (baseline.avgLikes + (baseline.avgRetweets * 3)) * SPREAD_SCALE_UPLIFT);
 }
 
 function readNumber(value: unknown): number | null {
@@ -591,6 +621,8 @@ function sortCaution(arms: BanditArmScore[]): BanditArmScore[] {
   );
 }
 
+const HOLDOUT_STEERED_LANES = new Set<LearningExperimentLane['id']>(['formats', 'hooks']);
+
 function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLane[] {
   if (!policy) return [];
 
@@ -608,13 +640,21 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
     const exploit = sortExploit(arms)[0] || null;
     const explore = sortExplore(arms)[0] || null;
     const caution = sortCaution(arms.filter((arm) => arm.pulls >= 2))[0] || null;
-    const underTest = sortExplore(arms).filter((arm) => arm.coldStart || arm.pulls < 3).slice(0, 3);
+    // Same under-tested rule as isUnderTestedBanditArm (cold start or fewer
+    // than 3 local pulls), so the lane describes the holdouts that really run.
+    const underTest = sortExplore(arms).filter((arm) => arm.coldStart || arm.localPulls < 3).slice(0, 3);
+    const steering: LearningLaneSteering = HOLDOUT_STEERED_LANES.has(id) ? 'holdout_flag' : 'observed_only';
+    const lane = title.toLowerCase();
     const belief = exploit
       ? `${title} winner: ${sentenceCaseArm(exploit.arm)} is the strongest bet right now.`
       : `${title} does not have a clear winner yet.`;
-    const hypothesis = explore
-      ? `The system is testing whether ${sentenceCaseArm(explore.arm)} can beat ${sentenceCaseArm(exploit?.arm || 'the current default')}.`
-      : `The system is still looking for a meaningful challenger in ${title.toLowerCase()}.`;
+    const hypothesis = steering === 'holdout_flag'
+      ? underTest.length > 0
+        ? `Quality-passing drafts that land on under-tested ${lane} (${underTest.map((arm) => sentenceCaseArm(arm.arm)).join(', ')}) are flagged as experiment holdouts, about 1 in 3, so the reward path shields them from negative lift while evidence accrues. Gates never loosen for them.`
+        : `No ${lane} arm is under-tested right now, so no experiment holdouts are being flagged in this lane.`
+      : explore
+        ? `${sentenceCaseArm(explore.arm)} is the least-tested ${lane} arm, but this lane is observed from outcomes only: the chooser does not steer drafts toward it, so read this as a posterior, not a running test.`
+        : `${title} is observed from outcomes only; nothing is being steered here.`;
     const nextCheck = underTest.length > 0
       ? `A policy change needs more evidence on ${underTest.map((arm) => sentenceCaseArm(arm.arm)).join(', ')}.`
       : caution
@@ -634,6 +674,7 @@ function buildExperimentLanes(policy: BanditPolicy | null): LearningExperimentLa
     return {
       id,
       title,
+      steering,
       belief,
       hypothesis,
       nextCheck,
@@ -874,13 +915,14 @@ function buildOutcomeEventEntries(episodes: OutcomeEpisode[], allTweets: Tweet[]
 }
 
 function computeLift(
+  performanceWindow: TweetPerformance[],
+  baseline: { avgLikes: number; avgRetweets: number } | null | undefined,
   performanceHistory: TweetPerformance[],
-  baseline?: { avgLikes: number; avgRetweets: number } | null,
 ): number | null {
-  if (!baseline) return null;
-  const baselineScore = Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2));
-  if (performanceHistory.length === 0) return null;
-  const avgScore = average(performanceHistory.map(weightedEngagement));
+  if (performanceWindow.length === 0) return null;
+  const baselineScore = resolveSpreadBaseline(performanceHistory, baseline, performanceWindow);
+  if (baselineScore === null) return null;
+  const avgScore = average(performanceWindow.map(weightedSpreadEngagement));
   return Math.round(((avgScore - baselineScore) / baselineScore) * 100);
 }
 
@@ -983,16 +1025,16 @@ function buildWindowMetrics({
   const performanceWindow = performanceHistory.filter((entry) =>
     inWindow(entry.postedAt, startMs, endMs) && (entry.source === 'autopilot' || Boolean(entry.tweetId))
   );
-  const lift = computeLift(performanceWindow, baseline) ?? 0;
+  const lift = computeLift(performanceWindow, baseline, performanceHistory) ?? 0;
   const queueQuality = computeQueueQualityScore(liveWindowTweets, settings, approvalRate);
   const keptLiveRate = postCount > 0 ? Math.round(((postCount - deleteFromXSignals.length) / postCount) * 100) : 0;
   const learningVelocity = filteredSignals.length;
   const outcomeWindow = outcomeEpisodes.filter((episode) => inWindow(episode.observedAt, startMs, endMs));
   const calibration = computeCalibrationScore(outcomeWindow, tweetById);
-  const baselineScore = baseline ? Math.max(1, baseline.avgLikes + (baseline.avgRetweets * 2)) : null;
+  const baselineScore = resolveSpreadBaseline(performanceHistory, baseline, performanceWindow);
   const outperformedBaseline = baselineScore === null
     ? 0
-    : performanceWindow.filter((entry) => weightedEngagement(entry) > baselineScore).length;
+    : performanceWindow.filter((entry) => weightedSpreadEngagement(entry) > baselineScore).length;
 
   return {
     label,
@@ -1610,7 +1652,7 @@ function buildDecisionInsights(
 export interface BuildLearningSnapshotOptions {
   settings: ProtocolSettings;
   learnings: AgentLearnings | null;
-  memory: PersonalizationMemory;
+  memory: PersonalizationMemory & { soulEvolution?: SoulEvolutionState | null };
   banditPolicy: BanditPolicy | null;
   signals: LearningSignal[];
   feedback: FeedbackEntry[];
@@ -1796,6 +1838,7 @@ export function buildLearningSnapshot({
       engagementLiftPercent: computeLift(
         performanceHistory.filter((entry) => new Date(entry.postedAt).getTime() >= nowMs - (14 * 24 * 60 * 60 * 1000)),
         baseline,
+        performanceHistory,
       ),
       averageConfidencePercent,
       autonomyMode: settings.autonomyMode,
@@ -1864,5 +1907,6 @@ export function buildLearningSnapshot({
     decisionInsights,
     planner,
     tasteCalibration: buildTasteCalibrationQueue(allTweets),
+    soulEvolution: memory.soulEvolution ?? null,
   };
 }
