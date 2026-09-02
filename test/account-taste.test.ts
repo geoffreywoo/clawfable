@@ -471,6 +471,22 @@ describe('account taste scoring', () => {
     );
   });
 
+  it('stores rubric-shaped forecast feedback without rejecting the AI topic', () => {
+    const feedback = classifyTasteFeedbackReason(
+      'AI slop: this horizon-first forecast reads like a rubric-shaped forecast worksheet.',
+      '',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+
+    expect(feedback.metadata).toMatchObject({
+      aiSlopComplaint: true,
+      forecastChecklistComplaint: true,
+      tasteComplaint: true,
+    });
+    expect(feedback.preferenceHints.join(' ')).toContain('keep the public thought singular');
+    expect(feedback.preferenceHints.join(' ')).not.toMatch(/avoid AI|reject AI/i);
+  });
+
   it('stores over-specialization feedback as a broadening instruction', () => {
     const feedback = classifyTasteFeedbackReason(
       'the candidates are too technical and too specialized. broaden the topics and stop making everything manufacturing heavy.',
@@ -584,7 +600,7 @@ describe('account taste scoring', () => {
     }
   });
 
-  it('keeps the current AI baseline and 6-12 month lead in every Geoffrey writing contract', () => {
+  it('keeps the current AI baseline and a non-formulaic 6-12 month lead in every Geoffrey writing contract', () => {
     for (const contract of [
       buildGeoffreyNativeGenerationBrief(),
       buildGeoffreyNativeV2WriterContract(),
@@ -594,7 +610,7 @@ describe('account taste scoring', () => {
       expect(contract).toMatch(/OpenAI.*trillion-dollar scale/i);
       expect(contract).toMatch(/frontier engineers.*coding agents/i);
       expect(contract).toMatch(/robots.*factor(?:y|ies).*warehouse/i);
-      expect(contract).toMatch(/threshold/i);
+      expect(contract).toMatch(/(?:literal timeline is optional|not a requirement to print|does not require a printed timeline)/i);
     }
   });
 
