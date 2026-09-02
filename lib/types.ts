@@ -242,6 +242,12 @@ export interface CandidateJudgeBreakdown {
   sourceCopyRisk?: number;
   qualityMargin?: number;
   viralityUpside?: number;
+  /**
+   * Bounded [-1, 1] read of this account's own measured outcomes on the
+   * draft's format/hook/tone/structure arms. Zero when no arm carries enough
+   * performance-backed evidence, so untested arms are never demoted.
+   */
+  learnedArmPrior?: number;
 }
 
 export interface CandidateCriticScores {

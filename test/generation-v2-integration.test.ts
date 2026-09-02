@@ -800,6 +800,117 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('carries measured account outcomes into the persisted selection score', async () => {
+    const evenScores = (options: any) => {
+      const candidates = JSON.parse(options.prompt).candidates;
+      return result(JSON.stringify({
+        ranking: candidates.map((candidate: any) => candidate.id),
+        scores: candidates.map((candidate: any) => ({
+          id: candidate.id,
+          overall: 0.88,
+          voiceFit: 0.9,
+          operatorPlausibility: 0.9,
+          frontierLead: 0.95,
+          aiBullishness: 0.95,
+          trajectoryConviction: 0.95,
+          forecastGrounding: 0.95,
+          exponentialIntuition: 0.95,
+          cringeRisk: 0.05,
+          insight: 0.87,
+          specificity: 0.86,
+          factualSafety: 0.98,
+          clarity: 0.9,
+          novelty: 0.88,
+          manualAnchorReskinRisk: 0.05,
+        })),
+      }));
+    };
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+      if (options.task === 'copy_judgment') return evenScores(options);
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    // Approval-only evidence (localPulls without outcomePulls) must leave the
+    // prior neutral, so an arm the account has never measured is not demoted.
+    const unmeasuredArm = (name: string, family: string) => ({
+      arm: name,
+      family,
+      pulls: 8,
+      localPulls: 8,
+      outcomePulls: 0,
+      globalPulls: 0,
+      priorPulls: 0,
+      successes: 1,
+      failures: 6,
+      meanReward: 0.2,
+      globalMeanReward: 0.5,
+      explorationBonus: 0,
+      uncertainty: 0.1,
+      alpha: 2,
+      beta: 7,
+      ucbScore: 0.3,
+      thompsonScore: 0.3,
+      coldStart: false,
+      source: 'local_evidence',
+      localShare: 1,
+    });
+
+    await generateTweetBatchV2({
+      ...input,
+      style: {
+        ...input.style,
+        banditPolicy: {
+          formatArms: [unmeasuredArm('hot_take', 'format')],
+          hookArms: [unmeasuredArm('contrarian', 'hook')],
+          toneArms: [],
+          structureArms: [],
+        },
+      },
+    } as any);
+
+    const persisted = mocks.upsertDraftCandidates.mock.calls
+      .flatMap((call) => call[1])
+      .filter((draft: any) => draft.judgeBreakdown && typeof draft.judgeBreakdown.qualityMargin === 'number');
+
+    expect(persisted.length).toBeGreaterThan(0);
+    // The term is computed and persisted on the real path, and approval-only
+    // evidence keeps it at exactly zero.
+    expect(persisted.every((draft: any) => draft.judgeBreakdown.learnedArmPrior === 0)).toBe(true);
+
+    // Now credit the arms these drafts actually landed on with measured wins.
+    const measured = persisted[0];
+    const provenArm = (name: string, family: string) => ({
+      ...unmeasuredArm(name, family),
+      outcomePulls: 9,
+      meanReward: 0.85,
+      successes: 7,
+      failures: 1,
+    });
+    mocks.upsertDraftCandidates.mockClear();
+
+    await generateTweetBatchV2({
+      ...input,
+      style: {
+        ...input.style,
+        banditPolicy: {
+          formatArms: [provenArm(measured.format, 'format')],
+          hookArms: measured.featureTags?.hook ? [provenArm(measured.featureTags.hook, 'hook')] : [],
+          toneArms: measured.featureTags?.tone ? [provenArm(measured.featureTags.tone, 'tone')] : [],
+          structureArms: measured.featureTags?.structure ? [provenArm(measured.featureTags.structure, 'structure')] : [],
+        },
+      },
+    } as any);
+
+    const afterEvidence = mocks.upsertDraftCandidates.mock.calls
+      .flatMap((call) => call[1])
+      .filter((draft: any) => draft.judgeBreakdown && typeof draft.judgeBreakdown.learnedArmPrior === 'number');
+
+    expect(afterEvidence.some((draft: any) => draft.judgeBreakdown.learnedArmPrior > 0)).toBe(true);
+  });
+
   it('selects quality margin over a critic ranking that puts threshold-hugging copy first', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);

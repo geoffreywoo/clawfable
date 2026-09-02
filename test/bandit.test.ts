@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBanditGlobalPrior, buildBanditPolicy, buildBanditSlotPlan, summarizeBanditExploitLessons } from '@/lib/bandit';
+import { buildBanditGlobalPrior, buildBanditPolicy, buildBanditSlotPlan, scoreLearnedArmPrior, summarizeBanditExploitLessons } from '@/lib/bandit';
 import type { FeedbackEntry, LearningSignal, LearningSignalType, Tweet, TweetPerformance } from '@/lib/types';
 
 function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: string; family: import('@/lib/bandit').BanditArmScore['family'] }): import('@/lib/bandit').BanditArmScore {
@@ -760,5 +760,81 @@ describe('bandit policy', () => {
     expect(plans.some((plan) => plan.mode === 'explore')).toBe(true);
     expect(plans.some((plan) => plan.topic === 'Markets')).toBe(true);
     expect(new Set(plans.map((plan) => `${plan.format}::${plan.topic}::${plan.length}`)).size).toBe(plans.length);
+  });
+});
+
+describe('scoreLearnedArmPrior', () => {
+  const tags = { format: 'hot_take', hook: 'contrarian', tone: 'analytical', structure: 'single_punch' };
+
+  it('stays neutral when the account has no policy at all', () => {
+    expect(scoreLearnedArmPrior(null, tags)).toEqual({ prior: 0, evidenceArms: 0, families: [] });
+  });
+
+  it('never demotes an arm the account has not measured yet', () => {
+    // localPulls without outcomePulls is approval evidence, not measured
+    // performance: exploration must cost a draft nothing.
+    const policy = {
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.2, localPulls: 8, outcomePulls: 0 })],
+      hookArms: [arm({ arm: 'contrarian', family: 'hook', meanReward: 0.15, localPulls: 6, outcomePulls: 2 })],
+      toneArms: [],
+      structureArms: [],
+    } as any;
+
+    const scored = scoreLearnedArmPrior(policy, tags);
+
+    expect(scored.prior).toBe(0);
+    expect(scored.evidenceArms).toBe(0);
+  });
+
+  it('reads measured over- and under-performance in opposite directions', () => {
+    const winning = scoreLearnedArmPrior({
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.8, localPulls: 8, outcomePulls: 8 })],
+      hookArms: [],
+      toneArms: [],
+      structureArms: [],
+    } as any, tags);
+    const losing = scoreLearnedArmPrior({
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.2, localPulls: 8, outcomePulls: 8 })],
+      hookArms: [],
+      toneArms: [],
+      structureArms: [],
+    } as any, tags);
+
+    expect(winning.prior).toBeGreaterThan(0);
+    expect(losing.prior).toBeLessThan(0);
+    expect(winning.prior).toBeCloseTo(-losing.prior, 5);
+    expect(winning.evidenceArms).toBe(1);
+    expect(winning.families).toEqual(['format']);
+  });
+
+  it('lets thin evidence move ordering less than a long measured record', () => {
+    const thin = scoreLearnedArmPrior({
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.9, localPulls: 3, outcomePulls: 3 })],
+      hookArms: [],
+      toneArms: [],
+      structureArms: [],
+    } as any, tags);
+    const deep = scoreLearnedArmPrior({
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.9, localPulls: 12, outcomePulls: 12 })],
+      hookArms: [],
+      toneArms: [],
+      structureArms: [],
+    } as any, tags);
+
+    expect(deep.prior).toBeGreaterThan(thin.prior);
+    expect(deep.prior).toBeLessThanOrEqual(1);
+  });
+
+  it('averages across every family that carries measured evidence', () => {
+    const scored = scoreLearnedArmPrior({
+      formatArms: [arm({ arm: 'hot_take', family: 'format', meanReward: 0.9, localPulls: 9, outcomePulls: 9 })],
+      hookArms: [arm({ arm: 'contrarian', family: 'hook', meanReward: 0.1, localPulls: 9, outcomePulls: 9 })],
+      toneArms: [],
+      structureArms: [],
+    } as any, tags);
+
+    expect(scored.evidenceArms).toBe(2);
+    expect(scored.families).toEqual(['format', 'hook']);
+    expect(scored.prior).toBeCloseTo(0, 5);
   });
 });

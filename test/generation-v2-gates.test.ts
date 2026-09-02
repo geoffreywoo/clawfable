@@ -7,6 +7,7 @@ import {
   isOperatorPremiseReskinV2,
   selectQuestionBudgetDemotionsV2,
   usesGeoffreyRegisterFloorsV2,
+  V2_LEARNED_PRIOR_SELECTION_WEIGHT,
   V2_VIRALITY_SELECTION_WEIGHT,
   type GenerationBriefV2,
 } from '@/lib/generation-v2';
@@ -291,5 +292,40 @@ describe('generation-v2 gate and prompt fixes', () => {
     expect(otherLanePrompt.responseContract.variantMoves[0].instruction).toContain('Do not add the consequence in this slot');
     expect(otherLanePrompt.responseContract.variantMoves[1].instruction).toContain('Stop at the direct reaction');
     expect(otherLanePrompt.responseContract.diversityContract).toContain('Slot 1 is the bare spoken verdict');
+  });
+});
+
+describe('learned outcome prior in the shared selection key', () => {
+  it('breaks a quality tie toward the arms this account has actually measured', () => {
+    // Same margin and upside; only the measured-outcome prior differs, so the
+    // draft on the account's proven arms must outrank the one on arms that
+    // measured badly, and the untested draft must sit between them.
+    const selected = [
+      { content: 'Is the queue the bottleneck?', judgeBreakdown: { qualityMargin: 0.9, viralityUpside: 0.4, learnedArmPrior: -0.8 } },
+      { content: 'Is the model the bottleneck?', judgeBreakdown: { qualityMargin: 0.9, viralityUpside: 0.4, learnedArmPrior: 0 } },
+      { content: 'Is the reviewer the bottleneck?', judgeBreakdown: { qualityMargin: 0.9, viralityUpside: 0.4, learnedArmPrior: 0.8 } },
+    ] as any;
+
+    // With one question allowed, the two weaker-priored drafts are demoted and
+    // the proven one survives.
+    expect(selectQuestionBudgetDemotionsV2(selected, 1)).toEqual([0, 1]);
+    // With two allowed, only the arm that measured badly is demoted.
+    expect(selectQuestionBudgetDemotionsV2(selected, 2)).toEqual([0]);
+  });
+
+  it('keeps the learned prior a tie-breaker rather than a gate override', () => {
+    // A full-strength negative prior must not outweigh a clear quality gap.
+    const clearQualityGap = 0.2;
+    expect(clearQualityGap).toBeGreaterThan(1 * V2_LEARNED_PRIOR_SELECTION_WEIGHT);
+    const selected = [
+      { content: 'Is the queue the bottleneck?', judgeBreakdown: { qualityMargin: 0.9, viralityUpside: 0, learnedArmPrior: -1 } },
+      { content: 'Is the model the bottleneck?', judgeBreakdown: { qualityMargin: 0.7, viralityUpside: 0, learnedArmPrior: 1 } },
+    ] as any;
+    expect(selectQuestionBudgetDemotionsV2(selected, 1)).toEqual([1]);
+  });
+
+  it('weights measured history in the same small band as the viral-upside bonus', () => {
+    expect(V2_LEARNED_PRIOR_SELECTION_WEIGHT).toBeGreaterThan(0);
+    expect(V2_LEARNED_PRIOR_SELECTION_WEIGHT).toBeLessThanOrEqual(V2_VIRALITY_SELECTION_WEIGHT);
   });
 });
