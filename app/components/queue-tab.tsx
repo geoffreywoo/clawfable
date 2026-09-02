@@ -197,29 +197,35 @@ export function QueueTab({ agentId }: QueueTabProps) {
   const handleSave = async () => {
     if (!editingId) return;
     try {
-      await fetch(`/api/agents/${agentId}/queue/${editingId}`, {
+      const res = await fetch(`/api/agents/${agentId}/queue/${editingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContent }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Save failed');
       setEditingId(null);
       showToast('Tweet updated');
       void refreshQueueState();
-    } catch {
-      showToast('Save failed');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Save failed');
     }
   };
 
   const handleMarkPosted = async (id: string) => {
     try {
-      await fetch(`/api/agents/${agentId}/queue/${id}`, {
+      const res = await fetch(`/api/agents/${agentId}/queue/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'posted' }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to mark as posted');
       showToast('Marked as posted');
       void refreshQueueState();
-    } catch {}
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to mark as posted');
+    }
   };
 
   const handleDelete = async (skipReason = false) => {
@@ -292,10 +298,15 @@ export function QueueTab({ agentId }: QueueTabProps) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      // Update in local state
-      setQueue((prev) => prev.map((t) => t.id === tweet.id ? { ...t, content: data.content } : t));
+      if (!res.ok) throw new Error(data.error || 'Remix failed');
+      // The remix child is the new queued item; the parent is quarantined
+      // server-side, so the card swaps to the child instead of mutating the
+      // parent's text. A refetch aligns the rest of the feed.
+      if (data.supersededParent && data.tweet) {
+        setQueue((prev) => prev.map((t) => (t.id === tweet.id ? (data.tweet as Tweet) : t)));
+      }
       showToast(`Remixed: ${direction || 'custom'}`);
+      void refreshQueueState();
       setRemixOpenId(null);
       setCustomPrompt('');
     } catch (err) {
@@ -384,21 +395,7 @@ export function QueueTab({ agentId }: QueueTabProps) {
   return (
     <div className="space-y-4" style={{ position: 'relative' }}>
       {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            background: '#1a1a1a',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px',
-            padding: '8px 16px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--text)',
-            zIndex: 200,
-          }}
-        >
+        <div className="engage-toast" role="status">
           {toast}
         </div>
       )}

@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   autoAdjustSettings: vi.fn(),
   maybeReanalyze: vi.fn(),
   refreshAgentTopicIntelligence: vi.fn(),
+  refreshAutopilotHealth: vi.fn(),
+  runAutopilotWatchdog: vi.fn(),
 }));
 
 vi.mock('@/lib/account-access', () => ({
@@ -91,6 +93,11 @@ vi.mock('@/lib/performance', () => ({
 
 vi.mock('@/lib/topic-intelligence-refresh', () => ({
   refreshAgentTopicIntelligence: mocks.refreshAgentTopicIntelligence,
+}));
+
+vi.mock('@/lib/autopilot-health', () => ({
+  refreshAutopilotHealth: mocks.refreshAutopilotHealth,
+  runAutopilotWatchdog: mocks.runAutopilotWatchdog,
 }));
 
 import { CRON_AUTOPILOT_LOCK_TTL_SECONDS, GET, maxDuration } from '@/app/api/cron/post/route';
@@ -170,6 +177,8 @@ describe('cron autopilot isolation', () => {
     mocks.invalidateAgentConnection.mockResolvedValue(undefined);
     mocks.setAutopilotHealth.mockResolvedValue({});
     mocks.getLatestTwitterTweetIdCursor.mockReturnValue(null);
+    mocks.refreshAutopilotHealth.mockResolvedValue(null);
+    mocks.runAutopilotWatchdog.mockResolvedValue(null);
     mocks.refreshAgentTopicIntelligence.mockResolvedValue({
       topics: [],
       attempted: false,
@@ -246,6 +255,40 @@ describe('cron autopilot isolation', () => {
       autopilotProcessed: 1,
       results: [expect.objectContaining({ agentId: 'agent-1', action: 'error' })],
     }));
+  });
+
+  it('isolates one agent failing before its lock so the rest of the tick still runs', async () => {
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = 'agent-1,agent-2';
+    const disconnected = {
+      isConnected: 0,
+      apiKey: null,
+      apiSecret: null,
+      accessToken: null,
+      accessSecret: null,
+      xUserId: null,
+    };
+    mocks.getAgents.mockResolvedValue([
+      { id: 'agent-1', handle: 'first', name: 'First', ...disconnected },
+      { id: 'agent-2', handle: 'second', name: 'Second', ...disconnected },
+    ]);
+    mocks.getProtocolSettings.mockRejectedValueOnce(new Error('settings hash corrupted'));
+    mocks.runAutopilot.mockResolvedValue({ agentId: 'agent-2', action: 'skipped', reason: 'nothing to post' });
+
+    const response = await GET(cronRequest() as any);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.runAutopilot).toHaveBeenCalledTimes(1);
+    expect(mocks.runAutopilot.mock.calls[0][0]).toMatchObject({ id: 'agent-2' });
+    expect(data.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: 'agent-1', action: 'error', reason: expect.stringContaining('settings hash corrupted') }),
+      expect.objectContaining({ agentId: 'agent-2', action: 'skipped' }),
+    ]));
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({ format: 'cron_agent_error', action: 'error', source: 'cron' }),
+    );
+    expect(mocks.addCronLogEntry).toHaveBeenCalledWith(expect.objectContaining({ autopilotProcessed: 2 }));
   });
 
   it('logs performance tracking failures instead of swallowing them', async () => {

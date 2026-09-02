@@ -15,14 +15,37 @@ import { isLeadingXMention } from './entity-mentions';
 
 export const POST_INTERVAL_JITTER_FRACTION = 0.15;
 
+function hashSeed(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index++) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** Deterministic unit-interval sample for a seed (mulberry32 over an FNV-1a hash). */
+function seededUnit(seed: string): number {
+  let t = hashSeed(seed) + 0x6d2b79f5;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
 /**
  * Given a base interval in ms, returns a jittered interval ±15%.
  * Posts at perfectly regular intervals are the #1 bot detection signal.
+ *
+ * Pass the scheduling anchor (for example the last posted-at timestamp) as
+ * `seed` so every cron tick evaluating the same slot samples the same
+ * interval. Re-rolling per tick lets the first low draw win, which collapses
+ * the spread to a few minutes and pushes the realized rate above postsPerDay.
  */
-export function jitterInterval(baseMs: number): number {
+export function jitterInterval(baseMs: number, seed?: string | null): number {
   const min = baseMs * (1 - POST_INTERVAL_JITTER_FRACTION);
   const max = baseMs * (1 + POST_INTERVAL_JITTER_FRACTION);
-  return Math.round(min + Math.random() * (max - min));
+  const unit = seed ? seededUnit(seed) : Math.random();
+  return Math.round(min + unit * (max - min));
 }
 
 // ─── Daily hard cap ─────────────────────────────────────────────────────────
@@ -32,6 +55,18 @@ export const DAILY_HARD_CAP = 12;
 
 /** Absolute max postsPerDay the user can configure. */
 export const MAX_POSTS_PER_DAY_SETTING = 12;
+
+/**
+ * Autopilot never schedules more than this many automated originals per day,
+ * whatever the setting says. Status, health, and the posting tick must all
+ * derive cadence from the same clamp so the UI never promises a window the
+ * tick will not honor.
+ */
+export const MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY = 5;
+
+export function effectivePostsPerDay(requested: number): number {
+  return Math.min(MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY, clampPostsPerDay(requested));
+}
 
 /** Longform-aware hard cap for a single X post or reply. */
 export const X_POST_TEXT_LIMIT = 4000;
@@ -402,15 +437,16 @@ export function getGeneratedTweetIssue(
 // ─── Queue selection with diversity ─────────────────────────────────────────
 
 /**
- * Pick the best tweet from the queue, preferring diversity over FIFO order.
- * Falls back to oldest tweet if no diverse option exists.
+ * Pick the best tweet from the queue, preferring diversity over rank order.
+ * The caller passes the queue best-first; with no recent history there is
+ * nothing to diversify against, so the top-ranked draft wins.
  */
 export function pickDiverseTweet(
   queue: Tweet[],
   recentPosts: Array<{ format: string; topic: string; content: string }>
 ): Tweet | null {
   if (queue.length === 0) return null;
-  if (recentPosts.length === 0) return queue[queue.length - 1]; // oldest first
+  if (recentPosts.length === 0) return queue[0];
 
   const recentContent = recentPosts.map((p) => p.content);
 
@@ -431,7 +467,7 @@ export function pickDiverseTweet(
     const dupCheck = isNearDuplicate(tweet.content, recentContent, 0.6);
     if (!dupCheck.isDuplicate) score += 3;
 
-    // Slight preference for older tweets (FIFO tiebreaker)
+    // Slight preference for higher-ranked tweets (rank-order tiebreaker)
     const index = queue.indexOf(tweet);
     score += (queue.length - index) * 0.01;
 

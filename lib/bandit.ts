@@ -3,6 +3,7 @@ import type {
   ContentSourceLane,
   FeedbackEntry,
   LearningSignal,
+  LearningSignalType,
   OutcomeEpisode,
   Tweet,
   TweetPerformance,
@@ -42,6 +43,8 @@ export interface BanditArmScore {
   family: BanditArmFamily;
   pulls: number;
   localPulls: number;
+  /** Weighted pulls backed by measured X performance (final-stage episodes or performance rows); approvals and thumbs never count here. Optional only so hand-built arms elsewhere stay valid; buildArmScores always sets it. */
+  outcomePulls?: number;
   globalPulls: number;
   priorPulls: number;
   successes: number;
@@ -108,6 +111,10 @@ interface BanditObservation {
   arm: string;
   reward: number;
   weight: number;
+  /** One evidence event (episode, performance row, feedback entry) fans out to up to seven family observations; this id groups them. */
+  eventId: string;
+  /** True when the reward is derived from measured X performance rather than operator approval/thumbs alone. */
+  outcomeBacked: boolean;
 }
 
 interface BuildBanditPolicyOptions {
@@ -133,6 +140,25 @@ const DEFAULT_MEAN_REWARD = 0.52;
 const DEFAULT_PRIOR_PULLS = 2;
 const GLOBAL_PRIOR_CAP = 16;
 const BANDIT_HALF_LIFE_DAYS = 21;
+// Final-stage (performance-backed) episode rewards blend the immediate and
+// delayed components instead of consuming the clamped additive total. With
+// the total, approval (0.85) + posting (0.32) saturates the immediate term at
+// 1.0 and a -0.6 lift flop still mapped to ~0.6, so approved posts could never
+// register as bandit failures. delayedTotal is scaled by the lift ceiling.
+const FINAL_STAGE_IMMEDIATE_WEIGHT = 0.2;
+const FINAL_STAGE_DELAYED_WEIGHT = 0.8;
+const DELAYED_REWARD_SCALE = 0.8;
+const BANDIT_FAILURE_REWARD = 0.35;
+const EXPLOIT_LESSON_MIN_OUTCOME_PULLS = 3;
+const EXPLOIT_LESSON_MIN_MEAN_REWARD = 0.55;
+// A feedback entry is skipped when the same tweet's episode already carries
+// the signal that recorded the same click, so one operator decision is
+// observed once (episode wins). Entries for hard-deleted tweets, or whose
+// episode lacks a matching signal, are still observed.
+const FEEDBACK_COVERING_SIGNALS: Record<FeedbackEntry['rating'], LearningSignalType[]> = {
+  down: ['deleted_from_x', 'deleted_from_queue', 'taste_less_like_this'],
+  up: ['taste_more_like_this', 'approved_without_edit'],
+};
 const ALL_HOOKS: TweetHookType[] = ['question', 'bold_claim', 'data_point', 'story', 'observation', 'contrarian', 'listicle', 'callout', 'prediction', 'confession', 'how_to'];
 const ALL_TONES: TweetToneType[] = ['sarcastic', 'earnest', 'analytical', 'provocative', 'educational', 'casual', 'urgent', 'playful'];
 const ALL_SPECIFICITY: TweetSpecificityType[] = ['abstract', 'concrete', 'data_driven', 'tactical', 'story_led'];
@@ -209,10 +235,36 @@ function performanceReward(
   return clamp((lift + 1) / 2, 0.05, 0.98);
 }
 
-function buildFamilyObservation(family: BanditArmFamily, arm: string | null | undefined, reward: number, weight: number): BanditObservation | null {
+function buildFamilyObservation(
+  family: BanditArmFamily,
+  arm: string | null | undefined,
+  reward: number,
+  weight: number,
+  event: { eventId: string; outcomeBacked: boolean },
+): BanditObservation | null {
   const normalized = arm?.trim();
   if (!normalized || normalized === 'unknown') return null;
-  return { family, arm: normalized, reward, weight };
+  return { family, arm: normalized, reward, weight, eventId: event.eventId, outcomeBacked: event.outcomeBacked };
+}
+
+/**
+ * Maps an outcome episode onto the bandit's [0.02, 0.98] reward scale.
+ * Immediate-stage episodes (no performance yet) keep the additive total.
+ * Final-stage episodes let the measured outcome dominate so flops on approved
+ * posts fall at or below the failure threshold and strong lifts land near the
+ * top. An explicit operator rejection (live deletion, "less like this") caps
+ * the reward: it is the terminal verdict on the post, and the approval that
+ * preceded it must not outvote it now that the paired feedback entry is no
+ * longer observed separately.
+ */
+export function episodeBanditReward(episode: Pick<OutcomeEpisode, 'stage' | 'reward'>): number {
+  const { reward, stage } = episode;
+  const base = stage === 'final'
+    ? (FINAL_STAGE_IMMEDIATE_WEIGHT * reward.immediateTotal)
+      + (FINAL_STAGE_DELAYED_WEIGHT * clamp(reward.delayedTotal / DELAYED_REWARD_SCALE, -1, 1))
+    : reward.total;
+  const capped = reward.deletionPenalty < 0 ? Math.min(base, reward.deletionPenalty) : base;
+  return clamp((clamp(capped, -1, 1) + 1) / 2, 0.02, 0.98);
 }
 
 function collectEpisodeObservations(
@@ -229,7 +281,7 @@ function collectEpisodeObservations(
     const tweet = tweetById.get(String(episode.tweetId));
     const historicalEntry = performanceByTweetId.get(String(episode.tweetId))
       || (episode.xTweetId ? performanceByXId.get(String(episode.xTweetId)) : null);
-    const reward = clamp((episode.reward.total + 1) / 2, 0.02, 0.98);
+    const reward = episodeBanditReward(episode);
     // Applied symmetrically to wins and losses: discounting only wins made
     // pattern-flagged styles unlearnable even when they kept outperforming.
     const qualityEvidenceWeight = historicalEntry
@@ -240,15 +292,16 @@ function collectEpisodeObservations(
       * qualityEvidenceWeight;
     const length = getLengthBucketFromText(tweet?.content || '');
     const tags = episode.featureTags;
+    const event = { eventId: `episode:${episode.tweetId}`, outcomeBacked: episode.stage === 'final' };
 
     observations.push(
-      buildFamilyObservation('format', episode.format, reward, weight),
-      buildFamilyObservation('topic', episode.topic, reward, weight),
-      buildFamilyObservation('length', length, reward, weight),
-      buildFamilyObservation('hook', tags.hook, reward, weight),
-      buildFamilyObservation('tone', tags.tone, reward, weight),
-      buildFamilyObservation('specificity', tags.specificity, reward, weight),
-      buildFamilyObservation('structure', tags.structure, reward, weight),
+      buildFamilyObservation('format', episode.format, reward, weight, event),
+      buildFamilyObservation('topic', episode.topic, reward, weight, event),
+      buildFamilyObservation('length', length, reward, weight, event),
+      buildFamilyObservation('hook', tags.hook, reward, weight, event),
+      buildFamilyObservation('tone', tags.tone, reward, weight, event),
+      buildFamilyObservation('specificity', tags.specificity, reward, weight, event),
+      buildFamilyObservation('structure', tags.structure, reward, weight, event),
     );
   }
 
@@ -274,15 +327,16 @@ function collectFallbackPerformanceObservations(
       thesisHint: entry.thesis,
     });
     const structure = entry.structure || extractStructureType(entry.content);
+    const event = { eventId: `performance:${entry.xTweetId || entry.tweetId}`, outcomeBacked: true };
 
     observations.push(
-      buildFamilyObservation('format', entry.format, reward, weight),
-      buildFamilyObservation('topic', entry.topic, reward, weight),
-      buildFamilyObservation('length', getLengthBucketFromText(entry.content), reward, weight),
-      buildFamilyObservation('hook', entry.hook || featureTags.hook, reward, weight),
-      buildFamilyObservation('tone', entry.tone || featureTags.tone, reward, weight),
-      buildFamilyObservation('specificity', entry.specificity || featureTags.specificity, reward, weight),
-      buildFamilyObservation('structure', structure, reward, weight),
+      buildFamilyObservation('format', entry.format, reward, weight, event),
+      buildFamilyObservation('topic', entry.topic, reward, weight, event),
+      buildFamilyObservation('length', getLengthBucketFromText(entry.content), reward, weight, event),
+      buildFamilyObservation('hook', entry.hook || featureTags.hook, reward, weight, event),
+      buildFamilyObservation('tone', entry.tone || featureTags.tone, reward, weight, event),
+      buildFamilyObservation('specificity', entry.specificity || featureTags.specificity, reward, weight, event),
+      buildFamilyObservation('structure', structure, reward, weight, event),
     );
   }
 
@@ -292,14 +346,27 @@ function collectFallbackPerformanceObservations(
 function collectFeedbackObservations(
   feedback: FeedbackEntry[],
   allTweets: Tweet[],
+  episodeSignalsByTweetId: Map<string, Set<LearningSignalType>> = new Map(),
 ): BanditObservation[] {
   const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));
   const observations: BanditObservation[] = [];
 
-  for (const entry of feedback) {
-    if (!entry.tweetId || (entry.rating !== 'down' && entry.rating !== 'up')) continue;
-    const tweet = tweetById.get(String(entry.tweetId));
-    if (!tweet) continue;
+  feedback.forEach((entry, index) => {
+    if (entry.rating !== 'down' && entry.rating !== 'up') return;
+    // Live deletions and taste calibration write a feedback entry AND a
+    // learning signal while the Tweet survives, so the episode already
+    // observes that click; observing the entry too counted it twice.
+    const episodeSignals = entry.tweetId ? episodeSignalsByTweetId.get(String(entry.tweetId)) : undefined;
+    if (episodeSignals && FEEDBACK_COVERING_SIGNALS[entry.rating].some((signal) => episodeSignals.has(signal))) return;
+    // A queue rejection hard-deletes the Tweet record, and first-batch
+    // preview thumbs are saved without a tweetId at all. Both previously
+    // dropped the operator's vote here entirely. The feedback entry keeps
+    // the draft text, so style arms can still be observed from it; only
+    // format/topic (not derivable from text alone) are skipped when no
+    // Tweet record is found.
+    const tweet = entry.tweetId ? tweetById.get(String(entry.tweetId)) : undefined;
+    const content = tweet?.content || entry.tweetText || '';
+    if (!content.trim()) return;
     // Thumbs-up is observed too: without it the bandit only ever learned what
     // the operator disliked and had no direct signal about what they endorsed.
     // Positive votes carry slightly less weight than negative ones because an
@@ -308,20 +375,21 @@ function collectFeedbackObservations(
       * (entry.userProvidedReason ? 1.2 : 1)
       * (entry.rating === 'up' ? 0.85 : 1);
     const reward = entry.rating === 'up' ? 0.9 : 0.02;
-    const featureTags = tweet.featureTags || extractCandidateFeatureTags(tweet.content, {
-      topic: tweet.topic,
-      thesisHint: tweet.thesis,
+    const featureTags = tweet?.featureTags || extractCandidateFeatureTags(content, {
+      topic: tweet?.topic,
+      thesisHint: tweet?.thesis,
     });
+    const event = { eventId: `feedback:${index}`, outcomeBacked: false };
     observations.push(
-      buildFamilyObservation('format', tweet.format, reward, weight),
-      buildFamilyObservation('topic', tweet.topic, reward, weight),
-      buildFamilyObservation('length', getLengthBucketFromText(tweet.content), reward, weight),
-      buildFamilyObservation('hook', featureTags.hook, reward, weight),
-      buildFamilyObservation('tone', featureTags.tone, reward, weight),
-      buildFamilyObservation('specificity', featureTags.specificity, reward, weight),
-      buildFamilyObservation('structure', featureTags.structure, reward, weight),
+      buildFamilyObservation('format', tweet?.format, reward, weight, event),
+      buildFamilyObservation('topic', tweet?.topic, reward, weight, event),
+      buildFamilyObservation('length', getLengthBucketFromText(content), reward, weight, event),
+      buildFamilyObservation('hook', featureTags.hook, reward, weight, event),
+      buildFamilyObservation('tone', featureTags.tone, reward, weight, event),
+      buildFamilyObservation('specificity', featureTags.specificity, reward, weight, event),
+      buildFamilyObservation('structure', featureTags.structure, reward, weight, event),
     );
-  }
+  });
 
   return observations.filter((entry): entry is BanditObservation => Boolean(entry));
 }
@@ -329,8 +397,10 @@ function collectFeedbackObservations(
 /**
  * Human-readable "what's working" lessons from arms with real local evidence,
  * for injection into the generation prompt via personalization memory. Only
- * arms with enough recent pulls and an above-baseline mean reward qualify, so
- * the prompt reflects live outcomes instead of cold-start noise.
+ * arms with enough performance-backed pulls and an above-baseline mean reward
+ * qualify: the prompt presents these as live outcome evidence, so approvals
+ * and thumbs-up alone (which also raise localPulls) must never promote an
+ * arm that has not yet been measured on X.
  */
 export function summarizeBanditExploitLessons(
   policy: Pick<BanditPolicy, 'formatArms' | 'hookArms' | 'toneArms' | 'structureArms'> | null | undefined,
@@ -346,12 +416,13 @@ export function summarizeBanditExploitLessons(
   const lessons: Array<{ line: string; strength: number }> = [];
   for (const { label, arms } of families) {
     const proven = arms
-      .filter((arm) => arm.localPulls >= 3 && arm.meanReward >= 0.55)
+      .filter((arm) => (arm.outcomePulls || 0) >= EXPLOIT_LESSON_MIN_OUTCOME_PULLS && arm.meanReward >= EXPLOIT_LESSON_MIN_MEAN_REWARD)
       .sort((left, right) => right.meanReward - left.meanReward)[0];
     if (!proven) continue;
+    const outcomePulls = proven.outcomePulls || 0;
     lessons.push({
-      line: `${label} "${proven.arm}" is earning ${Math.round(proven.meanReward * 100)}% mean reward across ${Math.round(proven.localPulls)} recent posts. Lean into it when the idea fits.`,
-      strength: proven.meanReward * Math.min(1, proven.localPulls / 6),
+      line: `${label} "${proven.arm}" is earning ${Math.round(proven.meanReward * 100)}% mean reward across ${Math.round(outcomePulls)} recent posts with outcome data. Lean into it when the idea fits.`,
+      strength: proven.meanReward * Math.min(1, outcomePulls / 6),
     });
   }
   return lessons
@@ -405,17 +476,18 @@ function buildArmScores(
   globalPrior: BanditGlobalPrior | null | undefined,
 ): BanditArmScore[] {
   const priorLookup = buildPriorLookup(globalPrior, family);
-  const grouped = new Map<string, { pulls: number; rewardSum: number; failures: number }>();
+  const grouped = new Map<string, { pulls: number; outcomePulls: number; rewardSum: number; failures: number }>();
   for (const candidate of candidates) {
-    grouped.set(candidate, { pulls: 0, rewardSum: 0, failures: 0 });
+    grouped.set(candidate, { pulls: 0, outcomePulls: 0, rewardSum: 0, failures: 0 });
   }
 
   for (const observation of observations) {
     if (observation.family !== family) continue;
-    const current = grouped.get(observation.arm) || { pulls: 0, rewardSum: 0, failures: 0 };
+    const current = grouped.get(observation.arm) || { pulls: 0, outcomePulls: 0, rewardSum: 0, failures: 0 };
     current.pulls += observation.weight;
+    if (observation.outcomeBacked) current.outcomePulls += observation.weight;
     current.rewardSum += observation.reward * observation.weight;
-    if (observation.reward <= 0.35) current.failures += observation.weight;
+    if (observation.reward <= BANDIT_FAILURE_REWARD) current.failures += observation.weight;
     grouped.set(observation.arm, current);
   }
 
@@ -445,6 +517,7 @@ function buildArmScores(
         family,
         pulls: Number(local.pulls.toFixed(3)),
         localPulls: Number(local.pulls.toFixed(3)),
+        outcomePulls: Number(local.outcomePulls.toFixed(3)),
         globalPulls: Number(globalPulls.toFixed(3)),
         priorPulls: Number(priorPulls.toFixed(3)),
         successes: Number(local.rewardSum.toFixed(3)),
@@ -519,7 +592,7 @@ export function buildBanditGlobalPrior({
       const current = totals.get(key) || { pulls: 0, rewardSum: 0, failures: 0 };
       current.pulls += observation.weight;
       current.rewardSum += observation.reward * observation.weight;
-      if (observation.reward <= 0.35) current.failures += observation.weight;
+      if (observation.reward <= BANDIT_FAILURE_REWARD) current.failures += observation.weight;
       totals.set(key, current);
     }
   }
@@ -579,21 +652,23 @@ export function buildBanditPolicy({
     performanceHistory: uniqueHistory,
     baseline,
   });
-  const manualPerformanceTweetIds = new Set(
-    uniqueHistory
-      .filter((entry) => entry.source !== 'autopilot' && entry.tweetId)
-      .map((entry) => String(entry.tweetId)),
-  );
-  const coveredTweetIds = new Set(
-    episodes
-      .map((episode) => String(episode.tweetId))
-      .filter((tweetId) => !manualPerformanceTweetIds.has(tweetId)),
-  );
+  // Every tweet with an episode is covered: its performance lift is already
+  // inside the episode reward. Excluding manual tweets here double-counted
+  // the identical outcome (episode + x2-weighted fallback observation) and,
+  // because the fallback re-extracts feature tags from posted text, could
+  // train different arms with the same outcome. Manual emphasis still
+  // applies via sourceSignalWeight for rows with no episode (e.g. timeline
+  // imports predating Clawfable).
+  const coveredTweetIds = new Set(episodes.map((episode) => String(episode.tweetId)));
+  const episodeSignalsByTweetId = new Map(episodes.map((episode) => [String(episode.tweetId), new Set(episode.signals)]));
   const observations = [
     ...collectEpisodeObservations(episodes, allTweets, uniqueHistory),
     ...collectFallbackPerformanceObservations(uniqueHistory, coveredTweetIds, baseline),
-    ...collectFeedbackObservations(feedback, allTweets),
+    ...collectFeedbackObservations(feedback, allTweets, episodeSignalsByTweetId),
   ];
+  // Each event fans out to up to seven family observations; the learning tab
+  // reads totalPulls as "how many things has the bandit seen", so count events.
+  const totalPulls = new Set(observations.map((observation) => observation.eventId)).size;
 
   const formatCandidates = toCandidateList([...allowedFormats, ...trainingHistory.map((entry) => entry.format)]);
   const topicCandidates = toCandidateList([...candidateTopics, ...trainingHistory.map((entry) => entry.topic)]);
@@ -642,7 +717,7 @@ export function buildBanditPolicy({
 
   return {
     trainingSource,
-    totalPulls: observations.length,
+    totalPulls,
     successThreshold,
     globalPriorWeight,
     localEvidenceWeight,
@@ -675,6 +750,7 @@ function pickUnusedArm(
     family: 'format',
     pulls: 0,
     localPulls: 0,
+    outcomePulls: 0,
     globalPulls: 0,
     priorPulls: DEFAULT_PRIOR_PULLS,
     successes: 0,
@@ -714,6 +790,7 @@ function createSyntheticArm(
     family,
     pulls: 0,
     localPulls: 0,
+    outcomePulls: 0,
     globalPulls: 0,
     priorPulls: DEFAULT_PRIOR_PULLS,
     successes: 0,

@@ -10,6 +10,8 @@ import {
   saveLearnings,
   saveStyleSignals,
   saveAnalysis,
+  pushSoulVersion,
+  updateProtocolSettings,
 } from '@/lib/kv-storage';
 import { buildGenerationContext } from '@/lib/generation-context';
 
@@ -143,6 +145,72 @@ describe('generation context', () => {
     expect(context.style.exploration.underusedFormats).toContain('question');
     expect(context.style.banditPolicy?.formatArms.length).toBeGreaterThan(0);
     expect(context.style.banditPolicy?.summary.some((entry) => entry.startsWith('Explore format:'))).toBe(true);
+  });
+
+  it('expires verbatim operator rejections after 21 days and skips duplicate-only rejections', async () => {
+    const agent = await createAgent({
+      handle: 'context-agent-rejection-window',
+      name: 'Context Agent Rejection Window',
+      soulMd: '# SOUL\n\nSharp and specific.',
+    } as any);
+    const day = 24 * 60 * 60 * 1000;
+    await saveFeedback(agent.id, {
+      tweetId: 'stale-1',
+      tweetText: 'stale rejected take about pricing',
+      rating: 'down',
+      generatedAt: new Date(Date.now() - 25 * day).toISOString(),
+      intentSummary: 'Too vague',
+      source: 'queue_delete',
+      userProvidedReason: true,
+    });
+    await saveFeedback(agent.id, {
+      tweetId: 'dup-1',
+      tweetText: 'duplicate rejected take about hiring',
+      rating: 'down',
+      generatedAt: new Date(Date.now() - 2 * day).toISOString(),
+      intentSummary: 'Duplicate premise: this is the same thesis already queued. Keep the sharper original.',
+      source: 'queue_delete',
+      userProvidedReason: true,
+    });
+    await saveFeedback(agent.id, {
+      tweetId: 'fresh-1',
+      tweetText: 'fresh rejected take about onboarding',
+      rating: 'down',
+      generatedAt: new Date(Date.now() - 5 * day).toISOString(),
+      intentSummary: 'Too generic',
+      source: 'queue_delete',
+      userProvidedReason: true,
+    });
+
+    const context = await buildGenerationContext(agent, { negativeLimit: 10 });
+    const style = context.voiceProfile.communicationStyle;
+    const [, afterHeader = ''] = style.split('## RECENT OPERATOR REJECTIONS (avoid similar content)\n');
+    const rejectionBlock = afterHeader.split('\n\n## ')[0];
+
+    expect(rejectionBlock).toBe('- "fresh rejected take about onboarding (why it was rejected: Too generic)"');
+    expect(style).not.toContain('stale rejected take about pricing');
+    expect(style).not.toContain('duplicate rejected take about hiring');
+    expect(context.memory.rejectedDrafts).toEqual(['fresh rejected take about onboarding']);
+  });
+
+  it('surfaces a pending soul evolution proposal through the generation memory', async () => {
+    const agent = await createAgent({
+      handle: 'context-agent-soul-proposal',
+      name: 'Context Agent Soul Proposal',
+      soulMd: '# SOUL\n\nSharp and specific.',
+    } as any);
+    await updateProtocolSettings(agent.id, { soulEvolutionMode: 'approval' });
+    await pushSoulVersion(agent.id, '# SOUL\n\nSharper, with concrete openings.', 'PENDING: sharpen the openings');
+
+    const context = await buildGenerationContext(agent);
+
+    expect(context.memory.soulEvolution.mode).toBe('approval');
+    expect(context.memory.soulEvolution.pendingProposal).toMatchObject({
+      changeSummary: 'sharpen the openings',
+      soulMd: '# SOUL\n\nSharper, with concrete openings.',
+    });
+    expect(context.memory.soulEvolution.holdReason).toContain('awaiting operator review');
+    expect(context.memory.soulEvolution.cooldownUntil).not.toBeNull();
   });
 
   it('stops injecting stale wizard style once live learnings are established', async () => {

@@ -1,10 +1,21 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getSession, getUser, getAgent, resetReadCache } from './kv-storage';
+import { getSession, getUser, getAgent, resetReadCache, type OAuthTempData } from './kv-storage';
 import { canAccessAgent } from './account-access';
 import type { User, Agent } from './types';
 
 const COOKIE_NAME = 'clawfable_session';
+
+/**
+ * Temp record for the connect-an-agent OAuth flow. `startedByUserId` binds the
+ * callback to the session that started the flow so a forwarded X authorize
+ * link cannot attach a stranger's tokens to the starter's agent.
+ */
+export interface ConnectOAuthTempData extends OAuthTempData {
+  purpose: 'connect';
+  agentId: string;
+  startedByUserId: string;
+}
 
 export class AuthError extends Error {
   constructor() { super('Unauthorized'); }

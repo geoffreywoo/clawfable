@@ -18,6 +18,14 @@ const geoffreyVoiceProfile = {
   summary: 'Geoffrey writes about frontier tech, industrial capacity, and AI infrastructure from technical constraints.',
 };
 
+const genericVoiceProfile = {
+  tone: 'direct',
+  topics: ['support', 'saas', 'pricing'],
+  antiGoals: ['hype'],
+  communicationStyle: 'plain founder notes from the support queue',
+  summary: 'A SaaS founder writing about customer support and pricing.',
+};
+
 describe('account taste scoring', () => {
   it('recognizes the current handle without applying Geoffrey taste to every hard-tech account', () => {
     expect(isGeoffreyVoiceProfile(geoffreyVoiceProfile)).toBe(true);
@@ -478,14 +486,57 @@ describe('account taste scoring', () => {
   it('stores a sports opt-out as an explicit account-topic instruction', () => {
     const feedback = classifyTasteFeedbackReason(
       'the sports content is not in my style. stop posting about sports',
+      '',
+      { voiceProfile: geoffreyVoiceProfile },
     );
 
     expect(feedback.metadata).toMatchObject({
       sportsTopicOptOut: true,
       tasteComplaint: true,
+      accountSpecificHints: 'geoffrey',
     });
     expect(feedback.preferenceHints.join(' ')).toContain('Random sports');
     expect(feedback.preferenceHints.join(' ')).toContain('Betr and Kings League');
+
+    const generic = classifyTasteFeedbackReason(
+      'the sports content is not in my style. stop posting about sports',
+      '',
+      { voiceProfile: genericVoiceProfile },
+    );
+    expect(generic.metadata).toMatchObject({ sportsTopicOptOut: true });
+    expect(generic.metadata).not.toHaveProperty('accountSpecificHints');
+    expect(generic.preferenceHints.join(' ')).not.toContain('Betr');
+    expect(generic.preferenceHints.join(' ')).not.toContain('@geoffwoo');
+  });
+
+  it('classifies the operator reason only, never the rejected tweet text', () => {
+    const duplicate = classifyTasteFeedbackReason(
+      'This repeats an angle already used or rejected.',
+      'space launch cadence will double once the robotics dashboard catches up with the frontier',
+    );
+    expect(duplicate.preferenceHints).toEqual([]);
+    expect(duplicate.metadata).not.toHaveProperty('technicalElevationRequested');
+    expect(duplicate.metadata).not.toHaveProperty('lowStatusTextureComplaint');
+    expect(duplicate.metadata).not.toHaveProperty('tasteComplaint');
+
+    const explicit = classifyTasteFeedbackReason('not elevated or technical enough', 'a plain draft');
+    expect(explicit.metadata).toMatchObject({ technicalElevationRequested: true, tasteComplaint: true });
+  });
+
+  it('keeps Geoffrey-specific wording out of hints for other accounts', () => {
+    const reason = 'does not sound like me, too Slack';
+    const generic = classifyTasteFeedbackReason(reason, '', { voiceProfile: genericVoiceProfile });
+    expect(generic.metadata).toMatchObject({ nativeVoiceComplaint: true, lowStatusTextureComplaint: true });
+    expect(generic.preferenceHints.join(' ')).not.toMatch(/geoffrey|geoffwoo/i);
+    expect(generic.preferenceHints.join(' ')).toContain("account's native voice");
+    expect(generic.preferenceHints.join(' ')).toContain('Slack/support/workflow texture');
+
+    const unscoped = classifyTasteFeedbackReason(reason);
+    expect(unscoped.preferenceHints.join(' ')).not.toMatch(/geoffrey|geoffwoo/i);
+
+    const geoffrey = classifyTasteFeedbackReason(reason, '', { voiceProfile: geoffreyVoiceProfile });
+    expect(geoffrey.preferenceHints.join(' ')).toContain('native Geoffrey voice');
+    expect(geoffrey.preferenceHints.join(' ')).toContain('insufficient proof for Geoffrey');
   });
 
   it('stores lagging AI baseline feedback as a future-horizon instruction', () => {

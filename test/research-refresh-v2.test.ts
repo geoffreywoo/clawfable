@@ -210,6 +210,34 @@ describe('research refresh orchestration', () => {
     ]));
   });
 
+  it('rebuilds the research agenda from post-backfill semantic blocks in the same tick', async () => {
+    const backfilled = {
+      schemaVersion: 2,
+      id: 'semantic-block-backfill-inference',
+      agentId: 'agent-1',
+      scope: 'topic',
+      semanticKey: 'ai:inference:economics',
+      topic: 'AI inference economics',
+      storyClusterId: null,
+      ideaId: null,
+      reasonCode: 'bad_source_topic',
+      reason: 'Do not regenerate the inference economics angle.',
+      permanent: true,
+      blockedUntil: null,
+      createdAt: nowIso,
+    } as const;
+    mocks.getSemanticBlocks.mockResolvedValue([]);
+    mocks.replaceLegacySemanticBackfillBlocks.mockResolvedValue([backfilled]);
+
+    await refreshAgentResearch({
+      id: 'agent-1', handle: 'geoffwoo', name: 'Geoffrey', soulMd: '# AI startups', isConnected: 0,
+    } as any);
+
+    const savedAgenda = mocks.saveResearchAgenda.mock.calls[0]?.[1] as ResearchAgenda;
+    expect(savedAgenda.queries.some((query) => /inference ASIC HBM/i.test(query))).toBe(false);
+    expect(savedAgenda.queries).toEqual(expect.arrayContaining(['hybrid bonding alignment yield chiplets']));
+  });
+
   it('does not refetch or re-age cached evidence while every adapter is still fresh', async () => {
     const cached = document('cached-1');
     const semanticKey = buildResearchSemanticKey(cached.title, cached.entities);

@@ -1,4 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const launchMocks = vi.hoisted(() => ({
+  failNextProtocolSettingsWrite: { value: false },
+}));
+
+vi.mock('@/lib/kv-storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/kv-storage')>();
+  return {
+    ...actual,
+    updateProtocolSettings: async (...args: Parameters<typeof actual.updateProtocolSettings>) => {
+      if (launchMocks.failNextProtocolSettingsWrite.value) {
+        launchMocks.failNextProtocolSettingsWrite.value = false;
+        throw new Error('KV write failed');
+      }
+      return actual.updateProtocolSettings(...args);
+    },
+  };
+});
+
 import {
   createAgent,
   createTweet,
@@ -13,6 +32,68 @@ import { SetupLaunchError, launchAgentFromPreview } from '@/lib/setup-launch';
 describe('setup launch flow', () => {
   afterEach(() => {
     delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+    launchMocks.failNextProtocolSettingsWrite.value = false;
+  });
+
+  it('can be retried with the same approvals after a mid-launch persistence failure', async () => {
+    const agent = await createAgent({
+      handle: 'launch-retry-agent',
+      name: 'Launch Retry Agent',
+      soulMd: '# soul',
+      setupStep: 'preview',
+    } as any);
+    await addAgentToUser('setup-owner', agent.id);
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+
+    const approved = await createTweet({
+      agentId: agent.id,
+      content: 'approved preview',
+      type: 'original',
+      status: 'preview',
+      topic: 'AI',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+    const rejected = await createTweet({
+      agentId: agent.id,
+      content: 'rejected preview',
+      type: 'original',
+      status: 'preview',
+      topic: 'AI',
+      xTweetId: null,
+      quoteTweetId: null,
+      quoteTweetAuthor: null,
+      scheduledAt: null,
+    });
+
+    const input = {
+      agentId: agent.id,
+      reviewedTweetIds: [approved.id, rejected.id],
+      approvedTweetIds: [approved.id],
+      postsPerDay: 4,
+    };
+
+    // First attempt: tweets are re-statused, then the settings write fails.
+    launchMocks.failNextProtocolSettingsWrite.value = true;
+    await expect(launchAgentFromPreview(input)).rejects.toThrow('KV write failed');
+    expect((await getTweet(approved.id))?.status).toBe('queued');
+    expect((await getAgent(agent.id))?.setupStep).toBe('preview');
+    expect((await getProtocolSettings(agent.id)).enabled).toBe(false);
+
+    // Retry with the same body must resume, not demand a fresh preview batch.
+    const result = await launchAgentFromPreview(input);
+
+    expect(result.queuedCount).toBe(1);
+    expect(result.resumedCount).toBe(1);
+    expect((await getAgent(agent.id))?.setupStep).toBe('ready');
+    const settings = await getProtocolSettings(agent.id);
+    expect(settings.enabled).toBe(true);
+    expect(settings.postsPerDay).toBe(4);
+    const queuedTweets = await getQueuedTweets(agent.id);
+    expect(queuedTweets.filter((tweet) => tweet.id === approved.id)).toHaveLength(1);
+    expect(await getTweet(rejected.id)).toBeNull();
   });
 
   it('queues approved preview tweets, discards rejected ones, and marks setup ready', async () => {

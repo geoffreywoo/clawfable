@@ -517,7 +517,11 @@ function PersonaModelMap({ snapshot }: { snapshot: LearningSnapshot }) {
                       <span className="persona-rail-label">{lane.title}</span>
                       <strong>{formatArmLabel(lane.exploit?.arm)}</strong>
                       <span>
-                        {lane.explore ? `Testing ${formatArmLabel(lane.explore.arm)}` : 'No challenger active'}
+                        {lane.explore
+                          ? (lane.steering === 'holdout_flag'
+                            ? `Holding out ${formatArmLabel(lane.explore.arm)} on ~1 in 3 passing drafts`
+                            : `Watching ${formatArmLabel(lane.explore.arm)} from outcomes only`)
+                          : 'No challenger active'}
                       </span>
                     </div>
                     <div className="persona-rail-metrics">

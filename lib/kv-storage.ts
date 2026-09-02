@@ -69,6 +69,7 @@ const LOCAL_KV_SYMBOL = Symbol.for('clawfable.localKvFallback');
 type LocalKvFallback = {
   memStore: Map<string, unknown>;
   memExpiry: Map<string, number>;
+  writeLocks?: Map<string, Promise<void>>;
 };
 
 const localKvFallbackGlobal = globalThis as typeof globalThis & {
@@ -110,21 +111,31 @@ async function getKvClient(): Promise<any> {
 // Memoizes KV reads within a single function invocation to dramatically cut
 // command counts on hot paths (cron). Writes invalidate the entry.
 // The cache is keyed by KV key string. Reset between requests via resetReadCache().
-const readCache = new Map<string, unknown>();
+// Entries also carry a short TTL so invocations that never call requireUser
+// (public routes, webhooks, billing cron) cannot serve indefinitely stale reads
+// from a warm instance.
+const READ_CACHE_TTL_MS = 2000;
+
+type ReadCacheEntry = { value: unknown; expiresAt: number };
+
+const readCache = new Map<string, ReadCacheEntry>();
 
 export function resetReadCache(): void {
   readCache.clear();
 }
 
 function getCached<T>(key: string): { hit: boolean; value: T | null } {
-  if (readCache.has(key)) {
-    return { hit: true, value: readCache.get(key) as T | null };
+  const entry = readCache.get(key);
+  if (!entry) return { hit: false, value: null };
+  if (Date.now() >= entry.expiresAt) {
+    readCache.delete(key);
+    return { hit: false, value: null };
   }
-  return { hit: false, value: null };
+  return { hit: true, value: entry.value as T | null };
 }
 
 function setCached(key: string, value: unknown): void {
-  readCache.set(key, value);
+  readCache.set(key, { value, expiresAt: Date.now() + READ_CACHE_TTL_MS });
 }
 
 function invalidateCached(key: string): void {
@@ -159,53 +170,57 @@ function normalizeAgentHandle(handle: string | null | undefined): string {
   return normalizeUsername(handle);
 }
 
+// ─── Per-key write serialization ─────────────────────────────────────────────
+// JSON-array ledgers are read-modify-write. Concurrent writers (Promise.all
+// fan-outs in setup-launch, autopilot quarantines, batch tweet creation) must
+// not read the same pre-image, so every ledger mutation runs under a per-key
+// promise chain. The map lives on globalThis next to the fallback store so
+// separately compiled module instances share it in local dev.
+const writeLocks = localKvFallback.writeLocks ??= new Map<string, Promise<void>>();
+
+async function withKeyLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = writeLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const chained = previous.then(() => current);
+  writeLocks.set(key, chained);
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+    if (writeLocks.get(key) === chained) writeLocks.delete(key);
+  }
+}
+
+// When a real client is configured, a failed command is retried once and then
+// rethrown. Falling back to the process-local memStore would report success
+// while KV truth stays unchanged, which callers cannot detect.
+async function withClientRetry<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    return operation();
+  }
+}
+
 async function kvGet<T>(key: string): Promise<T | null> {
   if (isMemExpired(key)) return null;
   const cached = getCached<T>(key);
   if (cached.hit) return cached.value;
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const value = (memStore.get(key) as T) ?? null;
-      setCached(key, value);
-      return value;
-    }
-    const value = (await client.get(key)) as T | null;
-    setCached(key, value);
-    return value;
-  } catch {
-    const value = (memStore.get(key) as T) ?? null;
-    setCached(key, value);
-    return value;
-  }
+  const client = await getKvClient();
+  const value = client
+    ? ((await withClientRetry(() => client.get(key))) as T | null)
+    : ((memStore.get(key) as T) ?? null);
+  setCached(key, value);
+  return value;
 }
 
 async function kvSet(key: string, value: unknown, options: { ex?: number; nx?: boolean } = {}): Promise<boolean> {
   invalidateCached(key);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      if (isMemExpired(key)) {
-        // expired keys are removed by isMemExpired
-      } else if (options.nx && memStore.has(key)) {
-        return false;
-      }
-      memStore.set(key, value);
-      if (options.ex && options.ex > 0) {
-        memExpiry.set(key, Date.now() + options.ex * 1000);
-      } else {
-        memExpiry.delete(key);
-      }
-      return true;
-    }
-    const result = Object.keys(options).length > 0
-      ? await client.set(key, value, options)
-      : await client.set(key, value);
-    return result !== null;
-  } catch {
-    if (isMemExpired(key)) {
-      // expired keys are removed by isMemExpired
-    } else if (options.nx && memStore.has(key)) {
+  const client = await getKvClient();
+  if (!client) {
+    if (!isMemExpired(key) && options.nx && memStore.has(key)) {
       return false;
     }
     memStore.set(key, value);
@@ -216,17 +231,19 @@ async function kvSet(key: string, value: unknown, options: { ex?: number; nx?: b
     }
     return true;
   }
+  const result = await withClientRetry(() => (
+    Object.keys(options).length > 0
+      ? client.set(key, value, options)
+      : client.set(key, value)
+  ));
+  return result !== null;
 }
 
 async function kvDel(key: string): Promise<void> {
   invalidateAllNamespaces(key);
-  try {
-    const client = await getKvClient();
-    if (!client) { deleteMemKey(key); return; }
-    await client.del(key);
-  } catch {
-    deleteMemKey(key);
-  }
+  const client = await getKvClient();
+  if (!client) { deleteMemKey(key); return; }
+  await withClientRetry(() => client.del(key));
 }
 
 const COMPARE_OBJECT_FIELD_AND_DELETE_SCRIPT = `
@@ -273,43 +290,30 @@ async function kvCompareObjectFieldAndDelete(
 
 async function kvSadd(key: string, ...members: string[]): Promise<void> {
   invalidateCached(`set:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const existing = (memStore.get(key) as Set<string>) ?? new Set<string>();
-      for (const m of members) existing.add(m);
-      memStore.set(key, existing);
-      return;
-    }
-    await client.sadd(key, ...members);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const existing = (memStore.get(key) as Set<string>) ?? new Set<string>();
     for (const m of members) existing.add(m);
     memStore.set(key, existing);
+    return;
   }
+  await withClientRetry(() => client.sadd(key, ...members));
 }
 
 async function kvSmembers(key: string): Promise<string[]> {
   const cacheKey = `set:${key}`;
   const cached = getCached<string[]>(cacheKey);
   if (cached.hit && cached.value) return cached.value;
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const s = memStore.get(key) as Set<string> | undefined;
-      const value = s ? Array.from(s) : [];
-      setCached(cacheKey, value);
-      return value;
-    }
-    const value = (await client.smembers(key)) as string[];
-    setCached(cacheKey, value);
-    return value;
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const s = memStore.get(key) as Set<string> | undefined;
     const value = s ? Array.from(s) : [];
     setCached(cacheKey, value);
     return value;
   }
+  const value = (await withClientRetry(() => client.smembers(key))) as string[];
+  setCached(cacheKey, value);
+  return value;
 }
 
 function globToRegExp(pattern: string): RegExp {
@@ -321,207 +325,160 @@ async function kvScanKeys(match: string): Promise<string[]> {
   const cacheKey = `scan:${match}`;
   const cached = getCached<string[]>(cacheKey);
   if (cached.hit && cached.value) return cached.value;
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const regex = globToRegExp(match);
-      const value = Array.from(memStore.keys()).filter((key) => regex.test(key));
-      setCached(cacheKey, value);
-      return value;
-    }
-
-    let cursor = '0';
-    const keys: string[] = [];
-    do {
-      const result = await client.scan(cursor, { match, count: 200 }) as [string, string[]];
-      cursor = String(result?.[0] ?? '0');
-      keys.push(...(result?.[1] ?? []).map(String));
-    } while (cursor !== '0');
-
-    setCached(cacheKey, keys);
-    return keys;
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const regex = globToRegExp(match);
     const value = Array.from(memStore.keys()).filter((key) => regex.test(key));
     setCached(cacheKey, value);
     return value;
   }
+
+  const keys = await withClientRetry(async () => {
+    let cursor = '0';
+    const found: string[] = [];
+    do {
+      const result = await client.scan(cursor, { match, count: 200 }) as [string, string[]];
+      cursor = String(result?.[0] ?? '0');
+      found.push(...(result?.[1] ?? []).map(String));
+    } while (cursor !== '0');
+    return found;
+  });
+
+  setCached(cacheKey, keys);
+  return keys;
 }
 
 async function kvSrem(key: string, member: string): Promise<void> {
   invalidateCached(`set:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const s = memStore.get(key) as Set<string> | undefined;
-      if (s) s.delete(member);
-      return;
-    }
-    await client.srem(key, member);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const s = memStore.get(key) as Set<string> | undefined;
     if (s) s.delete(member);
+    return;
   }
+  await withClientRetry(() => client.srem(key, member));
 }
 
 async function kvIncr(key: string): Promise<number> {
   invalidateCached(key);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const n = ((memStore.get(key) as number) ?? 0) + 1;
-      memStore.set(key, n);
-      return n;
-    }
-    return await client.incr(key);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const n = ((memStore.get(key) as number) ?? 0) + 1;
     memStore.set(key, n);
     return n;
   }
+  return withClientRetry(() => client.incr(key));
 }
 
 async function kvLpush(key: string, ...values: string[]): Promise<void> {
   invalidateCached(`list:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const list = (memStore.get(key) as string[]) ?? [];
-      list.unshift(...values);
-      memStore.set(key, list);
-      return;
-    }
-    await client.lpush(key, ...values);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const list = (memStore.get(key) as string[]) ?? [];
     list.unshift(...values);
     memStore.set(key, list);
+    return;
   }
+  await withClientRetry(() => client.lpush(key, ...values));
 }
 
 async function kvLtrim(key: string, start: number, stop: number): Promise<void> {
   invalidateCached(`list:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const list = (memStore.get(key) as string[]) ?? [];
-      memStore.set(key, stop === -1 ? list.slice(start) : list.slice(start, stop + 1));
-      return;
-    }
-    await client.ltrim(key, start, stop);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const list = (memStore.get(key) as string[]) ?? [];
     memStore.set(key, stop === -1 ? list.slice(start) : list.slice(start, stop + 1));
+    return;
   }
+  await withClientRetry(() => client.ltrim(key, start, stop));
+}
+
+// Lists are cached per request as the longest prefix fetched so far. A read
+// only goes to KV when the cached prefix cannot satisfy the requested range,
+// and it fetches just that range instead of the whole list.
+type ListCacheEntry = { items: string[]; complete: boolean };
+
+function sliceListRange(items: string[], start: number, stop: number): string[] {
+  return stop === -1 ? items.slice(start) : items.slice(start, stop + 1);
+}
+
+function listCacheCovers(entry: ListCacheEntry, stop: number): boolean {
+  return entry.complete || (stop !== -1 && stop < entry.items.length);
 }
 
 async function kvLrange(key: string, start: number, stop: number): Promise<string[]> {
-  // Cache the full list once per request and slice in-memory for subsequent reads.
-  // This collapses N range reads of the same list into a single KV command.
   const cacheKey = `list:${key}`;
-  const cached = getCached<string[]>(cacheKey);
-  if (cached.hit && cached.value) {
-    return stop === -1 ? cached.value.slice(start) : cached.value.slice(start, stop + 1);
+  const cached = getCached<ListCacheEntry>(cacheKey);
+  if (cached.hit && cached.value && listCacheCovers(cached.value, stop)) {
+    return sliceListRange(cached.value.items, start, stop);
   }
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const list = (memStore.get(key) as string[]) ?? [];
-      setCached(cacheKey, list);
-      return stop === -1 ? list.slice(start) : list.slice(start, stop + 1);
-    }
-    // Fetch the full list once so subsequent ranges are free.
-    const full = (await client.lrange(key, 0, -1)) as string[];
-    setCached(cacheKey, full);
-    return stop === -1 ? full.slice(start) : full.slice(start, stop + 1);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const list = (memStore.get(key) as string[]) ?? [];
-    setCached(cacheKey, list);
-    return stop === -1 ? list.slice(start) : list.slice(start, stop + 1);
+    setCached(cacheKey, { items: list, complete: true });
+    return sliceListRange(list, start, stop);
   }
+  const fetched = (await withClientRetry(() => client.lrange(key, 0, stop))) as string[];
+  const items = Array.isArray(fetched) ? fetched : [];
+  setCached(cacheKey, { items, complete: stop === -1 || items.length < stop + 1 });
+  return sliceListRange(items, start, stop);
 }
 
 async function kvLlen(key: string): Promise<number> {
   const cacheKey = `list:${key}`;
-  const cached = getCached<string[]>(cacheKey);
-  if (cached.hit && cached.value) {
-    return cached.value.length;
+  const cached = getCached<ListCacheEntry>(cacheKey);
+  if (cached.hit && cached.value?.complete) {
+    return cached.value.items.length;
   }
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const list = (memStore.get(key) as string[]) ?? [];
-      setCached(cacheKey, list);
-      return list.length;
-    }
-    if (typeof client.llen === 'function') {
-      return Number(await client.llen(key));
-    }
-    const full = (await client.lrange(key, 0, -1)) as string[];
-    setCached(cacheKey, full);
-    return full.length;
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const list = (memStore.get(key) as string[]) ?? [];
-    setCached(cacheKey, list);
+    setCached(cacheKey, { items: list, complete: true });
     return list.length;
   }
+  if (typeof client.llen === 'function') {
+    return Number(await withClientRetry(() => client.llen(key)));
+  }
+  const full = (await withClientRetry(() => client.lrange(key, 0, -1))) as string[];
+  const items = Array.isArray(full) ? full : [];
+  setCached(cacheKey, { items, complete: true });
+  return items.length;
 }
 
 async function kvLrem(key: string, count: number, value: string): Promise<void> {
   invalidateCached(`list:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const list = (memStore.get(key) as string[]) ?? [];
-      const idx = list.indexOf(value);
-      if (idx !== -1) list.splice(idx, 1);
-      memStore.set(key, list);
-      return;
-    }
-    await client.lrem(key, count, value);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const list = (memStore.get(key) as string[]) ?? [];
     const idx = list.indexOf(value);
     if (idx !== -1) list.splice(idx, 1);
     memStore.set(key, list);
+    return;
   }
+  await withClientRetry(() => client.lrem(key, count, value));
 }
 
 async function kvHset(key: string, fields: Record<string, unknown>): Promise<void> {
   invalidateCached(`hash:${key}`);
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const existing = (memStore.get(key) as Record<string, unknown>) ?? {};
-      memStore.set(key, { ...existing, ...fields });
-      return;
-    }
-    await client.hset(key, fields);
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     const existing = (memStore.get(key) as Record<string, unknown>) ?? {};
     memStore.set(key, { ...existing, ...fields });
+    return;
   }
+  await withClientRetry(() => client.hset(key, fields));
 }
 
 async function kvHgetall<T>(key: string): Promise<T | null> {
   const cacheKey = `hash:${key}`;
   const cached = getCached<T>(cacheKey);
   if (cached.hit) return cached.value;
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      const value = (memStore.get(key) as T) ?? null;
-      setCached(cacheKey, value);
-      return value;
-    }
-    const value = (await client.hgetall(key)) as T | null;
-    setCached(cacheKey, value);
-    return value;
-  } catch {
-    const value = (memStore.get(key) as T) ?? null;
-    setCached(cacheKey, value);
-    return value;
-  }
+  const client = await getKvClient();
+  const value = client
+    ? ((await withClientRetry(() => client.hgetall(key))) as T | null)
+    : ((memStore.get(key) as T) ?? null);
+  setCached(cacheKey, value);
+  return value;
 }
 
 function unwrapPipelineResult(value: unknown): unknown {
@@ -552,41 +509,8 @@ async function kvHgetallMany<T>(keys: string[]): Promise<Array<T | null>> {
 
   if (misses.length === 0) return results;
 
-  try {
-    const client = await getKvClient();
-    if (!client) {
-      for (const miss of misses) {
-        const value = (memStore.get(miss.key) as T) ?? null;
-        setCached(miss.cacheKey, value);
-        results[miss.index] = value;
-      }
-      return results;
-    }
-
-    if (typeof client.pipeline === 'function') {
-      const pipeline = client.pipeline();
-      for (const miss of misses) {
-        pipeline.hgetall(miss.key);
-      }
-      const values = await pipeline.exec();
-      values.forEach((raw: unknown, offset: number) => {
-        const miss = misses[offset];
-        const value = (unwrapPipelineResult(raw) as T | null) ?? null;
-        setCached(miss.cacheKey, value);
-        results[miss.index] = value;
-      });
-      return results;
-    }
-
-    const values = await Promise.all(misses.map((miss) => client.hgetall(miss.key) as Promise<T | null>));
-    values.forEach((value, offset) => {
-      const miss = misses[offset];
-      const normalized = value ?? null;
-      setCached(miss.cacheKey, normalized);
-      results[miss.index] = normalized;
-    });
-    return results;
-  } catch {
+  const client = await getKvClient();
+  if (!client) {
     for (const miss of misses) {
       const value = (memStore.get(miss.key) as T) ?? null;
       setCached(miss.cacheKey, value);
@@ -594,6 +518,34 @@ async function kvHgetallMany<T>(keys: string[]): Promise<Array<T | null>> {
     }
     return results;
   }
+
+  if (typeof client.pipeline === 'function') {
+    const values = await withClientRetry(async () => {
+      const pipeline = client.pipeline();
+      for (const miss of misses) {
+        pipeline.hgetall(miss.key);
+      }
+      return pipeline.exec() as Promise<unknown[]>;
+    });
+    values.forEach((raw: unknown, offset: number) => {
+      const miss = misses[offset];
+      const value = (unwrapPipelineResult(raw) as T | null) ?? null;
+      setCached(miss.cacheKey, value);
+      results[miss.index] = value;
+    });
+    return results;
+  }
+
+  const values = await Promise.all(misses.map((miss) => (
+    withClientRetry(() => client.hgetall(miss.key) as Promise<T | null>)
+  )));
+  values.forEach((value, offset) => {
+    const miss = misses[offset];
+    const normalized = value ?? null;
+    setCached(miss.cacheKey, normalized);
+    results[miss.index] = normalized;
+  });
+  return results;
 }
 
 // ─── Key helpers ─────────────────────────────────────────────────────────────
@@ -889,8 +841,11 @@ export async function deleteAgent(id: string): Promise<void> {
   // Cascade: delete queue refs
   await kvDel(KEYS.agentQueue(id));
 
-  // Cascade: delete mentions
+  // Cascade: delete mentions and their per-X-tweet index keys
   const mentionIds = await kvLrange(KEYS.agentMentions(id), 0, -1);
+  const mentionRecords = await kvHgetallMany<Mention>(mentionIds.map((mid) => KEYS.mention(String(mid))));
+  const mentionTweetIds = mentionRecords.flatMap((record) => (record?.tweetId != null ? [String(record.tweetId)] : []));
+  await Promise.all(mentionTweetIds.map((xTweetId) => kvDel(KEYS.agentMentionByTweet(id, xTweetId))));
   await Promise.all(mentionIds.map((mid) => kvDel(KEYS.mention(mid))));
   await kvDel(KEYS.agentMentions(id));
   const complaintIds = await kvLrange(KEYS.agentAudienceVoiceComplaints(id), 0, -1);
@@ -935,6 +890,22 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentSemanticBlocks(id));
   await kvDel(KEYS.agentResearchRefresh(id));
   await kvDel(KEYS.agentResearchLock(id));
+
+  // Cascade: learning ledgers, voice coaching, and autopilot state
+  await kvDel(KEYS.agentSignals(id));
+  await kvDel(KEYS.agentOutcomeEvents(id));
+  await kvDel(KEYS.agentGenerationOutcomes(id));
+  await kvDel(KEYS.agentCriticVerdicts(id));
+  await kvDel(KEYS.agentRelationshipProfiles(id));
+  await kvDel(KEYS.agentIdeaAtoms(id));
+  await kvDel(KEYS.agentMetricAvailability(id));
+  await kvDel(KEYS.agentSoulVersions(id));
+  await kvDel(KEYS.agentRemixMemory(id));
+  await kvDel(KEYS.agentVoiceChat(id));
+  await kvDel(KEYS.agentVoiceDirectives(id));
+  await kvDel(KEYS.agentVoiceDirectiveRules(id));
+  await kvDel(KEYS.agentAutopilotHealth(id));
+  await kvDel(KEYS.agentAutopilotLock(id));
   const experimentIds = await kvLrange(KEYS.agentExperiments(id), 0, -1);
   await Promise.all(experimentIds.map((experimentId) => kvDel(KEYS.draftExperiment(String(experimentId)))));
   await kvDel(KEYS.agentExperiments(id));
@@ -952,6 +923,14 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvSrem(KEYS.agentSet(), id);
   await syncCanonicalHandleIndex(agent.handle);
   await removeAgentFromAllUsers(id);
+
+  // Final sweep over the agent prefix (generation locks, per-mention indexes)
+  // and rate-limit counters so a namespace added later cannot be orphaned.
+  const [scopedKeys, rateLimitKeys] = await Promise.all([
+    kvScanKeys(`agent:${id}:*`),
+    kvScanKeys(`ratelimit:${id}:*`),
+  ]);
+  await Promise.all([...scopedKeys, ...rateLimitKeys].map((key) => kvDel(key)));
 }
 
 // ─── Tweet storage ────────────────────────────────────────────────────────────
@@ -1717,6 +1696,7 @@ export async function createMention(data: CreateMentionInput): Promise<Mention> 
     inReplyToTweetId: data.inReplyToTweetId ?? null,
     engagementLikes: data.engagementLikes ?? 0,
     engagementRetweets: data.engagementRetweets ?? 0,
+    authorFollowers: data.authorFollowers ?? null,
     createdAt: data.createdAt || new Date().toISOString(),
   };
   await kvHset(KEYS.mention(id), mention as unknown as Record<string, unknown>);
@@ -1772,8 +1752,12 @@ export interface OAuthTempData {
   createdAt?: string;
 }
 
+// Request tokens are consumed by the callback within minutes; abandoned
+// logins must not accumulate forever.
+const OAUTH_TEMP_TTL_SECONDS = 15 * 60;
+
 export async function saveOAuthTemp(oauthToken: string, data: OAuthTempData): Promise<void> {
-  await kvSet(KEYS.oauthTemp(oauthToken), data);
+  await kvSet(KEYS.oauthTemp(oauthToken), data, { ex: OAUTH_TEMP_TTL_SECONDS });
 }
 
 export async function getOAuthTemp(oauthToken: string): Promise<OAuthTempData | null> {
@@ -1840,10 +1824,12 @@ export async function getProtocolSettings(agentId: string): Promise<ProtocolSett
 }
 
 export async function updateProtocolSettings(agentId: string, updates: Partial<ProtocolSettings>): Promise<ProtocolSettings> {
-  const current = await getProtocolSettings(agentId);
-  const merged = { ...current, ...updates, proactiveReplies: false, proactiveLikes: false };
-  await kvSet(KEYS.agentProtocol(agentId), merged);
-  return merged;
+  return withKeyLock(KEYS.agentProtocol(agentId), async () => {
+    const current = await getProtocolSettings(agentId);
+    const merged = { ...current, ...updates, proactiveReplies: false, proactiveLikes: false };
+    await kvSet(KEYS.agentProtocol(agentId), merged);
+    return merged;
+  });
 }
 
 const DEFAULT_MANUAL_EXAMPLE_CURATION: ManualExampleCuration = {
@@ -1872,14 +1858,16 @@ export async function updateManualExampleCuration(
   agentId: string,
   updates: Partial<ManualExampleCuration>,
 ): Promise<ManualExampleCuration> {
-  const current = await getManualExampleCuration(agentId);
-  const next = normalizeManualExampleCuration({
-    ...current,
-    ...updates,
-    updatedAt: new Date().toISOString(),
+  return withKeyLock(KEYS.agentManualExamples(agentId), async () => {
+    const current = await getManualExampleCuration(agentId);
+    const next = normalizeManualExampleCuration({
+      ...current,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    await kvSet(KEYS.agentManualExamples(agentId), next);
+    return next;
   });
-  await kvSet(KEYS.agentManualExamples(agentId), next);
-  return next;
 }
 
 export async function getVoiceCorpusSnapshot(agentId: string): Promise<VoiceCorpusSnapshot | null> {
@@ -1907,10 +1895,13 @@ export async function setAutopilotHealth(snapshot: AutopilotHealthSnapshot): Pro
 
 // ─── Post log storage ────────────────────────────────────────────────────────
 
+const MAX_POST_LOG_ENTRIES = 2000;
+
 export async function addPostLogEntry(agentId: string, entry: Omit<PostLogEntry, 'id'>): Promise<PostLogEntry> {
   const id = `${agentId}:${Date.now()}`;
   const full: PostLogEntry = { ...entry, id };
   await kvLpush(KEYS.agentPostLog(agentId), JSON.stringify(full));
+  await kvLtrim(KEYS.agentPostLog(agentId), 0, MAX_POST_LOG_ENTRIES - 1);
   return full;
 }
 
@@ -1933,8 +1924,10 @@ export interface FollowerSnapshot {
 const MAX_FOLLOWER_SNAPSHOTS = 500;
 
 export async function addFollowerSnapshot(agentId: string, snapshot: FollowerSnapshot): Promise<void> {
-  await kvLpush(KEYS.agentFollowerSnapshots(agentId), JSON.stringify(snapshot));
-  await kvLtrim(KEYS.agentFollowerSnapshots(agentId), 0, MAX_FOLLOWER_SNAPSHOTS - 1);
+  await withKeyLock(KEYS.agentFollowerSnapshots(agentId), async () => {
+    await kvLpush(KEYS.agentFollowerSnapshots(agentId), JSON.stringify(snapshot));
+    await kvLtrim(KEYS.agentFollowerSnapshots(agentId), 0, MAX_FOLLOWER_SNAPSHOTS - 1);
+  });
 }
 
 export async function getFollowerSnapshots(agentId: string, limit = 100): Promise<FollowerSnapshot[]> {
@@ -1970,9 +1963,12 @@ export interface CronLogEntry {
   results: Array<{ agentId: string; action: string; reason: string; content?: string; repliesSent?: number; runId?: string }>;
 }
 
+const MAX_CRON_LOG_ENTRIES = 2000;
+
 export async function addCronLogEntry(entry: Omit<CronLogEntry, 'id'>): Promise<void> {
   const id = `cron:${Date.now()}`;
   await kvLpush(KEYS.cronLog(), JSON.stringify({ ...entry, id }));
+  await kvLtrim(KEYS.cronLog(), 0, MAX_CRON_LOG_ENTRIES - 1);
 }
 
 export async function getCronLog(limit = 30): Promise<CronLogEntry[]> {
@@ -2146,7 +2142,11 @@ export async function updateDraftExperiment(
   return updated;
 }
 
-async function updateDraftExperimentFromSignal(agentId: string, signal: LearningSignal): Promise<void> {
+async function updateDraftExperimentFromSignal(
+  agentId: string,
+  signal: LearningSignal,
+  replacedRewardDelta = 0,
+): Promise<void> {
   if (!signal.tweetId) return;
   const tweet = await getTweet(String(signal.tweetId));
   if (!tweet?.draftExperimentId) return;
@@ -2165,8 +2165,10 @@ async function updateDraftExperimentFromSignal(agentId: string, signal: Learning
     ...(existing?.outcomeNotes || []),
     signal.reason || (typeof signal.metadata?.preferenceHint === 'string' ? String(signal.metadata.preferenceHint) : ''),
   ].filter(Boolean).slice(-8);
+  // A unique signal type re-emitted for the same tweet replaced its prior
+  // ledger entry, so net that entry's reward out before applying the new one.
   const immediate = typeof existing?.immediateReward === 'number'
-    ? Math.max(-1, Math.min(1, existing.immediateReward + signal.rewardDelta))
+    ? Math.max(-1, Math.min(1, existing.immediateReward - replacedRewardDelta + signal.rewardDelta))
     : signal.rewardDelta;
 
   await updateDraftExperiment(tweet.draftExperimentId, {
@@ -2212,8 +2214,11 @@ async function updateDraftExperimentFromPerformance(agentId: string, entry: Twee
 
 // ─── Performance tracking storage ─────────────────────────────────────────────
 
+const MAX_PERFORMANCE_ENTRIES = 5000;
+
 export async function addPerformanceEntry(agentId: string, entry: TweetPerformance): Promise<void> {
   await kvLpush(KEYS.agentPerformance(agentId), JSON.stringify(entry));
+  await kvLtrim(KEYS.agentPerformance(agentId), 0, MAX_PERFORMANCE_ENTRIES - 1);
   await addOutcomeEvent(agentId, {
     eventType: 'metric_checkpoint',
     source: 'metrics',
@@ -2269,10 +2274,12 @@ function dedupeById<T extends { id: string; createdAt?: string }>(items: T[], li
 }
 
 export async function saveTrendOpportunities(agentId: string, opportunities: TrendOpportunity[]): Promise<TrendOpportunity[]> {
-  const existing = await getTrendOpportunities(agentId, 50);
-  const merged = dedupeById([...opportunities, ...existing], 50);
-  await kvSet(KEYS.agentTrendOpportunities(agentId), merged);
-  return merged;
+  return withKeyLock(KEYS.agentTrendOpportunities(agentId), async () => {
+    const existing = await getTrendOpportunities(agentId, 50);
+    const merged = dedupeById([...opportunities, ...existing], 50);
+    await kvSet(KEYS.agentTrendOpportunities(agentId), merged);
+    return merged;
+  });
 }
 
 export async function getTrendOpportunities(agentId: string, limit = 20): Promise<TrendOpportunity[]> {
@@ -2281,11 +2288,13 @@ export async function getTrendOpportunities(agentId: string, limit = 20): Promis
 }
 
 export async function saveRelationshipOpportunities(agentId: string, opportunities: RelationshipOpportunity[]): Promise<RelationshipOpportunity[]> {
-  const existing = await getRelationshipOpportunities(agentId, 50);
-  const merged = dedupeById([...opportunities, ...existing], 50)
-    .sort((a, b) => b.score - a.score || Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
-  await kvSet(KEYS.agentRelationshipOpportunities(agentId), merged);
-  return merged;
+  return withKeyLock(KEYS.agentRelationshipOpportunities(agentId), async () => {
+    const existing = await getRelationshipOpportunities(agentId, 50);
+    const merged = dedupeById([...opportunities, ...existing], 50)
+      .sort((a, b) => b.score - a.score || Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
+    await kvSet(KEYS.agentRelationshipOpportunities(agentId), merged);
+    return merged;
+  });
 }
 
 export async function getRelationshipOpportunities(agentId: string, limit = 20): Promise<RelationshipOpportunity[]> {
@@ -2294,17 +2303,16 @@ export async function getRelationshipOpportunities(agentId: string, limit = 20):
 }
 
 export async function saveViralityPostmortem(agentId: string, postmortem: ViralityPostmortem): Promise<ViralityPostmortem[]> {
-  const existing = await getViralityPostmortems(agentId, 50);
-  const merged = dedupeById([postmortem, ...existing], 50);
-  await kvSet(KEYS.agentViralityPostmortems(agentId), merged);
-  return merged;
+  return saveViralityPostmortems(agentId, [postmortem]);
 }
 
 export async function saveViralityPostmortems(agentId: string, postmortems: ViralityPostmortem[]): Promise<ViralityPostmortem[]> {
-  const existing = await getViralityPostmortems(agentId, 50);
-  const merged = dedupeById([...postmortems, ...existing], 50);
-  await kvSet(KEYS.agentViralityPostmortems(agentId), merged);
-  return merged;
+  return withKeyLock(KEYS.agentViralityPostmortems(agentId), async () => {
+    const existing = await getViralityPostmortems(agentId, 50);
+    const merged = dedupeById([...postmortems, ...existing], 50);
+    await kvSet(KEYS.agentViralityPostmortems(agentId), merged);
+    return merged;
+  });
 }
 
 export async function getViralityPostmortems(agentId: string, limit = 20): Promise<ViralityPostmortem[]> {
@@ -2327,9 +2335,11 @@ export async function getBaseline(agentId: string): Promise<EngagementBaseline |
 
 export async function saveBaseline(agentId: string, baseline: EngagementBaseline): Promise<void> {
   // Never overwrite — baseline is frozen on first autopilot enable
-  const existing = await getBaseline(agentId);
-  if (existing) return;
-  await kvSet(KEYS.agentBaseline(agentId), baseline);
+  await withKeyLock(KEYS.agentBaseline(agentId), async () => {
+    const existing = await getBaseline(agentId);
+    if (existing) return;
+    await kvSet(KEYS.agentBaseline(agentId), baseline);
+  });
 }
 
 // ─── User storage ────────────────────────────────────────────────────────────
@@ -2461,15 +2471,27 @@ export async function releaseStripeWebhookEvent(eventId: string): Promise<void> 
 
 // ─── Session storage ─────────────────────────────────────────────────────────
 
+// Matches the session cookie's maxAge; a captured token must not outlive it.
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
 export async function createSession(userId: string): Promise<string> {
   const token = crypto.randomUUID();
   const session: Session = { userId, createdAt: new Date().toISOString() };
-  await kvSet(KEYS.session(token), session);
+  await kvSet(KEYS.session(token), session, { ex: SESSION_TTL_SECONDS });
   return token;
 }
 
 export async function getSession(token: string): Promise<Session | null> {
-  return kvGet<Session>(KEYS.session(token));
+  const session = await kvGet<Session>(KEYS.session(token));
+  if (!session) return null;
+  // Records written before server-side expiry existed carry no TTL, so the
+  // cookie lifetime is also enforced on read.
+  const createdAtMs = Date.parse(session.createdAt);
+  if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > SESSION_TTL_SECONDS * 1000) {
+    await deleteSession(token);
+    return null;
+  }
+  return session;
 }
 
 export async function deleteSession(token: string): Promise<void> {
@@ -2590,16 +2612,18 @@ export async function getStyleSignals(agentId: string): Promise<StyleSignals | n
 // ─── Feedback storage ───────────────────────────────────────────────────────
 
 export async function saveFeedback(agentId: string, entry: FeedbackEntry): Promise<void> {
-  const existing = await getFeedback(agentId);
-  // Prune on write: keep only last 30 days and max 20 entries
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const pruned = existing.filter(e => new Date(e.generatedAt).getTime() > thirtyDaysAgo);
-  const deduped = entry.tweetId
-    ? pruned.filter((e) => !(e.tweetId === entry.tweetId && e.source === entry.source))
-    : pruned;
-  deduped.push(entry);
-  const capped = deduped.slice(-20);
-  await kvSet(KEYS.agentFeedback(agentId), capped);
+  await withKeyLock(KEYS.agentFeedback(agentId), async () => {
+    const existing = await getFeedback(agentId);
+    // Prune on write: keep only last 30 days and max 20 entries
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const pruned = existing.filter(e => new Date(e.generatedAt).getTime() > thirtyDaysAgo);
+    const deduped = entry.tweetId
+      ? pruned.filter((e) => !(e.tweetId === entry.tweetId && e.source === entry.source))
+      : pruned;
+    deduped.push(entry);
+    const capped = deduped.slice(-20);
+    await kvSet(KEYS.agentFeedback(agentId), capped);
+  });
 }
 
 export async function getFeedback(agentId: string): Promise<FeedbackEntry[]> {
@@ -2661,21 +2685,23 @@ export async function addOutcomeEvent(
 ): Promise<OutcomeEvent> {
   const createdAt = event.createdAt || new Date().toISOString();
   const idempotencyKey = event.idempotencyKey || `${event.eventType}:${event.tweetId || event.xTweetId || crypto.randomUUID()}`;
-  const existing = await getOutcomeEvents(agentId, MAX_OUTCOME_EVENTS);
-  const duplicate = existing.find((item) => item.idempotencyKey === idempotencyKey);
-  if (duplicate) return duplicate;
+  return withKeyLock(KEYS.agentOutcomeEvents(agentId), async () => {
+    const existing = await getOutcomeEvents(agentId, MAX_OUTCOME_EVENTS);
+    const duplicate = existing.find((item) => item.idempotencyKey === idempotencyKey);
+    if (duplicate) return duplicate;
 
-  const counter = await kvIncr(KEYS.counterOutcomeEvent());
-  const full: OutcomeEvent = {
-    id: String(counter),
-    agentId,
-    createdAt,
-    ...event,
-    idempotencyKey,
-    metadata: compactMetadata(event.metadata),
-  };
-  await kvSet(KEYS.agentOutcomeEvents(agentId), [full, ...existing].slice(0, MAX_OUTCOME_EVENTS));
-  return full;
+    const counter = await kvIncr(KEYS.counterOutcomeEvent());
+    const full: OutcomeEvent = {
+      id: String(counter),
+      agentId,
+      createdAt,
+      ...event,
+      idempotencyKey,
+      metadata: compactMetadata(event.metadata),
+    };
+    await kvSet(KEYS.agentOutcomeEvents(agentId), [full, ...existing].slice(0, MAX_OUTCOME_EVENTS));
+    return full;
+  });
 }
 
 export async function getOutcomeEvents(agentId: string, limit = 100): Promise<OutcomeEvent[]> {
@@ -2716,32 +2742,34 @@ export async function upsertProductFact(input: {
   expiresAt: string;
   active?: boolean;
 }): Promise<ProductFact> {
-  const existingFacts = await getProductFacts({ includeExpired: true });
-  const existing = input.id ? existingFacts.find((fact) => (
-    fact.id === String(input.id) || fact.familyId === String(input.id)
-  )) : null;
-  const now = new Date().toISOString();
-  const familyId = existing?.familyId || String(await kvIncr(KEYS.counterProductFact()));
-  const version = (existing?.version || 0) + 1;
-  const id = `${familyId}:v${version}`;
-  const fact: ProductFact = {
-    schemaVersion: 2,
-    id,
-    familyId,
-    statement: input.statement.replace(/\s+/g, ' ').trim(),
-    provenanceUrl: input.provenanceUrl.trim(),
-    provenanceLabel: input.provenanceLabel.replace(/\s+/g, ' ').trim(),
-    verifiedByUserId: String(input.verifiedByUserId),
-    verifiedAt: input.verifiedAt,
-    expiresAt: input.expiresAt,
-    version,
-    active: input.active ?? true,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const next = [fact, ...existingFacts.filter((entry) => entry.id !== id)].slice(0, 200);
-  await kvSet(KEYS.productFacts(), next);
-  return fact;
+  return withKeyLock(KEYS.productFacts(), async () => {
+    const existingFacts = await getProductFacts({ includeExpired: true });
+    const existing = input.id ? existingFacts.find((fact) => (
+      fact.id === String(input.id) || fact.familyId === String(input.id)
+    )) : null;
+    const now = new Date().toISOString();
+    const familyId = existing?.familyId || String(await kvIncr(KEYS.counterProductFact()));
+    const version = (existing?.version || 0) + 1;
+    const id = `${familyId}:v${version}`;
+    const fact: ProductFact = {
+      schemaVersion: 2,
+      id,
+      familyId,
+      statement: input.statement.replace(/\s+/g, ' ').trim(),
+      provenanceUrl: input.provenanceUrl.trim(),
+      provenanceLabel: input.provenanceLabel.replace(/\s+/g, ' ').trim(),
+      verifiedByUserId: String(input.verifiedByUserId),
+      verifiedAt: input.verifiedAt,
+      expiresAt: input.expiresAt,
+      version,
+      active: input.active ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = [fact, ...existingFacts.filter((entry) => entry.id !== id)].slice(0, 200);
+    await kvSet(KEYS.productFacts(), next);
+    return fact;
+  });
 }
 
 // ─── Evidence-to-idea generation V2 ────────────────────────────────────────
@@ -2788,18 +2816,20 @@ export async function getSourceDocuments(agentId: string, limit = MAX_SOURCE_DOC
 
 export async function upsertSourceDocuments(agentId: string, documents: SourceDocument[]): Promise<SourceDocument[]> {
   if (documents.length === 0) return getSourceDocuments(agentId);
-  const now = Date.now();
-  const current = await getSourceDocuments(agentId, MAX_SOURCE_DOCUMENTS);
-  const normalized = documents.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }));
-  const retained = mergeRecordsById(current, normalized).filter((entry) => {
-    const fetchedAt = Date.parse(entry.fetchedAt);
-    if (!Number.isFinite(fetchedAt)) return false;
-    const retentionDays = entry.trustTier === 'primary' ? 180 : 14;
-    return now - fetchedAt <= retentionDays * 24 * 60 * 60 * 1000;
+  return withKeyLock(KEYS.agentSourceDocuments(agentId), async () => {
+    const now = Date.now();
+    const current = await getSourceDocuments(agentId, MAX_SOURCE_DOCUMENTS);
+    const normalized = documents.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }));
+    const retained = mergeRecordsById(current, normalized).filter((entry) => {
+      const fetchedAt = Date.parse(entry.fetchedAt);
+      if (!Number.isFinite(fetchedAt)) return false;
+      const retentionDays = entry.trustTier === 'primary' ? 180 : 14;
+      return now - fetchedAt <= retentionDays * 24 * 60 * 60 * 1000;
+    });
+    const next = newestByTimestamp(retained, (entry) => entry.fetchedAt).slice(0, MAX_SOURCE_DOCUMENTS);
+    await kvSet(KEYS.agentSourceDocuments(agentId), next);
+    return next;
   });
-  const next = newestByTimestamp(retained, (entry) => entry.fetchedAt).slice(0, MAX_SOURCE_DOCUMENTS);
-  await kvSet(KEYS.agentSourceDocuments(agentId), next);
-  return next;
 }
 
 export async function getStoryClusters(agentId: string, limit = MAX_STORY_CLUSTERS): Promise<StoryCluster[]> {
@@ -2829,7 +2859,7 @@ export async function getIdeaCandidates(agentId: string, limit = 100): Promise<I
   ).slice(0, Math.max(0, limit));
 }
 
-export async function upsertIdeaCandidates(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
+async function mergeIdeaCandidatesUnlocked(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
   const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
   const next = newestByTimestamp(
     mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
@@ -2839,17 +2869,23 @@ export async function upsertIdeaCandidates(agentId: string, candidates: IdeaCand
   return next;
 }
 
+export async function upsertIdeaCandidates(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
+  return withKeyLock(KEYS.agentIdeaCandidates(agentId), () => mergeIdeaCandidatesUnlocked(agentId, candidates));
+}
+
 export async function updateIdeaCandidate(
   agentId: string,
   ideaId: string,
   updates: Partial<Omit<IdeaCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
 ): Promise<IdeaCandidate | null> {
-  const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
-  const found = current.find((entry) => entry.id === ideaId);
-  if (!found) return null;
-  const updated: IdeaCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
-  await upsertIdeaCandidates(agentId, [updated]);
-  return updated;
+  return withKeyLock(KEYS.agentIdeaCandidates(agentId), async () => {
+    const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
+    const found = current.find((entry) => entry.id === ideaId);
+    if (!found) return null;
+    const updated: IdeaCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
+    await mergeIdeaCandidatesUnlocked(agentId, [updated]);
+    return updated;
+  });
 }
 
 export async function getDraftCandidates(agentId: string, limit = 100): Promise<DraftCandidate[]> {
@@ -2860,7 +2896,7 @@ export async function getDraftCandidates(agentId: string, limit = 100): Promise<
   ).slice(0, Math.max(0, limit));
 }
 
-export async function upsertDraftCandidates(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
+async function mergeDraftCandidatesUnlocked(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
   const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
   const next = newestByTimestamp(
     mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
@@ -2870,17 +2906,23 @@ export async function upsertDraftCandidates(agentId: string, candidates: DraftCa
   return next;
 }
 
+export async function upsertDraftCandidates(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
+  return withKeyLock(KEYS.agentDraftCandidates(agentId), () => mergeDraftCandidatesUnlocked(agentId, candidates));
+}
+
 export async function updateDraftCandidate(
   agentId: string,
   draftId: string,
   updates: Partial<Omit<DraftCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
 ): Promise<DraftCandidate | null> {
-  const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
-  const found = current.find((entry) => entry.id === draftId);
-  if (!found) return null;
-  const updated: DraftCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
-  await upsertDraftCandidates(agentId, [updated]);
-  return updated;
+  return withKeyLock(KEYS.agentDraftCandidates(agentId), async () => {
+    const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
+    const found = current.find((entry) => entry.id === draftId);
+    if (!found) return null;
+    const updated: DraftCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
+    await mergeDraftCandidatesUnlocked(agentId, [updated]);
+    return updated;
+  });
 }
 
 export async function recordV2CandidateOutcomeForTweet(
@@ -2929,17 +2971,19 @@ export async function addGenerationOutcomeEvent(
   agentId: string,
   event: Omit<GenerationOutcomeEvent, 'agentId' | 'createdAt'> & { createdAt?: string },
 ): Promise<GenerationOutcomeEvent> {
-  const current = await getGenerationOutcomeEvents(agentId, MAX_GENERATION_OUTCOMES);
   const full: GenerationOutcomeEvent = {
     ...event,
     agentId,
     createdAt: event.createdAt || new Date().toISOString(),
   };
-  const next = newestByTimestamp(
-    mergeRecordsById(current, [full]),
-    (entry) => entry.createdAt,
-  ).slice(0, MAX_GENERATION_OUTCOMES);
-  await kvSet(KEYS.agentGenerationOutcomes(agentId), next);
+  await withKeyLock(KEYS.agentGenerationOutcomes(agentId), async () => {
+    const current = await getGenerationOutcomeEvents(agentId, MAX_GENERATION_OUTCOMES);
+    const next = newestByTimestamp(
+      mergeRecordsById(current, [full]),
+      (entry) => entry.createdAt,
+    ).slice(0, MAX_GENERATION_OUTCOMES);
+    await kvSet(KEYS.agentGenerationOutcomes(agentId), next);
+  });
   return full;
 }
 
@@ -2959,12 +3003,14 @@ export async function getGenerationRuns(agentId: string, limit = 50): Promise<Ge
 }
 
 export async function saveGenerationRun(agentId: string, trace: GenerationRunTrace): Promise<void> {
-  const current = await getGenerationRuns(agentId, MAX_GENERATION_RUNS);
-  const next = newestByTimestamp(
-    mergeRecordsById(current, [{ ...trace, agentId, schemaVersion: 2 as const }]),
-    (entry) => entry.startedAt,
-  ).slice(0, MAX_GENERATION_RUNS);
-  await kvSet(KEYS.agentGenerationRuns(agentId), next);
+  await withKeyLock(KEYS.agentGenerationRuns(agentId), async () => {
+    const current = await getGenerationRuns(agentId, MAX_GENERATION_RUNS);
+    const next = newestByTimestamp(
+      mergeRecordsById(current, [{ ...trace, agentId, schemaVersion: 2 as const }]),
+      (entry) => entry.startedAt,
+    ).slice(0, MAX_GENERATION_RUNS);
+    await kvSet(KEYS.agentGenerationRuns(agentId), next);
+  });
   if (trace.completedAt && trace.outcomeCode) {
     await addGenerationOutcomeEvent(agentId, {
       id: `${trace.id}:terminal`,
@@ -3000,16 +3046,18 @@ export async function getSemanticBlocks(agentId: string, includeExpired = false)
 }
 
 export async function addSemanticBlock(agentId: string, block: SemanticBlock): Promise<SemanticBlock> {
-  const current = await getSemanticBlocks(agentId, true);
   const normalized = { ...block, agentId, schemaVersion: 2 as const };
-  const next = [
-    normalized,
-    ...current.filter((entry) => !(
-      entry.scope === normalized.scope
-      && entry.semanticKey === normalized.semanticKey
-    )),
-  ].slice(0, MAX_SEMANTIC_BLOCKS);
-  await kvSet(KEYS.agentSemanticBlocks(agentId), next);
+  await withKeyLock(KEYS.agentSemanticBlocks(agentId), async () => {
+    const current = await getSemanticBlocks(agentId, true);
+    const next = [
+      normalized,
+      ...current.filter((entry) => !(
+        entry.scope === normalized.scope
+        && entry.semanticKey === normalized.semanticKey
+      )),
+    ].slice(0, MAX_SEMANTIC_BLOCKS);
+    await kvSet(KEYS.agentSemanticBlocks(agentId), next);
+  });
   return normalized;
 }
 
@@ -3017,20 +3065,22 @@ export async function replaceLegacySemanticBackfillBlocks(
   agentId: string,
   blocks: SemanticBlock[],
 ): Promise<SemanticBlock[]> {
-  const current = await getSemanticBlocks(agentId, true);
-  const seen = new Set<string>();
-  const normalized = [
-    ...blocks,
-    ...current.filter((block) => !block.id.startsWith('semantic-block-backfill-')),
-  ].flatMap((block) => {
-    const entry = { ...block, agentId, schemaVersion: 2 as const };
-    const key = `${entry.scope}:${entry.semanticKey}`;
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [entry];
-  }).slice(0, MAX_SEMANTIC_BLOCKS);
-  await kvSet(KEYS.agentSemanticBlocks(agentId), normalized);
-  return normalized;
+  return withKeyLock(KEYS.agentSemanticBlocks(agentId), async () => {
+    const current = await getSemanticBlocks(agentId, true);
+    const seen = new Set<string>();
+    const normalized = [
+      ...blocks,
+      ...current.filter((block) => !block.id.startsWith('semantic-block-backfill-')),
+    ].flatMap((block) => {
+      const entry = { ...block, agentId, schemaVersion: 2 as const };
+      const key = `${entry.scope}:${entry.semanticKey}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [entry];
+    }).slice(0, MAX_SEMANTIC_BLOCKS);
+    await kvSet(KEYS.agentSemanticBlocks(agentId), normalized);
+    return normalized;
+  });
 }
 
 export async function getResearchRefreshState(agentId: string): Promise<ResearchRefreshState | null> {
@@ -3159,9 +3209,11 @@ function buildCriticVerdict(tweet: Tweet): CriticVerdict {
 
 export async function addCriticVerdictForTweet(tweet: Tweet): Promise<CriticVerdict> {
   const verdict = buildCriticVerdict(tweet);
-  const existing = await getCriticVerdicts(tweet.agentId, MAX_CRITIC_VERDICTS);
-  const rest = existing.filter((item) => item.tweetId !== tweet.id);
-  await kvSet(KEYS.agentCriticVerdicts(tweet.agentId), [verdict, ...rest].slice(0, MAX_CRITIC_VERDICTS));
+  await withKeyLock(KEYS.agentCriticVerdicts(tweet.agentId), async () => {
+    const existing = await getCriticVerdicts(tweet.agentId, MAX_CRITIC_VERDICTS);
+    const rest = existing.filter((item) => item.tweetId !== tweet.id);
+    await kvSet(KEYS.agentCriticVerdicts(tweet.agentId), [verdict, ...rest].slice(0, MAX_CRITIC_VERDICTS));
+  });
   return verdict;
 }
 
@@ -3201,49 +3253,64 @@ export async function upsertRelationshipProfile(
 ): Promise<RelationshipProfile | null> {
   const handle = normalizeRelationshipHandle(input.handle);
   if (!handle) return null;
-  const profiles = await getRelationshipProfiles(agentId, 250);
-  const existing = profiles.find((profile) => profile.handle.toLowerCase() === handle.toLowerCase());
-  const now = new Date().toISOString();
-  const topics = [...new Set([
-    ...(existing?.topics || []),
-    ...(input.topic ? [input.topic.slice(0, 80)] : []),
-  ])].slice(-8);
-  const interactions = (existing?.interactions || 0) + 1;
-  const repliesSent = (existing?.repliesSent || 0) + (input.replied ? 1 : 0);
-  const repliesRejected = (existing?.repliesRejected || 0) + (input.rejected ? 1 : 0);
-  const relationshipScore = Math.max(0, Math.min(1,
-    (existing?.relationshipScore ?? 0.2)
-    + (input.replied ? 0.08 : 0.02)
-    - (input.rejected ? 0.06 : 0)
-    + Math.min(0.2, interactions * 0.01)
-  ));
-  const cooldownUntil = input.cooldownMins
-    ? new Date(Date.now() + input.cooldownMins * 60 * 1000).toISOString()
-    : existing?.cooldownUntil || null;
-  const profile: RelationshipProfile = {
-    handle,
-    agentId,
-    displayName: input.displayName ?? existing?.displayName ?? null,
-    lastMentionId: input.mentionId ?? existing?.lastMentionId ?? null,
-    lastInteractionAt: now,
-    topics,
-    relationshipScore: Number(relationshipScore.toFixed(3)),
-    interactions,
-    repliesSent,
-    repliesRejected,
-    cooldownUntil,
-    doNotReply: input.doNotReply ?? existing?.doNotReply ?? false,
-    lastOutcome: input.outcome ?? existing?.lastOutcome ?? null,
-    updatedAt: now,
-  };
-  const rest = profiles.filter((item) => item.handle.toLowerCase() !== handle.toLowerCase());
-  await kvSet(KEYS.agentRelationshipProfiles(agentId), [profile, ...rest].slice(0, 250));
-  return profile;
+  return withKeyLock(KEYS.agentRelationshipProfiles(agentId), async () => {
+    const profiles = await getRelationshipProfiles(agentId, 250);
+    const existing = profiles.find((profile) => profile.handle.toLowerCase() === handle.toLowerCase());
+    const now = new Date().toISOString();
+    const topics = [...new Set([
+      ...(existing?.topics || []),
+      ...(input.topic ? [input.topic.slice(0, 80)] : []),
+    ])].slice(-8);
+    const interactions = (existing?.interactions || 0) + 1;
+    const repliesSent = (existing?.repliesSent || 0) + (input.replied ? 1 : 0);
+    const repliesRejected = (existing?.repliesRejected || 0) + (input.rejected ? 1 : 0);
+    const relationshipScore = Math.max(0, Math.min(1,
+      (existing?.relationshipScore ?? 0.2)
+      + (input.replied ? 0.08 : 0.02)
+      - (input.rejected ? 0.06 : 0)
+      + Math.min(0.2, interactions * 0.01)
+    ));
+    const cooldownUntil = input.cooldownMins
+      ? new Date(Date.now() + input.cooldownMins * 60 * 1000).toISOString()
+      : existing?.cooldownUntil || null;
+    const profile: RelationshipProfile = {
+      handle,
+      agentId,
+      displayName: input.displayName ?? existing?.displayName ?? null,
+      lastMentionId: input.mentionId ?? existing?.lastMentionId ?? null,
+      lastInteractionAt: now,
+      topics,
+      relationshipScore: Number(relationshipScore.toFixed(3)),
+      interactions,
+      repliesSent,
+      repliesRejected,
+      cooldownUntil,
+      doNotReply: input.doNotReply ?? existing?.doNotReply ?? false,
+      lastOutcome: input.outcome ?? existing?.lastOutcome ?? null,
+      updatedAt: now,
+    };
+    const rest = profiles.filter((item) => item.handle.toLowerCase() !== handle.toLowerCase());
+    await kvSet(KEYS.agentRelationshipProfiles(agentId), [profile, ...rest].slice(0, 250));
+    return profile;
+  });
 }
 
 export async function getRelationshipProfiles(agentId: string, limit = 100): Promise<RelationshipProfile[]> {
   const data = await kvGet<RelationshipProfile[]>(KEYS.agentRelationshipProfiles(agentId));
   return (data ?? []).slice(0, limit);
+}
+
+// Unique signal types collapse to one entry per tweet, so their id is stable.
+// Every other type may legitimately repeat for the same tweet (taste hints,
+// calibration edits), so each emission gets its own id and its own outcome event.
+function buildLearningSignalId(
+  agentId: string,
+  signal: Pick<LearningSignal, 'signalType' | 'tweetId' | 'xTweetId'>,
+): string {
+  const subject = signal.tweetId || signal.xTweetId || null;
+  if (!subject) return `${agentId}:${signal.signalType}:${crypto.randomUUID()}`;
+  if (UNIQUE_SIGNAL_TYPES.has(signal.signalType)) return `${agentId}:${signal.signalType}:${subject}`;
+  return `${agentId}:${signal.signalType}:${subject}:${crypto.randomUUID()}`;
 }
 
 export async function addLearningSignal(
@@ -3252,23 +3319,26 @@ export async function addLearningSignal(
 ): Promise<LearningSignal> {
   const createdAt = signal.createdAt || new Date().toISOString();
   const full: LearningSignal = {
-    id: `${agentId}:${signal.signalType}:${signal.tweetId || signal.xTweetId || crypto.randomUUID()}`,
+    id: buildLearningSignalId(agentId, signal),
     agentId,
     createdAt,
     ...signal,
   };
 
-  const existing = await getLearningSignals(agentId, 250);
-  const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
-  const pruned = existing.filter((entry) => new Date(entry.createdAt).getTime() > ninetyDaysAgo);
-  const deduped = UNIQUE_SIGNAL_TYPES.has(full.signalType) && full.tweetId
-    ? pruned.filter((entry) => !(entry.signalType === full.signalType && entry.tweetId === full.tweetId))
-    : pruned;
+  const replacedRewardDelta = await withKeyLock(KEYS.agentSignals(agentId), async () => {
+    const existing = await getLearningSignals(agentId, 250);
+    const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const pruned = existing.filter((entry) => new Date(entry.createdAt).getTime() > ninetyDaysAgo);
+    const replacesPrior = UNIQUE_SIGNAL_TYPES.has(full.signalType) && Boolean(full.tweetId);
+    const isSameSignal = (entry: LearningSignal) => entry.signalType === full.signalType && entry.tweetId === full.tweetId;
+    const replaced = replacesPrior ? pruned.filter(isSameSignal) : [];
+    const deduped = replacesPrior ? pruned.filter((entry) => !isSameSignal(entry)) : pruned;
 
-  deduped.unshift(full);
-  const capped = deduped.slice(0, 250);
-  await kvSet(KEYS.agentSignals(agentId), capped);
-  await updateDraftExperimentFromSignal(agentId, full);
+    deduped.unshift(full);
+    await kvSet(KEYS.agentSignals(agentId), deduped.slice(0, 250));
+    return replaced.reduce((sum, entry) => sum + (Number.isFinite(entry.rewardDelta) ? entry.rewardDelta : 0), 0);
+  });
+  await updateDraftExperimentFromSignal(agentId, full, replacedRewardDelta);
   await addOutcomeEvent(agentId, {
     eventType: full.signalType,
     source: 'learning_signal',
@@ -3372,23 +3442,20 @@ export async function saveSoulBackup(agentId: string, soulMd: string): Promise<v
 
 // ─── Soul version stack ─────────────────────────────────────────────────────
 
+const MAX_SOUL_VERSIONS = 10;
+
 export async function pushSoulVersion(agentId: string, soulMd: string, reason: string): Promise<void> {
-  const versions = await getSoulVersions(agentId);
-  const nextVersion = versions.length > 0 ? Math.max(...versions.map((v) => v.version)) + 1 : 1;
-  const entry: SoulVersion = { version: nextVersion, soulMd, updatedAt: new Date().toISOString(), reason };
-  await kvLpush(KEYS.agentSoulVersions(agentId), JSON.stringify(entry));
-  // Trim to last 10 versions
-  const current = await kvLrange(KEYS.agentSoulVersions(agentId), 0, -1);
-  if (current.length > 10) {
-    // Remove oldest entries beyond 10
-    for (let i = 10; i < current.length; i++) {
-      await kvLrem(KEYS.agentSoulVersions(agentId), -1, current[i] as string);
-    }
-  }
+  await withKeyLock(KEYS.agentSoulVersions(agentId), async () => {
+    const versions = await getSoulVersions(agentId);
+    const nextVersion = versions.length > 0 ? Math.max(...versions.map((v) => v.version)) + 1 : 1;
+    const entry: SoulVersion = { version: nextVersion, soulMd, updatedAt: new Date().toISOString(), reason };
+    await kvLpush(KEYS.agentSoulVersions(agentId), JSON.stringify(entry));
+    await kvLtrim(KEYS.agentSoulVersions(agentId), 0, MAX_SOUL_VERSIONS - 1);
+  });
 }
 
 export async function getSoulVersions(agentId: string): Promise<SoulVersion[]> {
-  const raw = await kvLrange(KEYS.agentSoulVersions(agentId), 0, 9);
+  const raw = await kvLrange(KEYS.agentSoulVersions(agentId), 0, MAX_SOUL_VERSIONS - 1);
   return raw.map((s) => parseListEntry<SoulVersion>(s)).filter((e): e is SoulVersion => e !== null);
 }
 
@@ -3500,11 +3567,13 @@ export async function addVoiceDirective(
   directive: string,
   options: { sourceMessage?: string | null; createdAt?: string } = {},
 ): Promise<VoiceDirectiveRule> {
-  const existing = await getVoiceDirectiveRules(agentId);
-  const compiled = buildVoiceDirectiveRule(directive, options);
-  const merged = mergeVoiceDirectiveRule(existing, compiled);
-  await saveVoiceDirectiveRules(agentId, merged);
-  return merged.find((rule) => rule.id === compiled.id) || compiled;
+  return withKeyLock(KEYS.agentVoiceDirectiveRules(agentId), async () => {
+    const existing = await getVoiceDirectiveRules(agentId);
+    const compiled = buildVoiceDirectiveRule(directive, options);
+    const merged = mergeVoiceDirectiveRule(existing, compiled);
+    await saveVoiceDirectiveRules(agentId, merged);
+    return merged.find((rule) => rule.id === compiled.id) || compiled;
+  });
 }
 
 export async function getVoiceDirectives(agentId: string): Promise<string[]> {

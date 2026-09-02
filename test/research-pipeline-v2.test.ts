@@ -3,6 +3,7 @@ import {
   buildResearchAgenda,
   clusterAndQualifySources,
   isResearchDocumentEligibleForClustering,
+  isStoryClusterEligibleForGeneration,
   selectSourceDocumentsForEnrichment,
 } from '@/lib/research-pipeline';
 import type { ResearchAgenda, SourceDocument } from '@/lib/types';
@@ -606,5 +607,22 @@ describe('research agenda and story qualification', () => {
       blockReason: 'Political drift lacks operator evidence.',
     });
     expect(clusters.find((cluster) => cluster.sourceDocumentIds.includes('chips'))?.blockReason).toBe('Blocked by the research agenda.');
+    expect(clusters.map((cluster) => isStoryClusterEligibleForGeneration(cluster, now.getTime()))).toEqual([false, false]);
+  });
+
+  it('shares one story eligibility gate across generation and seed synthesis', () => {
+    const [qualified] = clusterAndQualifySources({
+      agentId: 'agent-1',
+      agenda,
+      now,
+      documents: [
+        source({ id: 'chips', title: 'Semiconductor market pricing changes startup costs', publisher: 'Chipmaker', isPrimary: true, trustTier: 'primary', topics: ['semiconductor markets'], entities: ['Chipmaker'] }),
+      ],
+    });
+    expect(isStoryClusterEligibleForGeneration(qualified, now.getTime())).toBe(true);
+    expect(isStoryClusterEligibleForGeneration({ ...qualified, evidenceQualified: false }, now.getTime())).toBe(false);
+    expect(isStoryClusterEligibleForGeneration({ ...qualified, blockReason: 'Operator paused this story.', blockedUntil: '2026-08-02T00:00:00.000Z' }, now.getTime())).toBe(false);
+    expect(isStoryClusterEligibleForGeneration({ ...qualified, blockedUntil: '2026-08-02T00:00:00.000Z' }, now.getTime())).toBe(false);
+    expect(isStoryClusterEligibleForGeneration({ ...qualified, blockedUntil: '2026-07-01T00:00:00.000Z' }, now.getTime())).toBe(true);
   });
 });

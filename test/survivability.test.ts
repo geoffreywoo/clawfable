@@ -16,8 +16,11 @@ import {
   getAutopostPolicyIssue,
   pickDiverseTweet,
   clampPostsPerDay,
+  effectivePostsPerDay,
   DAILY_HARD_CAP,
+  MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY,
   MAX_POSTS_PER_DAY_SETTING,
+  POST_INTERVAL_JITTER_FRACTION,
 } from '../lib/survivability';
 import type { PostLogEntry, Tweet } from '../lib/types';
 
@@ -395,13 +398,48 @@ describe('pickDiverseTweet', () => {
     expect(pickDiverseTweet([], [])).toBeNull();
   });
 
-  it('falls back to oldest when no recent history', () => {
+  it('returns the top-ranked draft when there is no recent history', () => {
+    // The caller passes the queue best-first; the first autopilot post after
+    // launch has no history and must not fall to the worst-ranked draft.
     const queue = [
-      makeTweet({ id: 'newer' }),
-      makeTweet({ id: 'older' }),
+      makeTweet({ id: 'top-ranked' }),
+      makeTweet({ id: 'runner-up' }),
+      makeTweet({ id: 'lowest-ranked' }),
     ];
     const picked = pickDiverseTweet(queue, []);
-    expect(picked?.id).toBe('older');
+    expect(picked?.id).toBe('top-ranked');
+  });
+});
+
+// ─── Seeded jitter ──────────────────────────────────────────────────────────
+
+describe('jitterInterval with a slot seed', () => {
+  const base = (24 / 5) * 60 * 60 * 1000;
+
+  it('samples the same interval for the same slot on every tick', () => {
+    const seed = 'agent-1:2026-09-01T12:00:00.000Z';
+    const first = jitterInterval(base, seed);
+    for (let tick = 0; tick < 20; tick++) {
+      expect(jitterInterval(base, seed)).toBe(first);
+    }
+    expect(jitterInterval(base, 'agent-1:2026-09-01T18:00:00.000Z')).not.toBe(first);
+  });
+
+  it('spreads slot intervals across the full jitter band around the base', () => {
+    const samples = Array.from({ length: 1000 }, (_, index) => (
+      jitterInterval(base, `agent-1:2026-09-01T${String(index % 24).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}:${String(index % 7)}0.000Z`)
+    ));
+    const min = base * (1 - POST_INTERVAL_JITTER_FRACTION);
+    const max = base * (1 + POST_INTERVAL_JITTER_FRACTION);
+    for (const sample of samples) {
+      expect(sample).toBeGreaterThanOrEqual(min);
+      expect(sample).toBeLessThanOrEqual(max);
+    }
+    const sorted = [...samples].sort((a, b) => a - b);
+    expect(sorted[Math.floor(sorted.length * 0.1)]).toBeLessThan(base * 0.9);
+    expect(sorted[Math.floor(sorted.length * 0.9)]).toBeGreaterThan(base * 1.1);
+    const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    expect(Math.abs(mean - base) / base).toBeLessThan(0.03);
   });
 });
 
@@ -426,5 +464,15 @@ describe('clampPostsPerDay', () => {
   it('rounds fractional values', () => {
     expect(clampPostsPerDay(2.7)).toBe(3);
     expect(clampPostsPerDay(1.2)).toBe(1);
+  });
+});
+
+describe('effectivePostsPerDay', () => {
+  it('caps the automated cadence at the shared five-per-day maximum', () => {
+    expect(MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY).toBe(5);
+    expect(effectivePostsPerDay(12)).toBe(5);
+    expect(effectivePostsPerDay(6)).toBe(5);
+    expect(effectivePostsPerDay(3)).toBe(3);
+    expect(effectivePostsPerDay(0)).toBe(1);
   });
 });

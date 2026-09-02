@@ -265,6 +265,110 @@ describe('buildLearningSnapshot', () => {
     expect(formatLane?.nextCheck).toContain('more evidence');
   });
 
+  it('describes experiment lanes as the holdout flags that actually run', () => {
+    const snapshot = buildLearningSnapshot({
+      settings,
+      learnings: null,
+      memory,
+      banditPolicy: policy,
+      signals: [],
+      feedback: [],
+      allTweets: [],
+      performanceHistory: [],
+      baseline: { avgLikes: 10, avgRetweets: 2 },
+    });
+
+    const formatLane = snapshot.experiments.lanes.find((lane) => lane.id === 'formats');
+    const hookLane = snapshot.experiments.lanes.find((lane) => lane.id === 'hooks');
+    expect(formatLane?.steering).toBe('holdout_flag');
+    expect(hookLane?.steering).toBe('holdout_flag');
+    expect(formatLane?.hypothesis).toContain('experiment holdouts');
+    expect(formatLane?.hypothesis).toContain('question');
+    expect(formatLane?.hypothesis).not.toContain('testing whether');
+
+    for (const id of ['topics', 'lengths', 'tones', 'specificity', 'structure'] as const) {
+      const lane = snapshot.experiments.lanes.find((entry) => entry.id === id);
+      expect(lane?.steering).toBe('observed_only');
+      expect(lane?.hypothesis).toContain('observed from outcomes only');
+      expect(lane?.hypothesis).not.toContain('testing whether');
+      expect(lane?.hypothesis).not.toContain('experiment holdouts');
+    }
+  });
+
+  it('measures engagement lift on the spread-weighted scale on both sides', () => {
+    const atBaseline = (index: number) => performance({
+      tweetId: `tweet-flat-${index}`,
+      xTweetId: `x-flat-${index}`,
+      content: `Flat post ${index}`,
+      postedAt: `2026-04-1${index}T10:00:00.000Z`,
+      checkedAt: '2026-04-18T10:00:00.000Z',
+      likes: 20,
+      retweets: 2,
+      replies: 4,
+    });
+    const snapshot = buildLearningSnapshot({
+      settings,
+      learnings: null,
+      memory,
+      banditPolicy: policy,
+      signals: [],
+      feedback: [],
+      allTweets: [],
+      performanceHistory: [atBaseline(5), atBaseline(6), atBaseline(7)],
+      baseline: { avgLikes: 20, avgRetweets: 2 },
+    });
+
+    const currentWeek = snapshot.weeklySeries[snapshot.weeklySeries.length - 1];
+    expect(snapshot.overview.engagementLiftPercent).not.toBeNull();
+    expect(Math.abs(snapshot.overview.engagementLiftPercent as number)).toBeLessThanOrEqual(10);
+    expect(Math.abs(currentWeek.engagementLift)).toBeLessThanOrEqual(10);
+    expect(snapshot.funnel.outperformedBaseline).toBe(0);
+  });
+
+  it('lifts a pending soul evolution proposal into the snapshot', () => {
+    const soulEvolution = {
+      mode: 'approval' as const,
+      lastEvolvedAt: null,
+      lastProposedAt: '2026-04-17T09:00:00.000Z',
+      pendingProposal: {
+        version: 4,
+        proposedAt: '2026-04-17T09:00:00.000Z',
+        expiresAt: '2026-04-24T09:00:00.000Z',
+        changeSummary: 'sharpen the openings',
+        soulMd: '# SOUL\n\nSharper.',
+      },
+      cooldownUntil: '2026-04-18T09:00:00.000Z',
+      holdReason: 'Soul evolution proposal v4 (proposed 2026-04-17T09:00:00.000Z) is awaiting operator review',
+    };
+    const snapshot = buildLearningSnapshot({
+      settings,
+      learnings: null,
+      memory: { ...memory, soulEvolution },
+      banditPolicy: policy,
+      signals: [],
+      feedback: [],
+      allTweets: [],
+      performanceHistory: [],
+      baseline: null,
+    });
+
+    expect(snapshot.soulEvolution?.pendingProposal?.changeSummary).toBe('sharpen the openings');
+    expect(snapshot.soulEvolution?.holdReason).toContain('awaiting operator review');
+
+    const bare = buildLearningSnapshot({
+      settings,
+      learnings: null,
+      memory,
+      banditPolicy: policy,
+      signals: [],
+      feedback: [],
+      allTweets: [],
+      performanceHistory: [],
+      baseline: null,
+    });
+    expect(bare.soulEvolution).toBeNull();
+  });
+
   it('builds an improving scoreboard from weekly approval and performance gains', () => {
     const allTweets = [
       tweet({

@@ -147,6 +147,8 @@ describe('buildOutcomeEpisode', () => {
         quotes: 0,
         bookmarks: 0,
         experimentHoldout,
+        // Within the 30-day experiment window; the shield expires after it.
+        postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       }),
       { avgLikes: 30, avgRetweets: 5 },
       rows,
@@ -157,6 +159,23 @@ describe('buildOutcomeEpisode', () => {
     expect(shielded).toBeGreaterThan(unshielded);
     // The shield softens, it does not erase: a real flop still reads negative.
     expect(shielded).toBeLessThan(0);
+    // Outside the 30-day window the same row reads unshielded.
+    const expired = computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-old',
+        xTweetId: 'x-hold-old',
+        likes: 6,
+        retweets: 1,
+        replies: 1,
+        quotes: 0,
+        bookmarks: 0,
+        experimentHoldout: true,
+        postedAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      { avgLikes: 30, avgRetweets: 5 },
+      rows,
+    );
+    expect(expired).toBe(unshielded);
   });
 
   it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
@@ -351,5 +370,33 @@ describe('buildOutcomeEpisode', () => {
 
     expect(episodes).toHaveLength(1);
     expect(episodes[0].stage).toBe('final');
+  });
+});
+
+describe('buildOutcomeEpisodes checkpoint selection', () => {
+  it('uses the latest checkpoint row for a tweet, not the oldest row in a newest-first list', () => {
+    const history: TweetPerformance[] = [
+      performance({ checkedAt: '2026-04-02T00:00:00.000Z', likes: 120, retweets: 20, replies: 10, performanceCheckpoint: 'full_24h' }),
+      performance({ checkedAt: '2026-04-01T00:15:00.000Z', likes: 2, retweets: 0, replies: 0, performanceCheckpoint: 'initial_15m' }),
+      ...Array.from({ length: 6 }, (_, index) => performance({
+        tweetId: `baseline-${index}`,
+        xTweetId: `x-baseline-${index}`,
+        likes: 40,
+        retweets: 8,
+        replies: 6,
+        performanceCheckpoint: 'full_24h',
+      })),
+    ];
+    const [episode] = buildOutcomeEpisodes({
+      agentId: 'agent-1',
+      tweets: [tweet()],
+      signals: [signal()],
+      performanceHistory: history,
+      baseline: { avgLikes: 40, avgRetweets: 8 },
+    });
+
+    expect(episode.stage).toBe('final');
+    expect(episode.observedAt).toBe('2026-04-02T00:00:00.000Z');
+    expect(episode.reward.engagementLift).toBeGreaterThan(0);
   });
 });

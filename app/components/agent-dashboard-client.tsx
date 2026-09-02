@@ -487,12 +487,12 @@ export function AgentDashboardClient({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-              <path d="M8 2L14 14H2L8 2z" stroke="#f59e0b" strokeWidth="1.3" strokeLinejoin="round" />
-              <line x1="8" y1="7" x2="8" y2="10" stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" />
-              <circle cx="8" cy="12" r="0.5" fill="#f59e0b" />
+              <path d="M8 2L14 14H2L8 2z" stroke="var(--warning)" strokeWidth="1.3" strokeLinejoin="round" />
+              <line x1="8" y1="7" x2="8" y2="10" stroke="var(--warning)" strokeWidth="1.3" strokeLinecap="round" />
+              <circle cx="8" cy="12" r="0.5" fill="var(--warning)" />
             </svg>
             <div>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#f59e0b', letterSpacing: '0' }}>
+              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: 'var(--warning)', letterSpacing: '0' }}>
                 Setup incomplete: {SETUP_BANNER_CONTENT[setupStep].title}
               </p>
               <p style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
