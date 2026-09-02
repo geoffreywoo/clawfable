@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { nextSessionState } from '@/lib/engagement';
 import { getEngagementSession, updateEngagementSession } from '@/lib/kv-storage';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 function ensureSessionAgent(sessionAgentId: string, agentId: string) {
   return String(sessionAgentId) === String(agentId);
@@ -42,7 +43,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const action = typeof body?.action === 'string' ? body.action : '';
     const now = new Date().toISOString();
 

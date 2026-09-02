@@ -3,6 +3,7 @@ import { getAgentByHandle, updateAgent } from '@/lib/kv-storage';
 import { getMe } from '@/lib/twitter-client';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/connect
 export async function POST(
@@ -13,7 +14,11 @@ export async function POST(
   try {
     const { agent } = await requireAgentAccess(id);
 
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const { apiKey, apiSecret, accessToken, accessSecret } = body;
     if (!apiKey || !apiSecret || !accessToken || !accessSecret) {
       return NextResponse.json({ error: 'All four API keys are required' }, { status: 400 });

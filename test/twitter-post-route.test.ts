@@ -111,6 +111,35 @@ describe('twitter post route', () => {
     });
   });
 
+  it('answers 400 for a malformed JSON body before touching X', async () => {
+    const agent = await createAgent({
+      handle: 'manual-post-json-guard',
+      name: 'Guard Agent',
+      soulMd: '# soul',
+      apiKey: 'encoded-app-key',
+      apiSecret: 'encoded-app-secret',
+      accessToken: 'encoded-access-token',
+      accessSecret: 'encoded-access-secret',
+      isConnected: 1,
+      xUserId: 'x-manual-post-json-guard',
+    } as any);
+    mocks.requireAgentAccess.mockResolvedValue({ user: { id: 'user-1' }, agent });
+
+    const response = await POST(
+      new Request('http://localhost/api/agents/twitter/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      }) as any,
+      { params: Promise.resolve({ id: agent.id }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('Invalid JSON body');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.acquireAutopilotLock).not.toHaveBeenCalled();
+  });
+
   it('blocks random sports at the final X write while allowing qualified portfolio business context', async () => {
     const agent = await createAgent({
       handle: 'geoffreywoo',

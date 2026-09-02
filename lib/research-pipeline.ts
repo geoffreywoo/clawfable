@@ -433,7 +433,6 @@ export async function enrichSourceDocuments(
   try {
     result = await generateText({
       task: 'source_enrichment',
-      tier: 'fast',
       modelStack,
       maxTokens: 4200,
       temperature: 0,

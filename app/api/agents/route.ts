@@ -11,6 +11,7 @@ import { parseSoulMd } from '@/lib/soul-parser';
 import { requireUser, handleAuthError } from '@/lib/auth';
 import { assertCanCreateAgent, BillingError } from '@/lib/billing';
 import { getAgentSummariesForUser, serializeAgentDetail } from '@/lib/dashboard-data';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // GET /api/agents — list current user's agents
 export async function GET() {
@@ -31,8 +32,12 @@ export async function POST(request: NextRequest) {
     const agentCount = await getAccessibleAgentCount(user);
     assertCanCreateAgent(user, agentCount);
 
-    const body = await request.json();
-    const { handle, name, soulMd } = body;
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
+    const { handle, name, soulMd } = body as Record<string, any>;
     if (!handle || !name || !soulMd) {
       return NextResponse.json({ error: 'handle, name, and soulMd are required' }, { status: 400 });
     }

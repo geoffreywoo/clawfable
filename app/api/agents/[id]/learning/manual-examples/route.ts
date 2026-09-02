@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleAuthError, requireAgentAccess } from '@/lib/auth';
 import { getManualExampleCuration, updateManualExampleCuration } from '@/lib/kv-storage';
 import { buildLearnings } from '@/lib/performance';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 function mergeIds(current: string[], add: string[] = [], remove: string[] = []): string[] {
   const next = new Set(current.map((id) => String(id)));
@@ -37,7 +38,11 @@ export async function PATCH(
   const { id } = await params;
   try {
     const { agent } = await requireAgentAccess(id);
-    const body = await request.json().catch(() => ({}));
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const current = await getManualExampleCuration(id);
     const pin = requestIds(body.pin);
     const block = requestIds(body.block);

@@ -7,7 +7,6 @@ import { estimateAiUsageCostUsd } from './ai-pricing';
 export { estimateAiUsageCostUsd } from './ai-pricing';
 
 export type AiProvider = 'openai' | 'anthropic';
-export type AiModelTier = 'quality' | 'fast';
 export type OpenAiReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type AiTask =
   | 'source_enrichment'
@@ -25,8 +24,7 @@ export type AiTask =
   | 'classification'
   | 'soul_generation'
   | 'exceptional'
-  | 'default_quality'
-  | 'default_fast';
+  | 'default_quality';
 export type AiMessageRole = 'user' | 'assistant';
 
 export interface AiModelTarget {
@@ -43,7 +41,6 @@ export interface GenerateTextOptions {
   system: string;
   prompt?: string;
   messages?: AiMessage[];
-  tier?: AiModelTier;
   task?: AiTask;
   modelChain?: AiModelTarget[];
   maxTokens: number;
@@ -142,7 +139,6 @@ const DEFAULT_TASK_TIMEOUT_MS: Record<AiTask, number> = {
   soul_generation: 180_000,
   exceptional: 180_000,
   default_quality: 120_000,
-  default_fast: 60_000,
 };
 
 export const PUBLISHING_V2_MODEL_STACK: GenerationModelStackId = 'publishing_v2_quality';
@@ -188,7 +184,6 @@ const TASK_MODEL_CHAINS: Record<AiTask, AiModelTarget[]> = {
   soul_generation: [OAI_QUALITY, CLAUDE_QUALITY],
   exceptional: [OAI_QUALITY, CLAUDE_QUALITY],
   default_quality: [OAI_QUALITY, CLAUDE_QUALITY],
-  default_fast: [OAI_QUALITY, CLAUDE_QUALITY],
 };
 
 const MODEL_STACK_TASK_OVERRIDES: Partial<Record<GenerationModelStackId, Partial<Record<AiTask, AiModelTarget[]>>>> = {
@@ -336,26 +331,20 @@ function dedupeTargets(targets: AiModelTarget[]): AiModelTarget[] {
 
 export function getModelChainForTask(
   task: AiTask,
-  tier: AiModelTier = 'quality',
   modelStack: GenerationModelStackId = 'standard',
 ): AiModelTarget[] {
-  const stackOverride = MODEL_STACK_TASK_OVERRIDES[modelStack]?.[task];
-  return dedupeTargets(
-    stackOverride
-    || TASK_MODEL_CHAINS[task]
-    || TASK_MODEL_CHAINS[tier === 'fast' ? 'default_fast' : 'default_quality'],
-  );
+  return dedupeTargets(MODEL_STACK_TASK_OVERRIDES[modelStack]?.[task] || TASK_MODEL_CHAINS[task]);
 }
 
 function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
   if (options.modelChain?.length) {
     const taskFallbacks = options.task
-      ? getModelChainForTask(options.task, options.tier, options.modelStack)
+      ? getModelChainForTask(options.task, options.modelStack)
       : [];
     return dedupeTargets([...taskFallbacks, ...options.modelChain]);
   }
-  if (options.task) return getModelChainForTask(options.task, options.tier, options.modelStack);
-  return getModelChainForTask(options.tier === 'fast' ? 'default_fast' : 'default_quality', options.tier);
+  if (options.task) return getModelChainForTask(options.task, options.modelStack);
+  return getModelChainForTask('default_quality');
 }
 
 async function generateWithOpenAi(
@@ -516,7 +505,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   const fallbackAttempts: AiFallbackAttempt[] = [];
   const timeoutMs = typeof options.timeoutMs === 'number'
     ? options.timeoutMs
-    : DEFAULT_TASK_TIMEOUT_MS[options.task || (options.tier === 'fast' ? 'default_fast' : 'default_quality')];
+    : DEFAULT_TASK_TIMEOUT_MS[options.task || 'default_quality'];
   const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : null;
   for (let index = 0; index < modelChain.length; index++) {
     const target = modelChain[index];

@@ -1334,27 +1334,22 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     .filter((group) => group.phase === 'initial');
   const ideaGenerationChain = getModelChainForTask(
     'idea_generation',
-    'quality',
     activeModelStack,
   );
   const ideaJudgeChain = getModelChainForTask(
     'idea_judgment',
-    'quality',
     activeModelStack,
   );
   const writingChain = getModelChainForTask(
     'tweet_writing',
-    'quality',
     activeModelStack,
   );
   const copyJudgeChain = getModelChainForTask(
     'copy_judgment',
-    'quality',
     activeModelStack,
   );
   const shadowControlWritingChain = getModelChainForTask(
     'tweet_writing',
-    'quality',
     modelStackAssignment.shadowStack,
   );
   const primaryIdeaGeneration = ideaGenerationChain[0];

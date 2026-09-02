@@ -10,6 +10,7 @@ import {
 import { extractStyleSignals, generateSoulMd } from '@/lib/soul-generation';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import type { WizardData } from '@/lib/types';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 const ARCHETYPES = ['contrarian', 'optimist', 'analyst', 'provocateur', 'educator'];
 
@@ -31,8 +32,12 @@ export async function POST(
       );
     }
 
-    const body = await request.json();
-    const { exampleTweets, archetype, topics, frequency } = body;
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
+    const { exampleTweets, archetype, topics, frequency } = body as Record<string, any>;
 
     // Validate inputs
     if (!archetype || !ARCHETYPES.includes(archetype)) {

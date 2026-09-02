@@ -12,6 +12,7 @@ import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/repl
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/twitter/post
 export async function POST(
@@ -33,7 +34,11 @@ export async function POST(
       return NextResponse.json({ error: 'Twitter API not configured for this agent' }, { status: 503 });
     }
 
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const { replyToId, tweetId } = body;
     let content = String(body?.content || '');
     dbTweetId = tweetId ? String(tweetId) : null;

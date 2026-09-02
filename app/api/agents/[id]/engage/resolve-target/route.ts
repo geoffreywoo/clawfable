@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { resolveEngagementTarget } from '@/lib/engagement';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/agents/[id]/engage/resolve-target
 export async function POST(
@@ -11,7 +12,11 @@ export async function POST(
 
   try {
     const { agent } = await requireAgentAccess(id);
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const url = typeof body?.url === 'string' ? body.url : '';
 
     if (!url.trim()) {

@@ -3,11 +3,16 @@ import {
   consumeBrowserCompanionPairingChallenge,
   createBrowserCompanionPairing,
 } from '@/lib/kv-storage';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // POST /api/browser-companion/pairings/complete
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const challenge = typeof body?.challenge === 'string' ? body.challenge : '';
     const machineLabel = typeof body?.machineLabel === 'string' && body.machineLabel.trim()
       ? body.machineLabel.trim()

@@ -13,6 +13,7 @@ import {
   getVoiceChatResponseMaxTokens,
 } from '@/lib/voice-chat-prompt';
 import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
+import { readJsonObjectBody } from '@/lib/request-validation';
 
 // GET /api/agents/[id]/voice-chat — get chat history + active directives
 export async function GET(
@@ -46,7 +47,11 @@ export async function POST(
   const { id } = await params;
   try {
     const { agent, user } = await requireAgentAccess(id);
-    const body = await request.json();
+    const parsedBody = await readJsonObjectBody(request);
+    if (!parsedBody.ok || !parsedBody.value) {
+      return NextResponse.json({ error: parsedBody.error || 'Invalid JSON body' }, { status: 400 });
+    }
+    const body = parsedBody.value;
     const { message } = body;
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'message required' }, { status: 400 });
@@ -71,7 +76,6 @@ export async function POST(
     // The model responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await generateText({
       task: 'learning',
-      tier: 'quality',
       maxTokens: getVoiceChatResponseMaxTokens({
         messageLength: message.trim().length,
         directiveCount: activeDirectiveRules.length,
@@ -169,7 +173,6 @@ async function auditQueueAgainstDirective(
 
   const response = await generateText({
     task: 'final_judgment',
-    tier: 'quality',
     maxTokens: getDirectiveAuditMaxTokens(queue.length),
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:
 - PASS: tweet already complies with the directive
