@@ -14,6 +14,7 @@ import {
   getAgent,
   updateProtocolSettings,
   getQueuedTweets,
+  getTweet,
   getTweets,
   getAnalysis,
   updateTweet,
@@ -58,6 +59,8 @@ import {
   isNearDuplicate,
   pickDiverseTweet,
   clampPostsPerDay,
+  effectivePostsPerDay,
+  MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY,
   getRecentPostDuplicateIssue,
   getReplyRepetitionIssue,
   getTweetCompletenessIssue,
@@ -91,6 +94,7 @@ import {
   GEOFFREY_CONTENT_MIX_POLICY_VERSION,
   evaluateGeoffreyQueueContentMix,
   getGeoffreyContentMixDecision,
+  isGeoffreyContentMixQueueSlotReserved,
 } from './geoffrey-content-mix';
 import {
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
@@ -140,6 +144,8 @@ export interface QueuePolicyRefreshResult {
   after: number;
   certified: number;
   quarantined: number;
+  /** Queued drafts held out of this pass by a content-mix window; they stay queued. */
+  deferred: number;
 }
 
 interface AutoReplyRunOutcome {
@@ -166,7 +172,19 @@ const HANDLED_AUTO_REPLY_FORMATS = new Set([
 ]);
 const AUTO_REPLY_HANDLED_LOG_LIMIT = 1000;
 const MAX_AUTO_REPLIES_PER_CONVERSATION = 1;
-const MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY = 5;
+/**
+ * Post-log entries the posting tick reads. The cron writes at least one entry
+ * per 10-minute tick, so a 50-entry window covered under 8 hours and the 24h
+ * cap and the recent-post diversity gate never saw a full day.
+ */
+const AUTOPILOT_POST_LOG_WINDOW = 400;
+/**
+ * Shared by the autopost-time semantic gate and the queue-insert gate. When
+ * the two drifted (0.48 vs 0.52) drafts queued in the gap were deterministically
+ * quarantined at post time with a spurious negative learning signal.
+ */
+export const QUEUE_SEMANTIC_DUPLICATE_THRESHOLD = 0.48;
+const CONTENT_MIX_DEFERRAL_LOG_PREFIX = 'content_mix_deferred:';
 
 const POSTED_AUTO_REPLY_FORMATS = new Set([
   'auto_reply',
@@ -204,6 +222,19 @@ function effectiveAutopostThreshold(tweet: Tweet, mode: ProtocolSettings['autono
 
 function clearsAutonomyThreshold(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
   return effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON >= effectiveAutopostThreshold(tweet, mode, threshold);
+}
+
+/**
+ * The legacy confidence gate applies only to drafts that carry a model
+ * confidence. V2 drafts were already judged by the final critic, and a post
+ * the operator wrote is operator intent, not a model guess: neither is gated
+ * or archived by the stale/low-confidence sweep. The posting tick, the queue
+ * health inspection, and the watchdog sweep must all agree on this rule.
+ */
+function isConfidenceEligibleForAutopost(tweet: Tweet, mode: ProtocolSettings['autonomyMode'], threshold: number): boolean {
+  return tweet.contentProvenance === 'operator_written'
+    || tweet.pipelineVersion === 'v2'
+    || clearsAutonomyThreshold(tweet, mode, threshold);
 }
 
 function isAutopostableQueuedTweet(tweet: Tweet): boolean {
@@ -480,17 +511,28 @@ function getSemanticHistoryIssue(
       { content },
     ),
   ), 0);
-  return maxSimilarity >= 0.48
+  return maxSimilarity >= QUEUE_SEMANTIC_DUPLICATE_THRESHOLD
     ? `Semantic idea repeats a recent post (${maxSimilarity.toFixed(2)} similarity).`
     : null;
+}
+
+interface QueuePolicyRescoreOptions {
+  /**
+   * Recent post log (newest first) used to avoid re-logging an unchanged
+   * content-mix deferral on every tick. Entries logged by this pass are
+   * pushed onto it so a later pass in the same tick sees them.
+   */
+  recentLog?: PostLogEntry[];
 }
 
 async function rescoreQueuedTweetsForCurrentPolicy(
   agent: Agent,
   queuedTweets: Tweet[],
   context: Awaited<ReturnType<typeof buildGenerationContext>> | null,
-): Promise<Tweet[]> {
+  options: QueuePolicyRescoreOptions = {},
+): Promise<{ valid: Tweet[]; deferred: Tweet[] }> {
   let valid: Tweet[] = [];
+  const deferred: Tweet[] = [];
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
@@ -574,18 +616,31 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     if (contentMixDeferred.length > 0) {
       const deferredIds = new Set(contentMixDeferred.map(({ tweet }) => tweet.id));
       valid = valid.filter((tweet) => !deferredIds.has(tweet.id));
-      await addPostLogEntry(agent.id, {
-        agentId: agent.id,
-        tweetId: '',
-        xTweetId: '',
-        content: '',
-        format: 'queue_refresh',
-        topic: 'content_mix',
-        postedAt: new Date().toISOString(),
-        source: 'autopilot',
-        action: 'skipped',
-        reason: `Deferred ${contentMixDeferred.length} queued draft${contentMixDeferred.length === 1 ? '' : 's'} for the company content-mix window; they stay queued and become postable when the window clears.`,
-      }).catch(() => null);
+      deferred.push(...contentMixDeferred.map(({ tweet }) => tweet));
+      // Log once per deferred set, not once per tick: a steady-state hold
+      // would otherwise write an entry every 10 minutes and crowd the window
+      // the daily cap and diversity gate read.
+      const deferralKey = `${CONTENT_MIX_DEFERRAL_LOG_PREFIX}${[...deferredIds].map(String).sort().join(',')}`;
+      const lastDeferralEntry = (options.recentLog || []).find((entry) => (
+        entry.format === 'queue_refresh' && entry.topic === 'content_mix'
+      ));
+      if (lastDeferralEntry?.skipReason !== deferralKey) {
+        const entry: Omit<PostLogEntry, 'id'> = {
+          agentId: agent.id,
+          tweetId: '',
+          xTweetId: '',
+          content: '',
+          format: 'queue_refresh',
+          topic: 'content_mix',
+          postedAt: new Date().toISOString(),
+          source: 'autopilot',
+          action: 'skipped',
+          reason: `Deferred ${contentMixDeferred.length} queued draft${contentMixDeferred.length === 1 ? '' : 's'} for the company content-mix window; they stay queued and become postable when the window clears.`,
+          skipReason: deferralKey,
+        };
+        await addPostLogEntry(agent.id, entry).catch(() => null);
+        options.recentLog?.unshift({ ...entry, id: `pending:${entry.postedAt}` });
+      }
     }
   }
   await Promise.all(invalid.map(({ tweet, issue }) => updateTweet(tweet.id, {
@@ -659,7 +714,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       reason: `Quarantined ${invalid.length} queued artifact${invalid.length === 1 ? '' : 's'} that failed current generation, quality, or account-topic policy.`,
     });
   }
-  return valid;
+  return { valid, deferred };
 }
 
 export async function refreshQueuedTweetsForCurrentQualityPolicy(
@@ -667,12 +722,13 @@ export async function refreshQueuedTweetsForCurrentQualityPolicy(
 ): Promise<QueuePolicyRefreshResult> {
   const before = await getQueuedTweets(agent.id);
   const context = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
-  const valid = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
+  const { valid, deferred } = await rescoreQueuedTweetsForCurrentPolicy(agent, before, context);
   return {
     before: before.length,
     after: valid.length,
     certified: valid.length,
-    quarantined: before.length - valid.length,
+    quarantined: before.length - valid.length - deferred.length,
+    deferred: deferred.length,
   };
 }
 
@@ -749,7 +805,63 @@ export async function regenerateAgentQueue(
     minQueueSize: settings.minQueueSize,
   };
 }
-async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[], recentPostedContent: string[] = []): Promise<Tweet[]> {
+function getStaleSelectionReason(candidate: Tweet, live: Tweet | null): string | null {
+  if (!live) return `Stale selection gate: draft ${candidate.id} no longer exists in storage (deleted before posting).`;
+  if (live.quarantinedAt) return `Stale selection gate: draft ${candidate.id} was quarantined before posting (${live.quarantineReason || 'no reason recorded'}).`;
+  if (live.status !== 'queued') return `Stale selection gate: draft ${candidate.id} is now ${live.status}, not queued.`;
+  if (live.content !== candidate.content) return `Stale selection gate: draft ${candidate.id} was edited after it was ranked; the new copy will be re-validated next tick.`;
+  return null;
+}
+
+/**
+ * A successful X post whose status write failed leaves the tweet queued while
+ * the post log already records its xTweetId. Without this, the next tick
+ * sees its own live copy in recent posts, quarantines the draft as a
+ * duplicate, and records a negative signal for a post that is live.
+ */
+async function reconcileQueuedTweetsAlreadyPosted(
+  agentId: string,
+  queue: Tweet[],
+  postLog: PostLogEntry[],
+): Promise<Tweet[]> {
+  const remaining: Tweet[] = [];
+  for (const queuedTweet of queue) {
+    const liveEntry = postLog.find((entry) => (
+      String(entry.tweetId) === String(queuedTweet.id)
+      && Boolean(entry.xTweetId)
+      && isSuccessfulOriginalPostLogEntry(entry)
+    ));
+    if (!liveEntry) {
+      remaining.push(queuedTweet);
+      continue;
+    }
+    await updateTweet(queuedTweet.id, {
+      status: 'posted',
+      xTweetId: liveEntry.xTweetId,
+      postedAt: liveEntry.postedAt,
+    });
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: queuedTweet.id,
+      xTweetId: liveEntry.xTweetId,
+      content: queuedTweet.content,
+      format: 'queue_reconcile',
+      topic: queuedTweet.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: `Reconciled queued draft to posted: X already accepted it as ${liveEntry.xTweetId} at ${liveEntry.postedAt} and only the status write had failed.`,
+    }).catch(() => null);
+  }
+  return remaining;
+}
+
+async function validateQueuedTweetsForPosting(
+  agent: Agent,
+  queuedTweets: Tweet[],
+  recentPostedContent: string[] = [],
+  recentLog: PostLogEntry[] = [],
+): Promise<Tweet[]> {
   const nativeContext = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
   const semanticHistoryContent = [...new Set([
     ...recentPostedContent,
@@ -758,7 +870,7 @@ async function validateQueuedTweetsForPosting(agent: Agent, queuedTweets: Tweet[
       .slice(0, 50)
       .map((tweet) => tweet.content),
   ])];
-  const policyCurrentQueue = await rescoreQueuedTweetsForCurrentPolicy(agent, queuedTweets, nativeContext);
+  const { valid: policyCurrentQueue } = await rescoreQueuedTweetsForCurrentPolicy(agent, queuedTweets, nativeContext, { recentLog });
   const validationPassedQueue: Tweet[] = [];
   for (const queuedTweet of policyCurrentQueue) {
     const sanitizedIssue = getSanitizedTweetTextIssue(queuedTweet.content, 'post');
@@ -1035,9 +1147,8 @@ async function archiveStaleLowConfidenceQueue(
 ): Promise<number> {
   const staleLowConfidenceTweets = tweets.filter((tweet) => {
     const createdAt = new Date(tweet.createdAt).getTime();
-    const tweetThreshold = effectiveAutopostThreshold(tweet, mode, threshold);
     return (force || (Number.isFinite(createdAt) && now - createdAt >= STALE_LOW_CONFIDENCE_QUEUE_MS))
-      && effectiveConfidence(tweet) + CONFIDENCE_THRESHOLD_EPSILON < tweetThreshold;
+      && !isConfidenceEligibleForAutopost(tweet, mode, threshold);
   });
 
   if (staleLowConfidenceTweets.length === 0) return 0;
@@ -1132,13 +1243,13 @@ export async function inspectAutopilotQueue(
     queueDepth: queue.length,
     activeQueueDepth: activeQueue.length,
     postableQueueDepth: completeQueue.filter((tweet) =>
-      clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+      isConfidenceEligibleForAutopost(tweet, settings.autonomyMode || 'balanced', threshold)
     ).length,
     lowConfidenceDepth: completeQueue.filter((tweet) =>
-      !clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+      !isConfidenceEligibleForAutopost(tweet, settings.autonomyMode || 'balanced', threshold)
     ).length,
     staleLowConfidenceDepth: completeQueue.filter((tweet) =>
-      !clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', threshold)
+      !isConfidenceEligibleForAutopost(tweet, settings.autonomyMode || 'balanced', threshold)
       && new Date(tweet.createdAt).getTime() < staleCutoff
     ).length,
     threshold,
@@ -1265,7 +1376,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
-  const postLog = await getPostLog(agentId, 50);
+  const postLog = await getPostLog(agentId, AUTOPILOT_POST_LOG_WINDOW);
 
   // Content calendar: if today has a topic focus, pass it to generation
   const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()];
@@ -1298,7 +1409,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // Heal broken queued drafts before cooldown so the queue stays healthy even
   // during long off-peak pauses.
   let queue = await getQueuedTweets(agentId);
-  queue = await rescoreQueuedTweetsForCurrentPolicy(agent, queue, null);
+  queue = await reconcileQueuedTweetsAlreadyPosted(agentId, queue, postLog);
+  queue = (await rescoreQueuedTweetsForCurrentPolicy(agent, queue, null, { recentLog: postLog })).valid;
   const healedQueue: typeof queue = [];
   for (const queuedTweet of queue) {
     const queueIssue = queuedTweet.quarantinedAt
@@ -1365,11 +1477,8 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     }
   }
 
-  // Clamp postsPerDay to safe maximum
-  const safePostsPerDay = Math.min(
-    MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY,
-    clampPostsPerDay(settings.postsPerDay),
-  );
+  // Clamp postsPerDay to the shared automated maximum
+  const safePostsPerDay = effectivePostsPerDay(settings.postsPerDay);
   const baseIntervalMs = (24 / safePostsPerDay) * 60 * 60 * 1000;
 
   // Peak hour clustering: during peak hours, use 40% of normal cooldown (post more often).
@@ -1395,13 +1504,18 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     await updateProtocolSettings(agentId, { postCooldownUntil: null });
   }
 
-  const minIntervalMs = jitterInterval(Math.round(baseIntervalMs * cooldownMultiplier));
   const latestLoggedPostAt = latestSuccessfulOriginalPostAt(postLog);
   const settingsLastPostedMs = settings.lastPostedAt ? new Date(settings.lastPostedAt).getTime() : NaN;
   const loggedLastPostedMs = latestLoggedPostAt ? new Date(latestLoggedPostAt).getTime() : NaN;
   const cadenceAnchor = Number.isFinite(loggedLastPostedMs) && (!Number.isFinite(settingsLastPostedMs) || loggedLastPostedMs > settingsLastPostedMs)
     ? latestLoggedPostAt
     : settings.lastPostedAt;
+  // Seed the jitter with the slot anchor so every tick evaluates the same
+  // sampled interval for this slot instead of re-rolling until a low draw wins.
+  const minIntervalMs = jitterInterval(
+    Math.round(baseIntervalMs * cooldownMultiplier),
+    cadenceAnchor ? `${agentId}:${cadenceAnchor}` : null,
+  );
   if (cadenceAnchor) {
     const elapsed = Date.now() - new Date(cadenceAnchor).getTime();
     if (elapsed < minIntervalMs) {
@@ -1449,7 +1563,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     .slice(0, 10)
     .map((e) => ({ format: e.format, topic: e.topic, content: e.content }));
   const recentPostedContent = recentPostEntries.map((entry) => entry.content);
-  let validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue, recentPostedContent);
+  let validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue, recentPostedContent, postLog);
 
   if (validationPassedQueue.length === 0) {
     return {
@@ -1464,8 +1578,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   const confidenceThreshold = getAutonomyConfidenceThreshold(settings.autonomyMode || 'balanced');
   let confidenceFiltered = validationPassedQueue.filter((tweet) => (
-    tweet.pipelineVersion === 'v2'
-    || clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
+    isConfidenceEligibleForAutopost(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
   ));
 
   if (confidenceFiltered.length === 0) {
@@ -1479,10 +1592,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
       if (generated > 0) {
         queue = await getQueuedTweets(agentId);
         activeQueue = queue.filter((tweet) => isAutopostableQueuedTweetForAgent(agent, tweet));
-        validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue, recentPostedContent);
+        validationPassedQueue = await validateQueuedTweetsForPosting(agent, activeQueue, recentPostedContent, postLog);
         confidenceFiltered = validationPassedQueue.filter((tweet) => (
-          tweet.pipelineVersion === 'v2'
-          || clearsAutonomyThreshold(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
+          isConfidenceEligibleForAutopost(tweet, settings.autonomyMode || 'balanced', confidenceThreshold)
         ));
       }
     }
@@ -1504,7 +1616,43 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0) ||
     a.createdAt.localeCompare(b.createdAt)
   );
-  const tweet = pickDiverseTweet(rankedQueue, recentPostEntries) || rankedQueue[0];
+  // The queue snapshot can be minutes old by now (refill and validation run
+  // in between), and operator delete/edit/refresh routes do not take the
+  // autopilot lock. Re-read the pick from storage and skip it if it is no
+  // longer the queued draft we ranked, falling through to the next candidate.
+  const selectionPool = [...rankedQueue];
+  let tweet: Tweet | null = null;
+  while (selectionPool.length > 0) {
+    const candidate = pickDiverseTweet(selectionPool, recentPostEntries) || selectionPool[0];
+    const staleReason = getStaleSelectionReason(candidate, await getTweet(candidate.id));
+    if (!staleReason) {
+      tweet = candidate;
+      break;
+    }
+    selectionPool.splice(selectionPool.indexOf(candidate), 1);
+    await addPostLogEntry(agentId, {
+      agentId,
+      tweetId: candidate.id,
+      xTweetId: candidate.xTweetId || '',
+      content: candidate.content,
+      format: 'stale_selection_gate',
+      topic: candidate.topic || 'general',
+      postedAt: new Date().toISOString(),
+      source: 'autopilot',
+      action: 'skipped',
+      reason: staleReason,
+    }).catch(() => null);
+  }
+  if (!tweet) {
+    return {
+      agentId,
+      action: repliesSent > 0 ? 'replied' : 'skipped',
+      reason: repliesSent > 0
+        ? `Sent ${repliesSent} replies. Every ranked draft changed in storage before posting; nothing was posted.`
+        : 'Every ranked draft changed in storage before posting; nothing was posted.',
+      repliesSent,
+    };
+  }
 
   let result: Awaited<ReturnType<typeof postTweet>>;
   try {
@@ -2777,8 +2925,9 @@ export async function refillQueue(
       const traceCache = new Map<string, GenerationRunTrace>();
       const recordQueueDecision = async (
         item: RankedProtocolTweet,
-        outcome: 'persisted' | 'rejected',
+        outcome: 'persisted' | 'rejected' | 'deferred',
         rejectionCode: string | null = null,
+        options: { persistedToQueue?: boolean } = {},
       ) => {
         const runId = item.generationRunId;
         if (!runId) return;
@@ -2787,11 +2936,13 @@ export async function refillQueue(
           trace = (await getGenerationRuns(agent.id, 50)).find((run) => run.id === runId);
           if (!trace) return;
         }
+        const persistedToQueue = outcome === 'persisted' || (outcome === 'deferred' && options.persistedToQueue === true);
         const stageCounts = {
           ...trace.stageCounts,
           queueCandidatesEvaluated: (trace.stageCounts.queueCandidatesEvaluated || 0) + 1,
-          queueCandidatesPersisted: (trace.stageCounts.queueCandidatesPersisted || 0) + (outcome === 'persisted' ? 1 : 0),
+          queueCandidatesPersisted: (trace.stageCounts.queueCandidatesPersisted || 0) + (persistedToQueue ? 1 : 0),
           queueCandidatesRejected: (trace.stageCounts.queueCandidatesRejected || 0) + (outcome === 'rejected' ? 1 : 0),
+          queueCandidatesDeferred: (trace.stageCounts.queueCandidatesDeferred || 0) + (outcome === 'deferred' ? 1 : 0),
         };
         const rejectionCounts = { ...trace.rejectionCounts };
         if (outcome === 'rejected' && rejectionCode) {
@@ -2911,22 +3062,53 @@ export async function refillQueue(
         if (recentContent.some((content) => semanticIdeaSimilarity(
           { content: item.content, topic: item.targetTopic },
           { content },
-        // Aligned with the autopost-time semantic gate (0.48): queueing into
-        // the [0.48, 0.52) band produced drafts that were deterministically
-        // quarantined at post time with a spurious negative learning signal.
-        ) >= 0.48)) {
+        ) >= QUEUE_SEMANTIC_DUPLICATE_THRESHOLD)) {
           await rejectCandidate(item, 'recent_semantic_duplicate');
           continue;
         }
-        const contentMixIssue = isGeoffreyAccount(agent.handle)
+        const contentMixDecision = isGeoffreyAccount(agent.handle)
           ? getGeoffreyContentMixDecision({
             content: item.content,
             targetTopic: item.targetTopic,
             portfolioCompanyContext: item.portfolioCompanyContext,
-          }, contentMixHistory).issue
+          }, contentMixHistory)
           : null;
-        if (contentMixIssue) {
-          await rejectCandidate(item, 'company_content_mix_policy', contentMixIssue);
+        if (contentMixDecision?.issue) {
+          // A content-mix block is a scheduling window, not a content defect,
+          // so a critic-approved draft is held rather than discarded. When no
+          // queued draft holds the slot yet it is queued as the slot-holder
+          // and the tick defers it until the window clears; when another
+          // queued draft already reserves the slot it is kept as a draft so
+          // the queue never fills with company-led holds.
+          const holdStatus = isGeoffreyContentMixQueueSlotReserved(contentMixDecision) ? 'draft' : 'queued';
+          const heldTweet = await createTweetFromGeneratedCandidate(agent.id, item, {
+            status: holdStatus,
+            topic: item.targetTopic,
+          });
+          contentMixHistory.push(heldTweet);
+          recentContent.unshift(item.content);
+          await Promise.allSettled([
+            addPostLogEntry(agent.id, {
+              agentId: agent.id,
+              tweetId: heldTweet.id,
+              xTweetId: '',
+              content: item.content,
+              format: 'refill_candidate_deferred',
+              topic: item.targetTopic || 'generation',
+              postedAt: new Date().toISOString(),
+              source: 'autopilot',
+              action: 'skipped',
+              reason: `company_content_mix_policy: ${contentMixDecision.issue} ${holdStatus === 'queued'
+                ? 'Queued as the slot-holder; autopilot defers it until the window clears.'
+                : 'Held as a draft because another queued draft already reserves the slot.'}`,
+              runId: item.generationRunId || undefined,
+              draftCandidateId: item.draftCandidateId || undefined,
+              model: item.finalCriticModel || item.judgeModel || item.generationModel || undefined,
+              qualityPolicyVersion: item.qualityPolicyVersion || undefined,
+            }),
+            recordQueueDecision(item, 'deferred', null, { persistedToQueue: holdStatus === 'queued' }),
+          ]);
+          if (holdStatus === 'queued') addedFromBatch++;
           continue;
         }
         recentContent.unshift(item.content);

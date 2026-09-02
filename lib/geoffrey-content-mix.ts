@@ -158,6 +158,18 @@ export function getGeoffreyContentMixDecision(
   };
 }
 
+/**
+ * True when the blocking slot is already held by another queued draft, so a
+ * new candidate would only duplicate that reservation. False when the block
+ * comes from the published window alone: the candidate can safely become the
+ * queued slot-holder and post once the window clears.
+ */
+export function isGeoffreyContentMixQueueSlotReserved(decision: GeoffreyContentMixDecision): boolean {
+  if (decision.companyLed && decision.queuedCompanyLedCount >= GEOFFREY_MAX_COMPANY_LED_IN_WINDOW) return true;
+  return decision.standingPromotion
+    && decision.queuedStandingPromotionCount >= GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW;
+}
+
 function queuePriority(item: GeoffreyContentMixItem): number {
   // Operator intent is the highest signal: a post the operator wrote must
   // never lose the mix slot to the bot's own generated draft (operator posts
