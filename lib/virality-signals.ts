@@ -77,7 +77,8 @@ export function inferPromptStrategy({
 
 const LISTICLE_COUNT_PATTERN = /\b\d+\s+(?:(?:big|key|main|major|quick|simple|hard|brutal|honest|underrated|contrarian)\s+)?(?:things?|reasons?|ways|lessons?|rules?|tips?|steps?|signs?|mistakes?|takeaways?|truths?|ideas?|questions?|frameworks?|principles?|habits?|traits?|shifts?|trends?|takes?|points?|thoughts?|predictions?|observations?|hot takes?)\b/gi;
 const NUMBERED_LIST_MARKER_PATTERN = /^\s*\d+[.)]\s+/gm;
-const NUMBER_LABEL_PATTERN = /\b(?:version|ver|v|chapter|part|phase|step|section|no|number|top|q)\s*\.?\s*\d+(?:[.,]\d+)*\b|#\d+\b/gi;
+const NUMBER_LABEL_PATTERN = /\b(?:version|ver|v|chapter|part|phase|step|section|no|number|top|q)\s*\.?\s*\d+(?:[.,]\d+)*\b(?!\s?%)|#\d+\b/gi;
+const MODEL_VERSION_PATTERN = /\b(?:gpt|claude|gemini|llama|grok|mistral|qwen|deepseek|sonnet|opus|haiku)[-\s]?\d+(?:\.\d+)*\b|\bo\d(?:\.\d+)*\b/gi;
 const MEASURED_NUMBER_PATTERN = new RegExp([
   '\\$\\s?\\d',
   '\\b\\d+(?:[.,]\\d+)*\\s?%',
@@ -90,7 +91,8 @@ function stripNonEvidenceNumbers(content: string): string {
   return content
     .replace(NUMBERED_LIST_MARKER_PATTERN, '')
     .replace(LISTICLE_COUNT_PATTERN, '')
-    .replace(NUMBER_LABEL_PATTERN, '');
+    .replace(NUMBER_LABEL_PATTERN, '')
+    .replace(MODEL_VERSION_PATTERN, '');
 }
 
 /**

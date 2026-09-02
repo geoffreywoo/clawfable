@@ -276,6 +276,21 @@ describe('virality signals', () => {
     expect(hasConcreteNumericAnchor('the eval ran for 24-hour cycles')).toBe(true);
   });
 
+  it('keeps percentile labels as proof and ignores model version numbers', () => {
+    // "top 10%" is a measured share, not a label; the % must survive stripping.
+    expect(hasConcreteNumericAnchor('the top 10% of accounts drive most of the replies')).toBe(true);
+    expect(hasConcreteNumericAnchor('top 10 accounts to follow')).toBe(false);
+
+    // Model version numbers are names, not measurements.
+    expect(hasConcreteNumericAnchor('GPT-5.6 changes the eval game')).toBe(false);
+    expect(hasConcreteNumericAnchor('Claude 4.6 is better at long context')).toBe(false);
+    expect(hasConcreteNumericAnchor('o3 was the turning point')).toBe(false);
+    expect(hasSpecificQuantity('GPT-5.6 changes the eval game')).toBe(false);
+
+    // A real measurement next to a model name still counts.
+    expect(hasConcreteNumericAnchor('GPT-5.6 cut our eval cost 40%')).toBe(true);
+  });
+
   it('separates specific quantities from measured factual proof', () => {
     expect(hasConcreteNumericAnchor('we talked to 8 founders about pricing')).toBe(false);
     expect(hasSpecificQuantity('we talked to 8 founders about pricing')).toBe(true);
