@@ -24,10 +24,13 @@ const mocks = vi.hoisted(() => ({
   saveRelationshipOpportunities: vi.fn(),
   saveViralityPostmortems: vi.fn(),
   backfillAudienceVoiceComplaints: vi.fn(),
+  getFollowerSnapshots: vi.fn(),
+  addFollowerSnapshot: vi.fn(),
   getUserTimeline: vi.fn(),
   getDeepTimeline: vi.fn(),
   decodeKeys: vi.fn(),
   getFollowing: vi.fn(),
+  getAccountPublicMetrics: vi.fn(),
   analyzeAccount: vi.fn(),
 }));
 
@@ -65,6 +68,8 @@ vi.mock('@/lib/kv-storage', () => ({
   saveRelationshipOpportunities: mocks.saveRelationshipOpportunities,
   saveViralityPostmortems: mocks.saveViralityPostmortems,
   backfillAudienceVoiceComplaints: mocks.backfillAudienceVoiceComplaints,
+  getFollowerSnapshots: mocks.getFollowerSnapshots,
+  addFollowerSnapshot: mocks.addFollowerSnapshot,
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
@@ -72,13 +77,14 @@ vi.mock('@/lib/twitter-client', () => ({
   getDeepTimeline: mocks.getDeepTimeline,
   decodeKeys: mocks.decodeKeys,
   getFollowing: mocks.getFollowing,
+  getAccountPublicMetrics: mocks.getAccountPublicMetrics,
 }));
 
 vi.mock('@/lib/analysis', () => ({
   analyzeAccount: mocks.analyzeAccount,
 }));
 
-import { checkPerformance, maybeReanalyze } from '@/lib/performance';
+import { captureFollowerSnapshotIfDue, checkPerformance, maybeReanalyze } from '@/lib/performance';
 import { TwitterActionError } from '@/lib/twitter-debug';
 
 describe('performance tracking X API failures', () => {
@@ -220,6 +226,8 @@ describe('performance tracking X API failures', () => {
       {
         format: 'cron_reanalysis_error',
         action: 'error',
+        errorCode: 'x_rate_limit',
+        reason: 'get_user_timeline: rate limited by X.',
         postedAt: new Date().toISOString(),
       },
     ]);
@@ -257,5 +265,50 @@ describe('performance tracking X API failures', () => {
         reason: expect.stringContaining('X credentials rejected by X during auto re-analysis. Agent disconnected, reconnect in Settings.'),
       }),
     );
+  });
+});
+
+describe('follower snapshot capture', () => {
+  const keys = { appKey: 'key', appSecret: 'secret', accessToken: 'token', accessSecret: 'access-secret' };
+  const now = Date.parse('2026-08-30T12:00:00.000Z');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getFollowerSnapshots.mockResolvedValue([]);
+    mocks.addFollowerSnapshot.mockResolvedValue(undefined);
+  });
+
+  it('stores a snapshot when X returns public metrics', async () => {
+    mocks.getAccountPublicMetrics.mockResolvedValue({ followersCount: 1234, followingCount: 88, tweetCount: 910 });
+
+    await expect(captureFollowerSnapshotIfDue('agent-followers', keys, now)).resolves.toBe(true);
+
+    expect(mocks.addFollowerSnapshot).toHaveBeenCalledWith('agent-followers', {
+      capturedAt: '2026-08-30T12:00:00.000Z',
+      followersCount: 1234,
+      followingCount: 88,
+      tweetCount: 910,
+    });
+  });
+
+  it('skips the write instead of storing fabricated zeros when metrics are missing', async () => {
+    mocks.getAccountPublicMetrics.mockResolvedValue(null);
+
+    await expect(captureFollowerSnapshotIfDue('agent-followers', keys, now)).resolves.toBe(false);
+
+    expect(mocks.addFollowerSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('holds the 6h cadence between snapshots', async () => {
+    mocks.getFollowerSnapshots.mockResolvedValue([{
+      capturedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+      followersCount: 1200,
+      followingCount: 88,
+      tweetCount: 900,
+    }]);
+
+    await expect(captureFollowerSnapshotIfDue('agent-followers', keys, now)).resolves.toBe(false);
+
+    expect(mocks.getAccountPublicMetrics).not.toHaveBeenCalled();
   });
 });

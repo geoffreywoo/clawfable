@@ -3,6 +3,8 @@ import { addPostLogEntry, getOAuthTemp, deleteOAuthTemp, getAgent, getAgentByHan
 import { exchangeOAuthTokens } from '@/lib/twitter-client';
 import { findExistingConnectedAgentByXUserId } from '@/lib/x-account-conflicts';
 import { resolveRequestOrigin } from '@/lib/request-origin';
+import { getCurrentUser, type ConnectOAuthTempData } from '@/lib/auth';
+import { canAccessAgent } from '@/lib/account-access';
 
 // GET /api/auth/twitter/callback — Twitter redirects here after user authorizes agent connection
 function agentRedirectUrl(origin: string, agentId: string, params: Record<string, string>): URL {
@@ -55,6 +57,31 @@ export async function GET(request: NextRequest) {
     }
 
     const { oauthTokenSecret, agentId } = temp;
+
+    // The browser finishing the flow must be the session that started it and
+    // must still own the agent; otherwise never exchange or attach the tokens.
+    const startedByUserId = (temp as Partial<ConnectOAuthTempData>).startedByUserId ?? null;
+    const sessionUser = await getCurrentUser();
+    const sessionMatchesStarter = Boolean(
+      sessionUser && startedByUserId && String(sessionUser.id) === String(startedByUserId)
+    );
+    if (!sessionMatchesStarter || !(await canAccessAgent(sessionUser!, agentId))) {
+      await addPostLogEntry(agentId, {
+        agentId,
+        tweetId: '',
+        xTweetId: '',
+        content: '',
+        format: 'x_auth_session_mismatch',
+        topic: 'auth',
+        postedAt: new Date().toISOString(),
+        source: 'manual',
+        reason: startedByUserId
+          ? 'X callback was completed by a browser that did not start this connect flow. No tokens were attached to this agent.'
+          : 'X callback arrived for a connect flow with no starting session recorded. No tokens were attached to this agent.',
+      }).catch(() => null);
+      await deleteOAuthTemp(oauthToken);
+      return NextResponse.redirect(new URL('/?oauth=session_mismatch', origin));
+    }
 
     const { accessToken, accessSecret, userId, screenName } =
       await exchangeOAuthTokens(oauthToken, oauthTokenSecret, oauthVerifier);

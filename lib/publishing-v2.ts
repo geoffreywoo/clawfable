@@ -580,6 +580,18 @@ async function replayIdempotentResult(
     // A completed live run has already spent its generation budget. The queue
     // write happens in the caller, so replaying here would race that write and
     // regenerate the same cadence slot. A later trigger can safely refill it.
+    // But selection is not persistence: if the caller's queue gates rejected
+    // every selected draft (recorded as queueCandidatesPersisted=0), replaying
+    // [] would black out generation on an empty queue until the trigger's
+    // 2-hour bucket rolls over - regenerate instead.
+    const persistedToQueue = run.stageCounts?.queueCandidatesPersisted;
+    const evaluatedAtQueue = run.stageCounts?.queueCandidatesEvaluated;
+    if (
+      typeof persistedToQueue === 'number'
+      && typeof evaluatedAtQueue === 'number'
+      && evaluatedAtQueue > 0
+      && persistedToQueue === 0
+    ) return null;
     return run.selectedDraftIds.length > 0 ? [] : null;
   }
   const evidence = evidenceForRequest(request);

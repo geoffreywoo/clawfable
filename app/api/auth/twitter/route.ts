@@ -3,7 +3,7 @@ import { addPostLogEntry, saveOAuthTemp } from '@/lib/kv-storage';
 import { formatOAuthStartError } from '@/lib/oauth-start-error';
 import { resolveOAuthCallbackOrigin } from '@/lib/request-origin';
 import { generateOAuthLink } from '@/lib/twitter-client';
-import { requireAgentAccess, handleAuthError } from '@/lib/auth';
+import { requireAgentAccess, handleAuthError, type ConnectOAuthTempData } from '@/lib/auth';
 
 // POST /api/auth/twitter — start OAuth flow to connect an agent to X
 // Requires login. Verifies the user owns the agent.
@@ -18,19 +18,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify login + ownership
-    const { agent } = await requireAgentAccess(agentId);
+    const { user, agent } = await requireAgentAccess(agentId);
 
     const origin = resolveOAuthCallbackOrigin(request);
     callbackUrl = `${origin}/api/auth/twitter/callback`;
 
     const { url, oauthToken, oauthTokenSecret } = await generateOAuthLink(callbackUrl);
 
-    await saveOAuthTemp(oauthToken, {
+    const temp: ConnectOAuthTempData = {
       oauthTokenSecret,
       agentId,
       purpose: 'connect',
+      startedByUserId: String(user.id),
       createdAt: new Date().toISOString(),
-    });
+    };
+    await saveOAuthTemp(oauthToken, temp);
     await addPostLogEntry(agentId, {
       agentId,
       tweetId: '',

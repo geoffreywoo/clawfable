@@ -370,15 +370,18 @@ export async function getMe(
 
 export async function getAccountPublicMetrics(
   keys: TwitterKeys
-): Promise<{ followersCount: number; followingCount: number; tweetCount: number }> {
+): Promise<{ followersCount: number; followingCount: number; tweetCount: number } | null> {
   const client = createClient(keys);
   try {
     const result = await client.v2.me({ 'user.fields': ['public_metrics'] });
     const metrics = result.data.public_metrics;
+    // Missing metrics are unknown, never zero: a fabricated 0 would read as a
+    // total follower loss in the next growth summary.
+    if (!metrics || typeof metrics.followers_count !== 'number') return null;
     return {
-      followersCount: metrics?.followers_count ?? 0,
-      followingCount: metrics?.following_count ?? 0,
-      tweetCount: metrics?.tweet_count ?? 0,
+      followersCount: metrics.followers_count,
+      followingCount: metrics.following_count ?? 0,
+      tweetCount: metrics.tweet_count ?? 0,
     };
   } catch (error) {
     return handleApiError(error, { action: 'get_account_public_metrics' });

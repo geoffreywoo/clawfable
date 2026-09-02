@@ -26,6 +26,7 @@ import {
   getStoryClusters,
   saveDynamicIdeaSeeds,
 } from './kv-storage';
+import { isStoryClusterEligibleForGeneration } from './research-pipeline';
 import { researchTokenSimilarity } from './research-utils';
 import type { Agent, SourceDocument, StoryCluster } from './types';
 
@@ -99,9 +100,22 @@ export async function synthesizeDynamicIdeaSeeds({
   existingSeeds,
   now,
 }: SynthesizeOptions): Promise<DynamicIdeaSeed[]> {
-  const qualifiedStories = stories.slice(0, 10);
-  const documentById = new Map(documents.map((doc) => [doc.id, doc]));
-  if (qualifiedStories.length === 0 && documents.length === 0) return [];
+  // Same deterministic story gate the generation briefs use: a blocked,
+  // political-drift, or evidence-unqualified story must not be laundered into
+  // a 14-day premise through the seed path. Documents that only support an
+  // ineligible story leave the corpus with it.
+  const eligibleStories = stories.filter((story) => isStoryClusterEligibleForGeneration(story, now));
+  const eligibleDocumentIds = new Set(eligibleStories.flatMap((story) => story.sourceDocumentIds || []));
+  const ineligibleDocumentIds = new Set(
+    stories
+      .filter((story) => !isStoryClusterEligibleForGeneration(story, now))
+      .flatMap((story) => story.sourceDocumentIds || [])
+      .filter((id) => !eligibleDocumentIds.has(id)),
+  );
+  const eligibleDocuments = documents.filter((doc) => !ineligibleDocumentIds.has(doc.id));
+  const qualifiedStories = eligibleStories.slice(0, 10);
+  const documentById = new Map(eligibleDocuments.map((doc) => [doc.id, doc]));
+  if (qualifiedStories.length === 0 && eligibleDocuments.length === 0) return [];
 
   const corpus = {
     stories: qualifiedStories.map((story) => ({
@@ -110,7 +124,7 @@ export async function synthesizeDynamicIdeaSeeds({
       summary: story.summary?.slice(0, 280) || '',
       sourceDocumentIds: story.sourceDocumentIds?.slice(0, 4) || [],
     })),
-    documents: documents.slice(0, 16).map((doc) => ({
+    documents: eligibleDocuments.slice(0, 16).map((doc) => ({
       id: doc.id,
       title: doc.title?.slice(0, 160) || '',
       publisher: doc.publisher || '',
@@ -182,18 +196,32 @@ export async function synthesizeDynamicIdeaSeeds({
  * pickGeoffreyIdeaSeed, so synthesizing for other accounts would spend an AI
  * call on seeds nothing reads yet.
  */
+export interface DynamicSeedRefreshResult {
+  synthesized: number;
+  retained: number;
+  saved: boolean;
+  skipReason: 'not_geoffrey' | 'seed_pool_read_failed' | 'nothing_synthesized' | null;
+}
+
 export async function refreshDynamicIdeaSeeds(
   agent: Agent,
   options: { now?: number } = {},
-): Promise<{ synthesized: number; retained: number }> {
+): Promise<DynamicSeedRefreshResult> {
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-  if (!isGeoffreyVoiceProfile(voiceProfile)) return { synthesized: 0, retained: 0 };
+  if (!isGeoffreyVoiceProfile(voiceProfile)) {
+    return { synthesized: 0, retained: 0, saved: false, skipReason: 'not_geoffrey' };
+  }
   const now = options.now ?? Date.now();
   const [stories, documents, current] = await Promise.all([
-    getStoryClusters(agent.id, 20),
+    getStoryClusters(agent.id, 40),
     getSourceDocuments(agent.id, 60),
-    getDynamicIdeaSeeds(agent.id),
+    getDynamicIdeaSeeds(agent.id) as Promise<DynamicIdeaSeed[] | null>,
   ]);
+  // A pool read that did not come back as a list is a failed read, not an
+  // empty pool. Saving on top of it would wipe seeds that still exist.
+  if (!Array.isArray(current)) {
+    return { synthesized: 0, retained: 0, saved: false, skipReason: 'seed_pool_read_failed' };
+  }
   const retained = pruneExpiredDynamicSeeds(current, now);
   const curated = getFrontierIdeaSeeds(voiceProfile);
   const fresh = await synthesizeDynamicIdeaSeeds({
@@ -202,12 +230,14 @@ export async function refreshDynamicIdeaSeeds(
     existingSeeds: [...curated, ...retained],
     now,
   }).catch(() => [] as DynamicIdeaSeed[]);
-  const merged = [...fresh, ...retained].slice(0, MAX_DYNAMIC_SEEDS);
-  // Never overwrite the stored pool with nothing: a transient KV read blip
-  // that surfaced as an empty current list must not wipe seeds we still have.
-  if (merged.length === 0 && current.length > 0) {
-    return { synthesized: 0, retained: 0 };
+  // Only write when there is something new to persist. Expired seeds are
+  // pruned lazily on read, so a run that synthesized nothing has no reason to
+  // touch the stored pool; this also keeps a read that surfaced as empty from
+  // overwriting a pool that is still intact.
+  if (fresh.length === 0) {
+    return { synthesized: 0, retained: retained.length, saved: false, skipReason: 'nothing_synthesized' };
   }
+  const merged = [...fresh, ...retained].slice(0, MAX_DYNAMIC_SEEDS);
   await saveDynamicIdeaSeeds(agent.id, merged);
-  return { synthesized: fresh.length, retained: retained.length };
+  return { synthesized: fresh.length, retained: retained.length, saved: true, skipReason: null };
 }

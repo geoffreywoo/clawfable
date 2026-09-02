@@ -21,6 +21,7 @@ export interface GeoffreyContentMixItem {
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   finalCriticScores?: CandidateJudgeBreakdown | null;
   candidateScore?: number | null;
+  contentProvenance?: string | null;
   confidenceScore?: number | null;
 }
 
@@ -157,7 +158,23 @@ export function getGeoffreyContentMixDecision(
   };
 }
 
+/**
+ * True when the blocking slot is already held by another queued draft, so a
+ * new candidate would only duplicate that reservation. False when the block
+ * comes from the published window alone: the candidate can safely become the
+ * queued slot-holder and post once the window clears.
+ */
+export function isGeoffreyContentMixQueueSlotReserved(decision: GeoffreyContentMixDecision): boolean {
+  if (decision.companyLed && decision.queuedCompanyLedCount >= GEOFFREY_MAX_COMPANY_LED_IN_WINDOW) return true;
+  return decision.standingPromotion
+    && decision.queuedStandingPromotionCount >= GEOFFREY_MAX_STANDING_PROMOTION_IN_WINDOW;
+}
+
 function queuePriority(item: GeoffreyContentMixItem): number {
+  // Operator intent is the highest signal: a post the operator wrote must
+  // never lose the mix slot to the bot's own generated draft (operator posts
+  // carry no critic scores, which previously ranked them at 0).
+  if (item.contentProvenance === 'operator_written') return 1_000_000;
   const margin = item.finalCriticScores?.qualityMargin;
   if (typeof margin === 'number') return margin * 1000;
   if (typeof item.candidateScore === 'number') return item.candidateScore;

@@ -6,6 +6,7 @@ import {
   evaluateGeoffreyQueueContentMix,
   getGeoffreyContentMixDecision,
   isCompanyLedGeoffreyPost,
+  isGeoffreyContentMixQueueSlotReserved,
   isStandingCompanyPromotionGeoffreyPost,
 } from '@/lib/geoffrey-content-mix';
 
@@ -88,5 +89,35 @@ describe('Geoffrey company-led content mix', () => {
     expect(decisions.get('strong')).toMatchObject({ allowed: true, companyLed: true });
     expect(decisions.get('weak')).toMatchObject({ allowed: false, reasonCode: 'company_led_queue_reservation' });
     expect(decisions.get('idea')).toMatchObject({ allowed: true, companyLed: false });
+  });
+
+  it('lets an operator-written company post hold the mix slot over a higher-scored generated draft', () => {
+    const queue = [
+      { ...post('strong-generated', 'Devin makes software retries a real budget line', '2026-08-30T13:00:00.000Z', 'queued'), finalCriticScores: { qualityMargin: 0.94 } },
+      { ...post('operator', 'OpenAI becomes the default work interface', '2026-08-30T14:00:00.000Z', 'queued'), contentProvenance: 'operator_written' },
+    ];
+    const decisions = evaluateGeoffreyQueueContentMix(queue as any, []);
+    expect(decisions.get('operator')).toMatchObject({ allowed: true, companyLed: true });
+    expect(decisions.get('strong-generated')).toMatchObject({ allowed: false, reasonCode: 'company_led_queue_reservation' });
+  });
+
+  it('distinguishes a queue-held slot from a published-window block', () => {
+    const recentCompanyPost = post('company', 'OpenAI will absorb a lot more software work', '2026-08-30T12:00:00.000Z');
+    const windowBlocked = getGeoffreyContentMixDecision(
+      { content: 'Cognition will become a generational company' },
+      [recentCompanyPost],
+    );
+    expect(windowBlocked.reasonCode).toBe('company_led_recent_window');
+    expect(isGeoffreyContentMixQueueSlotReserved(windowBlocked)).toBe(false);
+
+    const queueBlocked = getGeoffreyContentMixDecision(
+      { content: 'Cognition will become a generational company' },
+      [post('queued-company', 'Devin makes software retries a real budget line', '2026-08-30T13:00:00.000Z', 'queued')],
+    );
+    expect(queueBlocked.reasonCode).toBe('company_led_queue_reservation');
+    expect(isGeoffreyContentMixQueueSlotReserved(queueBlocked)).toBe(true);
+
+    const allowed = getGeoffreyContentMixDecision({ content: 'founders are going to hire much smaller teams' }, [recentCompanyPost]);
+    expect(isGeoffreyContentMixQueueSlotReserved(allowed)).toBe(false);
   });
 });

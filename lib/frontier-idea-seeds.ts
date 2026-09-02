@@ -12,6 +12,8 @@ export interface FrontierIdeaSeed {
   startupBackingFact: string;
   domains: string[];
   sourceQueries: string[];
+  /** Set on research-synthesized seeds; at equal relevance the newest seed wins. */
+  synthesizedAt?: string;
 }
 
 export interface FrontierSeedSourceFamily {
@@ -501,6 +503,12 @@ export function pickFrontierIdeaSeed({
   return ranked[0]?.seed || null;
 }
 
+function seedFreshness(seed: FrontierIdeaSeed): number {
+  const synthesizedAt = seed.synthesizedAt ? Date.parse(seed.synthesizedAt) : Number.NaN;
+  if (Number.isFinite(synthesizedAt)) return synthesizedAt;
+  return seed.id.startsWith('dynamic:') ? 1 : 0;
+}
+
 function preferredGeoffreySeedKinds(targetTopic: string): Array<NonNullable<FrontierIdeaSeed['kind']>> {
   const target = normalize(targetTopic);
   if (/\b(?:manufactur(?:e|ing|er|ers)?|factor(?:y|ies)|industr(?:y|ial)|materials?|minerals?|rare earth|tungsten|rhenium|beryllium|magnets?|fusion|fission|nuclear|reactors?|robots?|robotics|space|rockets?|defense|asics?|semiconductors?|chips?|hbm|data centers?|grid|energy)\b/.test(target)) {
@@ -527,7 +535,7 @@ export function pickGeoffreyIdeaSeed({
   targetTopic: string;
   slot: number;
   usedSeedIds?: Set<string>;
-  /** Research-synthesized dynamic seeds; merged ahead of the curated pool so a fresh, relevant premise beats an evergreen one at equal relevance. */
+  /** Research-synthesized dynamic seeds. Among relevant seeds at equal relevance the freshest (newest synthesizedAt, then any dynamic seed) wins before rotation, so a live premise beats an evergreen one. */
   extraSeeds?: FrontierIdeaSeed[];
 }): FrontierIdeaSeed | null {
   if (!voiceProfile || !isGeoffreyVoiceProfile(voiceProfile)) return null;
@@ -540,6 +548,7 @@ export function pickGeoffreyIdeaSeed({
     .map((seed, index) => ({
       seed,
       relevance: seedScore(seed, targetTopic),
+      freshness: seedFreshness(seed),
       rotation: ((slot + index) % kindPool.length) / 100,
       used: usedSeedIds.has(seed.id),
       index,
@@ -555,6 +564,9 @@ export function pickGeoffreyIdeaSeed({
     .sort((a, b) => (
       b.relevance - a.relevance
       || Number(a.used) - Number(b.used)
+      // Freshness only breaks ties among relevant seeds; an off-topic dynamic
+      // seed does not outrank an off-topic curated one just for being new.
+      || (a.relevance >= 1 ? b.freshness - a.freshness : 0)
       || b.rotation - a.rotation
       || a.index - b.index
     ));

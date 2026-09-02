@@ -79,11 +79,13 @@ export function buildPerformanceSignalBaseline(history: TweetPerformance[]): Per
     likes: Math.max(1, median(sample.map((entry) => finite(entry.likes)), 12)),
     retweets: Math.max(1, median(sample.map((entry) => finite(entry.retweets)), 2)),
     replies: Math.max(1, median(sample.map((entry) => finite(entry.replies)), 2)),
+    // Raw medians: a 0-quote account must not be handed a phantom baseline of 1
+    // that then penalizes every median post for "falling below" it.
     quotes: directQuoteRows.length > 0
-      ? Math.max(1, median(directQuoteRows.map((entry) => finite(entry.quotes)), 1))
+      ? median(directQuoteRows.map((entry) => finite(entry.quotes)), 0)
       : null,
     bookmarks: directBookmarkRows.length > 0
-      ? Math.max(1, median(directBookmarkRows.map((entry) => finite(entry.bookmarks)), 1))
+      ? median(directBookmarkRows.map((entry) => finite(entry.bookmarks)), 0)
       : null,
     impressions: Math.max(100, median(sample.map((entry) => finite(entry.impressions)), 1000)),
     engagementRate: Math.max(0.25, median(sample.map((entry) => finite(entry.engagementRate)), 2)),
@@ -109,12 +111,14 @@ export function computeRelativeSpreadSignal(
   entry: TweetPerformance,
   baseline: PerformanceSignalBaseline,
 ): RelativeSpreadSignal {
-  const metrics: Array<{ value: number; baseline: number; weight: number; direct: boolean }> = [
+  const metrics: Array<{ value: number; baseline: number; weight: number; direct: boolean; projectable?: boolean }> = [
     { value: finite(entry.likes), baseline: baseline.likes, weight: 0.1, direct: true },
     { value: finite(entry.retweets), baseline: baseline.retweets, weight: 0.22, direct: true },
     { value: finite(entry.replies), baseline: baseline.replies, weight: 0.1, direct: true },
     { value: finite(entry.impressions), baseline: baseline.impressions, weight: 0.05, direct: true },
-    { value: finite(entry.engagementRate), baseline: baseline.engagementRate, weight: 0.05, direct: true },
+    // Engagement rate is already normalized by impressions; it does not grow
+    // with age, so projecting it to 24h only inflates young posts.
+    { value: finite(entry.engagementRate), baseline: baseline.engagementRate, weight: 0.05, direct: true, projectable: false },
     {
       value: finite(entry.quotes),
       baseline: baseline.quotes || 1,
@@ -134,7 +138,9 @@ export function computeRelativeSpreadSignal(
 
   let projectedTo24Hours = false;
   const total = available.reduce((sum, metric) => {
-    const projected = projectedMetric(metric.value, entry);
+    const projected = metric.projectable === false
+      ? { value: metric.value, projected: false }
+      : projectedMetric(metric.value, entry);
     projectedTo24Hours ||= projected.projected;
     return sum + (relativeLiftScore(projected.value, metric.baseline) * metric.weight);
   }, 0);

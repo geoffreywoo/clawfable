@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, hasConcreteNumericAnchor, hasSpecificQuantity, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
+import { assessFormulaicCadence, inferPerformanceCheckpoint, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, hasConcreteNumericAnchor, hasSpecificQuantity, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
 import type { CandidateFeatureTags, TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -403,5 +403,45 @@ describe('virality signals', () => {
 
     expect(bad.action).toBe('block');
     expect(sharp.action).toBe('allow');
+  });
+});
+
+describe('performance checkpoint ladder', () => {
+  const postedAt = '2026-08-30T12:00:00.000Z';
+  const at = (minutes: number) => new Date(Date.parse(postedAt) + minutes * 60_000).toISOString();
+
+  it('does not hand the 24h slot to the first read after the momentum window', () => {
+    // The cron reads every 10 minutes, so the first post-momentum read lands at ~2.6h.
+    expect(inferPerformanceCheckpoint(postedAt, at(156))).toBe('settling_6h');
+    expect(inferPerformanceCheckpoint(postedAt, at(6 * 60))).toBe('settling_6h');
+    expect(inferPerformanceCheckpoint(postedAt, at(18 * 60))).toBe('full_24h');
+    expect(inferPerformanceCheckpoint(postedAt, at(24 * 60))).toBe('full_24h');
+    expect(inferPerformanceCheckpoint(postedAt, at(31 * 60))).toBe('late');
+  });
+
+  it('keeps the early checkpoints unchanged', () => {
+    expect(inferPerformanceCheckpoint(postedAt, at(10))).toBe('initial_15m');
+    expect(inferPerformanceCheckpoint(postedAt, at(30))).toBe('early_30m');
+    expect(inferPerformanceCheckpoint(postedAt, at(120))).toBe('momentum_2h');
+  });
+
+  it('does not penalize a median post on an account whose median quotes are zero', () => {
+    const zeroMedianAccount = computeActionRewards(performance({ quotes: 0, bookmarks: 0 }), {
+      avgLikes: 12,
+      avgRetweets: 2,
+      avgQuotes: 0,
+      avgBookmarks: 0,
+    });
+    expect(zeroMedianAccount.quoteReward).toBe(0);
+    expect(zeroMedianAccount.bookmarkReward).toBe(0);
+
+    const realBaseline = computeActionRewards(performance({ quotes: 0, bookmarks: 0 }), {
+      avgLikes: 12,
+      avgRetweets: 2,
+      avgQuotes: 1,
+      avgBookmarks: 1,
+    });
+    expect(realBaseline.quoteReward).toBeLessThan(0);
+    expect(realBaseline.bookmarkReward).toBeLessThan(0);
   });
 });

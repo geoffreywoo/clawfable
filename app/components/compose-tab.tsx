@@ -153,13 +153,15 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
 
   const handleQueue = async (tweet: ProtocolTweet) => {
     try {
-      await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
+      const res = await fetch(`/api/agents/${agentId}/queue/${tweet.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'queued' }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to queue');
       showToast('Added to queue');
-    } catch { showToast('Failed to queue'); }
+    } catch (err) { showToast(err instanceof Error ? err.message : 'Failed to queue'); }
   };
 
   const handleCopy = async (tweet: ProtocolTweet) => {
@@ -210,12 +212,7 @@ export function ComposeTab({ agentId }: ComposeTabProps) {
   return (
     <div className="space-y-6" style={{ position: 'relative' }}>
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24, background: '#1a1a1a',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px',
-          padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px',
-          color: 'var(--text)', zIndex: 200,
-        }}>
+        <div className="engage-toast" role="status">
           {toast}
         </div>
       )}

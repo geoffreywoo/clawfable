@@ -1537,7 +1537,24 @@ describe('generateTweetBatchV2 integration', () => {
     expect(serializedPremises).not.toContain(rawGeneratedWinner);
     expect(serializedPremises).not.toContain(rawViralWinner);
     expect(serializedPremises).toContain('generated_post');
-    expect(serializedPremises).toContain('performance_outcome');
+    // Viral winners are positive references, never "never reskin" exclusions:
+    // neither the raw text nor the premise fingerprint reaches previousPremises.
+    expect(serializedPremises).not.toContain('performance_outcome');
+    expect(serializedPremises.toLowerCase()).not.toContain('spread mechanics');
+    expect(ideaPrompt.provenSpreadMechanics).toEqual({
+      instruction: expect.stringContaining('Positive references only'),
+      references: [expect.objectContaining({ source: 'performance_outcome', spreadMechanics: expect.any(Array) })],
+    });
+    expect(JSON.stringify(ideaPrompt.provenSpreadMechanics)).not.toContain('semanticKey');
+    expect(JSON.stringify(ideaPrompt.provenSpreadMechanics)).not.toContain(rawViralWinner);
+    const ideaJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
+    const judgePremises = JSON.stringify(ideaJudgePrompt.previousPremises);
+    expect(judgePremises).not.toContain('performance_outcome');
+    expect(judgePremises).not.toContain(rawViralWinner);
+    expect(ideaJudgePrompt.provenSpreadMechanics.references).toEqual([
+      expect.objectContaining({ source: 'performance_outcome' }),
+    ]);
+    expect(JSON.stringify(ideaJudgePrompt.provenSpreadMechanics)).not.toContain('semanticKey');
   });
 
   it('shows both judges the actual evidence and stage-specific rejection lessons', async () => {
@@ -1938,6 +1955,121 @@ describe('generateTweetBatchV2 integration', () => {
     ]));
   });
 
+  it('vetoes cringe before the judge only when the blended estimate is a guaranteed failure', async () => {
+    mocks.accountTasteOverride = { cringeRisk: 0.36 };
+    const drafts = await generateTweetBatchV2(input);
+
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(true);
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(drafts.every((draft) => (draft.judgeBreakdown?.cringeRisk ?? 1) < 0.32)).toBe(true);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1].every((draft: any) => (
+      !draft.rejectionCodes.includes('final_cringe_risk')
+    ))).toBe(true);
+
+    vi.clearAllMocks();
+    mocks.accountTasteOverride = { cringeRisk: 0.6 };
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rejectionCodes: expect.arrayContaining(['final_cringe_risk']) }),
+    ]));
+  });
+
+  it('applies the casual-startup and stiffness floors only to the Geoffrey register', async () => {
+    mocks.accountTasteOverride = { casualStartupScore: 0.5, stiffnessRisk: 0.31 };
+    mocks.geoffreyVoiceProfile = false;
+    await generateTweetBatchV2(input);
+
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(true);
+    const otherAccountDrafts = mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1] as any[];
+    expect(otherAccountDrafts.length).toBeGreaterThan(0);
+    expect(otherAccountDrafts.every((draft) => (
+      !draft.rejectionCodes.includes('final_casual_startup_below_floor')
+      && !draft.rejectionCodes.includes('final_stiffness_risk')
+    ))).toBe(true);
+
+    vi.clearAllMocks();
+    mocks.geoffreyVoiceProfile = true;
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        rejectionCodes: expect.arrayContaining(['final_casual_startup_below_floor', 'final_stiffness_risk']),
+      }),
+    ]));
+  });
+
+  it('judges other accounts against their own author block instead of Geoffrey identity', async () => {
+    mocks.geoffreyVoiceProfile = false;
+    const directive = 'Always name the client outcome before the method.';
+    await generateTweetBatchV2({
+      ...input,
+      voiceProfile: {
+        ...input.voiceProfile,
+        antiGoals: ['Never sell supplements'],
+        communicationStyle: `short operator observations\n\n## OPERATOR VOICE REFERENCE (manual)\nVoice anchors:\n${Array.from({ length: 10 }, (_, index) => `- "${'x'.repeat(170)} anchor ${index}"`).join('\n')}\n\n## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)\n1. ${directive}`,
+      },
+    });
+
+    const systemFor = (task: string) => mocks.generateText.mock.calls
+      .filter(([options]) => options.task === task)
+      .map(([options]) => String(options.system));
+    const promptFor = (task: string) => mocks.generateText.mock.calls
+      .filter(([options]) => options.task === task)
+      .map(([options]) => JSON.parse(options.prompt));
+    for (const task of ['idea_generation', 'idea_judgment', 'tweet_writing', 'copy_judgment']) {
+      expect(systemFor(task).length).toBeGreaterThan(0);
+      expect(systemFor(task).every((system) => !system.includes('Geoffrey'))).toBe(true);
+      expect(promptFor(task).every((prompt) => !JSON.stringify(prompt).includes('Geoffrey'))).toBe(true);
+    }
+    expect(systemFor('copy_judgment')[0]).toContain('would this author');
+    expect(systemFor('copy_judgment')[0]).toContain('Candidate order carries no signal');
+    expect(systemFor('idea_judgment')[0]).toContain('Candidate order carries no signal');
+    const copyJudgePrompt = promptFor('copy_judgment')[0];
+    expect(copyJudgePrompt.author).toEqual(expect.objectContaining({
+      tone: input.voiceProfile.tone,
+      antiGoals: ['Never sell supplements'],
+      communicationStyle: 'short operator observations',
+    }));
+    expect(JSON.stringify(copyJudgePrompt.author.learnedVoiceGuidance)).toContain(directive);
+    const writerPrompt = promptFor('tweet_writing')[0];
+    expect(writerPrompt.author.antiGoals).toEqual(['Never sell supplements']);
+    expect(JSON.stringify(writerPrompt.author.learnedVoiceGuidance)).toContain(directive);
+    const ideaPrompt = promptFor('idea_generation')[0];
+    expect(JSON.stringify(ideaPrompt.author.learnedVoiceGuidance)).toContain(directive);
+    expect(JSON.stringify(ideaPrompt.author)).not.toContain('anchor 3');
+    expect(ideaPrompt.author.antiGoals).toEqual(['Never sell supplements']);
+    expect(promptFor('idea_judgment')[0].author.antiGoals).toEqual(['Never sell supplements']);
+
+    vi.clearAllMocks();
+    mocks.geoffreyVoiceProfile = true;
+    await generateTweetBatchV2(input);
+    expect(systemFor('copy_judgment')[0]).toContain('would Geoffrey plausibly have typed');
+    expect(systemFor('copy_judgment')[0]).toContain('Candidate order carries no signal');
+  });
+
+  it('keeps the frontier mechanism and consequence in every AI-lane writer variant', async () => {
+    await generateTweetBatchV2(input);
+    const writerCalls = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => ({ system: String(options.system), prompt: JSON.parse(options.prompt) }));
+    const laneCalls = writerCalls.filter((call) => call.prompt.geoffreyAIFutureHorizon);
+    const otherCalls = writerCalls.filter((call) => !call.prompt.geoffreyAIFutureHorizon);
+    expect(laneCalls.length).toBeGreaterThan(0);
+    expect(otherCalls.length).toBeGreaterThan(0);
+    for (const call of laneCalls) {
+      expect(call.system).not.toContain('stop at the direct reaction');
+      expect(call.system).not.toContain('only the direct reaction');
+      expect(call.system).toContain('never consequence presence');
+      expect(call.prompt.responseContract.variantMoves.every((move: any) => move.consequenceRole === 'approved_consequence')).toBe(true);
+      expect(JSON.stringify(call.prompt.responseContract)).not.toContain('Do not add the consequence in this slot');
+    }
+    for (const call of otherCalls) {
+      expect(call.system).toContain('stop at the direct reaction');
+      expect(call.prompt.responseContract.variantMoves[0].consequenceRole).toBe('reaction_only');
+    }
+  });
+
   it('blocks model-recognized cringe even when generic engagement scores are high', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -2056,7 +2188,7 @@ describe('generateTweetBatchV2 integration', () => {
     mocks.geoffreyVoiceProfile = false;
     let writerCalls = 0;
     mocks.accountTasteImplementation = (content) => (
-      content.includes('prove the buyer decision') ? {} : { stiffnessRisk: 0.31 }
+      content.includes('prove the buyer decision') ? {} : { voiceDriftRisk: 0.21 }
     );
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
@@ -2136,7 +2268,7 @@ describe('generateTweetBatchV2 integration', () => {
     let writerCalls = 0;
     let criticCalls = 0;
     mocks.accountTasteImplementation = (content) => (
-      content.includes('customers commit before') ? { stiffnessRisk: 0.31 } : {}
+      content.includes('customers commit before') ? { voiceDriftRisk: 0.21 } : {}
     );
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);

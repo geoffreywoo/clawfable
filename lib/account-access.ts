@@ -153,7 +153,11 @@ export async function canAccessAgent(user: User, agentId: string, preloadedAgent
     return true;
   }
 
-  if (normalizedHandle && normalizedHandle === normalizeUsername(user.username)) {
+  // A verified X user id is authoritative over the handle: once an agent is
+  // bound to a different X account, matching the (possibly recycled) handle
+  // must not grant access.
+  const boundToDifferentXUser = Boolean(agent.xUserId) && String(agent.xUserId) !== userId;
+  if (!boundToDifferentXUser && normalizedHandle && normalizedHandle === normalizeUsername(user.username)) {
     return true;
   }
 

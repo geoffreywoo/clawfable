@@ -458,7 +458,18 @@ export function scoreHighValueReply(mention: {
   // discovery surfaces on X: the author's audience sees the exchange. Reach
   // adds a log-scaled bonus from 10k followers up (10k +0.05, 100k +0.11,
   // 1M +0.16); small accounts are never penalized for being small.
-  if (typeof mention.authorFollowers === 'number' && mention.authorFollowers >= 10_000) {
+  // Reach amplifies substance, it cannot substitute for it: the bonus needs
+  // at least one strong content signal and never applies to spam/promo or
+  // generic-praise mentions, so follower count alone cannot clear the reply
+  // gate or claw back a spam penalty.
+  const hasStrongContentSignal = hasQuestion || asksForDepth || substantiveDisagreement || topicMatch;
+  if (
+    typeof mention.authorFollowers === 'number'
+    && mention.authorFollowers >= 10_000
+    && hasStrongContentSignal
+    && !hasLinkOrSpam
+    && !genericPraise
+  ) {
     score += Math.min(0.16, Math.log10(mention.authorFollowers / 1_000) * 0.053);
     reasons.push(`large audience (${Math.round(mention.authorFollowers / 1000)}k followers)`);
   }
@@ -665,6 +676,10 @@ export function inferPerformanceCheckpoint(postedAt: string, checkedAt: string):
   if (ageMins <= 20) return 'initial_15m';
   if (ageMins <= 45) return 'early_30m';
   if (ageMins <= 150) return 'momentum_2h';
+  // The cron reads every 10 minutes, so whatever label covers the window right
+  // after momentum_2h is captured at ~2.6h. It must not be the "24h" slot: that
+  // row is trusted as a mature, unprojected read until the late checkpoint.
+  if (ageMins < 18 * 60) return 'settling_6h';
   if (ageMins <= 30 * 60) return 'full_24h';
   return 'late';
 }
@@ -676,6 +691,7 @@ export function computeEarlyVelocityScore(entry: TweetPerformance): number {
     checkpoint === 'initial_15m' ? 10 :
     checkpoint === 'early_30m' ? 16 :
     checkpoint === 'momentum_2h' ? 30 :
+    checkpoint === 'settling_6h' ? 50 :
     checkpoint === 'full_24h' ? 80 :
     140;
   const replyShare = entry.replies / Math.max(1, entry.likes + entry.retweets + entry.replies);
@@ -699,13 +715,17 @@ export function computeActionRewards(
   // Quote/bookmark counts only go negative against a real account baseline.
   // Without one, a typical 0-quote post measured against the default divisor
   // would take a constant penalty purely for having the metric available.
+  // An account whose median post gets zero quotes has no real baseline to fall
+  // below, so the negative floor only opens once the account median is >= 1.
+  const hasQuoteBaseline = typeof baseline?.avgQuotes === 'number' && baseline.avgQuotes >= 1;
   const quoteBaseline = Math.max(1, baseline?.avgQuotes || 1);
   const quoteReward = typeof entry.quotes === 'number'
-    ? clamp((entry.quotes - quoteBaseline) / quoteBaseline * 0.24, typeof baseline?.avgQuotes === 'number' ? -0.2 : 0, 0.46)
+    ? clamp((entry.quotes - quoteBaseline) / quoteBaseline * 0.24, hasQuoteBaseline ? -0.2 : 0, 0.46)
     : 0;
+  const hasBookmarkBaseline = typeof baseline?.avgBookmarks === 'number' && baseline.avgBookmarks >= 1;
   const bookmarkBaseline = Math.max(1, baseline?.avgBookmarks || 1);
   const bookmarkReward = typeof entry.bookmarks === 'number'
-    ? clamp((entry.bookmarks - bookmarkBaseline) / bookmarkBaseline * 0.2, typeof baseline?.avgBookmarks === 'number' ? -0.16 : 0, 0.4)
+    ? clamp((entry.bookmarks - bookmarkBaseline) / bookmarkBaseline * 0.2, hasBookmarkBaseline ? -0.16 : 0, 0.4)
     : 0;
   const replyReward = clamp(entry.replies / Math.max(2, baselineLikes * 0.35) * 0.18, 0, 0.32);
   const impressionReward = entry.impressions > 0 ? clamp(Math.log10(entry.impressions + 1) / 12, 0, 0.28) : 0;

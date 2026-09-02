@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Tweet } from '../lib/types';
+import type { PostLogEntry, Tweet } from '../lib/types';
 
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   updateProtocolSettings: vi.fn(),
   getQueuedTweets: vi.fn(),
+  getTweet: vi.fn(),
+  getTweets: vi.fn(),
   getAnalysis: vi.fn(),
   createTweet: vi.fn(),
   updateTweet: vi.fn(),
@@ -64,13 +66,14 @@ const mocks = vi.hoisted(() => ({
     return `${surface === 'reply' ? 'Reply' : 'Draft'} is ${length} characters; X API posts must be 4000 characters or fewer.`;
   }),
   getAutopostPolicyIssue: vi.fn(() => null),
-  countPostsInLast24h: vi.fn(() => 0),
+  countPostsInLast24h: vi.fn((_postLog: PostLogEntry[]) => 0),
   getRecentPostDuplicateIssue: vi.fn((_content: string, _recentPosts: string[]) => null as string | null),
   getReplyRepetitionIssue: vi.fn((_reply: string, _previousReplies: string[]) => null as string | null),
   extractMentionHandles: vi.fn((text: string) => (text.match(/@\w+/g) || []).map((handle) => handle.slice(1).toLowerCase())),
   resolveQueuedTweetFailure: vi.fn(),
   discoverCurrentTrends: vi.fn(),
   generateText: vi.fn(),
+  semanticIdeaSimilarity: vi.fn(),
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -80,6 +83,8 @@ vi.mock('@/lib/kv-storage', () => ({
   getUser: mocks.getUser,
   updateProtocolSettings: mocks.updateProtocolSettings,
   getQueuedTweets: mocks.getQueuedTweets,
+  getTweet: mocks.getTweet,
+  getTweets: mocks.getTweets,
   getAnalysis: mocks.getAnalysis,
   createTweet: mocks.createTweet,
   updateTweet: mocks.updateTweet,
@@ -190,12 +195,15 @@ vi.mock('@/lib/trending', () => ({
     topic.networkTopicId || String(topic.id),
 }));
 
-vi.mock('@/lib/survivability', () => ({
+vi.mock('@/lib/survivability', async (importOriginal) => ({
   jitterInterval: vi.fn((value: number) => value),
   isDailyCapReached: vi.fn(() => false),
-  isNearDuplicate: vi.fn(() => false),
+  // Real copy-duplicate detection so the refill gates see genuine similarity.
+  isNearDuplicate: (await importOriginal<typeof import('@/lib/survivability')>()).isNearDuplicate,
   pickDiverseTweet: vi.fn((queue: Array<unknown>) => queue[0] ?? null),
   clampPostsPerDay: vi.fn((value: number) => value),
+  effectivePostsPerDay: vi.fn((value: number) => Math.min(5, value)),
+  MAX_AUTOMATED_ORIGINAL_POSTS_PER_DAY: 5,
   getTweetCompletenessIssue: mocks.getTweetCompletenessIssue,
   getTweetLengthIssue: mocks.getTweetLengthIssue,
   getAutopostPolicyIssue: mocks.getAutopostPolicyIssue,
@@ -207,6 +215,11 @@ vi.mock('@/lib/survivability', () => ({
 
 vi.mock('@/lib/queue-healing', () => ({
   resolveQueuedTweetFailure: mocks.resolveQueuedTweetFailure,
+}));
+
+vi.mock('@/lib/tweet-features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tweet-features')>()),
+  semanticIdeaSimilarity: (...args: unknown[]) => mocks.semanticIdeaSimilarity(...args),
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -225,7 +238,15 @@ vi.mock('@/lib/ai', () => ({
   getPrimaryAiProvider: vi.fn(() => 'openai'),
 }));
 
-import { archiveStaleNetworkTopicQueue, refillQueue, refreshQueuedTweetsForCurrentQualityPolicy, runAutopilot } from '@/lib/autopilot';
+import {
+  QUEUE_SEMANTIC_DUPLICATE_THRESHOLD,
+  archiveStaleNetworkTopicQueue,
+  refillQueue,
+  refreshQueuedTweetsForCurrentQualityPolicy,
+  runAutopilot,
+  selfHealAutopilotQueue,
+} from '@/lib/autopilot';
+const actualTweetFeatures = await vi.importActual<typeof import('@/lib/tweet-features')>('@/lib/tweet-features');
 import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
 import { ACCOUNT_TOPIC_POLICY_VERSION } from '@/lib/account-topic-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
@@ -358,6 +379,47 @@ function v2CandidateFromTweet(tweet: Tweet) {
   };
 }
 
+function generationRunFixture(agentId: string, runId: string, draftIds: string[]) {
+  return {
+    schemaVersion: 2,
+    id: runId,
+    agentId,
+    pipelineVersion: 'v2',
+    qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    requestedCount: draftIds.length,
+    sourceDocumentIds: [],
+    storyClusterIds: [],
+    ideaCandidateIds: draftIds.map((id) => `idea-${id}`),
+    draftCandidateIds: draftIds,
+    selectedDraftIds: draftIds,
+    stageCounts: { draftsSelected: draftIds.length },
+    rejectionCounts: {},
+    modelCalls: [],
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    estimatedCostUsd: 0,
+    startedAt: '2026-08-14T10:00:00.000Z',
+    completedAt: '2026-08-14T10:00:01.000Z',
+    durationMs: 1000,
+    status: 'completed',
+    error: null,
+  };
+}
+
+const refillReadyContext = {
+  voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'sharp and direct', summary: 'startup investor' },
+  learnings: {
+    voiceCorpus: { ...activeGeoffreyCorpus },
+    operatorVoiceReference: { pinnedExamples: [], startupRegisterExamples: [], bestPerformers: [] },
+  },
+  settings: { ...baseSettings, minQueueSize: 5 },
+  style: { autonomyMode: 'balanced', trendMixTarget: 35, bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+  recentPosts: [],
+  memory: null,
+  ideaAtoms: [],
+  signals: [],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 
@@ -367,6 +429,24 @@ beforeEach(() => {
   mocks.getUser.mockResolvedValue(null);
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
+  mocks.getTweets.mockResolvedValue([]);
+  // Storage truth for the pre-post re-read: the latest version of a tweet the
+  // run has observed through the queue read, a repair, or a refill persist.
+  mocks.getTweet.mockImplementation(async (id: string) => {
+    let match: Tweet | null = null;
+    for (const source of [mocks.getQueuedTweets, mocks.resolveQueuedTweetFailure, mocks.createTweetFromGeneratedCandidate]) {
+      for (const result of source.mock.results) {
+        if (result.type !== 'return') continue;
+        const value = await result.value;
+        const candidates: Tweet[] = Array.isArray(value) ? value : value?.tweet ? [value.tweet] : value?.id ? [value] : [];
+        for (const candidate of candidates) {
+          if (String(candidate.id) === String(id)) match = candidate;
+        }
+      }
+    }
+    return match;
+  });
+  mocks.semanticIdeaSimilarity.mockImplementation(actualTweetFeatures.semanticIdeaSimilarity);
   mocks.getAnalysis.mockResolvedValue(null);
   mocks.getMentions.mockResolvedValue([]);
   mocks.getRecentMentions.mockResolvedValue([]);
@@ -697,7 +777,7 @@ describe('autopilot remote debug logging', () => {
       expect.objectContaining({
         format: 'refill_candidate_rejected',
         draftCandidateId: 'draft-modal-databricks-duplicate',
-        reason: 'recent_semantic_duplicate',
+        reason: 'recent_copy_duplicate',
         qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
       }),
     );
@@ -709,9 +789,254 @@ describe('autopilot remote debug logging', () => {
           queueCandidatesPersisted: 1,
           queueCandidatesRejected: 1,
         }),
+        rejectionCounts: expect.objectContaining({ queue_recent_copy_duplicate: 1 }),
+      }),
+    );
+  });
+
+  it('pins the queue-insert semantic gate to the shared autopost threshold', async () => {
+    expect(QUEUE_SEMANTIC_DUPLICATE_THRESHOLD).toBe(0.48);
+    mocks.getAnalysis.mockResolvedValue({ agentId: baseAgent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      ...refillReadyContext,
+      allTweets: [{
+        ...validQueuedTweet,
+        id: 'live-seed',
+        status: 'posted',
+        xTweetId: 'x-live-seed',
+        content: 'the seed live post about agent budgets',
+      }],
+    });
+    const nearCandidate = {
+      content: 'my pick is agent retries as the line item that surprises the budget next year.',
+      format: 'observation',
+      targetTopic: 'agent budgets',
+      rationale: 'Near-duplicate idea.',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-semantic-band',
+      ideaId: 'idea-near',
+      draftCandidateId: 'draft-near-049',
+      candidateScore: 90,
+      confidenceScore: 0.9,
+    } as any;
+    const farCandidate = {
+      ...nearCandidate,
+      content: 'my pick is founders keeping teams smaller than their boards would like.',
+      targetTopic: 'team size',
+      ideaId: 'idea-far',
+      draftCandidateId: 'draft-far-047',
+    };
+    mocks.generateTweetBatchV2.mockResolvedValue([nearCandidate, farCandidate]);
+    mocks.getGenerationRuns.mockResolvedValue([
+      generationRunFixture(baseAgent.id, 'run-semantic-band', ['draft-near-049', 'draft-far-047']),
+    ]);
+    mocks.semanticIdeaSimilarity.mockImplementation((candidate: { content: string }) => (
+      candidate.content.includes('retries') ? 0.49 : candidate.content.includes('smaller') ? 0.47 : 0
+    ));
+
+    expect(await refillQueue(baseAgent, 2)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledTimes(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-far-047' }),
+      expect.objectContaining({ status: 'queued' }),
+    );
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        format: 'refill_candidate_rejected',
+        draftCandidateId: 'draft-near-049',
+        reason: 'recent_semantic_duplicate',
+      }),
+    );
+    expect(mocks.saveGenerationRun).toHaveBeenLastCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
         rejectionCounts: expect.objectContaining({ queue_recent_semantic_duplicate: 1 }),
       }),
     );
+  });
+
+  it('applies the same semantic threshold at autopost time', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    mocks.getTweet.mockResolvedValue(validQueuedTweet);
+    mocks.getPostLog.mockResolvedValue([{
+      agentId: baseAgent.id,
+      tweetId: 'live-seed',
+      xTweetId: 'x-live-seed',
+      content: 'the seed live post about agent budgets',
+      format: 'observation',
+      topic: 'startup',
+      postedAt: new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
+      source: 'autopilot',
+      action: 'posted',
+    }]);
+    mocks.semanticIdeaSimilarity.mockReturnValue(0.49);
+
+    const blocked = await runAutopilot(baseAgent);
+    expect(blocked.action).toBe('skipped');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.resolveQueuedTweetFailure).toHaveBeenCalledWith(
+      baseAgent,
+      expect.objectContaining({ id: validQueuedTweet.id }),
+      'Semantic idea repeats a recent post (0.49 similarity).',
+    );
+
+    mocks.semanticIdeaSimilarity.mockReturnValue(0.47);
+    const posted = await runAutopilot(baseAgent);
+    expect(posted.action).toBe('posted');
+    expect(mocks.postTweet).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds an insert-time content-mix draft instead of discarding critic-approved copy', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.semanticIdeaSimilarity.mockReturnValue(0);
+    const companyCandidate = {
+      content: 'my pick is Databricks first. @modal getting there ahead of them would be way more fun, but i dont think it happens.',
+      format: 'prediction',
+      targetTopic: 'Modal Databricks IPO prediction',
+      rationale: 'Direct operator prediction.',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-mix-hold',
+      ideaId: 'idea-mix-hold',
+      draftCandidateId: 'draft-mix-hold',
+      sourceLane: 'manual_core_exploit',
+      sourceBrief: 'OPERATOR-OWNED TOPIC [subject=Modal Databricks IPO prediction]',
+      allowedMentionHandles: ['modal'],
+      candidateScore: 91,
+      confidenceScore: 0.91,
+    } as any;
+    mocks.generateTweetBatchV2.mockResolvedValue([companyCandidate]);
+    mocks.getGenerationRuns.mockResolvedValue([generationRunFixture(agent.id, 'run-mix-hold', ['draft-mix-hold'])]);
+
+    // Another queued draft already reserves the company-led slot: keep the
+    // new draft as a held draft so the queue never fills with company-led holds.
+    mocks.buildGenerationContext.mockResolvedValue({
+      ...refillReadyContext,
+      allTweets: [{
+        ...validQueuedTweet,
+        ...currentGeoffreyCertification,
+        id: 'queued-devin',
+        content: "within 12 months Devin's biggest scaling cost will be failed context recovery",
+        topic: 'Devin cloud agent costs',
+      }],
+    });
+    expect(await refillQueue(agent as any, 1)).toBe(0);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-mix-hold' }),
+      expect.objectContaining({ status: 'draft' }),
+    );
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({
+        format: 'refill_candidate_deferred',
+        draftCandidateId: 'draft-mix-hold',
+        reason: expect.stringContaining('company_content_mix_policy'),
+      }),
+    );
+    expect(mocks.addPostLogEntry).not.toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ format: 'refill_candidate_rejected' }),
+    );
+    expect(mocks.saveGenerationRun).toHaveBeenLastCalledWith(
+      agent.id,
+      expect.objectContaining({
+        stageCounts: expect.objectContaining({
+          queueCandidatesEvaluated: 1,
+          queueCandidatesPersisted: 0,
+          queueCandidatesRejected: 0,
+          queueCandidatesDeferred: 1,
+        }),
+        rejectionCounts: expect.not.objectContaining({ queue_company_content_mix_policy: expect.anything() }),
+      }),
+    );
+
+    // Only the published window blocks the slot: queue the draft as the
+    // slot-holder so the tick defers it until the window clears.
+    vi.clearAllMocks();
+    mocks.getGenerationRuns.mockResolvedValue([generationRunFixture(agent.id, 'run-mix-hold', ['draft-mix-hold'])]);
+    mocks.buildGenerationContext.mockResolvedValue({
+      ...refillReadyContext,
+      allTweets: [{
+        ...validQueuedTweet,
+        id: 'posted-microsoft',
+        status: 'posted',
+        xTweetId: 'x-posted-microsoft',
+        postedAt: '2026-08-30T21:00:00.000Z',
+        createdAt: '2026-08-30T21:00:00.000Z',
+        content: 'i would buy @Microsoft for the next 12 months',
+        topic: 'Microsoft AI distribution',
+      }],
+    });
+    expect(await refillQueue(agent as any, 1)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+      agent.id,
+      expect.objectContaining({ draftCandidateId: 'draft-mix-hold' }),
+      expect.objectContaining({ status: 'queued' }),
+    );
+    expect(mocks.saveGenerationRun).toHaveBeenLastCalledWith(
+      agent.id,
+      expect.objectContaining({
+        stageCounts: expect.objectContaining({
+          queueCandidatesPersisted: 1,
+          queueCandidatesRejected: 0,
+          queueCandidatesDeferred: 1,
+        }),
+      }),
+    );
+  });
+
+  it('logs a steady-state content-mix deferral once instead of every tick', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    const standalone = {
+      ...validQueuedTweet,
+      ...currentGeoffreyCertification,
+      id: 'standalone-agent-labor',
+      content: 'software agents should kill the weekly status meeting within 12 months',
+      topic: 'software work',
+    };
+    const companyDrafts = [{
+      ...standalone,
+      id: 'company-devin',
+      content: "within 12 months Devin's biggest scaling cost will be failed context recovery",
+      topic: 'Devin cloud agent costs',
+    }, {
+      ...standalone,
+      id: 'company-openai',
+      content: 'i would still value @OpenAI above a trillion dollars',
+      topic: 'OpenAI startup conviction',
+      allowedMentionHandles: ['openai'],
+    }];
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      postCooldownUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    mocks.getQueuedTweets.mockResolvedValue([standalone, ...companyDrafts]);
+    const deferralEntries = () => mocks.addPostLogEntry.mock.calls
+      .map(([, entry]) => entry)
+      .filter((entry) => entry.format === 'queue_refresh' && entry.topic === 'content_mix');
+
+    await runAutopilot(agent);
+    expect(deferralEntries()).toHaveLength(1);
+    const logged = deferralEntries()[0];
+    expect(logged.skipReason).toMatch(/^content_mix_deferred:/);
+
+    mocks.getPostLog.mockResolvedValue([{ ...logged, id: 'log-deferral-1' }]);
+    await runAutopilot(agent);
+    expect(deferralEntries()).toHaveLength(1);
+
+    mocks.getQueuedTweets.mockResolvedValue([standalone, ...companyDrafts, {
+      ...standalone,
+      id: 'company-spacex',
+      content: 'i would pay a stupid price for @SpaceX ownership',
+      topic: 'SpaceX startup conviction',
+      allowedMentionHandles: ['spacex'],
+    }]);
+    await runAutopilot(agent);
+    expect(deferralEntries()).toHaveLength(2);
+    expect(deferralEntries()[1].skipReason).not.toBe(logged.skipReason);
   });
 
   it('ignores the retired Geoffrey pipeline switch and uses the V2-only publish path', async () => {
@@ -732,6 +1057,176 @@ describe('autopilot remote debug logging', () => {
     expect(result.action).toBe('skipped');
     expect(result.reason).toContain('Daily post cap reached');
     expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('reads a full day of post history so the rolling daily cap can trip', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/survivability')>('@/lib/survivability');
+    mocks.countPostsInLast24h.mockImplementation(actual.countPostsInLast24h);
+    const now = Date.now();
+    const skipEntries = Array.from({ length: 60 }, (_, index) => ({
+      agentId: baseAgent.id,
+      tweetId: '',
+      xTweetId: '',
+      content: '',
+      format: 'cron',
+      topic: '',
+      postedAt: new Date(now - (index + 1) * 10 * 60 * 1000).toISOString(),
+      source: 'cron' as const,
+      action: 'skipped' as const,
+      reason: 'Cooldown: 30m until next post',
+    }));
+    const postedEntries = Array.from({ length: 5 }, (_, index) => ({
+      agentId: baseAgent.id,
+      tweetId: `posted-${index}`,
+      xTweetId: `x-posted-${index}`,
+      content: `live original post ${index}`,
+      format: 'hot_take',
+      topic: 'startup',
+      postedAt: new Date(now - (12 + index) * 60 * 60 * 1000).toISOString(),
+      source: 'autopilot' as const,
+      action: 'posted' as const,
+    }));
+    const fullLog = [...skipEntries, ...postedEntries];
+    mocks.getPostLog.mockImplementation(async (_agentId: string, limit = 20) => fullLog.slice(0, limit));
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(mocks.getPostLog).toHaveBeenCalledWith(baseAgent.id, 400);
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('Daily post cap reached');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the pick from storage and skips a draft the operator removed mid-tick', async () => {
+    const first = {
+      ...validQueuedTweet,
+      id: 'ranked-first',
+      content: 'first ranked draft about shipping cadence',
+      candidateScore: 95,
+      confidenceScore: 0.95,
+    };
+    const second = {
+      ...validQueuedTweet,
+      id: 'ranked-second',
+      content: 'second ranked draft about hiring pace',
+      candidateScore: 80,
+      confidenceScore: 0.8,
+    };
+    mocks.getQueuedTweets.mockResolvedValue([first, second]);
+    mocks.getTweet.mockImplementation(async (id: string) => (
+      id === 'ranked-first'
+        ? { ...first, status: 'quarantined', quarantinedAt: new Date().toISOString(), quarantineReason: 'Superseded by operator-written child' }
+        : second
+    ));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(result.tweetId).toBe('ranked-second');
+    expect(mocks.postTweet).toHaveBeenCalledTimes(1);
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), second.content, { username: baseAgent.handle });
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith('ranked-first', expect.objectContaining({ status: 'posted' }));
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: 'ranked-first',
+        format: 'stale_selection_gate',
+        action: 'skipped',
+        reason: expect.stringContaining('quarantined before posting'),
+      }),
+    );
+  });
+
+  it('posts nothing when every ranked draft changed in storage before posting', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    mocks.getTweet.mockResolvedValue(null);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('changed in storage before posting');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a queued draft whose X post succeeded but whose status write failed', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    mocks.getPostLog.mockResolvedValue([{
+      agentId: baseAgent.id,
+      tweetId: validQueuedTweet.id,
+      xTweetId: 'x-live-523',
+      content: validQueuedTweet.content,
+      format: 'long_form',
+      topic: 'startup',
+      postedAt: new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
+      source: 'autopilot',
+      reason: 'Posted with confidence 0.67 in balanced mode. Persistence warnings: tweet_status: KV write failed',
+    }]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(mocks.updateTweet).toHaveBeenCalledWith(validQueuedTweet.id, expect.objectContaining({
+      status: 'posted',
+      xTweetId: 'x-live-523',
+    }));
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ signalType: 'x_post_rejected' }),
+    );
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(validQueuedTweet.id, expect.objectContaining({ status: 'quarantined' }));
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ tweetId: validQueuedTweet.id, format: 'queue_reconcile' }),
+    );
+    expect(result.action).toBe('skipped');
+  });
+
+  it('autoposts an operator-written draft in safe mode without a model confidence score', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, autonomyMode: 'safe' });
+    mocks.getQueuedTweets.mockResolvedValue([{
+      ...validQueuedTweet,
+      confidenceScore: null,
+      candidateScore: null,
+      pipelineVersion: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    }]);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(mocks.postTweet).toHaveBeenCalledWith(expect.anything(), validQueuedTweet.content, { username: baseAgent.handle });
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: 'quarantined' }));
+  });
+
+  it('keeps operator-written and V2 drafts out of the forced low-confidence watchdog sweep', async () => {
+    const safeSettings = { ...baseSettings, autonomyMode: 'safe' as const };
+    mocks.getProtocolSettings.mockResolvedValue(safeSettings);
+    mocks.getQueuedTweets.mockResolvedValue([
+      {
+        ...validQueuedTweet,
+        id: 'operator-old',
+        confidenceScore: null,
+        candidateScore: null,
+        createdAt: '2026-04-01T00:00:00.000Z',
+      },
+      {
+        ...validQueuedTweet,
+        ...currentGeoffreyCertification,
+        id: 'v2-below-threshold',
+        confidenceScore: 0.55,
+        candidateScore: 55,
+        createdAt: '2026-04-01T00:00:00.000Z',
+      },
+    ]);
+
+    const healed = await selfHealAutopilotQueue(baseAgent, safeSettings as any, { forceArchiveLowConfidence: true });
+
+    expect(healed.before.postableQueueDepth).toBe(2);
+    expect(healed.before.lowConfidenceDepth).toBe(0);
+    expect(healed.archived).toBe(0);
+    expect(healed.action).toBe('queue already has postable drafts');
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
   it('retires an old network-derived draft when refreshed follow-graph evidence drops its topic', async () => {
@@ -907,12 +1402,12 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
+    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0, deferred: 0 });
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.updateTweet).not.toHaveBeenCalled();
   });
 
-  it('quarantines excess company-led drafts without teaching a negative company lesson', async () => {
+  it('defers excess company-led drafts for the mix window without quarantining them', async () => {
     const standalone = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -964,14 +1459,15 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 4, after: 1, certified: 1, quarantined: 3 });
-    expect(mocks.updateTweet).toHaveBeenCalledTimes(3);
-    for (const draft of companyDrafts) {
-      expect(mocks.updateTweet).toHaveBeenCalledWith(draft.id, expect.objectContaining({
-        status: 'quarantined',
-        quarantineReason: expect.stringContaining('at most 1 company-led original in any 5 posts'),
-      }));
-    }
+    expect(result).toEqual({ before: 4, after: 1, certified: 1, quarantined: 0, deferred: 3 });
+    // The mix window is a transient scheduling constraint: the excess drafts
+    // are held out of this tick's postable set but stay queued - no
+    // quarantine, no learning penalty - and become postable when the window
+    // clears.
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'quarantined' }),
+    );
     expect(mocks.addLearningSignal).not.toHaveBeenCalled();
   });
 
@@ -992,7 +1488,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 2, after: 0, certified: 0, quarantined: 2 });
+    expect(result).toEqual({ before: 2, after: 0, certified: 0, quarantined: 2, deferred: 0 });
     expect(mocks.updateTweet).toHaveBeenCalledWith('v2-sports-draft', expect.objectContaining({
       status: 'quarantined',
       quarantineReason: expect.stringContaining('excludes sports'),
@@ -1043,7 +1539,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0 });
+    expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0, deferred: 0 });
     expect(mocks.updateTweet).not.toHaveBeenCalled();
     expect(mocks.addLearningSignal).not.toHaveBeenCalled();
   });
@@ -1061,7 +1557,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1, deferred: 0 });
     expect(mocks.updateTweet).toHaveBeenCalledWith(cursorDraft.id, expect.objectContaining({
       status: 'quarantined',
       quarantineReason: expect.stringContaining('suppresses Cursor'),
@@ -1106,7 +1602,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1, deferred: 0 });
     expect(mocks.updateTweet).toHaveBeenCalledWith(elevenLabsDraft.id, expect.objectContaining({
       status: 'quarantined',
       quarantineReason: expect.stringContaining('prioritize OpenAI and Cognition'),
@@ -1126,7 +1622,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1, deferred: 0 });
     expect(mocks.updateTweet).toHaveBeenCalledWith('v2-natural-promotion', expect.objectContaining({
       status: 'quarantined',
       quarantineReason: expect.stringContaining('portfolio_company_promotion_excluded'),
@@ -1155,7 +1651,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1, deferred: 0 });
     expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-policy', expect.objectContaining({
       status: 'quarantined',
       preQuarantineStatus: 'queued',
@@ -1191,7 +1687,7 @@ describe('autopilot remote debug logging', () => {
 
     const result = await refreshQueuedTweetsForCurrentQualityPolicy({ ...baseAgent, handle: 'geoffwoo' });
 
-    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1 });
+    expect(result).toEqual({ before: 1, after: 0, certified: 0, quarantined: 1, deferred: 0 });
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.updateTweet).toHaveBeenCalledWith('v2-stale-certification', expect.objectContaining({
       status: 'quarantined',
@@ -1834,8 +2330,11 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
-  it('archives stale below-threshold drafts and refills instead of wedging autopost', async () => {
-    const staleLowConfidenceTweets = [
+  it('never archives stale operator-written drafts for low model confidence', async () => {
+    // Operator copy is operator intent, not a model guess: a day-old
+    // operator draft with a low legacy score still posts instead of being
+    // auto-archived and replaced by a generated refill.
+    const staleOperatorDrafts = [
       {
         ...queuedTweet,
         id: 'low-1',
@@ -1851,87 +2350,26 @@ describe('autopilot remote debug logging', () => {
         candidateScore: 57,
       },
     ];
-    const freshQueuedTweet = {
-      ...validQueuedTweet,
-      id: 'fresh-1',
-      content: 'fresh high confidence draft',
-      createdAt: new Date().toISOString(),
-      confidenceScore: 0.82,
-      candidateScore: 88,
-    };
-
-    mocks.getProtocolSettings.mockResolvedValue({
-      ...baseSettings,
-      minQueueSize: 2,
-    });
-    mocks.getQueuedTweets
-      .mockResolvedValueOnce(staleLowConfidenceTweets)
-      .mockResolvedValueOnce([freshQueuedTweet]);
-    mocks.getAnalysis.mockResolvedValue({ summary: 'analysis' });
-    mocks.buildGenerationContext.mockResolvedValue({
-      voiceProfile: {
-        tone: 'contrarian',
-        topics: ['AI'],
-        antiGoals: [],
-        communicationStyle: 'sharp and direct',
-        summary: 'summary',
-      },
-      learnings: null,
-      settings: { ...baseSettings, minQueueSize: 2 },
-      style: { bias: {} },
-      recentPosts: [],
-      allTweets: [],
-      memory: null,
-    });
-    mocks.generateTweetBatchV2.mockResolvedValue([v2CandidateFromTweet(freshQueuedTweet)]);
-    mocks.postTweet.mockResolvedValue({ tweetId: 'x-fresh-1', username: 'debugbot' });
+    mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, minQueueSize: 2 });
+    mocks.getQueuedTweets.mockResolvedValue(staleOperatorDrafts);
+    mocks.postTweet.mockResolvedValue({ tweetId: 'x-low-2', username: 'debugbot' });
 
     const result = await runAutopilot(baseAgent);
 
     expect(result.action).toBe('posted');
-    expect(result.tweetId).toBe('fresh-1');
-    expect(mocks.updateTweet).toHaveBeenCalledWith(
-      'low-1',
-      expect.objectContaining({
-        status: 'quarantined',
-        quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
-      }),
+    expect(result.tweetId).toBe('low-2');
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ quarantineReason: expect.stringContaining('Auto-archived from autopost queue') }),
     );
-    expect(mocks.updateTweet).toHaveBeenCalledWith(
-      'low-2',
-      expect.objectContaining({
-        status: 'quarantined',
-        quarantineReason: expect.stringContaining('Auto-archived from autopost queue'),
-      }),
-    );
-    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(
+    expect(mocks.createTweetFromGeneratedCandidate).not.toHaveBeenCalled();
+    expect(mocks.addPostLogEntry).not.toHaveBeenCalledWith(
       baseAgent.id,
-      expect.objectContaining({
-        content: freshQueuedTweet.content,
-        pipelineVersion: 'v2',
-      }),
-      expect.objectContaining({
-      status: 'queued',
-      }),
-    );
-    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
-      baseAgent.id,
-      expect.objectContaining({
-        format: 'queue_refresh',
-        reason: expect.stringContaining('stale low-confidence'),
-      }),
+      expect.objectContaining({ reason: expect.stringContaining('stale low-confidence') }),
     );
   });
 
   it('does not apply the retired additive confidence veto to judge-selected V2 drafts', async () => {
-    const lowConfidenceDefault = {
-      ...validQueuedTweet,
-      id: 'explore-default-low',
-      content: 'normal low confidence draft should still need review',
-      generationMode: 'balanced',
-      confidenceScore: 0.49,
-      candidateScore: 98,
-    };
     const explicitExplore = {
       ...validQueuedTweet,
       ...currentGeoffreyCertification,
@@ -1946,7 +2384,7 @@ describe('autopilot remote debug logging', () => {
       ...baseSettings,
       autonomyMode: 'explore',
     });
-    mocks.getQueuedTweets.mockResolvedValue([lowConfidenceDefault, explicitExplore]);
+    mocks.getQueuedTweets.mockResolvedValue([explicitExplore]);
     mocks.postTweet.mockResolvedValue({ tweetId: 'x-explore-tagged', username: 'debugbot' });
 
     const result = await runAutopilot(baseAgent);
@@ -1957,18 +2395,13 @@ describe('autopilot remote debug logging', () => {
       explicitExplore.content,
       { username: baseAgent.handle },
     );
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(
+      'explore-tagged-low',
+      expect.objectContaining({ status: 'quarantined' }),
+    );
   });
 
   it('uses warmed research during queue refill and never starts a live trend refresh', async () => {
-    const staleLowConfidenceTweets = [
-      {
-        ...queuedTweet,
-        id: 'trend-refill-low',
-        createdAt: '2026-04-01T00:00:00.000Z',
-        confidenceScore: 0.51,
-        candidateScore: 55,
-      },
-    ];
     const freshQueuedTweet = {
       ...validQueuedTweet,
       id: 'trend-refill-fresh',
@@ -1983,7 +2416,7 @@ describe('autopilot remote debug logging', () => {
       minQueueSize: 1,
     });
     mocks.getQueuedTweets
-      .mockResolvedValueOnce(staleLowConfidenceTweets)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([freshQueuedTweet]);
     mocks.getAnalysis.mockResolvedValue({ summary: 'analysis' });
     mocks.getTrendingCache
@@ -2225,6 +2658,42 @@ describe('autopilot remote debug logging', () => {
     );
   });
 
+  it('does not re-reply to a mention whose reply tweet is persisted after the post log rotated', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({
+      ...baseSettings,
+      enabled: false,
+      autoReply: true,
+    });
+    mocks.getMentionsFromTwitter.mockResolvedValue([{
+      id: '900000000000000009',
+      text: 'What eval catches memory drift before production?',
+      authorId: 'user-builder',
+      authorName: 'Builder',
+      authorUsername: 'builder',
+      createdAt: '2026-04-07T12:03:00.000Z',
+      conversationId: 'conv-persisted-reply',
+      inReplyToTweetId: null,
+    }]);
+    mocks.getPostLog.mockResolvedValue([]);
+    mocks.getTweets.mockResolvedValue([{
+      ...validQueuedTweet,
+      id: 'reply-persisted',
+      type: 'reply',
+      status: 'posted',
+      xTweetId: 'x-reply-persisted',
+      content: 'already answered this one',
+      generationSurface: 'reply',
+      generationTriggerId: '900000000000000009',
+    }]);
+    mocks.replyToTweet.mockResolvedValue({ tweetId: 'reply-duplicate', username: 'debugbot' });
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.repliesSent).toBe(0);
+    expect(mocks.replyToTweet).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
   it('uses a deep handled-reply log window so old stored mentions are not retried', async () => {
     mocks.getProtocolSettings.mockResolvedValue({
       ...baseSettings,
@@ -2392,16 +2861,21 @@ describe('autopilot remote debug logging', () => {
         reason: expect.stringContaining('already sent 1 auto-reply in this conversation'),
       }),
     );
-    expect(mocks.addLearningSignal).toHaveBeenCalledWith(
+    // A conversation-level cap must not poison the skipped author: no
+    // reply_rejected signal and no rejected relationship state for merely
+    // replying in an already-answered thread.
+    expect(mocks.addLearningSignal).not.toHaveBeenCalledWith(
       baseAgent.id,
       expect.objectContaining({
         xTweetId: skippedMentionId,
         signalType: 'reply_rejected',
-        metadata: expect.objectContaining({
-          qualityGate: 'conversation_reply_limit',
-          conversationId: 'root-conversation',
-          maxDepth: 1,
-        }),
+      }),
+    );
+    expect(mocks.upsertRelationshipProfile).not.toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        mentionId: skippedMentionId,
+        rejected: true,
       }),
     );
   });
