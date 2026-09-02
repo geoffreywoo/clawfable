@@ -557,6 +557,7 @@ const KEYS = {
   agentOwner: (id: string) => `agent:${id}:owner`,
   agentTweets: (id: string) => `agent:${id}:tweets`,
   agentQueue: (id: string) => `agent:${id}:queue`,
+  agentQueueVersion: (id: string) => `agent:${id}:queue:version`,
   agentMentions: (id: string) => `agent:${id}:mentions`,
   agentMentionByTweet: (agentId: string, tweetId: string) => `agent:${agentId}:mention:tweet:${tweetId}`,
   agentMetrics: (id: string) => `agent:${id}:metrics`,
@@ -840,6 +841,7 @@ export async function deleteAgent(id: string): Promise<void> {
 
   // Cascade: delete queue refs
   await kvDel(KEYS.agentQueue(id));
+  await kvDel(KEYS.agentQueueVersion(id));
 
   // Cascade: delete mentions and their per-X-tweet index keys
   const mentionIds = await kvLrange(KEYS.agentMentions(id), 0, -1);
@@ -1163,6 +1165,32 @@ export async function getPreviewTweets(agentId: string): Promise<Tweet[]> {
   return tweets.filter((tweet) => tweet.status === 'preview');
 }
 
+/**
+ * Monotonic version for an agent's queue. Every write that adds, removes, or
+ * rewrites a queued draft bumps it, which lets the autopilot tick detect an
+ * operator delete/edit/refresh that landed after it re-read its pick and abort
+ * the post instead of publishing something the operator already cancelled.
+ * The bump runs under the version key's write lock, matching the per-key
+ * serialization every other read-modify-write ledger uses.
+ */
+export async function bumpQueueVersion(agentId: string): Promise<number> {
+  const key = KEYS.agentQueueVersion(String(agentId));
+  return withKeyLock(key, () => kvIncr(key));
+}
+
+/**
+ * Always reads through to KV. The tick captures this value and re-reads it
+ * seconds later to catch a write made by another process, so the
+ * request-scoped read cache would hide exactly the mutation it is looking for.
+ */
+export async function getQueueVersion(agentId: string): Promise<number> {
+  const key = KEYS.agentQueueVersion(String(agentId));
+  invalidateCached(key);
+  const raw = await kvGet<number | string>(key);
+  const parsed = typeof raw === 'string' ? Number(raw) : raw;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : 0;
+}
+
 export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
   const ids = await kvLrange(KEYS.agentQueue(agentId), 0, -1);
   const tweets = await kvHgetallMany<Tweet>(ids.map((id) => KEYS.tweet(String(id))));
@@ -1282,6 +1310,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
   await kvLpush(KEYS.agentTweets(data.agentId), id);
   if (tweet.status === 'queued') {
     await kvLpush(KEYS.agentQueue(data.agentId), id);
+    await bumpQueueVersion(data.agentId);
   }
   if (tweet.draftExperimentId) {
     await createDraftExperiment(data.agentId, {
@@ -1418,6 +1447,13 @@ export async function updateTweet(id: string, data: UpdateTweetInput): Promise<T
     }
   }
 
+  // Anything that changes what the queue holds — a draft leaving or entering
+  // it, or the copy of a draft still in it — moves the queue version so an
+  // in-flight autopilot tick can see the change before it posts.
+  if (prevStatus === 'queued' || updated.status === 'queued') {
+    await bumpQueueVersion(existing.agentId);
+  }
+
   await Promise.all([
     data.content !== undefined && data.content !== existing.content
       ? addOutcomeEvent(existing.agentId, {
@@ -1483,6 +1519,7 @@ export async function deleteTweet(id: string): Promise<void> {
   await kvDel(KEYS.tweet(id));
   await kvLrem(KEYS.agentTweets(tweet.agentId), 0, id);
   await kvLrem(KEYS.agentQueue(tweet.agentId), 0, id);
+  if (tweet.status === 'queued') await bumpQueueVersion(tweet.agentId);
 }
 
 function hasGeneratedTweetProvenance(tweet: Tweet): boolean {

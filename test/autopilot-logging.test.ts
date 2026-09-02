@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   updateProtocolSettings: vi.fn(),
   getQueuedTweets: vi.fn(),
+  getQueueVersion: vi.fn(),
   getTweet: vi.fn(),
   getTweets: vi.fn(),
   getAnalysis: vi.fn(),
@@ -83,6 +84,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getUser: mocks.getUser,
   updateProtocolSettings: mocks.updateProtocolSettings,
   getQueuedTweets: mocks.getQueuedTweets,
+  getQueueVersion: mocks.getQueueVersion,
   getTweet: mocks.getTweet,
   getTweets: mocks.getTweets,
   getAnalysis: mocks.getAnalysis,
@@ -429,6 +431,7 @@ beforeEach(() => {
   mocks.getUser.mockResolvedValue(null);
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
+  mocks.getQueueVersion.mockResolvedValue(4);
   mocks.getTweets.mockResolvedValue([]);
   // Storage truth for the pre-post re-read: the latest version of a tweet the
   // run has observed through the queue read, a repair, or a refill persist.
@@ -1147,6 +1150,46 @@ describe('autopilot remote debug logging', () => {
     expect(result.action).toBe('skipped');
     expect(result.reason).toContain('changed in storage before posting');
     expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('cancels the post when a queue mutation lands after the pre-post re-read', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    // First read is captured before the re-read; the second read sees the bump
+    // from an operator delete that landed while the post was being prepared.
+    mocks.getQueueVersion.mockReset();
+    mocks.getQueueVersion.mockResolvedValueOnce(7).mockResolvedValueOnce(8);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(result.action).toBe('skipped');
+    expect(result.tweetId).toBe(validQueuedTweet.id);
+    expect(result.reason).toContain('Queue mutation gate');
+    expect(mocks.updateTweet).not.toHaveBeenCalledWith(validQueuedTweet.id, expect.objectContaining({ status: 'posted' }));
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({
+        tweetId: validQueuedTweet.id,
+        format: 'queue_mutation_gate',
+        action: 'skipped',
+        reason: expect.stringContaining('version 7 -> 8'),
+      }),
+    );
+  });
+
+  it('posts when the queue version is unchanged between selection and the X call', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    mocks.getQueueVersion.mockReset();
+    mocks.getQueueVersion.mockResolvedValue(12);
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('posted');
+    expect(mocks.postTweet).toHaveBeenCalledTimes(1);
+    expect(mocks.addPostLogEntry).not.toHaveBeenCalledWith(
+      baseAgent.id,
+      expect.objectContaining({ format: 'queue_mutation_gate' }),
+    );
   });
 
   it('reconciles a queued draft whose X post succeeded but whose status write failed', async () => {
