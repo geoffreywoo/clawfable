@@ -612,6 +612,30 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.discoverCurrentTrends).not.toHaveBeenCalled();
   });
 
+  it('adds an explicit protected-refresh attempt id to the generation trigger', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'direct', summary: 'founder' },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 2 },
+      style: { autonomyMode: 'balanced', bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [],
+      allTweets: [],
+      memory: null,
+      ideaAtoms: [],
+      signals: [],
+    });
+
+    await refillQueue(agent as any, 2, {}, { attemptId: 'quality-refresh:2' });
+
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        triggerId: expect.stringContaining(':queue:empty:attempt:quality-refresh:2'),
+      }),
+    }));
+  });
+
   it('does not invoke V1 or a strict fallback when V2 returns no eligible drafts', async () => {
     process.env.VERCEL_ENV = 'production';
     const agent = { ...baseAgent, handle: 'geoffwoo' };

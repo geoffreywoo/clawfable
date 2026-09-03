@@ -2845,6 +2845,7 @@ export async function refillQueue(
   agent: Agent,
   count: number,
   bias: { scheduledTopic?: string | null; momentumTopic?: string | null } = {},
+  options: { attemptId?: string | null } = {},
 ): Promise<number> {
   try {
     const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
@@ -2888,7 +2889,8 @@ export async function refillQueue(
       .map((tweet) => tweet.id)
       .sort()
       .join(',') || 'empty';
-    const refillTrigger = `refill:${trendingSnapshot?.cachedAt || 'no-research'}:${Math.floor(Date.now() / (2 * 60 * 60 * 1000))}:queue:${queueFingerprint}`;
+    const attemptId = String(options.attemptId || '').trim().slice(0, 160);
+    const refillTrigger = `refill:${trendingSnapshot?.cachedAt || 'no-research'}:${Math.floor(Date.now() / (2 * 60 * 60 * 1000))}:queue:${queueFingerprint}${attemptId ? `:attempt:${attemptId}` : ''}`;
     const batch = organicCount <= 0
       ? []
       : await generatePublishingBatchV2({

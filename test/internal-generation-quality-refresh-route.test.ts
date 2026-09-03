@@ -134,7 +134,12 @@ describe('internal generation quality refresh route', () => {
     expect(mocks.checkPerformance).toHaveBeenNthCalledWith(2, agent, undefined);
     expect(mocks.buildLearnings).toHaveBeenCalledWith(agent);
     expect(mocks.refreshQueuedTweetsForCurrentQualityPolicy).toHaveBeenCalledWith(agent);
-    expect(mocks.refillQueue).toHaveBeenCalledWith(agent, 1);
+    expect(mocks.refillQueue).toHaveBeenCalledWith(
+      agent,
+      1,
+      {},
+      { attemptId: 'refresh-owner:1' },
+    );
     expect(mocks.buildGenerationQualityAudit).toHaveBeenCalledWith(agent);
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'refresh-owner');
     expect(data).toMatchObject({
@@ -208,6 +213,10 @@ describe('internal generation quality refresh route', () => {
 
     expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
     expect(mocks.refillQueue.mock.calls.map((call) => call[1])).toEqual([4, 2]);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[3]?.attemptId)).toEqual([
+      'refresh-owner:1',
+      'refresh-owner:2',
+    ]);
     expect(data.refill).toMatchObject({
       requested: 4,
       added: 4,
@@ -239,6 +248,10 @@ describe('internal generation quality refresh route', () => {
     const data = await response.json();
 
     expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[3]?.attemptId)).toEqual([
+      'refresh-owner:1',
+      'refresh-owner:2',
+    ]);
     expect(data.refill).toMatchObject({
       requested: 2,
       added: 2,
