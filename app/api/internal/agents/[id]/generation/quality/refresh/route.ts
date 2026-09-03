@@ -106,7 +106,9 @@ export async function POST(
     const maxRefillAttempts = Math.min(5, Math.max(1, Math.ceil(refillRequested / 2) + 1));
     while (refillRequested - refillAdded > 0 && refillAttempts.length < maxRefillAttempts) {
       const remaining = refillRequested - refillAdded;
-      const attemptAdded = await refillQueue(agent, remaining);
+      const attemptAdded = await refillQueue(agent, remaining, {}, {
+        attemptId: `${lock.owner}:${refillAttempts.length + 1}`,
+      });
       refillAttempts.push({ requested: remaining, added: attemptAdded });
       refillAdded += attemptAdded;
       consecutiveEmptyAttempts = attemptAdded > 0 ? 0 : consecutiveEmptyAttempts + 1;

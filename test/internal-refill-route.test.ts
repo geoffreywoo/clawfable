@@ -81,7 +81,12 @@ describe('internal queue refill route', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resetReadCache).toHaveBeenCalledOnce();
-    expect(mocks.refillQueue).toHaveBeenCalledWith(expect.objectContaining({ id: '13' }), 3);
+    expect(mocks.refillQueue).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '13' }),
+      3,
+      {},
+      { attemptId: 'internal-refill:test:1' },
+    );
     expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith('13', 'internal-refill:test');
     expect(data).toMatchObject({
       agentId: '13',
@@ -113,6 +118,11 @@ describe('internal queue refill route', () => {
 
     expect(mocks.refillQueue).toHaveBeenCalledTimes(3);
     expect(mocks.refillQueue.mock.calls.map((call) => call[1])).toEqual([5, 3, 1]);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[3]?.attemptId)).toEqual([
+      'internal-refill:test:1',
+      'internal-refill:test:2',
+      'internal-refill:test:3',
+    ]);
     expect(data).toMatchObject({
       requested: 5,
       added: 5,
@@ -144,6 +154,10 @@ describe('internal queue refill route', () => {
     const data = await response.json();
 
     expect(mocks.refillQueue).toHaveBeenCalledTimes(2);
+    expect(mocks.refillQueue.mock.calls.map((call) => call[3]?.attemptId)).toEqual([
+      'internal-refill:test:1',
+      'internal-refill:test:2',
+    ]);
     expect(data).toMatchObject({
       requested: 2,
       added: 2,

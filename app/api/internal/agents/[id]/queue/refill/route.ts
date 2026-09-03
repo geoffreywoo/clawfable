@@ -60,7 +60,9 @@ export async function POST(
     const maxAttempts = Math.min(10, Math.max(1, Math.ceil(requestedCount / 2) + 1));
     while (added < requestedCount && attempts.length < maxAttempts) {
       const remaining = requestedCount - added;
-      const attemptAdded = await refillQueue(agent, remaining);
+      const attemptAdded = await refillQueue(agent, remaining, {}, {
+        attemptId: `${lock.owner}:${attempts.length + 1}`,
+      });
       attempts.push({ requested: remaining, added: attemptAdded });
       added += attemptAdded;
       consecutiveEmptyAttempts = attemptAdded > 0 ? 0 : consecutiveEmptyAttempts + 1;
