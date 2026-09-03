@@ -52,13 +52,13 @@ import {
   selectOperatorTopicSignals,
 } from './source-planner';
 import {
+  getPublishingV2FinalCriticVersion,
+  getPublishingV2QualityPolicyVersion,
   PUBLISHING_V2_CONTEXTUAL_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
-  PUBLISHING_V2_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN,
   PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
-  PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 import {
   getVoiceCorpusTextSurfaceExclusions,
@@ -1302,6 +1302,8 @@ export function buildAutopostPostingRateAudit(
 
 export async function buildGenerationQualityAudit(agent: Agent) {
   const pipelineVersion = 'v2' as const;
+  const activeQualityPolicyVersion = getPublishingV2QualityPolicyVersion('original', agent.handle);
+  const activeFinalCriticVersion = getPublishingV2FinalCriticVersion('original', agent.handle);
   const [context, queue, corpus, complaints, allTweets, trendingValue, topicIntelligence, generationV2, sourceDocuments, storyClusters, researchAgenda, semanticBlocks, recentIdeas, analysis, postLog] = await Promise.all([
     buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
     getQueuedTweets(agent.id),
@@ -1310,7 +1312,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     getTweets(agent.id),
     getTrendingCache(agent.id),
     getTopicIntelligenceState(agent.id),
-    loadGenerationV2Metrics(agent.id),
+    loadGenerationV2Metrics(agent.id, activeQualityPolicyVersion),
     getSourceDocuments(agent.id, 300),
     getStoryClusters(agent.id, 200),
     getResearchAgenda(agent.id),
@@ -1383,6 +1385,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const queueItems = queue.map((tweet) => {
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion: corpus?.snapshotId || null,
+      accountHandle: agent.handle,
     });
     const accountTopicIssue = getAccountTopicPolicyIssue(
       agent.handle,
@@ -1542,7 +1545,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     id: signal.id,
     subject: signal.subject,
     domain: signal.domain,
-    attempt: getOperatorTopicSignalAttemptDecisionV2(signal.id, recentIdeas),
+    attempt: getOperatorTopicSignalAttemptDecisionV2(
+      signal.id,
+      recentIdeas,
+      new Date(),
+      activeQualityPolicyVersion,
+    ),
   }));
   const auditAnalysis: AccountAnalysis = analysis || {
     agentId: agent.id,
@@ -1580,7 +1588,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     signals: context.signals,
     blocks: semanticBlocks,
     recentIdeas,
-    seedRotationKey: `audit:${agent.id}:${PUBLISHING_V2_QUALITY_POLICY_VERSION}`,
+    seedRotationKey: `audit:${agent.id}:${activeQualityPolicyVersion}`,
   });
   const nextBriefLaneCounts = countBy(nextBriefPlan.map((brief) => (
     brief.portfolioCompanyContext
@@ -1704,7 +1712,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   });
   const postingRateAudit = buildAutopostPostingRateAudit(
     allTweets,
-    PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    activeQualityPolicyVersion,
   );
   const autopostSummary = {
     enabled: context.settings.enabled,
@@ -1783,7 +1791,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     metricsOnly: true,
   };
   const currentPolicyRuns = generationV2.lineage.filter((run) => (
-    run.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    run.qualityPolicyVersion === activeQualityPolicyVersion
     && run.mode === 'live'
     && (run.surface || 'original') === 'original'
   ));
@@ -1811,10 +1819,10 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const writerOutcomes = buildGenerationWriterOutcomeAudit(currentPolicyRuns);
   const refillCandidateRejections = postLog.filter((entry) => (
     entry.format === 'refill_candidate_rejected'
-    && entry.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    && entry.qualityPolicyVersion === activeQualityPolicyVersion
   ));
   const currentPolicyWindow = {
-    qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    qualityPolicyVersion: activeQualityPolicyVersion,
     runCount: currentPolicyRuns.length,
     runsWithSelectedDrafts,
     emptySelectionRunCount: currentPolicyRuns.length - runsWithSelectedDrafts,
@@ -1952,11 +1960,11 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       portfolioCompanySnapshotVersion: ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION,
       geoffreyAIFutureHorizonPolicyVersion: GEOFFREY_AI_HORIZON_POLICY_VERSION,
       frontierForecastLearningVersion: FRONTIER_FORECAST_LEARNING_VERSION,
-      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      qualityPolicyVersion: activeQualityPolicyVersion,
       entityMentionPolicyVersion: ENTITY_MENTION_POLICY_VERSION,
       curatedEntityRegistryVersion: CURATED_X_ENTITY_REGISTRY_VERSION,
       curatedEntityRegistryCount: CURATED_X_ENTITY_REGISTRY.length,
-      finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
+      finalCriticVersion: activeFinalCriticVersion,
       generationQualityMarginFloor: PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN,
       autopostQualityMarginFloor: ['geoffwoo', 'geoffreywoo'].includes(normalizedHandle)
         ? PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN
@@ -1987,7 +1995,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     portfolio: portfolioSummary,
     sources: {
       nextBriefPlan: {
-        deterministicSeedPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+        deterministicSeedPolicyVersion: activeQualityPolicyVersion,
         previewKind: 'representative_deterministic',
         predictsExactNextLiveRun: false,
         liveRunSeedSource: 'generation_run_id',

@@ -11,6 +11,7 @@ import {
   getGenerationV2CircuitPauseUntil,
   getCommittedTweetCopyMemoryV2,
   hasUnsupportedOperatorEvidenceV2,
+  getGeoffreyAIAmbitionIssueV2,
   getGeoffreyAIBaselineLagIssueV2,
   getGeoffreyAIFutureRejectionCodesV2,
   getGeoffreyFrontierForecastShapeRejectionCodesV2,
@@ -485,6 +486,86 @@ describe('Tweet Generation V2', () => {
     )).toBe('industrial_robot_pilots_are_current_baseline');
   });
 
+  it('blocks basic AI confidence theater while preserving genuinely larger calls', () => {
+    const liveBasicTake = 'a startup built entirely by coding agents will hit a billion-dollar valuation within 12 months. i’d put my own money on it.';
+    const queuedBasicTake = 'i’d buy SoftBank stock for Masayoshi Son’s maximally reckless AI ambition.';
+
+    expect(getGeoffreyAIAmbitionIssueV2(liveBasicTake)).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'i’d bet my own money that a startup with no human-written code reaches a billion-dollar valuation within 12 months.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'coding agents will build the first unicorn before the end of next year.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first one-person unicorn is less than a year away.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'an AI agent will found the first billion-dollar business next year.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn arrives next year.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'an agent-built startup will be worth $5b next year.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'coding agents will build the first decacorn before 2028.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(queuedBasicTake)).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'SoftBank’s reckless AI ambition is why i’d own the stock.',
+    )).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'i’d buy SoftBank because Masa is reckless about AI capex.',
+    )).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'SoftBank’s AI capex is maximally reckless. i want to own it.',
+    )).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'SoftBank is maximally reckless on AI. i would buy the stock.',
+    )).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'i am buying SoftBank because it is maximally aggressive on AI.',
+    )).toBe('ai_ambition_adjective_is_not_a_thesis');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'agents will build the first unicorn, but they will not replace the software industry.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'agents will build the first unicorn and replace two interns.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn. every venture fund.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn arrives next year, as most people would expect.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'every venture fund will watch. the first agent-built unicorn arrives next year.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn will not replace engineers. it will force every venture fund to rebuild around autonomous companies.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'frontier coding agents are already good enough. the next $100b software company might employ fewer people than this fund.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'one founder will command more AI labor than a Fortune 500 company within 12 months.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn is obvious. 100 of them replace the SaaS index within two years.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn is obvious. every venture fund has to rebuild around autonomous companies.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn is obvious. it forces every venture fund to rebuild.',
+    )).toBeNull();
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'the first agent-built unicorn is obvious. the weather changed. it forces every venture fund to rebuild.',
+    )).toBe('agent_built_unicorn_is_current_baseline');
+  });
+
   it('requires frontier lead and bullish trajectory conviction for Geoffrey AI ideas', () => {
     const geoffreyVoice = {
       ...voiceProfile,
@@ -566,6 +647,42 @@ describe('Tweet Generation V2', () => {
       forecastGrounding: 0.95,
       exponentialIntuition: 0.95,
     })).toContain('final_frontier_baseline_lag');
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'AI coding agents startups',
+      content: 'a startup built entirely by coding agents will hit a billion-dollar valuation within 12 months. i’d put my own money on it.',
+      frontierLead: 0.99,
+      aiBullishness: 0.99,
+      trajectoryConviction: 0.99,
+      forecastGrounding: 0.99,
+      exponentialIntuition: 0.99,
+    })).toContain('final_ai_ambition_below_floor');
+    expect(getV2IdeaJudgeRejectionCodes({
+      ...lagging,
+      frontierLead: 0.9,
+      aiBullishness: 0.819,
+      trajectoryConviction: 0.9,
+      forecastGrounding: 0.9,
+      exponentialIntuition: 0.9,
+    }, geoffreyVoice, 'OpenAI coding agents')).toContain('idea_judge_timid_ai_posture');
+    expect(getV2IdeaJudgeRejectionCodes({
+      ...lagging,
+      frontierLead: 0.9,
+      aiBullishness: 0.82,
+      trajectoryConviction: 0.9,
+      forecastGrounding: 0.9,
+      exponentialIntuition: 0.9,
+    }, geoffreyVoice, 'OpenAI coding agents')).not.toContain('idea_judge_timid_ai_posture');
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'AI coding agents startups',
+      content: 'one founder is about to command more AI labor than a Fortune 500 company.',
+      frontierLead: 0.9,
+      aiBullishness: 0.82,
+      trajectoryConviction: 0.9,
+      forecastGrounding: 0.9,
+      exponentialIntuition: 0.9,
+    })).toEqual([]);
   });
 
   it('allows direct AI reactions without forcing a visible forecast worksheet', () => {
@@ -687,6 +804,39 @@ describe('Tweet Generation V2', () => {
 
     expect(stale.rejectionCodes).toContain('behind_frontier_baseline');
     expect(forward.rejectionCodes).not.toContain('behind_frontier_baseline');
+  });
+
+  it('rejects a basic agent-built unicorn premise before paying the idea judge', () => {
+    const geoffreyVoice = {
+      ...voiceProfile,
+      summary: `${voiceProfile.summary} Account topic policy for @geoffwoo.`,
+    };
+    const basic = normalizeIdeaCandidatesV2({
+      raw: [rawIdea(
+        'operator',
+        'i’d bet my own money that a startup with no human-written code reaches a billion-dollar valuation within 12 months.',
+      )],
+      agentId: 'agent-1',
+      runId: 'run-basic-ai-ambition',
+      briefs: [brief('operator', 'AI coding agents')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-09-02T00:00:00.000Z',
+    })[0];
+    const impliedAiBasic = normalizeIdeaCandidatesV2({
+      raw: [rawIdea('operator', 'the first agent-built unicorn arrives next year.')],
+      agentId: 'agent-1',
+      runId: 'run-implied-ai-ambition',
+      briefs: [brief('operator', 'startups')],
+      voiceProfile: geoffreyVoice,
+      recentPosts: [],
+      blocks: [],
+      now: '2026-09-02T00:00:00.000Z',
+    })[0];
+
+    expect(basic.rejectionCodes).toContain('basic_ai_take');
+    expect(impliedAiBasic.rejectionCodes).toContain('basic_ai_take');
   });
 
   it('rejects abstract comparison theses for Geoffrey before copy generation', () => {

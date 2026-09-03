@@ -72,6 +72,11 @@ describe('Geoffrey semantic topic identity', () => {
 
   it('recognizes the broad native finance, culture, health, and sports lanes', () => {
     expect(classifyGeoffreyTopicDomain('AI/ML')).toBe('ai_compute');
+    expect(classifyGeoffreyTopicDomain('a startup built entirely by coding agents')).toBe('ai_compute');
+    expect(classifyGeoffreyTopicDomain('i would buy stocks exposed to coding agents')).toBe('ai_compute');
+    expect(classifyGeoffreyTopicDomain('the first agent-built unicorn arrives next year')).toBe('ai_compute');
+    expect(classifyGeoffreyTopicDomain('a one-person unicorn')).toBe('ai_compute');
+    expect(classifyGeoffreyTopicDomain('an entirely autonomous software company')).toBe('ai_compute');
     expect(classifyGeoffreyTopicDomain('QQQ and public market investing')).toBe('finance_investing');
     expect(classifyGeoffreyTopicDomain('Modal Databricks IPO timing')).toBe('finance_investing');
     expect(classifyGeoffreyTopicDomain('Burning Man status and city culture')).toBe('culture_status');

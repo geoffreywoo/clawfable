@@ -4,6 +4,8 @@
  */
 
 export interface VoiceProfile {
+  /** Authenticated account identity when the profile was built for a live agent. */
+  accountHandle?: string | null;
   tone: string;
   topics: string[];
   antiGoals: string[];

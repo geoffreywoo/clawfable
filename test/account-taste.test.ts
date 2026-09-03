@@ -39,6 +39,15 @@ describe('account taste scoring', () => {
       communicationStyle: 'technical and compressed',
       summary: 'Writes about inference ASICs, tungsten, and industrial capacity.',
     })).toBe(false);
+    expect(isGeoffreyVoiceProfile({
+      ...genericVoiceProfile,
+      accountHandle: '@geoffwoo',
+    })).toBe(true);
+    expect(isGeoffreyVoiceProfile({
+      ...geoffreyVoiceProfile,
+      accountHandle: '@another-founder',
+      antiGoals: ['Never imitate @geoffwoo'],
+    })).toBe(false);
   });
 
   it('calibrates casual register against known manual Geoffrey sentence shapes', () => {
@@ -487,6 +496,37 @@ describe('account taste scoring', () => {
     expect(feedback.preferenceHints.join(' ')).not.toMatch(/avoid AI|reject AI/i);
   });
 
+  it('stores basic AI take feedback as an ambition correction without forcing a formula', () => {
+    const feedback = classifyTasteFeedbackReason(
+      'this tweet reads very basic. the takes should be super spicy and super aggressive in terms of ai pilled',
+      '',
+      { voiceProfile: geoffreyVoiceProfile },
+    );
+
+    expect(feedback.metadata).toMatchObject({
+      aiAmbitionComplaint: true,
+      aiBullishPostureRequested: true,
+      tasteComplaint: true,
+      accountSpecificHints: 'geoffrey',
+    });
+    expect(feedback.preferenceHints.join(' ')).toContain('one agent-built unicorn');
+    expect(feedback.preferenceHints.join(' ')).toContain('non-consensus magnitude');
+    expect(feedback.preferenceHints.join(' ')).toContain('do not force a forecast');
+    expect(feedback.preferenceHints.join(' ')).toContain('arbitrary number');
+  });
+
+  it.each([
+    'this AI take is too aggressive and too bullish',
+    'be less bullish about AI',
+    'the AI hype is too much. dial it back',
+  ])('preserves negative polarity for AI ambition feedback: %s', (reason) => {
+    const feedback = classifyTasteFeedbackReason(reason, '', { voiceProfile: geoffreyVoiceProfile });
+
+    expect(feedback.metadata.aiBullishPostureRequested).not.toBe(true);
+    expect(feedback.metadata.aiAmbitionComplaint).not.toBe(true);
+    expect(feedback.preferenceHints.join(' ')).not.toContain('non-consensus magnitude');
+  });
+
   it('stores over-specialization feedback as a broadening instruction', () => {
     const feedback = classifyTasteFeedbackReason(
       'the candidates are too technical and too specialized. broaden the topics and stop making everything manufacturing heavy.',
@@ -611,6 +651,8 @@ describe('account taste scoring', () => {
       expect(contract).toMatch(/frontier engineers.*coding agents/i);
       expect(contract).toMatch(/robots.*factor(?:y|ies).*warehouse/i);
       expect(contract).toMatch(/(?:literal timeline is optional|not a requirement to print|does not require a printed timeline)/i);
+      expect(contract).toMatch(/agent-built.*one-person unicorn/i);
+      expect(contract).toMatch(/(?:larger valuation number|bigger valuation number|inflate numbers|arbitrary number)/i);
     }
   });
 

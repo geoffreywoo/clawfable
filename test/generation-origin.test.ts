@@ -5,6 +5,8 @@ import {
   PUBLISHING_V2_CONTEXTUAL_QUALITY_POLICY_VERSION,
   PUBLISHING_V2_FINAL_CRITIC_VERSION,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
+  PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION,
+  PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
 } from '@/lib/publishing-quality-policy';
 
 const currentCertification = {
@@ -18,6 +20,61 @@ const currentCertification = {
 };
 
 describe('generated publishing origin gate', () => {
+  it('preserves standard-account queue certification across Geoffrey-only policy changes', () => {
+    const complete = {
+      type: 'original' as const,
+      pipelineVersion: 'v2' as const,
+      contentProvenance: 'generated_v2' as const,
+      generationSurface: 'original' as const,
+      generationRunId: 'run-standard',
+      ideaId: 'idea-standard',
+      draftCandidateId: 'draft-standard',
+      qualityPolicyVersion: PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
+      voiceCorpusVersion: 'voice-corpus-standard',
+      finalCriticProvider: 'openai' as const,
+      finalCriticModel: 'gpt-5.6',
+      finalCriticVerdict: 'allow' as const,
+      finalCriticScores: { qualityMargin: 0.9 } as any,
+      finalCriticVersion: PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION,
+      generationEvidenceReferences: [{
+        id: 'operator-topic:startups',
+        kind: 'operator_topic' as const,
+        sourceDocumentId: null,
+        url: null,
+        title: 'Operator topic signal: startups',
+        publisher: 'Clawfable operator corpus',
+        content: 'Aggregate topic preference only.',
+        publishedAt: null,
+        verifiedAt: new Date().toISOString(),
+        expiresAt: null,
+        trustTier: 'primary' as const,
+      }],
+    };
+
+    expect(getGeneratedPublishIssue(complete, { accountHandle: '@another-founder' })).toBeNull();
+    expect(getGeneratedPublishIssue(complete, { accountHandle: '@geoffwoo' })).toContain(
+      PUBLISHING_V2_QUALITY_POLICY_VERSION,
+    );
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      ...currentCertification,
+    }, { accountHandle: '@another-founder' })).toBeNull();
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      finalCriticVersion: PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION,
+    }, { accountHandle: '@another-founder' })).toContain(
+      PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
+    );
+    expect(getGeneratedPublishIssue({
+      ...complete,
+      qualityPolicyVersion: PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
+      finalCriticVersion: PUBLISHING_V2_FINAL_CRITIC_VERSION,
+    }, { accountHandle: '@another-founder' })).toContain(
+      PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION,
+    );
+  });
+
   it('allows complete V2 lineage and explicit operator-written content', () => {
     expect(getGeneratedPublishIssue({
       type: 'original',

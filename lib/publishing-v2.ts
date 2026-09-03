@@ -44,7 +44,7 @@ import { getAutopostPolicyIssue, getGeneratedTweetIssue, getTweetLengthIssue, is
 import { buildCoverageCluster, extractCandidateFeatureTags } from './tweet-features';
 import { buildResearchSemanticKey, clampResearchScore, researchTokenSimilarity, stableResearchId } from './research-utils';
 import { summarizeGenerationUsage } from './generation-usage';
-import { assessAccountTaste } from './account-taste';
+import { assessAccountTaste, isGeoffreyVoiceProfile } from './account-taste';
 import { ENTITY_MENTION_POLICY_VERSION } from './entity-mentions';
 import {
   getPublishingV2FinalCriticVersion,
@@ -215,10 +215,15 @@ function requestContextFingerprint(input: GeneratePublishingBatchV2Input): strin
   );
 }
 
+function publishingPolicyAccountHandle(input: GeneratePublishingBatchV2Input): string {
+  return isGeoffreyVoiceProfile(input.voiceProfile) ? 'geoffwoo' : 'standard-account';
+}
+
 export function buildPublishingV2RequestIdempotencyKey(input: GeneratePublishingBatchV2Input): string {
   const voiceCorpusVersion = input.learnings?.voiceCorpus?.snapshotId || '';
-  const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(input.request.surface);
-  const finalCriticVersion = getPublishingV2FinalCriticVersion(input.request.surface);
+  const accountHandle = publishingPolicyAccountHandle(input);
+  const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(input.request.surface, accountHandle);
+  const finalCriticVersion = getPublishingV2FinalCriticVersion(input.request.surface, accountHandle);
   const contextFingerprint = requestContextFingerprint(input);
   if (input.request.surface === 'original' && input.request.triggerId) {
     return stableResearchId(
@@ -565,7 +570,10 @@ async function replayIdempotentResult(
   const run = (await getGenerationRuns(input.agentId, 100)).find((entry) => (
     entry.idempotencyKey === idempotencyKey
     && entry.status === 'completed'
-    && entry.qualityPolicyVersion === getPublishingV2QualityPolicyVersion(input.request.surface)
+    && entry.qualityPolicyVersion === getPublishingV2QualityPolicyVersion(
+      input.request.surface,
+      publishingPolicyAccountHandle(input),
+    )
     && entry.voiceCorpusVersion === (input.learnings?.voiceCorpus?.snapshotId || null)
     && entry.surface === input.request.surface
   ));

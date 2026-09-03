@@ -60,7 +60,9 @@ export async function PATCH(
     if (status !== undefined) {
       if (status === 'queued' || status === 'posted') {
         await assertAgentAutomationEntitlement(id, { agent, user });
-        const generationOriginIssue = immutableV2Edit ? null : getGeneratedPublishIssue(tweet);
+        const generationOriginIssue = immutableV2Edit
+          ? null
+          : getGeneratedPublishIssue(tweet, { accountHandle: agent.handle });
         if (generationOriginIssue) {
           return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
         }

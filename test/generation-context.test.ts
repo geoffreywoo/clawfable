@@ -59,6 +59,7 @@ describe('generation context', () => {
 
     const context = await buildGenerationContext(agent);
 
+    expect(context.voiceProfile.accountHandle).toBe(agent.handle);
     expect(context.style.banditPolicy?.trainingSource).toBe('mixed');
     expect(context.style.banditPolicy?.evidence).toMatchObject({
       performanceRows: 3,
