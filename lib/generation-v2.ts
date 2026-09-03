@@ -548,6 +548,7 @@ export interface GenerateTweetBatchV2Input {
   parentDraftId?: string | null;
   mode?: 'live' | 'manual' | 'preview';
   requireAutopostQuality?: boolean;
+  allowQualityRetry?: boolean;
   entitlement?: AutomationEntitlement | null;
   persistArtifacts?: boolean;
   onTrace?: (trace: GenerationRunTrace) => void;
@@ -6745,7 +6746,10 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
       briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}:${(brief.verifiedEntityMentions || []).map((entry) => `${entry.entity}=@${entry.handle}`).join('|')}`).sort().join(','),
     );
-    const qualityPauseUntil = getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);
+    if (input.allowQualityRetry) trace.stageCounts.protectedQualityRetry = 1;
+    const qualityPauseUntil = input.allowQualityRetry
+      ? null
+      : getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);
     if (qualityPauseUntil) {
       trace.status = 'empty';
       trace.error = 'quality_empty_paused';
@@ -6757,6 +6761,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     trace.sourceDocumentIds = uniqueStrings(briefs.flatMap((brief) => brief.sourceDocumentIds), 100);
     trace.storyClusterIds = uniqueStrings(briefs.map((brief) => brief.storyClusterId), 40);
     trace.stageCounts = {
+      ...trace.stageCounts,
       sourceDocuments: documents.length,
       qualifiedStories: stories.filter((story) => isStoryEditoriallyQualifiedV2(story, {
         minConsequence: isGeoffreyVoiceProfile(input.voiceProfile) ? 0.55 : undefined,

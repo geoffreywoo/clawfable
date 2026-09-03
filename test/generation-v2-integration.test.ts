@@ -452,6 +452,44 @@ describe('generateTweetBatchV2 integration', () => {
     expect(copyJudgeCandidateCount).toBeLessThanOrEqual(8);
   });
 
+  it('lets an explicit protected refill retry bypass only the matching-input quality cooldown', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-02T12:00:00.000Z'));
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(
+      '00000000-0000-4000-8000-000000000000',
+    );
+    try {
+      await generateTweetBatchV2(input);
+      const completedTrace = [...mocks.saveGenerationRun.mock.calls]
+        .reverse()
+        .map(([, trace]) => trace)
+        .find((trace) => Boolean(trace.inputFingerprint));
+      expect(completedTrace?.inputFingerprint).toBeTruthy();
+      mocks.getGenerationRuns.mockResolvedValue([{
+        ...completedTrace,
+        status: 'empty',
+        outcomeCode: 'quality_empty',
+        completedAt: new Date().toISOString(),
+      }]);
+
+      mocks.generateText.mockClear();
+      await generateTweetBatchV2(input);
+      expect(mocks.generateText).not.toHaveBeenCalled();
+
+      mocks.generateText.mockClear();
+      await generateTweetBatchV2({ ...input, allowQualityRetry: true });
+      expect(mocks.generateText).toHaveBeenCalled();
+      const retryTrace = [...mocks.saveGenerationRun.mock.calls]
+        .reverse()
+        .map(([, trace]) => trace)
+        .find((trace) => trace.stageCounts?.protectedQualityRetry === 1);
+      expect(retryTrace?.stageCounts.protectedQualityRetry).toBe(1);
+    } finally {
+      uuid.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('generates three independent one-draft Fable variants plus one matched GPT shadow per batch', async () => {
     mocks.generateText.mockImplementation(async (options: any) => {
       if (options.task === 'idea_generation') return ideaResponse(options.prompt);
