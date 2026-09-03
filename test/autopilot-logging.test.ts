@@ -630,6 +630,7 @@ describe('autopilot remote debug logging', () => {
     await refillQueue(agent as any, 2, {}, { attemptId: 'quality-refresh:2' });
 
     expect(mocks.generateTweetBatchV2).toHaveBeenCalledWith(expect.objectContaining({
+      allowQualityRetry: true,
       request: expect.objectContaining({
         triggerId: expect.stringContaining(':queue:empty:attempt:quality-refresh:2'),
       }),

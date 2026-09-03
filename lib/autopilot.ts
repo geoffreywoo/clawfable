@@ -2908,6 +2908,7 @@ export async function refillQueue(
           trending,
           modelStack: publishingModelStack,
           mode: 'live',
+          allowQualityRetry: Boolean(attemptId),
           entitlement,
         });
     const productEvidence: GenerationEvidenceReference[] = activeProductFacts.map((fact) => ({
@@ -2943,6 +2944,7 @@ export async function refillQueue(
           trending: null,
           modelStack: publishingModelStack,
           mode: 'live',
+          allowQualityRetry: Boolean(attemptId),
           entitlement,
         })
       : [];
