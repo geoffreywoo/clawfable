@@ -512,6 +512,14 @@ describe('Tweet Generation V2', () => {
     expect(getGeoffreyAIAmbitionIssueV2(
       'coding agents will build the first decacorn before 2028.',
     )).toBe('agent_built_unicorn_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'spud should embarrass me out of at least one startup idea i currently think requires a company',
+      'ai model startups',
+    )).toBe('single_startup_org_displacement_is_current_baseline');
+    expect(getGeoffreyAIAmbitionIssueV2(
+      'my cofounder should embarrass me out of at least one startup idea i currently think requires a company',
+      'founder culture',
+    )).toBeNull();
     expect(getGeoffreyAIAmbitionIssueV2(queuedBasicTake)).toBe('ai_ambition_adjective_is_not_a_thesis');
     expect(getGeoffreyAIAmbitionIssueV2(
       'SoftBank’s reckless AI ambition is why i’d own the stock.',
@@ -657,10 +665,20 @@ describe('Tweet Generation V2', () => {
       forecastGrounding: 0.99,
       exponentialIntuition: 0.99,
     })).toContain('final_ai_ambition_below_floor');
+    expect(getGeoffreyAIFutureRejectionCodesV2({
+      voiceProfile: geoffreyVoice,
+      topicContext: 'ai model startups',
+      content: 'spud should embarrass me out of at least one startup idea i currently think requires a company',
+      frontierLead: 0.99,
+      aiBullishness: 0.99,
+      trajectoryConviction: 0.99,
+      forecastGrounding: 0.99,
+      exponentialIntuition: 0.99,
+    })).toContain('final_ai_ambition_below_floor');
     expect(getV2IdeaJudgeRejectionCodes({
       ...lagging,
       frontierLead: 0.9,
-      aiBullishness: 0.819,
+      aiBullishness: 0.899,
       trajectoryConviction: 0.9,
       forecastGrounding: 0.9,
       exponentialIntuition: 0.9,
@@ -668,7 +686,7 @@ describe('Tweet Generation V2', () => {
     expect(getV2IdeaJudgeRejectionCodes({
       ...lagging,
       frontierLead: 0.9,
-      aiBullishness: 0.82,
+      aiBullishness: 0.9,
       trajectoryConviction: 0.9,
       forecastGrounding: 0.9,
       exponentialIntuition: 0.9,
@@ -678,7 +696,7 @@ describe('Tweet Generation V2', () => {
       topicContext: 'AI coding agents startups',
       content: 'one founder is about to command more AI labor than a Fortune 500 company.',
       frontierLead: 0.9,
-      aiBullishness: 0.82,
+      aiBullishness: 0.9,
       trajectoryConviction: 0.9,
       forecastGrounding: 0.9,
       exponentialIntuition: 0.9,
