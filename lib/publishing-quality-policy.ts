@@ -1,7 +1,7 @@
 import type { GenerationSurface } from './types';
 
-export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-19';
-export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-124';
+export const PUBLISHING_V2_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-20';
+export const PUBLISHING_V2_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-125';
 export const PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION = 'publishing-v2-copy-judge-18';
 export const PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION = 'publishing-v2-hard-gates-123';
 export const PUBLISHING_V2_MIN_FINAL_QUALITY_MARGIN = 0.81;

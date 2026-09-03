@@ -1630,15 +1630,17 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaSystem).toContain('claim is the one factual basis and must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
     expect(ideaPrompt.requirements.nativeReactionContract).toContain('Raw native prose is intentionally withheld');
-    expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('one agent-built or one-person unicorn');
+    expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('one agent-built unicorn');
+    expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('one AI model obviating one startup team');
     expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('without merely inflating the valuation number');
     expect(ideaJudgeSystem).toContain('one agent-built or one-person billion-dollar company');
     expect(ideaJudgeSystem).toContain('must score both frontierLead and aiBullishness at most 0.45');
     expect(ideaJudgeSystem).toContain('non-consensus magnitude, speed, or institutional consequence');
     expect(ideaJudgePrompt.author.aiFutureHorizon).toContain('one agent-built or one-person unicorn');
     expect(ideaJudgePrompt.author.aiFutureHorizon).toContain('not a larger arbitrary number or confidence coda');
+    expect(ideaJudgePrompt.author.aiFutureHorizon).toContain('one model making one startup or company optional');
     const timedWriterPrompt = writerPrompts.find((prompt) => prompt.geoffreyAIFutureHorizon);
-    expect(timedWriterPrompt?.geoffreyAIFutureHorizon.currentBaselines).toContain('one agent-built or one-person unicorn is already a baseline take');
+    expect(timedWriterPrompt?.geoffreyAIFutureHorizon.currentBaselines).toContain('one agent-built unicorn or one AI-obviated startup team is already baseline');
     expect(timedWriterPrompt?.geoffreyAIFutureHorizon.instruction).toContain('personal-bet coda');
     expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).length).toBeGreaterThan(0);
     expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).every((pattern: any) => (

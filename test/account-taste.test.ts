@@ -510,6 +510,7 @@ describe('account taste scoring', () => {
       accountSpecificHints: 'geoffrey',
     });
     expect(feedback.preferenceHints.join(' ')).toContain('one agent-built unicorn');
+    expect(feedback.preferenceHints.join(' ')).toContain('one model making one startup or company optional');
     expect(feedback.preferenceHints.join(' ')).toContain('non-consensus magnitude');
     expect(feedback.preferenceHints.join(' ')).toContain('do not force a forecast');
     expect(feedback.preferenceHints.join(' ')).toContain('arbitrary number');
@@ -647,12 +648,13 @@ describe('account taste scoring', () => {
       buildGeoffreyNativeWritingBrief(),
     ]) {
       expect(contract).toContain('6-12');
-      expect(contract).toMatch(/OpenAI.*trillion-dollar scale/i);
-      expect(contract).toMatch(/frontier engineers.*coding agents/i);
-      expect(contract).toMatch(/robots.*factor(?:y|ies).*warehouse/i);
-      expect(contract).toMatch(/(?:literal timeline is optional|not a requirement to print|does not require a printed timeline)/i);
-      expect(contract).toMatch(/agent-built.*one-person unicorn/i);
-      expect(contract).toMatch(/(?:larger valuation number|bigger valuation number|inflate numbers|arbitrary number)/i);
+      expect(contract).toMatch(/OpenAI.*trillion(?:-dollar)? scale/i);
+      expect(contract).toMatch(/(?:frontier.*coding agents|agents.*frontier)/i);
+      expect(contract).toMatch(/robots.*factor(?:y|ies)/i);
+      expect(contract).toMatch(/(?:a |literal )?timeline is optional|not a requirement to print|without a printed timeline/i);
+      expect(contract).toMatch(/agent-built.*unicorn/i);
+      expect(contract).toMatch(/AI model.*startup team/i);
+      expect(contract).toMatch(/(?:larger valuation number|bigger valuation(?: number)?|inflate numbers|arbitrary number)/i);
     }
   });
 
