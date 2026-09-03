@@ -80,7 +80,7 @@ export async function POST(
     if (!existingTweet || String(existingTweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
     }
-    const parentLineageIssue = getGeneratedPublishIssue(existingTweet);
+    const parentLineageIssue = getGeneratedPublishIssue(existingTweet, { accountHandle: agent.handle });
     if (parentLineageIssue) {
       return NextResponse.json({
         error: `This draft cannot seed a V2 remix: ${parentLineageIssue}`,

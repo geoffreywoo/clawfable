@@ -1,5 +1,6 @@
 import { getAgent, getAgentByHandle } from '../lib/kv-storage';
 import { loadGenerationV2Metrics } from '../lib/generation-v2-metrics';
+import { getPublishingV2QualityPolicyVersion } from '../lib/publishing-quality-policy';
 
 function readArg(name: string): string | null {
   const exact = process.argv.find((argument) => argument.startsWith(`${name}=`));
@@ -14,7 +15,10 @@ async function main() {
     ? await getAgent(requestedId)
     : await getAgentByHandle('geoffwoo') || await getAgentByHandle('geoffreywoo');
   if (!agent) throw new Error('No @geoffwoo agent found. Pass --agent-id if needed.');
-  const report = await loadGenerationV2Metrics(agent.id);
+  const report = await loadGenerationV2Metrics(
+    agent.id,
+    getPublishingV2QualityPolicyVersion('original', agent.handle),
+  );
   console.log(JSON.stringify({ agentId: agent.id, handle: `@${agent.handle}`, ...report }, null, 2));
 }
 

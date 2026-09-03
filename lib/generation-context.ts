@@ -203,7 +203,10 @@ export async function buildGenerationContext(
   ]);
 
   const effectiveLearnings = learnings;
-  const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
+  const voiceProfile: VoiceProfile = {
+    ...parseSoulMd(agent.name, agent.soulMd),
+    accountHandle: agent.handle,
+  };
   const liveTweets = allTweets.filter((tweet) => LIVE_CONTENT_STATUSES.has(tweet.status));
 
   // Bootstrap with wizard-derived style only until live learnings have enough evidence.

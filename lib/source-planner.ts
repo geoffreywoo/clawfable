@@ -147,7 +147,7 @@ const BROAD_IDENTITY_TOPICS = new Set([
 ]);
 
 const GEOFFREY_RELEVANT_EVENT_PATTERN = /\b(?:accelerators?|agents?|aircraft|anduril|anthropic|apps?|archer|athletes?|automation|autonomous|batter(?:y|ies)|boxing|capital markets?|chatgpt|chips?|claude|college|companies|compute|culture|data centers?|defense|drones?|e2b|education|energy|factor(?:y|ies)|fighting|fintech|fission|founders?|funding|fusion|grids?|healthspan|hugging face|inference|investing|longevity|manufactur(?:e|ing)|markets?|merit|minerals?|models?|nepotis|nfl|nuclear|openai|power|prompts?|rare earth|reactors?|robots?|robotics|rockets?|semiconductors?|social status|space|startups?|stocks?|user scale|venture|vertical lift|xiaomi)\b/i;
-const GEOFFREY_AI_TOKEN_PATTERN = /(?:^|[\s/(])ai(?:$|[\s/),.:-])/i;
+const GEOFFREY_AI_TOKEN_PATTERN = /(?:^|[\s/(])ai(?:$|[\s/),.:-])|\bcoding agents?\b|\bagent[- ](?:built|written|run|operated|created|founded)\b|\bagentic\b|\b(?:one[- ]person|single[- ]person)\s+unicorn\b|\b(?:fully|entirely)\s+autonomous\s+(?:software\s+)?(?:startup|company|business|venture)\b/i;
 const GEOFFREY_NAMED_TECH_PATTERN = /\b(?:anduril|anthropic|archer|chatgpt|claude|e2b|hugging face|nvidia|openai|spacex|tsmc|xiaomi)\b/i;
 const GEOFFREY_CONCRETE_EVENT_PATTERN = /\b(?:battlefield|benchmarks?|capacity|customers?|deployments?|factor(?:y|ies)|infrastructure|land|latency|payload|pricing|process|rate limits?|scale|supply|throttl(?:e|ed|ing)|throughput|training|vertical lift|yield)\b/i;
 const GEOFFREY_STARTUP_INVESTING_IMPLICATION_PATTERN = /\b(?:startups?|compan(?:y|ies)|founders?|funding|venture|investors?|investments?|capital|markets?|suppliers?|customers?|products?|margins?|unit economics|cost curve|valuations?)\b/i;

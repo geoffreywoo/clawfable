@@ -71,7 +71,7 @@ export async function POST(
       || null;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
     const generationOriginIssue = existingTweet
-      ? getGeneratedPublishIssue(existingTweet)
+      ? getGeneratedPublishIssue(existingTweet, { accountHandle: agent.handle })
       : null;
     if (generationOriginIssue) {
       return NextResponse.json({ error: generationOriginIssue, code: 'generation_origin_retired' }, { status: 409 });

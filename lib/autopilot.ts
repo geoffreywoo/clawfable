@@ -254,7 +254,7 @@ function isAutopostableQueuedTweetForAgent(agent: Agent | null, tweet: Tweet): b
     ? getAntiFundAutonomousPromotionPolicyIssue(tweet.portfolioCompanyContext)
     : null;
   return isAutopostableQueuedTweet(tweet)
-    && !getGeneratedPublishIssue(tweet)
+    && !getGeneratedPublishIssue(tweet, { accountHandle: agent?.handle })
     && !getAccountTopicPolicyIssue(
       agent?.handle,
       `${tweet.topic || ''} ${tweet.content}`,
@@ -552,7 +552,10 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       agent.handle,
       `${tweet.topic || ''} ${tweet.content}`,
     );
-    const originIssue = getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion });
+    const originIssue = getGeneratedPublishIssue(tweet, {
+      currentVoiceCorpusVersion,
+      accountHandle: agent.handle,
+    });
     const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null;
@@ -3016,7 +3019,7 @@ export async function refillQueue(
           await rejectCandidate(item, 'missing_v2_provenance');
           continue;
         }
-        const originIssue = getGeneratedPublishIssue(item);
+        const originIssue = getGeneratedPublishIssue(item, { accountHandle: agent.handle });
         if (originIssue) {
           await rejectCandidate(item, 'generated_publish_issue', originIssue);
           continue;

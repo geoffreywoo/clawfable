@@ -101,6 +101,7 @@ export function buildGenerationV2Metrics({
   performance,
   voiceCorpus = null,
   researchState = null,
+  currentQualityPolicyVersion = PUBLISHING_V2_QUALITY_POLICY_VERSION,
   now = new Date(),
 }: {
   runs: GenerationRunTrace[];
@@ -111,6 +112,7 @@ export function buildGenerationV2Metrics({
   performance: TweetPerformance[];
   voiceCorpus?: VoiceCorpusSnapshot | null;
   researchState?: ResearchRefreshState | null;
+  currentQualityPolicyVersion?: string;
   now?: Date;
 }) {
   const completedRuns = runs.filter((run) => run.status !== 'running' && run.mode !== 'preview');
@@ -137,13 +139,13 @@ export function buildGenerationV2Metrics({
   );
   const factualIncidents = v2Signals.filter((signal) => signal.metadata?.feedbackReasonCode === 'factual_risk');
   const currentPolicyFactualIncidents = factualIncidents.filter((signal) => (
-    signalPolicyVersion(signal) === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    signalPolicyVersion(signal) === currentQualityPolicyVersion
   ));
   const policyIncidents = v2Signals.filter((signal) => (
     signal.signalType === 'x_post_rejected' && signal.metadata?.errorClass === 'policy'
   ));
   const currentPolicyPolicyIncidents = policyIncidents.filter((signal) => (
-    signalPolicyVersion(signal) === PUBLISHING_V2_QUALITY_POLICY_VERSION
+    signalPolicyVersion(signal) === currentQualityPolicyVersion
   ));
   const liveIdeas = ideas.filter((idea) => liveRunIds.has(idea.generationRunId));
   const liveDrafts = drafts.filter((draft) => liveRunIds.has(draft.generationRunId));
@@ -159,7 +161,7 @@ export function buildGenerationV2Metrics({
   )));
   const currentPolicyMaturePerformance = maturePostSnapshots(performance.filter((entry) => {
     const tweet = entry.tweetId ? v2TweetsById.get(entry.tweetId) : null;
-    return tweet?.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION;
+    return tweet?.qualityPolicyVersion === currentQualityPolicyVersion;
   }));
   const matureV1Performance = maturePostSnapshots(performance.filter((entry) => (
     entry.source === 'autopilot' && (!entry.tweetId || !v2TweetsById.has(entry.tweetId))
@@ -397,7 +399,10 @@ export function buildGenerationV2Metrics({
   };
 }
 
-export async function loadGenerationV2Metrics(agentId: string) {
+export async function loadGenerationV2Metrics(
+  agentId: string,
+  currentQualityPolicyVersion = PUBLISHING_V2_QUALITY_POLICY_VERSION,
+) {
   const [runs, ideas, drafts, tweets, signals, performance, researchState, voiceCorpus] = await Promise.all([
     getGenerationRuns(agentId, 250),
     getIdeaCandidates(agentId, 2000),
@@ -408,5 +413,15 @@ export async function loadGenerationV2Metrics(agentId: string) {
     getResearchRefreshState(agentId),
     getVoiceCorpusSnapshot(agentId),
   ]);
-  return buildGenerationV2Metrics({ runs, ideas, drafts, tweets, signals, performance, researchState, voiceCorpus });
+  return buildGenerationV2Metrics({
+    runs,
+    ideas,
+    drafts,
+    tweets,
+    signals,
+    performance,
+    researchState,
+    voiceCorpus,
+    currentQualityPolicyVersion,
+  });
 }

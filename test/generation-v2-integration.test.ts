@@ -1557,13 +1557,18 @@ describe('generateTweetBatchV2 integration', () => {
     });
 
     const writerCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'tweet_writing');
+    const writerPrompts = mocks.generateText.mock.calls
+      .filter(([options]) => options.task === 'tweet_writing')
+      .map(([options]) => JSON.parse(options.prompt || '{}'));
     const anchors = JSON.parse(writerCall?.[0].prompt || '{}').voiceAnchors.map((anchor: any) => anchor.text);
     const writerSystem = String(writerCall?.[0].system || '');
     const ideaCalls = mocks.generateText.mock.calls.filter(([options]) => options.task === 'idea_generation');
     const ideaSystem = String(ideaCalls[0]?.[0].system || '');
     const ideaPrompts = ideaCalls.map(([options]) => JSON.parse(options.prompt || '{}'));
     const ideaPrompt = ideaPrompts[0];
-    const ideaJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment')?.[0].prompt || '{}');
+    const ideaJudgeCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'idea_judgment');
+    const ideaJudgePrompt = JSON.parse(ideaJudgeCall?.[0].prompt || '{}');
+    const ideaJudgeSystem = String(ideaJudgeCall?.[0].system || '');
     const ideaPayload = JSON.stringify(ideaPrompts);
     const ideaJudgePayload = JSON.stringify(ideaJudgePrompt);
     expect(anchors).toContain('operator-written diction anchor');
@@ -1577,6 +1582,8 @@ describe('generateTweetBatchV2 integration', () => {
     expect(writerSystem).toContain('neither are lessons, advice, balanced closers');
     expect(writerSystem).toContain('rough multi-paragraph thought');
     expect(writerSystem).toContain('Three polished paraphrases are not');
+    expect(writerSystem).toContain('one agent-built unicorn');
+    expect(writerSystem).toContain('personal-bet coda');
     expect(writerSystem).not.toContain('at most 190 characters');
     expect(writerSystem).toContain("every number's subject, denominator, geography, period, and measurement type");
     expect(writerSystem.length).toBeLessThan(6_000);
@@ -1585,6 +1592,16 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaSystem).toContain('claim is the one factual basis and must be directly entailed');
     expect(ideaPrompt.requirements.evidenceIdContract).toContain('Copy evidenceIds exactly');
     expect(ideaPrompt.requirements.nativeReactionContract).toContain('Raw native prose is intentionally withheld');
+    expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('one agent-built or one-person unicorn');
+    expect(ideaPrompt.requirements.geoffreyAIFutureHorizonContract).toContain('without merely inflating the valuation number');
+    expect(ideaJudgeSystem).toContain('one agent-built or one-person billion-dollar company');
+    expect(ideaJudgeSystem).toContain('must score both frontierLead and aiBullishness at most 0.45');
+    expect(ideaJudgeSystem).toContain('non-consensus magnitude, speed, or institutional consequence');
+    expect(ideaJudgePrompt.author.aiFutureHorizon).toContain('one agent-built or one-person unicorn');
+    expect(ideaJudgePrompt.author.aiFutureHorizon).toContain('not a larger arbitrary number or confidence coda');
+    const timedWriterPrompt = writerPrompts.find((prompt) => prompt.geoffreyAIFutureHorizon);
+    expect(timedWriterPrompt?.geoffreyAIFutureHorizon.currentBaselines).toContain('one agent-built or one-person unicorn is already a baseline take');
+    expect(timedWriterPrompt?.geoffreyAIFutureHorizon.instruction).toContain('personal-bet coda');
     expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).length).toBeGreaterThan(0);
     expect(ideaPrompts.flatMap((prompt) => prompt.nativeReactionPatterns).every((pattern: any) => (
       pattern.reactionMode && pattern.lengthBand && pattern.paragraphBand && !('text' in pattern)
@@ -1599,10 +1616,15 @@ describe('generateTweetBatchV2 integration', () => {
     expect(ideaJudgePayload).not.toContain('timeline diction from the curated voice corpus');
     expect(ideaJudgePayload).not.toContain('generated diction must not return');
     expect(ideaPrompts.flatMap((prompt) => prompt.briefs).flatMap((brief: any) => brief.evidence).every((entry: any) => entry.evidenceId && !entry.claimId)).toBe(true);
-    const copyJudgePrompt = JSON.parse(mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment')?.[0].prompt || '{}');
+    const copyJudgeCall = mocks.generateText.mock.calls.find(([options]) => options.task === 'copy_judgment');
+    const copyJudgePrompt = JSON.parse(copyJudgeCall?.[0].prompt || '{}');
+    const copyJudgeSystem = String(copyJudgeCall?.[0].system || '');
     expect(copyJudgePrompt.voiceAnchors.map((anchor: any) => anchor.text)).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).toContain('operator-written diction anchor');
     expect(copyJudgePrompt.operatorPremiseExclusions).not.toContain('generated diction must not return');
+    expect(copyJudgeSystem).toContain('one agent-built or one-person billion-dollar company');
+    expect(copyJudgeSystem).toContain('bigger arbitrary valuation');
+    expect(copyJudgeSystem).toContain('non-consensus magnitude, speed, or institutional consequence');
   });
 
   it('keeps raw generated winners out of model premise memory', async () => {
@@ -1849,6 +1871,26 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.upsertDraftCandidates.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ rejectionCodes: expect.arrayContaining(['generic_product_wishlist']) }),
     ]));
+  });
+
+  it('rejects a basic agent-built unicorn draft before spending a critic call', async () => {
+    mocks.generateText.mockImplementation(async (options: any) => {
+      if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+      if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+      if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+        content: 'a startup built entirely by coding agents will hit a billion-dollar valuation within 12 months. i’d put my own money on it.',
+        format: 'hot_take',
+        posture: 'agent-built unicorn prediction',
+      }] }), 'anthropic');
+      if (options.task === 'copy_judgment') throw new Error('preflight should reject every draft');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+
+    await expect(generateTweetBatchV2(input)).resolves.toEqual([]);
+    expect(mocks.generateText.mock.calls.some(([options]) => options.task === 'copy_judgment')).toBe(false);
+    const persistedDrafts = mocks.upsertDraftCandidates.mock.calls.flatMap((call) => call[1]);
+    expect(persistedDrafts.length).toBeGreaterThan(0);
+    expect(persistedDrafts.every((draft) => draft.rejectionCodes.includes('basic_ai_take'))).toBe(true);
   });
 
   it('returns fewer drafts after malformed idea output instead of inventing fallback copy', async () => {
@@ -2133,6 +2175,7 @@ describe('generateTweetBatchV2 integration', () => {
       expect(systemFor(task).every((system) => !system.includes('Geoffrey'))).toBe(true);
       expect(promptFor(task).every((prompt) => !JSON.stringify(prompt).includes('Geoffrey'))).toBe(true);
     }
+    expect(systemFor('tweet_writing')[0]).not.toContain('one agent-built unicorn');
     expect(systemFor('copy_judgment')[0]).toContain('would this author');
     expect(systemFor('copy_judgment')[0]).toContain('Candidate order carries no signal');
     expect(systemFor('idea_judgment')[0]).toContain('Candidate order carries no signal');

@@ -61,7 +61,7 @@ export async function launchAgentFromPreview({
   // Resolve approved IDs against what actually exists in KV.
   const retiredApprovalIds = requestedApprovals.filter((id) => {
     const tweet = previewTweets.find((entry) => String(entry.id) === id);
-    return tweet ? Boolean(getGeneratedPublishIssue(tweet)) : false;
+    return tweet ? Boolean(getGeneratedPublishIssue(tweet, { accountHandle: agent.handle })) : false;
   });
   const newlyApprovedIds = requestedApprovals.filter((id) => previewIds.has(id) && !retiredApprovalIds.includes(id));
   const resumedApprovalIds = requestedApprovals.filter((id) => !previewIds.has(id) && alreadyQueuedIds.has(id));

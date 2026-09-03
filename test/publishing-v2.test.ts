@@ -35,7 +35,9 @@ import {
   buildPublishingV2RequestIdempotencyKey,
   generatePublishingBatchV2,
 } from '@/lib/publishing-v2';
-import { PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
+import {
+  PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
+} from '@/lib/publishing-quality-policy';
 
 function result(text: string) {
   return {
@@ -330,7 +332,7 @@ describe('V2 publishing surfaces', () => {
     mocks.getGenerationRuns.mockResolvedValue([{
       idempotencyKey,
       status: 'completed',
-      qualityPolicyVersion: PUBLISHING_V2_QUALITY_POLICY_VERSION,
+      qualityPolicyVersion: PUBLISHING_V2_STANDARD_QUALITY_POLICY_VERSION,
       voiceCorpusVersion: 'voice-current',
       surface: 'original',
       selectedDraftIds: ['draft-already-generated'],
