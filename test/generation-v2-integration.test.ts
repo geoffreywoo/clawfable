@@ -72,6 +72,7 @@ function result(text: string, provider: 'openai' | 'anthropic' = 'openai') {
     stopReason: 'end_turn',
     provider,
     model: provider === 'openai' ? 'gpt-test' : 'claude-test',
+    providerModel: `${provider}-wire-model-test`,
     inputTokens: 100,
     outputTokens: 50,
   };
@@ -361,9 +362,17 @@ describe('generateTweetBatchV2 integration', () => {
 
   it('runs frozen Astra previews through the real gates without reading or writing account storage', async () => {
     const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
+    let trace: any;
     const outputs = await generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra',
       mode: 'preview', persistArtifacts: false, previewContext: { briefs, documents: sourceDocuments, stories: storyClusters },
+      onTrace: (value) => { trace = value; },
     });
+    const ideaCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'idea_generation');
+    expect(ideaCalls).toHaveLength(briefs.length);
+    expect(ideaCalls.every((options) => JSON.parse(options.prompt).briefs.length === 1
+      && JSON.parse(options.prompt).requirements.ideasPerBrief === 3 && options.timeoutMs === 75_000)).toBe(true);
+    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: briefs.length, ideaRetryCalls: 0, ideasGenerated: briefs.length * 3 });
+    expect(trace.modelCalls.every((call: any) => call.providerModel === `${call.provider}-wire-model-test`)).toBe(true);
     const writerCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'tweet_writing');
     expect(writerCalls.length).toBeGreaterThanOrEqual(3);
     expect(new Set(writerCalls.slice(0, 3).map((options) => JSON.parse(options.prompt).responseContract.independentCreativeMove.move)))
@@ -810,6 +819,108 @@ describe('generateTweetBatchV2 integration', () => {
     releaseIdeas();
 
     await expect(generation).resolves.toHaveLength(2);
+  });
+
+  it('bounds single-brief Astra ideation to four concurrent calls without dropping any brief', async () => {
+    const baseBriefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
+    const briefs = Array.from({ length: 8 }, (_, index) => ({ ...baseBriefs[index % baseBriefs.length], id: `concurrency-brief-${index}` }));
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    let released = false;
+    let trace: any;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      expect(options.task).toBe('idea_generation');
+      expect(JSON.parse(options.prompt).briefs).toHaveLength(1);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (!released) await new Promise<void>((resolve) => { releases.push(resolve); });
+      active -= 1;
+      throw new Error('bounded provider failure');
+    });
+    const generation = generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+      previewContext: { briefs, documents: sourceDocuments }, onTrace: (value) => { trace = value; },
+    });
+    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    expect(mocks.generateText).toHaveBeenCalledTimes(4);
+    released = true;
+    releases.forEach((release) => release());
+    await expect(generation).resolves.toEqual([]);
+    expect(maxActive).toBe(4);
+    expect(mocks.generateText).toHaveBeenCalledTimes(8);
+    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: 8, ideaRetryCalls: 0 });
+    expect(mocks.generateText.mock.calls.flatMap(([options]) => JSON.parse(options.prompt).briefs.map((brief: any) => brief.id)))
+      .toEqual(briefs.map((brief) => brief.id));
+  });
+
+  it.each([
+    { preparationMs: 160_000, expectedTimeouts: [75_000, 75_000, 75_000, 75_000, 5_000, 5_000, 5_000, 5_000] },
+    { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000] },
+  ])('clips queued Astra waves after $preparationMs preparation and stops new requests at the deadline', async ({ preparationMs, expectedTimeouts }) => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = new Date('2026-08-02T02:00:00Z');
+      vi.setSystemTime(startedAt);
+      const baseBriefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: startedAt });
+      const briefs = Array.from({ length: 8 }, (_, index) => ({ ...baseBriefs[index % baseBriefs.length], id: `deadline-brief-${index}` }));
+      let prepared = false;
+      let trace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        expect(options.task).toBe('idea_generation');
+        await new Promise<void>((resolve) => setTimeout(resolve, options.timeoutMs));
+        return ideaResponse(options.prompt);
+      });
+      const generation = generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, get documents() {
+          if (!prepared) { vi.setSystemTime(startedAt.getTime() + preparationMs); prepared = true; }
+          return sourceDocuments;
+        } }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      await expect(generation).resolves.toEqual([]);
+      expect(mocks.generateText.mock.calls.map(([options]) => options.timeoutMs)).toEqual(expectedTimeouts);
+      expect(trace).toMatchObject({ outcomeCode: 'run_deadline', durationMs: 240_000,
+        stageCounts: expect.objectContaining({ ideaGenerationCalls: expectedTimeouts.length, ideaRetryCalls: 0 }) });
+      expect(mocks.generateText).toHaveBeenCalledTimes(expectedTimeouts.length);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('bounds writer work by its own run deadline without shrinking a concurrent run', async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = new Date('2026-08-02T02:00:00Z');
+      vi.setSystemTime(startedAt);
+      const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: startedAt });
+      let prepared = false;
+      let firstTrace: any;
+      let secondTrace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        const durations = { idea_generation: 50_000, idea_judgment: 10_000, tweet_writing: 50_000, copy_judgment: 1_000 };
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(options.timeoutMs, durations[options.task])));
+        if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+        if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+        if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+        return rankingResponse(options.prompt, 'candidates');
+      });
+      const first = generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, get documents() {
+          if (!prepared) { vi.setSystemTime(startedAt.getTime() + 175_000); prepared = true; }
+          return sourceDocuments;
+        } }, onTrace: (value) => { firstTrace = value; },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const second = generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, documents: sourceDocuments }, onTrace: (value) => { secondTrace = value; },
+      });
+      await vi.runAllTimersAsync();
+      await expect(first).resolves.toEqual([]);
+      expect((await second).length).toBeGreaterThan(0);
+      expect(firstTrace).toMatchObject({ outcomeCode: 'run_deadline', durationMs: 240_000 });
+      expect(firstTrace.modelCalls.some((call: any) => call.stage === 'copy_judgment')).toBe(false);
+      expect(firstTrace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === 5_000)).toBe(true);
+      expect(secondTrace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === 50_000)).toBe(true);
+      expect(secondTrace.outcomeCode).toBe('completed');
+    } finally { vi.useRealTimers(); }
   });
 
   it('retries only operator briefs with no deterministic idea survivors', async () => {
@@ -1992,6 +2103,20 @@ describe('generateTweetBatchV2 integration', () => {
       outcomeCode: 'idea_generation_failed',
       stageCounts: expect.objectContaining({ ideaGenerationCalls: 2 }),
     });
+  });
+
+  it('distinguishes the last attempted model from a later unconfigured fallback', async () => {
+    mocks.generateText.mockRejectedValue(Object.assign(new Error('provider failure'), {
+      requestedProvider: 'openai', requestedModel: 'gpt-6-astra', reasoningEffort: 'high',
+      fallbackAttempts: [
+        { provider: 'openai', model: 'gpt-6-astra', reason: 'provider_error' },
+        { provider: 'anthropic', model: 'unconfigured-fallback', reason: 'provider_unconfigured' },
+      ],
+    }));
+    await expect(generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra' })).resolves.toEqual([]);
+    const trace = mocks.saveGenerationRun.mock.calls.at(-1)?.[1];
+    expect(trace.modelCalls.every((call: any) => call.provider === 'openai' && call.model === 'gpt-6-astra'
+      && call.requestedModel === 'gpt-6-astra' && call.reasoningEffort === 'high')).toBe(true);
   });
 
   it('keeps usable ideas when only one parallel generation batch fails', async () => {

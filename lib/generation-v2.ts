@@ -233,6 +233,10 @@ const V2_MIN_GEOFFREY_IDEA_NATIVE_REACTION = 0.76;
 const V2_MIN_GEOFFREY_IDEA_PUBLIC_MOVE_STRENGTH = 0.76;
 const V2_MIN_GEOFFREY_IDEA_SHARE_POTENTIAL = 0.7;
 const MAX_IDEA_CANDIDATES_PER_BRIEF = 3;
+const MAX_CONCURRENT_IDEA_CALLS = 4;
+function ideaBriefsPerCall(modelStack: GenerationModelStackId): number {
+  return modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? 1 : 2;
+}
 const MAX_DRAFTS_PER_IDEA = 3;
 const SYSTEM_ERROR_PAUSE_MS = 2 * 60 * 60 * 1000;
 const QUALITY_EMPTY_PAUSE_MS = 2 * 60 * 60 * 1000;
@@ -569,21 +573,35 @@ export interface GenerateTweetBatchV2Input {
   }) => void;
 }
 
+// Calls arrays are unique per run. Weak keys keep concurrent runs isolated and
+// do not retain completed traces; standalone tracked calls have no run budget.
+const generationRunDeadlines = new WeakMap<GenerationModelCallTrace[], number>();
+function assertGenerationRunBudget(calls: GenerationModelCallTrace[]): void {
+  const deadline = generationRunDeadlines.get(calls);
+  if (deadline !== undefined && Date.now() >= deadline) throw new Error('run_deadline');
+}
+
 export async function trackedGenerate(
   stage: GenerationModelCallTrace['stage'],
   options: GenerateTextOptions,
   calls: GenerationModelCallTrace[],
 ): Promise<GenerateTextResult> {
   const startedAt = Date.now();
+  const deadline = generationRunDeadlines.get(calls);
+  if (deadline !== undefined && startedAt >= deadline) throw new Error('run_deadline');
+  const stageTimeout = options.timeoutMs ?? STAGE_DEADLINES_MS[stage];
+  const timeoutMs = deadline === undefined ? stageTimeout
+    : Math.min(stageTimeout && stageTimeout > 0 ? stageTimeout : Infinity, deadline - startedAt);
   try {
     const result = await generateText({
       ...options,
-      timeoutMs: options.timeoutMs ?? STAGE_DEADLINES_MS[stage],
+      timeoutMs,
     });
     calls.push({
       stage,
       provider: result.provider,
       model: result.model,
+      providerModel: result.providerModel,
       requestedModel: result.requestedModel,
       requestedProvider: result.requestedProvider,
       reasoningEffort: result.reasoningEffort,
@@ -603,11 +621,15 @@ export async function trackedGenerate(
     const fallbackAttempts = error && typeof error === 'object' && Array.isArray((error as { fallbackAttempts?: unknown }).fallbackAttempts)
       ? (error as { fallbackAttempts: GenerateTextResult['fallbackAttempts'] }).fallbackAttempts || []
       : [];
-    const lastAttempt = fallbackAttempts.at(-1) || null;
+    const lastAttempt = [...fallbackAttempts].reverse().find((attempt) => attempt.reason !== 'provider_unconfigured') || null;
+    const provenance = error && typeof error === 'object' ? error as Partial<GenerateTextResult> : {};
     calls.push({
       stage,
       provider: lastAttempt?.provider || null,
       model: lastAttempt?.model || null,
+      requestedModel: provenance.requestedModel,
+      requestedProvider: provenance.requestedProvider,
+      reasoningEffort: provenance.reasoningEffort,
       inputTokens: null,
       outputTokens: null,
       estimatedCostUsd: null,
@@ -3727,12 +3749,33 @@ async function generateIdeas({
       return { raw: [] as Record<string, unknown>[], failed: true };
     }
   };
-  // Two compact calls run concurrently. This removes the serial 12-idea response
-  // without paying fixed schema and voice-context overhead four separate times.
-  const briefBatches = Array.from({ length: Math.ceil(briefs.length / 2) }, (_entry, index) => (
-    briefs.slice(index * 2, index * 2 + 2)
-  ));
-  const batchResults = await Promise.all(briefBatches.map((briefBatch) => generateBriefBatch(briefBatch)));
+  // Astra's high-reasoning calls timed out with six propositions across two
+  // briefs. One brief halves the requested proposition count and removes the
+  // other subject's evidence/context; the batch still gets three per brief.
+  // Preserve the previous maximum of four concurrent calls, including retries.
+  const briefsPerCall = ideaBriefsPerCall(input.modelStack);
+  const splitBriefs = (entries: GenerationBriefV2[]) => Array.from(
+    { length: Math.ceil(entries.length / briefsPerCall) },
+    (_entry, index) => entries.slice(index * briefsPerCall, (index + 1) * briefsPerCall),
+  );
+  const runBriefBatches = async (
+    batches: GenerationBriefV2[][],
+    failures: Parameters<typeof generateBriefBatch>[1] = [],
+  ) => {
+    const results: Awaited<ReturnType<typeof generateBriefBatch>>[] = new Array(batches.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_IDEA_CALLS, batches.length) }, async () => {
+      while (next < batches.length) {
+        const index = next++;
+        const batch = batches[index];
+        results[index] = await generateBriefBatch(batch, failures.filter((failure) => batch.some((brief) => brief.id === failure.briefId)));
+      }
+    }));
+    return results;
+  };
+  const briefBatches = splitBriefs(briefs);
+  const batchResults = await runBriefBatches(briefBatches);
+  assertGenerationRunBudget(calls);
   if (batchResults.every((result) => result.failed)) {
     throw new Error('idea_generation_failed');
   }
@@ -3787,14 +3830,8 @@ async function generateIdeas({
         rejectionCodes: idea.rejectionCodes.slice(0, 6),
       })),
   }));
-  const retryBatches = Array.from(
-    { length: Math.ceil(retryBriefs.length / 2) },
-    (_entry, index) => retryBriefs.slice(index * 2, index * 2 + 2),
-  );
-  const retryResults = await Promise.all(retryBatches.map((batch) => generateBriefBatch(
-    batch,
-    retryFailures.filter((failure) => batch.some((brief) => brief.id === failure.briefId)),
-  )));
+  const retryResults = await runBriefBatches(splitBriefs(retryBriefs), retryFailures);
+  assertGenerationRunBudget(calls);
   const retried = retryResults.flatMap((result, index) => (
     result.failed || result.raw.length === 0
       ? []
@@ -6857,6 +6894,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     status: 'running',
     error: null,
   };
+  const runDeadlineAt = Date.parse(trace.startedAt) + GENERATION_RUN_DEADLINE_MS;
+  generationRunDeadlines.set(trace.modelCalls, runDeadlineAt);
   let observedIdeas: IdeaCandidate[] = [];
   let observedDrafts: DraftCandidate[] = [];
   const publishArtifacts = () => {
@@ -6913,8 +6952,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
   let ideas: IdeaCandidate[] = [];
   let evaluations: DraftEvaluation[] = [];
-  const runDeadlineAt = Date.now() + GENERATION_RUN_DEADLINE_MS;
   try {
+    assertGenerationRunBudget(trace.modelCalls);
     if (!isV2VoiceReady(input)) {
       trace.status = 'empty';
       trace.error = 'voice_not_ready';
@@ -7015,7 +7054,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       trace.stageCounts.ideaGenerationCalls = trace.modelCalls.filter((call) => call.stage === 'idea_generation').length;
       trace.stageCounts.ideaRetryCalls = Math.max(
         0,
-        trace.stageCounts.ideaGenerationCalls - Math.ceil(briefs.length / 2),
+        trace.stageCounts.ideaGenerationCalls - Math.ceil(briefs.length / ideaBriefsPerCall(input.modelStack)),
       );
     }
     trace.ideaCandidateIds = ideas.map((idea) => idea.id);
@@ -7034,6 +7073,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     }
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     const selectedIdeas = await selectIdeas({ ideas, briefs, blocks, input, calls: trace.modelCalls });
+    assertGenerationRunBudget(trace.modelCalls);
     trace.stageCounts.ideasSelected = selectedIdeas.length;
     await persistIdeas(ideas);
     if (selectedIdeas.length === 0) {
@@ -7061,6 +7101,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       calls: trace.modelCalls,
       blocks,
     });
+    assertGenerationRunBudget(trace.modelCalls);
     let retryUsed = false;
     let eligibleDrafts = evaluations.filter((entry) => entry.draft.status !== 'rejected');
     const eligibleIdeaIds = new Set(eligibleDrafts.map((entry) => entry.idea.id));
@@ -7136,6 +7177,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         eligibleDrafts = evaluations.filter((entry) => entry.draft.status !== 'rejected');
       }
     }
+    assertGenerationRunBudget(trace.modelCalls);
     const drafts = evaluations.map((entry) => entry.draft);
     trace.stageCounts.ideasSelected = ideas.filter((idea) => idea.status === 'selected').length;
     trace.stageCounts.retryUsed = retryUsed ? 1 : 0;
@@ -7170,6 +7212,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     let selected = await selectFinalTweets({ evaluations, input, calls: trace.modelCalls, blocks });
+    assertGenerationRunBudget(trace.modelCalls);
     const geoffreySubtractiveRepairEnabled = shouldSpendOnGeoffreySubtractiveRepairV2(
       input.voiceProfile,
       recentRuns,
@@ -7420,6 +7463,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         }
       }
     }
+    assertGenerationRunBudget(trace.modelCalls);
     // The main, trim, rescue, and alternate selection passes each reset their
     // per-batch caps, so the MERGED selection can exceed the learned question
     // budget (e.g. two question drafts against a budget of one). Enforce the

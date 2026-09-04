@@ -56,6 +56,7 @@ export interface GenerateTextResult {
   stopReason: string | null;
   provider: AiProvider;
   model: string;
+  providerModel?: string | null;
   requestedProvider?: AiProvider;
   requestedModel?: string;
   reasoningEffort?: OpenAiReasoningEffort | null;
@@ -429,6 +430,7 @@ async function generateWithOpenAi(
     stopReason: getOpenAiStopReason(response),
     provider: 'openai',
     model,
+    providerModel: typeof response.model === 'string' ? response.model : null,
     reasoningEffort: reasoning?.effort ?? null,
     cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? null,
     reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? null,
@@ -502,6 +504,7 @@ async function generateWithAnthropic(
     stopReason: response.stop_reason || null,
     provider: 'anthropic',
     model,
+    providerModel: typeof response.model === 'string' ? response.model : null,
     inputTokens: response.usage?.input_tokens ?? null,
     outputTokens: response.usage?.output_tokens ?? null,
   };
@@ -536,12 +539,28 @@ function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode'
   };
 }
 
+function annotateGenerationFailure(
+  failure: Error,
+  options: GenerateTextOptions,
+  requestedChain: AiModelTarget[],
+  fallbackAttempts: AiFallbackAttempt[],
+): Error {
+  const attempted = [...fallbackAttempts].reverse().find((attempt) => attempt.reason !== 'provider_unconfigured');
+  return Object.assign(failure, {
+    requestedProvider: requestedChain[0]?.provider,
+    requestedModel: requestedChain[0]?.model,
+    reasoningEffort: attempted?.provider === 'openai'
+      ? getOpenAiReasoning(options, attempted.model)?.effort ?? null : null,
+    fallbackAttempts,
+  });
+}
+
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
   const requestedChain = resolveModelChain(options);
   const modelChain = requestedChain;
 
   if (!modelChain.some((target) => isProviderConfigured(target.provider))) {
-    throw new Error('No AI provider is configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.');
+    throw annotateGenerationFailure(new Error('No AI provider is configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.'), options, requestedChain, []);
   }
 
   let lastError: unknown = null;
@@ -623,6 +642,5 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   }
 
   const failure = lastError instanceof Error ? lastError : new Error('AI generation failed');
-  (failure as Error & { fallbackAttempts?: AiFallbackAttempt[] }).fallbackAttempts = fallbackAttempts;
-  throw failure;
+  throw annotateGenerationFailure(failure, options, requestedChain, fallbackAttempts);
 }

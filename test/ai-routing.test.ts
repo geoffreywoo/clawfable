@@ -585,6 +585,7 @@ describe('AI model routing', () => {
     const anthropicCreate = vi.fn(() => new Promise((resolve) => {
       setTimeout(() => resolve({
         content: [{ type: 'text', text: 'primary completed' }],
+      model: 'claude-fable-5-20260901',
         stop_reason: 'end_turn',
       }), 60);
     }));
@@ -606,6 +607,7 @@ describe('AI model routing', () => {
       text: 'primary completed',
       provider: 'anthropic',
       model: 'claude-fable-5',
+      providerModel: 'claude-fable-5-20260901',
     }));
     expect(anthropicCreate).toHaveBeenCalledWith(expect.objectContaining({
       output_config: expect.objectContaining({ effort: 'medium' }),
@@ -779,7 +781,7 @@ describe('Astra creative pilot', () => {
   ] as const)('uses task-specific reasoning and preserves structured output for %s', async (task, effort) => {
     delete process.env.OPENAI_REASONING_EFFORT;
     delete process.env.OPENAI_REASONING_EFFORT_TWEET_WRITING;
-    const create = vi.fn().mockResolvedValue({ status: 'completed', output_text: '{"content":"ok"}', usage: {
+    const create = vi.fn().mockResolvedValue({ status: 'completed', model: 'gpt-6-astra-2026-09-01', output_text: '{"content":"ok"}', usage: {
       input_tokens: 1000, output_tokens: 500, input_tokens_details: { cached_tokens: 200 }, output_tokens_details: { reasoning_tokens: 450 },
     } });
     const { generateText } = await loadGeneratorWithOpenAiMock(create);
@@ -787,7 +789,7 @@ describe('Astra creative pilot', () => {
     const result = await generateText({ task, modelStack: 'publishing_v2_astra', system: 'Write JSON.', prompt: 'test', maxTokens: 600, temperature: 0.9, jsonSchema: schema });
     expect(create.mock.calls[0][0]).toMatchObject({ model: 'gpt-6-astra', reasoning: { effort }, max_output_tokens: 8192, text: { format: { type: 'json_schema', strict: true, schema } } });
     expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
-    expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', model: 'gpt-6-astra', reasoningEffort: effort, inputTokens: 1000, outputTokens: 500, cachedInputTokens: 200, reasoningTokens: 450 });
+    expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', model: 'gpt-6-astra', providerModel: 'gpt-6-astra-2026-09-01', reasoningEffort: effort, inputTokens: 1000, outputTokens: 500, cachedInputTokens: 200, reasoningTokens: 450 });
   });
 
   it.each(['none','minimal'] as const)('normalizes incompatible inherited %s reasoning to low', async effort => {
@@ -798,6 +800,24 @@ describe('Astra creative pilot', () => {
     await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 400, temperature: 1 });
     expect(create.mock.calls[0][0].reasoning).toEqual({ effort: 'low' });
     expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+  });
+
+  it('preserves requested Astra identity and effective reasoning when a bounded call times out', async () => {
+    delete process.env.OPENAI_REASONING_EFFORT;
+    const create = vi.fn((_request, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    await loadGeneratorWithOpenAiMock(create);
+    const { trackedGenerate } = await import('@/lib/generation-v2');
+    const calls: import('@/lib/types').GenerationModelCallTrace[] = [];
+    await expect(trackedGenerate('idea_generation', { task: 'idea_generation', modelStack: 'publishing_v2_astra',
+      system: 'Return three propositions.', prompt: 'One brief.', maxTokens: 2200, timeoutMs: 20,
+    }, calls)).rejects.toMatchObject({ requestedProvider: 'openai', requestedModel: 'gpt-6-astra', reasoningEffort: 'high' });
+    expect(calls).toEqual([expect.objectContaining({ stage: 'idea_generation', succeeded: false, provider: 'openai', model: 'gpt-6-astra',
+      requestedProvider: 'openai', requestedModel: 'gpt-6-astra', reasoningEffort: 'high',
+      fallbackAttempts: [expect.objectContaining({ reason: 'timeout' })],
+    })]);
+    expect(create.mock.calls[0][0]).toMatchObject({ reasoning: { effort: 'high' }, max_output_tokens: 8192 });
   });
 
   it('accepts explicit max reasoning and retains a larger caller output budget', async () => {

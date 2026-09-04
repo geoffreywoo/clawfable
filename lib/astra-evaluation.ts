@@ -219,6 +219,7 @@ export interface EvaluationArmResult {
   trace: GenerationRunTrace | null;
   validPrimaryModels: boolean;
   invalidReason: string | null;
+  executionEnvironment?: { kind: 'remote'; origin: string; gitCommit: string };
 }
 export interface EvaluationComparison {
   version: string;
@@ -227,62 +228,98 @@ export interface EvaluationComparison {
   estimatedCostUsd: number;
   packets: Array<{ id: string; kind: FrozenEvaluationPacket['kind']; baseline: EvaluationArmResult; astra: EvaluationArmResult }>;
 }
+export type EvaluationArmRunner = (packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack']) => Promise<EvaluationArmResult>;
+
+export function validateFrozenEvaluationAge(capturedAt: string, now = new Date()): void {
+  const age = now.getTime() - Date.parse(capturedAt);
+  if (!Number.isFinite(age) || age < -5 * 60 * 1000 || age > 7 * 24 * 60 * 60 * 1000) throw new Error('Capture a fresh snapshot: comparison evidence is frozen as-of capture and expires after seven days.');
+}
+
+/** One identical non-persisting arm, shared by local and protected remote execution. */
+export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack'], options: {
+  generate?: typeof generateTweetBatchV2;
+} = {}): Promise<EvaluationArmResult> {
+  if (!['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(stack)
+    || packet.input.mode !== 'preview' || packet.input.persistArtifacts !== false
+    || packet.input.requireAutopostQuality !== true || packet.input.count !== 1
+    || packet.input.previewContext?.briefs.length !== 1 || !Array.isArray(packet.input.previewContext.documents)) {
+    throw new Error('Unsafe frozen evaluation arm.');
+  }
+  const generate = options.generate || generateTweetBatchV2;
+  let trace: GenerationRunTrace | null = null;
+  let drafts: DraftCandidate[] = [];
+  let ideas: IdeaCandidate[] = [];
+  let selected: RankedPublishingCandidate[] = [];
+  let failure: string | null = null;
+  try {
+    selected = await generate({ ...structuredClone(packet.input), modelStack: stack,
+      onTrace: (value) => { trace = value; }, onArtifacts: (artifacts) => { drafts = artifacts.drafts; ideas = artifacts.ideas; },
+    });
+  } catch (error) { failure = error instanceof Error ? error.message : String(error); }
+  const completedTrace = trace as GenerationRunTrace | null;
+  const invalidCalls = (completedTrace?.modelCalls || []).filter((call) => {
+    if (!call.succeeded) return false;
+    const task = ({ idea_generation: 'idea_generation', idea_judgment: 'idea_judgment', tweet_writing: 'tweet_writing', copy_judgment: 'copy_judgment' } as const)[call.stage];
+    if (!task) return true;
+    const primary = getModelChainForTask(task, stack)[0];
+    const reportedModel = call.providerModel;
+    const reportedMatchesPrimary = !reportedModel || Boolean(primary && (reportedModel === primary.model
+      || (reportedModel.startsWith(`${primary.model}-`) && /^\d{4}-\d{2}-\d{2}$/.test(reportedModel.slice(primary.model.length + 1)))));
+    return !primary || call.model !== primary.model || call.provider !== primary.provider || !reportedMatchesPrimary;
+  });
+  const successfulCalls = completedTrace?.modelCalls?.filter((call) => call.succeeded) || [];
+  const invalidReason = failure || (!completedTrace ? 'missing_trace'
+    : !['completed', 'empty'].includes(completedTrace.status) ? completedTrace.error || 'generation_failed'
+    : invalidCalls.length ? 'provider_or_model_substitution'
+    : successfulCalls.length === 0 ? 'no_successful_model_calls'
+    : !Number.isFinite(completedTrace.estimatedCostUsd) ? 'unknown_evaluation_cost'
+    : null);
+  return { stack, selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason };
+}
+
 export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, options: {
   generate?: typeof generateTweetBatchV2;
+  runArm?: EvaluationArmRunner;
   maxEstimatedCostUsd?: number;
   limit?: number;
   onProgress?: (comparison: EvaluationComparison) => void | Promise<void>;
   now?: Date;
 } = {}): Promise<EvaluationComparison> {
   validateFrozenEvaluation(snapshot);
-  const age = (options.now || new Date()).getTime() - Date.parse(snapshot.capturedAt);
-  if (!Number.isFinite(age) || age < -5 * 60 * 1000 || age > 7 * 24 * 60 * 60 * 1000) throw new Error('Capture a fresh snapshot: comparison evidence is frozen as-of capture and expires after seven days.');
-  const generate = options.generate || generateTweetBatchV2;
+  validateFrozenEvaluationAge(snapshot.capturedAt, options.now);
+  const runArm: EvaluationArmRunner = options.runArm || ((packet, stack) => runFrozenEvaluationArm(packet, stack, { generate: options.generate }));
   const budget = options.maxEstimatedCostUsd ?? 100;
   if (!Number.isFinite(budget) || budget <= 0) throw new Error('A positive evaluation cost budget is required.');
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 40)) throw new Error('Evaluation limit must be an integer from 1 to 40.');
   const comparison: EvaluationComparison = { version: ASTRA_EVALUATION_VERSION, snapshotHash: snapshot.hash, completed: false, estimatedCostUsd: 0, packets: [] };
   for (const packet of snapshot.packets.slice(0, Math.max(1, Math.min(40, options.limit ?? 40)))) {
     if (comparison.estimatedCostUsd >= budget) break;
-    const runArm = async (stack: EvaluationArmResult['stack']): Promise<EvaluationArmResult> => {
-      let trace: GenerationRunTrace | null = null;
-      let drafts: DraftCandidate[] = [];
-      let ideas: IdeaCandidate[] = [];
-      let selected: RankedPublishingCandidate[] = [];
-      let failure: string | null = null;
-      try {
-        selected = await generate({ ...structuredClone(packet.input), modelStack: stack,
-          onTrace: (value) => { trace = value; }, onArtifacts: (artifacts) => { drafts = artifacts.drafts; ideas = artifacts.ideas; },
-        });
-      } catch (error) { failure = error instanceof Error ? error.message : String(error); }
-      const completedTrace = trace as GenerationRunTrace | null;
-      const invalidCalls = (completedTrace?.modelCalls || []).filter((call) => {
-        if (!call.succeeded) return false;
-        const task = ({ idea_generation: 'idea_generation', idea_judgment: 'idea_judgment', tweet_writing: 'tweet_writing', copy_judgment: 'copy_judgment' } as const)[call.stage];
-        if (!task) return true;
-        const primary = getModelChainForTask(task, stack)[0];
-        return !primary || call.model !== primary.model || call.provider !== primary.provider;
-      });
-      const successfulCalls = completedTrace?.modelCalls?.filter((call) => call.succeeded) || [];
-      const invalidReason = failure || (!completedTrace ? 'missing_trace'
-        : !['completed', 'empty'].includes(completedTrace.status) ? completedTrace.error || 'generation_failed'
-        : invalidCalls.length ? 'provider_or_model_substitution'
-        : successfulCalls.length === 0 ? 'no_successful_model_calls'
-        : !Number.isFinite(completedTrace.estimatedCostUsd) ? 'unknown_evaluation_cost'
-        : null);
-      return { stack, selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason };
-    };
     // Alternate run order to avoid always measuring Astra after a warmed provider.
     const astraFirst = parseInt(evaluationHash(`${snapshot.hash}:${packet.id}`).slice(0, 2), 16) % 2 === 0;
     const firstStack = astraFirst ? 'publishing_v2_astra' : 'publishing_v2_gpt_control';
     const secondStack = astraFirst ? 'publishing_v2_gpt_control' : 'publishing_v2_astra';
-    const first = await runArm(firstStack);
-    const second: EvaluationArmResult = first.validPrimaryModels
-      ? await runArm(secondStack)
-      : { stack: secondStack, selected: [], ideas: [], drafts: [], trace: null, validPrimaryModels: false, invalidReason: 'paired_run_aborted_after_invalid_arm' };
-    comparison.packets.push({ id: packet.id, kind: packet.kind, baseline: astraFirst ? second : first, astra: astraFirst ? first : second });
-    comparison.estimatedCostUsd += (first.trace?.estimatedCostUsd || 0) + (second.trace?.estimatedCostUsd || 0);
-    comparison.completed = comparison.packets.length === 40;
+    const absent = (stack: EvaluationArmResult['stack'], invalidReason: string): EvaluationArmResult => ({
+      stack, selected: [], ideas: [], drafts: [], trace: null, validPrimaryModels: false, invalidReason,
+    });
+    const invokeArm = async (stack: EvaluationArmResult['stack']): Promise<EvaluationArmResult> => {
+      try { return await runArm(packet, stack); }
+      catch { return absent(stack, 'evaluation_arm_execution_failed_cost_unknown'); }
+    };
+    const first = await invokeArm(firstStack);
+    const pending = absent(secondStack, 'paired_arm_pending');
+    const pair = { id: packet.id, kind: packet.kind, baseline: astraFirst ? pending : first, astra: astraFirst ? first : pending };
+    comparison.packets.push(pair);
+    comparison.estimatedCostUsd += first.trace?.estimatedCostUsd || 0;
+    // A completed paid arm remains reviewable even if the process or its paired
+    // remote request terminates. Unknown remote costs never count as success.
+    await options.onProgress?.(structuredClone(comparison));
+    const budgetRemaining = comparison.estimatedCostUsd < budget;
+    const second = first.validPrimaryModels && budgetRemaining
+      ? await invokeArm(secondStack)
+      : absent(secondStack, !budgetRemaining ? 'evaluation_cost_budget_reached' : 'paired_run_aborted_after_invalid_arm');
+    if (astraFirst) pair.baseline = second; else pair.astra = second;
+    comparison.estimatedCostUsd += second.trace?.estimatedCostUsd || 0;
+    comparison.completed = comparison.packets.length === 40 && comparison.packets.every((entry) => entry.baseline.validPrimaryModels && entry.astra.validPrimaryModels);
     await options.onProgress?.(structuredClone(comparison));
     if (!first.validPrimaryModels || !second.validPrimaryModels) break;
   }

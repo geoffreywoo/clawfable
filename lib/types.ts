@@ -1022,6 +1022,8 @@ export interface GenerationModelCallTrace {
   model: string | null;
   requestedProvider?: 'openai' | 'anthropic' | null;
   requestedModel?: string | null;
+  /** Model identifier reported by the provider, including a resolved snapshot when returned. */
+  providerModel?: string | null;
   reasoningEffort?: string | null;
   cachedInputTokens?: number | null;
   reasoningTokens?: number | null;
