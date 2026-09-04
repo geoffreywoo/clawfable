@@ -145,6 +145,31 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     if (!valid) expect(result.invalidReason).toBe('provider_or_model_substitution');
   });
 
+  it.each([
+    ['gpt-5.6', true], ['gpt-5.6-sol', true], ['gpt-5.6-2026-09-04', true], ['gpt-5.6-sol-2026-09-04', true],
+    ['gpt-5.6-terra', false], ['gpt-5.6-luna', false], ['gpt-5.6-sol-mini', false],
+    ['gpt-5.6-sol-2026-09-04-proxy', false], ['gpt-6-astra', false], ['', false],
+  ])('accepts only documented control-model identities: %s', async (providerModel, valid) => {
+    const result = await runFrozenEvaluationArm(snapshot().packets[0], 'publishing_v2_gpt_control', { generate: async (input) => {
+      input.onTrace?.({ status: 'empty', estimatedCostUsd: 0.01, modelCalls: [{
+        stage: 'tweet_writing', model: 'gpt-5.6', provider: 'openai', providerModel, succeeded: true,
+      }] } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.validPrimaryModels).toBe(valid);
+    expect(result.trace?.modelCalls[0].providerModel).toBe(providerModel);
+    if (!valid) expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
+  it('rejects Sol and dated compared-model identities as independent critics', async () => {
+    const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
+    for (const model of ['gpt-5.6-sol', 'gpt-5.6-sol-2026-09-04', 'gpt-5.6-2026-09-04', 'gpt-6-astra-2026-09-04']) {
+      const votes = votesFor(report);
+      votes.judge = { kind: 'independent_critic', id: 'test', model };
+      expect(() => scoreFrozenEvaluation(report, votes)).toThrow('independent');
+    }
+  });
+
   it('stops before the paired second arm when the first reaches the cost ceiling', async () => {
     const generate = vi.fn(fakeGenerate);
     const report = await runFrozenEvaluation(snapshot(), { generate, maxEstimatedCostUsd: 0.005, now });

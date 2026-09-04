@@ -370,7 +370,7 @@ describe('generateTweetBatchV2 integration', () => {
     const ideaCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'idea_generation');
     expect(ideaCalls).toHaveLength(briefs.length);
     expect(ideaCalls.every((options) => JSON.parse(options.prompt).briefs.length === 1
-      && JSON.parse(options.prompt).requirements.ideasPerBrief === 3 && options.timeoutMs === 75_000)).toBe(true);
+      && JSON.parse(options.prompt).requirements.ideasPerBrief === 3 && options.timeoutMs === 120_000)).toBe(true);
     expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: briefs.length, ideaRetryCalls: 0, ideasGenerated: briefs.length * 3 });
     expect(trace.modelCalls.every((call: any) => call.providerModel === `${call.provider}-wire-model-test`)).toBe(true);
     const writerCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'tweet_writing');
@@ -415,7 +415,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(tasks.filter((task) => task === 'idea_judgment')).toHaveLength(1);
     expect(tasks.filter((task) => task === 'tweet_writing')).toHaveLength(4);
     expect(tasks.filter((task) => task === 'copy_judgment')).toHaveLength(1);
-    expect(ideaCall).toMatchObject({ maxTokens: 2200, jsonSchema: expect.objectContaining({ type: 'object' }) });
+    expect(ideaCall).toMatchObject({ maxTokens: 2200, timeoutMs: 75_000, jsonSchema: expect.objectContaining({ type: 'object' }) });
     expect(ideaCall.jsonSchema.properties.ideas.items.required).toContain('publicMove');
     expect(ideaCall.jsonSchema.properties.ideas.items.required).not.toContain('authorReason');
     expect(ideaCall.jsonSchema.properties.ideas.items.properties).not.toHaveProperty('authorReason');
@@ -854,7 +854,7 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it.each([
-    { preparationMs: 160_000, expectedTimeouts: [75_000, 75_000, 75_000, 75_000, 5_000, 5_000, 5_000, 5_000] },
+    { preparationMs: 80_000, expectedTimeouts: [120_000, 120_000, 120_000, 120_000, 40_000, 40_000, 40_000, 40_000] },
     { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000] },
   ])('clips queued Astra waves after $preparationMs preparation and stops new requests at the deadline', async ({ preparationMs, expectedTimeouts }) => {
     vi.useFakeTimers();
