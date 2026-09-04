@@ -178,6 +178,43 @@ describe('buildOutcomeEpisode', () => {
     expect(expired).toBe(unshielded);
   });
 
+  it('keeps a low-reach shielded flop negative instead of flipping it positive', () => {
+    const rows = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `hold-thin-base-${index}`,
+      xTweetId: `x-hold-thin-base-${index}`,
+      likes: 40,
+      retweets: 6,
+      replies: 5,
+      wasViral: false,
+    }));
+    const flop = (impressions: number, experimentHoldout: boolean) => computePerformanceLiftReward(
+      performance({
+        tweetId: 'hold-thin',
+        xTweetId: 'x-hold-thin',
+        likes: 0,
+        retweets: 0,
+        replies: 0,
+        quotes: 0,
+        bookmarks: 0,
+        impressions,
+        engagementRate: 0,
+        wasViral: false,
+        experimentHoldout,
+        postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      { avgLikes: 40, avgRetweets: 6 },
+      rows,
+    );
+
+    for (const impressions of [40, 100, 300]) {
+      const shielded = flop(impressions, true);
+      const unshielded = flop(impressions, false);
+      // The shield softens the damped penalty; it never flips a flop positive.
+      expect(shielded).toBeLessThan(0);
+      expect(shielded).toBeGreaterThan(unshielded);
+    }
+  });
+
   it('scores a median post as near-neutral lift on the spread-weighted scale', () => {
     // 8 typical rows; the post under test matches them exactly. With the
     // baseline derived from history on the same spread scale, lift must be
@@ -307,6 +344,69 @@ describe('buildOutcomeEpisode', () => {
 
     expect(episode(-30).reward.timeToApproval).toBe(0);
     expect(episode(10).reward.timeToApproval).toBeGreaterThan(0);
+  });
+
+  it('dampens the lift reward for low-reach posts with noisy counts', () => {
+    const history = Array.from({ length: 8 }, (_, index) => performance({
+      tweetId: `hist-${index}`,
+      xTweetId: `x-hist-${index}`,
+      likes: 12,
+      retweets: 2,
+      replies: 2,
+      impressions: 1000,
+      engagementRate: 1.6,
+      wasViral: false,
+    }));
+    const base = { avgLikes: 12, avgRetweets: 2 };
+    const highReach = computePerformanceLiftReward(
+      performance({ likes: 40, retweets: 8, replies: 6, impressions: 5000 }),
+      base,
+      history,
+    );
+    const thinReach = computePerformanceLiftReward(
+      performance({ likes: 40, retweets: 8, replies: 6, impressions: 40, engagementRate: 5.4 }),
+      base,
+      history,
+    );
+
+    expect(highReach).toBeGreaterThan(thinReach);
+  });
+
+  it('uses the newest performance checkpoint per tweet in batch episodes', () => {
+    const stale = performance({ checkedAt: '2026-04-02T00:00:00.000Z', likes: 5, retweets: 1, replies: 0, wasViral: false });
+    const fresh = performance({ checkedAt: '2026-04-05T00:00:00.000Z', likes: 60, retweets: 12, replies: 8 });
+    const episodes = buildOutcomeEpisodes({
+      agentId: 'agent-1',
+      tweets: [tweet({ status: 'posted', xTweetId: 'x-1' })],
+      signals: [signal({ signalType: 'x_post_succeeded' })],
+      performanceHistory: [fresh, stale],
+      baseline: { avgLikes: 10, avgRetweets: 2 },
+    });
+    const reversed = buildOutcomeEpisodes({
+      agentId: 'agent-1',
+      tweets: [tweet({ status: 'posted', xTweetId: 'x-1' })],
+      signals: [signal({ signalType: 'x_post_succeeded' })],
+      performanceHistory: [stale, fresh],
+      baseline: { avgLikes: 10, avgRetweets: 2 },
+    });
+
+    // Insertion order must not decide which checkpoint is learned from.
+    expect(episodes[0].observedAt).toBe('2026-04-05T00:00:00.000Z');
+    expect(reversed[0].observedAt).toBe('2026-04-05T00:00:00.000Z');
+    expect(episodes[0].reward.total).toBe(reversed[0].reward.total);
+  });
+
+  it('keeps performance-only episodes so action rewards are not dropped', () => {
+    const episodes = buildOutcomeEpisodes({
+      agentId: 'agent-1',
+      tweets: [tweet({ status: 'posted', xTweetId: 'x-1' })],
+      signals: [],
+      performanceHistory: [performance()],
+      baseline: { avgLikes: 40, avgRetweets: 8 },
+    });
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].stage).toBe('final');
   });
 });
 
