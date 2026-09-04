@@ -21,6 +21,7 @@ vi.mock('@/lib/ai', () => ({
   hasTextGenerationProvider: () => true,
   PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_fable_control',
   PUBLISHING_V2_GPT_CONTROL_MODEL_STACK: 'publishing_v2_gpt_control',
+  PUBLISHING_V2_ASTRA_MODEL_STACK: 'publishing_v2_astra',
   PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
 
@@ -60,6 +61,7 @@ vi.mock('@/lib/account-taste', async (importOriginal) => ({
 
 import {
   generateTweetBatchV2,
+  buildGenerationBriefsV2,
   isGeoffreyAIFutureLaneV2,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from '@/lib/generation-v2';
@@ -355,6 +357,35 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
     });
+  });
+
+  it('runs frozen Astra previews through the real gates without reading or writing account storage', async () => {
+    const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
+    const outputs = await generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra',
+      mode: 'preview', persistArtifacts: false, previewContext: { briefs, documents: sourceDocuments, stories: storyClusters },
+    });
+    const writerCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'tweet_writing');
+    expect(writerCalls.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(writerCalls.slice(0, 3).map((options) => JSON.parse(options.prompt).responseContract.independentCreativeMove.move)))
+      .toEqual(new Set(['direct_judgment', 'concrete_decision', 'unexpected_consequence']));
+    expect(writerCalls.every((options) => options.modelStack === 'publishing_v2_astra')).toBe(true);
+    expect(outputs.length).toBeGreaterThan(0);
+    expect(outputs.every((output) => output.generationSelection?.mode === 'exploit' && output.finalCriticVerdict === 'allow')).toBe(true);
+    expect(mocks.getSourceDocuments).not.toHaveBeenCalled();
+    expect(mocks.getStoryClusters).not.toHaveBeenCalled();
+    expect(mocks.getGenerationRuns).not.toHaveBeenCalled();
+    expect(mocks.getSemanticBlocks).not.toHaveBeenCalled();
+    expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
+    expect(mocks.upsertDraftCandidates).not.toHaveBeenCalled();
+    expect(mocks.upsertIdeaCandidates).not.toHaveBeenCalled();
+  });
+
+  it('rejects live or persisting frozen-context overrides before any side effect', async () => {
+    for (const options of [{ mode: 'live', persistArtifacts: false }, { mode: 'preview', persistArtifacts: true }, { mode: 'preview' }]) {
+      await expect(generateTweetBatchV2({ ...input, ...options, previewContext: { briefs: [], documents: [] } })).rejects.toThrow('preview_context_requires_non_persisting_preview');
+    }
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
   });
 
   it('uses the bounded normal call graph and returns fully linked drafts', async () => {

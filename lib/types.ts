@@ -444,6 +444,7 @@ export type DraftExperimentStatus =
 
 export type GenerationModelStackId =
   | 'standard'
+  | 'publishing_v2_astra'
   | 'publishing_v2_quality'
   | 'publishing_v2_gpt_control'
   | 'publishing_v2_fable_control';
@@ -486,6 +487,14 @@ export type QueueFeedbackReasonCode =
 
 export type FeedbackBlockScope = 'copy' | 'idea' | 'story' | 'topic';
 
+export interface GenerationSelectionTrace {
+  mode: 'exploit' | 'explore';
+  eligibleDraftIds: string[];
+  propensity: number;
+  explorationRate: number;
+  qualityMarginTolerance: number;
+}
+
 export interface Tweet {
   id: string;
   agentId: string;
@@ -500,6 +509,10 @@ export interface Tweet {
   quoteTweetAuthor: string | null;
   scheduledAt: string | null;
   deletionReason: string | null;  // why the operator deleted this from X
+  xRemovalFirstMissingAt?: string | null;
+  xRemovalLastCheckedAt?: string | null;
+  xRemovalConfirmationCount?: number | null;
+  generationSelection?: GenerationSelectionTrace | null;
   editCount?: number;
   lastEditedAt?: string | null;
   approvedAt?: string | null;
@@ -895,6 +908,7 @@ export interface DraftCandidate {
   content: string;
   format: string;
   posture: string;
+  generationSelection?: GenerationSelectionTrace | null;
   voiceAnchorIds: string[];
   evidenceIds: string[];
   generationModelStack?: GenerationModelStackId | null;
@@ -1006,6 +1020,11 @@ export interface GenerationModelCallTrace {
   stage: 'source_enrichment' | 'idea_generation' | 'idea_judgment' | 'tweet_writing' | 'copy_judgment';
   provider: 'openai' | 'anthropic' | null;
   model: string | null;
+  requestedProvider?: 'openai' | 'anthropic' | null;
+  requestedModel?: string | null;
+  reasoningEffort?: string | null;
+  cachedInputTokens?: number | null;
+  reasoningTokens?: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
   estimatedCostUsd: number | null;
@@ -1016,7 +1035,7 @@ export interface GenerationModelCallTrace {
   fallbackAttempts?: Array<{
     provider: 'openai' | 'anthropic';
     model: string;
-    reason: 'empty_text' | 'provider_error' | 'timeout';
+    reason: 'empty_text' | 'provider_error' | 'provider_unconfigured' | 'timeout' | 'incomplete';
     stopReason: string | null;
     statusCode: number | null;
     errorType: string | null;
@@ -1519,6 +1538,16 @@ export interface FrontierForecastLearningProfile {
 }
 
 export interface AgentLearnings {
+  learningDerivation?: {
+    version: string;
+    rewardMathVersion?: string;
+    finalRewardMinAgeHours?: number;
+    generatedAt: string;
+    maturePerformanceCount: number;
+    immaturePerformanceCount: number;
+    recoveredEditSignalIds: string[];
+    inhibitedRemovalSignalCount: number;
+  };
   agentId: string;
   updatedAt: string;
   totalTracked: number;
@@ -1870,6 +1899,8 @@ export type LearningSignalType =
 
 export interface LearningSignal {
   id: string;
+  /** Canonical ledger ordering for concurrent corrections with equal timestamps. */
+  storageRevision?: number;
   agentId: string;
   tweetId?: string;
   xTweetId?: string;

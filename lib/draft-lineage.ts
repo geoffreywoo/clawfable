@@ -4,7 +4,7 @@ import {
   recordV2CandidateOutcomeForTweet,
   updateTweet,
 } from './kv-storage';
-import { buildGenerationLearningMetadata, summarizeEditDelta } from './learning-loop';
+import { buildEditLearningMetadata, buildGenerationLearningMetadata, summarizeEditDelta } from './learning-loop';
 import { metadataWithStyleMode } from './style-mode';
 import { resolveAntiFundPortfolioContext } from './antifund-portfolio';
 import type { LearningSignal, PortfolioCompanyGenerationContext, Tweet } from './types';
@@ -73,7 +73,8 @@ export async function createOperatorChildDraft(
     reason: editSummary.summary,
     metadata: metadataWithStyleMode(tweet, {
       ...buildGenerationLearningMetadata(tweet),
-      ...editSummary.metadata,
+      ...buildEditLearningMetadata(tweet.content, content, tweet.topic || undefined),
+      acceptedEdit: childStatus === 'queued' || childStatus === 'posted',
       parentTweetId: tweet.id,
       parentIdeaId: tweet.ideaId || null,
       parentDraftCandidateId: tweet.draftCandidateId || null,

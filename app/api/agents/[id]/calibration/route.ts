@@ -8,6 +8,7 @@ import {
 } from '@/lib/kv-storage';
 import { buildTasteCalibrationQueue } from '@/lib/taste-calibration';
 import { metadataWithStyleMode } from '@/lib/style-mode';
+import { buildEditLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 
 type TasteAction = 'more_like_this' | 'less_like_this' | 'edited';
 
@@ -43,7 +44,7 @@ export async function POST(
     const tweetId = typeof body?.tweetId === 'string' ? body.tweetId : '';
     const action = normalizeAction(body?.action);
     const reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 240) : '';
-    const editedContent = typeof body?.editedContent === 'string' ? body.editedContent.trim().slice(0, 1000) : '';
+    const editedContent = typeof body?.editedContent === 'string' ? body.editedContent.trim() : '';
 
     if (!tweetId || !action) {
       return NextResponse.json({ error: 'tweetId and valid action are required' }, { status: 400 });
@@ -53,6 +54,10 @@ export async function POST(
     if (!tweet || String(tweet.agentId) !== String(id)) {
       return NextResponse.json({ error: 'Tweet not found' }, { status: 404 });
     }
+    if (action === 'edited' && (!editedContent || editedContent.length > 4000 || editedContent === tweet.content.trim())) {
+      return NextResponse.json({ error: 'An edited calibration draft must contain a change.' }, { status: 400 });
+    }
+    const editSummary = action === 'edited' ? summarizeEditDelta(tweet.content, editedContent) : null;
 
     const signalType =
       action === 'more_like_this' ? 'taste_more_like_this' :
@@ -61,11 +66,11 @@ export async function POST(
     const rewardDelta =
       action === 'more_like_this' ? 0.52 :
       action === 'less_like_this' ? -0.56 :
-      0.24;
+      editSummary!.rewardDelta;
     const preferenceHint =
       action === 'more_like_this' ? `Taste calibration: do more drafts like ${tweet.hookType || tweet.format || 'this shape'} on ${tweet.topic || 'this topic'}.` :
       action === 'less_like_this' ? `Taste calibration: avoid drafts like ${tweet.hookType || tweet.format || 'this shape'} on ${tweet.topic || 'this topic'}.` :
-      'Taste calibration: owner edited the draft before it felt right.';
+      editSummary!.preferenceHints[0] || 'Taste calibration: owner edited the draft before it felt right.';
 
     if (action === 'less_like_this') {
       await saveFeedback(id, {
@@ -88,6 +93,7 @@ export async function POST(
       reason: reason || preferenceHint,
       metadata: metadataWithStyleMode(tweet, {
         preferenceHint,
+        ...(editSummary ? buildEditLearningMetadata(tweet.content, editedContent, tweet.topic || undefined) : {}),
         calibrationAction: action,
         calibrationReason: reason || null,
         editedDraft: editedContent || null,

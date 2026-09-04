@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getAnalysis, getTrendingCache } from '@/lib/kv-storage';
 import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
-import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { resolvePublishingV2ModelStacks } from '@/lib/ai';
 import type { TrendingTopic } from '@/lib/trending';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
@@ -60,7 +60,7 @@ export async function POST(
       memory,
       signals,
       trending,
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       mode: entitlement.eligible ? 'manual' : 'preview',
       entitlement,
     });

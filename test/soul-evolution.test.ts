@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   addVoiceDirective,
+  addLearningSignal,
   createAgent,
   getSoulVersions,
   saveFeedback,
@@ -104,6 +105,14 @@ Primary objective: Write thoughtful tweets.`,
       source: 'queue_delete',
       userProvidedReason: true,
     });
+    await saveFeedback(agent.id, {
+      tweetId: 'uncertain-removal', tweetText: 'UNVERIFIED_REMOVAL_SENTINEL', rating: 'down',
+      generatedAt: new Date().toISOString(), source: 'queue_delete', userProvidedReason: false,
+    });
+    await addLearningSignal(agent.id, {
+      tweetId: 'uncertain-removal', signalType: 'deleted_from_x', surface: 'cron',
+      rewardDelta: -0.8, inferred: true, metadata: {},
+    });
     await saveLearnings(agent.id, {
       agentId: agent.id,
       updatedAt: new Date().toISOString(),
@@ -180,6 +189,7 @@ Primary objective: Write thoughtful tweets.`,
     expect(prompt).toContain('Lead with concrete observations.');
     expect(prompt).toContain('Lesson: Concrete openings feel more native to the operator than abstract framing.');
     expect(prompt).toContain('generic filler tweet (why it was rejected: Too generic)');
+    expect(prompt).not.toContain('UNVERIFIED_REMOVAL_SENTINEL');
   });
 
   it('does not regenerate an approval proposal while one is pending', async () => {

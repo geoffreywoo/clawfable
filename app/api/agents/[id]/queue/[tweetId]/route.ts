@@ -11,7 +11,7 @@ import {
 } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { inferDeleteIntent } from '@/lib/delete-intent';
-import { buildGenerationLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
+import { buildEditLearningMetadata, buildGenerationLearningMetadata, summarizeEditDelta } from '@/lib/learning-loop';
 import { metadataWithStyleMode } from '@/lib/style-mode';
 import { readJsonObjectBody, validateQueueDeleteRequest, validateQueueUpdateRequest } from '@/lib/request-validation';
 import { getTweetCompletenessIssue } from '@/lib/survivability';
@@ -164,11 +164,9 @@ export async function PATCH(
           reason: editSummary.summary,
           metadata: metadataWithStyleMode(updated, {
             ...buildGenerationLearningMetadata(updated),
-            ...editSummary.metadata,
+            ...buildEditLearningMetadata(updated.originalContent, updated.content, updated.topic || undefined),
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
-            originalDraft: updated.originalContent.slice(0, 500),
-            editedDraft: updated.content.slice(0, 500),
             draftExperimentId: updated.draftExperimentId ?? null,
             creativeLane: updated.creativeLane ?? null,
             experimentHoldout: updated.experimentHoldout === true,
@@ -204,11 +202,9 @@ export async function PATCH(
           reason: editSummary.summary,
           metadata: metadataWithStyleMode(updated, {
             ...buildGenerationLearningMetadata(updated),
-            ...editSummary.metadata,
+            ...buildEditLearningMetadata(updated.originalContent, updated.content, updated.topic || undefined),
             preferenceHint: editSummary.preferenceHints[0] || null,
             preferenceHints: editSummary.preferenceHints.join('\n') || null,
-            originalDraft: updated.originalContent.slice(0, 500),
-            editedDraft: updated.content.slice(0, 500),
             draftExperimentId: updated.draftExperimentId ?? null,
             creativeLane: updated.creativeLane ?? null,
             experimentHoldout: updated.experimentHoldout === true,

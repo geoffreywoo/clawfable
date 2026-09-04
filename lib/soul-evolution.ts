@@ -8,6 +8,8 @@ import type { Agent, AgentLearnings, ProtocolSettings, SoulVersion } from './typ
 import {
   getAgent,
   getFeedback,
+  getLearningSignals,
+  getTweets,
   getLearnings,
   getProtocolSettings,
   getSoulVersions,
@@ -18,9 +20,10 @@ import {
   addPostLogEntry,
 } from './kv-storage';
 import { parseSoulMd } from './soul-parser';
-import { generateText } from './ai';
+import { generateText, resolvePublishingV2ModelStacks } from './ai';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { selectRecentRejectionLines } from './learning-loop';
+import { filterLearningEvidence } from './learning-evidence';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_TRACKED_FOR_EVOLUTION = 50;
@@ -272,10 +275,13 @@ async function evolveSoul(
     const promptSoul = formatSoulForEvolutionPrompt(currentSoul);
 
     // Gather operator signals that soul evolution should respect
-    const [directiveRules, feedback] = await Promise.all([
+    const [directiveRules, rawFeedback, signals, tweets] = await Promise.all([
       getVoiceDirectiveRules(agent.id),
       getFeedback(agent.id),
+      getLearningSignals(agent.id),
+      getTweets(agent.id),
     ]);
+    const { feedback } = filterLearningEvidence(signals, rawFeedback, tweets);
     const negFeedback = selectRecentRejectionLines(feedback, 5);
     const activeDirectiveRules = getActiveVoiceDirectiveRules(directiveRules);
 
@@ -290,6 +296,7 @@ async function evolveSoul(
 
     const response = await generateText({
       task: 'learning',
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       maxTokens: getSoulEvolutionMaxTokens(currentSoul.length),
       system: `You are updating a SOUL.md personality contract for an X (Twitter) agent based on real performance data. The soul defines WHO the agent is and HOW it communicates. Your job is to evolve it — not replace it.
 

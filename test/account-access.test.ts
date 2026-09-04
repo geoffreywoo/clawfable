@@ -89,6 +89,8 @@ describe('handle equality versus verified X identity', () => {
 
     expect(await canAccessAgent(newcomer, agent.id)).toBe(false);
     expect(await canAccessAgent(original, agent.id)).toBe(true);
+    expect(await getAccessibleAgentIds(newcomer)).not.toContain(agent.id);
+    expect(await getAccessibleAgentIds(original)).toContain(agent.id);
   });
 
   it('still recovers access by handle when the agent has no verified X user', async () => {

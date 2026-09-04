@@ -4,6 +4,9 @@ export interface AiModelTokenRates {
 }
 
 const DEFAULT_AI_MODEL_COSTS_USD_PER_MILLION: Record<string, AiModelTokenRates> = {
+  // Standard API rates, verified 2026-09-04. Estimates use uncached input;
+  // provider invoices may include cache-read/write adjustments.
+  'gpt-6-astra': { input: 10, output: 50 },
   'gpt-5.6': { input: 5, output: 30 },
   'gpt-5.5': { input: 5, output: 30 },
   'claude-fable-5': { input: 10, output: 50 },
@@ -17,6 +20,7 @@ function configuredRates(): Record<string, AiModelTokenRates> {
     const parsed = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
     const overrides = Object.fromEntries(Object.entries(parsed).flatMap(([model, rates]) => (
       typeof rates?.input === 'number' && typeof rates.output === 'number'
+        && Number.isFinite(rates.input) && rates.input >= 0 && Number.isFinite(rates.output) && rates.output >= 0
         ? [[model, { input: rates.input, output: rates.output } satisfies AiModelTokenRates]]
         : []
     )));
@@ -35,8 +39,10 @@ export function estimateAiUsageCostUsd(
   inputTokens: number | null | undefined,
   outputTokens: number | null | undefined,
 ): number | null {
-  if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') return null;
+  if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number'
+    || !Number.isFinite(inputTokens) || !Number.isFinite(outputTokens) || inputTokens < 0 || outputTokens < 0) return null;
   const rates = configuredRates()[model];
   if (!rates) return null;
-  return Number((((inputTokens * rates.input) + (outputTokens * rates.output)) / 1_000_000).toFixed(6));
+  const longContext = model === 'gpt-6-astra' && inputTokens > 272_000;
+  return Number((((inputTokens * rates.input * (longContext ? 2 : 1)) + (outputTokens * rates.output * (longContext ? 1.5 : 1))) / 1_000_000).toFixed(6));
 }

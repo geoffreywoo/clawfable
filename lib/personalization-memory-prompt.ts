@@ -46,7 +46,7 @@ const MEMORY_PROMPT_GROUPS: MemoryPromptGroup[] = [
     key: 'editTransformations',
     title: 'EDIT TRANSFORMATION MEMORY',
     limit: 2,
-    intro: 'These are before/after lessons from drafts the operator changed before approval. Generate closer to the after-state.',
+    intro: 'These are before/after lessons from drafts the operator changed before approval. Prefer the revised judgment, detail, and rhythm. Historical claims are examples, not material to repeat.',
   },
   {
     key: 'referenceBank',

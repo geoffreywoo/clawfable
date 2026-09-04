@@ -7,7 +7,7 @@ import { estimateAiUsageCostUsd } from './ai-pricing';
 export { estimateAiUsageCostUsd } from './ai-pricing';
 
 export type AiProvider = 'openai' | 'anthropic';
-export type OpenAiReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type OpenAiReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type AiTask =
   | 'source_enrichment'
   | 'idea_generation'
@@ -56,6 +56,11 @@ export interface GenerateTextResult {
   stopReason: string | null;
   provider: AiProvider;
   model: string;
+  requestedProvider?: AiProvider;
+  requestedModel?: string;
+  reasoningEffort?: OpenAiReasoningEffort | null;
+  cachedInputTokens?: number | null;
+  reasoningTokens?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
   fallbackAttempts?: AiFallbackAttempt[];
@@ -64,7 +69,7 @@ export interface GenerateTextResult {
 export interface AiFallbackAttempt {
   provider: AiProvider;
   model: string;
-  reason: 'empty_text' | 'provider_error' | 'timeout';
+  reason: 'empty_text' | 'provider_error' | 'provider_unconfigured' | 'timeout' | 'incomplete';
   stopReason: string | null;
   statusCode: number | null;
   errorType: string | null;
@@ -108,6 +113,7 @@ async function withTimeout<T>(
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
 const OPENAI_COPY_MODEL = 'gpt-5.6';
+export const OPENAI_ASTRA_MODEL = 'gpt-6-astra';
 const OPENAI_QUALITY_MODEL = 'gpt-5.5';
 const ANTHROPIC_FABLE_MODEL = 'claude-fable-5';
 const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
@@ -115,7 +121,9 @@ const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
 // max_tokens without being returned, so the short copy budgets callers pass
 // (600-1400) can be consumed entirely by reasoning and yield no text block.
 const ANTHROPIC_FABLE_MIN_MAX_TOKENS = 4000;
-const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const OAI_ASTRA: AiModelTarget = { provider: 'openai', model: OPENAI_ASTRA_MODEL };
+const ASTRA_JUDGE_TASKS = new Set<AiTask>(['idea_judgment', 'copy_judgment', 'bulk_judgment', 'final_judgment', 'reply_scoring']);
 
 const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL };
 const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
@@ -144,15 +152,27 @@ const DEFAULT_TASK_TIMEOUT_MS: Record<AiTask, number> = {
 export const PUBLISHING_V2_MODEL_STACK: GenerationModelStackId = 'publishing_v2_quality';
 export const PUBLISHING_V2_CONTROL_MODEL_STACK: GenerationModelStackId = 'publishing_v2_fable_control';
 export const PUBLISHING_V2_GPT_CONTROL_MODEL_STACK: GenerationModelStackId = 'publishing_v2_gpt_control';
+export const PUBLISHING_V2_ASTRA_MODEL_STACK: GenerationModelStackId = 'publishing_v2_astra';
 
 export interface PublishingV2ModelStackAssignment {
   activeStack: GenerationModelStackId;
   shadowStack: GenerationModelStackId;
-  reason: 'geoffrey_gpt_independent_native_variants_with_surgical_rescue' | 'default_gpt_primary';
+  reason: 'geoffrey_gpt_independent_native_variants_with_surgical_rescue' | 'default_gpt_primary' | 'astra_geoffrey_pilot' | 'astra_general_release';
 }
 
 export function resolvePublishingV2ModelStacks(handle?: string | null): PublishingV2ModelStackAssignment {
   const normalizedHandle = String(handle || '').trim().replace(/^@/, '').toLowerCase();
+  // Promotion is explicit: deploy the compatibility and correctness work before
+  // enabling the pilot, and never broaden it because a model happens to exist.
+  const rollout = process.env.ASTRA_CREATIVE_ROLLOUT?.trim().toLowerCase();
+  const isGeoffrey = normalizedHandle === 'geoffwoo' || normalizedHandle === 'geoffreywoo';
+  if (rollout === 'all' || (rollout === 'geoffrey' && isGeoffrey)) {
+    return {
+      activeStack: PUBLISHING_V2_ASTRA_MODEL_STACK,
+      shadowStack: isGeoffrey ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : PUBLISHING_V2_MODEL_STACK,
+      reason: rollout === 'all' ? 'astra_general_release' : 'astra_geoffrey_pilot',
+    };
+  }
   if (normalizedHandle === 'geoffwoo' || normalizedHandle === 'geoffreywoo') {
     return {
       activeStack: PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
@@ -275,6 +295,7 @@ function readOpenAiReasoningEffort(value: string | undefined): OpenAiReasoningEf
 
 function getAllowedOpenAiReasoningEfforts(model: string): Set<OpenAiReasoningEffort> {
   const normalized = normalizeOpenAiModelName(model);
+  if (normalized === OPENAI_ASTRA_MODEL) return new Set(['low', 'medium', 'high', 'xhigh', 'max']);
   if (/^gpt-5-pro(?:[.-]|$)/.test(normalized)) return new Set(['high']);
   if (/^o[1-9]/.test(normalized)) return new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
   if (!/^gpt-5(?:[.-]|$)/.test(normalized)) return new Set();
@@ -307,7 +328,14 @@ function getOpenAiReasoning(options: GenerateTextOptions, model: string): { effo
   const allowed = getAllowedOpenAiReasoningEfforts(model);
   if (allowed.size === 0) return undefined;
 
-  const effort = getConfiguredOpenAiReasoningEffort(options) || getDefaultOpenAiReasoningEffort(model);
+  const configured = getConfiguredOpenAiReasoningEffort(options);
+  if (normalizeOpenAiModelName(model) === OPENAI_ASTRA_MODEL) {
+    const effort = configured === 'none' || configured === 'minimal'
+      ? 'low'
+      : configured || (options.task && ASTRA_JUDGE_TASKS.has(options.task) ? 'medium' : 'high');
+    return { effort };
+  }
+  const effort = configured || getDefaultOpenAiReasoningEffort(model);
   if (!effort || !allowed.has(effort)) return undefined;
   return { effort };
 }
@@ -333,6 +361,12 @@ export function getModelChainForTask(
   task: AiTask,
   modelStack: GenerationModelStackId = 'standard',
 ): AiModelTarget[] {
+  if (modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK) {
+    const utilityTask = task === 'classification' || task === 'source_enrichment' || task === 'default_quality';
+    if (!utilityTask) {
+      return dedupeTargets([OAI_ASTRA, ...(MODEL_STACK_TASK_OVERRIDES[PUBLISHING_V2_GPT_CONTROL_MODEL_STACK]?.[task] || TASK_MODEL_CHAINS[task])]);
+    }
+  }
   return dedupeTargets(MODEL_STACK_TASK_OVERRIDES[modelStack]?.[task] || TASK_MODEL_CHAINS[task]);
 }
 
@@ -362,7 +396,9 @@ async function generateWithOpenAi(
     model,
     instructions: options.system,
     input: getInputMessages(options),
-    max_output_tokens: options.maxTokens,
+    // Reasoning consumes the output budget too. Short visible tweet budgets
+    // must leave room for thinking, while request deadlines remain bounded.
+    max_output_tokens: model === OPENAI_ASTRA_MODEL ? Math.max(options.maxTokens, 8192) : options.maxTokens,
     ...(options.jsonSchema ? {
       text: {
         format: {
@@ -373,11 +409,14 @@ async function generateWithOpenAi(
         },
       },
     } : {}),
-    ...(reasoning ? { reasoning } : {}),
+    // The installed SDK predates Astra's documented `max` effort. This narrow
+    // type bridge preserves the validated wire value; no unsupported value can
+    // enter through getOpenAiReasoning's model capability table.
+    ...(reasoning ? { reasoning: reasoning as OpenAI.Reasoning } : {}),
     // GPT-5 reasoning models reject temperature unless reasoning is off, so an
     // operator raising OPENAI_REASONING_EFFORT must not turn every copy call
     // into a 400. Dropping the sampling knob is the documented tradeoff.
-    ...(typeof options.temperature === 'number' && (!reasoning || reasoning.effort === 'none')
+    ...(model !== OPENAI_ASTRA_MODEL && typeof options.temperature === 'number' && (!reasoning || reasoning.effort === 'none')
       ? { temperature: options.temperature }
       : {}),
   };
@@ -390,6 +429,9 @@ async function generateWithOpenAi(
     stopReason: getOpenAiStopReason(response),
     provider: 'openai',
     model,
+    reasoningEffort: reasoning?.effort ?? null,
+    cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? null,
+    reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? null,
     inputTokens: response.usage?.input_tokens ?? null,
     outputTokens: response.usage?.output_tokens ?? null,
   };
@@ -495,9 +537,10 @@ function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode'
 }
 
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
-  const modelChain = resolveModelChain(options).filter((target) => isProviderConfigured(target.provider));
+  const requestedChain = resolveModelChain(options);
+  const modelChain = requestedChain;
 
-  if (modelChain.length === 0) {
+  if (!modelChain.some((target) => isProviderConfigured(target.provider))) {
     throw new Error('No AI provider is configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.');
   }
 
@@ -509,6 +552,12 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : null;
   for (let index = 0; index < modelChain.length; index++) {
     const target = modelChain[index];
+    if (!isProviderConfigured(target.provider)) {
+      fallbackAttempts.push({ provider: target.provider, model: target.model, reason: 'provider_unconfigured',
+        stopReason: null, statusCode: null, errorType: null, inputTokens: null, outputTokens: null,
+        estimatedCostUsd: 0, durationMs: 0 });
+      continue;
+    }
     const attemptStartedAt = Date.now();
     const remainingMs = deadlineAt === null ? null : deadlineAt - Date.now();
     if (remainingMs !== null && remainingMs <= 0) break;
@@ -528,12 +577,13 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
             new AiGenerationTimeoutError(target.provider, target.model, attemptTimeoutMs),
             () => abortController?.abort(),
           );
-      if (!result.text.trim()) {
-        lastError = new Error(`${target.provider}:${target.model} returned empty text`);
+      const incomplete = ['max_tokens', 'content_filter', 'failed', 'incomplete', 'cancelled', 'queued', 'in_progress'].includes(result.stopReason || '');
+      if (!result.text.trim() || incomplete) {
+        lastError = new Error(`${target.provider}:${target.model} returned ${incomplete ? 'incomplete' : 'empty'} text`);
         fallbackAttempts.push({
           provider: target.provider,
           model: target.model,
-          reason: 'empty_text',
+          reason: result.text.trim() && incomplete ? 'incomplete' : 'empty_text',
           stopReason: result.stopReason,
           statusCode: null,
           errorType: null,
@@ -544,7 +594,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         });
         continue;
       }
-      return { ...result, fallbackAttempts };
+      return { ...result, requestedProvider: requestedChain[0]?.provider, requestedModel: requestedChain[0]?.model, fallbackAttempts };
     } catch (error) {
       lastError = error;
       const providerError = readProviderError(error);

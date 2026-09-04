@@ -1,4 +1,5 @@
 import type { BanditArmScore, BanditPolicy } from './bandit';
+import { episodeBanditReward } from './bandit';
 import type {
   AgentLearnings,
   ContentSourceLane,
@@ -16,7 +17,8 @@ import { buildTasteCalibrationQueue, type TasteCalibrationSnapshot } from './tas
 import type { EnrichedTrendingTopic, SourcePlannerPlan } from './source-planner';
 import { getShitpoastSlotCount, SHITPOAST_STYLE_MODE } from './style-mode';
 import { getTrendingTopicStableId } from './trending';
-import { weightedSpreadEngagement } from './performance-signals';
+import { isMaturePerformance, weightedSpreadEngagement } from './performance-signals';
+import { filterLearningEvidence } from './learning-evidence';
 import type { SoulEvolutionState } from './soul-evolution';
 
 type LearningItemSource = 'operator' | 'performance' | 'inferred' | 'bandit';
@@ -962,12 +964,13 @@ function getPredictedOutcomeValue(tweet: Tweet): number | null {
 
 function computeCalibrationScore(episodes: OutcomeEpisode[], tweets: Map<string, Tweet>): number {
   const comparable = episodes
+    .filter((episode) => episode.stage === 'final')
     .map((episode) => {
       const tweet = tweets.get(String(episode.tweetId));
       if (!tweet) return null;
       const predicted = getPredictedOutcomeValue(tweet);
       if (predicted === null) return null;
-      const actual = clamp((episode.reward.total + 1) / 2);
+      const actual = episodeBanditReward(episode);
       return Math.abs(predicted - actual);
     })
     .filter((value): value is number => value !== null);
@@ -1791,6 +1794,8 @@ export function buildLearningSnapshot({
   manualExampleCuration,
   trending,
 }: BuildLearningSnapshotOptions): LearningSnapshot {
+  ({ signals, feedback } = filterLearningEvidence(signals, feedback, allTweets));
+  performanceHistory = performanceHistory.filter(isMaturePerformance);
   const nowMs = Date.now();
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const tweetById = new Map(allTweets.map((tweet) => [String(tweet.id), tweet]));

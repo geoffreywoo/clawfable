@@ -28,7 +28,7 @@ function arm(overrides: Partial<import('@/lib/bandit').BanditArmScore> & { arm: 
 }
 
 function performanceEntry(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
-  const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recent = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   return {
     tweetId: overrides.tweetId || crypto.randomUUID(),
     xTweetId: overrides.xTweetId || crypto.randomUUID(),
@@ -113,6 +113,15 @@ function approvedPostedTweet(id: string, overrides: { format: string; topic: str
 }
 
 describe('bandit policy', () => {
+  it('does not count a young post as outcome evidence locally or in a global prior', () => {
+    const young = performanceEntry({ postedAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), likes: 0 });
+    const policy = buildBanditPolicy({ performanceHistory: [young], feedback: [], signals: [], allTweets: [],
+      allowedFormats: ['hot_take'], candidateTopics: ['AI'] });
+    expect(policy.formatArms.find((arm) => arm.arm === 'hot_take')?.outcomePulls).toBe(0);
+    const prior = buildBanditGlobalPrior({ performanceHistory: [young] });
+    expect(prior.totalSamples).toBe(0);
+    expect(prior.families.format).toEqual([]);
+  });
   it('separates exploit leaders from cold-start exploration arms', () => {
     const performanceHistory = Array.from({ length: 12 }, (_, index) =>
       performanceEntry({
@@ -215,6 +224,7 @@ describe('bandit policy', () => {
           likes: 3,
           source: 'autopilot',
           checkedAt: '2026-07-01T00:15:00.000Z',
+          postedAt: '2026-07-01T00:00:00.000Z',
         }),
         performanceEntry({
           tweetId: 'auto-1',
@@ -224,7 +234,8 @@ describe('bandit policy', () => {
           topic: 'Infra',
           likes: 5,
           source: 'autopilot',
-          checkedAt: '2026-07-01T02:00:00.000Z',
+          checkedAt: '2026-07-02T02:00:00.000Z',
+          postedAt: '2026-07-01T00:00:00.000Z',
         }),
         performanceEntry({
           tweetId: '',
@@ -256,7 +267,7 @@ describe('bandit policy', () => {
       systemWrittenPosts: 1,
     });
     expect(policy.formatArms[0]?.arm).toBe('hot_take');
-    expect(policy.summary[0]).toContain('2 unique posts');
+    expect(policy.summary[0]).toContain('2 mature unique posts');
   });
 
   it('discounts obsolete generated scaffolds without throwing away their outcome', () => {

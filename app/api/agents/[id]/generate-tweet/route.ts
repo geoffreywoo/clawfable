@@ -9,7 +9,7 @@ import {
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { getGeneratedTweetIssue } from '@/lib/survivability';
-import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { resolvePublishingV2ModelStacks } from '@/lib/ai';
 import type { TrendingTopic } from '@/lib/trending';
 import { readJsonObjectBody, validateGenerationRequest } from '@/lib/request-validation';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
@@ -94,7 +94,7 @@ export async function POST(
         memory,
         signals,
         trending,
-        modelStack: PUBLISHING_V2_MODEL_STACK,
+        modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
         mode: 'preview',
         entitlement,
       });
@@ -142,7 +142,7 @@ export async function POST(
         memory,
         signals,
         trending: null,
-        modelStack: PUBLISHING_V2_MODEL_STACK,
+        modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
         mode: entitlement.eligible ? 'manual' : 'preview',
         entitlement,
       });

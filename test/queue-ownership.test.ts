@@ -122,6 +122,9 @@ describe('queue ownership route guard', () => {
     expect((await getLearningSignals(agent.id))[0].metadata).toMatchObject({
       portfolioCompanyId: 'betr',
       portfolioCompanyPolicyVersion: context.policyVersion,
+      originalDraft: queuedTweet.content,
+      editedDraft: child.content,
+      acceptedEdit: true,
     });
   });
 

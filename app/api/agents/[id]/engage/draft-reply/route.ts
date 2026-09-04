@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { resolvePublishingV2ModelStacks } from '@/lib/ai';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { buildEngagementDraft } from '@/lib/engagement';
@@ -96,7 +96,7 @@ export async function POST(
       memory: context.memory,
       signals: context.signals,
       trending: null,
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       mode: 'manual',
       entitlement,
     });

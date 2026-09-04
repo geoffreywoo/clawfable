@@ -11,6 +11,7 @@ import {
   getQueuedTweets,
   releaseAutopilotLock,
   resetReadCache,
+  replayDerivedExperimentRewards,
 } from '@/lib/kv-storage';
 import { buildLearnings, checkPerformance } from '@/lib/performance';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
@@ -45,6 +46,10 @@ export async function POST(
   }
 
   const body = await request.json().catch(() => ({}));
+  const derivedOnly = body?.mode === 'derived_only';
+  if (body?.mode !== undefined && body.mode !== 'derived_only' && body.mode !== 'full') {
+    return NextResponse.json({ error: 'mode must be derived_only or full' }, { status: 400 });
+  }
   const classificationPasses = Number(body?.classificationPasses ?? MAX_CLASSIFICATION_PASSES);
   const targetQueueDepth = Number(body?.targetQueueDepth ?? 2);
   const refill = body?.refill !== false;
@@ -77,6 +82,14 @@ export async function POST(
   }
 
   try {
+    if (derivedOnly) {
+      // Replay retained evidence without X reads, queue changes, posting, or
+      // modifying the owner's SOUL. Insight generation can still call the AI.
+      const learnings = await buildLearnings(agent, { backfillAudienceFeedback: false });
+      const replay = await replayDerivedExperimentRewards(id);
+      return NextResponse.json({ agentId: id, mode: 'derived_only', totalTracked: learnings.totalTracked,
+        corpus: learnings.voiceCorpus || null, derivation: learnings.learningDerivation, replay });
+    }
     const classificationRuns: number[] = [];
     for (let index = 0; index < classificationPasses; index++) {
       classificationRuns.push(await checkPerformance(

@@ -140,6 +140,36 @@ describe('summarizeFollowerGrowth', () => {
 });
 
 describe('baseline and projection honesty', () => {
+  it('keeps a sparse mature baseline unchanged by many early or invalid snapshots', () => {
+    const mature = [performance({ likes: 10, retweets: 2, replies: 1, quotes: 0, bookmarks: 1 })];
+    const early = Array.from({ length: 20 }, (_, index) => performance({
+      tweetId: `early-${index}`, xTweetId: `early-x-${index}`,
+      checkedAt: '2026-08-20T02:00:00.000Z', performanceCheckpoint: 'full_24h',
+      likes: 100_000, retweets: 10_000, replies: 1_000, quotes: 1_000, bookmarks: 10_000,
+    }));
+    const invalid = performance({ checkedAt: 'invalid', performanceCheckpoint: 'late', likes: 100_000 });
+    const measuredBaseline = buildPerformanceSignalBaseline(mature);
+    const mixedBaseline = buildPerformanceSignalBaseline([...mature, ...early, invalid]);
+
+    expect(mixedBaseline).toEqual(measuredBaseline);
+    expect(mixedBaseline.sampleCount).toBe(1);
+    expect(computeRelativeSpreadSignal(mature[0], mixedBaseline))
+      .toEqual(computeRelativeSpreadSignal(mature[0], measuredBaseline));
+    expect(buildPerformanceSignalBaseline([...early, invalid])).toEqual({
+      likes: 12, retweets: 2, replies: 2, quotes: null, bookmarks: null,
+      impressions: 1000, engagementRate: 2, sampleCount: 0,
+    });
+  });
+
+  it.each(['full_24h', 'late'] as const)('projects an early snapshot even when its legacy label is %s', (performanceCheckpoint) => {
+    const baseline = buildPerformanceSignalBaseline([performance()]);
+    const early = performance({ checkedAt: '2026-08-20T02:00:00.000Z', performanceCheckpoint });
+    const projected = computeRelativeSpreadSignal(early, baseline);
+
+    expect(projected.projectedTo24Hours).toBe(true);
+    expect(projected).toEqual(computeRelativeSpreadSignal({ ...early, performanceCheckpoint: 'momentum_2h' }, baseline));
+  });
+
   it('keeps a zero quote median at zero instead of inventing a baseline of one', () => {
     const history = Array.from({ length: 10 }, (_, index) => performance({
       tweetId: `zero-${index}`,

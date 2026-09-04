@@ -13,6 +13,7 @@
     "audit:generation": "tsx scripts/audit-generation.ts",
     "audit:geoffrey": "tsx scripts/audit-generation.ts --handle geoffwoo",
     "eval:generation:v2": "tsx scripts/eval-generation-v2.ts",
+    "eval:astra": "tsx scripts/eval-astra.ts",
     "seeds:geoffrey": "tsx scripts/list-frontier-seeds.ts"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@types/node": "25.3.2",
     "@types/react": "19.2.14",
     "@vitejs/plugin-react": "^6.0.2",
+    "tsx": "^4.21.0",
     "typescript": "5.9.3",
     "vitest": "^4.1.7"
   },

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet } from '@/lib/kv-storage';
 import type { VoiceDirective, VoiceDirectiveRule } from '@/lib/types';
-import { generateText } from '@/lib/ai';
+import { generateText, resolvePublishingV2ModelStacks } from '@/lib/ai';
 import { getActiveVoiceDirectiveRules } from '@/lib/voice-directives';
 import {
   formatDirectiveAuditTweetList,
@@ -76,6 +76,7 @@ export async function POST(
     // The model responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await generateText({
       task: 'learning',
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       maxTokens: getVoiceChatResponseMaxTokens({
         messageLength: message.trim().length,
         directiveCount: activeDirectiveRules.length,
@@ -173,6 +174,7 @@ async function auditQueueAgainstDirective(
 
   const response = await generateText({
     task: 'final_judgment',
+    modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
     maxTokens: getDirectiveAuditMaxTokens(queue.length),
     system: `You audit queued tweets against a new voice directive. For each tweet, decide:
 - PASS: tweet already complies with the directive

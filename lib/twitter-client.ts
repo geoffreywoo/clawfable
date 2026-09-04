@@ -195,6 +195,34 @@ export async function fetchTweetById(
   }
 }
 
+export type TweetAvailability =
+  | { status: 'present'; tweetId: string }
+  | { status: 'not_found'; tweetId: string }
+  | { status: 'unavailable'; tweetId: string };
+
+/** Only a resource-specific official error proves absence. HTTP failures do not. */
+export function isExplicitTweetNotFound(value: unknown, tweetId: string): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, any>;
+  const errors = [record, ...(Array.isArray(record.errors) ? record.errors : []),
+    ...(Array.isArray(record.data?.errors) ? record.data.errors : [])];
+  return errors.some((error) => {
+    const matchesId = String(error.resource_id || error.value || '') === String(tweetId);
+    return matchesId && /(?:^|\/)resource-not-found$/.test(String(error.type || ''))
+      && (!error.resource_type || error.resource_type === 'tweet');
+  });
+}
+
+export async function lookupTweetAvailability(keys: TwitterKeys, tweetId: string): Promise<TweetAvailability> {
+  try {
+    const result = await createClient(keys).v2.singleTweet(tweetId);
+    if (String(result.data?.id || '') === String(tweetId)) return { status: 'present', tweetId };
+    return { status: isExplicitTweetNotFound(result, tweetId) ? 'not_found' : 'unavailable', tweetId };
+  } catch (error) {
+    return { status: isExplicitTweetNotFound(error, tweetId) ? 'not_found' : 'unavailable', tweetId };
+  }
+}
+
 export async function fetchTweetByIdApp(
   tweetId: string
 ): Promise<{ id: string; text: string; authorId: string; authorUsername: string; likes: number; createdAt: string; inReplyToId: string | null } | null> {

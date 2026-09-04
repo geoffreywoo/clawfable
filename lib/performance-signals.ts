@@ -47,17 +47,20 @@ export function confidenceAdjustedPerformanceAverage(
   return ((Math.max(0, total)) + (Math.max(0, globalAverage) * prior)) / (observedCount + prior);
 }
 
-function observedAgeHours(entry: Pick<TweetPerformance, 'postedAt' | 'checkedAt'>): number {
+function observedAgeHours(entry: Pick<TweetPerformance, 'postedAt' | 'checkedAt'>): number | null {
   const posted = Date.parse(entry.postedAt);
   const checked = Date.parse(entry.checkedAt);
-  if (!Number.isFinite(posted) || !Number.isFinite(checked)) return 24;
+  if (!Number.isFinite(posted) || !Number.isFinite(checked) || checked < posted) return null;
   return Math.max(0.25, (checked - posted) / (60 * 60 * 1000));
 }
 
-function isMature(entry: TweetPerformance): boolean {
-  return entry.performanceCheckpoint === 'full_24h'
-    || entry.performanceCheckpoint === 'late'
-    || observedAgeHours(entry) >= 18;
+export function isMaturePerformance(entry: Pick<TweetPerformance, 'postedAt' | 'checkedAt'>): boolean {
+  const posted = Date.parse(entry.postedAt);
+  const checked = Date.parse(entry.checkedAt);
+  // Checkpoint labels from older versions can be wrong. Measured elapsed time
+  // is the authority; a missing timestamp is not a mature outcome.
+  return Number.isFinite(posted) && Number.isFinite(checked)
+    && checked - posted >= 18 * 60 * 60 * 1000;
 }
 
 export function weightedSpreadEngagement(
@@ -71,8 +74,9 @@ export function weightedSpreadEngagement(
 }
 
 export function buildPerformanceSignalBaseline(history: TweetPerformance[]): PerformanceSignalBaseline {
-  const mature = history.filter(isMature);
-  const sample = mature.length >= 8 ? mature : history;
+  // A sparse account keeps its small measured sample (or explicit defaults).
+  // Early snapshots must never move the baseline used to judge final outcomes.
+  const sample = history.filter(isMaturePerformance);
   const directQuoteRows = sample.filter((entry) => typeof entry.quotes === 'number');
   const directBookmarkRows = sample.filter((entry) => typeof entry.bookmarks === 'number');
   return {
@@ -95,7 +99,9 @@ export function buildPerformanceSignalBaseline(history: TweetPerformance[]): Per
 
 function projectedMetric(value: number, entry: TweetPerformance): { value: number; projected: boolean } {
   const ageHours = observedAgeHours(entry);
-  if (ageHours >= 18 || entry.performanceCheckpoint === 'full_24h' || entry.performanceCheckpoint === 'late') {
+  // Old checkpoint labels can be wrong. Only actual elapsed time controls
+  // projection; unknown ages have no defensible projection to fabricate.
+  if (ageHours === null || ageHours >= 18) {
     return { value, projected: false };
   }
   const multiplier = Math.min(3.5, Math.sqrt(24 / Math.max(1, ageHours)));

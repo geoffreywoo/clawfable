@@ -7,6 +7,8 @@ import {
   updateProtocolSettings,
   updateManualExampleCuration,
   addLearningSignal,
+  getLearningSignals,
+  getPerformanceHistory,
 } from '@/lib/kv-storage';
 
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -34,6 +36,9 @@ import {
   selectTweetClassificationBacklog,
   selectTweetDirectMetricBackfill,
 } from '@/lib/performance';
+import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
+import { deriveMaturePerformanceRewards, PERFORMANCE_REWARD_DERIVATION_VERSION } from '@/lib/performance-rewards';
+import type { TweetPerformance } from '@/lib/types';
 
 function performanceEntry(overrides: Record<string, unknown>) {
   return {
@@ -43,7 +48,7 @@ function performanceEntry(overrides: Record<string, unknown>) {
     format: String(overrides.format || 'hot_take'),
     topic: String(overrides.topic || 'AI'),
     postedAt: '2026-04-01T00:00:00.000Z',
-    checkedAt: '2026-04-01T01:00:00.000Z',
+    checkedAt: '2026-04-02T00:00:00.000Z',
     likes: Number(overrides.likes ?? 10),
     retweets: Number(overrides.retweets ?? 2),
     replies: Number(overrides.replies ?? 1),
@@ -61,6 +66,39 @@ function performanceEntry(overrides: Record<string, unknown>) {
 }
 
 describe('performance learning smoke', () => {
+  it('repairs legacy cached rewards in learnings while preserving stored performance evidence', async () => {
+    const agent = await createAgent({ handle: 'reward-derivation-recovery', name: 'Derived', soulMd: '# soul' } as any);
+    const entry = { ...performanceEntry({ tweetId: 'derived-reward-tweet', xTweetId: 'derived-reward-x',
+      content: 'The packaging line lost six hours to one die.' }),
+      actionRewards: { total: -0.99, qualityAdjustedGrowthReward: -0.99 } as any,
+      qualityAdjustedGrowthScore: 0 } as TweetPerformance;
+    await addPerformanceEntry(agent.id, entry);
+    const rawBefore = await getPerformanceHistory(agent.id);
+    const learnings = await buildLearnings(agent, { backfillAudienceFeedback: false });
+
+    expect(learnings.bestPerformers).toHaveLength(1);
+    expect(learnings.bestPerformers[0].actionRewards).toEqual(deriveMaturePerformanceRewards([entry])[0].actionRewards);
+    expect(learnings.bestPerformers[0].actionRewards?.total).not.toBe(-0.99);
+    expect(learnings.learningDerivation).toMatchObject({ version: LEARNING_DERIVATION_VERSION,
+      rewardMathVersion: PERFORMANCE_REWARD_DERIVATION_VERSION, finalRewardMinAgeHours: 18 });
+    expect(await getPerformanceHistory(agent.id)).toEqual(rawBefore);
+  });
+
+  it('versions an idempotent derived rebuild and records recovered lineage without rewriting signals', async () => {
+    const agent = await createAgent({ handle: 'derivation-recovery', name: 'Derived', soulMd: '# soul' } as any);
+    const parent = await createTweet({ agentId: agent.id, content: 'An abstract old draft.', type: 'original', status: 'draft',
+      pipelineVersion: 'v2' } as any);
+    const child = await createTweet({ agentId: agent.id, content: 'The packaging line lost 6 hours to one die.', type: 'original',
+      status: 'queued', parentTweetId: parent.id, contentProvenance: 'operator_written' } as any);
+    const raw = await addLearningSignal(agent.id, { tweetId: child.id, signalType: 'edited_before_queue', surface: 'queue',
+      rewardDelta: 0.3, metadata: { parentTweetId: parent.id } });
+    const first = await buildLearnings(agent, { backfillAudienceFeedback: false });
+    const second = await buildLearnings(agent, { backfillAudienceFeedback: false });
+    expect(first.learningDerivation).toMatchObject({ version: LEARNING_DERIVATION_VERSION,
+      maturePerformanceCount: 0, immaturePerformanceCount: 0, recoveredEditSignalIds: [raw.id] });
+    expect(second.learningDerivation?.recoveredEditSignalIds).toEqual(first.learningDerivation?.recoveredEditSignalIds);
+    expect((await getLearningSignals(agent.id))[0].metadata).toEqual({ parentTweetId: parent.id });
+  });
   it('rebuilds Geoffrey learnings on the posting cadence while keeping other accounts daily', () => {
     expect(getLearningRefreshIntervalMs({ handle: 'geoffwoo' })).toBe(3 * 60 * 60 * 1000);
     expect(getLearningRefreshIntervalMs({ handle: 'anotherfounder' })).toBe(24 * 60 * 60 * 1000);

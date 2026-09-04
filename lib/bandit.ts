@@ -18,6 +18,8 @@ import { extractCandidateFeatureTags, extractStructureType } from './tweet-featu
 import { buildShitpoastSlotSet, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE } from './style-mode';
 import { collapsePerformanceSnapshotsWithStats } from './performance-history';
 import { assessHistoricalWinner, historicalPerformanceEvidenceWeight } from './winner-learning';
+import { isMaturePerformance } from './performance-signals';
+import { filterLearningEvidence } from './learning-evidence';
 
 export type BanditLengthBucket = 'short' | 'medium' | 'long';
 export type BanditTrainingSource = 'autopilot' | 'mixed';
@@ -316,6 +318,7 @@ function collectFallbackPerformanceObservations(
   const observations: BanditObservation[] = [];
 
   for (const entry of performanceHistory) {
+    if (!isMaturePerformance(entry)) continue;
     if (entry.tweetId && coveredTweetIds.has(String(entry.tweetId))) continue;
     const reward = performanceReward(entry, baseline, performanceHistory);
     const qualityEvidenceWeight = historicalPerformanceEvidenceWeight(entry);
@@ -643,7 +646,7 @@ export function buildBanditGlobalPrior({
   let totalSamples = 0;
 
   for (const group of groups) {
-    const uniqueHistory = collapsePerformanceSnapshotsWithStats(group).entries;
+    const uniqueHistory = collapsePerformanceSnapshotsWithStats(group).entries.filter(isMaturePerformance);
     totalSamples += uniqueHistory.length;
     const baseline = accountHistories && accountHistories.length > 0
       ? accountBaselineFromHistory(uniqueHistory)
@@ -689,15 +692,17 @@ export function buildBanditPolicy({
   baseline,
   globalPrior,
 }: BuildBanditPolicyOptions): BanditPolicy {
+  ({ signals, feedback } = filterLearningEvidence(signals, feedback, allTweets));
   const collapsed = collapsePerformanceSnapshotsWithStats(performanceHistory);
   const uniqueHistory = collapsed.entries;
-  const autopilotHistory = uniqueHistory.filter((entry) => entry.source === 'autopilot');
-  const operatorHistory = uniqueHistory.filter((entry) => entry.source !== 'autopilot');
+  const matureHistory = uniqueHistory.filter(isMaturePerformance);
+  const autopilotHistory = matureHistory.filter((entry) => entry.source === 'autopilot');
+  const operatorHistory = matureHistory.filter((entry) => entry.source !== 'autopilot');
   const trainingHistory = operatorHistory.length > 0
-    ? uniqueHistory
+    ? matureHistory
     : autopilotHistory.length >= 10
       ? autopilotHistory
-      : uniqueHistory;
+      : matureHistory;
   const trainingSource: BanditTrainingSource = operatorHistory.length === 0 && autopilotHistory.length >= 10 ? 'autopilot' : 'mixed';
   const qualityDiscountedSystemHistory = autopilotHistory.filter((entry) =>
     assessHistoricalWinner(entry).evidenceWeight < 1
@@ -763,7 +768,7 @@ export function buildBanditPolicy({
   const exploreHook = sortExplore(hookArms).find((arm) => arm.coldStart) || sortExplore(hookArms)[0];
 
   const summary = [
-    `Learning evidence: ${collapsed.uniquePosts} unique posts (${operatorHistory.length} operator, ${autopilotHistory.length} system); ${collapsed.collapsedSnapshots} repeated checkpoints collapsed`,
+    `Learning evidence: ${matureHistory.length} mature unique posts (${operatorHistory.length} operator, ${autopilotHistory.length} system); ${collapsed.collapsedSnapshots} repeated checkpoints collapsed`,
     qualityDiscountedSystemHistory.length > 0
       ? `Quality-adjusted ${qualityDiscountedSystemHistory.length} system post${qualityDiscountedSystemHistory.length === 1 ? '' : 's'} with obsolete generated patterns; discount applies to wins and losses symmetrically`
       : '',
@@ -793,7 +798,7 @@ export function buildBanditPolicy({
     summary,
     evidence: {
       performanceRows: collapsed.inputRows,
-      uniquePerformancePosts: collapsed.uniquePosts,
+      uniquePerformancePosts: matureHistory.length,
       collapsedSnapshots: collapsed.collapsedSnapshots,
       operatorWrittenPosts: operatorHistory.length,
       systemWrittenPosts: autopilotHistory.length,

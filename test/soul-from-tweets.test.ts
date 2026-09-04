@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   getFollowing: vi.fn(),
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ai')>(),
   generateText: mocks.generateText,
 }));
 

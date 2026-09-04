@@ -7,8 +7,10 @@ import type {
   TweetPerformance,
 } from './types';
 import { extractCandidateFeatureTags } from './tweet-features';
-import { computeActionRewards } from './virality-signals';
-import { weightedSpreadEngagement } from './performance-signals';
+import { buildPerformanceSignalBaseline, isMaturePerformance, weightedSpreadEngagement, type PerformanceSignalBaseline } from './performance-signals';
+import { deriveMaturePerformanceReward } from './performance-rewards';
+import { collapsePerformanceSnapshots } from './performance-history';
+import { isUnverifiedRemovalSignal } from './learning-evidence';
 import { assessAccountTaste, assessTechnicalCredibility } from './account-taste';
 
 export interface EditDeltaSummary {
@@ -274,7 +276,8 @@ export function computePerformanceLiftReward(
   baseline?: { avgLikes: number; avgRetweets: number } | null,
   history: TweetPerformance[] = [],
 ): number {
-  if (!performance) return 0;
+  if (!performance || !isMaturePerformance(performance)) return 0;
+  history = collapsePerformanceSnapshots(history).filter(isMaturePerformance);
   // The account baseline must live on the same spread-weighted scale as
   // weightedEngagement. With enough history, derive it directly from history
   // (identical function on both sides). Otherwise, uplift the like/retweet
@@ -381,6 +384,7 @@ export function buildOutcomeEpisode({
   performance,
   performanceHistory = [],
   baseline,
+  rewardBaseline,
 }: {
   agentId: string;
   tweet: Tweet;
@@ -388,6 +392,7 @@ export function buildOutcomeEpisode({
   performance?: TweetPerformance;
   performanceHistory?: TweetPerformance[];
   baseline?: { avgLikes: number; avgRetweets: number } | null;
+  rewardBaseline?: PerformanceSignalBaseline;
 }): OutcomeEpisode {
   const breakdown: RewardBreakdown = {
     approval: 0,
@@ -407,6 +412,7 @@ export function buildOutcomeEpisode({
 
   const seenSignalIds = new Set<string>();
   const uniqueSignals = signals.filter((signal) => {
+    if (isUnverifiedRemovalSignal(signal)) return false;
     if (!signal.id) return true;
     if (seenSignalIds.has(signal.id)) return false;
     seenSignalIds.add(signal.id);
@@ -426,8 +432,12 @@ export function buildOutcomeEpisode({
     breakdown.engagementLift += performanceLift;
     breakdown.notes.push(`Performance lift ${performanceLift >= 0 ? '+' : ''}${Math.round(performanceLift * 100)} vs baseline.`);
   }
-  if (performance) {
-    breakdown.actionRewards = performance.actionRewards || computeActionRewards(performance, baseline);
+  const maturePerformance = performance && isMaturePerformance(performance);
+  if (maturePerformance) {
+    const measuredBaseline = rewardBaseline || buildPerformanceSignalBaseline(collapsePerformanceSnapshots(
+      [...performanceHistory, performance].filter(isMaturePerformance),
+    ));
+    breakdown.actionRewards = deriveMaturePerformanceReward(performance, measuredBaseline).actionRewards;
     breakdown.notes.push(`Quality growth ${breakdown.actionRewards.qualityAdjustedGrowthScore ?? 'n/a'}/100; action reward ${breakdown.actionRewards.total >= 0 ? '+' : ''}${Math.round(breakdown.actionRewards.total * 100)} from useful replies, target attention, reposts, impressions, and rate.`);
   }
 
@@ -458,7 +468,7 @@ export function buildOutcomeEpisode({
     featureTags,
     reward: breakdown,
     signals: [...new Set(uniqueSignals.map((signal) => signal.signalType))],
-    stage: performance ? 'final' : 'immediate',
+    stage: maturePerformance ? 'final' : 'immediate',
     observedAt: performance?.checkedAt || uniqueSignals[0]?.createdAt || tweet.postedAt || tweet.approvedAt || tweet.createdAt,
   };
 }
@@ -476,6 +486,7 @@ export function buildOutcomeEpisodes({
   performanceHistory: TweetPerformance[];
   baseline?: { avgLikes: number; avgRetweets: number } | null;
 }): OutcomeEpisode[] {
+  const rewardBaseline = buildPerformanceSignalBaseline(collapsePerformanceSnapshots(performanceHistory.filter(isMaturePerformance)));
   const signalsByTweetId = new Map<string, LearningSignal[]>();
   for (const signal of signals) {
     if (!signal.tweetId) continue;
@@ -505,6 +516,7 @@ export function buildOutcomeEpisodes({
       performance: performanceByTweetId.get(String(tweet.id)),
       performanceHistory,
       baseline,
+      rewardBaseline,
     }))
     .filter((episode) => episode.signals.length > 0 || episode.stage === 'final');
 }

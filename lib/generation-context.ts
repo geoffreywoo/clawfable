@@ -18,11 +18,12 @@ import {
 import { parseSoulMd, type VoiceProfile } from './soul-parser';
 import { ALL_FORMATS, type ContentStyleConfig } from './content-style';
 import { buildBanditPolicy } from './bandit';
-import { buildPersonalizationMemory, selectRecentRejectionLines } from './learning-loop';
+import { buildPersonalizationMemory, recoverEditLearningSignals, selectRecentRejectionLines } from './learning-loop';
 import { resolveSoulEvolutionState, type SoulEvolutionState } from './soul-evolution';
 import { PERSONALIZATION_MEMORY_PROMPT_HEADER, buildPersonalizationMemoryPrompt } from './personalization-memory-prompt';
 import { formatVoiceDirectiveRule, getActiveVoiceDirectiveRules } from './voice-directives';
 import { getGlobalBanditPrior } from './global-bandit-prior';
+import { filterLearningEvidence } from './learning-evidence';
 import { collapsePerformanceSnapshots } from './performance-history';
 
 const DEFAULT_STYLE: ContentStyleConfig = {
@@ -178,8 +179,8 @@ export async function buildGenerationContext(
     directiveRules,
     allTweets,
     performanceHistory,
-    feedback,
-    signals,
+    rawFeedback,
+    rawSignals,
     baseline,
     globalPrior,
     mentions,
@@ -202,6 +203,8 @@ export async function buildGenerationContext(
     getFollowerSnapshots(agent.id, 40).catch(() => []),
   ]);
 
+  const { signals: verifiedSignals, feedback } = filterLearningEvidence(rawSignals, rawFeedback, allTweets);
+  const signals = recoverEditLearningSignals(verifiedSignals, allTweets);
   const effectiveLearnings = learnings;
   const voiceProfile: VoiceProfile = {
     ...parseSoulMd(agent.name, agent.soulMd),

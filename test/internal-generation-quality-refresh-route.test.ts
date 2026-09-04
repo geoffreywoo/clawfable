@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   refreshQueuedTweetsForCurrentQualityPolicy: vi.fn(),
   releaseAutopilotLock: vi.fn(),
   resetReadCache: vi.fn(),
+  replayDerivedExperimentRewards: vi.fn(),
 }));
 
 vi.mock('@/lib/autopilot', () => ({
@@ -30,6 +31,7 @@ vi.mock('@/lib/kv-storage', () => ({
   getQueuedTweets: mocks.getQueuedTweets,
   releaseAutopilotLock: mocks.releaseAutopilotLock,
   resetReadCache: mocks.resetReadCache,
+  replayDerivedExperimentRewards: mocks.replayDerivedExperimentRewards,
 }));
 
 vi.mock('@/lib/performance', () => ({
@@ -53,6 +55,17 @@ function request(body: unknown = {}, secret = 'test-cron-secret'): Request {
 }
 
 describe('internal generation quality refresh route', () => {
+  it('rebuilds derived learning without reading X or mutating the queue', async () => {
+    mocks.replayDerivedExperimentRewards.mockResolvedValue({ experimentsUpdated: 3 });
+    const response = await POST(request({ mode: 'derived_only' }) as any, { params: Promise.resolve({ id: '13' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ mode: 'derived_only', replay: { experimentsUpdated: 3 } });
+    expect(mocks.buildLearnings).toHaveBeenCalledWith(agent, { backfillAudienceFeedback: false });
+    expect(mocks.checkPerformance).not.toHaveBeenCalled();
+    expect(mocks.refreshQueuedTweetsForCurrentQualityPolicy).not.toHaveBeenCalled();
+    expect(mocks.refillQueue).not.toHaveBeenCalled();
+    expect(mocks.releaseAutopilotLock).toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';

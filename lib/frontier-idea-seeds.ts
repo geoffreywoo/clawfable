@@ -538,7 +538,17 @@ export function pickGeoffreyIdeaSeed({
   /** Research-synthesized dynamic seeds. Among relevant seeds at equal relevance the freshest (newest synthesizedAt, then any dynamic seed) wins before rotation, so a live premise beats an evergreen one. */
   extraSeeds?: FrontierIdeaSeed[];
 }): FrontierIdeaSeed | null {
-  if (!voiceProfile || !isGeoffreyVoiceProfile(voiceProfile)) return null;
+  if (!voiceProfile) return null;
+  if (!isGeoffreyVoiceProfile(voiceProfile)) {
+    // Other accounts may learn their own research seeds. Geoffrey's curated
+    // worldview never becomes another author's fallback topic agenda.
+    return [...extraSeeds].filter((seed) => seedScore(seed, targetTopic) >= 1)
+      .sort((left, right) => (
+        Number(usedSeedIds.has(left.id)) - Number(usedSeedIds.has(right.id))
+        || seedScore(right, targetTopic) - seedScore(left, targetTopic)
+        || seedFreshness(right) - seedFreshness(left)
+      ))[0] || null;
+  }
   const preferredKinds = preferredGeoffreySeedKinds(targetTopic);
   const frontier = FRONTIER_CHOKEPOINT_SEEDS.map((seed) => ({ ...seed, kind: 'frontier' as const }));
   const allSeeds = [...extraSeeds, ...GEOFFREY_BROAD_SEEDS, ...frontier];
