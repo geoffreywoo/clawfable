@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessFormulaicCadence, inferPerformanceCheckpoint, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
+import { assessFormulaicCadence, inferPerformanceCheckpoint, assessTasteRisk, assessTechnicalElevation, blendedCringeRisk, computeActionRewards, getAuthorityProofIssue, getReplyOptOutReason, hasConcreteNumericAnchor, hasSpecificQuantity, scoreConversationValue, scoreHighValueReply, scoreSlopRisk, scoreViralityUpside } from '@/lib/virality-signals';
 import type { CandidateFeatureTags, TweetPerformance } from '@/lib/types';
 
 function performance(overrides: Partial<TweetPerformance> = {}): TweetPerformance {
@@ -259,6 +259,62 @@ describe('virality signals', () => {
     expect(formulaic.hits).toContain('not-x-but-y');
     expect(concrete.score).toBeLessThan(0.2);
     expect(concrete.hasConcreteAnchor).toBe(true);
+  });
+
+  it('does not treat listicle counts, bare digits, or label numbers as concrete anchors', () => {
+    expect(hasConcreteNumericAnchor('5 things I learned about distribution')).toBe(false);
+    expect(hasConcreteNumericAnchor('3 reasons your startup will fail')).toBe(false);
+    expect(hasConcreteNumericAnchor('1. build\n2. ship\n3. learn')).toBe(false);
+    expect(hasConcreteNumericAnchor('I have 3 rules for hiring')).toBe(false);
+    expect(hasConcreteNumericAnchor('version 12 shipped today')).toBe(false);
+    expect(hasConcreteNumericAnchor('3 big shifts are coming for founders')).toBe(false);
+
+    expect(hasConcreteNumericAnchor('churn dropped 8% after the pricing change')).toBe(true);
+    expect(hasConcreteNumericAnchor('churn dropped 12% after the pricing change')).toBe(true);
+    expect(hasConcreteNumericAnchor('a $40 dispute took 3 hours of support time')).toBe(true);
+    expect(hasConcreteNumericAnchor('inference cost fell 3.5x in a year')).toBe(true);
+    expect(hasConcreteNumericAnchor('the eval ran for 24-hour cycles')).toBe(true);
+  });
+
+  it('keeps percentile labels as proof and ignores model version numbers', () => {
+    // "top 10%" is a measured share, not a label; the % must survive stripping.
+    expect(hasConcreteNumericAnchor('the top 10% of accounts drive most of the replies')).toBe(true);
+    expect(hasConcreteNumericAnchor('top 10 accounts to follow')).toBe(false);
+
+    // Model version numbers are names, not measurements.
+    expect(hasConcreteNumericAnchor('GPT-5.6 changes the eval game')).toBe(false);
+    expect(hasConcreteNumericAnchor('Claude 4.6 is better at long context')).toBe(false);
+    expect(hasConcreteNumericAnchor('o3 was the turning point')).toBe(false);
+    expect(hasSpecificQuantity('GPT-5.6 changes the eval game')).toBe(false);
+
+    // A real measurement next to a model name still counts.
+    expect(hasConcreteNumericAnchor('GPT-5.6 cut our eval cost 40%')).toBe(true);
+  });
+
+  it('separates specific quantities from measured factual proof', () => {
+    expect(hasConcreteNumericAnchor('we talked to 8 founders about pricing')).toBe(false);
+    expect(hasSpecificQuantity('we talked to 8 founders about pricing')).toBe(true);
+    expect(hasSpecificQuantity('we shipped 47 drafts before one landed')).toBe(true);
+    expect(hasSpecificQuantity('churn dropped 8%')).toBe(true);
+
+    expect(hasSpecificQuantity('5 things I learned about distribution')).toBe(false);
+    expect(hasSpecificQuantity('version 12 shipped today')).toBe(false);
+    expect(hasSpecificQuantity('1. build\n2. ship\n3. learn')).toBe(false);
+  });
+
+  it('flags abstract listicles that previously hid behind their own count numbers', () => {
+    const listicle = assessFormulaicCadence(
+      '5 things most people miss about leverage:\n1. distribution is the real moat\n2. narrative compounds\n3. systems beat velocity'
+    );
+    expect(listicle.hasConcreteAnchor).toBe(false);
+    expect(listicle.hits).toContain('neat-numbered-scaffold');
+    expect(listicle.hits).toContain('abstract-stack-without-proof');
+
+    const measured = assessFormulaicCadence(
+      'Queue review this week:\n1. slop rate fell to 8%\n2. approvals up 3x\n3. two drafts deleted after posting'
+    );
+    expect(measured.hasConcreteAnchor).toBe(true);
+    expect(measured.hits).not.toContain('neat-numbered-scaffold');
   });
 
   it('boosts reply value for large-audience authors without penalizing small ones', () => {

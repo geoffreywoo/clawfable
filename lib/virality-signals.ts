@@ -75,11 +75,53 @@ export function inferPromptStrategy({
   return 'baseline';
 }
 
+const LISTICLE_COUNT_PATTERN = /\b\d+\s+(?:(?:big|key|main|major|quick|simple|hard|brutal|honest|underrated|contrarian)\s+)?(?:things?|reasons?|ways|lessons?|rules?|tips?|steps?|signs?|mistakes?|takeaways?|truths?|ideas?|questions?|frameworks?|principles?|habits?|traits?|shifts?|trends?|takes?|points?|thoughts?|predictions?|observations?|hot takes?)\b/gi;
+const NUMBERED_LIST_MARKER_PATTERN = /^\s*\d+[.)]\s+/gm;
+const NUMBER_LABEL_PATTERN = /\b(?:version|ver|v|chapter|part|phase|step|section|no|number|top|q)\s*\.?\s*\d+(?:[.,]\d+)*\b(?!\s?%)|#\d+\b/gi;
+const MODEL_VERSION_PATTERN = /\b(?:gpt|claude|gemini|llama|grok|mistral|qwen|deepseek|sonnet|opus|haiku)[-\s]?\d+(?:\.\d+)*\b|\bo\d(?:\.\d+)*\b/gi;
+const MEASURED_NUMBER_PATTERN = new RegExp([
+  '\\$\\s?\\d',
+  '\\b\\d+(?:[.,]\\d+)*\\s?%',
+  '\\b\\d+(?:[.,]\\d+)+\\b',
+  '\\b\\d+(?:[.,]\\d+)*[\\s-]?(?:x|k|m|b|bn|hrs?|hours?|days?|weeks?|months?|years?|yrs?|mins?|minutes?|secs?|seconds?|ms|nm|mm|cm|km|kg|lbs?|tons?|kw|mw|gw|kwh|kv|amps?|watts?|cycles?)\\b',
+].join('|'), 'i');
+const QUANTIFIED_NOUN_PATTERN = /\b\d+(?:[.,]\d+)*\s+[a-z][a-z-]{2,}\b/i;
+
+function stripNonEvidenceNumbers(content: string): string {
+  return content
+    .replace(NUMBERED_LIST_MARKER_PATTERN, '')
+    .replace(LISTICLE_COUNT_PATTERN, '')
+    .replace(NUMBER_LABEL_PATTERN, '')
+    .replace(MODEL_VERSION_PATTERN, '');
+}
+
+/**
+ * A number counts as factual proof only when it carries a measured magnitude:
+ * currency, percentage, decimal precision, or a unit of time/size/power.
+ * Listicle counts ("5 things"), numbered-list markers, and version/label
+ * numbers ("version 12", "#3") never count — they are scaffolding, not
+ * evidence.
+ */
+export function hasConcreteNumericAnchor(content: string): boolean {
+  return MEASURED_NUMBER_PATTERN.test(stripNonEvidenceNumbers(content));
+}
+
+/**
+ * Weaker signal than hasConcreteNumericAnchor: a number attached to a real
+ * noun ("8 founders", "47 drafts") shows specificity even without a measured
+ * unit. Used to soften abstraction penalties, never to suppress cadence hits.
+ */
+export function hasSpecificQuantity(content: string): boolean {
+  const stripped = stripNonEvidenceNumbers(content);
+  return MEASURED_NUMBER_PATTERN.test(stripped) || QUANTIFIED_NOUN_PATTERN.test(stripped);
+}
+
 export function assessFormulaicCadence(content: string): FormulaicCadenceAssessment {
   const text = content.trim();
   const lower = text.toLowerCase();
   const hits: string[] = [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|hr|hrs|hour|hours|day|days|week|weeks|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|churned|deleted|approval|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(text);
+  const hasConcreteAnchor = hasConcreteNumericAnchor(text)
+    || /\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|churned|deleted|approval|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(text);
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook|distribution)\b/g) || [];
 
   const patterns: Array<[RegExp, string]> = [
@@ -247,7 +289,8 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   score += Math.min(0.42, genericHits * 0.08);
 
   const abstractPowerWords = lower.match(/\b(leverage|signal|optics|moat|edge|compounds?|flywheel|narrative|iteration|feedback loops?|systems?|velocity|incentives|playbook)\b/g) || [];
-  const hasConcreteAnchor = /\b\d+([.,]\d+)?\s?(%|x|k|m|b|nm|mm|kw|mw|gw|cycles?)?\b|\$\d|\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(content);
+  const hasConcreteAnchor = hasConcreteNumericAnchor(content)
+    || /\b(for example|because|when|after|before|the bug|the metric|the eval|screenshot|rollback|incident|exception log|yield|tolerance|qualification|thermal|bandwidth|power density)\b/i.test(content);
   score += Math.min(0.42, cadence.score * 0.72);
   if (abstractPowerWords.length >= 4 && !hasConcreteAnchor) score += 0.18;
   if (abstractPowerWords.length >= 6) score += 0.1;
@@ -266,6 +309,7 @@ export function scoreSlopRisk(content: string, featureTags: CandidateFeatureTags
   if (technicalElevation.hasHardTechAnchor) score -= technicalElevation.technicalScore * 0.6;
   if (featureTags.structure === 'story_arc' || featureTags.structure === 'comparison') score -= 0.06;
   if (hasConcreteAnchor && cadence.hits.length <= 1 && genericHits <= 2) score -= 0.08;
+  if (!hasConcreteAnchor && hasSpecificQuantity(content)) score -= 0.06;
   return clamp(score);
 }
 
@@ -289,7 +333,8 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
 
   const hasQuestion = /\?/.test(text) || featureTags.hook === 'question';
   const hasMechanism = /\b(because|when|if|after|before|until|tradeoff|constraint|failure mode|recovery path|example|for instance)\b/i.test(text);
-  const hasSpecificProof = /\b\d+([.,]\d+)?\s?(%|x|k|m|b)?\b|\$\d|\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
+  const hasSpecificProof = hasConcreteNumericAnchor(text)
+    || /\b(data|benchmark|case study|metric|eval|workflow|demo|production)\b/i.test(text);
   const hasDistinction = /\b(not|isn't|aren't)\b.{0,80}\b(but|because)\b|\bvs\b| versus | compared to |\binstead of\b/i.test(text);
   const asksForUsefulInput = /\b(where does this break|what am i missing|what would you change|which part is wrong|what would make this fail|edge case)\b/i.test(text);
   const genericBait = /\bthoughts(?:\s+on\s+[^?.!\n]{0,60})?\?|\bwhat do you think\b|\bagree or disagree\b|\breply below\b|\bdrop your\b|\bhot take\s*[:?]/i.test(text);
@@ -297,6 +342,7 @@ export function scoreConversationValue(content: string, featureTags: CandidateFe
   if (hasQuestion) score += 0.1;
   if (hasMechanism) score += 0.16;
   if (hasSpecificProof || ['concrete', 'data_driven', 'tactical', 'story_led'].includes(featureTags.specificity)) score += 0.16;
+  else if (hasSpecificQuantity(text)) score += 0.08;
   if (hasDistinction || featureTags.structure === 'comparison') score += 0.12;
   if (asksForUsefulInput) score += 0.12;
   if (featureTags.hook === 'contrarian' && hasMechanism) score += 0.08;
