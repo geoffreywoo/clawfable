@@ -235,6 +235,15 @@ export function validateFrozenEvaluationAge(capturedAt: string, now = new Date()
   if (!Number.isFinite(age) || age < -5 * 60 * 1000 || age > 7 * 24 * 60 * 60 * 1000) throw new Error('Capture a fresh snapshot: comparison evidence is frozen as-of capture and expires after seven days.');
 }
 
+function matchesEvaluationModel(primaryModel: string, reportedModel: string): boolean {
+  // OpenAI explicitly documents gpt-5.6 as an alias for Sol (verified 2026-09-04):
+  // https://developers.openai.com/api/docs/models/gpt-5.6-sol
+  // Keep the allowlist exact: Terra, Luna, and arbitrary suffixes are different models.
+  const identities = primaryModel === 'gpt-5.6' ? [primaryModel, 'gpt-5.6-sol'] : [primaryModel];
+  return identities.some((identity) => reportedModel === identity
+    || (reportedModel.startsWith(`${identity}-`) && /^\d{4}-\d{2}-\d{2}$/.test(reportedModel.slice(identity.length + 1))));
+}
+
 /** One identical non-persisting arm, shared by local and protected remote execution. */
 export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack'], options: {
   generate?: typeof generateTweetBatchV2;
@@ -263,8 +272,7 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     if (!task) return true;
     const primary = getModelChainForTask(task, stack)[0];
     const reportedModel = call.providerModel;
-    const reportedMatchesPrimary = !reportedModel || Boolean(primary && (reportedModel === primary.model
-      || (reportedModel.startsWith(`${primary.model}-`) && /^\d{4}-\d{2}-\d{2}$/.test(reportedModel.slice(primary.model.length + 1)))));
+    const reportedMatchesPrimary = reportedModel == null || Boolean(primary && matchesEvaluationModel(primary.model, reportedModel));
     return !primary || call.model !== primary.model || call.provider !== primary.provider || !reportedMatchesPrimary;
   });
   const successfulCalls = completedTrace?.modelCalls?.filter((call) => call.succeeded) || [];
@@ -353,7 +361,7 @@ const SLOP_CODES = new Set(['generated_writing_pattern', 'final_slop_risk', 'fin
 export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: EvaluationVotes) {
   if (votes.snapshotHash !== comparison.snapshotHash) throw new Error('Votes use another snapshot.');
   if (!['human', 'independent_critic'].includes(votes.judge.kind) || !votes.judge.id?.trim()) throw new Error('Declare the human or independent critic responsible for votes.');
-  if (votes.judge.kind === 'independent_critic' && (!votes.judge.model || ['gpt-6-astra', 'gpt-5.6', 'gpt-5.5'].includes(votes.judge.model))) throw new Error('Declare a critic model independent of the compared writing/judging models.');
+  if (votes.judge.kind === 'independent_critic' && (!votes.judge.model || ['gpt-6-astra', 'gpt-5.6', 'gpt-5.5'].some((primaryModel) => matchesEvaluationModel(primaryModel, votes.judge.model!)))) throw new Error('Declare a critic model independent of the compared writing/judging models.');
   const ids = new Set(comparison.packets.map((packet) => packet.id));
   if (new Set(votes.votes.map((vote) => vote.packetId)).size !== votes.votes.length || votes.votes.some((vote) => !ids.has(vote.packetId) || !['A', 'B', 'tie', 'neither'].includes(vote.choice))) throw new Error('Votes must be unique and refer to known packets.');
   let decisive = 0;

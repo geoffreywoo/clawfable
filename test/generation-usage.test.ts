@@ -77,7 +77,7 @@ describe('generation usage accounting', () => {
     });
   });
 
-  it('backfills historical token costs for active models when traces lack a stored estimate', () => {
+  it('estimates missing historical costs at current active-model rates', () => {
     const calls: GenerationModelCallTrace[] = [{
       stage: 'tweet_writing',
       provider: 'openai',
@@ -94,7 +94,7 @@ describe('generation usage accounting', () => {
     expect(summarizeGenerationUsage(calls)).toMatchObject({
       unknownCostAttempts: 0,
       unknownCostCalls: 0,
-      estimatedCostUsd: 0.002,
+      estimatedCostUsd: 0.0014,
       costDataStatus: 'complete',
     });
   });

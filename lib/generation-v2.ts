@@ -243,6 +243,7 @@ const QUALITY_EMPTY_PAUSE_MS = 2 * 60 * 60 * 1000;
 const STORY_FAILURE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const STORY_PUBLISH_MEMORY_MS = 21 * 24 * 60 * 60 * 1000;
 const GENERATION_RUN_DEADLINE_MS = 240 * 1000;
+const ASTRA_IDEA_GENERATION_DEADLINE_MS = 120 * 1000;
 const STAGE_DEADLINES_MS: Partial<Record<GenerationModelCallTrace['stage'], number>> = {
   idea_generation: 75 * 1000,
   idea_judgment: 30 * 1000,
@@ -3724,6 +3725,10 @@ async function generateIdeas({
       const result = await trackedGenerate('idea_generation', {
         task: 'idea_generation',
         modelStack: input.modelStack,
+        // Match the central ideation allowance for Astra. trackedGenerate still
+        // clips this to the remaining 240-second run budget, including retries.
+        timeoutMs: input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
+          ? ASTRA_IDEA_GENERATION_DEADLINE_MS : undefined,
         maxTokens: 2200,
         temperature: 0.85,
         jsonSchema: IDEA_GENERATION_SCHEMA,
