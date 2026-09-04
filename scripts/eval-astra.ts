@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createFrozenEvaluationSnapshot, validateFrozenEvaluation, runFrozenEvaluation, blindedEvaluationCards, scoreFrozenEvaluation,
+import { createFrozenEvaluationSnapshot, validateFrozenEvaluation, runFrozenEvaluation, blindedEvaluationCards, scoreFrozenEvaluation, frozenEvaluationCoverage,
   type FrozenEvaluationSnapshot, type EvaluationComparison, type EvaluationVotes,
 } from '../lib/astra-evaluation';
 import { getAgentByHandle, getAnalysis, getSourceDocuments, getStoryClusters, getSemanticBlocks, getIdeaCandidates, getPerformanceHistory, getManualExampleCuration, getVoiceCorpusSnapshot } from '../lib/kv-storage';
@@ -33,9 +33,9 @@ async function loadJson<T>(filename: string | undefined): Promise<T> {
 }
 
 async function main() {
-  const modes = ['--capture', '--validate', '--run', '--score'].filter((mode) => process.argv.includes(mode));
+  const modes = ['--capture', '--validate', '--coverage', '--run', '--score'].filter((mode) => process.argv.includes(mode));
   if (modes.length !== 1) {
-    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Capture reads stored account data only. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at observed spend; in-flight arms may exceed it. SIGINT/SIGTERM stop new work and drain active arms into private receipts. All outputs are private; synthetic profiles have no human ground-truth labels.');
+    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --coverage --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--complete-suite] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Coverage writes a separate manifest without changing the frozen benchmark. Complete-suite attempts all paired arms despite generation failures with known costs or auditable per-request Astra reservations; authentication, integrity, unreserved unknown spend, or budget exhaustion still stop new work. Attempted completion is not promotion validity. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at known spend plus conservative unknown-attempt reservations; reservations are not observed charges or guaranteed billing maxima, and in-flight arms may exceed the ceiling. SIGINT/SIGTERM drain active arms into private receipts. The hand-authored stress set and synthetic profiles are not an empirical sample of account traffic or human preferences.');
     if (modes.length > 1) process.exitCode = 1;
     return;
   }
@@ -59,6 +59,7 @@ async function main() {
     await saveJson(path.join(path.dirname(output), 'manifest.json'), {
       version: snapshot.version, snapshotHash: snapshot.hash, capturedAt: snapshot.capturedAt,
       heldoutCount: snapshot.heldoutExamples.length, referenceSummary: snapshot.referenceSummary,
+      coverage: frozenEvaluationCoverage(snapshot),
       packets: snapshot.packets.map((packet) => ({ id: packet.id, kind: packet.kind, subject: packet.subject,
         calibrationSource: packet.calibrationSource, evidenceMode: packet.input.previewContext!.briefs[0].evidenceMode })),
     });
@@ -78,6 +79,14 @@ async function main() {
   const snapshot = await loadJson<FrozenEvaluationSnapshot>(arg('--snapshot'));
   const validation = validateFrozenEvaluation(snapshot);
   if (modes[0] === '--validate') { console.log(JSON.stringify({ status: 'validated_without_model_calls', ...validation })); return; }
+  if (modes[0] === '--coverage') {
+    const coverage = frozenEvaluationCoverage(snapshot);
+    const output = path.join(path.dirname(privatePath(arg('--snapshot')!)), `coverage-${timestamp}.json`);
+    await saveJson(output, coverage);
+    console.log(JSON.stringify({ status: 'coverage_without_model_calls', output, cohorts: coverage.cohorts,
+      benchmarkKind: coverage.benchmarkKind, limitations: coverage.limitations }));
+    return;
+  }
   const remoteOrigin = arg('--remote-origin');
   if (!remoteOrigin && !process.env.OPENAI_API_KEY?.trim()) throw new Error('OPENAI_API_KEY is required for a local comparison, or use --remote-origin with CRON_SECRET. Validation alone cannot establish model quality.');
   const remoteRunner = remoteOrigin ? createRemoteEvaluationRunner(snapshot, { origin: remoteOrigin, secret: process.env.CRON_SECRET || '' }) : undefined;
@@ -99,13 +108,18 @@ async function main() {
   try {
     comparison = await runFrozenEvaluation(snapshot, {
       runArm: remoteRunner, signal: controller.signal,
+      failurePolicy: process.argv.includes('--complete-suite') ? 'complete_suite' : 'fail_fast',
       limit: Number(arg('--limit') ?? 40), concurrency: Number(arg('--concurrency') ?? 1),
       maxEstimatedCostUsd: Number(arg('--max-cost-usd') ?? 100),
       onProgress: async (progress) => {
         await saveJson(comparisonFile, progress);
         console.log(JSON.stringify({ completedPackets: progress.packets.filter((packet) => packet.baseline.validPrimaryModels && packet.astra.validPrimaryModels).length,
-          completedArms: progress.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.trace !== null).length,
-          totalPackets: 40, estimatedCostUsd: progress.estimatedCostUsd, execution: progress.execution }));
+          attemptedArms: progress.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.attempted).length,
+          failedArms: progress.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.attempted && !arm.validPrimaryModels).length,
+          totalPackets: 40, estimatedCostUsd: progress.estimatedCostUsd, knownEstimatedCostUsd: progress.knownEstimatedCostUsd,
+          unknownCostArms: progress.unknownCostArms, reservedUnknownCostUsd: progress.reservedUnknownCostUsd,
+          reservedUnknownAttempts: progress.reservedUnknownAttempts, unreservedUnknownAttempts: progress.unreservedUnknownAttempts,
+          budgetMeasureUsd: progress.budgetMeasureUsd, attemptedCompletion: progress.attemptedCompletion, execution: progress.execution }));
       },
     });
   } finally {
@@ -118,7 +132,11 @@ async function main() {
     snapshotHash: snapshot.hash, judge: { kind: 'human', id: '' },
     votes: comparison.packets.map((packet) => ({ packetId: packet.id, choice: '', reason: '', editCharsA: null, editCharsB: null })),
   });
-  console.log(JSON.stringify({ status: comparison.completed ? 'awaiting_blinded_votes' : 'incomplete_comparison', comparisonFile, estimatedCostUsd: comparison.estimatedCostUsd }));
+  console.log(JSON.stringify({ status: comparison.completed ? 'awaiting_blinded_votes'
+    : comparison.attemptedCompletion ? 'suite_attempted_not_promotion_valid' : 'incomplete_comparison', comparisonFile,
+    estimatedCostUsd: comparison.estimatedCostUsd, knownEstimatedCostUsd: comparison.knownEstimatedCostUsd, unknownCostArms: comparison.unknownCostArms,
+    reservedUnknownCostUsd: comparison.reservedUnknownCostUsd, reservedUnknownAttempts: comparison.reservedUnknownAttempts,
+    unreservedUnknownAttempts: comparison.unreservedUnknownAttempts, budgetMeasureUsd: comparison.budgetMeasureUsd }));
   if (interruptedExitCode) process.exitCode = interruptedExitCode;
   else if (!comparison.completed) process.exitCode = 2;
 }

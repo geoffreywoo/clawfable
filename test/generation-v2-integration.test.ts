@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { founderBrief, founderDraft, founderIdea } from './fixtures/founder-critic-execution';
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -80,7 +81,8 @@ function result(text: string, provider: 'openai' | 'anthropic' = 'openai') {
 
 function ideaResponse(prompt: string) {
   const parsed = JSON.parse(prompt);
-  const ideas = parsed.briefs.flatMap((brief: any, briefIndex: number) => [0, 1, 2].map((variant) => {
+  const variants = parsed.requirements.independentApproach ? [parsed.requirements.independentApproach.index] : [0, 1, 2];
+  const ideas = parsed.briefs.flatMap((brief: any, briefIndex: number) => variants.map((variant: number) => {
     const path = `${String.fromCharCode(97 + briefIndex)}${String.fromCharCode(97 + variant)}`;
     const frontierContext = `${brief.topic} ${brief.title}`;
     const frontierLane = isGeoffreyAIFutureLaneV2(frontierContext);
@@ -368,10 +370,12 @@ describe('generateTweetBatchV2 integration', () => {
       onTrace: (value) => { trace = value; },
     });
     const ideaCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'idea_generation');
-    expect(ideaCalls).toHaveLength(briefs.length);
+    expect(ideaCalls).toHaveLength(briefs.length * 3);
     expect(ideaCalls.every((options) => JSON.parse(options.prompt).briefs.length === 1
-      && JSON.parse(options.prompt).requirements.ideasPerBrief === 3 && options.timeoutMs === 120_000)).toBe(true);
-    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: briefs.length, ideaRetryCalls: 0, ideasGenerated: briefs.length * 3 });
+      && JSON.parse(options.prompt).requirements.ideasPerBrief === 1 && options.timeoutMs <= 120_000)).toBe(true);
+    expect(new Set(ideaCalls.map((options) => JSON.parse(options.prompt).requirements.independentApproach.move)))
+      .toEqual(new Set(['direct_conviction', 'decision_question', 'institutional_consequence']));
+    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: briefs.length * 3, ideaRetryCalls: 0, ideasGenerated: briefs.length * 3 });
     expect(trace.modelCalls.every((call: any) => call.providerModel === `${call.provider}-wire-model-test`)).toBe(true);
     const writerCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'tweet_writing');
     expect(writerCalls.length).toBeGreaterThanOrEqual(3);
@@ -847,16 +851,49 @@ describe('generateTweetBatchV2 integration', () => {
     releases.forEach((release) => release());
     await expect(generation).resolves.toEqual([]);
     expect(maxActive).toBe(4);
-    expect(mocks.generateText).toHaveBeenCalledTimes(8);
-    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: 8, ideaRetryCalls: 0 });
+    expect(mocks.generateText).toHaveBeenCalledTimes(24);
+    expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: 24, ideaRetryCalls: 0 });
     expect(mocks.generateText.mock.calls.flatMap(([options]) => JSON.parse(options.prompt).briefs.map((brief: any) => brief.id)))
-      .toEqual(briefs.map((brief) => brief.id));
+      .toEqual([0, 1, 2].flatMap(() => briefs.map((brief) => brief.id)));
+  });
+
+  it('retains a completed Astra proposition at stage expiry and leaves time for full writing and judgment', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-02T02:00:00Z'));
+      const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date() }).slice(0, 1);
+      let ideaCalls = 0;
+      let trace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        if (options.task === 'idea_generation') {
+          const first = ideaCalls++ === 0;
+          await new Promise<void>((resolve) => setTimeout(resolve, first ? 20_000 : options.timeoutMs));
+          if (!first) throw new Error('bounded provider timeout');
+          return ideaResponse(options.prompt);
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+        if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+        if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+        return rankingResponse(options.prompt, 'candidates');
+      });
+      const generation = generateTweetBatchV2({ ...input, count: 1, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, documents: sourceDocuments }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      const selected = await generation;
+      expect(selected).toHaveLength(1);
+      expect(selected[0].finalCriticVerdict).toBe('allow');
+      expect(trace.durationMs).toBeGreaterThan(120_000);
+      expect(trace.durationMs).toBeLessThan(240_000);
+      expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: 3, ideaRetryCalls: 0, ideasGenerated: 1 });
+      expect(trace.modelCalls.filter((call: any) => call.stage === 'idea_generation' && !call.succeeded)).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
   });
 
   it.each([
-    { preparationMs: 80_000, expectedTimeouts: [120_000, 120_000, 120_000, 120_000, 40_000, 40_000, 40_000, 40_000] },
-    { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000] },
-  ])('clips queued Astra waves after $preparationMs preparation and stops new requests at the deadline', async ({ preparationMs, expectedTimeouts }) => {
+    { preparationMs: 80_000, expectedTimeouts: [120_000, 120_000, 120_000, 120_000], expectedDuration: 200_000, outcomeCode: 'idea_generation_failed' },
+    { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000], expectedDuration: 240_000, outcomeCode: 'run_deadline' },
+  ])('clips queued Astra waves after $preparationMs preparation and reserves writing time', async ({ preparationMs, expectedTimeouts, expectedDuration, outcomeCode }) => {
     vi.useFakeTimers();
     try {
       const startedAt = new Date('2026-08-02T02:00:00Z');
@@ -868,7 +905,7 @@ describe('generateTweetBatchV2 integration', () => {
       mocks.generateText.mockImplementation(async (options: any) => {
         expect(options.task).toBe('idea_generation');
         await new Promise<void>((resolve) => setTimeout(resolve, options.timeoutMs));
-        return ideaResponse(options.prompt);
+        throw new Error('bounded provider timeout');
       });
       const generation = generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
         previewContext: { briefs, get documents() {
@@ -879,7 +916,7 @@ describe('generateTweetBatchV2 integration', () => {
       await vi.runAllTimersAsync();
       await expect(generation).resolves.toEqual([]);
       expect(mocks.generateText.mock.calls.map(([options]) => options.timeoutMs)).toEqual(expectedTimeouts);
-      expect(trace).toMatchObject({ outcomeCode: 'run_deadline', durationMs: 240_000,
+      expect(trace).toMatchObject({ outcomeCode, durationMs: expectedDuration,
         stageCounts: expect.objectContaining({ ideaGenerationCalls: expectedTimeouts.length, ideaRetryCalls: 0 }) });
       expect(mocks.generateText).toHaveBeenCalledTimes(expectedTimeouts.length);
     } finally { vi.useRealTimers(); }
@@ -2911,4 +2948,79 @@ describe('generateTweetBatchV2 integration', () => {
       stageCounts: expect.objectContaining({ retryUsed: 0, rescueTargets: 0, draftsSelected: 0 }),
     });
   });
+
+  it.each(['critic_rejects_again', 'factual_failure', 'insufficient_budget'] as const)(
+    'keeps the founder diagnostic gates while applying at most one actual critic diagnosis: %s', async (scenario) => {
+      const malformedVoice = { ...input.voiceProfile, topics: ['founder ownership'],
+        antiGoals: ['Do not sound like a generic founder coach.\n\n## Content Pillars\n### Founder ownership\nTell a story from a trip, call, demo, dinner, or round.'] };
+      let criticCalls = 0;
+      let trace: any;
+      let artifacts: any;
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      mocks.generateText.mockImplementation(async (options: any) => {
+        const payload = JSON.parse(options.prompt);
+        if (options.task === 'idea_generation') return result(JSON.stringify({ ideas: payload.briefs.map((brief: any) => ({ ...founderIdea, briefId: brief.id })) }));
+        if (options.task === 'idea_judgment') return result(JSON.stringify({
+          ranking: payload.ideas.map((idea: any) => idea.id),
+          scores: payload.ideas.map((idea: any) => ({ id: idea.id, ...founderIdea.judgeBreakdown })),
+        }));
+        if (options.task === 'tweet_writing') return result(JSON.stringify({ drafts: [{
+          content: payload.failedAttempts.length > 0
+            ? 'i’d leave a departed founder’s vested shares alone. the extra votes should end when they leave.'
+            : founderDraft.content,
+          format: 'observation', posture: 'direct judgment',
+        }] }));
+        if (options.task === 'copy_judgment') {
+          criticCalls += 1;
+          if (scenario === 'insufficient_budget') clock.mockReturnValue(now + 160_000);
+          expect(payload.author.antiGoals.join('\n')).not.toContain('Content Pillars');
+          expect(payload.author.soulThemes.join('\n')).toContain('Content Pillars');
+          return result(JSON.stringify({ ranking: payload.candidates.map((candidate: any) => candidate.id),
+            scores: payload.candidates.map((candidate: any) => ({ id: candidate.id,
+              overall: 0.7, voiceFit: 0.76, operatorPlausibility: 0.62, insight: 0.67,
+              specificity: 0.54, clarity: 0.93, novelty: 0.58, cringeRisk: 0.28,
+              factualSafety: scenario === 'factual_failure' ? 0.4 : 1,
+              manualAnchorReskinRisk: 0.02, frontierLead: 1, aiBullishness: 1,
+              trajectoryConviction: 1, forecastGrounding: 1, exponentialIntuition: 1,
+              diagnosis: founderDraft.judgeRawNotes,
+            })),
+          }));
+        }
+        throw new Error(`Unexpected task ${options.task}`);
+      });
+      try {
+        const drafts = await generateTweetBatchV2({ ...input, count: 1, modelStack: 'publishing_v2_astra',
+          voiceProfile: malformedVoice, mode: 'preview', persistArtifacts: false,
+          previewContext: { briefs: [founderBrief], documents: [], stories: [], blocks: [], recentIdeas: [], dynamicIdeaSeeds: [] },
+          onTrace: (value: any) => { trace = value; }, onArtifacts: (value: any) => { artifacts = value; },
+        });
+        const writerCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'tweet_writing');
+        const repairs = writerCalls.filter((options) => JSON.parse(options.prompt).failedAttempts.length > 0);
+        const shouldRepair = scenario === 'critic_rejects_again';
+        expect(repairs).toHaveLength(shouldRepair ? 1 : 0);
+        expect(criticCalls).toBe(shouldRepair ? 2 : 1);
+        expect(drafts).toEqual([]);
+        expect(trace.stageCounts.draftsSelected).toBe(0);
+        expect(writerCalls.filter((options) => JSON.parse(options.prompt).failedAttempts.length === 0)
+          .every((options) => options.system.includes('uneven beats') && !options.system.includes('Use the shortest natural shape'))).toBe(true);
+        if (shouldRepair) {
+          const payload = JSON.parse(repairs[0].prompt);
+          expect(payload.responseContract.draftCount).toBe(1);
+          expect(payload.failedAttempts[0].issues).toContain(founderDraft.judgeRawNotes);
+          expect(payload.boundedRepair.instruction).toContain('Restore a missing approved stake');
+          expect(repairs[0].modelStack).toBe('publishing_v2_astra');
+          expect(trace.stageCounts.postcriticExecutionRepairTargets).toBe(1);
+          const revised = artifacts.drafts.filter((draft: any) => draft.mutationRound === 1);
+          expect(revised).toHaveLength(1);
+          expect(revised[0].parentDraftId).toBeTruthy();
+          expect(revised[0].status).toBe('rejected');
+          expect(revised[0].rejectionCodes).toContain('final_native_voice_below_floor');
+          expect(revised[0].rejectionCodes).toContain('final_quality_margin');
+        }
+        expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
+        expect(mocks.upsertDraftCandidates).not.toHaveBeenCalled();
+      } finally { clock.mockRestore(); }
+    },
+  );
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ASTRA_IDEA_GENERATION_SYSTEM_V2, buildAstraIdeaGenerationPromptV2, buildGenerationBriefsV2,
+  buildAstraSingleIdeaGenerationPromptV2,
   buildIdeaGenerationPromptV2, buildVoiceGuidanceV2, hydrateDynamicSeedEvidenceV2,
   V2_IDEA_VOICE_GUIDANCE_BUDGET_CHARS, V2_WRITER_VOICE_GUIDANCE_BUDGET_CHARS, V2_JUDGE_VOICE_GUIDANCE_BUDGET_CHARS,
   type GenerationBriefV2,
@@ -33,6 +34,18 @@ const planning = (voiceProfile: VoiceProfile, requestedTopic: string) => ({ coun
 const parse = (profile = geoffrey, packet = brief) => JSON.parse(buildAstraIdeaGenerationPromptV2([packet], profile));
 
 describe('Astra idea development contract', () => {
+  it('assigns three independent substantive approaches without increasing propositions or removing evidence rules', () => {
+    const prompts = [0, 1, 2].map((index) => JSON.parse(buildAstraSingleIdeaGenerationPromptV2([[brief], geoffrey], index)));
+    expect(prompts.map((prompt) => prompt.requirements.ideasPerBrief)).toEqual([1, 1, 1]);
+    expect(prompts.map((prompt) => prompt.requirements.independentApproach.move))
+      .toEqual(['direct_conviction', 'decision_question', 'institutional_consequence']);
+    for (const prompt of prompts) {
+      expect(prompt.requirements.opinion).toContain('No invented current event');
+      expect(prompt.requirements.frontier).toContain('ultra bullish');
+      expect(prompt.briefs[0].id).toBe(brief.id);
+    }
+    expect(() => buildAstraSingleIdeaGenerationPromptV2([[brief], geoffrey], 3)).toThrow('invalid_astra_idea_approach');
+  });
   it('keeps SOUL meaning, separates malformed positive themes, and orders relevant coaching without redundant wrappers', () => {
     const prompt = parse();
     expect(prompt.author.communicationStyle).toBe('Casual, high-context, blunt.');

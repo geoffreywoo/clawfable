@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   blindedEvaluationCards, createFrozenEvaluationSnapshot, evaluationHash, runFrozenEvaluation,
-  scoreFrozenEvaluation, validateFrozenEvaluation, runFrozenEvaluationArm, type EvaluationComparison, type EvaluationVotes,
-  type EvaluationArmResult, type EvaluationArmRunner,
+  scoreFrozenEvaluation, validateFrozenEvaluation, runFrozenEvaluationArm, frozenEvaluationCoverage, type EvaluationComparison, type EvaluationVotes,
+  type EvaluationArmResult, type EvaluationArmRunner, evaluationArmCost,
 } from '@/lib/astra-evaluation';
 import { DEFAULT_CONTENT_STYLE } from '@/lib/content-style';
 import { getModelChainForTask } from '@/lib/ai';
+import { estimateAiUsageCostUsd } from '@/lib/ai-pricing';
 import type { GenerationContext } from '@/lib/generation-context';
 import type { AccountAnalysis, GenerationRunTrace, IdeaCandidate, TweetPerformance, VoiceCorpusSnapshot } from '@/lib/types';
 import type { GenerateTweetBatchV2Input } from '@/lib/generation-v2';
@@ -66,6 +67,18 @@ function armResult(stack: EvaluationArmResult['stack'], cost = 0.01): Evaluation
     validPrimaryModels: true, invalidReason: null };
 }
 
+function reservedFailure(stack: EvaluationArmResult['stack']): EvaluationArmResult {
+  const progress = { requestBytes: 1000, framingTokenAllowance: 16384, inputTokenUpperEstimate: 17384, outputTokenLimit: 8192,
+    estimatedMaxCostUsd: estimateAiUsageCostUsd('gpt-6-astra', 17384, 8192), responseId: null, providerModel: null,
+    status: null, firstEventMs: null, firstOutputMs: null, lastEventMs: null, eventCount: 0 };
+  const failed = { stage: 'idea_generation', provider: 'openai', model: 'gpt-6-astra', succeeded: false,
+    inputTokens: null, outputTokens: null, estimatedCostUsd: null, responseProgress: progress,
+    fallbackAttempts: [{ provider: 'openai', model: 'gpt-6-astra', reason: 'timeout', inputTokens: null,
+      outputTokens: null, estimatedCostUsd: null, responseProgress: progress }] };
+  return { ...armResult(stack), validPrimaryModels: false, invalidReason: 'timeout',
+    trace: { estimatedCostUsd: null, costDataStatus: 'missing', modelCalls: [failed] } as unknown as GenerationRunTrace };
+}
+
 function controlledArms() {
   const calls: Array<{ packetId: string; stack: EvaluationArmResult['stack']; finish: (overrides?: Partial<EvaluationArmResult>) => void }> = [];
   const runArm = vi.fn<EvaluationArmRunner>((packet, stack) => new Promise((resolve) => {
@@ -94,6 +107,21 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(calibration.map((entry) => entry.xTweetId)).toEqual(['x-3', 'x-4', 'x-5']);
     expect(calibration.every((entry) => entry.authorshipProvenance === 'timeline_unmatched')).toBe(true);
     expect(validateFrozenEvaluation(frozen).packets).toBe(40);
+  });
+
+  it('reports opinion stress coverage and separates synthetic from real-account calibration without changing the snapshot', () => {
+    const frozen = snapshot(true);
+    const originalHash = evaluationHash(frozen);
+    const coverage = frozenEvaluationCoverage(frozen);
+    expect(coverage.benchmarkKind).toBe('requested_topic_breadth_stress');
+    expect(coverage.cohorts).toEqual([
+      expect.objectContaining({ kind: 'geoffrey', packets: 30, opinionOnlyPackets: 30, verifiedSourcePackets: 0, uniqueSourceDocuments: 0 }),
+      expect.objectContaining({ kind: 'synthetic_profile', packets: 10, opinionOnlyPackets: 10 }),
+    ]);
+    expect(coverage.packets.every((packet) => packet.voiceReady)).toBe(true);
+    expect(coverage.packets[0].verifiedComposedAnchors).toBe(0);
+    expect(coverage.referenceSummary.heldoutCuratedAuthorshipUnverified).toBe(3);
+    expect(evaluationHash(frozen)).toBe(originalHash);
   });
 
   it('allows production-selected account corpus references without inventing operator curation or human authorship', () => {
@@ -218,7 +246,9 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(checkpoints[0].estimatedCostUsd).toBe(0.5);
     expect([checkpoints[0].packets[0].baseline.invalidReason, checkpoints[0].packets[0].astra.invalidReason]).toContain('paired_arm_pending');
     expect(report.completed).toBe(false);
-    expect(report.estimatedCostUsd).toBe(0.5);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.knownEstimatedCostUsd).toBe(0.5);
+    expect(report.unknownCostArms).toBe(1);
     expect([report.packets[0].baseline.invalidReason, report.packets[0].astra.invalidReason]).toContain('evaluation_arm_execution_failed_cost_unknown');
   });
 
@@ -346,7 +376,7 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(runArm).toHaveBeenCalledTimes(3);
     expect(report.estimatedCostUsd).toBe(2.25);
     expect(report.execution).toMatchObject({ concurrency: 3, maxEstimatedCostUsd: 0.5,
-      budgetPolicy: 'observed_cost_stop_with_in_flight_drain', stopReason: 'cost_budget' });
+      budgetPolicy: 'known_cost_plus_unknown_reservations_with_in_flight_drain', stopReason: 'cost_budget' });
     expect(report.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.trace)).toHaveLength(3);
     expect(report.packets.every((packet) => [packet.baseline.invalidReason, packet.astra.invalidReason].includes('evaluation_cost_budget_reached'))).toBe(true);
     expect(report.completed).toBe(false);
@@ -369,6 +399,113 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(report.estimatedCostUsd).toBeCloseTo(0.03);
     expect(report.execution?.stopReason).toBe('invalid_arm');
     expect(report.completed).toBe(false);
+  });
+
+  it('attempts all 80 arms in complete-suite mode after a known-cost failure without calling it promotion-valid', async () => {
+    const runArm = vi.fn(async (_packet, stack) => ({ ...armResult(stack),
+      ...(runArm.mock.calls.length === 1 ? { validPrimaryModels: false, invalidReason: 'provider_returned_incomplete',
+        trace: { estimatedCostUsd: 0.2, costDataStatus: 'complete', status: 'failed' } as GenerationRunTrace } : {}),
+    }));
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite', concurrency: 2 });
+    expect(runArm).toHaveBeenCalledTimes(80);
+    expect(report.packets).toHaveLength(40);
+    expect(report.attemptedCompletion).toBe(true);
+    expect(report.completed).toBe(false);
+    expect(report.estimatedCostUsd).toBeCloseTo(0.99);
+    expect(report.execution).toMatchObject({ failurePolicy: 'complete_suite', stopReason: null });
+    expect(report.packets.flatMap((packet) => [packet.astra, packet.baseline]).filter((arm) => arm.attempted && !arm.validPrimaryModels)).toHaveLength(1);
+  });
+
+  it.each([
+    ['authentication', new Error('Remote evaluation rejected (HTTP 401); no automatic retry.'), 'authentication_failure'],
+    ['deployment', new Error('Remote evaluation rejected (HTTP 409); no automatic retry.'), 'integrity_failure'],
+    ['frozen identity', new Error('Remote evaluation result does not match the frozen arm.'), 'integrity_failure'],
+    ['unknown spend', new Error('Remote evaluation response unavailable; no automatic retry because the arm may already have incurred cost.'), 'unknown_cost'],
+  ])('stops complete-suite scheduling on %s and records the attempted failure', async (_name, error, stopReason) => {
+    const runArm = vi.fn(async () => { throw error; });
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite' });
+    expect(runArm).toHaveBeenCalledTimes(1);
+    expect(report.attemptedCompletion).toBe(false);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.unknownCostArms).toBe(1);
+    expect(report.execution?.stopReason).toBe(stopReason);
+    expect(report.packets[0].baseline.attempted !== report.packets[0].astra.attempted).toBe(true);
+  });
+
+  it('does not mistake a partial-cost failed arm for bounded spend in complete-suite mode', async () => {
+    const runArm = vi.fn(async (_packet, stack) => ({ ...armResult(stack, 0.2), validPrimaryModels: false,
+      invalidReason: 'timeout', trace: { estimatedCostUsd: 0.2, costDataStatus: 'partial' } as GenerationRunTrace }));
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite' });
+    expect(runArm).toHaveBeenCalledTimes(1);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.knownEstimatedCostUsd).toBe(0.2);
+    expect(report.execution?.stopReason).toBe('unknown_cost');
+  });
+
+  it('continues all 80 arms with auditable unknown-attempt reservations without inventing actual cost or promotion validity', async () => {
+    const runArm = vi.fn(async (_packet, stack) => runArm.mock.calls.length === 1 ? reservedFailure(stack) : armResult(stack));
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite' });
+    const reservation = evaluationArmCost(reservedFailure('publishing_v2_astra')).reservedUnknownCostUsd;
+    expect(runArm).toHaveBeenCalledTimes(80);
+    expect(report.attemptedCompletion).toBe(true);
+    expect(report.completed).toBe(false);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.knownEstimatedCostUsd).toBeCloseTo(0.79);
+    expect(report.reservedUnknownAttempts).toBe(1);
+    expect(report.unreservedUnknownAttempts).toBe(0);
+    expect(report.reservedUnknownCostUsd).toBe(reservation);
+    expect(report.budgetMeasureUsd).toBeCloseTo(0.79 + reservation);
+    expect(report.execution?.stopReason).toBeNull();
+    const score = scoreFrozenEvaluation(report, { snapshotHash: report.snapshotHash, judge: { kind: 'human', id: 'test' },
+      votes: report.packets.map((packet) => ({ packetId: packet.id, choice: 'neither' })) });
+    expect(score.status).toBe('not_ready');
+    expect(score.baseline.reservedUnknownAttempts + score.astra.reservedUnknownAttempts).toBe(1);
+  });
+
+  it('stops at known cost plus reservations while keeping failed final-attempt mirrors out of the sum', async () => {
+    const runArm = vi.fn(async (_packet, stack) => reservedFailure(stack));
+    const reservation = evaluationArmCost(reservedFailure('publishing_v2_astra')).reservedUnknownCostUsd;
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite', maxEstimatedCostUsd: reservation });
+    expect(runArm).toHaveBeenCalledTimes(1);
+    expect(report.reservedUnknownAttempts).toBe(1);
+    expect(report.budgetMeasureUsd).toBe(reservation);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.execution?.stopReason).toBe('cost_budget');
+  });
+
+  it('retains known usage in partial traces and reserves each unknown request separately', () => {
+    const arm = reservedFailure('publishing_v2_astra');
+    const failed = arm.trace!.modelCalls[0];
+    arm.trace!.modelCalls.push({ ...failed, fallbackAttempts: [], succeeded: true, estimatedCostUsd: 0.2 });
+    const costs = evaluationArmCost(arm);
+    expect(costs).toMatchObject({ knownEstimatedCostUsd: 0.2, reservedUnknownAttempts: 1, unreservedUnknownAttempts: 0, costKnown: false, budgetBounded: true });
+    const another = structuredClone(failed.fallbackAttempts![0]);
+    failed.fallbackAttempts!.push(another);
+    expect(evaluationArmCost(arm).reservedUnknownCostUsd).toBe(costs.reservedUnknownCostUsd * 2);
+    delete another.responseProgress;
+    expect(evaluationArmCost(arm)).toMatchObject({ reservedUnknownAttempts: 1, unreservedUnknownAttempts: 1, budgetBounded: false });
+  });
+
+  it.each(['missing_bounds', 'underpriced_bound', 'unknown_fallback', 'authentication'])('never continues %s merely because another attempt has a reservation', async (fault) => {
+    const arm = reservedFailure('publishing_v2_astra');
+    const attempts = arm.trace!.modelCalls[0].fallbackAttempts!;
+    if (fault === 'missing_bounds') delete attempts[0].responseProgress!.requestBytes;
+    if (fault === 'underpriced_bound') attempts[0].responseProgress!.estimatedMaxCostUsd = 0.001;
+    if (fault === 'unknown_fallback') attempts.push({ ...attempts[0], provider: 'anthropic', model: 'claude-fable-5', responseProgress: undefined });
+    if (fault === 'authentication') attempts[0].statusCode = 401;
+    const runArm = vi.fn(async (_packet, stack) => ({ ...arm, stack }));
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite' });
+    expect(runArm).toHaveBeenCalledTimes(1);
+    expect(report.estimatedCostUsd).toBeNull();
+    expect(report.execution?.stopReason).toBe(fault === 'authentication' ? 'authentication_failure' : 'unknown_cost');
+  });
+
+  it('records an explicit zero-provider-call failure without a fabricated charge', async () => {
+    const runArm = vi.fn(async (_packet, stack) => ({ ...armResult(stack), validPrimaryModels: false, invalidReason: 'context_failed',
+      trace: { estimatedCostUsd: null, costDataStatus: 'missing', modelCalls: [] } as unknown as GenerationRunTrace }));
+    const report = await runFrozenEvaluation(snapshot(), { now, runArm, failurePolicy: 'complete_suite', limit: 1 });
+    expect(runArm).toHaveBeenCalledTimes(2);
+    expect(report).toMatchObject({ estimatedCostUsd: 0, knownEstimatedCostUsd: 0, unknownCostArms: 0, reservedUnknownAttempts: 0, completed: false });
   });
 
   it('drains and checkpoints paid results after graceful interruption without scheduling their paired arms', async () => {
@@ -423,6 +560,35 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(scoreFrozenEvaluation(report, votesFor(report)).noRegression).toBe(false);
     const undeclared = votesFor(report); undeclared.judge.id = '';
     expect(() => scoreFrozenEvaluation(report, undeclared)).toThrow('Declare');
+  });
+
+  it('includes rejected idea facts in safety rates and reports cohort denominators separately', async () => {
+    const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
+    report.packets[0].astra.ideas.push({ status: 'rejected', semanticKey: 'unsafe', rejectionCodes: ['unsupported_operator_fact'] } as IdeaCandidate);
+    const score = scoreFrozenEvaluation(report, votesFor(report));
+    expect(score.status).toBe('not_ready');
+    expect(score.noRegression).toBe(false);
+    expect(score.astra.factualFailureRate).toBeCloseTo(1 / 41);
+    expect(score.astra.ideaFactualFailureRate).toBeCloseTo(1 / 41);
+    expect(score.astra.draftFactualFailureRate).toBeNull();
+    expect(score.cohorts.geoffrey).toMatchObject({ packets: 30, decisive: 30, astraWins: 24,
+      astra: { hardGateDenominators: { ideas: 31, drafts: 0 }, ideaFactualFailureRate: expect.closeTo(1 / 31) } });
+    expect(score.cohorts.synthetic_profile).toMatchObject({ packets: 10, decisive: 10, astraWins: 0,
+      astra: { hardGateDenominators: { ideas: 10, drafts: 0 }, ideaFactualFailureRate: 0 } });
+  });
+
+  it('keeps one-sided valid-empty utility outside the strict 30 decisive copy-preference requirement', async () => {
+    const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
+    report.packets.slice(0, 11).forEach((packet) => { packet.baseline.selected = []; });
+    const score = scoreFrozenEvaluation(report, votesFor(report, 40));
+    expect(score.status).toBe('not_ready');
+    expect(score.decisive).toBe(29);
+    expect(score.astraWins).toBe(29);
+    expect(score.oneSidedUtility).toMatchObject({ astraAvailableOverValidEmpty: 11, astraPreferred: 11,
+      baselinePreferred: 0, countsTowardDecisivePreference: false });
+    expect(score.cohorts.geoffrey.decisive).toBe(19);
+    report.packets[0].baseline.validPrimaryModels = false;
+    expect(() => scoreFrozenEvaluation(report, votesFor(report, 40))).toThrow('failed or invalid execution');
   });
 
   it('does not turn a stale snapshot, empty candidate, or absent edit estimate into positive evidence', async () => {

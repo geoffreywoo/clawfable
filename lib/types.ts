@@ -1016,6 +1016,23 @@ export interface GenerationOutcomeEvent {
   createdAt: string;
 }
 
+/** Server progress only; streamed partial copy is never a completed result. */
+export interface GenerationResponseProgress {
+  responseId: string | null;
+  providerModel: string | null;
+  status: string | null;
+  firstEventMs: number | null;
+  firstOutputMs: number | null;
+  lastEventMs: number | null;
+  eventCount: number;
+  /** Conservative budget reservation when usage is unknown, never an observed charge or guaranteed billing maximum. */
+  estimatedMaxCostUsd?: number | null;
+  requestBytes?: number;
+  inputTokenUpperEstimate?: number;
+  framingTokenAllowance?: number;
+  outputTokenLimit?: number;
+}
+
 export interface GenerationModelCallTrace {
   stage: 'source_enrichment' | 'idea_generation' | 'idea_judgment' | 'tweet_writing' | 'copy_judgment';
   provider: 'openai' | 'anthropic' | null;
@@ -1024,6 +1041,7 @@ export interface GenerationModelCallTrace {
   requestedModel?: string | null;
   /** Model identifier reported by the provider, including a resolved snapshot when returned. */
   providerModel?: string | null;
+  responseProgress?: GenerationResponseProgress;
   reasoningEffort?: string | null;
   cachedInputTokens?: number | null;
   reasoningTokens?: number | null;
@@ -1045,6 +1063,7 @@ export interface GenerationModelCallTrace {
     outputTokens: number | null;
     estimatedCostUsd: number | null;
     durationMs: number;
+    responseProgress?: GenerationResponseProgress;
   }>;
 }
 
