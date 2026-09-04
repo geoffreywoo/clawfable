@@ -182,6 +182,38 @@ export async function POST(
     }
     lockOwner = lock.owner;
 
+    // Everything above used a pre-lock snapshot. A competing post/edit/delete
+    // may have completed before we acquired the lease, including on another
+    // server whose write could not invalidate this instance's read cache.
+    if (dbTweetId) {
+      const fresh = await getTweet(dbTweetId, { fresh: true });
+      if (!fresh || String(fresh.agentId) !== String(id)) {
+        return NextResponse.json({ error: 'Tweet not found for this agent' }, { status: 404 });
+      }
+      if (fresh.status === 'posted' && fresh.xTweetId) {
+        return NextResponse.json({ success: true, alreadyPosted: true,
+          tweetUrl: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${fresh.xTweetId}`,
+          tweetId: fresh.xTweetId });
+      }
+      if (fresh.content !== existingTweet?.content || fresh.status !== existingTweet?.status
+        || fresh.type !== existingTweet?.type || fresh.followupForTweetId !== existingTweet?.followupForTweetId
+        || fresh.quoteTweetId !== existingTweet?.quoteTweetId || fresh.replyConversationId !== existingTweet?.replyConversationId
+        || fresh.quarantinedAt || fresh.xTweetId || !['preview', 'draft', 'queued'].includes(fresh.status)) {
+        return NextResponse.json({ error: 'This draft changed before posting. Review its current state and try again.',
+          code: 'draft_changed_before_post' }, { status: 409 });
+      }
+      const freshOriginIssue = getGeneratedPublishIssue(fresh, { accountHandle: agent.handle });
+      if (freshOriginIssue) {
+        return NextResponse.json({ error: freshOriginIssue, code: 'generation_origin_retired' }, { status: 409 });
+      }
+      if (!isReply) {
+        const freshPolicyIssue = getAccountPublishingPolicyIssue({ handle: agent.handle, content: fresh.content,
+          topic: fresh.topic, portfolioCompanyContext: fresh.portfolioCompanyContext });
+        if (freshPolicyIssue) return NextResponse.json({ error: freshPolicyIssue, code: 'account_publish_policy' }, { status: 422 });
+      }
+      existingTweet = fresh;
+    }
+
     if (!dbTweetId) {
       const operatorDraft = await createTweet({
         agentId: id,

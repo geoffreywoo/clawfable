@@ -42,7 +42,7 @@ describe('generation context', () => {
       source: 'autopilot',
     } as const;
     await addPerformanceEntry(agent.id, { ...base, checkedAt: '2026-07-01T00:15:00.000Z' } as any);
-    await addPerformanceEntry(agent.id, { ...base, likes: 8, checkedAt: '2026-07-01T02:00:00.000Z' } as any);
+    await addPerformanceEntry(agent.id, { ...base, likes: 8, checkedAt: '2026-07-02T02:00:00.000Z' } as any);
     await addPerformanceEntry(agent.id, {
       ...base,
       tweetId: '',
@@ -54,7 +54,7 @@ describe('generation context', () => {
       retweets: 8,
       replies: 6,
       source: 'timeline',
-      checkedAt: '2026-07-01T02:00:00.000Z',
+      checkedAt: '2026-07-02T02:00:00.000Z',
     } as any);
 
     const context = await buildGenerationContext(agent);
@@ -480,7 +480,7 @@ describe('generation context', () => {
       soulMd: '# SOUL\n\nTasteful AI operator notes.',
     } as any);
 
-    await createTweet({
+    const tweet = await createTweet({
       agentId: agent.id,
       content: 'AI agents only compound when the eval loop catches bad memory before it reaches users.',
       type: 'original',
@@ -513,6 +513,16 @@ describe('generation context', () => {
         computedAt: '2026-05-25T00:00:00.000Z',
         notes: ['Strong approval but poor engagement after posting.'],
       },
+    });
+
+    // A cached reward alone is no longer trusted as outcome evidence.
+    expect((await buildGenerationContext(agent)).memory.outcomeFatigueLessons).toEqual([]);
+    await addPerformanceEntry(agent.id, {
+      tweetId: tweet.id, xTweetId: 'x-fatigue-1', content: tweet.content,
+      format: 'hot_take', topic: 'AI agents', source: 'autopilot',
+      postedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), checkedAt: new Date().toISOString(),
+      likes: 0, retweets: 0, replies: 0, impressions: 1000, engagementRate: 0, wasViral: false,
+      performanceCheckpoint: 'full_24h',
     });
 
     const context = await buildGenerationContext(agent);

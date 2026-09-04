@@ -114,13 +114,18 @@ export async function getAccessibleAgentIds(user: User): Promise<string[]> {
     || (directIds.size > 0 && recoveredIds.size > 0);
 
   if (hasConfidentFastPath && resolvedIds.size > 0) {
-    return Array.from(resolvedIds);
+    return filterAuthorizedAgentIds(user, Array.from(resolvedIds));
   }
 
   const accessibleUsers = await getAccessibleUsers(user);
   const fallbackOwnerIds = accessibleUsers.map((candidate) => String(candidate.id));
   const fallbackIds = await getFallbackAgentIdsFromScan(user, fallbackOwnerIds, accessibleUsers);
-  return Array.from(new Set(fallbackIds));
+  return filterAuthorizedAgentIds(user, Array.from(new Set(fallbackIds)));
+}
+
+async function filterAuthorizedAgentIds(user: User, candidateIds: string[]): Promise<string[]> {
+  const decisions = await Promise.all(candidateIds.map(async (id) => ({ id, allowed: await canAccessAgent(user, id) })));
+  return decisions.filter((entry) => entry.allowed).map((entry) => entry.id);
 }
 
 export async function getAccessibleAgentCount(user: User): Promise<number> {

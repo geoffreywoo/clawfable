@@ -111,6 +111,40 @@ describe('twitter post route', () => {
     });
   });
 
+  it.each(['posted', 'deleted', 'edited', 'quarantined', 'quarantine_marker', 'eligibility_revoked', 'unknown_lifecycle'] as const)(
+    'rechecks uncached persisted state when another server %s the draft before lock acquisition', async (change) => {
+      const agent = await createAgent({ handle: `manual-stale-${change}`, name: 'Guard', soulMd: '# soul',
+        apiKey: 'key', apiSecret: 'secret', accessToken: 'token', accessSecret: 'secret', isConnected: 1,
+        xUserId: `x-stale-${change}` } as any);
+      const tweet = await createTweet({ agentId: agent.id, content: 'We shipped the first cache invalidation test today.',
+        type: 'original', status: change === 'unknown_lifecycle' ? 'archived_legacy' : 'draft', contentProvenance: 'operator_written' } as any);
+      mocks.requireAgentAccess.mockResolvedValue({ agent, user: { id: 'owner' } });
+      mocks.acquireAutopilotLock.mockImplementationOnce(async () => {
+        // Simulate another server: write storage without this module's cache invalidation.
+        const store = (globalThis as any)[Symbol.for('clawfable.localKvFallback')].memStore as Map<string, unknown>;
+        const key = `tweet:${tweet.id}`;
+        const existing = store.get(key) as Record<string, unknown>;
+        if (change === 'unknown_lifecycle') { /* Both snapshots contain the same invalid legacy status. */ }
+        else if (change === 'deleted') store.delete(key);
+        else store.set(key, { ...existing,
+          ...(change === 'posted' ? { status: 'posted', xTweetId: 'already-on-x' }
+            : change === 'edited' ? { content: 'A different saved draft.' }
+              : change === 'quarantine_marker' ? { quarantinedAt: new Date().toISOString() }
+                : change === 'eligibility_revoked' ? { contentProvenance: 'historical_v1' } : { status: 'quarantined' }),
+        });
+        return { acquired: true, owner: 'manual-post-lock' };
+      });
+      const response = await POST(new Request('http://localhost/api/post', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tweetId: tweet.id, content: tweet.content }),
+      }) as any, { params: Promise.resolve({ id: agent.id }) });
+      expect(response.status).toBe(change === 'posted' ? 200 : change === 'deleted' ? 404 : 409);
+      if (change === 'posted') expect(await response.json()).toMatchObject({ alreadyPosted: true, tweetId: 'already-on-x' });
+      expect(mocks.postTweet).not.toHaveBeenCalled();
+      expect(mocks.replyToTweet).not.toHaveBeenCalled();
+      expect(mocks.releaseAutopilotLock).toHaveBeenCalledWith(agent.id, 'manual-post-lock');
+    },
+  );
+
   it('answers 400 for a malformed JSON body before touching X', async () => {
     const agent = await createAgent({
       handle: 'manual-post-json-guard',

@@ -72,7 +72,7 @@ import {
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import type { RankedPublishingCandidate as RankedProtocolTweet } from './publishing-candidate';
 import { resolveQueuedTweetFailure } from './queue-healing';
-import { PUBLISHING_V2_MODEL_STACK, resolvePublishingV2ModelStacks } from './ai';
+import { resolvePublishingV2ModelStacks } from './ai';
 import { getPublishingV2AutopostQualityMargin } from './publishing-quality-policy';
 import { getAuthorityProofIssue, getReplyOptOutReason, scoreHighValueReply } from './virality-signals';
 import { assessClaimEvidence } from './claim-evidence';
@@ -2780,7 +2780,7 @@ async function generateReply(
     memory: context.memory,
     signals: context.signals,
     trending: null,
-    modelStack: PUBLISHING_V2_MODEL_STACK,
+    modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
     mode: 'live',
     entitlement,
   });

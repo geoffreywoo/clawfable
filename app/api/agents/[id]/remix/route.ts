@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addRemixEntry, checkRateLimit, getAnalysis, getTweet, updateTweet } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
-import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { resolvePublishingV2ModelStacks } from '@/lib/ai';
 import { buildGenerationContext } from '@/lib/generation-context';
 import { generatePublishingBatchV2 } from '@/lib/publishing-v2';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
@@ -127,7 +127,7 @@ export async function POST(
       memory: context.memory,
       signals: context.signals,
       trending: null,
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       mode: entitlement.eligible ? 'manual' : 'preview',
       entitlement,
     });

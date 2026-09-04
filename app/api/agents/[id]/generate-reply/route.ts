@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAnalysis } from '@/lib/kv-storage';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { buildGenerationContext } from '@/lib/generation-context';
-import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
+import { resolvePublishingV2ModelStacks } from '@/lib/ai';
 import { hasPostedReplyForConversation, normalizeTweetTarget } from '@/lib/reply-conversation-guard';
 import { areRepliesDisabled, REPLY_AUTOMATION_DISABLED_REASON } from '@/lib/reply-safety';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
@@ -85,7 +85,7 @@ export async function POST(
       memory: context.memory,
       signals: context.signals,
       trending: null,
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       mode: 'manual',
       entitlement,
     });

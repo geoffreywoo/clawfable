@@ -46,6 +46,7 @@ import {
   PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
+  PUBLISHING_V2_ASTRA_MODEL_STACK,
   type GenerateTextOptions,
   type GenerateTextResult,
 } from './ai';
@@ -76,7 +77,8 @@ import {
 } from './geoffrey-content-mix';
 import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import { isUnderTestedBanditArm, scoreLearnedArmPrior } from './bandit';
-import { pruneExpiredDynamicSeeds } from './seed-synthesis';
+import { DYNAMIC_SEED_TTL_DAYS, pruneExpiredDynamicSeeds, type DynamicIdeaSeed } from './seed-synthesis';
+import { selectApprovedEditExamples, type ApprovedEditExample } from './learning-loop';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
   inferAudienceSegment,
@@ -541,6 +543,15 @@ export interface GenerateTweetBatchV2Input {
   signals: LearningSignal[];
   trending: TrendingTopic[] | null;
   modelStack: GenerationModelStackId;
+  /** Internal offline-evaluation seam; never accepted by a live/persisting run. */
+  previewContext?: {
+    briefs: GenerationBriefV2[];
+    documents: SourceDocument[];
+    stories?: StoryCluster[];
+    blocks?: SemanticBlock[];
+    recentIdeas?: IdeaCandidate[];
+    dynamicIdeaSeeds?: DynamicIdeaSeed[];
+  };
   surface?: GenerationSurface;
   triggerId?: string | null;
   idempotencyKey?: string | null;
@@ -573,6 +584,11 @@ export async function trackedGenerate(
       stage,
       provider: result.provider,
       model: result.model,
+      requestedModel: result.requestedModel,
+      requestedProvider: result.requestedProvider,
+      reasoningEffort: result.reasoningEffort,
+      cachedInputTokens: result.cachedInputTokens,
+      reasoningTokens: result.reasoningTokens,
       inputTokens: result.inputTokens ?? null,
       outputTokens: result.outputTokens ?? null,
       estimatedCostUsd: estimateAiUsageCostUsd(result.model, result.inputTokens, result.outputTokens),
@@ -1461,6 +1477,57 @@ function storyBrief(story: StoryCluster, documents: SourceDocument[]): Generatio
   };
 }
 
+/** Resolve seed provenance back to the current corpus; seed prose never proves a fact. */
+export function hydrateDynamicSeedEvidenceV2(
+  brief: GenerationBriefV2,
+  seed: FrontierIdeaSeed | null,
+  eligibleStories: StoryCluster[],
+  documents: SourceDocument[],
+  now = new Date(),
+): GenerationBriefV2 {
+  const dynamic = seed as Partial<DynamicIdeaSeed> | null;
+  const synthesizedAt = Date.parse(dynamic?.synthesizedAt || '');
+  const oldest = now.getTime() - DYNAMIC_SEED_TTL_DAYS * 24 * 60 * 60 * 1000;
+  if (dynamic?.provenance !== 'research_synthesis' || !Number.isFinite(synthesizedAt)
+    || synthesizedAt < oldest || synthesizedAt > now.getTime()
+    || !dynamic.sourceDocumentIds?.length) return brief;
+  const seedDocumentIds = new Set(dynamic.sourceDocumentIds);
+  const currentDocuments = documents.filter((document) => {
+    const fetchedAt = Date.parse(document.fetchedAt);
+    return seedDocumentIds.has(document.id) && Number.isFinite(fetchedAt)
+      && fetchedAt >= oldest && fetchedAt <= now.getTime();
+  });
+  const story = eligibleStories.find((candidate) => (
+    isStoryEditoriallyQualifiedV2(candidate)
+    && (!candidate.blockedUntil || Date.parse(candidate.blockedUntil) <= now.getTime())
+    && currentDocuments.some((document) => document.agentId === candidate.agentId
+      && candidate.sourceDocumentIds.includes(document.id)
+      && document.claims.some((claim) => claim.kind !== 'opinion'
+        && candidate.qualifiedClaimIds?.includes(claim.id)))
+  ));
+  if (!story) return brief;
+  const source = storyBrief(story, currentDocuments.filter((document) => document.agentId === story.agentId));
+  if (!source.evidence.length) return brief;
+  return {
+    ...brief,
+    id: stableResearchId('brief', brief.id, seed!.id, story.id),
+    storyClusterId: story.id,
+    title: story.title,
+    summary: story.summary,
+    evidenceMode: 'verified_source',
+    evidenceIds: source.evidenceIds,
+    sourceDocumentIds: source.sourceDocumentIds,
+    qualifiedClaimIds: source.qualifiedClaimIds,
+    evidence: source.evidence,
+    evidenceScore: source.evidenceScore,
+    freshnessScore: source.freshnessScore,
+    sourceBrief: source.sourceBrief,
+    verifiedEntityMentions: source.verifiedEntityMentions,
+    portfolioCompanyContext: source.portfolioCompanyContext,
+    authorOpportunity: 'Use one supplied factual atom to make a new judgment in the author\'s native topic. The seed proposes an angle, not additional facts. Keep the factual atom and the author\'s inference distinct.',
+  };
+}
+
 function getPortfolioPolicyIssuesForVoiceProfile(
   voiceProfile: VoiceProfile,
   content: string,
@@ -1743,6 +1810,7 @@ export function getStoryGenerationPlanningRejectionCodesV2(
     now,
   );
   return uniqueStrings([
+    story.blockedUntil && Date.parse(story.blockedUntil) > now.getTime() ? 'blocked' : null,
     isStoryBlockedBySemanticMemory(story, options.blocks || []) ? 'semantic_memory_block' : null,
     isStoryAlreadyCommittedV2(story, options.committedTweets || [], now) ? 'already_committed' : null,
     isStoryInEditorialCooldownV2(story, failedAttempts) ? 'editorial_cooldown' : null,
@@ -1887,7 +1955,7 @@ export function buildGenerationBriefsV2({
       requestedPortfolioContext,
       [requested],
     )) return [];
-    briefs.push({
+    const requestedBrief: GenerationBriefV2 = {
       id: stableResearchId('brief', 'operator-request', requested),
       topic: requested,
       sourceLane: 'manual_core_exploit',
@@ -1922,7 +1990,8 @@ export function buildGenerationBriefsV2({
         reactionPrompt: seed.reactionPrompt || null,
       } : null,
       portfolioCompanyContext: requestedPortfolioContext,
-    });
+    };
+    briefs.push(hydrateDynamicSeedEvidenceV2(requestedBrief, seed, storyCandidates, documents, now));
     usedTopics.add(topicKey(requested));
     return briefs;
   }
@@ -1947,7 +2016,7 @@ export function buildGenerationBriefsV2({
   };
 
   const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
-    .filter((candidate) => !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
+    .filter((candidate) => !geoffreyPortfolio || !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
     .filter((candidate) => !isGenerationSubjectBlocked(
       voiceProfile,
       `${candidate.topic} ${candidate.historicalAngle || ''} ${(candidate.personalTopicSignals || []).join(' ')}`,
@@ -2177,7 +2246,7 @@ export function buildGenerationBriefsV2({
       [],
       [candidate.topic, candidate.historicalAngle, ...personalTopicSignals].filter(Boolean).join(' '),
     )) return false;
-    const brief = operatorTopicBrief(
+    const nativeBrief = operatorTopicBrief(
       candidate.topic,
       index,
       candidate.identityScore,
@@ -2188,6 +2257,10 @@ export function buildGenerationBriefsV2({
       personalTopicSignals,
       personalTopicSignalPremises,
     );
+    const brief = hydrateDynamicSeedEvidenceV2(nativeBrief, seed, storyCandidates.filter((story) => (
+      !briefs.some((existing) => existing.storyClusterId === story.id)
+    )), documents, now);
+    if (!portfolioAllowsTopic(`${brief.topic} ${brief.title}`, brief.topic, brief.portfolioCompanyContext)) return false;
     briefs.push(brief);
     usedTopics.add(key);
     reservedConcreteSubjects.push(...personalTopicSignals.map((signal) => signal.replace(/:/g, ' ')));
@@ -2198,7 +2271,7 @@ export function buildGenerationBriefsV2({
   // Keep the plan's 70% core-topic floor. Recent use is only a modest ranking
   // penalty, so proven AI/startup/investing subjects do not disappear behind
   // low-evidence exploration labels after one recent post.
-  const businessTechTarget = Math.ceil(briefCount * 0.7);
+  const businessTechTarget = geoffreyPortfolio ? Math.ceil(briefCount * 0.7) : 0;
   let businessTechCount = briefs.filter((brief) => BUSINESS_TECH_OPERATOR_DOMAINS.has(
     classifyGeoffreyTopicDomain(`${brief.topic} ${brief.title}`),
   )).length;
@@ -2256,7 +2329,10 @@ const V2_VOICE_GUIDANCE_SECTION_PRIORITY = [
 // Sections that carry raw prior prose (anchors, rejected drafts). They stay
 // out of ideation so premise overlap cannot masquerade as author fit, and are
 // the first sections trimmed when a writer or judge budget is exceeded.
-const V2_VOICE_GUIDANCE_RAW_PROSE_SECTIONS = new Set(['OPERATOR VOICE REFERENCE', 'RECENT OPERATOR REJECTIONS']);
+const V2_VOICE_GUIDANCE_RAW_PROSE_SECTIONS = new Set([
+  'OPERATOR VOICE REFERENCE', 'RECENT OPERATOR REJECTIONS',
+  'RECENT REJECTED DRAFTS', 'EDIT TRANSFORMATION MEMORY',
+]);
 export const V2_IDEA_VOICE_GUIDANCE_BUDGET_CHARS = 2400;
 export const V2_WRITER_VOICE_GUIDANCE_BUDGET_CHARS = 6000;
 export const V2_JUDGE_VOICE_GUIDANCE_BUDGET_CHARS = 4000;
@@ -2274,7 +2350,9 @@ export function buildVoiceGuidanceV2(
   voiceProfile: Pick<VoiceProfile, 'communicationStyle'>,
   options: { budget: number; includeRawProse: boolean },
 ): VoiceGuidanceV2 {
-  const chunks = (voiceProfile.communicationStyle || '').split(/\n\s*\n(?=##\s+)/);
+  // Personalization's first child heading has only one newline after its
+  // wrapper. Split every heading so nested raw examples cannot bypass isolation.
+  const chunks = (voiceProfile.communicationStyle || '').split(/\n+(?=##\s+)/);
   const baseStyle = (chunks[0] || '').trim();
   const parsed = chunks.slice(1).flatMap((chunk) => {
     const [headingLine, ...rest] = chunk.trim().split('\n');
@@ -2578,6 +2656,107 @@ export function selectQuestionBudgetDemotionsV2(
     .slice(Math.max(0, questionBudget))
     .map(({ index }) => index)
     .sort((left, right) => left - right);
+}
+
+export const V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE = 0.03;
+
+/** One randomized near-tie decision, after all writing/repair passes and gates. */
+export function selectQualifiedExplorationV2({
+  selected,
+  qualifiedCandidates,
+  input,
+  random = Math.random,
+}: {
+  selected: RankedProtocolTweet[];
+  qualifiedCandidates: RankedProtocolTweet[];
+  input: Pick<GenerateTweetBatchV2Input, 'style' | 'voiceProfile' | 'allTweets' | 'signals' | 'count' | 'memory' | 'learnings'>;
+  random?: () => number;
+}): RankedProtocolTweet[] {
+  if (selected.length === 0) return [];
+  const configuredRate = Number(input.style.exploration?.rate);
+  const rate = Number.isFinite(configuredRate) ? Math.max(0, Math.min(1, configuredRate / 100)) : 0;
+  const key = (candidate: RankedProtocolTweet) => (
+    (candidate.judgeBreakdown?.qualityMargin ?? 0)
+    + (candidate.judgeBreakdown?.viralityUpside ?? 0) * V2_VIRALITY_SELECTION_WEIGHT
+    + (candidate.judgeBreakdown?.learnedArmPrior ?? 0) * V2_LEARNED_PRIOR_SELECTION_WEIGHT
+  );
+  const slot = selected.reduce((lowest, candidate, index) => key(candidate) < key(selected[lowest]) ? index : lowest, 0);
+  const baseline = selected[slot];
+  const retained = selected.filter((_, index) => index !== slot);
+  const isGeoffrey = isGeoffreyVoiceProfile(input.voiceProfile);
+  const questionBudget = buildGenerationWritingConstraintsV2(input).maxQuestionDraftsInBatch;
+  const hasNative = selected.some((candidate) => !candidate.storyClusterId);
+  const trendLimit = hasNative
+    ? Math.max(0, Math.min(input.count - 1, Math.round(input.count * (input.style.trendMixTarget / 100))))
+    : input.count;
+  // The normal selector may already have used its documented throughput
+  // fallback. Exploration must not increase that exception's source share.
+  const sourceCap = Math.max(trendLimit, selected.filter((candidate) => candidate.storyClusterId).length);
+  const portfolioDue = isGeoffrey && isAntiFundPortfolioBriefDue(input.allTweets, input.signals);
+  const seen = new Set<string>();
+  const feasibleCandidates = qualifiedCandidates.filter((candidate) => {
+    const id = candidate.draftCandidateId;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    if (selected.some((current) => current.draftCandidateId === id)) return false;
+    const margin = candidate.judgeBreakdown?.qualityMargin;
+    const baselineMargin = baseline.judgeBreakdown?.qualityMargin;
+    if (!Number.isFinite(margin) || !Number.isFinite(baselineMargin)) return false;
+    if (retained.some((current) => (candidate.ideaId && current.ideaId === candidate.ideaId)
+      || (candidate.storyClusterId && current.storyClusterId === candidate.storyClusterId))) return false;
+    if (isNearDuplicate(candidate.content, [...retained.map((current) => current.content), ...getCommittedTweetCopyMemoryV2(input.allTweets)], 0.55).isDuplicate) return false;
+    if ([...retained, candidate].filter((current) => isQuestionDraftV2(current.content)).length > questionBudget) return false;
+    if ([...retained, candidate].filter((current) => current.storyClusterId).length > sourceCap) return false;
+    if (portfolioDue && baseline.portfolioCompanyContext && !candidate.portfolioCompanyContext) return false;
+    if (isGeoffrey) {
+      if (!getGeoffreyContentMixDecision(candidate, [
+        ...input.allTweets,
+        ...retained.map((current) => ({ ...current, topic: current.targetTopic, status: 'queued' })),
+      ]).allowed) return false;
+      const portfolio = [...retained, candidate];
+      if (portfolio.filter((current) => isGeoffreyDeepTechnicalTopic(`${current.targetTopic} ${current.content}`)).length > 1
+        || portfolio.filter((current) => isGeoffreyManufacturingMaterialsTopic(`${current.targetTopic} ${current.content}`)).length > 1) return false;
+    }
+    return true;
+  });
+  // Compare with the strongest feasible copy, including alternatives whose
+  // weighted selection score was lower. Comparing only with the replaced
+  // baseline could admit a materially weaker draft into the random draw.
+  const bestAvailableMargin = Math.max(baseline.judgeBreakdown?.qualityMargin ?? -Infinity,
+    ...feasibleCandidates.map((candidate) => candidate.judgeBreakdown!.qualityMargin!));
+  const alternatives = feasibleCandidates.filter((candidate) => (
+    candidate.judgeBreakdown!.qualityMargin! + V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE + 1e-8 >= bestAvailableMargin
+    && (isUnderTestedBanditArm(input.style.banditPolicy, 'format', candidate.format)
+      || isUnderTestedBanditArm(input.style.banditPolicy, 'hook', candidate.featureTags.hook))
+  ));
+  const result: RankedProtocolTweet[] = selected.map((candidate) => ({
+    ...candidate,
+    experimentHoldout: false,
+    generationSelection: {
+      mode: 'exploit' as const,
+      eligibleDraftIds: [candidate.draftCandidateId!],
+      propensity: 1,
+      explorationRate: rate,
+      qualityMarginTolerance: V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE,
+    },
+  }));
+  if (rate === 0 || alternatives.length === 0) return result;
+  const explore = random() < rate;
+  const chosen = explore
+    ? alternatives[Math.min(alternatives.length - 1, Math.floor(Math.max(0, random()) * alternatives.length))]
+    : baseline;
+  result[slot] = {
+    ...chosen,
+    experimentHoldout: explore,
+    generationSelection: {
+      mode: explore ? 'explore' : 'exploit',
+      eligibleDraftIds: [baseline.draftCandidateId!, ...alternatives.map((candidate) => candidate.draftCandidateId!)],
+      propensity: explore ? rate / alternatives.length : 1 - rate,
+      explorationRate: rate,
+      qualityMarginTolerance: V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE,
+    },
+  };
+  return result;
 }
 
 export function buildGenerationWritingConstraintsV2(
@@ -3286,7 +3465,7 @@ export function normalizeIdeaCandidatesV2({
     if (candidate.noveltyScore < 0.38) candidate.rejectionCodes.push('recent_semantic_repeat');
     if (candidate.identityScore < 0.28) candidate.rejectionCodes.push('low_identity_fit');
     if (/\b(?:politic|election|president|putin|trump|democrat|republican)\b/i.test(ideaText(candidate))
-      && !voiceProfile.topics.some((topic) => /politic|policy|government/i.test(topic))) {
+      && !voiceProfile.topics.some((topic) => /politic|policy|government|election|geopolitic/i.test(topic))) {
       candidate.rejectionCodes.push('political_drift');
     }
     const blockIssue = semanticBlockIssue(candidate, blocks);
@@ -4307,6 +4486,8 @@ function initialVariantMoveForAnchor(anchor: DictionAnchor | undefined, slot: nu
 }
 
 interface DraftEvaluation {
+  /** Set only after every deterministic and final-critic gate has passed. */
+  qualifiedCandidate?: RankedProtocolTweet;
   draft: DraftCandidate;
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -4361,6 +4542,13 @@ function sourceDocumentsForBrief(brief: GenerationBriefV2, documents: SourceDocu
     });
 }
 
+export type InitialCreativeMoveV2 = 'direct_judgment' | 'concrete_decision' | 'unexpected_consequence';
+const INITIAL_CREATIVE_MOVE_INSTRUCTIONS_V2: Record<InitialCreativeMoveV2, string> = {
+  direct_judgment: 'Make the shortest native statement of the approved belief. Lead with the concrete subject and the author\'s actual position. Stop before explaining the mechanism or consequence.',
+  concrete_decision: 'Express the approved belief through one specific choice, threshold, or mechanism already permitted by the idea and evidence. Change what the reader notices or decides, not merely the phrasing. Keep hypothetical choices explicitly hypothetical; invent no personal action or fact. Do not append a second consequence.',
+  unexpected_consequence: 'Make the most surprising consequence already present in the approved stakes legible in the author\'s natural voice. Keep predictions and counterfactuals explicit. Do not invent a new outcome or mechanism, copy the direct-judgment skeleton, or add a slogan.',
+};
+
 export function buildTweetWritingPromptV2(
   idea: IdeaCandidate,
   brief: GenerationBriefV2,
@@ -4374,6 +4562,8 @@ export function buildTweetWritingPromptV2(
   subjectNativeReactionPattern: NativeReactionPatternV2 | null = null,
   initialSingleMoveFromAnchor = false,
   voiceProfile?: VoiceProfile | null,
+  approvedEditExamples: ApprovedEditExample[] = [],
+  creativeMove?: InitialCreativeMoveV2,
 ): string {
   const verifiedEntityMentions = verifiedEntityMentionsForIdea(brief, idea);
   const repairSource = revisionStrategy === 'critic_surgical'
@@ -4510,6 +4700,10 @@ export function buildTweetWritingPromptV2(
       voiceMechanics: learningBrief.voiceMechanics,
       frontierForecast: learningBrief.frontierForecast,
     } : null,
+    approvedEditExamples: approvedEditExamples.length > 0 ? {
+      instruction: 'These paired drafts show choices this author explicitly accepted. Prefer the after-state judgment, rhythm, and amount of explanation. Transfer the editorial change only; neither version supplies a new fact, premise, personal experience, distinctive wording, or sentence skeleton for this post.',
+      examples: approvedEditExamples,
+    } : null,
     sameSubjectNativeReactionPattern: subjectNativeReactionPattern ? {
       ...subjectNativeReactionPattern,
       instruction: 'Positive public-move evidence from a same-subject operator post. Match only its reaction mode, length band, paragraph count, and use of first person. The prior premise and every word of prior prose are intentionally absent; do not infer or recreate them.',
@@ -4517,6 +4711,10 @@ export function buildTweetWritingPromptV2(
     writingConstraints: writingConstraints || null,
     responseContract: {
       draftCount,
+      independentCreativeMove: creativeMove ? {
+        move: creativeMove,
+        instruction: INITIAL_CREATIVE_MOVE_INSTRUCTIONS_V2[creativeMove],
+      } : null,
       variantMoves: initialMultiDraft
         ? Array.from({ length: draftCount }, (_, index) => {
             const move = initialVariantMoveForAnchor(anchors[index], index + 1);
@@ -4548,7 +4746,10 @@ export function buildTweetWritingPromptV2(
           move: 'subject_rewrite',
           instruction: 'Return to the named subject and approved publicMove, then solve the same diagnosis with a different opening and sentence skeleton.',
         },
-      ] : (revisionContext?.length || 0) === 0 ? [initialSingleVariantMove] : [],
+      ] : (revisionContext?.length || 0) === 0 ? [{
+        ...initialSingleVariantMove,
+        ...(creativeMove ? { move: creativeMove, instruction: INITIAL_CREATIVE_MOVE_INSTRUCTIONS_V2[creativeMove] } : {}),
+      }] : [],
       diversityContract: initialMultiDraft
         ? explicitTimedFrontierForecast
           ? 'Drafts map to variantMoves by slot. Each slot has one voiceAnchorId and nativeReactionMode; perform that native move and use only that anchor as evidence for cleanup level, roughness, line breaks, and public posture. Do not average the anchors into one house style. Preserve the approved timing and belief, but vary how much is said: one bare call, one call with a mechanism, and one call with a consequence. Never combine all three into a horizon-mechanism-consequence checklist. Drafts must not share an opening clause, sentence skeleton, or closer. Compression means no filler, not that every thought must become a slogan.'
@@ -4664,6 +4865,7 @@ async function writeIdeaDrafts({
   candidateIdSalt = '',
   initialDraftCount = MAX_DRAFTS_PER_IDEA,
   initialSingleMoveFromAnchor = false,
+  initialCreativeMove,
 }: {
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -4679,6 +4881,7 @@ async function writeIdeaDrafts({
   candidateIdSalt?: string;
   initialDraftCount?: 1 | 2 | typeof MAX_DRAFTS_PER_IDEA;
   initialSingleMoveFromAnchor?: boolean;
+  initialCreativeMove?: InitialCreativeMoveV2;
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
     ? buildGeoffreyNativeV2WriterContract()
@@ -4714,7 +4917,9 @@ async function writeIdeaDrafts({
     idea,
     collectOperatorAnchors(input),
   );
-  const variantInstruction = draftCount === 1
+  const variantInstruction = initialSingleDraft && initialCreativeMove
+    ? `Write exactly one X post. ${INITIAL_CREATIVE_MOVE_INSTRUCTIONS_V2[initialCreativeMove]}`
+    : draftCount === 1
     ? initialSingleDraft
       ? initialSingleMoveFromAnchor
         ? `Write exactly one X post from the approved idea. ${initialVariantMoveForAnchor(anchors[0], 1).instruction}`
@@ -4744,7 +4949,9 @@ async function writeIdeaDrafts({
         ? 'Let both initial drafts choose their own natural length and shape. Use different openings and public moves; neither draft is a revision of the other.'
         : 'Keep one candidate close enough to preserve the sound core, but make the other materially different in wording and shape. Both must fix the substantive issue named by the critic.'
       : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
-  const consequenceInstruction = explicitTimedFrontierForecast && revisionContext.length === 0
+  const consequenceInstruction = initialSingleDraft && initialCreativeMove
+    ? `This independent variant must perform only the ${initialCreativeMove.replace(/_/g, ' ')} move assigned in the payload. Use the approved packet only; no new facts, personal experiences, or conclusions.`
+    : explicitTimedFrontierForecast && revisionContext.length === 0
     ? 'Preserve the approved timing in every variant, but keep the public thought singular: one bare call, one may use the approved mechanism, and one may use the approved consequence. Never combine all of them into visible rubric compliance.'
     : initialMultiDraft
       ? 'For this initial multi-variant pass, make exactly one supplied consequence legible in exactly one variant; the other variants should stop at the direct reaction.'
@@ -4786,6 +4993,8 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       subjectNativeReactionPattern,
       initialSingleMoveFromAnchor,
       input.voiceProfile,
+      selectApprovedEditExamples(input.signals, idea.topic),
+      initialCreativeMove,
     ),
   }, calls);
   const root = parseJsonRoot(result.text);
@@ -4818,7 +5027,9 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       storyClusterId: idea.storyClusterId,
       content,
       format: normalizeFormat(entry.format),
-      posture: stringField(entry, 'posture', 180) || `Variant ${index + 1}`,
+      posture: initialCreativeMove
+        ? `${initialCreativeMove}: ${stringField(entry, 'posture', 140)}`
+        : stringField(entry, 'posture', 180) || `Variant ${index + 1}`,
       voiceAnchorIds: anchors.map((anchor) => anchor.id),
       evidenceIds: idea.evidenceIds,
       generationModelStack: input.modelStack,
@@ -5092,17 +5303,21 @@ async function generateDraftEvaluations({
       candidateIdSalt: string;
       anchorOffset: number;
       initialSingleMoveFromAnchor: boolean;
-    }> = isGeoffreyVoiceProfile(input.voiceProfile)
+      initialCreativeMove?: InitialCreativeMoveV2;
+    }> = input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK || (isGeoffreyVoiceProfile(input.voiceProfile)
       && (
         input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
         || input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-      )
+      ))
       ? Array.from({ length: MAX_DRAFTS_PER_IDEA }, (_, index) => ({
           modelStack: input.modelStack,
           initialDraftCount: 1 as const,
           candidateIdSalt: `${input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK ? 'fable' : 'gpt'}-single-${index + 1}`,
           anchorOffset: index,
           initialSingleMoveFromAnchor: index > 0,
+          initialCreativeMove: input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
+            ? (['direct_judgment', 'concrete_decision', 'unexpected_consequence'] as const)[index]
+            : undefined,
         }))
       : [{
           modelStack: input.modelStack,
@@ -5143,6 +5358,7 @@ async function generateDraftEvaluations({
           initialDraftCount: plan.initialDraftCount,
           candidateIdSalt: plan.candidateIdSalt,
           initialSingleMoveFromAnchor: plan.initialSingleMoveFromAnchor,
+          initialCreativeMove: plan.initialCreativeMove,
         });
         return drafts.map((draft) => ({ draft, anchors: planAnchors }));
       } catch {
@@ -5441,6 +5657,10 @@ async function judgeDraftsOnce(
         learnedEditorialStrategy: buildGenerationLearningBriefV2(input.learnings, input.memory),
         writingConstraints: buildGenerationWritingConstraintsV2(input),
         priorWritingRejections: getV2EditorialFeedbackLessons(blocks, ['copy']),
+        approvedEditExamples: {
+          instruction: 'Use these accepted edits to compare editorial judgment and voice, never as evidence for the candidate\'s facts or as wording to reuse.',
+          examples: selectApprovedEditExamples(input.signals),
+        },
         operatorPremiseExclusions: operatorPremiseExclusions(
           input,
           eligible.map((entry) => entry.idea.topic),
@@ -5895,12 +6115,7 @@ function toRankedTweet(
     draftExperimentId: draft.id,
     experimentBatchId: draft.generationRunId,
     experimentHypothesis: ideaPublicMove(idea),
-    experimentHoldout: shouldFlagExplorationHoldoutV2(
-      draft.id,
-      draft.format,
-      featureTags.hook,
-      input.style.banditPolicy,
-    ),
+    experimentHoldout: false,
     promptVariant: 'evidence_idea_voice_v4',
     targetAudienceSegment: audience,
     segmentHypothesis: `Test whether ${audience} responds to this evidence-backed operator judgment.`,
@@ -5987,6 +6202,7 @@ async function selectFinalTweets({
       ]);
       continue;
     }
+    evaluation.qualifiedCandidate = toRankedTweet(evaluation, score, judge, input);
     selectionPool.push(evaluation);
   }
   // Every draft in the pool has already cleared the full gate stack, so the
@@ -6040,7 +6256,7 @@ async function selectFinalTweets({
         portfolioCompanyContext: evaluation.brief.portfolioCompanyContext,
       }, input.allTweets)
       : null;
-    if (contentMixDecision?.issue || (companyLed && selectedCompanyLed >= 1)) return false;
+    if (contentMixDecision?.issue || (isGeoffreyVoiceProfile(input.voiceProfile) && companyLed && selectedCompanyLed >= 1)) return false;
     const score = judge.scores.get(evaluation.draft.id);
     if (!score) return false;
     const isQuestion = isQuestionDraftV2(evaluation.draft.content);
@@ -6601,6 +6817,9 @@ function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
 }
 
 export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Promise<RankedProtocolTweet[]> {
+  if (input.previewContext && (input.mode !== 'preview' || input.persistArtifacts !== false)) {
+    throw new Error('preview_context_requires_non_persisting_preview');
+  }
   const runId = `generation-v2-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const persistArtifacts = input.persistArtifacts !== false;
   const policyVersions = getGenerationPolicyVersions(input.voiceProfile, input.surface || 'original');
@@ -6704,7 +6923,13 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       await publishTrace();
       return [];
     }
-    const [documents, stories, blocks, recentIdeas, dynamicIdeaSeeds] = await Promise.all([
+    const [documents, stories, blocks, recentIdeas, dynamicIdeaSeeds] = input.previewContext ? [
+      input.previewContext.documents,
+      input.previewContext.stories || [],
+      input.previewContext.blocks || [],
+      input.previewContext.recentIdeas || [],
+      input.previewContext.dynamicIdeaSeeds || [],
+    ] as const : await Promise.all([
       getSourceDocuments(input.agentId, 300),
       getStoryClusters(input.agentId, 200),
       getSemanticBlocks(input.agentId),
@@ -6713,7 +6938,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         .then((seeds) => pruneExpiredDynamicSeeds(seeds, Date.now()))
         .catch(() => []),
     ]);
-    const builtBriefs = buildGenerationBriefsV2({
+    const builtBriefs = input.previewContext?.briefs || buildGenerationBriefsV2({
       count: input.count,
       requestedTopic: input.requestedTopic,
       stories,
@@ -7211,6 +7436,34 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         }
       }
       selected = selected.filter((_, index) => !demote.has(index));
+    }
+    if (input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK && selected.length > 0) {
+      const beforeExplorationIds = new Set(selected.map((candidate) => candidate.draftCandidateId));
+      selected = selectQualifiedExplorationV2({
+        selected,
+        qualifiedCandidates: evaluations.flatMap((entry) => (
+          entry.qualifiedCandidate
+          && entry.draft.rejectionCodes.every((code) => code === 'copy_not_selected')
+            ? [entry.qualifiedCandidate] : []
+        )),
+        input,
+      });
+      const selectedById = new Map(selected.map((candidate) => [candidate.draftCandidateId, candidate]));
+      for (const evaluation of evaluations) {
+        const candidate = selectedById.get(evaluation.draft.id);
+        if (candidate) {
+          evaluation.draft.status = 'selected';
+          evaluation.draft.rejectionCodes = [];
+          evaluation.draft.generationSelection = candidate.generationSelection;
+        } else if (beforeExplorationIds.has(evaluation.draft.id)) {
+          evaluation.draft.status = 'rejected';
+          evaluation.draft.rejectionCodes = ['exploration_not_selected'];
+        }
+      }
+      trace.stageCounts.explorationEligibleAlternatives = Math.max(0, ...selected.map((candidate) => (
+        (candidate.generationSelection?.eligibleDraftIds.length || 1) - 1
+      )));
+      trace.stageCounts.explorationSelections = selected.filter((candidate) => candidate.generationSelection?.mode === 'explore').length;
     }
     const finalDrafts = evaluations.map((entry) => entry.draft);
     trace.ideaCandidateIds = ideas.map((idea) => idea.id);

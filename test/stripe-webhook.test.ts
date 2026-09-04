@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   claimStripeWebhookEvent: vi.fn(),
+  completeStripeWebhookEvent: vi.fn(),
   releaseStripeWebhookEvent: vi.fn(),
   syncStripePaidInvoice: vi.fn(),
   handleStripeChargeRefunded: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   claimStripeWebhookEvent: mocks.claimStripeWebhookEvent,
+  completeStripeWebhookEvent: mocks.completeStripeWebhookEvent,
   releaseStripeWebhookEvent: mocks.releaseStripeWebhookEvent,
 }));
 vi.mock('@/lib/billing-sync', () => ({
@@ -45,7 +47,8 @@ function request() {
 describe('Stripe webhook idempotency', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimStripeWebhookEvent.mockResolvedValue(true);
+    mocks.claimStripeWebhookEvent.mockResolvedValue({ status: 'claimed', owner: 'attempt-1' });
+    mocks.completeStripeWebhookEvent.mockResolvedValue(true);
     mocks.releaseStripeWebhookEvent.mockResolvedValue(undefined);
     mocks.subscriptionIdFromInvoice.mockReturnValue(null);
     mocks.constructEvent.mockReturnValue({
@@ -60,23 +63,41 @@ describe('Stripe webhook idempotency', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.syncStripePaidInvoice).toHaveBeenCalledWith({ id: 'in_paid' });
+    expect(mocks.completeStripeWebhookEvent).toHaveBeenCalledWith('evt_paid', 'attempt-1');
     expect(mocks.releaseStripeWebhookEvent).not.toHaveBeenCalled();
   });
 
   it('acknowledges duplicate events without repeating side effects', async () => {
-    mocks.claimStripeWebhookEvent.mockResolvedValue(false);
+    mocks.claimStripeWebhookEvent.mockResolvedValue({ status: 'completed', owner: 'attempt-2' });
     const response = await POST(request() as any);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ received: true, duplicate: true });
     expect(mocks.syncStripePaidInvoice).not.toHaveBeenCalled();
+    expect(mocks.completeStripeWebhookEvent).not.toHaveBeenCalled();
   });
 
   it('releases a failed event claim so Stripe can retry it', async () => {
     mocks.syncStripePaidInvoice.mockRejectedValue(new Error('temporary KV failure'));
     const response = await POST(request() as any);
 
-    expect(response.status).toBe(400);
-    expect(mocks.releaseStripeWebhookEvent).toHaveBeenCalledWith('evt_paid');
+    expect(response.status).toBe(500);
+    expect(mocks.releaseStripeWebhookEvent).toHaveBeenCalledWith('evt_paid', 'attempt-1');
+    expect(mocks.completeStripeWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it('asks Stripe to retry an event still owned by another live processor', async () => {
+    mocks.claimStripeWebhookEvent.mockResolvedValue({ status: 'busy', owner: 'attempt-2' });
+    const response = await POST(request() as any);
+    expect(response.status).toBe(503);
+    expect(mocks.syncStripePaidInvoice).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge work whose completion receipt could not be saved', async () => {
+    mocks.syncStripePaidInvoice.mockResolvedValue(undefined);
+    mocks.completeStripeWebhookEvent.mockResolvedValue(false);
+    const response = await POST(request() as any);
+    expect(response.status).toBe(500);
+    expect(mocks.releaseStripeWebhookEvent).toHaveBeenCalledWith('evt_paid', 'attempt-1');
   });
 });

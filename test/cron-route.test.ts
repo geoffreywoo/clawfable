@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   checkPerformance: vi.fn(),
   buildLearnings: vi.fn(),
   autoAdjustSettings: vi.fn(),
+  getLearningRefreshIntervalMs: vi.fn(),
   maybeReanalyze: vi.fn(),
   refreshAgentTopicIntelligence: vi.fn(),
   refreshAutopilotHealth: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock('@/lib/performance', () => ({
   checkPerformance: mocks.checkPerformance,
   buildLearnings: mocks.buildLearnings,
   autoAdjustSettings: mocks.autoAdjustSettings,
+  getLearningRefreshIntervalMs: mocks.getLearningRefreshIntervalMs,
   maybeReanalyze: mocks.maybeReanalyze,
 }));
 
@@ -102,6 +104,8 @@ vi.mock('@/lib/autopilot-health', () => ({
 
 import { CRON_AUTOPILOT_LOCK_TTL_SECONDS, GET, maxDuration } from '@/app/api/cron/post/route';
 import { TwitterActionError } from '@/lib/twitter-debug';
+import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
+import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
 describe('cron autopilot isolation', () => {
   it('has enough runtime and lock headroom for the quality generation pipeline', () => {
@@ -165,6 +169,7 @@ describe('cron autopilot isolation', () => {
     mocks.getLearnings.mockResolvedValue(null);
     mocks.getPerformanceHistory.mockResolvedValue([]);
     mocks.checkPerformance.mockResolvedValue(0);
+    mocks.getLearningRefreshIntervalMs.mockReturnValue(24 * 60 * 60 * 1000);
     mocks.maybeReanalyze.mockResolvedValue(undefined);
     mocks.maybeEvolveSoul.mockResolvedValue({ evolved: false, changeSummary: '' });
     mocks.acquireAutopilotLock.mockResolvedValue({
@@ -357,6 +362,44 @@ describe('cron autopilot isolation', () => {
         source: 'cron',
       }),
     );
+  });
+
+  it.each([
+    ['outdated derivation', 'learning-previous-version', true],
+    ['current derivation', LEARNING_DERIVATION_VERSION, false],
+  ] as const)('handles fresh learnings with %s without hiding learning errors', async (_label, version, shouldRebuild) => {
+    const connectedAgent = {
+      id: 'agent-1', handle: 'geoffreywoo', name: 'Geoffrey Woo', isConnected: 1,
+      apiKey: 'key', apiSecret: 'secret', accessToken: 'token', accessSecret: 'access-secret', xUserId: 'user-1',
+    };
+    mocks.getAgents.mockResolvedValue([connectedAgent]);
+    mocks.getAgent.mockResolvedValue(connectedAgent);
+    mocks.getRecentMentions.mockResolvedValue([]);
+    mocks.getMentionsFromTwitter.mockResolvedValue([]);
+    mocks.decodeKeys.mockReturnValue({ appKey: 'key', appSecret: 'secret', accessToken: 'token', accessSecret: 'access-secret' });
+    mocks.runAutopilot.mockResolvedValue({ agentId: 'agent-1', action: 'skipped', reason: 'nothing to post' });
+    const freshLearnings = {
+      updatedAt: new Date().toISOString(),
+      voiceCorpus: { version: VOICE_CORPUS_SCHEMA_VERSION },
+      learningDerivation: { version },
+    };
+    mocks.getLearnings.mockResolvedValue(freshLearnings);
+    mocks.getPerformanceHistory.mockResolvedValue([{ tweetId: 'posted-1' }]);
+    const rebuilt = { ...freshLearnings, learningDerivation: { version: LEARNING_DERIVATION_VERSION } };
+    mocks.buildLearnings.mockResolvedValue(rebuilt);
+
+    const response = await GET(cronRequest() as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.getLearningRefreshIntervalMs).toHaveBeenCalledWith(connectedAgent);
+    expect(mocks.buildLearnings).toHaveBeenCalledTimes(shouldRebuild ? 1 : 0);
+    if (shouldRebuild) {
+      expect(mocks.buildLearnings).toHaveBeenCalledWith(connectedAgent);
+      expect(mocks.autoAdjustSettings).toHaveBeenCalledWith('agent-1', rebuilt);
+    } else {
+      expect(mocks.autoAdjustSettings).not.toHaveBeenCalled();
+    }
+    expect(mocks.addPostLogEntry).not.toHaveBeenCalledWith('agent-1', expect.objectContaining({ format: 'cron_learning_error' }));
   });
 
   it('logs reset-aware X rate limits from cron mention refresh', async () => {

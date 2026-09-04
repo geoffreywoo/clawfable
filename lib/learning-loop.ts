@@ -12,7 +12,7 @@ import type { RemixEntry } from './kv-storage';
 import type { BanditPolicy } from './bandit';
 import { summarizeBanditExploitLessons } from './bandit';
 import type { VoiceProfile } from './soul-parser';
-import { summarizeEditDelta, type EditDeltaSummary } from './outcome-rewards';
+import { buildOutcomeEpisodes, summarizeEditDelta, type EditDeltaSummary } from './outcome-rewards';
 import {
   summarizeAudienceSegmentLessons,
   summarizeConversationInsights,
@@ -29,10 +29,126 @@ import {
   summarizeViralityPostmortemMemory,
 } from './growth-engine';
 import { classifyTasteFeedbackReason } from './account-taste';
-import { summarizeFollowerGrowth, weightedSpreadEngagement } from './performance-signals';
+import { isMaturePerformance, summarizeFollowerGrowth, weightedSpreadEngagement } from './performance-signals';
+import { filterLearningEvidence } from './learning-evidence';
 
 export { summarizeEditDelta };
 export type { EditDeltaSummary };
+
+export function buildEditLearningMetadata(original: string, edited: string, topic?: string): NonNullable<LearningSignal['metadata']> {
+  const summary = summarizeEditDelta(original, edited);
+  return {
+    ...summary.metadata,
+    originalDraft: original,
+    editedDraft: edited,
+    preferenceHint: summary.preferenceHints[0] || null,
+    preferenceHints: summary.preferenceHints.join('\n') || null,
+    acceptedEdit: true,
+    editTopic: topic || null,
+  };
+}
+
+export interface ApprovedEditExample {
+  signalId: string;
+  tweetId?: string;
+  before: string;
+  after: string;
+  lesson: string;
+  createdAt: string;
+}
+
+/** Recover missing examples in a derived view; never rewrite the raw signal ledger. */
+export function recoverEditLearningSignals(signals: LearningSignal[], tweets: Tweet[]): LearningSignal[] {
+  const byId = new Map(tweets.map((tweet) => [String(tweet.id), tweet]));
+  const recovered = signals.map((signal) => {
+    if (!['edited_before_queue', 'edited_before_post'].includes(signal.signalType) || signal.inferred) return signal;
+    if (typeof signal.metadata?.originalDraft === 'string' && typeof signal.metadata?.editedDraft === 'string') return signal;
+    const child = signal.tweetId ? byId.get(String(signal.tweetId)) : undefined;
+    const parentId = signal.metadata?.parentTweetId || child?.parentTweetId;
+    const parent = parentId ? byId.get(String(parentId)) : undefined;
+    if (!child || !parent || parent.pipelineVersion !== 'v2' || (child.editCount || 0) > 0) return signal;
+    if (typeof signal.metadata?.originalLength === 'number' && signal.metadata.originalLength !== parent.content.length) return signal;
+    if (typeof signal.metadata?.editedLength === 'number' && signal.metadata.editedLength !== child.content.length) return signal;
+    if (parent.content === child.content || parent.content.length > 4000 || child.content.length > 4000) return signal;
+    return { ...signal, metadata: { ...signal.metadata,
+      ...buildEditLearningMetadata(parent.content, child.content, child.topic || undefined),
+      acceptedEdit: child.status === 'queued' || child.status === 'posted',
+      parentTweetId: parent.id, editPairRecovered: true, editPairRecoverySource: 'immutable_parent_child',
+    } };
+  });
+  const signaledChildren = new Set(signals.filter((signal) => ['edited_before_queue', 'edited_before_post'].includes(signal.signalType))
+    .map((signal) => String(signal.tweetId)));
+  for (const child of tweets) {
+    if (!child.parentTweetId || child.contentProvenance !== 'operator_written' || signaledChildren.has(String(child.id))) continue;
+    if ((child.editCount || 0) > 0 || (child.status !== 'queued' && child.status !== 'posted')) continue;
+    const parent = byId.get(String(child.parentTweetId));
+    if (!parent || parent.pipelineVersion !== 'v2' || parent.content === child.content
+      || parent.content.length > 4000 || child.content.length > 4000) continue;
+    const summary = summarizeEditDelta(parent.content, child.content);
+    recovered.push({ id: `derived-edit:${parent.id}:${child.id}`, agentId: child.agentId, tweetId: child.id,
+      signalType: child.status === 'queued' ? 'edited_before_queue' : 'edited_before_post', surface: 'queue',
+      rewardDelta: summary.rewardDelta, createdAt: child.createdAt, reason: summary.summary,
+      metadata: { ...buildEditLearningMetadata(parent.content, child.content, child.topic || undefined),
+        parentTweetId: parent.id, editPairRecovered: true, editPairRecoverySource: 'immutable_parent_child' },
+    });
+  }
+  return recovered;
+}
+
+export function selectApprovedEditExamples(signals: LearningSignal[], topic?: string, limit = 2): ApprovedEditExample[] {
+  const editTypes = new Set(['edited_before_queue', 'edited_before_post', 'taste_calibration_edit']);
+  const rejectionTypes = new Set(['deleted_from_queue', 'deleted_from_x', 'taste_less_like_this', 'reply_rejected']);
+  const currentSignals = filterLearningEvidence(signals).signals;
+  const topicWords = new Set(((topic || '').toLowerCase().match(/[a-z0-9]{2,}/g) || [])
+    .filter((word) => !['the', 'and', 'of', 'to', 'in', 'on', 'for'].includes(word)));
+  const subjects = (signal: LearningSignal) => [signal.tweetId, signal.metadata?.parentTweetId].filter(Boolean).map(String);
+  const pair = (signal: LearningSignal) => ({
+    before: typeof signal.metadata?.originalDraft === 'string' ? signal.metadata.originalDraft.trim() : '',
+    after: typeof signal.metadata?.editedDraft === 'string' ? signal.metadata.editedDraft.trim() : '',
+  });
+  const candidates = currentSignals.flatMap((signal) => {
+    if (!editTypes.has(signal.signalType) || signal.inferred || signal.metadata?.acceptedEdit === false) return [];
+    const { before, after } = pair(signal);
+    // Preserve a whole correction within the existing queue/post input bound.
+    // A partially copied after-state teaches the wrong writing decision.
+    if (!before || !after || before === after || before.length > 4000 || after.length > 4000) return [];
+    const created = Date.parse(signal.createdAt);
+    if (!Number.isFinite(created)) return [];
+    const related = new Set(subjects(signal));
+    const superseded = currentSignals.some((event) => {
+      if (Date.parse(event.createdAt) <= created || !subjects(event).some((subject) => related.has(subject))) return false;
+      if (rejectionTypes.has(event.signalType) && event.metadata?.softArchive !== true) return true;
+      if (!editTypes.has(event.signalType)) return false;
+      const newer = pair(event);
+      return Boolean(newer.after && newer.after !== after);
+    });
+    if (superseded) return [];
+    const lesson = signal.reason || 'Match the owner’s revised judgment, detail, and rhythm.';
+    const featureLesson = [lesson, signal.metadata?.preferenceHints, signal.metadata?.editedHook,
+      signal.metadata?.editedTone, signal.metadata?.editedSpecificity, signal.metadata?.editedStructure].join(' ').toLowerCase();
+    const relevance = [...topicWords].filter((word) => featureLesson.includes(word)).length;
+    const sourceTopic = String(signal.metadata?.editTopic || '').toLowerCase();
+    const crossTopic = sourceTopic && topicWords.size > 0 && ![...topicWords].some((word) => sourceTopic.includes(word));
+    const ageDays = Math.max(0, (Date.now() - created) / 86400000);
+    // Transferable lesson matches dominate recency. Prefer cross-topic examples
+    // when relevance is close so calibration does not become premise copying.
+    const score = relevance + (1 / (1 + ageDays / 14)) + (crossTopic ? 0.15 : 0);
+    return [{ signalId: signal.id, tweetId: signal.tweetId, before, after, lesson, createdAt: signal.createdAt, score }];
+  }).sort((a, b) => b.score - a.score || Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const seen = new Set<string>();
+  const selected: ApprovedEditExample[] = [];
+  let remainingChars = 10000;
+  for (const { score: _score, ...example } of candidates) {
+    const key = JSON.stringify([example.before, example.after]);
+    const chars = example.before.length + example.after.length;
+    if (seen.has(key) || chars > remainingChars) continue;
+    seen.add(key);
+    selected.push(example);
+    remainingChars -= chars;
+    if (selected.length >= Math.max(0, limit)) break;
+  }
+  return limit <= 0 ? [] : selected;
+}
 
 function unique(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
@@ -137,6 +253,7 @@ function summarizeOperatorPreferences(signals: LearningSignal[], remixPatterns: 
   }
 
   for (const signal of signals) {
+    if (signal.metadata?.acceptedEdit === false) continue;
     for (const hint of readPreferenceHints(signal.metadata)) {
       counts[hint] = (counts[hint] || 0) + 1;
     }
@@ -161,6 +278,7 @@ function summarizeNativeTasteComplaints(
   // never evidence of a preference, and account-specific wording is gated on
   // the voice profile.
   for (const entry of feedback) {
+    if (entry.rating !== 'down') continue;
     const classified = classifyTasteFeedbackReason(entry.intentSummary || entry.reason, '', { voiceProfile });
     for (const hint of classified.preferenceHints) {
       counts[hint] = (counts[hint] || 0) + 1;
@@ -187,7 +305,8 @@ function summarizeEditTransformations(signals: LearningSignal[]): string[] {
   const counts: Record<string, number> = {};
 
   for (const signal of signals) {
-    if (signal.signalType !== 'edited_before_queue' && signal.signalType !== 'edited_before_post') continue;
+    if (!['edited_before_queue', 'edited_before_post', 'taste_calibration_edit'].includes(signal.signalType)
+      || signal.metadata?.acceptedEdit === false || signal.inferred) continue;
     const originalHook = typeof signal.metadata?.originalHook === 'string' ? signal.metadata.originalHook : null;
     const editedHook = typeof signal.metadata?.editedHook === 'string' ? signal.metadata.editedHook : null;
     const originalTone = typeof signal.metadata?.originalTone === 'string' ? signal.metadata.originalTone : null;
@@ -246,7 +365,7 @@ function summarizeWeeklyChanges(
   if (tasteSignals > 0) changes.push(`${tasteSignals} taste calibration signal${tasteSignals === 1 ? '' : 's'} tightened the owner preference model this week.`);
   if (momentumTopics.length > 0) changes.push(`Momentum is building around ${momentumTopics.slice(0, 2).join(' and ')} right now.`);
 
-  const recentReasons = unique(recentFeedback.map((entry) => entry.intentSummary || entry.reason)).slice(0, 2);
+  const recentReasons = unique(recentFeedback.filter((entry) => entry.rating === 'down').map((entry) => entry.intentSummary || entry.reason)).slice(0, 2);
   for (const reason of recentReasons) {
     changes.push(`Recent feedback is pushing the system away from: ${reason}.`);
   }
@@ -439,13 +558,17 @@ export function buildPersonalizationMemory({
   mentions = [],
   followerSnapshots = [],
 }: BuildPersonalizationMemoryOptions): PersonalizationMemory {
+  ({ signals, feedback } = filterLearningEvidence(signals, feedback, allTweets));
+  signals = recoverEditLearningSignals(signals, allTweets);
+  performanceHistory = performanceHistory.filter(isMaturePerformance);
   const alwaysDoMoreOfThis = unique([
+    ...feedback.filter((entry) => entry.rating === 'up').map((entry) => entry.intentSummary || entry.reason || ''),
     ...(learnings?.insights.slice(0, 3) || []),
     ...summarizeReferenceBank(learnings?.bestPerformers || []).slice(0, 2),
   ]).slice(0, 5);
 
   const neverDoThisAgain = unique([
-    ...feedback.map((entry) => entry.intentSummary || entry.reason || '').filter(Boolean),
+    ...feedback.filter((entry) => entry.rating === 'down').map((entry) => entry.intentSummary || entry.reason || '').filter(Boolean),
     ...(learnings?.styleFingerprint?.antiPatterns || []),
   ]).slice(0, 5);
   // Rejections expire after 21 days: the exclusion corpus previously only
@@ -483,7 +606,13 @@ export function buildPersonalizationMemory({
   const portfolioLessons = summarizePortfolioLessons(learnings);
   const relationshipLessons = summarizeRelationshipLessons(learnings);
   const viralityPostmortems = summarizeViralityPostmortemMemory(learnings);
-  const outcomeFatigueLessons = summarizeOutcomeFatigueLessons(allTweets);
+  const currentEpisodes = buildOutcomeEpisodes({ agentId: allTweets[0]?.agentId || 'agent', tweets: allTweets,
+    signals, performanceHistory });
+  const matureRewards = new Map(currentEpisodes.filter((episode) => episode.stage === 'final')
+    .map((episode) => [String(episode.tweetId), episode.reward]));
+  const outcomeFatigueLessons = summarizeOutcomeFatigueLessons(allTweets.map((tweet) => ({
+    ...tweet, rewardBreakdown: matureRewards.get(String(tweet.id)),
+  })));
 
   const identityConstraints = unique([
     ...summarizeDirectiveRules(directiveRules),

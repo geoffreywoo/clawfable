@@ -2990,12 +2990,12 @@ describe('Tweet Generation V2', () => {
     expect(ideaPrompt.requirements.verifiedSourceReactionContract).toContain('Do not invent a downstream business model');
   });
 
-  it('keeps at least 70% of refill briefs in core topics without excluding recent proven lanes', () => {
+  it('keeps Geoffrey refill briefs in core topics without excluding recent proven lanes', () => {
     const briefs = buildGenerationBriefsV2({
       count: 2,
       stories: [],
       documents: [],
-      voiceProfile,
+      voiceProfile: { ...voiceProfile, communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: native voice.' },
       analysis: { engagementPatterns: { topTopics: ['AI', 'culture', 'startups', 'personal', 'humor', 'sports'] } } as any,
       learnings: {
         manualTopicProfile: [

@@ -12,7 +12,7 @@ vi.mock('@/lib/kv-storage', () => ({
 }));
 
 function rows(format: string, count = 6): TweetPerformance[] {
-  const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recent = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   return Array.from({ length: count }, (_, index) => ({
     tweetId: `${format}-${index}`,
     xTweetId: `x-${format}-${index}`,

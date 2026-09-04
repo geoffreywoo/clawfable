@@ -20,8 +20,6 @@ import {
   getPostLog,
   getRecentMentions,
   updateTweet,
-  saveFeedback,
-  addLearningSignal,
   getManualExampleCuration,
   getLearningSignals,
   invalidateAgentConnection,
@@ -35,8 +33,11 @@ import {
 } from './kv-storage';
 import { getDeepTimeline, getUserTimeline, decodeKeys, getFollowing, getAccountPublicMetrics, type TwitterKeys } from './twitter-client';
 import { analyzeAccount } from './analysis';
-import { inferDeleteIntent } from './delete-intent';
-import { generateText, PUBLISHING_V2_MODEL_STACK } from './ai';
+import { reconcileXRemovals } from './x-removal-reconciliation';
+import { filterLearningEvidence, LEARNING_DERIVATION_VERSION } from './learning-evidence';
+import { deriveMaturePerformanceRewards, PERFORMANCE_REWARD_DERIVATION_VERSION } from './performance-rewards';
+import { recoverEditLearningSignals } from './learning-loop';
+import { generateText, resolvePublishingV2ModelStacks } from './ai';
 import { extractCandidateFeatureTags, extractStructureType } from './tweet-features';
 import { buildManualTopicProfile } from './source-planner';
 import { normalizeContentStyleMode, SHITPOAST_STYLE_MODE, STANDARD_STYLE_MODE, tweetStyleMode } from './style-mode';
@@ -45,6 +46,7 @@ import { historicalPerformanceEvidenceWeight, inferContentSpreadMechanics } from
 import { buildFrontierForecastLearningProfile, describeFrontierForecastPattern } from './frontier-forecast-learning';
 import {
   buildPerformanceSignalBaseline,
+  isMaturePerformance,
   confidenceAdjustedPerformanceAverage,
   computeRelativeSpreadSignal,
   weightedSpreadEngagement,
@@ -669,7 +671,7 @@ async function createVelocityFollowupDraft(
     memory: context.memory,
     signals: context.signals,
     trending: null,
-    modelStack: PUBLISHING_V2_MODEL_STACK,
+    modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
     mode: 'live',
     entitlement,
   });
@@ -826,8 +828,6 @@ export async function checkPerformance(
     return 0;
   }
 
-  if (timeline.length === 0) return 0;
-
   // Build a map of our Clawfable-posted tweets for source detection
   const allTweets = await getTweets(agent.id);
   const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
@@ -871,7 +871,6 @@ export async function checkPerformance(
     || directMetricBackfillIds.has(String(tweet.id))
     || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
   ));
-  if (newTweets.length === 0) return 0;
 
   const classificationChunks = Array.from(
     { length: Math.ceil(classificationBacklog.length / 20) },
@@ -987,64 +986,9 @@ export async function checkPerformance(
     tracked++;
   }
 
-  // Detect manual deletions: posted tweets whose xTweetId is no longer on the timeline
-  // Only check tweets posted in the last 7 days (older tweets naturally fall off the timeline API)
-  const timelineXIds = new Set(timeline.map((t) => String(t.id)));
-  const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const postedEntries = new Map(
-    postLog
-      .filter((entry) => entry.action === 'posted' && entry.tweetId)
-      .map((entry) => [String(entry.tweetId), entry])
-  );
-  const postedTweets = allTweets.filter((t) => {
-    if (t.status !== 'posted' || !t.xTweetId) return false;
-    const postedAt = postedEntries.get(String(t.id))?.postedAt || t.createdAt;
-    return new Date(postedAt).getTime() > recentCutoff;
-  });
-
-  for (const tweet of postedTweets) {
-    if (!timelineXIds.has(String(tweet.xTweetId))) {
-      // Tweet was deleted from X — mark it
-      try {
-        await updateTweet(tweet.id, { status: 'deleted_from_x' as any });
-        const inferredReason = await inferDeleteIntent({
-          agentName: agent.name,
-          soulMd: agent.soulMd,
-          tweetText: tweet.content,
-        });
-        await saveFeedback(agent.id, {
-          tweetId: tweet.id,
-          tweetText: tweet.content,
-          rating: 'down',
-          generatedAt: new Date().toISOString(),
-          intentSummary: inferredReason,
-          source: 'queue_delete',
-          userProvidedReason: false,
-        });
-        await addLearningSignal(agent.id, {
-          tweetId: tweet.id,
-          xTweetId: tweet.xTweetId || undefined,
-          signalType: 'deleted_from_x',
-          surface: 'cron',
-          rewardDelta: -0.8,
-          reason: inferredReason,
-          inferred: true,
-        });
-        await addPostLogEntry(agent.id, {
-          agentId: agent.id,
-          tweetId: tweet.id,
-          xTweetId: tweet.xTweetId || '',
-          content: tweet.content,
-          format: 'deletion_detected',
-          topic: tweet.topic || 'general',
-          postedAt: new Date().toISOString(),
-          source: 'cron',
-          action: 'skipped',
-          reason: 'Tweet deleted from X — inferred reason captured, operator can still override it',
-        });
-      } catch { /* non-critical */ }
-    }
-  }
+  // Reconciliation runs even when no new metric checkpoint is due. Timeline
+  // absence never produces negative learning without independent verification.
+  await reconcileXRemovals(agent, keys, allTweets, new Set(timeline.map((tweet) => String(tweet.id))), signals);
 
   return tracked;
 }
@@ -1111,18 +1055,30 @@ Output ONLY JSON objects, one per line, no other text.`,
  * Computes style fingerprint from top performers, ranks all dimensions,
  * and generates prescriptive rules for generation.
  */
-export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
-  await backfillAudienceVoiceComplaints(agent.id, 1000);
+export async function buildLearnings(agent: Agent, options: { backfillAudienceFeedback?: boolean } = {}): Promise<AgentLearnings> {
+  if (options.backfillAudienceFeedback !== false) await backfillAudienceVoiceComplaints(agent.id, 1000);
   const rawHistory = await getPerformanceHistory(agent.id, 2000);
-  const [allTweets, manualExampleCuration, signals, mentions, postLog] = await Promise.all([
+  const [allTweets, manualExampleCuration, rawSignals, mentions, postLog] = await Promise.all([
     getTweets(agent.id),
     getManualExampleCuration(agent.id),
     getLearningSignals(agent.id, 500),
     getRecentMentions(agent.id, 500).catch(() => []),
     getPostLog(agent.id, 300).catch(() => []),
   ]);
+  const { signals: verifiedSignals } = filterLearningEvidence(rawSignals);
+  const signals = recoverEditLearningSignals(verifiedSignals, allTweets);
   const learningMentions = filterLearningMentions(mentions);
   let history = normalizeManualPerformanceSources(collapsePerformanceSnapshots(rawHistory), signals);
+  const learningDerivation: NonNullable<AgentLearnings['learningDerivation']> = {
+    version: LEARNING_DERIVATION_VERSION,
+    rewardMathVersion: PERFORMANCE_REWARD_DERIVATION_VERSION,
+    finalRewardMinAgeHours: 18,
+    generatedAt: new Date().toISOString(),
+    maturePerformanceCount: history.filter(isMaturePerformance).length,
+    immaturePerformanceCount: history.filter((entry) => !isMaturePerformance(entry)).length,
+    recoveredEditSignalIds: signals.filter((signal) => signal.metadata?.editPairRecovered === true).map((signal) => signal.id),
+    inhibitedRemovalSignalCount: rawSignals.length - verifiedSignals.length,
+  };
 
   if (history.length === 0) {
     const voiceCorpusSnapshot = buildVoiceCorpusSnapshot({
@@ -1135,6 +1091,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
       curation: manualExampleCuration,
     });
     const emptyLearnings: AgentLearnings = {
+      learningDerivation,
       agentId: agent.id,
       updatedAt: new Date().toISOString(),
       totalTracked: 0,
@@ -1190,7 +1147,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
   history = applyVoiceCorpusMetadata(history, voiceCorpusSnapshot);
 
   const performanceBaseline = buildPerformanceSignalBaseline(history);
-  history = history.map((entry) => {
+  history = deriveMaturePerformanceRewards(history).map((entry) => {
     const spread = computeRelativeSpreadSignal(entry, performanceBaseline);
     return {
       ...entry,
@@ -1199,7 +1156,7 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     };
   });
   const policyLearningHistory = history.filter((entry) => (
-    isEligibleForAccountPolicyLearning(agent, entry, allTweets)
+    isMaturePerformance(entry) && isEligibleForAccountPolicyLearning(agent, entry, allTweets)
   ));
 
   const autopilotHistory = policyLearningHistory.filter((t) => t.source === 'autopilot');
@@ -1235,8 +1192,9 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     weightedEngagementScore(b) - weightedEngagementScore(a)
   );
 
-  const totalLikes = history.reduce((s, h) => s + h.likes, 0);
-  const totalRetweets = history.reduce((s, h) => s + h.retweets, 0);
+  const matureHistory = history.filter(isMaturePerformance);
+  const totalLikes = matureHistory.reduce((s, h) => s + h.likes, 0);
+  const totalRetweets = matureHistory.reduce((s, h) => s + h.retweets, 0);
   const globalSignalAverage = trainingHistory.length > 0
     ? trainingHistory.reduce((sum, entry) => sum + weightedLearningScore(entry), 0) / trainingHistory.length
     : 0;
@@ -1340,14 +1298,15 @@ export async function buildLearnings(agent: Agent): Promise<AgentLearnings> {
     .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights
-  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown);
+  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, agent.handle);
 
   const learnings: AgentLearnings = {
+    learningDerivation,
     agentId: agent.id,
     updatedAt: new Date().toISOString(),
     totalTracked: history.length,
-    avgLikes: Math.round(totalLikes / history.length),
-    avgRetweets: Math.round(totalRetweets / history.length),
+    avgLikes: Math.round(totalLikes / Math.max(1, matureHistory.length)),
+    avgRetweets: Math.round(totalRetweets / Math.max(1, matureHistory.length)),
     bestPerformers: sorted.slice(0, 10),
     worstPerformers: sorted.slice(-5).reverse(),
     formatRankings,
@@ -1755,6 +1714,7 @@ async function generateInsights(
   topicRankings: AgentLearnings['topicRankings'],
   styleFingerprint: StyleFingerprint,
   sourceBreakdown: NonNullable<AgentLearnings['sourceBreakdown']>,
+  accountHandle: string,
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
@@ -1772,6 +1732,7 @@ async function generateInsights(
   try {
     const response = await generateText({
       task: 'learning',
+      modelStack: resolvePublishingV2ModelStacks(accountHandle).activeStack,
       maxTokens: getLearningInsightMaxTokens(history.length),
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")

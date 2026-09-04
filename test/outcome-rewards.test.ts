@@ -79,6 +79,44 @@ describe('summarizeEditDelta', () => {
 });
 
 describe('buildOutcomeEpisode', () => {
+  it('derives mature action rewards from metrics instead of divergent cached rewards', () => {
+    const raw = performance();
+    const cached = { ...raw, actionRewards: { total: -0.99, qualityAdjustedGrowthReward: -0.99 } as any };
+    const repaired = buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(), signals: [], performance: cached, performanceHistory: [cached] });
+    const current = buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(), signals: [], performance: raw, performanceHistory: [raw] });
+    expect({ ...repaired.reward, computedAt: undefined }).toEqual({ ...current.reward, computedAt: undefined });
+    expect(repaired.reward.actionRewards?.total).not.toBe(-0.99);
+    expect(cached.actionRewards.total).toBe(-0.99);
+  });
+
+  it('keeps an early snapshot out of final rewards, then learns from the mature outcome', () => {
+    const young = performance({ checkedAt: '2026-04-01T00:15:00.000Z', likes: 0, retweets: 0, replies: 0 });
+    const early = buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(), signals: [signal()], performance: young });
+    expect(early.stage).toBe('immediate');
+    expect(early.reward.delayedTotal).toBe(0);
+    expect(early.reward.immediateTotal).toBe(0.85);
+    expect(computePerformanceLiftReward(young)).toBe(0);
+    const mature = buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(), signals: [signal()],
+      performance: { ...young, checkedAt: '2026-04-02T00:00:00.000Z' } });
+    expect(mature.stage).toBe('final');
+    expect(mature.reward.delayedTotal).toBeLessThan(0);
+  });
+
+  it('does not treat a bad timestamp or an old incorrect checkpoint label as maturity', () => {
+    for (const row of [performance({ checkedAt: 'invalid' }),
+      { ...performance({ checkedAt: '2026-04-01T01:00:00.000Z' }), performanceCheckpoint: 'full_24h' as const }]) {
+      expect(buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(), signals: [], performance: row }).stage).toBe('immediate');
+      expect(computePerformanceLiftReward(row)).toBe(0);
+    }
+  });
+
+  it('ignores legacy inferred removals until verified while retaining explicit owner deletions', () => {
+    const episode = (inferred: boolean, verifiedRemoval?: boolean) => buildOutcomeEpisode({ agentId: 'agent-1', tweet: tweet(),
+      signals: [signal({ signalType: 'deleted_from_x', inferred, metadata: { verifiedRemoval: verifiedRemoval ?? null } })] });
+    expect(episode(true).reward.deletionPenalty).toBe(0);
+    expect(episode(true, true).reward.deletionPenalty).toBeLessThan(0);
+    expect(episode(false).reward.deletionPenalty).toBeLessThan(0);
+  });
   it('normalizes immediate and delayed rewards into one composite score', () => {
     const episode = buildOutcomeEpisode({
       agentId: 'agent-1',
@@ -149,6 +187,7 @@ describe('buildOutcomeEpisode', () => {
         experimentHoldout,
         // Within the 30-day experiment window; the shield expires after it.
         postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        checkedAt: new Date().toISOString(),
       }),
       { avgLikes: 30, avgRetweets: 5 },
       rows,
@@ -171,6 +210,7 @@ describe('buildOutcomeEpisode', () => {
         bookmarks: 0,
         experimentHoldout: true,
         postedAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+        checkedAt: new Date().toISOString(),
       }),
       { avgLikes: 30, avgRetweets: 5 },
       rows,
@@ -201,6 +241,7 @@ describe('buildOutcomeEpisode', () => {
         wasViral: false,
         experimentHoldout,
         postedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        checkedAt: new Date().toISOString(),
       }),
       { avgLikes: 40, avgRetweets: 6 },
       rows,

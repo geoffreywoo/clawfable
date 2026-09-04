@@ -11,7 +11,7 @@ import type { TwitterKeys } from './twitter-client';
 import { followUser, getFollowing } from './twitter-client';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
 import { addPostLogEntry, getAgents, getPostLog, getTrendingCache, getPerformanceHistory, getTweets, getAnalysis } from './kv-storage';
-import { PUBLISHING_V2_MODEL_STACK } from './ai';
+import { resolvePublishingV2ModelStacks } from './ai';
 import { hasRecentReadEndpointFailure } from './twitter-read-backoff';
 import { refreshAgentTopicIntelligence } from './topic-intelligence-refresh';
 import { assertAgentAutomationEntitlement } from './automation-entitlement';
@@ -158,7 +158,7 @@ export async function generateAgentShoutout(
       memory: context.memory,
       signals: context.signals,
       trending: null,
-      modelStack: PUBLISHING_V2_MODEL_STACK,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       mode: 'live',
       entitlement,
     });

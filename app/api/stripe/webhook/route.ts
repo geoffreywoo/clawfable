@@ -9,10 +9,11 @@ import {
   syncStripePaidInvoice,
   syncStripeSubscription,
 } from '@/lib/billing-sync';
-import { claimStripeWebhookEvent, releaseStripeWebhookEvent } from '@/lib/kv-storage';
+import { claimStripeWebhookEvent, completeStripeWebhookEvent, releaseStripeWebhookEvent } from '@/lib/kv-storage';
 import { getStripe, getStripeWebhookSecret, isStripeConfigured } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 async function syncSubscriptionState(
   stripe: Stripe,
@@ -42,12 +43,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing Stripe signature' }, { status: 400 });
   }
 
+  let verified = false;
   try {
     const stripe = getStripe();
     const rawBody = await request.text();
     const event = stripe.webhooks.constructEvent(rawBody, signature, getStripeWebhookSecret());
-    const claimed = await claimStripeWebhookEvent(event.id);
-    if (!claimed) return NextResponse.json({ received: true, duplicate: true });
+    verified = true;
+    const claim = await claimStripeWebhookEvent(event.id);
+    if (claim.status === 'completed') return NextResponse.json({ received: true, duplicate: true });
+    if (claim.status === 'busy') return NextResponse.json({ error: 'This event is still processing. Retry shortly.' }, { status: 503 });
 
     try {
       switch (event.type) {
@@ -105,14 +109,17 @@ export async function POST(request: NextRequest) {
         default:
           break;
       }
+      if (!await completeStripeWebhookEvent(event.id, claim.owner)) {
+        throw new Error('Stripe event processing lease expired before completion.');
+      }
     } catch (error) {
-      await releaseStripeWebhookEvent(event.id).catch(() => null);
+      await releaseStripeWebhookEvent(event.id, claim.owner).catch(() => null);
       throw error;
     }
 
     return NextResponse.json({ received: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Stripe webhook failed';
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: verified ? 500 : 400 });
   }
 }

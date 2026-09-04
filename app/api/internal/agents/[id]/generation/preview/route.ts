@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  PUBLISHING_V2_ASTRA_MODEL_STACK,
   PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
 } from '@/lib/ai';
@@ -29,6 +30,7 @@ import type {
 const MAX_PREVIEW_COUNT = 5;
 const GENERATION_SURFACES = new Set<GenerationSurface>(['original', 'reply', 'followup', 'remix', 'marketing', 'relationship']);
 const ALLOWED_MODEL_STACKS = new Set<GenerationModelStackId>([
+  PUBLISHING_V2_ASTRA_MODEL_STACK,
   PUBLISHING_V2_MODEL_STACK,
   PUBLISHING_V2_CONTROL_MODEL_STACK,
   'publishing_v2_gpt_control',

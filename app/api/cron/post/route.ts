@@ -12,6 +12,7 @@ import { getAgentAutomationEntitlement } from '@/lib/automation-entitlement';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
+import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
 
 export const maxDuration = 800;
 export const CRON_AUTOPILOT_LOCK_TTL_SECONDS = 15 * 60;
@@ -173,7 +174,8 @@ export async function GET(request: NextRequest) {
               || existingLearnings.voiceCorpus.version !== VOICE_CORPUS_SCHEMA_VERSION
             );
 
-            if (hasPerformanceData && (!existingLearnings || learningsAge > learningRefreshIntervalMs || needsVoiceCorpusMigration)) {
+            const needsLearningDerivation = existingLearnings?.learningDerivation?.version !== LEARNING_DERIVATION_VERSION;
+            if (hasPerformanceData && (!existingLearnings || learningsAge > learningRefreshIntervalMs || needsVoiceCorpusMigration || needsLearningDerivation)) {
               const learnings = await buildLearnings(agent);
               await autoAdjustSettings(agent.id, learnings);
             }

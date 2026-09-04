@@ -41,7 +41,8 @@ vi.mock('@/lib/twitter-client', () => ({
   getUserByUsername: mocks.getUserByUsername,
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ai')>(),
   generateText: mocks.generateText,
   PUBLISHING_V2_MODEL_STACK: 'publishing_v2_quality',
 }));
@@ -204,7 +205,7 @@ describe('proactive engagement', () => {
           url: 'https://x.com/builderbot/status/x-target-1',
         }),
       }),
-      modelStack: 'publishing_v2_quality',
+      modelStack: 'publishing_v2_gpt_control',
     }));
     expect(mocks.generateText).not.toHaveBeenCalled();
   });

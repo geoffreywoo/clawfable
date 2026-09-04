@@ -11,6 +11,7 @@ import type {
   CreativeLane,
   GenerationEvidenceReference,
   GenerationModelStackId,
+  GenerationSelectionTrace,
   GenerationPipelineVersion,
   GenerationSurface,
   MediaExperimentType,
@@ -26,6 +27,7 @@ export interface PublishingCandidate {
   targetTopic: string;
   rationale: string;
   generationModelStack?: GenerationModelStackId | null;
+  generationSelection?: GenerationSelectionTrace | null;
   generationProvider?: 'openai' | 'anthropic' | 'local' | null;
   generationModel?: string | null;
   judgeProvider?: 'openai' | 'anthropic' | null;

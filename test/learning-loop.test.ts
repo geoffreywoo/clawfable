@@ -4,6 +4,9 @@ import {
   buildPersonalizationMemory,
   selectRecentRejectionLines,
   summarizeEditDelta,
+  buildEditLearningMetadata,
+  selectApprovedEditExamples,
+  recoverEditLearningSignals,
 } from '@/lib/learning-loop';
 import type { FeedbackEntry, LearningSignal } from '@/lib/types';
 
@@ -24,6 +27,63 @@ function learningSignal(overrides: Partial<LearningSignal>): LearningSignal {
 }
 
 describe('buildPersonalizationMemory', () => {
+  it('keeps approval explanations out of negative memory', () => {
+    const memory = buildPersonalizationMemory({ feedback: [{ tweetText: 'Example', rating: 'up',
+      generatedAt: new Date().toISOString(), reason: 'More named technical examples.' }], signals: [], remixPatterns: [],
+      directiveRules: [], learnings: null, performanceHistory: [], banditPolicy: null,
+      voiceProfile: { tone: 'direct', topics: [], antiGoals: [], communicationStyle: '', summary: '' } });
+    expect(memory.neverDoThisAgain).not.toContain('More named technical examples.');
+    expect(memory.alwaysDoMoreOfThis).toContain('More named technical examples.');
+  });
+
+  it('preserves complete edit pairs and deduplicates queue and post observations', () => {
+    const before = 'The best founders focus on the moat.';
+    const after = 'The packaging line ran at 60% yield before the fixture change. It now runs at 92%.';
+    const metadata = buildEditLearningMetadata(before, after);
+    const signals = [learningSignal({ signalType: 'edited_before_queue', metadata }),
+      learningSignal({ signalType: 'edited_before_post', metadata }),
+      learningSignal({ signalType: 'taste_calibration_edit', metadata: { ...metadata, acceptedEdit: false } })];
+    expect(selectApprovedEditExamples(signals)).toHaveLength(1);
+    expect(selectApprovedEditExamples(signals)[0]).toMatchObject({ before, after });
+    expect(selectApprovedEditExamples([learningSignal({ signalType: 'taste_calibration_edit', metadata })])).toHaveLength(1);
+    expect(selectApprovedEditExamples([learningSignal({ signalType: 'edited_before_post', metadata, inferred: true })])).toHaveLength(0);
+  });
+
+  it('retains long after-states and excludes subsequent rejected or superseded examples', () => {
+    const before = `${'Original detail. '.repeat(80)}BEFORE_END`;
+    const after = `${'Revised concrete detail. '.repeat(80)}AFTER_END`;
+    const metadata = buildEditLearningMetadata(before, after, 'AI');
+    const accepted = learningSignal({ signalType: 'edited_before_queue', metadata, createdAt: '2026-09-01T10:00:00Z' });
+    expect(selectApprovedEditExamples([accepted])[0]).toMatchObject({ before, after });
+    const rejection = learningSignal({ signalType: 'taste_less_like_this', createdAt: '2026-09-01T11:00:00Z' });
+    expect(selectApprovedEditExamples([accepted, rejection])).toEqual([]);
+    const replacement = learningSignal({ signalType: 'edited_before_post',
+      metadata: buildEditLearningMetadata(after, 'A different complete revision.'), createdAt: '2026-09-01T11:00:00Z' });
+    expect(selectApprovedEditExamples([accepted, replacement]).map((entry) => entry.after)).toEqual(['A different complete revision.']);
+  });
+
+  it('recovers immutable lineage pairs in a derived view without rewriting raw evidence', () => {
+    const parent = { id: 'parent', agentId: 'agent-1', pipelineVersion: 'v2', content: 'An abstract old draft.' } as any;
+    const child = { id: 'tweet-1', agentId: 'agent-1', parentTweetId: 'parent', contentProvenance: 'operator_written',
+      content: 'The packaging line lost 6 hours to one die.', status: 'queued', createdAt: '2026-09-01T12:00:00Z' } as any;
+    const raw = learningSignal({ signalType: 'edited_before_queue', metadata: { parentTweetId: 'parent' } });
+    const repaired = recoverEditLearningSignals([raw], [parent, child]);
+    expect(selectApprovedEditExamples(repaired)[0]).toMatchObject({ before: parent.content, after: child.content });
+    expect(raw.metadata).toEqual({ parentTweetId: 'parent' });
+    expect(repaired[0].metadata?.editPairRecovered).toBe(true);
+    // An expired bounded ledger can be reconstructed from an intact operator child.
+    expect(selectApprovedEditExamples(recoverEditLearningSignals([], [parent, child]))).toHaveLength(1);
+    // A later edited child cannot prove what the earlier after-state contained.
+    expect(selectApprovedEditExamples(recoverEditLearningSignals([raw], [parent, { ...child, editCount: 1 }]))).toHaveLength(0);
+  });
+
+  it('prefers a transferable cross-topic lesson when relevance and age are equal', () => {
+    const sameTopic = { ...learningSignal({ signalType: 'edited_before_queue', reason: 'Owner added technical specificity.',
+      metadata: buildEditLearningMetadata('An abstract draft.', 'The reactor trip consumed 18 hours.', 'technical specificity') }), tweetId: 'same' };
+    const crossTopic = { ...learningSignal({ signalType: 'edited_before_queue', reason: 'Owner added technical specificity.',
+      metadata: buildEditLearningMetadata('Another abstract draft.', 'The packaging line lost 6 hours to one die.', 'packaging') }), tweetId: 'cross' };
+    expect(selectApprovedEditExamples([sameTopic, crossTopic], 'technical specificity', 1)[0].tweetId).toBe('cross');
+  });
   it('captures before/after lessons when edits replace low-status texture with technical anchors', () => {
     const summary = summarizeEditDelta(
       'AI infrastructure is working when the Slack channel gets quieter and every support queue has a clean workflow handoff.',

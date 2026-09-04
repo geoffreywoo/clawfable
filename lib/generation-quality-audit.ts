@@ -10,6 +10,7 @@ import { getTrendingTopicStableId, type TrendingTopic } from './trending';
 import { buildAgentIdentityAudit } from './agent-identity';
 import {
   getModelChainForTask,
+  PUBLISHING_V2_ASTRA_MODEL_STACK,
   PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
   resolvePublishingV2ModelStacks,
@@ -1453,6 +1454,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       qualityIssues,
       scores: tweet.finalCriticScores || null,
       generationModelStack: tweet.generationModelStack || null,
+      generationSelection: tweet.generationSelection || null,
       generationProvider: tweet.generationProvider || null,
       generationModel: tweet.generationModel || null,
       judgeProvider: tweet.judgeProvider || null,
@@ -1983,6 +1985,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     },
     autopost: autopostSummary,
     learning: {
+      derivation: context.learnings?.learningDerivation || null,
       updatedAt: context.learnings?.updatedAt || null,
       totalTracked: context.learnings?.totalTracked || 0,
       refreshIntervalHours: isGeoffrey ? 3 : 24,
@@ -2149,10 +2152,12 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       routingReason: modelStackAssignment.reason,
       shadowControlStack: modelStackAssignment.shadowStack,
       shadowComparison: {
-        isolatedVariable: 'primary_writer',
-        samplingDesign: activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
-          ? 'three independent GPT one-draft calls with separate native register anchors; matched Fable control retired after zero-yield production audit'
-          : 'one control variant on the highest-ranked selected idea',
+        isolatedVariable: activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? 'complete_creative_stack' : 'primary_writer',
+        samplingDesign: activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
+          ? 'three independent Astra variants using direct judgment, concrete decision, and unexpected consequence; comparison stack is available for explicit preview evaluation'
+          : activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
+            ? 'three independent GPT one-draft calls with separate native register anchors; matched Fable control retired after zero-yield production audit'
+            : 'one control variant on the highest-ranked selected idea',
         defaultWriter: primaryWriting,
         controlWriter: shadowControlWriting,
         sharedIdeaGenerator: primaryIdeaGeneration,

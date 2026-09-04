@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   decodeKeys: vi.fn(),
   getFollowing: vi.fn(),
   getAccountPublicMetrics: vi.fn(),
+  lookupTweetAvailability: vi.fn(),
   analyzeAccount: vi.fn(),
 }));
 
@@ -78,6 +79,7 @@ vi.mock('@/lib/twitter-client', () => ({
   decodeKeys: mocks.decodeKeys,
   getFollowing: mocks.getFollowing,
   getAccountPublicMetrics: mocks.getAccountPublicMetrics,
+  lookupTweetAvailability: mocks.lookupTweetAvailability,
 }));
 
 vi.mock('@/lib/analysis', () => ({
@@ -116,6 +118,7 @@ describe('performance tracking X API failures', () => {
       accessSecret: 'access-secret',
     });
     mocks.getPerformanceHistory.mockResolvedValue([]);
+    mocks.getTweets.mockResolvedValue([]);
     mocks.getPostLog.mockResolvedValue([]);
     mocks.getLearningSignals.mockResolvedValue([]);
     mocks.getProtocolSettings.mockResolvedValue({});
@@ -192,6 +195,18 @@ describe('performance tracking X API failures', () => {
       600,
     );
     expect(mocks.getUserTimeline).not.toHaveBeenCalled();
+  });
+
+  it('verifies a missing post even when the timeline has no new metric checkpoints', async () => {
+    mocks.getUserTimeline.mockResolvedValue([]);
+    mocks.getTweets.mockResolvedValue([{ id: 'missing-post', agentId: agent.id, status: 'posted', xTweetId: 'x-missing',
+      content: 'A post that may still exist.', type: 'original', createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }]);
+    mocks.lookupTweetAvailability.mockResolvedValue({ status: 'present', tweetId: 'x-missing' });
+    expect(await checkPerformance(agent as any)).toBe(0);
+    expect(mocks.lookupTweetAvailability).toHaveBeenCalledWith(expect.any(Object), 'x-missing');
+    expect(mocks.addPerformanceEntry).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+    expect(mocks.saveFeedback).not.toHaveBeenCalled();
   });
 
   it('logs reset-aware rate limits when auto re-analysis cannot read X', async () => {

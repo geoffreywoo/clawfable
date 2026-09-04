@@ -5,6 +5,7 @@ const ENV_KEYS = [
   'OPENAI_REASONING_EFFORT',
   'OPENAI_REASONING_EFFORT_TWEET_WRITING',
   'ANTHROPIC_API_KEY',
+  'ASTRA_CREATIVE_ROLLOUT',
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -735,5 +736,122 @@ describe('provider request hygiene', () => {
 
     expect(anthropicCreate.mock.calls[0][0].max_tokens).toBeGreaterThanOrEqual(4000);
     expect(anthropicCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
+  });
+});
+
+describe('Astra creative pilot', () => {
+  it('requires explicit promotion and isolates the Geoffrey pilot', async () => {
+    const { resolvePublishingV2ModelStacks, PUBLISHING_V2_ASTRA_MODEL_STACK } = await loadDefaultRouter();
+    delete process.env.ASTRA_CREATIVE_ROLLOUT;
+    expect(resolvePublishingV2ModelStacks('geoffwoo').activeStack).toBe('publishing_v2_gpt_control');
+    process.env.ASTRA_CREATIVE_ROLLOUT = 'geoffrey';
+    expect(resolvePublishingV2ModelStacks('@GeoffWoo')).toMatchObject({
+      activeStack: PUBLISHING_V2_ASTRA_MODEL_STACK,
+      shadowStack: 'publishing_v2_gpt_control',
+      reason: 'astra_geoffrey_pilot',
+    });
+    expect(resolvePublishingV2ModelStacks('another_writer').activeStack).toBe('publishing_v2_quality');
+    process.env.ASTRA_CREATIVE_ROLLOUT = 'all';
+    expect(resolvePublishingV2ModelStacks('another_writer').activeStack).toBe(PUBLISHING_V2_ASTRA_MODEL_STACK);
+    process.env.ASTRA_CREATIVE_ROLLOUT = 'typo';
+    expect(resolvePublishingV2ModelStacks('geoffwoo').activeStack).toBe('publishing_v2_gpt_control');
+  });
+
+  it('covers the complete creative loop while preserving utility and comparison chains', async () => {
+    const { getModelChainForTask, PUBLISHING_V2_ASTRA_MODEL_STACK } = await loadDefaultRouter();
+    const tasks = ['idea_generation','idea_judgment','tweet_writing','copy_judgment','tweet_generation','creative_variant','bulk_judgment','final_judgment','reply_generation','reply_scoring','learning','soul_generation'] as const;
+    for (const task of tasks) {
+      const chain = getModelChainForTask(task, PUBLISHING_V2_ASTRA_MODEL_STACK);
+      expect(chain[0]).toEqual({ provider: 'openai', model: 'gpt-6-astra' });
+      expect(new Set(chain.map(t => `${t.provider}:${t.model}`)).size).toBe(chain.length);
+      expect(chain.length).toBeGreaterThan(1);
+    }
+    expect(getModelChainForTask('classification', PUBLISHING_V2_ASTRA_MODEL_STACK)[0].model).toBe('gpt-5.5');
+    expect(getModelChainForTask('source_enrichment', PUBLISHING_V2_ASTRA_MODEL_STACK)[0].model).toBe('gpt-5.5');
+    expect(getModelChainForTask('tweet_writing', 'publishing_v2_gpt_control')[0].model).toBe('gpt-5.6');
+    expect(getModelChainForTask('tweet_writing', 'publishing_v2_fable_control')[0].model).toBe('claude-fable-5');
+  });
+
+  it.each([
+    ['tweet_writing', 'high'], ['idea_generation', 'high'], ['learning', 'high'],
+    ['reply_generation', 'high'], ['soul_generation', 'high'],
+    ['copy_judgment', 'medium'], ['idea_judgment', 'medium'], ['reply_scoring', 'medium'],
+  ] as const)('uses task-specific reasoning and preserves structured output for %s', async (task, effort) => {
+    delete process.env.OPENAI_REASONING_EFFORT;
+    delete process.env.OPENAI_REASONING_EFFORT_TWEET_WRITING;
+    const create = vi.fn().mockResolvedValue({ status: 'completed', output_text: '{"content":"ok"}', usage: {
+      input_tokens: 1000, output_tokens: 500, input_tokens_details: { cached_tokens: 200 }, output_tokens_details: { reasoning_tokens: 450 },
+    } });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const schema = { type: 'object', additionalProperties: false, required: ['content'], properties: { content: { type: 'string' } } };
+    const result = await generateText({ task, modelStack: 'publishing_v2_astra', system: 'Write JSON.', prompt: 'test', maxTokens: 600, temperature: 0.9, jsonSchema: schema });
+    expect(create.mock.calls[0][0]).toMatchObject({ model: 'gpt-6-astra', reasoning: { effort }, max_output_tokens: 8192, text: { format: { type: 'json_schema', strict: true, schema } } });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+    expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', model: 'gpt-6-astra', reasoningEffort: effort, inputTokens: 1000, outputTokens: 500, cachedInputTokens: 200, reasoningTokens: 450 });
+  });
+
+  it.each(['none','minimal'] as const)('normalizes incompatible inherited %s reasoning to low', async effort => {
+    process.env.OPENAI_REASONING_EFFORT = effort;
+    delete process.env.OPENAI_REASONING_EFFORT_TWEET_WRITING;
+    const create = vi.fn().mockResolvedValue({ status: 'completed', output_text: 'ok' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 400, temperature: 1 });
+    expect(create.mock.calls[0][0].reasoning).toEqual({ effort: 'low' });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+  });
+
+  it('accepts explicit max reasoning and retains a larger caller output budget', async () => {
+    const create = vi.fn().mockResolvedValue({ status: 'completed', output_text: 'ok' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', openAiReasoningEffort: 'max', system: 'Write.', prompt: 'test', maxTokens: 12000 });
+    expect(create.mock.calls[0][0]).toMatchObject({ reasoning: { effort: 'max' }, max_output_tokens: 12000 });
+  });
+
+  it('rejects truncated Astra output and records the actual fallback', async () => {
+    const create = vi.fn()
+      .mockResolvedValueOnce({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_text: '{"content":"unfinished', usage: { input_tokens: 1000, output_tokens: 8192 } })
+      .mockResolvedValueOnce({ status: 'completed', output_text: '{"content":"finished"}' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const result = await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write JSON.', prompt: 'test', maxTokens: 600 });
+    expect(result).toMatchObject({ text: '{"content":"finished"}', requestedModel: 'gpt-6-astra', model: 'gpt-5.6', fallbackAttempts: [{ model: 'gpt-6-astra', reason: 'incomplete', stopReason: 'max_tokens', inputTokens: 1000, outputTokens: 8192 }] });
+  });
+
+  it('records Astra provider rejection rather than silently labeling fallback as Astra', async () => {
+    const create = vi.fn().mockRejectedValueOnce(Object.assign(new Error('model unavailable'), { status: 404, code: 'model_not_found' })).mockResolvedValueOnce({ status: 'completed', output_text: 'ok' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const result = await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 600 });
+    expect(result.requestedModel).toBe('gpt-6-astra');
+    expect(result.model).toBe('gpt-5.6');
+    expect(result.fallbackAttempts[0]).toMatchObject({ model: 'gpt-6-astra', reason: 'provider_error', statusCode: 404 });
+  });
+
+  it.each(['incomplete', 'cancelled', 'queued', 'in_progress', 'failed'])('rejects partial text with response status %s', async status => {
+    const create = vi.fn().mockResolvedValueOnce({ status, output_text: 'partial' }).mockResolvedValueOnce({ status: 'completed', output_text: 'complete' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const result = await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 600 });
+    expect(result.text).toBe('complete');
+    expect(result.fallbackAttempts[0]).toMatchObject({ model: 'gpt-6-astra', reason: 'incomplete', stopReason: status });
+  });
+
+  it('prices Astra and its long-context tier without treating missing usage as free', async () => {
+    const { estimateAiUsageCostUsd } = await loadDefaultRouter();
+    expect(estimateAiUsageCostUsd('gpt-6-astra', 1000, 1000)).toBe(0.06);
+    expect(estimateAiUsageCostUsd('gpt-6-astra', 300000, 1000)).toBe(6.075);
+    expect(estimateAiUsageCostUsd('gpt-6-astra', null, 1000)).toBeNull();
+    for (const invalid of [NaN, Infinity, -1]) {
+      expect(estimateAiUsageCostUsd('gpt-6-astra', invalid, 1000)).toBeNull();
+      expect(estimateAiUsageCostUsd('gpt-6-astra', 1000, invalid)).toBeNull();
+    }
+  });
+
+  it('records missing provider configuration as a fallback reason', async () => {
+    const openAi = vi.fn();
+    const anthropic = vi.fn().mockResolvedValue({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'fallback copy' }] });
+    const { generateText } = await loadGeneratorWithAiMocks(openAi, anthropic);
+    delete process.env.OPENAI_API_KEY;
+    const result = await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'Test.', maxTokens: 500 });
+    expect(openAi).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', provider: 'anthropic' });
+    expect(result.fallbackAttempts[0]).toMatchObject({ model: 'gpt-6-astra', reason: 'provider_unconfigured', durationMs: 0 });
   });
 });

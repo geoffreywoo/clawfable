@@ -59,6 +59,9 @@ import { buildVoiceDirectiveRule, getActiveVoiceDirectiveRules, mergeVoiceDirect
 import { computeActionRewards, computeEarlyVelocityScore } from './virality-signals';
 import { assessTasteRisk } from './virality-signals';
 import type { NetworkTopicIntelligenceState } from './network-topic-intelligence';
+import { mutateRemoteValue, type CasMutation } from './kv-atomic';
+import { isMaturePerformance } from './performance-signals';
+import { deriveMaturePerformanceRewards } from './performance-rewards';
 
 // ─── In-memory fallback store ─────────────────────────────────────────────────
 // Used when Vercel KV env vars are not set (local dev). Next compiles API routes
@@ -190,6 +193,28 @@ async function withKeyLock<T>(key: string, task: () => Promise<T>): Promise<T> {
   } finally {
     release();
     if (writeLocks.get(key) === chained) writeLocks.delete(key);
+  }
+}
+
+async function mutateStoredValue<T, R>(
+  key: string,
+  update: (current: T | null) => CasMutation<T, R>,
+  kind: 'json' | 'hash' = 'json',
+): Promise<R> {
+  const client = await getKvClient();
+  try {
+    if (client) return await mutateRemoteValue(client, key, kind, update);
+    return await withKeyLock(key, async () => {
+      isMemExpired(key);
+      const current = memStore.has(key) ? structuredClone(memStore.get(key)) as T : null;
+      const mutation = update(current);
+      if (mutation.skip) return mutation.result;
+      memStore.set(key, structuredClone(mutation.value));
+      memExpiry.delete(key);
+      return mutation.result;
+    });
+  } finally {
+    invalidateAllNamespaces(key);
   }
 }
 
@@ -909,7 +934,10 @@ export async function deleteAgent(id: string): Promise<void> {
   await kvDel(KEYS.agentAutopilotHealth(id));
   await kvDel(KEYS.agentAutopilotLock(id));
   const experimentIds = await kvLrange(KEYS.agentExperiments(id), 0, -1);
-  await Promise.all(experimentIds.map((experimentId) => kvDel(KEYS.draftExperiment(String(experimentId)))));
+  await Promise.all(experimentIds.flatMap((experimentId) => [
+    kvDel(KEYS.draftExperiment(String(experimentId))),
+    kvDel(`${KEYS.draftExperiment(String(experimentId))}:cas_revision`),
+  ]));
   await kvDel(KEYS.agentExperiments(id));
   await kvDel(KEYS.agentBaseline(id));
   const engagementSessionIds = await kvLrange(KEYS.agentEngagementSessions(id), 0, -1);
@@ -1028,6 +1056,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     postedAt: tweet.postedAt ?? null,
     rationale: tweet.rationale ?? null,
     generationModelStack: tweet.generationModelStack ?? null,
+    generationSelection: coerceNullableJson<Tweet['generationSelection']>(tweet.generationSelection),
     generationProvider: tweet.generationProvider ?? null,
     generationModel: tweet.generationModel ?? null,
     judgeProvider: tweet.judgeProvider ?? null,
@@ -1119,6 +1148,7 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
   return {
     ...tweet,
     featureTags: tweet.featureTags ? JSON.stringify(tweet.featureTags) : null,
+    generationSelection: tweet.generationSelection ? JSON.stringify(tweet.generationSelection) : null,
     judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
     finalCriticScores: tweet.finalCriticScores ? JSON.stringify(tweet.finalCriticScores) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
@@ -1155,7 +1185,8 @@ export async function getTweetCount(agentId: string): Promise<number> {
   return kvLlen(KEYS.agentTweets(agentId));
 }
 
-export async function getTweet(id: string): Promise<Tweet | null> {
+export async function getTweet(id: string, options: { fresh?: boolean } = {}): Promise<Tweet | null> {
+  if (options.fresh) invalidateAllNamespaces(KEYS.tweet(String(id)));
   const tweet = await kvHgetall<Tweet>(KEYS.tweet(String(id)));
   return tweet ? normalizeTweetRecord(tweet) : null;
 }
@@ -1220,6 +1251,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     postedAt: data.status === 'posted' ? new Date().toISOString() : null,
     rationale: data.rationale ?? null,
     generationModelStack: data.generationModelStack ?? null,
+    generationSelection: data.generationSelection ?? null,
     generationProvider: data.generationProvider ?? null,
     generationModel: data.generationModel ?? null,
     judgeProvider: data.judgeProvider ?? null,
@@ -2168,85 +2200,185 @@ export async function updateDraftExperiment(
   id: string,
   updates: Partial<Omit<DraftExperiment, 'id' | 'agentId' | 'createdAt'>>
 ): Promise<DraftExperiment | null> {
-  const current = await getDraftExperiment(id);
-  if (!current) return null;
-  const updated = normalizeDraftExperiment({
-    ...current,
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  });
-  await kvHset(KEYS.draftExperiment(id), serializeDraftExperiment(updated));
-  return updated;
+  const updatedAt = new Date().toISOString();
+  return mutateStoredValue<Record<string, unknown>, DraftExperiment | null>(KEYS.draftExperiment(id), (raw) => {
+    if (!raw) return { value: {}, result: null, skip: true };
+    const updated = normalizeDraftExperiment({ ...normalizeDraftExperiment(raw as unknown as DraftExperiment), ...updates, updatedAt });
+    return { value: { ...raw, ...serializeDraftExperiment(updated) }, result: updated };
+  }, 'hash');
+}
+
+function rewardEligibleSignal(signal: LearningSignal): boolean {
+  return Number.isFinite(signal.rewardDelta)
+    && !(signal.signalType === 'deleted_from_x' && signal.inferred === true && signal.metadata?.verifiedRemoval !== true);
+}
+
+function experimentStatusFromSignal(signal: LearningSignal): DraftExperiment['status'] | undefined {
+  return signal.signalType === 'approved_without_edit' || signal.signalType === 'taste_more_like_this' ? 'approved'
+    : ['edited_before_queue', 'edited_before_post', 'taste_calibration_edit'].includes(signal.signalType) ? 'edited'
+    : signal.signalType === 'x_post_succeeded' || signal.signalType === 'reply_posted' ? 'posted'
+    : ['deleted_from_queue', 'x_post_rejected', 'reply_rejected', 'taste_less_like_this'].includes(signal.signalType) ? 'rejected'
+    : signal.signalType === 'deleted_from_x' ? 'deleted' : undefined;
+}
+
+function normalizeRewardSignals(signals: LearningSignal[]): LearningSignal[] {
+  const unique = new Map<string, LearningSignal>();
+  for (const signal of signals.filter(rewardEligibleSignal)) {
+    const key = UNIQUE_SIGNAL_TYPES.has(signal.signalType) && signal.tweetId ? `${signal.signalType}:${signal.tweetId}` : signal.id;
+    const prior = unique.get(key);
+    if (!prior || signal.createdAt > prior.createdAt || (signal.createdAt === prior.createdAt
+      && Number(signal.storageRevision || 0) >= Number(prior.storageRevision || 0))) {
+      // Projection receipts need identity/reward, not another copy of full edit
+      // pairs and generation metadata. Those remain in the canonical ledger.
+      unique.set(key, {
+        id: signal.id, agentId: signal.agentId, tweetId: signal.tweetId, xTweetId: signal.xTweetId,
+        signalType: signal.signalType, surface: signal.surface, rewardDelta: signal.rewardDelta,
+        createdAt: signal.createdAt, storageRevision: signal.storageRevision, inferred: signal.inferred,
+        reason: signal.reason?.slice(0, 500),
+        metadata: { verifiedRemoval: signal.metadata?.verifiedRemoval ?? null,
+          preferenceHint: typeof signal.metadata?.preferenceHint === 'string' ? signal.metadata.preferenceHint.slice(0, 500) : null },
+      });
+    }
+  }
+  return [...unique.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt)
+    || Number(right.storageRevision || 0) - Number(left.storageRevision || 0)).slice(0, 250);
+}
+
+function signalRewardUpdates(existing: DraftExperiment, signals: LearningSignal[]): Partial<DraftExperiment> {
+  const immediate = Math.max(-1, Math.min(1, signals.reduce((sum, entry) => sum + entry.rewardDelta, 0)));
+  const latest = signals.find((entry) => experimentStatusFromSignal(entry));
+  const signalStatus = latest ? experimentStatusFromSignal(latest) : undefined;
+  const terminal = signalStatus === 'rejected' || signalStatus === 'deleted';
+  return {
+    immediateReward: Number(immediate.toFixed(3)),
+    totalReward: Number(((existing.finalReward || 0) + immediate).toFixed(3)),
+    status: terminal ? signalStatus : existing.finalReward !== null ? 'measured' : signalStatus || existing.status,
+    lastSignalType: latest?.signalType || existing.lastSignalType,
+    completedAt: terminal ? latest!.createdAt : existing.completedAt,
+    outcomeNotes: [...new Set([
+      ...(existing.outcomeNotes || []),
+      ...signals.slice(0, 8).reverse().map((entry) => entry.reason || String(entry.metadata?.preferenceHint || '')).filter(Boolean),
+    ])].slice(-8),
+  };
 }
 
 async function updateDraftExperimentFromSignal(
   agentId: string,
   signal: LearningSignal,
-  replacedRewardDelta = 0,
 ): Promise<void> {
-  if (!signal.tweetId) return;
+  if (!signal.tweetId || !rewardEligibleSignal(signal)) return;
   const tweet = await getTweet(String(signal.tweetId));
   if (!tweet?.draftExperimentId) return;
-
-  const status =
-    signal.signalType === 'approved_without_edit' ? 'approved' :
-    signal.signalType === 'taste_more_like_this' ? 'approved' :
-    signal.signalType === 'edited_before_queue' || signal.signalType === 'edited_before_post' || signal.signalType === 'taste_calibration_edit' ? 'edited' :
-    signal.signalType === 'x_post_succeeded' || signal.signalType === 'reply_posted' ? 'posted' :
-    signal.signalType === 'deleted_from_queue' || signal.signalType === 'x_post_rejected' || signal.signalType === 'reply_rejected' || signal.signalType === 'taste_less_like_this' ? 'rejected' :
-    signal.signalType === 'deleted_from_x' ? 'deleted' :
-    undefined;
-
-  const existing = await getDraftExperiment(tweet.draftExperimentId);
-  const notes = [
-    ...(existing?.outcomeNotes || []),
-    signal.reason || (typeof signal.metadata?.preferenceHint === 'string' ? String(signal.metadata.preferenceHint) : ''),
-  ].filter(Boolean).slice(-8);
-  // A unique signal type re-emitted for the same tweet replaced its prior
-  // ledger entry, so net that entry's reward out before applying the new one.
-  const immediate = typeof existing?.immediateReward === 'number'
-    ? Math.max(-1, Math.min(1, existing.immediateReward - replacedRewardDelta + signal.rewardDelta))
-    : signal.rewardDelta;
-
-  await updateDraftExperiment(tweet.draftExperimentId, {
-    tweetId: tweet.id,
-    xTweetId: signal.xTweetId || tweet.xTweetId || null,
-    status: status || existing?.status || 'generated',
-    immediateReward: Number(immediate.toFixed(3)),
-    totalReward: Number(((existing?.finalReward || 0) + immediate).toFixed(3)),
-    lastSignalType: signal.signalType,
-    outcomeNotes: notes,
-    completedAt: status === 'rejected' || status === 'deleted' ? new Date().toISOString() : existing?.completedAt || null,
-  });
+  const seeds = (await getLearningSignals(agentId, 250)).filter((entry) => entry.tweetId === tweet.id);
+  const updatedAt = new Date().toISOString();
+  await mutateStoredValue<Record<string, unknown>, void>(KEYS.draftExperiment(tweet.draftExperimentId), (raw) => {
+    if (!raw) return { value: {}, result: undefined, skip: true };
+    const existing = normalizeDraftExperiment(raw as unknown as DraftExperiment);
+    const storedSignals = typeof raw._rewardSignals === 'string'
+      ? JSON.parse(raw._rewardSignals) as LearningSignal[] : raw._rewardSignals as LearningSignal[] | undefined;
+    const signals = normalizeRewardSignals([...(storedSignals || seeds), signal]);
+    const updated = normalizeDraftExperiment({
+      ...existing, ...signalRewardUpdates(existing, signals), tweetId: tweet.id,
+      xTweetId: signal.xTweetId || tweet.xTweetId || existing.xTweetId, updatedAt,
+    });
+    return { value: { ...raw, ...serializeDraftExperiment(updated), _rewardSignals: JSON.stringify(signals) }, result: undefined };
+  }, 'hash');
 }
 
 async function updateDraftExperimentFromPerformance(agentId: string, entry: TweetPerformance): Promise<void> {
   const experimentId = entry.draftExperimentId;
-  if (!experimentId) return;
-  const experiment = await getDraftExperiment(experimentId);
+  if (!experimentId || !isMaturePerformance(entry)) return;
   const engagement = entry.likes + (entry.retweets * 2) + (entry.replies * 1.5);
   const actionRewards = entry.actionRewards || computeActionRewards(entry);
   const qualityLift = actionRewards.qualityAdjustedGrowthReward ?? actionRewards.total;
+  if (!Number.isFinite(qualityLift)) return;
   const earlyVelocityScore = entry.earlyVelocityScore ?? computeEarlyVelocityScore(entry);
-  const notes = [
-    ...(experiment?.outcomeNotes || []),
-    `Live performance: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies. Quality growth ${actionRewards.qualityAdjustedGrowthScore ?? 'n/a'}/100; reward ${qualityLift >= 0 ? '+' : ''}${qualityLift}.`,
-  ].slice(-8);
+  const updatedAt = new Date().toISOString();
+  await mutateStoredValue<Record<string, unknown>, void>(KEYS.draftExperiment(experimentId), (raw) => {
+    if (!raw || (typeof raw._performanceCheckedAt === 'string' && raw._performanceCheckedAt >= entry.checkedAt)) {
+      return { value: raw || {}, result: undefined, skip: true };
+    }
+    const experiment = normalizeDraftExperiment(raw as unknown as DraftExperiment);
+    const terminal = experiment.status === 'deleted' || experiment.status === 'rejected';
+    const updated = normalizeDraftExperiment({
+      ...experiment, xTweetId: entry.xTweetId || experiment.xTweetId,
+      status: terminal ? experiment.status : 'measured',
+      finalReward: Number(qualityLift.toFixed(3)), actionRewards, earlyVelocityScore,
+      actualEngagement: Number(engagement.toFixed(3)), engagementRate: entry.engagementRate,
+      performanceLift: Number(qualityLift.toFixed(3)),
+      totalReward: Number(((experiment.immediateReward || 0) + qualityLift).toFixed(3)),
+      lastSignalType: terminal ? experiment.lastSignalType : 'x_post_succeeded',
+      outcomeNotes: [...(experiment.outcomeNotes || []), `Live performance: ${entry.likes} likes, ${entry.retweets} reposts, ${entry.replies} replies. Quality growth ${actionRewards.qualityAdjustedGrowthScore ?? 'n/a'}/100; reward ${qualityLift >= 0 ? '+' : ''}${qualityLift}.`].slice(-8),
+      completedAt: terminal ? experiment.completedAt : entry.checkedAt, updatedAt,
+    });
+    return { value: { ...raw, ...serializeDraftExperiment(updated), _performanceCheckedAt: entry.checkedAt }, result: undefined };
+  }, 'hash');
+}
 
-  await updateDraftExperiment(experimentId, {
-    xTweetId: entry.xTweetId || experiment?.xTweetId || null,
-    status: 'measured',
-    finalReward: Number(qualityLift.toFixed(3)),
-    actionRewards,
-    earlyVelocityScore,
-    actualEngagement: Number(engagement.toFixed(3)),
-    engagementRate: entry.engagementRate,
-    performanceLift: Number(qualityLift.toFixed(3)),
-    totalReward: Number(((experiment?.immediateReward || 0) + qualityLift).toFixed(3)),
-    lastSignalType: 'x_post_succeeded',
-    outcomeNotes: notes,
-    completedAt: new Date().toISOString(),
-  });
+/** Rebuild projections from retained evidence without editing raw history. */
+export async function replayDerivedExperimentRewards(agentId: string): Promise<{ experimentsUpdated: number }> {
+  const replayStartedAt = new Date().toISOString();
+  resetReadCache();
+  // Read projections first: any later projection commit can then be detected
+  // even when the source event carries an older timestamp.
+  const experiments = await getDraftExperiments(agentId, 5000);
+  const [signals, rawHistory] = await Promise.all([
+    getLearningSignals(agentId, 250), getPerformanceHistory(agentId, 5000),
+  ]);
+  // Stored rewards may reflect an older formula or an immature baseline.
+  // Rebuild the projection from raw mature measurements; retain raw history.
+  const history = deriveMaturePerformanceRewards(rawHistory);
+  const snapshotSignalRevision = Math.max(0, ...signals.map((entry) => Number(entry.storageRevision) || 0));
+  let experimentsUpdated = 0;
+  for (const experiment of experiments) {
+    const relatedSignals = signals.filter((entry) => entry.tweetId === experiment.tweetId
+      || entry.metadata?.draftExperimentId === experiment.id);
+    const mature = history.filter((entry) => isMaturePerformance(entry) && (
+      entry.draftExperimentId === experiment.id
+      || Boolean(experiment.tweetId && entry.tweetId === experiment.tweetId)
+      || Boolean(experiment.xTweetId && entry.xTweetId === experiment.xTweetId)
+    )).sort((left, right) => right.checkedAt.localeCompare(left.checkedAt))[0];
+    await mutateStoredValue<Record<string, unknown>, void>(KEYS.draftExperiment(experiment.id), (raw) => {
+      if (!raw) return { value: {}, result: undefined, skip: true };
+      const existing = normalizeDraftExperiment(raw as unknown as DraftExperiment);
+      const storedSignals = typeof raw._rewardSignals === 'string'
+        ? JSON.parse(raw._rewardSignals) as LearningSignal[] : raw._rewardSignals as LearningSignal[] | undefined;
+      // Preserve live evidence arriving while replay was reading its inputs.
+      const retained = normalizeRewardSignals([...relatedSignals, ...(storedSignals || []).filter((entry) => (
+        Number(entry.storageRevision || 0) > snapshotSignalRevision
+        || (!entry.storageRevision && entry.createdAt >= replayStartedAt)
+      ))]);
+      const hasUnverifiedRemoval = relatedSignals.some((entry) => entry.signalType === 'deleted_from_x' && !rewardEligibleSignal(entry));
+      const hasVerifiedRemoval = retained.some((entry) => entry.signalType === 'deleted_from_x');
+      const preserveTerminal = ['rejected', 'deleted'].includes(existing.status)
+        && !(existing.status === 'deleted' && hasUnverifiedRemoval && !hasVerifiedRemoval);
+      const newerLiveMeasurement = Boolean(raw._performanceCheckedAt)
+        && raw._performanceCheckedAt !== (experiment as unknown as Record<string, unknown>)._performanceCheckedAt;
+      const rewards = mature ? mature.actionRewards || computeActionRewards(mature) : null;
+      const lift = rewards ? rewards.qualityAdjustedGrowthReward ?? rewards.total : null;
+      const finalReward = newerLiveMeasurement ? existing.finalReward : typeof lift === 'number' && Number.isFinite(lift) ? Number(lift.toFixed(3)) : null;
+      const base = normalizeDraftExperiment({
+        ...existing, finalReward, performanceLift: finalReward,
+        completedAt: preserveTerminal ? existing.completedAt : newerLiveMeasurement ? existing.completedAt : finalReward !== null ? mature?.checkedAt || null : null,
+        status: preserveTerminal ? existing.status : finalReward !== null ? 'measured' : existing.xTweetId ? 'posted' : 'generated',
+      });
+      const projected = signalRewardUpdates(base, retained);
+      const updated = normalizeDraftExperiment({
+        ...base, ...projected,
+        ...(preserveTerminal ? { status: existing.status, completedAt: existing.completedAt } : {}),
+        ...(!newerLiveMeasurement ? {
+          actionRewards: rewards, earlyVelocityScore: mature ? mature.earlyVelocityScore ?? computeEarlyVelocityScore(mature) : null,
+          actualEngagement: mature ? mature.likes + mature.retweets * 2 + mature.replies * 1.5 : null,
+          engagementRate: mature?.engagementRate ?? null,
+        } : {}),
+        updatedAt: replayStartedAt,
+      });
+      return { value: { ...raw, ...serializeDraftExperiment(updated), _rewardSignals: JSON.stringify(retained),
+        _performanceCheckedAt: newerLiveMeasurement ? raw._performanceCheckedAt : mature?.checkedAt || '' }, result: undefined };
+    }, 'hash');
+    experimentsUpdated += 1;
+  }
+  return { experimentsUpdated };
 }
 
 // ─── Performance tracking storage ─────────────────────────────────────────────
@@ -2498,12 +2630,82 @@ export async function unlinkStripeSubscription(subscriptionId: string): Promise<
   await kvDel(KEYS.stripeSubscriptionUser(subscriptionId));
 }
 
-export async function claimStripeWebhookEvent(eventId: string, ttlSeconds = 90 * 24 * 60 * 60): Promise<boolean> {
-  return kvSet(KEYS.stripeWebhookEvent(eventId), new Date().toISOString(), { nx: true, ex: ttlSeconds });
+const STRIPE_PROCESSING_TTL_SECONDS = 330;
+const STRIPE_COMPLETED_TTL_SECONDS = 90 * 24 * 60 * 60;
+const CLAIM_STRIPE_EVENT_SCRIPT = `-- clawfable:stripe-claim:v2
+if redis.call('EXISTS', KEYS[1]) == 1 then return 2 end
+local raw = redis.call('GET', KEYS[2])
+if raw then
+  local value = cjson.decode(raw)
+  if value.owner == ARGV[1] then return 1 end
+  return 0
+end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3], 'NX')
+return 1
+`;
+const COMPLETE_STRIPE_EVENT_SCRIPT = `-- clawfable:stripe-complete:v2
+if redis.call('EXISTS', KEYS[1]) == 1 then return 1 end
+local raw = redis.call('GET', KEYS[2])
+if not raw or cjson.decode(raw).owner ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+redis.call('DEL', KEYS[2])
+return 1
+`;
+
+export async function claimStripeWebhookEvent(eventId: string, owner = crypto.randomUUID()): Promise<{
+  status: 'claimed' | 'completed' | 'busy'; owner: string;
+}> {
+  const key = KEYS.stripeWebhookEvent(eventId);
+  const leaseKey = `${key}:processing`;
+  const lease = { owner, acquiredAt: new Date().toISOString() };
+  const client = await getKvClient();
+  let result: number;
+  if (client) {
+    result = Number(await withClientRetry(() => client.eval(CLAIM_STRIPE_EVENT_SCRIPT, [key, leaseKey], [
+      owner, JSON.stringify(lease), String(STRIPE_PROCESSING_TTL_SECONDS),
+    ])));
+  } else {
+    result = await withKeyLock(leaseKey, async () => {
+      isMemExpired(key); isMemExpired(leaseKey);
+      if (memStore.has(key)) return 2;
+      const existing = memStore.get(leaseKey) as typeof lease | undefined;
+      if (existing) return existing.owner === owner ? 1 : 0;
+      memStore.set(leaseKey, lease);
+      memExpiry.set(leaseKey, Date.now() + STRIPE_PROCESSING_TTL_SECONDS * 1000);
+      return 1;
+    });
+  }
+  invalidateAllNamespaces(key); invalidateAllNamespaces(leaseKey);
+  return { status: result === 1 ? 'claimed' : result === 2 ? 'completed' : 'busy', owner };
 }
 
-export async function releaseStripeWebhookEvent(eventId: string): Promise<void> {
-  await kvDel(KEYS.stripeWebhookEvent(eventId));
+export async function completeStripeWebhookEvent(eventId: string, owner: string): Promise<boolean> {
+  const key = KEYS.stripeWebhookEvent(eventId);
+  const leaseKey = `${key}:processing`;
+  const receipt = { owner, completedAt: new Date().toISOString() };
+  const client = await getKvClient();
+  let completed: boolean;
+  if (client) {
+    completed = Number(await withClientRetry(() => client.eval(COMPLETE_STRIPE_EVENT_SCRIPT, [key, leaseKey], [
+      owner, JSON.stringify(receipt), String(STRIPE_COMPLETED_TTL_SECONDS),
+    ]))) === 1;
+  } else {
+    completed = await withKeyLock(leaseKey, async () => {
+      isMemExpired(key); isMemExpired(leaseKey);
+      if (memStore.has(key)) return true;
+      if ((memStore.get(leaseKey) as { owner?: string } | undefined)?.owner !== owner) return false;
+      memStore.set(key, receipt);
+      memExpiry.set(key, Date.now() + STRIPE_COMPLETED_TTL_SECONDS * 1000);
+      deleteMemKey(leaseKey);
+      return true;
+    });
+  }
+  invalidateAllNamespaces(key); invalidateAllNamespaces(leaseKey);
+  return completed;
+}
+
+export async function releaseStripeWebhookEvent(eventId: string, owner: string): Promise<boolean> {
+  return kvCompareObjectFieldAndDelete(`${KEYS.stripeWebhookEvent(eventId)}:processing`, 'owner', owner);
 }
 
 // ─── Session storage ─────────────────────────────────────────────────────────
@@ -2722,22 +2924,20 @@ export async function addOutcomeEvent(
 ): Promise<OutcomeEvent> {
   const createdAt = event.createdAt || new Date().toISOString();
   const idempotencyKey = event.idempotencyKey || `${event.eventType}:${event.tweetId || event.xTweetId || crypto.randomUUID()}`;
-  return withKeyLock(KEYS.agentOutcomeEvents(agentId), async () => {
-    const existing = await getOutcomeEvents(agentId, MAX_OUTCOME_EVENTS);
+  const counter = await kvIncr(KEYS.counterOutcomeEvent());
+  const full: OutcomeEvent = {
+    id: String(counter), agentId, createdAt, ...event, idempotencyKey,
+    metadata: compactMetadata(event.metadata),
+  };
+  return mutateStoredValue<OutcomeEvent[], OutcomeEvent>(KEYS.agentOutcomeEvents(agentId), (stored) => {
+    const existing = stored ?? [];
     const duplicate = existing.find((item) => item.idempotencyKey === idempotencyKey);
-    if (duplicate) return duplicate;
-
-    const counter = await kvIncr(KEYS.counterOutcomeEvent());
-    const full: OutcomeEvent = {
-      id: String(counter),
-      agentId,
-      createdAt,
-      ...event,
-      idempotencyKey,
-      metadata: compactMetadata(event.metadata),
-    };
-    await kvSet(KEYS.agentOutcomeEvents(agentId), [full, ...existing].slice(0, MAX_OUTCOME_EVENTS));
-    return full;
+    if (duplicate && full.source === 'learning_signal' && (full.createdAt > duplicate.createdAt
+      || (full.createdAt === duplicate.createdAt && Number(full.metadata?.storageRevision || 0) > Number(duplicate.metadata?.storageRevision || 0)))) {
+      const corrected = { ...full, id: duplicate.id };
+      return { value: existing.map((entry) => entry.id === duplicate.id ? corrected : entry), result: corrected };
+    }
+    return { value: duplicate ? existing : [full, ...existing].slice(0, MAX_OUTCOME_EVENTS), result: duplicate || full, skip: Boolean(duplicate) };
   });
 }
 
@@ -2896,18 +3096,14 @@ export async function getIdeaCandidates(agentId: string, limit = 100): Promise<I
   ).slice(0, Math.max(0, limit));
 }
 
-async function mergeIdeaCandidatesUnlocked(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
-  const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
-  const next = newestByTimestamp(
-    mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
-    (entry) => entry.createdAt,
-  ).slice(0, MAX_IDEA_CANDIDATES);
-  await kvSet(KEYS.agentIdeaCandidates(agentId), next);
-  return next;
-}
-
 export async function upsertIdeaCandidates(agentId: string, candidates: IdeaCandidate[]): Promise<IdeaCandidate[]> {
-  return withKeyLock(KEYS.agentIdeaCandidates(agentId), () => mergeIdeaCandidatesUnlocked(agentId, candidates));
+  return mutateStoredValue<IdeaCandidate[], IdeaCandidate[]>(KEYS.agentIdeaCandidates(agentId), (current) => {
+    const next = newestByTimestamp(
+      mergeRecordsById(current ?? [], candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+      (entry) => entry.createdAt,
+    ).slice(0, MAX_IDEA_CANDIDATES);
+    return { value: next, result: next };
+  });
 }
 
 export async function updateIdeaCandidate(
@@ -2915,13 +3111,13 @@ export async function updateIdeaCandidate(
   ideaId: string,
   updates: Partial<Omit<IdeaCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
 ): Promise<IdeaCandidate | null> {
-  return withKeyLock(KEYS.agentIdeaCandidates(agentId), async () => {
-    const current = await getIdeaCandidates(agentId, MAX_IDEA_CANDIDATES);
+  const updatedAt = new Date().toISOString();
+  return mutateStoredValue<IdeaCandidate[], IdeaCandidate | null>(KEYS.agentIdeaCandidates(agentId), (stored) => {
+    const current = stored ?? [];
     const found = current.find((entry) => entry.id === ideaId);
-    if (!found) return null;
-    const updated: IdeaCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
-    await mergeIdeaCandidatesUnlocked(agentId, [updated]);
-    return updated;
+    if (!found) return { value: current, result: null };
+    const updated: IdeaCandidate = { ...found, ...updates, updatedAt };
+    return { value: current.map((entry) => entry.id === ideaId ? updated : entry), result: updated };
   });
 }
 
@@ -2933,18 +3129,14 @@ export async function getDraftCandidates(agentId: string, limit = 100): Promise<
   ).slice(0, Math.max(0, limit));
 }
 
-async function mergeDraftCandidatesUnlocked(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
-  const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
-  const next = newestByTimestamp(
-    mergeRecordsById(current, candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
-    (entry) => entry.createdAt,
-  ).slice(0, MAX_DRAFT_CANDIDATES);
-  await kvSet(KEYS.agentDraftCandidates(agentId), next);
-  return next;
-}
-
 export async function upsertDraftCandidates(agentId: string, candidates: DraftCandidate[]): Promise<DraftCandidate[]> {
-  return withKeyLock(KEYS.agentDraftCandidates(agentId), () => mergeDraftCandidatesUnlocked(agentId, candidates));
+  return mutateStoredValue<DraftCandidate[], DraftCandidate[]>(KEYS.agentDraftCandidates(agentId), (current) => {
+    const next = newestByTimestamp(
+      mergeRecordsById(current ?? [], candidates.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }))),
+      (entry) => entry.createdAt,
+    ).slice(0, MAX_DRAFT_CANDIDATES);
+    return { value: next, result: next };
+  });
 }
 
 export async function updateDraftCandidate(
@@ -2952,13 +3144,13 @@ export async function updateDraftCandidate(
   draftId: string,
   updates: Partial<Omit<DraftCandidate, 'id' | 'agentId' | 'schemaVersion'>>,
 ): Promise<DraftCandidate | null> {
-  return withKeyLock(KEYS.agentDraftCandidates(agentId), async () => {
-    const current = await getDraftCandidates(agentId, MAX_DRAFT_CANDIDATES);
+  const updatedAt = new Date().toISOString();
+  return mutateStoredValue<DraftCandidate[], DraftCandidate | null>(KEYS.agentDraftCandidates(agentId), (stored) => {
+    const current = stored ?? [];
     const found = current.find((entry) => entry.id === draftId);
-    if (!found) return null;
-    const updated: DraftCandidate = { ...found, ...updates, updatedAt: new Date().toISOString() };
-    await mergeDraftCandidatesUnlocked(agentId, [updated]);
-    return updated;
+    if (!found) return { value: current, result: null };
+    const updated: DraftCandidate = { ...found, ...updates, updatedAt };
+    return { value: current.map((entry) => entry.id === draftId ? updated : entry), result: updated };
   });
 }
 
@@ -3013,13 +3205,13 @@ export async function addGenerationOutcomeEvent(
     agentId,
     createdAt: event.createdAt || new Date().toISOString(),
   };
-  await withKeyLock(KEYS.agentGenerationOutcomes(agentId), async () => {
-    const current = await getGenerationOutcomeEvents(agentId, MAX_GENERATION_OUTCOMES);
+  await mutateStoredValue<GenerationOutcomeEvent[], void>(KEYS.agentGenerationOutcomes(agentId), (stored) => {
+    const current = stored ?? [];
     const next = newestByTimestamp(
       mergeRecordsById(current, [full]),
       (entry) => entry.createdAt,
     ).slice(0, MAX_GENERATION_OUTCOMES);
-    await kvSet(KEYS.agentGenerationOutcomes(agentId), next);
+    return { value: next, result: undefined };
   });
   return full;
 }
@@ -3040,13 +3232,13 @@ export async function getGenerationRuns(agentId: string, limit = 50): Promise<Ge
 }
 
 export async function saveGenerationRun(agentId: string, trace: GenerationRunTrace): Promise<void> {
-  await withKeyLock(KEYS.agentGenerationRuns(agentId), async () => {
-    const current = await getGenerationRuns(agentId, MAX_GENERATION_RUNS);
+  await mutateStoredValue<GenerationRunTrace[], void>(KEYS.agentGenerationRuns(agentId), (stored) => {
+    const current = stored ?? [];
     const next = newestByTimestamp(
       mergeRecordsById(current, [{ ...trace, agentId, schemaVersion: 2 as const }]),
       (entry) => entry.startedAt,
     ).slice(0, MAX_GENERATION_RUNS);
-    await kvSet(KEYS.agentGenerationRuns(agentId), next);
+    return { value: next, result: undefined };
   });
   if (trace.completedAt && trace.outcomeCode) {
     await addGenerationOutcomeEvent(agentId, {
@@ -3352,7 +3544,7 @@ function buildLearningSignalId(
 
 export async function addLearningSignal(
   agentId: string,
-  signal: Omit<LearningSignal, 'id' | 'agentId' | 'createdAt'> & { createdAt?: string }
+  signal: Omit<LearningSignal, 'id' | 'agentId' | 'createdAt' | 'storageRevision'> & { createdAt?: string }
 ): Promise<LearningSignal> {
   const createdAt = signal.createdAt || new Date().toISOString();
   const full: LearningSignal = {
@@ -3362,32 +3554,37 @@ export async function addLearningSignal(
     ...signal,
   };
 
-  const replacedRewardDelta = await withKeyLock(KEYS.agentSignals(agentId), async () => {
-    const existing = await getLearningSignals(agentId, 250);
-    const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const committed = await mutateStoredValue<LearningSignal[], LearningSignal>(KEYS.agentSignals(agentId), (stored) => {
+    const existing = stored ?? [];
     const pruned = existing.filter((entry) => new Date(entry.createdAt).getTime() > ninetyDaysAgo);
     const replacesPrior = UNIQUE_SIGNAL_TYPES.has(full.signalType) && Boolean(full.tweetId);
-    const isSameSignal = (entry: LearningSignal) => entry.signalType === full.signalType && entry.tweetId === full.tweetId;
-    const replaced = replacesPrior ? pruned.filter(isSameSignal) : [];
-    const deduped = replacesPrior ? pruned.filter((entry) => !isSameSignal(entry)) : pruned;
-
-    deduped.unshift(full);
-    await kvSet(KEYS.agentSignals(agentId), deduped.slice(0, 250));
-    return replaced.reduce((sum, entry) => sum + (Number.isFinite(entry.rewardDelta) ? entry.rewardDelta : 0), 0);
+    const isSameSignal = (entry: LearningSignal) => entry.id === full.id
+      || (replacesPrior && entry.signalType === full.signalType && entry.tweetId === full.tweetId);
+    const newer = pruned.find((entry) => isSameSignal(entry) && entry.createdAt > full.createdAt);
+    if (newer) return { value: existing, result: newer, skip: true };
+    const sameOperation = pruned.find((entry) => entry.id === full.id
+      && JSON.stringify({ ...entry, storageRevision: undefined }) === JSON.stringify(full));
+    if (sameOperation) return { value: existing, result: sameOperation, skip: true };
+    const deduped = pruned.filter((entry) => !isSameSignal(entry));
+    const versioned = { ...full, storageRevision: Math.max(0, ...existing.map((entry) => Number(entry.storageRevision) || 0)) + 1 };
+    deduped.unshift(versioned);
+    return { value: deduped.slice(0, 250), result: versioned };
   });
-  await updateDraftExperimentFromSignal(agentId, full, replacedRewardDelta);
+  await updateDraftExperimentFromSignal(agentId, committed);
   await addOutcomeEvent(agentId, {
-    eventType: full.signalType,
+    eventType: committed.signalType,
     source: 'learning_signal',
-    tweetId: full.tweetId,
-    xTweetId: full.xTweetId,
-    rewardDelta: full.rewardDelta,
-    reason: full.reason,
-    metadata: full.metadata,
-    idempotencyKey: `learning:${full.id}`,
-    createdAt: full.createdAt,
-  }).catch(() => null);
-  return full;
+    tweetId: committed.tweetId,
+    xTweetId: committed.xTweetId,
+    rewardDelta: committed.rewardDelta,
+    reason: committed.reason,
+    metadata: { storageRevision: committed.storageRevision || 0,
+      ...Object.fromEntries(Object.entries(committed.metadata || {}).filter(([key]) => key !== 'storageRevision')) },
+    idempotencyKey: `learning:${committed.id}`,
+    createdAt: committed.createdAt,
+  });
+  return committed;
 }
 
 export async function getLearningSignals(agentId: string, limit = 200): Promise<LearningSignal[]> {
