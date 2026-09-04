@@ -285,40 +285,9 @@ export async function PATCH(
         await recordV2CandidateOutcomeForTweet(tweet, 'deleted', [`feedback:${reasonCode}`], {
           updateIdea: stage !== 'writing' || semanticBlock?.scope !== 'copy',
         });
-      } else if (trimmedReason === 'skipped') {
-        const inferredReason = await inferDeleteIntent({
-          agentName: agent.name,
-          soulMd: agent.soulMd,
-          tweetText: tweet.content,
-        });
-        const tasteFeedback = classifyTasteFeedbackReason(inferredReason, tweet.content, { voiceProfile: parseSoulMd(agent.name, agent.soulMd) });
-        await saveFeedback(id, {
-          tweetId: tweet.id,
-          tweetText: tweet.content,
-          rating: 'down',
-          generatedAt: new Date().toISOString(),
-          intentSummary: inferredReason,
-          source: 'queue_delete',
-          userProvidedReason: false,
-        });
-        await addLearningSignal(id, {
-          tweetId: tweet.id,
-          xTweetId: tweet.xTweetId || undefined,
-          signalType: 'deleted_from_x',
-          surface: 'queue',
-          rewardDelta: -0.8,
-          reason: inferredReason,
-          inferred: true,
-          metadata: metadataWithStyleMode(tweet, {
-            ...buildGenerationLearningMetadata(tweet),
-            ...tasteFeedback.metadata,
-            userProvidedReason: false,
-            draftExperimentId: tweet.draftExperimentId ?? null,
-            creativeLane: tweet.creativeLane ?? null,
-            experimentHoldout: tweet.experimentHoldout === true,
-          }),
-        });
       }
+      // Skipping dismisses the explanation prompt. It supplies no editorial
+      // evidence and must not replace the verified removal signal with a guess.
     }
 
     return NextResponse.json(updated);

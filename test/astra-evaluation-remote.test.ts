@@ -50,7 +50,7 @@ function request(value: unknown, headers: Record<string, string> = {}) {
 function successfulGeneration(input: GenerateTweetBatchV2Input) {
   const primary = getModelChainForTask('tweet_writing', input.modelStack)[0];
   input.onTrace?.({ status: 'empty', mode: 'preview', requestedCount: 1, estimatedCostUsd: 0.03,
-    modelCalls: [{ stage: 'tweet_writing', model: primary.model, provider: primary.provider, succeeded: true }],
+    modelCalls: [{ stage: 'tweet_writing', model: primary.model, provider: primary.provider, providerModel: primary.model, succeeded: true }],
   } as GenerationRunTrace);
   input.onArtifacts?.({ ideas: [], drafts: [] });
   return Promise.resolve([]);

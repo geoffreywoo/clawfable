@@ -2594,13 +2594,18 @@ export async function getOrCreateUser(xUserId: string, username: string, name: s
 }
 
 export async function updateUser(xUserId: string, updates: Partial<User>): Promise<User> {
-  const current = await getUser(xUserId);
-  if (!current) {
-    throw new Error(`User ${xUserId} not found`);
-  }
-  const merged = normalizeUser({ ...current, ...updates });
-  const previousUsername = normalizeUsername(current.username);
-  await kvHset(KEYS.user(xUserId), merged as unknown as Record<string, unknown>);
+  // Different Stripe events and profile requests can update the same user in
+  // separate instances. Merge the patch against the authoritative hash so an
+  // email refresh cannot restore billing fields from a cached pre-refund row.
+  const { merged, previousUsername } = await mutateStoredValue<User, { merged: User; previousUsername: string }>(
+    KEYS.user(xUserId),
+    (current) => {
+      if (!current) throw new Error(`User ${xUserId} not found`);
+      const merged = normalizeUser({ ...current, ...updates });
+      return { value: merged, result: { merged, previousUsername: normalizeUsername(current.username) } };
+    },
+    'hash',
+  );
   await kvSadd(KEYS.userSet(), xUserId);
   const nextUsername = normalizeUsername(merged.username);
   if (previousUsername && previousUsername !== nextUsername) {

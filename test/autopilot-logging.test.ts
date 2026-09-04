@@ -1177,6 +1177,36 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { status: 'draft' },
+    { content: 'Operator replaced this copy after the queue read.' },
+    { quarantinedAt: '2026-09-04T00:00:00.000Z', quarantineReason: 'Operator stopped this draft' },
+    { agentId: 'another-account' },
+    { xTweetId: '1777777777777777777' },
+    { type: 'reply' },
+    { followupForTweetId: 'different-reply-parent' },
+    { quoteTweetId: 'different-quote-parent' },
+    { replyConversationId: 'different-conversation' },
+    { parentTweetId: 'different-draft-parent' },
+    { parentIdeaId: 'different-idea-parent' },
+    { parentDraftCandidateId: 'different-candidate-parent' },
+    { contentProvenance: 'generated_legacy' },
+  ])('ignores the cached pick after an operator mutation before queue-version capture: %j', async (mutation) => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    // The mutation has already landed before either version read. Only an
+    // authoritative tweet read can distinguish it from the cached queue row.
+    mocks.getQueueVersion.mockResolvedValue(8);
+    mocks.getTweet.mockImplementation(async (_id: string, options?: { fresh?: boolean }) => (
+      options?.fresh ? { ...validQueuedTweet, ...mutation } : validQueuedTweet
+    ));
+
+    const result = await runAutopilot(baseAgent);
+
+    expect(result.action).toBe('skipped');
+    expect(result.reason).toContain('changed in storage before posting');
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
   it('cancels the post when a queue mutation lands after the pre-post re-read', async () => {
     mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
     // First read is captured before the re-read; the second read sees the bump

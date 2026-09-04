@@ -35,7 +35,7 @@ async function loadJson<T>(filename: string | undefined): Promise<T> {
 async function main() {
   const modes = ['--capture', '--validate', '--run', '--score'].filter((mode) => process.argv.includes(mode));
   if (modes.length !== 1) {
-    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --run --snapshot FILE [--limit 40] [--max-cost-usd 100] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Capture reads stored account data only. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. All outputs are private; synthetic profiles have no human ground-truth labels.');
+    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Capture reads stored account data only. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at observed spend; in-flight arms may exceed it. SIGINT/SIGTERM stop new work and drain active arms into private receipts. All outputs are private; synthetic profiles have no human ground-truth labels.');
     if (modes.length > 1) process.exitCode = 1;
     return;
   }
@@ -83,16 +83,35 @@ async function main() {
   const remoteRunner = remoteOrigin ? createRemoteEvaluationRunner(snapshot, { origin: remoteOrigin, secret: process.env.CRON_SECRET || '' }) : undefined;
   const outputDirectory = privatePath(path.join(path.dirname(privatePath(arg('--snapshot')!)), `run-${timestamp}`));
   const comparisonFile = path.join(outputDirectory, 'comparison.json');
-  const comparison = await runFrozenEvaluation(snapshot, {
-    runArm: remoteRunner,
-    limit: Number(arg('--limit') || 40), maxEstimatedCostUsd: Number(arg('--max-cost-usd') || 100),
-    onProgress: async (progress) => {
-      await saveJson(comparisonFile, progress);
-      console.log(JSON.stringify({ completedPackets: progress.packets.filter((packet) => packet.baseline.validPrimaryModels && packet.astra.validPrimaryModels).length,
-        completedArms: progress.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.trace !== null).length,
-        totalPackets: 40, estimatedCostUsd: progress.estimatedCostUsd }));
-    },
-  });
+  const controller = new AbortController();
+  let interruptedExitCode: number | undefined;
+  const interrupt = (signal: 'SIGINT' | 'SIGTERM') => {
+    if (controller.signal.aborted) return;
+    interruptedExitCode = signal === 'SIGINT' ? 130 : 143;
+    controller.abort();
+    console.error('Stopping new evaluation calls; waiting for active paid arms and private receipt writes to finish.');
+  };
+  const onSigint = () => interrupt('SIGINT');
+  const onSigterm = () => interrupt('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  let comparison: EvaluationComparison;
+  try {
+    comparison = await runFrozenEvaluation(snapshot, {
+      runArm: remoteRunner, signal: controller.signal,
+      limit: Number(arg('--limit') ?? 40), concurrency: Number(arg('--concurrency') ?? 1),
+      maxEstimatedCostUsd: Number(arg('--max-cost-usd') ?? 100),
+      onProgress: async (progress) => {
+        await saveJson(comparisonFile, progress);
+        console.log(JSON.stringify({ completedPackets: progress.packets.filter((packet) => packet.baseline.validPrimaryModels && packet.astra.validPrimaryModels).length,
+          completedArms: progress.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.trace !== null).length,
+          totalPackets: 40, estimatedCostUsd: progress.estimatedCostUsd, execution: progress.execution }));
+      },
+    });
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+    process.removeListener('SIGTERM', onSigterm);
+  }
   await saveJson(comparisonFile, comparison);
   await saveJson(path.join(outputDirectory, 'blinded-cards.json'), blindedEvaluationCards(snapshot, comparison));
   await saveJson(path.join(outputDirectory, 'votes-template.json'), {
@@ -100,7 +119,8 @@ async function main() {
     votes: comparison.packets.map((packet) => ({ packetId: packet.id, choice: '', reason: '', editCharsA: null, editCharsB: null })),
   });
   console.log(JSON.stringify({ status: comparison.completed ? 'awaiting_blinded_votes' : 'incomplete_comparison', comparisonFile, estimatedCostUsd: comparison.estimatedCostUsd }));
-  if (!comparison.completed) process.exitCode = 2;
+  if (interruptedExitCode) process.exitCode = interruptedExitCode;
+  else if (!comparison.completed) process.exitCode = 2;
 }
 
 main().catch((error) => {

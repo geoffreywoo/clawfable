@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createAgent,
+  addLearningSignal,
   createTweet,
   getFeedback,
   getIdeaCandidates,
@@ -42,6 +43,7 @@ vi.mock('@/lib/automation-entitlement', async () => {
   };
 });
 
+import { inferDeleteIntent } from '@/lib/delete-intent';
 import { DELETE, PATCH } from '@/app/api/agents/[id]/queue/[tweetId]/route';
 import { ANTIFUND_PORTFOLIO_COMPANIES, buildAntiFundPortfolioContext } from '@/lib/antifund-portfolio';
 
@@ -501,9 +503,9 @@ describe('queue ownership route guard', () => {
     });
   });
 
-  it('stores inferred feedback when a deleted-from-X tweet is skipped', async () => {
+  it.each([false, true])('keeps a skipped deletion reason unknown and preserves prior verified evidence (verified=%s)', async (verified) => {
     const agent = await createAgent({
-      handle: 'queue-delete-from-x-skip',
+      handle: `queue-delete-from-x-skip-${verified}`,
       name: 'Queue Delete From X Skip',
       soulMd: '# soul',
     } as any);
@@ -519,6 +521,17 @@ describe('queue ownership route guard', () => {
       scheduledAt: null,
     });
 
+    if (verified) {
+      await addLearningSignal(agent.id, {
+        tweetId: deletedTweet.id, xTweetId: deletedTweet.xTweetId!, signalType: 'deleted_from_x',
+        surface: 'cron', rewardDelta: -0.8, inferred: true,
+        reason: 'Two official checks confirmed removal; editorial reason unknown.',
+        metadata: { verifiedRemoval: true, confirmationCount: 2 },
+      });
+    }
+    const priorSignals = await getLearningSignals(agent.id);
+    vi.mocked(inferDeleteIntent).mockClear();
+
     const response = await PATCH(
       new Request('http://localhost/api/queue', {
         method: 'PATCH',
@@ -533,11 +546,9 @@ describe('queue ownership route guard', () => {
     const updatedTweet = await getTweet(deletedTweet.id);
     expect(updatedTweet?.deletionReason).toBe('skipped');
 
-    const feedback = await getFeedback(agent.id);
-    expect(feedback.some((entry) =>
-      entry.tweetId === deletedTweet.id &&
-      entry.userProvidedReason === false &&
-      entry.intentSummary === `Inferred intent for: ${deletedTweet.content}`
-    )).toBe(true);
+    expect(await getFeedback(agent.id)).toEqual([]);
+    expect(await getLearningSignals(agent.id)).toEqual(priorSignals);
+    expect(inferDeleteIntent).not.toHaveBeenCalled();
+
   });
 });
