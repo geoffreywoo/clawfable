@@ -1408,13 +1408,13 @@ describe('Tweet Generation V2', () => {
     expect(writingPrompt.verifiedEntityMentionPolicy.instruction).toContain('Never begin the post with @');
   });
 
-  it('refuses an exact Natural promotion request before idea generation', () => {
+  it("refuses Geoffrey's exact Natural promotion request before idea generation", () => {
     const requested = buildGenerationBriefsV2({
       count: 1,
       requestedTopic: 'Natural',
       stories: [],
       documents: [],
-      voiceProfile,
+      voiceProfile: { ...voiceProfile, accountHandle: 'geoffwoo' },
       analysis: { engagementPatterns: { topTopics: ['AI', 'startups'] } } as any,
       learnings: null,
       style: { autonomyMode: 'balanced', trendMixTarget: 40, trendTolerance: 'adjacent', exploration: { underusedTopics: [] } } as any,

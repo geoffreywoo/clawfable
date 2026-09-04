@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   blindedEvaluationCards, createFrozenEvaluationSnapshot, evaluationHash, runFrozenEvaluation,
   scoreFrozenEvaluation, validateFrozenEvaluation, runFrozenEvaluationArm, type EvaluationComparison, type EvaluationVotes,
+  type EvaluationArmResult, type EvaluationArmRunner,
 } from '@/lib/astra-evaluation';
 import { DEFAULT_CONTENT_STYLE } from '@/lib/content-style';
 import { getModelChainForTask } from '@/lib/ai';
@@ -43,7 +44,7 @@ function fakeGenerate(input: GenerateTweetBatchV2Input) {
   const trace = { schemaVersion: 2, id: 'test-trace', status: 'completed', outcomeCode: 'completed',
     modelCalls: (['idea_generation', 'idea_judgment', 'tweet_writing', 'copy_judgment'] as const).map((stage) => {
       const primary = getModelChainForTask(stage, modelStack)[0];
-      return { stage, model: primary.model, provider: primary.provider, succeeded: true };
+      return { stage, model: primary.model, provider: primary.provider, providerModel: primary.model, succeeded: true };
     }), durationMs: 20, estimatedCostUsd: 0.01, stageCounts: {},
   } as GenerationRunTrace;
   input.onTrace?.(trace);
@@ -58,6 +59,19 @@ function votesFor(comparison: EvaluationComparison, astraWins = 24): EvaluationV
       return { packetId: packet.id, choice: ((index < astraWins) === astraA ? 'A' : 'B') as 'A' | 'B', editCharsA: 10, editCharsB: 20 };
     }),
   };
+}
+
+function armResult(stack: EvaluationArmResult['stack'], cost = 0.01): EvaluationArmResult {
+  return { stack, selected: [], ideas: [], drafts: [], trace: { estimatedCostUsd: cost } as GenerationRunTrace,
+    validPrimaryModels: true, invalidReason: null };
+}
+
+function controlledArms() {
+  const calls: Array<{ packetId: string; stack: EvaluationArmResult['stack']; finish: (overrides?: Partial<EvaluationArmResult>) => void }> = [];
+  const runArm = vi.fn<EvaluationArmRunner>((packet, stack) => new Promise((resolve) => {
+    calls.push({ packetId: packet.id, stack, finish: (overrides = {}) => resolve({ ...armResult(stack), ...overrides }) });
+  }));
+  return { calls, runArm };
 }
 
 describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
@@ -161,6 +175,17 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     if (!valid) expect(result.invalidReason).toBe('provider_or_model_substitution');
   });
 
+  it.each([undefined, null, '', ' '])('requires actual wire-model identity instead of only the requested model: %s', async (providerModel) => {
+    const result = await runFrozenEvaluationArm(snapshot().packets[0], 'publishing_v2_astra', { generate: async (input) => {
+      input.onTrace?.({ status: 'completed', estimatedCostUsd: 0.01, modelCalls: [{
+        stage: 'tweet_writing', model: 'gpt-6-astra', provider: 'openai', providerModel, succeeded: true,
+      }] } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.validPrimaryModels).toBe(false);
+    expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
   it('rejects Sol and dated compared-model identities as independent critics', async () => {
     const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
     for (const model of ['gpt-5.6-sol', 'gpt-5.6-sol-2026-09-04', 'gpt-5.6-2026-09-04', 'gpt-6-astra-2026-09-04']) {
@@ -195,6 +220,193 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(report.completed).toBe(false);
     expect(report.estimatedCostUsd).toBe(0.5);
     expect([report.packets[0].baseline.invalidReason, report.packets[0].astra.invalidReason]).toContain('evaluation_arm_execution_failed_cost_unknown');
+  });
+
+  it.each([0, 5, 1.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid concurrency before calling any model: %s', async (concurrency) => {
+    const runArm = vi.fn<EvaluationArmRunner>();
+    await expect(runFrozenEvaluation(snapshot(), { runArm, concurrency, now })).rejects.toThrow('concurrency');
+    expect(runArm).not.toHaveBeenCalled();
+  });
+
+  it('preflights unsafe later packets before any paid calls even with a smaller diagnostic limit', async () => {
+    const frozen = snapshot();
+    frozen.packets[39].input.requireAutopostQuality = false;
+    const { hash: _hash, ...body } = frozen;
+    frozen.hash = evaluationHash(body);
+    const runArm = vi.fn<EvaluationArmRunner>();
+    await expect(runFrozenEvaluation(frozen, { runArm, concurrency: 4, limit: 1, now })).rejects.toThrow('Unsafe frozen evaluation packet');
+    expect(runArm).not.toHaveBeenCalled();
+  });
+
+  it('remains serial by default and preserves each packet’s hashed alternating arm order', async () => {
+    const frozen = snapshot();
+    let active = 0;
+    let maximumActive = 0;
+    const calls: string[] = [];
+    const report = await runFrozenEvaluation(frozen, { now, limit: 3, runArm: async (packet, stack) => {
+      maximumActive = Math.max(maximumActive, ++active);
+      calls.push(`${packet.id}:${stack}`);
+      await Promise.resolve();
+      active--;
+      return armResult(stack);
+    } });
+    const expected = frozen.packets.slice(0, 3).flatMap((packet) => {
+      const astraFirst = parseInt(evaluationHash(`${frozen.hash}:${packet.id}`).slice(0, 2), 16) % 2 === 0;
+      return (astraFirst ? ['publishing_v2_astra', 'publishing_v2_gpt_control'] : ['publishing_v2_gpt_control', 'publishing_v2_astra'])
+        .map((stack) => `${packet.id}:${stack}`);
+    });
+    expect(calls).toEqual(expected);
+    expect(maximumActive).toBe(1);
+    expect(report.execution?.concurrency).toBe(1);
+    expect(report.completed).toBe(false);
+  });
+
+  it('completes all 40 packets with at most four concurrent arms, no duplicates, and no premature completed receipt', async () => {
+    const frozen = snapshot();
+    const activePackets = new Set<string>();
+    const calls: Array<{ packetId: string; stack: string }> = [];
+    const progress: EvaluationComparison[] = [];
+    let maximumActive = 0;
+    const report = await runFrozenEvaluation(frozen, { now, concurrency: 4, onProgress: (value) => { progress.push(value); },
+      runArm: async (packet, stack) => {
+        expect(activePackets.has(packet.id)).toBe(false);
+        activePackets.add(packet.id);
+        maximumActive = Math.max(maximumActive, activePackets.size);
+        calls.push({ packetId: packet.id, stack });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activePackets.delete(packet.id);
+        return armResult(stack);
+      },
+    });
+    expect(maximumActive).toBe(4);
+    expect(calls).toHaveLength(80);
+    expect(new Set(calls.map((call) => `${call.packetId}:${call.stack}`)).size).toBe(80);
+    expect(report.packets.map((packet) => packet.id)).toEqual(frozen.packets.map((packet) => packet.id));
+    expect(report.completed).toBe(true);
+    expect(report.estimatedCostUsd).toBeCloseTo(0.8);
+    expect(progress).toHaveLength(80);
+    for (const receipt of progress) {
+      const ids = new Set(receipt.packets.map((packet) => packet.id));
+      expect(receipt.packets.map((packet) => packet.id)).toEqual(frozen.packets.filter((packet) => ids.has(packet.id)).map((packet) => packet.id));
+      if (receipt.completed) expect(receipt.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.validPrimaryModels)).toHaveLength(80);
+    }
+    expect(progress.slice(0, -1).every((receipt) => !receipt.completed)).toBe(true);
+    expect(progress.at(-1)).toEqual(report);
+  });
+
+  it('serializes delayed progress writes and sorts out-of-order completed arms without mutating earlier receipts', async () => {
+    const frozen = snapshot();
+    const { calls, runArm } = controlledArms();
+    const receipts: EvaluationComparison[] = [];
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    let activeWrites = 0;
+    let maximumWrites = 0;
+    const running = runFrozenEvaluation(frozen, { now, concurrency: 3, limit: 3, runArm,
+      onProgress: async (value) => {
+        maximumWrites = Math.max(maximumWrites, ++activeWrites);
+        receipts.push(value);
+        if (receipts.length === 1) await firstWrite;
+        activeWrites--;
+      },
+    });
+    expect(calls).toHaveLength(3);
+    calls[2].finish();
+    await vi.waitFor(() => expect(receipts).toHaveLength(1));
+    calls[0].finish();
+    calls[1].finish();
+    await Promise.resolve();
+    expect(receipts).toHaveLength(1);
+    expect(calls).toHaveLength(3);
+    releaseFirstWrite();
+    await vi.waitFor(() => expect(calls).toHaveLength(6));
+    calls[5].finish(); calls[3].finish(); calls[4].finish();
+    const report = await running;
+    expect(maximumWrites).toBe(1);
+    expect(receipts).toHaveLength(6);
+    expect(receipts[0].packets.map((packet) => packet.id)).toEqual([frozen.packets[2].id]);
+    expect(receipts[0].estimatedCostUsd).toBe(0.01);
+    expect([receipts[0].packets[0].baseline.invalidReason, receipts[0].packets[0].astra.invalidReason]).toContain('paired_arm_pending');
+    for (let index = 0; index < receipts.length; index++) {
+      expect(receipts[index].packets.map((packet) => packet.id)).toEqual(receipts[index].packets.map((packet) => packet.id).sort());
+      if (index) expect(receipts[index].estimatedCostUsd).toBeGreaterThanOrEqual(receipts[index - 1].estimatedCostUsd);
+    }
+    expect(receipts.at(-1)).toEqual(report);
+  });
+
+  it('stops all new arms at observed budget exhaustion and accounts for every already-running arm while draining', async () => {
+    const { calls, runArm } = controlledArms();
+    const running = runFrozenEvaluation(snapshot(), { now, concurrency: 3, maxEstimatedCostUsd: 0.5, runArm });
+    expect(calls).toHaveLength(3);
+    calls[0].finish({ trace: { estimatedCostUsd: 0.75 } as GenerationRunTrace });
+    await vi.waitFor(() => expect(runArm).toHaveBeenCalledTimes(3));
+    calls[1].finish({ trace: { estimatedCostUsd: 0.75 } as GenerationRunTrace });
+    calls[2].finish({ trace: { estimatedCostUsd: 0.75 } as GenerationRunTrace });
+    const report = await running;
+    expect(runArm).toHaveBeenCalledTimes(3);
+    expect(report.estimatedCostUsd).toBe(2.25);
+    expect(report.execution).toMatchObject({ concurrency: 3, maxEstimatedCostUsd: 0.5,
+      budgetPolicy: 'observed_cost_stop_with_in_flight_drain', stopReason: 'cost_budget' });
+    expect(report.packets.flatMap((packet) => [packet.baseline, packet.astra]).filter((arm) => arm.trace)).toHaveLength(3);
+    expect(report.packets.every((packet) => [packet.baseline.invalidReason, packet.astra.invalidReason].includes('evaluation_cost_budget_reached'))).toBe(true);
+    expect(report.completed).toBe(false);
+  });
+
+  it('fails fast on one invalid arm while retaining another packet’s in-flight paid second arm', async () => {
+    const { calls, runArm } = controlledArms();
+    const running = runFrozenEvaluation(snapshot(), { now, concurrency: 2, runArm });
+    calls[0].finish();
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2].packetId).toBe(calls[0].packetId);
+    calls[1].finish({ validPrimaryModels: false, invalidReason: 'provider_or_model_substitution' });
+    await Promise.resolve();
+    calls[2].finish();
+    const report = await running;
+    expect(runArm).toHaveBeenCalledTimes(3);
+    expect(report.packets).toHaveLength(2);
+    expect(report.packets[0].baseline.validPrimaryModels && report.packets[0].astra.validPrimaryModels).toBe(true);
+    expect([report.packets[1].baseline.invalidReason, report.packets[1].astra.invalidReason]).toContain('paired_run_aborted_after_invalid_arm');
+    expect(report.estimatedCostUsd).toBeCloseTo(0.03);
+    expect(report.execution?.stopReason).toBe('invalid_arm');
+    expect(report.completed).toBe(false);
+  });
+
+  it('drains and checkpoints paid results after graceful interruption without scheduling their paired arms', async () => {
+    const { calls, runArm } = controlledArms();
+    const controller = new AbortController();
+    const receipts: EvaluationComparison[] = [];
+    const running = runFrozenEvaluation(snapshot(), { now, concurrency: 2, runArm, signal: controller.signal,
+      onProgress: (value) => { receipts.push(value); },
+    });
+    expect(calls).toHaveLength(2);
+    controller.abort();
+    calls[1].finish(); calls[0].finish();
+    const report = await running;
+    expect(runArm).toHaveBeenCalledTimes(2);
+    expect(report.estimatedCostUsd).toBeCloseTo(0.02);
+    expect(report.execution?.stopReason).toBe('interrupted');
+    expect(report.packets.every((packet) => [packet.baseline.invalidReason, packet.astra.invalidReason].includes('evaluation_interrupted'))).toBe(true);
+    expect(receipts.at(-1)).toEqual(report);
+    expect(report.completed).toBe(false);
+  });
+
+  it('stops scheduling on receipt-write failure, drains remaining arms, then reports the write error', async () => {
+    const { calls, runArm } = controlledArms();
+    const receipts: EvaluationComparison[] = [];
+    const running = runFrozenEvaluation(snapshot(), { now, concurrency: 2, runArm, onProgress: (value) => {
+      receipts.push(value);
+      if (receipts.length === 1) throw new Error('receipt disk unavailable');
+    } });
+    const rejected = expect(running).rejects.toThrow('receipt disk unavailable');
+    calls[0].finish();
+    await vi.waitFor(() => expect(receipts.length).toBeGreaterThanOrEqual(2));
+    expect(runArm).toHaveBeenCalledTimes(2);
+    calls[1].finish();
+    await rejected;
+    expect(runArm).toHaveBeenCalledTimes(2);
+    expect(receipts.at(-1)?.estimatedCostUsd).toBeCloseTo(0.02);
+    expect(receipts.at(-1)?.execution?.stopReason).toBe('progress_write_failed');
+    expect(receipts.at(-1)?.packets).toHaveLength(2);
   });
 
   it('enforces blinded preference, safety, completeness, and explicit scoring provenance', async () => {

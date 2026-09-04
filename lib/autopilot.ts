@@ -809,11 +809,20 @@ export async function regenerateAgentQueue(
     minQueueSize: settings.minQueueSize,
   };
 }
-function getStaleSelectionReason(candidate: Tweet, live: Tweet | null): string | null {
+function getStaleSelectionReason(candidate: Tweet, live: Tweet | null, agent: Agent): string | null {
   if (!live) return `Stale selection gate: draft ${candidate.id} no longer exists in storage (deleted before posting).`;
+  if (String(live.agentId) !== String(agent.id)) return `Stale selection gate: draft ${candidate.id} no longer belongs to this account.`;
   if (live.quarantinedAt) return `Stale selection gate: draft ${candidate.id} was quarantined before posting (${live.quarantineReason || 'no reason recorded'}).`;
+  if (live.xTweetId) return `Stale selection gate: draft ${candidate.id} already has an X post receipt.`;
   if (live.status !== 'queued') return `Stale selection gate: draft ${candidate.id} is now ${live.status}, not queued.`;
   if (live.content !== candidate.content) return `Stale selection gate: draft ${candidate.id} was edited after it was ranked; the new copy will be re-validated next tick.`;
+  if (live.type !== candidate.type || live.followupForTweetId !== candidate.followupForTweetId
+    || live.quoteTweetId !== candidate.quoteTweetId || live.replyConversationId !== candidate.replyConversationId
+    || live.parentTweetId !== candidate.parentTweetId || live.parentIdeaId !== candidate.parentIdeaId
+    || live.parentDraftCandidateId !== candidate.parentDraftCandidateId) {
+    return `Stale selection gate: draft ${candidate.id} changed its publishing target or lineage after ranking.`;
+  }
+  if (!isAutopostableQueuedTweetForAgent(agent, live)) return `Stale selection gate: draft ${candidate.id} no longer clears the account's publishing eligibility checks.`;
   return null;
 }
 
@@ -1633,7 +1642,7 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   let tweet: Tweet | null = null;
   while (selectionPool.length > 0) {
     const candidate = pickDiverseTweet(selectionPool, recentPostEntries) || selectionPool[0];
-    const staleReason = getStaleSelectionReason(candidate, await getTweet(candidate.id));
+    const staleReason = getStaleSelectionReason(candidate, await getTweet(candidate.id, { fresh: true }), agent);
     if (!staleReason) {
       tweet = candidate;
       break;

@@ -40,7 +40,18 @@ function decodeSnapshot<T>(raw: unknown, kind: 'json' | 'hash'): T | null {
     for (let index = 0; index < raw.length; index += 2) {
       let fieldValue = raw[index + 1];
       if (typeof fieldValue === 'string') {
-        try { fieldValue = JSON.parse(fieldValue); } catch { /* Plain Redis string. */ }
+        try {
+          const parsed = JSON.parse(fieldValue);
+          // X IDs exceed Number's safe integer range. The SDK preserves their
+          // raw strings; parsing them again here would round and rewrite them.
+          if (!(typeof parsed === 'number' && Number.isInteger(parsed) && !Number.isSafeInteger(parsed))) {
+            fieldValue = parsed;
+          }
+        } catch { /* Plain Redis string. */ }
+      } else if (typeof fieldValue === 'number' && Number.isInteger(fieldValue) && !Number.isSafeInteger(fieldValue)) {
+        // EVAL can eagerly decode exactly representable large integers. Keep
+        // their identity as a string, as HGETALL does, without changing decimals.
+        fieldValue = String(fieldValue);
       }
       value[String(raw[index])] = fieldValue;
     }

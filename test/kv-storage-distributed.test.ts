@@ -7,6 +7,7 @@ import { mutateRemoteValue } from '@/lib/kv-atomic';
 import { isMaturePerformance } from '@/lib/performance-signals';
 import { deriveMaturePerformanceRewards } from '@/lib/performance-rewards';
 import { computeActionRewards, computeEarlyVelocityScore } from '@/lib/virality-signals';
+import { normalizeUsername } from '@/lib/internal-accounts';
 
 const storageCode = ts.transpileModule(readFileSync('lib/kv-storage.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -23,6 +24,7 @@ function redisServer() {
   const strings = new Map<string, string>();
   const hashes = new Map<string, Record<string, string>>();
   const lists = new Map<string, any[]>();
+  const sets = new Map<string, Set<string>>();
   const expiry = new Map<string, number>();
   let barrierKey = '';
   let barrierReads = 0;
@@ -41,10 +43,21 @@ function redisServer() {
     async get(key: string) { purge(key); return decode(strings.get(key)); },
     async incr(key: string) { const value = Number(strings.get(key) || 0) + 1; strings.set(key, String(value)); return value; },
     async set(key: string, value: unknown) { strings.set(key, JSON.stringify(value)); return 'OK'; },
+    async sadd(key: string, ...members: string[]) {
+      const set = sets.get(key) || new Set<string>();
+      members.forEach((member) => set.add(member));
+      sets.set(key, set);
+    },
     async hset(key: string, value: Record<string, unknown>) {
       hashes.set(key, { ...hashes.get(key), ...Object.fromEntries(Object.entries(value).map(([field, entry]) => [field, typeof entry === 'string' ? entry : JSON.stringify(entry ?? null)])) });
     },
-    async hgetall(key: string) { const value = hashes.get(key); return value ? Object.fromEntries(Object.entries(value).map(([field, entry]) => [field, decode(entry)])) : null; },
+    async hgetall(key: string) {
+      const value = hashes.get(key);
+      // Match Upstash HGETALL's guard against precision loss in numeric strings.
+      return value ? Object.fromEntries(Object.entries(value).map(([field, entry]) => [field,
+        !Number.isNaN(Number(entry)) && !Number.isSafeInteger(Number(entry)) ? entry : decode(entry),
+      ])) : null;
+    },
     async lpush(key: string, ...values: string[]) { lists.set(key, [...values, ...(lists.get(key) || [])]); },
     async ltrim(key: string, start: number, stop: number) { lists.set(key, (lists.get(key) || []).slice(start, stop === -1 ? undefined : stop + 1)); },
     async lrange(key: string, start: number, stop: number) { return (lists.get(key) || []).slice(start, stop === -1 ? undefined : stop + 1); },
@@ -98,6 +111,7 @@ function independentStorage(server: ReturnType<typeof redisServer>): typeof impo
     './performance-signals': { isMaturePerformance },
     './performance-rewards': { deriveMaturePerformanceRewards },
     './virality-signals': { computeActionRewards, computeEarlyVelocityScore },
+    './internal-accounts': { normalizeUsername },
   };
   vm.runInNewContext(storageCode, {
     module, exports: module.exports, require: (name: string) => dependencies[name] || {},
@@ -114,6 +128,57 @@ async function seedExperiment(server: ReturnType<typeof redisServer>, storage: R
 
 describe('storage across independent server instances', () => {
   afterEach(() => vi.useRealTimers());
+
+  it('preserves a full X user ID and username index when an atomic user patch rewrites its hash', async () => {
+    const server = redisServer();
+    const userId = '1777777777777777777';
+    await server.hset(`user:${userId}`, { id: userId, username: 'exactidowner', name: 'Owner',
+      createdAt: '2026-09-01T00:00:00.000Z', billingStatus: 'active', lastPaidAmountCents: 4900 });
+    const storage = independentStorage(server);
+    expect((await storage.getUser(userId))?.id).toBe(userId);
+    const updated = await storage.updateUser(userId, { billingEmail: 'owner@example.invalid' });
+    expect(updated.id).toBe(userId);
+    expect(updated.lastPaidAmountCents).toBe(4900);
+    expect(server.hashes.get(`user:${userId}`)?.id).toBe(userId);
+    expect(await server.get('user:username:exactidowner')).toBe(userId);
+    expect((await independentStorage(server).getUserByUsername('exactidowner'))?.id).toBe(userId);
+  });
+
+  it('preserves a refund when another server updates the customer email from an older cached user', async () => {
+    const server = redisServer(), left = independentStorage(server), right = independentStorage(server);
+    await server.hset('user:owner-1', {
+      id: 'owner-1', username: 'owner', name: 'Owner', billingStatus: 'active', plan: 'pro',
+      paidThrough: '2026-10-01T00:00:00.000Z', lastPaidInvoiceId: 'invoice-1', lastPaidAmountCents: 4900,
+      billingEmail: 'old@example.invalid', createdAt: '2026-09-01T00:00:00.000Z',
+    });
+    await Promise.all([left.getUser('owner-1'), right.getUser('owner-1')]);
+    server.race('user:owner-1');
+    await Promise.all([
+      left.updateUser('owner-1', {
+        billingStatus: 'unpaid', paidThrough: null, lastPaidAmountCents: 0, lastRefundedInvoiceId: 'invoice-1',
+      }),
+      right.updateUser('owner-1', { billingEmail: 'new@example.invalid' }),
+    ]);
+    expect(await independentStorage(server).getUser('owner-1')).toMatchObject({
+      billingStatus: 'unpaid', paidThrough: null, lastPaidAmountCents: 0, lastRefundedInvoiceId: 'invoice-1',
+      billingEmail: 'new@example.invalid', lastPaidInvoiceId: 'invoice-1', username: 'owner',
+    });
+    expect(server.conflicts()).toBeGreaterThan(0);
+    expect(await server.get('user:username:owner')).toBe('owner-1');
+  });
+
+  it('bypasses a warmed queue hash when a different server changes the draft before version capture', async () => {
+    const server = redisServer(), reader = independentStorage(server);
+    await server.hset('tweet:queued-1', { id: 'queued-1', agentId: 'a1', content: 'Old queued copy', status: 'queued' });
+    await server.lpush('agent:a1:queue', 'queued-1');
+    const [candidate] = await reader.getQueuedTweets('a1');
+    await server.hset('tweet:queued-1', { content: 'New operator copy', status: 'draft' });
+    await server.incr('agent:a1:queue:version');
+    const before = await reader.getQueueVersion('a1');
+    expect(await reader.getTweet(candidate.id)).toMatchObject({ content: 'Old queued copy', status: 'queued' });
+    expect(await reader.getTweet(candidate.id, { fresh: true })).toMatchObject({ content: 'New operator copy', status: 'draft' });
+    expect(await reader.getQueueVersion('a1')).toBe(before);
+  });
 
   it('preserves both outcome events when two servers read the same old array', async () => {
     const server = redisServer();

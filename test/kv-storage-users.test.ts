@@ -7,6 +7,23 @@ describe('kv-storage user index repair', () => {
     vi.clearAllMocks();
   });
 
+  it('merges simultaneous billing and profile patches in the local fallback', async () => {
+    vi.stubEnv('KV_URL', '');
+    vi.stubEnv('KV_REST_API_URL', '');
+    const storage = await import('@/lib/kv-storage');
+    const user = await storage.getOrCreateUser('local-atomic-user', 'localatomicuser', 'Local Owner');
+    await Promise.all([
+      storage.updateUser(user.id, { billingStatus: 'unpaid', lastRefundedInvoiceId: 'invoice-local' }),
+      storage.updateUser(user.id, { billingEmail: 'owner@example.invalid' }),
+    ]);
+    expect(await storage.getUser(user.id)).toMatchObject({
+      billingStatus: 'unpaid', lastRefundedInvoiceId: 'invoice-local', billingEmail: 'owner@example.invalid',
+    });
+    await storage.updateUser(user.id, { username: 'renamedowner' });
+    expect((await storage.getUserByUsername('renamedowner'))?.id).toBe(user.id);
+    expect(await storage.getUserByUsername('localatomicuser')).toBeNull();
+  });
+
   it('backfills the users set from existing user hashes when the index is empty', async () => {
     const fakeKv = {
       smembers: vi.fn(async (key: string) => {
