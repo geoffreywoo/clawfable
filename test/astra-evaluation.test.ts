@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   blindedEvaluationCards, createFrozenEvaluationSnapshot, evaluationHash, runFrozenEvaluation,
-  scoreFrozenEvaluation, validateFrozenEvaluation, type EvaluationComparison, type EvaluationVotes,
+  scoreFrozenEvaluation, validateFrozenEvaluation, runFrozenEvaluationArm, type EvaluationComparison, type EvaluationVotes,
 } from '@/lib/astra-evaluation';
 import { DEFAULT_CONTENT_STYLE } from '@/lib/content-style';
 import { getModelChainForTask } from '@/lib/ai';
@@ -125,6 +125,51 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(generate).toHaveBeenCalledTimes(1);
     expect(report.completed).toBe(false);
     expect([report.packets[0].astra.invalidReason, report.packets[0].baseline.invalidReason]).toContain('provider_or_model_substitution');
+  });
+
+  it.each([
+    ['exact', null, true], ['dated snapshot', '-2026-09-04', true], ['different model', 'other-model', false],
+    ['unrelated suffix', '-mini', false], ['dated snapshot with suffix', '-2026-09-04-proxy', false],
+  ])('validates the actual provider-reported model: %s', async (_label, suffix, valid) => {
+    const stack = 'publishing_v2_astra';
+    const primary = getModelChainForTask('tweet_writing', stack)[0];
+    const providerModel = suffix === null ? primary.model : suffix.startsWith('-') ? `${primary.model}${suffix}` : suffix;
+    const result = await runFrozenEvaluationArm(snapshot().packets[0], stack, { generate: async (input) => {
+      input.onTrace?.({ status: 'empty', estimatedCostUsd: 0.01, modelCalls: [{
+        stage: 'tweet_writing', model: primary.model, provider: primary.provider, providerModel, succeeded: true,
+      }] } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.validPrimaryModels).toBe(valid);
+    expect(result.trace?.modelCalls[0].providerModel).toBe(providerModel);
+    if (!valid) expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
+  it('stops before the paired second arm when the first reaches the cost ceiling', async () => {
+    const generate = vi.fn(fakeGenerate);
+    const report = await runFrozenEvaluation(snapshot(), { generate, maxEstimatedCostUsd: 0.005, now });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(report.estimatedCostUsd).toBe(0.01);
+    expect([report.packets[0].astra.invalidReason, report.packets[0].baseline.invalidReason]).toContain('evaluation_cost_budget_reached');
+  });
+
+  it('checkpoints a paid first arm and preserves progress when a remote pair loses its response', async () => {
+    const checkpoints: EvaluationComparison[] = [];
+    let calls = 0;
+    const report = await runFrozenEvaluation(snapshot(), { now, onProgress: (value) => { checkpoints.push(value); },
+      runArm: async (packet, stack) => {
+        if (++calls === 2) throw new Error('remote response lost');
+        return { stack, selected: [], ideas: [], drafts: [], trace: { estimatedCostUsd: 0.5 } as GenerationRunTrace,
+          validPrimaryModels: true, invalidReason: null };
+      },
+    });
+    expect(calls).toBe(2);
+    expect(checkpoints).toHaveLength(2);
+    expect(checkpoints[0].estimatedCostUsd).toBe(0.5);
+    expect([checkpoints[0].packets[0].baseline.invalidReason, checkpoints[0].packets[0].astra.invalidReason]).toContain('paired_arm_pending');
+    expect(report.completed).toBe(false);
+    expect(report.estimatedCostUsd).toBe(0.5);
+    expect([report.packets[0].baseline.invalidReason, report.packets[0].astra.invalidReason]).toContain('evaluation_arm_execution_failed_cost_unknown');
   });
 
   it('enforces blinded preference, safety, completeness, and explicit scoring provenance', async () => {
