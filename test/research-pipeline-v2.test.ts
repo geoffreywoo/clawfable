@@ -8,6 +8,7 @@ import {
 } from '@/lib/research-pipeline';
 import type { ResearchAgenda, SourceDocument } from '@/lib/types';
 import { ANTIFUND_PROMOTION_COMPANIES } from '@/lib/antifund-portfolio';
+import { extractResearchEntities } from '@/lib/research-utils';
 
 const now = new Date('2026-08-01T12:00:00.000Z');
 
@@ -499,6 +500,80 @@ describe('research agenda and story qualification', () => {
         'claim-trajectory-news',
       ]),
     });
+  });
+
+  it.each([false, true])('keeps the cached OpenAI/Anthropic outage and IPO stories separate (lowercase claims=%s)', (lowercaseClaims) => {
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1', agenda, now,
+      documents: [
+        source({
+          id: 'source-y6558q',
+          title: 'Nobody Is Saying Why OpenAI and Anthropic Had Outages',
+          excerpt: 'Nobody Is Saying Why OpenAI and Anthropic Had Outages',
+          publisher: 'wired.com', entities: ['OpenAI', 'Anthropic'],
+          claims: [
+            { id: 'outage-fact', text: 'OpenAI and Anthropic had outages.', kind: 'fact', confidence: 0.9, entities: ['OpenAI', 'Anthropic'] },
+            { id: 'outage-explanation', text: 'Nobody is saying why OpenAI and Anthropic had outages.', kind: 'fact', confidence: 0.85, entities: ['OpenAI', 'Anthropic'] },
+          ],
+        }),
+        source({
+          id: 'source-67ugmi',
+          title: 'How The Anthropic And OpenAI IPOs Could Shake Up The AI Brawl',
+          excerpt: 'How The Anthropic And OpenAI IPOs Could Shake Up The AI Brawl',
+          publisher: "Investor's Business Daily", entities: ['Anthropic', 'OpenAI'],
+          claims: [{ id: 'ipo-analysis', text: 'How The Anthropic And OpenAI IPOs Could Shake Up The AI Brawl.', kind: 'fact', confidence: 0.72, entities: ['Anthropic', 'OpenAI'] }],
+        }),
+      ].map((document) => lowercaseClaims ? { ...document, claims: document.claims.map((claim) => ({ ...claim, text: claim.text.toLowerCase() })) } : document),
+    });
+
+    expect(clusters).toHaveLength(2);
+    expect(clusters.map((cluster) => cluster.sourceDocumentIds)).toEqual(expect.arrayContaining([['source-y6558q'], ['source-67ugmi']]));
+    expect(clusters.every((cluster) => !cluster.evidenceQualified && cluster.qualifiedClaimIds.length === 0)).toBe(true);
+  });
+
+  it('requires an event match even when company names alone clear the high title-overlap branch', () => {
+    const entities = ['OpenAI', 'Anthropic', 'Google', 'Microsoft'];
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1', agenda, now,
+      documents: ['report outages', 'prepare IPOs'].map((event, index) => source({
+        id: `distinct-event-${index}`, title: `OpenAI Anthropic Google Microsoft ${event}`,
+        excerpt: '', publisher: `Publisher ${index}`, entities,
+        claims: [{ id: `event-claim-${index}`, text: `OpenAI Anthropic Google Microsoft ${event}.`, kind: 'fact', confidence: 0.8, entities }],
+      })),
+    });
+    expect(clusters).toHaveLength(2);
+    expect(clusters.every((cluster) => !cluster.evidenceQualified)).toBe(true);
+  });
+
+  it('still corroborates differently worded reports about the same companies and outage', () => {
+    const entities = ['OpenAI', 'Anthropic'];
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1', agenda, now,
+      documents: [
+        source({ id: 'outage-a', title: 'OpenAI and Anthropic services suffer widespread outages', publisher: 'Publisher A', entities,
+          claims: [{ id: 'outage-a-claim', text: 'OpenAI and Anthropic suffered widespread service outages.', kind: 'fact', confidence: 0.8, entities }] }),
+        source({ id: 'outage-b', title: 'OpenAI Anthropic outage disrupts ChatGPT and Claude', publisher: 'Publisher B', entities,
+          claims: [{ id: 'outage-b-claim', text: 'A widespread service outage affected OpenAI and Anthropic.', kind: 'fact', confidence: 0.8, entities }] }),
+      ],
+    });
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]).toMatchObject({ evidenceQualified: true, qualifiedClaimIds: expect.arrayContaining(['outage-a-claim', 'outage-b-claim']) });
+  });
+
+  it.each([false, true])('preserves corroboration with noisy title-case entity extraction (paraphrase=%s)', (paraphrase) => {
+    const titles = ['OpenAI Suffers Outage', paraphrase ? 'OpenAI Experiences Outage' : 'OpenAI Suffers Outage'];
+    const clusters = clusterAndQualifySources({
+      agentId: 'agent-1', agenda, now,
+      documents: titles.map((title, index) => source({
+        id: `noisy-entity-${index}`, title, excerpt: '', publisher: `Publisher ${index}`,
+        entities: extractResearchEntities(title),
+        claims: [{ id: `noisy-claim-${index}`, text: paraphrase ? 'OpenAI suffered an outage.' : title,
+          kind: 'fact', confidence: 0.8, entities: extractResearchEntities(title) }],
+      })),
+    });
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]).toMatchObject({ sourceDocumentIds: expect.arrayContaining(['noisy-entity-0', 'noisy-entity-1']),
+      evidenceQualified: true, qualifiedClaimIds: expect.arrayContaining(['noisy-claim-0', 'noisy-claim-1']) });
   });
 
   it('assigns zero freshness when a source has no trustworthy publication timestamp', () => {

@@ -2750,6 +2750,25 @@ export const ASTRA_IDEA_APPROACHES_V2 = [
   { move: 'institutional_consequence', instruction: 'Develop a surprising second-order consequence for the people, companies, or institutions in this subject. Own it as an explicit prediction or conditional unless supplied evidence establishes it. Preserve the stakes that make the implication interesting; no generic bottleneck or bigger-adjective prediction.' },
 ] as const;
 
+export function astraSubstantiveIdeaDirectionsV2(brief: Pick<GenerationBriefV2, 'topic' | 'title'>): string[] {
+  const subject = `${brief.topic} ${brief.title}`;
+  if (/\b(?:ownership|equity|cap(?:ital|\s+table)|invest(?:ment|ing|or)|venture|fundrais(?:e|ing)|financing|portfolio)\b/i.test(subject)) return [
+    'Decision rights: who gets to choose, refuse, control, or change the decision. Explore an actual allocation of authority; leave compensation, ownership top-ups, financing cost, and exit payouts to the other calls.',
+    'Incentives and exposure: who bears the downside or keeps the upside, and which choice that changes. Leave board/control rights and acquisition payouts to the other calls. A familiar alignment maxim is not a new idea.',
+    'Liquidity and transfers: what changes when someone buys, sells, exits, or transfers an interest. Explore the affected counterparty and the consequence of that transaction; do not repeat founder-equity top-ups or board-control arguments.',
+  ];
+  if (/\b(?:ai|inference|robot(?:s|ics)?|nuclear|fusion|software|electricity|semiconductors?|packaging|manufacturing|industrial|space|mineral|research)\b/i.test(subject)) return [
+    'Use and demand: what a person, customer, or operator would choose to do or buy with this capability. Own the position; do not invent observed behavior. Explore the end use itself, not venture financing, credit lines, or ownership dilution.',
+    'Business economics: how a company would charge, get paid, own the customer, or finance this subject. This is the only call assigned capital structure or financing vehicles; do not repeat a product-feature wish or a general claim that things become cheaper.',
+    'Institutional scale: what established role, market category, or institution could change as this capability scales. Keep it a specific owned implication, not a funding vehicle, credit line, or the same end-use proposal from another angle.',
+  ];
+  return [
+    'The practitioner’s choice: identify one decision the author would make differently in this subject. Own it without inventing lived experience; leave other people’s reaction and wider institutional consequences to the other calls.',
+    'The affected person: consider a specific consequence for the customer, colleague, student, or other participant naturally present in this subject. Do not invent an observed response or repeat the practitioner’s decision as advice.',
+    'The wider consequence: consider what this subject could change for a community, institution, or convention beyond the immediate interaction. Keep it grounded in the supplied subject; do not rephrase the practitioner’s choice or recipient’s experience.',
+  ];
+}
+
 /** One proposition per request avoids jointly solving three competing creative approaches. */
 export function buildAstraSingleIdeaGenerationPromptV2(
   args: Parameters<typeof buildIdeaGenerationPromptV2>,
@@ -2759,7 +2778,10 @@ export function buildAstraSingleIdeaGenerationPromptV2(
   if (!approach) throw new Error('invalid_astra_idea_approach');
   const prompt = JSON.parse(buildAstraIdeaGenerationPromptV2(...args));
   prompt.requirements.ideasPerBrief = 1;
-  prompt.requirements.independentApproach = { ...approach, index: approachIndex, total: MAX_IDEA_CANDIDATES_PER_BRIEF };
+  prompt.requirements.independentApproach = { ...approach, index: approachIndex, total: MAX_IDEA_CANDIDATES_PER_BRIEF,
+    substance: astraSubstantiveIdeaDirectionsV2(args[0][0])[approachIndex],
+    boundary: 'This call owns one substantive direction, not merely a different sentence shape. Use only the supplied facts and account voice. Do not invent an actor or force an inapplicable role to satisfy the direction.',
+  };
   return JSON.stringify(prompt);
 }
 
@@ -3202,7 +3224,11 @@ function hasUnsupportedOperatorNumber(text: string): boolean {
 }
 
 function unsupportedOperatorFact(text: string): boolean {
-  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|acquired|launched|launching|merged\s+with|this week|today|yesterday)\b|\b(?:merger|acquisition)(?:\s+of\s+[a-z0-9@._-]+){0,3}\s+(?:is|has|puts?|makes?|created|closed)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(text);
+  // "If signed contracts could ..." describes a generic condition, not a
+  // signing event. Keep named/definite contracts, active signing claims, dates,
+  // measurements and every assertion outside that narrow condition intact.
+  const assertionText = text.replace(/(^|[.!?]\s+)(if|assuming|supposing)\s+signed\s+((?:(?:customer|purchase|sales|service)\s+)?(?:work|contracts|orders|agreements|receivables))(?=\s+(?:can|could|would)\b)/gi, '$1$2 $3');
+  const assertedEventOrExperience = /\b(?:according to|announced|reported|signed|filed|acquired|launched|launching|merged\s+with|this week|today|yesterday)\b|\b(?:merger|acquisition)(?:\s+of\s+[a-z0-9@._-]+){0,3}\s+(?:is|has|puts?|makes?|created|closed)\b|\b(?:landed in|folding into|folded into|putting .{0,80} inside|bundling into|bundled into|rolled out|shipping with|shipped with)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:rounds?|years?|months?|days?|people|employees?|customers?|companies?)\b|\bi\s+(?:read|bought|sold|ran|run|talked|spoke|met|saw|heard|used|use|tried|tested|built|hired|fired|invested|backed|visited|asked|told)\b|\b(?:when|whenever)\s+i\s+(?:see|meet|hear|talk|visit|use|try|test|ask|notice)\b|\bi\s+(?:keep|maintain|track|notice)\s+(?:a|an|the|my)\b|\b(?:founders?|people|companies|investors?|teams?)\s+i\s+(?:know|meet|talk|see|back(?:ed)?)\b/i.test(assertionText);
   const assertedNumber = hasUnsupportedOperatorNumber(text);
   return assertedEventOrExperience || assertedNumber;
 }
@@ -3210,7 +3236,7 @@ function unsupportedOperatorFact(text: string): boolean {
 const OPERATOR_JUDGMENT_POSTURE = /\b(?:i(?:['’]d| would|['’]ll| will| can| prefer| rather| trust| distrust| discount| want| care| choose| take| accept| avoid| refuse| own| buy| sell| long| short| judge| rate| treat| believe| think)|i(?:['’]m|\s+am)\s+(?:in|out|long|short)|my (?:rule|preference|preferred|test|view|default|philosophy)|give me|should\s+(?:buy|sell|pay|be|hire|fire|acquire)|deserves?|is\s+(?:a\s+)?(?:good|bad|great|terrible|overpriced|underpriced)|(?:more|less)\s+interesting|(?:sounds?|feels?|looks?)\s+(?:miserable|great|terrible|good|bad|expensive|cheap|interesting|boring|awkward)|worth\s+(?:caring|buying|owning|watching|backing|funding))\b/i;
 
 export function isGenericOperatorProductWishlistV2(text: string): boolean {
-  return /\b(?:i\s+want(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
+  return /\b(?:i\s+want(?!\s+to\s+(?:know|understand|learn|ask|figure\s+out|decide)\b)(?:\s+to\s+(?:fund|back|build|see|give|create|launch))?|i(?:'d|\s+would)\s+(?:fund|back)|who(?:'s|\s+is)\s+building|someone\s+should\s+build)\b.{0,55}\b(?:an?|more|the(?:\s+first)?|\d+(?:-person|\s+person))\s+(?:ai(?:-native)?\s+)?(?:startup|company|model|agent|app|product|tool|platform)\b/i.test(text);
 }
 
 const GEOFFREY_GENERIC_PRODUCT_OPS_OBJECT = /\b(?:permission(?:s)?|authority|veto(?:\s+power)?|escalation|control plane|implementation options?|freeze(?:s|ing)?\s+(?:a\s+|the\s+)?(?:software\s+)?release|task continuity|week-long task|workflow handoffs?)\b/i;
@@ -3231,11 +3257,31 @@ const ABSTRACT_PUBLIC_MOVE_EVALUATION = /\b(?:gets?|becomes?|feels?|is|seems?|so
 const ANNOUNCED_PUBLIC_MOVE_PREFERENCE = /^(?:i(?:['’]d|\s+would)?\s+(?:prefer|rather)|my\s+preference\s+is)\b/i;
 const BALANCED_PUBLIC_MOVE_COMPARISON = /\b(?:more|less)\s+(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b.{0,180}\b(?:than|rather\s+than|instead\s+of)\b|\b(?:rather\s+than|instead\s+of)\b/i;
 
+function withoutConcreteAcquisitionComparisons(publicMove: string): string {
+  return publicMove.split(/(?<=[.!?])\s+/).map((sentence) => {
+    const sides = sentence.split(/\b(?:rather\s+than|instead\s+of)\b/i);
+    if (sides.length !== 2 || !/\b(?:buyer|acquirer|acquisition|buyout)\b/i.test(sentence)) return sentence;
+    const paymentAction = /\b(?:pay(?:ing)?|put(?:ting)?|direct(?:ing)?|allocat(?:e|ing)|increas(?:e|ing))\b/i;
+    const retentionAllocation = (side: string) => paymentAction.test(side)
+      && /\b(?:cash|money|dollars|bonuses|payments)\b/i.test(side)
+      && /\b(?:founder|employee|executive|management|team)\b/i.test(side)
+      && /\b(?:retention|retain(?:ing)?|keep(?:ing)?)\b/i.test(side);
+    const ownerPayment = (side: string) => paymentAction.test(side)
+      && /\b(?:shares|shareholders|stockholders|investors|holders|fund(?:['’]s)?)\b/i.test(side)
+      && /\b(?:shares|cash|money|dollars|payouts|proceeds)\b/i.test(side);
+    // A literal split of acquisition money between retention and owners is a
+    // concrete mechanism, not an abstract X-versus-Y slogan. Clear only this
+    // connector; other sentences/comparisons and every substantive gate remain.
+    return (retentionAllocation(sides[0]) && ownerPayment(sides[1]))
+      || (ownerPayment(sides[0]) && retentionAllocation(sides[1])) ? sides.join(' ') : sentence;
+  }).join(' ');
+}
+
 export function isAbstractComparativePublicMoveV2(publicMove: string): boolean {
   const normalized = publicMove.replace(/\s+/g, ' ').trim();
   return ABSTRACT_PUBLIC_MOVE_EVALUATION.test(normalized)
     || ANNOUNCED_PUBLIC_MOVE_PREFERENCE.test(normalized)
-    || BALANCED_PUBLIC_MOVE_COMPARISON.test(normalized);
+    || BALANCED_PUBLIC_MOVE_COMPARISON.test(withoutConcreteAcquisitionComparisons(normalized));
 }
 
 export function isGenericInvestorSelectionTemplateV2(content: string): boolean {
@@ -3864,6 +3910,7 @@ async function generateIdeas({
   blocks,
   runId,
   calls,
+  onRetryBudgetDeferred,
 }: {
   input: GenerateTweetBatchV2Input;
   briefs: GenerationBriefV2[];
@@ -3871,6 +3918,7 @@ async function generateIdeas({
   blocks: SemanticBlock[];
   runId: string;
   calls: GenerationModelCallTrace[];
+  onRetryBudgetDeferred?: (briefCount: number) => void;
 }): Promise<IdeaCandidate[]> {
   const premiseExclusions = operatorPremiseExclusions(input, briefs.map((brief) => brief.topic));
   const semanticMemory = uniqueStrings([
@@ -3899,9 +3947,10 @@ async function generateIdeas({
       }>;
     }> = [],
     approachIndex?: number,
+    minimumAttemptMs = 0,
   ) => {
     try {
-      if (Date.now() >= ideaDeadline) return { raw: [] as Record<string, unknown>[], failed: true };
+      if (Date.now() >= ideaDeadline) return { raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0 };
       const batchSubject = briefBatch.map((brief) => `${brief.topic} ${brief.title}`).join(' ');
       const batchReference = briefBatch[0];
       const batchPremiseMemory = uniqueStrings(briefBatch.flatMap((brief) => (
@@ -3937,7 +3986,9 @@ async function generateIdeas({
         subjectReactionPatterns, promptSpreadReferences];
       const prompt = astra ? buildAstraSingleIdeaGenerationPromptV2(promptArgs, approachIndex!) : buildIdeaGenerationPromptV2(...promptArgs);
       const remainingIdeaMs = ideaDeadline - Date.now();
-      if (remainingIdeaMs <= 0) return { raw: [] as Record<string, unknown>[], failed: true };
+      if (remainingIdeaMs <= 0 || remainingIdeaMs < minimumAttemptMs) return {
+        raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0,
+      };
       const result = await trackedGenerate('idea_generation', {
         task: 'idea_generation',
         modelStack: input.modelStack,
@@ -3968,18 +4019,23 @@ async function generateIdeas({
   const runBriefBatches = async (
     batches: GenerationBriefV2[][],
     failures: Parameters<typeof generateBriefBatch>[1] = [],
+    minimumAttemptMs = 0,
   ) => {
     const jobs = astra ? ASTRA_IDEA_APPROACHES_V2.flatMap((_approach, approachIndex) =>
       batches.map((batch) => ({ batch, approachIndex }))) : batches.map((batch) => ({ batch, approachIndex: undefined }));
-    const results: Awaited<ReturnType<typeof generateBriefBatch>>[] = jobs.map(() => ({ raw: [], failed: true }));
+    const results: Awaited<ReturnType<typeof generateBriefBatch>>[] = jobs.map(() => ({ raw: [], failed: true, retryBudgetDeferred: minimumAttemptMs > 0 }));
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_IDEA_CALLS, jobs.length) }, async () => {
       while (next < jobs.length && Date.now() < ideaDeadline) {
         const index = next++;
         const { batch, approachIndex } = jobs[index];
-        results[index] = await generateBriefBatch(batch, failures.filter((failure) => batch.some((brief) => brief.id === failure.briefId)), approachIndex);
+        results[index] = await generateBriefBatch(batch, failures.filter((failure) => batch.some((brief) => brief.id === failure.briefId)), approachIndex, minimumAttemptMs);
       }
     }));
+    if (minimumAttemptMs > 0) {
+      const deferred = new Set(results.flatMap((result, index) => result.retryBudgetDeferred ? jobs[index].batch.map((brief) => brief.id) : []));
+      if (deferred.size) onRetryBudgetDeferred?.(deferred.size);
+    }
     return results;
   };
   const briefBatches = splitBriefs(briefs);
@@ -4026,6 +4082,20 @@ async function generateIdeas({
   )).slice(0, Math.min(4, Math.max(2, input.count)));
   if (retryBriefs.length === 0) return initial;
 
+  let requiredRetryMs = 0;
+  if (astra) {
+    // A harder retry should not be launched with less time than the completed
+    // first attempts needed. Live traces showed 54–59 second retries spending
+    // their entire remaining budget in reasoning after 61–65 second originals.
+    const observedIdeaMs = Math.max(0, ...calls.filter((call) => call.stage === 'idea_generation' && call.succeeded)
+      .map((call) => call.durationMs));
+    requiredRetryMs = Math.max(60_000, observedIdeaMs);
+    if (ideaDeadline - Date.now() < requiredRetryMs) {
+      onRetryBudgetDeferred?.(retryBriefs.length);
+      return initial;
+    }
+  }
+
   const retryFailures = retryBriefs.map((brief) => ({
     briefId: brief.id,
     attempts: initial
@@ -4039,7 +4109,7 @@ async function generateIdeas({
         rejectionCodes: idea.rejectionCodes.slice(0, 6),
       })),
   }));
-  const retryResults = await runBriefBatches(splitBriefs(retryBriefs), retryFailures);
+  const retryResults = await runBriefBatches(splitBriefs(retryBriefs), retryFailures, requiredRetryMs);
   assertGenerationRunBudget(calls);
   const retried = astra ? normalize(retryResults.flatMap((result) => result.raw), 'operator-retry') : retryResults.flatMap((result, index) => (
     result.failed || result.raw.length === 0
@@ -7322,7 +7392,9 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     try {
-      ideas = await generateIdeas({ input, briefs, documents, blocks, runId, calls: trace.modelCalls });
+      ideas = await generateIdeas({ input, briefs, documents, blocks, runId, calls: trace.modelCalls,
+        onRetryBudgetDeferred: (briefCount) => { trace.stageCounts.ideaRetryBudgetDeferred = briefCount; },
+      });
     } finally {
       trace.stageCounts.ideaGenerationCalls = trace.modelCalls.filter((call) => call.stage === 'idea_generation').length;
       trace.stageCounts.ideaRetryCalls = Math.max(
