@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ASTRA_IDEA_GENERATION_SYSTEM_V2, buildAstraIdeaGenerationPromptV2, buildGenerationBriefsV2,
   buildAstraSingleIdeaGenerationPromptV2,
+  astraSubstantiveIdeaDirectionsV2,
   buildIdeaGenerationPromptV2, buildVoiceGuidanceV2, hydrateDynamicSeedEvidenceV2,
   V2_IDEA_VOICE_GUIDANCE_BUDGET_CHARS, V2_WRITER_VOICE_GUIDANCE_BUDGET_CHARS, V2_JUDGE_VOICE_GUIDANCE_BUDGET_CHARS,
   type GenerationBriefV2,
@@ -44,6 +45,14 @@ describe('Astra idea development contract', () => {
       expect(prompt.requirements.frontier).toContain('ultra bullish');
       expect(prompt.briefs[0].id).toBe(brief.id);
     }
+    expect(prompts[0].requirements.independentApproach.substance).toContain('Use and demand');
+    expect(prompts[1].requirements.independentApproach.substance).toContain('only call assigned capital structure');
+    expect(prompts[2].requirements.independentApproach.substance).toContain('Institutional scale');
+    expect(astraSubstantiveIdeaDirectionsV2({ topic: 'founder ownership', title: 'founder ownership' }).map((value) => value.split(':')[0]))
+      .toEqual(['Decision rights', 'Incentives and exposure', 'Liquidity and transfers']);
+    const teacher = astraSubstantiveIdeaDirectionsV2({ topic: 'classroom feedback', title: 'classroom feedback' }).join(' ');
+    expect(teacher).toContain('student');
+    expect(teacher).not.toContain('venture financing');
     expect(() => buildAstraSingleIdeaGenerationPromptV2([[brief], geoffrey], 3)).toThrow('invalid_astra_idea_approach');
   });
   it('keeps SOUL meaning, separates malformed positive themes, and orders relevant coaching without redundant wrappers', () => {

@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
-  generateTweetBatchV2, buildGenerationBriefsV2, buildVoiceGuidanceV2, isV2VoiceReady,
+  generateTweetBatchV2, buildGenerationBriefsV2, buildVoiceGuidanceV2, isV2VoiceReady, getPostcriticRepairModelStackV2,
   type GenerateTweetBatchV2Input, type GenerationBriefV2,
 } from './generation-v2';
 import { getModelChainForTask } from './ai';
 import { estimateAiUsageCostUsd } from './ai-pricing';
 import { ASTRA_EVALUATION_VERSION, GEOFFREY_EVALUATION_SUBJECTS, SYNTHETIC_AUTHOR_FIXTURES } from './astra-evaluation-fixtures';
 import type { GenerationContext } from './generation-context';
-import type { AccountAnalysis, DraftCandidate, GenerationRunTrace, SourceDocument, StoryCluster, SemanticBlock, IdeaCandidate, TweetPerformance, ManualExampleCuration, VoiceCorpusSnapshot } from './types';
+import type { AccountAnalysis, DraftCandidate, GenerationRunTrace, GenerationModelCallTrace, SourceDocument, StoryCluster, SemanticBlock, IdeaCandidate, TweetPerformance, ManualExampleCuration, VoiceCorpusSnapshot } from './types';
 import type { VoiceProfile } from './soul-parser';
 import type { RankedPublishingCandidate } from './publishing-candidate';
 import { researchTokenSimilarity } from './research-utils';
@@ -304,6 +304,14 @@ function matchesEvaluationModel(primaryModel: string, reportedModel: string): bo
     || (reportedModel.startsWith(`${identity}-`) && /^\d{4}-\d{2}-\d{2}$/.test(reportedModel.slice(identity.length + 1))));
 }
 
+function matchesEvaluationCallPrimary(call: GenerationModelCallTrace, primary: ReturnType<typeof getModelChainForTask>[number], requireRequested = false): boolean {
+  return Boolean(primary && call.model === primary.model && call.provider === primary.provider
+    && typeof call.providerModel === 'string' && matchesEvaluationModel(primary.model, call.providerModel)
+    && (!(requireRequested || call.requestedModel !== undefined) || call.requestedModel === primary.model)
+    && (!(requireRequested || call.requestedProvider !== undefined) || call.requestedProvider === primary.provider)
+    && !call.fallbackAttempts?.some((attempt) => attempt.reason !== 'provider_unconfigured'));
+}
+
 /** One identical non-persisting arm, shared by local and protected remote execution. */
 export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack'], options: {
   generate?: typeof generateTweetBatchV2;
@@ -326,15 +334,23 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     });
   } catch (error) { failure = error instanceof Error ? error.message : String(error); }
   const completedTrace = trace as GenerationRunTrace | null;
-  const invalidCalls = (completedTrace?.modelCalls || []).filter((call) => {
+  const invalidCalls = (completedTrace?.modelCalls || []).filter((call, index, calls) => {
     if (!call.succeeded) return false;
     const task = ({ idea_generation: 'idea_generation', idea_judgment: 'idea_judgment', tweet_writing: 'tweet_writing', copy_judgment: 'copy_judgment' } as const)[call.stage];
     if (!task) return true;
-    const primary = getModelChainForTask(task, stack)[0];
-    const reportedModel = call.providerModel;
-    const reportedMatchesPrimary = typeof reportedModel === 'string' && reportedModel.length > 0
-      && Boolean(primary && matchesEvaluationModel(primary.model, reportedModel));
-    return !primary || call.model !== primary.model || call.provider !== primary.provider || !reportedMatchesPrimary;
+    const plannedStack = call.plannedModelStack ?? stack;
+    // The existing GPT control may deliberately commission a Fable repair.
+    // Only the actual postcritic branch may declare that role; legacy receipts
+    // without it remain strict instead of inferring an intention from the model.
+    const alternateRepair = plannedStack !== stack;
+    if (call.modelCallRole === 'postcritic_repair' && call.stage !== 'tweet_writing') return true;
+    if (alternateRepair && (call.stage !== 'tweet_writing' || call.modelCallRole !== 'postcritic_repair'
+      || plannedStack !== getPostcriticRepairModelStackV2(stack, packet.input.voiceProfile))) return true;
+    if (alternateRepair && !calls.slice(0, index).some((prior) => prior.stage === 'copy_judgment' && prior.succeeded
+      && (prior.plannedModelStack ?? stack) === stack
+      && matchesEvaluationCallPrimary(prior, getModelChainForTask('copy_judgment', stack)[0]))) return true;
+    const primary = getModelChainForTask(task, plannedStack)[0];
+    return !matchesEvaluationCallPrimary(call, primary, alternateRepair);
   });
   const successfulCalls = completedTrace?.modelCalls?.filter((call) => call.succeeded) || [];
   const invalidReason = failure || (!completedTrace ? 'missing_trace'
@@ -547,7 +563,7 @@ export interface EvaluationVotes {
   judge: { kind: 'human' | 'independent_critic'; id: string; model?: string };
   votes: Array<{ packetId: string; choice: 'A' | 'B' | 'tie' | 'neither'; reason?: string; editCharsA?: number | null; editCharsB?: number | null }>;
 }
-const FACTUAL_CODES = new Set(['claim_evidence', 'unsupported_operator_fact', 'source_attribution_dropped', 'copy_judge_factual_risk', 'unearned_authority', 'final_policy_safety_below_floor']);
+const FACTUAL_CODES = new Set(['claim_evidence', 'idea_judge_evidence_mismatch', 'unsupported_operator_fact', 'source_attribution_dropped', 'copy_judge_factual_risk', 'unearned_authority', 'final_policy_safety_below_floor']);
 const RESKIN_CODES = new Set(['voice_anchor_reskin', 'voice_anchor_semantic_reskin', 'copy_judge_anchor_reskin', 'recent_copy_duplicate', 'source_copy']);
 const SLOP_CODES = new Set(['generated_writing_pattern', 'final_slop_risk', 'final_generated_pattern_risk', 'final_cringe_risk']);
 export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: EvaluationVotes) {
@@ -655,7 +671,7 @@ export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: E
   const winRate = decisive ? astraWins / decisive : null;
   const pass = comparison.completed && comparison.packets.length === 40 && votes.votes.length === 40
     && validModels && decisive >= 30 && winRate !== null && winRate >= 0.6 && noRegression;
-  return { status: pass ? 'pass' : 'not_ready', judge: votes.judge, decisive, astraWins, winRate, validModels, noRegression, baseline, astra,
+  return { status: pass ? 'pass' : 'not_ready', metricDefinitionVersion: 'factual-evidence-mismatch-v2', judge: votes.judge, decisive, astraWins, winRate, validModels, noRegression, baseline, astra,
     attemptedCompletion: comparison.attemptedCompletion ?? comparison.completed, promotionValidCompletion: comparison.completed,
     cohorts, oneSidedUtility: utilityFor(comparison.packets), coverage: comparison.coverage || null,
     hardGateRateNotice: 'Rates include observed rejected ideas and drafts with separate factual denominators; null means no observations. Synthetic and Geoffrey results are reported separately.',

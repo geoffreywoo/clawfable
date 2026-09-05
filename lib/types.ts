@@ -1039,6 +1039,9 @@ export interface GenerationModelCallTrace {
   model: string | null;
   requestedProvider?: 'openai' | 'anthropic' | null;
   requestedModel?: string | null;
+  /** Stack selected by the generation branch before provider routing or fallback. */
+  plannedModelStack?: GenerationModelStackId;
+  modelCallRole?: 'primary' | 'postcritic_repair';
   /** Model identifier reported by the provider, including a resolved snapshot when returned. */
   providerModel?: string | null;
   responseProgress?: GenerationResponseProgress;

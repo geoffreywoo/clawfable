@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/ai', () => ({
+  PUBLISHING_V2_ASTRA_MODEL_STACK: 'publishing_v2_astra',
   estimateAiUsageCostUsd: () => null,
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,

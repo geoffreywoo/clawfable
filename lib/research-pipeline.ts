@@ -667,12 +667,51 @@ function maxClaimSimilarity(left: SourceDocument, right: SourceDocument): number
   )));
 }
 
-function sourceDocumentsDescribeSameStory(left: SourceDocument, right: SourceDocument): boolean {
-  const titleSimilarity = researchTokenSimilarity(left.title, right.title);
-  if (titleSimilarity >= 0.55) return true;
+const STORY_EVENT_CONTEXT_TOKENS = new Set([
+  'and', 'are', 'but', 'can', 'for', 'had', 'has', 'how', 'its', 'now', 'the',
+  'was', 'were', 'who', 'why', 'will',
+  'ai', 'business', 'company', 'model', 'new', 'report', 'startup', 'technology',
+]);
 
+function sharesStoryEvent(left: SourceDocument, right: SourceDocument, sharedEntities: string[]): boolean {
+  // Company names establish the subject, not the event. Apply the existing
+  // similarity bars to the remaining event language too, so e.g. the same
+  // companies' outages cannot corroborate a separate story about their IPOs.
+  // The adapter's title-case extractor can call an entire headline an entity
+  // ("OpenAI Suffers Outage"). Lowercase language in factual claims is evidence
+  // that a token such as "outage" is part of the event, not the company name.
+  const claimEventTokens = new Set([left, right].flatMap((document) => document.claims
+    .filter((claim) => claim.kind !== 'opinion' && claim.confidence >= 0.45)
+    .flatMap((claim) => significantResearchTokens((claim.text.match(/\b[a-z][a-z0-9+.-]{1,}\b/g) || []).join(' ')))));
+  const explicitEntityTokens = new Set([left, right].flatMap((document) => document.entities
+    .map(significantResearchTokens)
+    .filter((tokens) => tokens.length === 1)
+    .flat()));
+  const contextTokens = new Set([
+    // An explicitly named company stays a subject even in lowercased claims.
+    ...sharedEntities.filter((token) => explicitEntityTokens.has(token) || !claimEventTokens.has(token)),
+    ...STORY_EVENT_CONTEXT_TOKENS,
+  ]);
+  const eventText = (text: string) => significantResearchTokens(text)
+    .filter((token) => !contextTokens.has(token))
+    .join(' ');
+  if (researchTokenSimilarity(eventText(left.title), eventText(right.title)) >= 0.55) return true;
+  const claims = (document: SourceDocument) => document.claims
+    .filter((claim) => claim.kind !== 'opinion' && claim.confidence >= 0.45)
+    .map((claim) => eventText(claim.text));
+  return claims(left).some((leftClaim) => claims(right).some((rightClaim) => (
+    researchTokenSimilarity(leftClaim, rightClaim) >= 0.36
+  )));
+}
+
+function sourceDocumentsDescribeSameStory(left: SourceDocument, right: SourceDocument): boolean {
+  const normalizedTitle = (title: string) => significantResearchTokens(title).join(' ');
+  if (normalizedTitle(left.title) && normalizedTitle(left.title) === normalizedTitle(right.title)) return true;
+  const titleSimilarity = researchTokenSimilarity(left.title, right.title);
   const leftEntities = distinctiveEntityTokens(left);
   const sharedEntities = [...distinctiveEntityTokens(right)].filter((token) => leftEntities.has(token));
+  if (!sharesStoryEvent(left, right, sharedEntities)) return false;
+  if (titleSimilarity >= 0.55) return true;
   if (sharedEntities.length === 0) return false;
   if (titleSimilarity >= 0.34) return true;
 

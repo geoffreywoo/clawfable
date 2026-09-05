@@ -891,6 +891,68 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it.each([
+    { ideaMs: 65_000, expectedCalls: 3, deferred: 1 },
+    { ideaMs: 20_000, expectedCalls: 6, deferred: 0 },
+  ])('admits an Astra retry only when the stage can cover observed idea latency ($ideaMs ms)', async ({ ideaMs, expectedCalls, deferred }) => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-02T02:00:00Z'));
+      const base = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date() })[0];
+      const brief = { ...base, topic: 'AI company formation', title: 'AI company formation', sourceLane: 'manual_core_exploit',
+        storyClusterId: null, evidenceMode: 'operator_opinion' as const, evidence: [], evidenceIds: [], qualifiedClaimIds: [], sourceDocumentIds: [] };
+      let trace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        expect(options.task).toBe('idea_generation');
+        await new Promise<void>((resolve) => setTimeout(resolve, ideaMs));
+        const generated = ideaResponse(options.prompt);
+        const raw = JSON.parse(generated.text);
+        raw.ideas.forEach((idea: any) => { idea.publicMove = 'I want an AI company that handles everything.'; });
+        return { ...generated, text: JSON.stringify(raw) };
+      });
+      const generation = generateTweetBatchV2({ ...input, count: 1, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs: [brief], documents: [] }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      await expect(generation).resolves.toEqual([]);
+      expect(mocks.generateText).toHaveBeenCalledTimes(expectedCalls);
+      expect(trace.stageCounts.ideaRetryBudgetDeferred || 0).toBe(deferred);
+      expect(trace.stageCounts.ideaRetryCalls).toBe(expectedCalls - 3);
+      expect(trace.modelCalls.every((call: any) => call.succeeded)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rechecks retry admission for queued waves after earlier retry calls use their budget', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-02T02:00:00Z'));
+      const base = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date() })[0];
+      const briefs = [0, 1].map((index) => ({ ...base, id: `retry-wave-${index}`, topic: 'AI company formation', title: 'AI company formation',
+        sourceLane: 'manual_core_exploit', storyClusterId: null, evidenceMode: 'operator_opinion' as const,
+        evidence: [], evidenceIds: [], qualifiedClaimIds: [], sourceDocumentIds: [] }));
+      let trace: any;
+      let dispatched = 0;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        expect(options.task).toBe('idea_generation');
+        const retry = dispatched++ >= 6;
+        await new Promise<void>((resolve) => setTimeout(resolve, retry ? 30_000 : 20_000));
+        const generated = ideaResponse(options.prompt);
+        const raw = JSON.parse(generated.text);
+        raw.ideas.forEach((idea: any) => { idea.publicMove = 'I want an AI company that handles everything.'; });
+        return { ...generated, text: JSON.stringify(raw) };
+      });
+      const generation = generateTweetBatchV2({ ...input, count: 2, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, documents: [] }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      await expect(generation).resolves.toEqual([]);
+      expect(mocks.generateText).toHaveBeenCalledTimes(10);
+      expect(trace.stageCounts).toMatchObject({ ideaRetryBudgetDeferred: 2, ideaRetryCalls: 4 });
+      expect(trace.durationMs).toBe(70_000);
+      expect(trace.modelCalls.every((call: any) => call.succeeded)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
     { preparationMs: 80_000, expectedTimeouts: [120_000, 120_000, 120_000, 120_000], expectedDuration: 200_000, outcomeCode: 'idea_generation_failed' },
     { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000], expectedDuration: 240_000, outcomeCode: 'run_deadline' },
   ])('clips queued Astra waves after $preparationMs preparation and reserves writing time', async ({ preparationMs, expectedTimeouts, expectedDuration, outcomeCode }) => {
@@ -919,6 +981,34 @@ describe('generateTweetBatchV2 integration', () => {
       expect(trace).toMatchObject({ outcomeCode, durationMs: expectedDuration,
         stageCounts: expect.objectContaining({ ideaGenerationCalls: expectedTimeouts.length, ideaRetryCalls: 0 }) });
       expect(mocks.generateText).toHaveBeenCalledTimes(expectedTimeouts.length);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('allows Astra writers to complete after the former 75-second cutoff and still judges the result', async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = new Date('2026-08-02T02:00:00Z');
+      vi.setSystemTime(startedAt);
+      const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: startedAt }).slice(0, 1);
+      let trace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        const durations = { idea_generation: 50_000, idea_judgment: 10_000, tweet_writing: 90_000, copy_judgment: 5_000 };
+        if (options.task === 'tweet_writing') expect(options.timeoutMs).toBe(120_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(options.timeoutMs, durations[options.task])));
+        if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+        if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+        if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+        return rankingResponse(options.prompt, 'candidates');
+      });
+      const generation = generateTweetBatchV2({ ...input, count: 1, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, documents: sourceDocuments }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      expect((await generation).length).toBeGreaterThan(0);
+      expect(trace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === 90_000)).toBe(true);
+      expect(trace.modelCalls.some((call: any) => call.stage === 'copy_judgment' && call.succeeded)).toBe(true);
+      expect(trace.outcomeCode).toBe('completed');
+      expect(trace.durationMs).toBeLessThan(240_000);
     } finally { vi.useRealTimers(); }
   });
 
