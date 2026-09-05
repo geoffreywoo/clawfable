@@ -66,6 +66,128 @@ describe('claim evidence', () => {
     expect(assessClaimEvidence('The meeting gets 10x more serious.', ['The portfolio was worth $10b.']).risk).toBeGreaterThan(0.4);
   });
 
+  it.each(['35-fold', '35fold', '35 fold'])('normalizes the explicit multiplier unit %s in either direction', (multiplier) => {
+    expect(assessClaimEvidence(
+      `The vendor reports up to a ${multiplier} reduction in token cost.`,
+      ['The vendor reports up to 35x lower token cost.'],
+    )).toMatchObject({ unsupportedNumbers: [], issue: null });
+    expect(assessClaimEvidence(
+      'The vendor reports up to 35x lower token cost.',
+      [`The vendor reports up to a ${multiplier} reduction in token cost.`],
+    )).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
+  it('accepts the observed attributed vendor claim with equivalent multiplier notation', () => {
+    const assessment = assessClaimEvidence(
+      'NVIDIA’s early agentic-workload measurements report as much as a 35-fold reduction in cost for a million tokens with Vera Rubin NVL72 against GB300 NVL72; SemiAnalysis review remains pending, and Vera CPU tool calls are excluded.',
+      ['NVIDIA reports up to 35x lower cost per million tokens for Vera Rubin NVL72 versus GB300 NVL72 in its early agentic-workload results; these vendor measurements are pending SemiAnalysis review and exclude Vera CPU tool calling.'],
+      { lockEvidenceConcepts: true, allowForecastTimingNumbers: true },
+    );
+
+    expect(assessment).toMatchObject({ unsupportedNumbers: [], crossClaimNumbers: [], issue: null });
+  });
+
+  it.each([
+    ['35', '35x', '35'],
+    ['35-fold', '35', '35x'],
+    ['36-fold', '35x', '36x'],
+    ['3.5-fold', '35x', '3.5x'],
+    ['35-fold', '35%', '35x'],
+    ['35%', '35-fold', '35%'],
+    ['35 folders', '35x', '35'],
+  ])('does not equate %s with evidence for %s', (candidate, source, unsupported) => {
+    const assessment = assessClaimEvidence(`The result was ${candidate}.`, [`The result was ${source}.`]);
+    expect(assessment.unsupportedNumbers).toContain(unsupported);
+    expect(assessment.issue).toContain('unsupported numeric claim');
+  });
+
+  it('keeps multiplier comparisons scoped to one source claim', () => {
+    const support = ['The vendor reports 30x higher throughput.', 'The vendor reports 35x lower token cost.'];
+    const assessment = assessClaimEvidence('The vendor reports 30-fold higher throughput and 35-fold lower token cost.', support);
+
+    expect(assessment.unsupportedNumbers).toEqual([]);
+    expect(assessment.crossClaimNumbers).toEqual(['30x', '35x']);
+    expect(assessment.issue).toContain('combines separate evidence claims');
+    expect(assessClaimEvidence('The vendor reports 30-fold higher throughput and 35-fold lower token cost.', [support.join(' ')])).toMatchObject({ issue: null });
+  });
+
+  it('does not reinterpret names, currency or forecast horizons as supported multipliers', () => {
+    expect(assessClaimEvidence('GPT-5.6 remains a model identifier.', [])).toMatchObject({ issue: null });
+    expect(assessClaimEvidence('The improvement was 35-fold.', ['The cost was $35.']).unsupportedNumbers).toEqual(['35x']);
+    expect(assessClaimEvidence('Within 12 months, throughput could improve 35-fold.', [], { allowForecastTimingNumbers: true }).unsupportedNumbers).toEqual(['35x']);
+  });
+
+  it.each([
+    ['3-fold speedup.', '3x'],
+    ['3.5-fold speedup.', '3.5x'],
+    ['Results:\n3-fold speedup.', '3x'],
+    ['Results:\n3.5-fold speedup.', '3.5x'],
+    ['3x speedup.', '3x'],
+    ['3.5 speedup.', '3.5'],
+    ['3 hours saved.', '3hours'],
+    ['$3 saved.', '$3'],
+  ])('does not exempt a quantity at the start of a line as a list marker: %s', (content, unsupported) => {
+    expect(assessClaimEvidence(content, []).unsupportedNumbers).toEqual([unsupported]);
+  });
+
+  it('still exempts bare numbered-list markers', () => {
+    expect(assessClaimEvidence('1. Source headline\n2. Source limitations\n3 Next steps', [])).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
+  it.each([
+    ['-35-fold', '35x', '-35x'],
+    ['−35-fold', '35x', '-35x'],
+    ['-35x', '35-fold', '-35x'],
+    ['35-fold', '-35x', '35x'],
+  ])('does not equate signed multiplier %s with %s', (candidate, source, unsupported) => {
+    expect(assessClaimEvidence(`The result was ${candidate}.`, [`The result was ${source}.`]).unsupportedNumbers).toEqual([unsupported]);
+  });
+
+  it('normalizes the unit without discarding a matching multiplier sign', () => {
+    expect(assessClaimEvidence('The result was -35-fold.', ['The result was -35x.'])).toMatchObject({ issue: null });
+    expect(assessClaimEvidence('The result was -35x.', ['The result was −35-fold.'])).toMatchObject({ issue: null });
+    expect(assessClaimEvidence('The result was +35-fold.', ['The result was 35x.'])).toMatchObject({ issue: null });
+  });
+
+  it.each(['2026-fold', '2026x'])('does not exempt the explicit multiplier %s as a year', (multiplier) => {
+    expect(assessClaimEvidence(`The result was ${multiplier}.`, []).unsupportedNumbers).toEqual(['2026x']);
+  });
+
+  it('still permits a bare year without treating a currency amount as a date', () => {
+    expect(assessClaimEvidence('The report was released in 2026.', [])).toMatchObject({ issue: null });
+    expect(assessClaimEvidence('The cost was $2026.', []).unsupportedNumbers).toEqual(['$2026']);
+  });
+
+  it.each([
+    'In 2026 we expect more demand.',
+    'In 2026, we want more reliable systems.',
+    'In 2026 water use rose.',
+    'The 2026 yearly report was published.',
+    'The 2026 market report was published.',
+    'The 2026 business report was published.',
+    'The 2026 value report was published.',
+  ])('does not consume the first letters of a word after a year: %s', (content) => {
+    expect(assessClaimEvidence(content, [])).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
+  it.each([
+    ['35 workflows', '35'],
+    ['35 measurements', '35'],
+    ['35 businesses', '35'],
+    ['35 variants', '35'],
+    ['35 kilograms', '35'],
+    ['35 yearly reports', '35'],
+    ['35 folder names', '35'],
+  ])('does not borrow a numeric unit from a following word: %s', (content, unsupported) => {
+    expect(assessClaimEvidence(`The report covered ${content}.`, []).unsupportedNumbers).toEqual([unsupported]);
+  });
+
+  it.each(['35%', '35x', '35-fold', '$35m', '35 million', '35 kg', '2026 years'])('retains a complete explicit unit in %s', (value) => {
+    const content = `The result was ${value} overall.`;
+    expect(assessClaimEvidence(content, []).issue).not.toBeNull();
+    expect(assessClaimEvidence(content, [content])).toMatchObject({ unsupportedNumbers: [], issue: null });
+  });
+
   it('normalizes percent notation but rejects cross-claim numeric synthesis', () => {
     const support = [
       'Of 77 commodities, China produced 74 and ranked first for 39.',

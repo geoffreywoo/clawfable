@@ -81,7 +81,7 @@ function personalClaimIsSupported(content: string, supportTexts: string[]): bool
 
 function numericClaims(content: string): string[] {
   const claims: string[] = [];
-  const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:percentage\s+points?|percent(?:age)?|million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|samples?|models?|sensors?|chips?|racks?|boards?|incidents?|failures?|defects?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)?/gi;
+  const pattern = /(?:[$£€]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:(?:-?fold\b|percentage\s+points?|percent(?:age)?|million|billion|trillion|minutes?|hours?|days?|weeks?|months?|years?|cycles?|parts?|points?|pages?|clips?|hooks?|languages?|tokens?|tons?|api\s+calls?|customers?|users?|plants?|factories?|lines?|suppliers?|samples?|models?|sensors?|chips?|racks?|boards?|incidents?|failures?|defects?|kwh|mwh|gwh|ghz|gb|tb|amps?|nm|mm|cm|kg|kw|mw|gw|kv|ms|us|ns|hz|bn|%|x|k|m|b|w|v)(?![a-z]))?/gi;
   const normalizedContent = content.replace(
     /(\d[\d,]*(?:\.\d+)?)\s*([–—-])\s*(\d[\d,]*(?:\.\d+)?)\s*(percentage\s+points?|percent(?:age)?|%)/gi,
     '$1$4$2$3$4',
@@ -99,11 +99,14 @@ function numericClaims(content: string): string[] {
     const digits = raw.replace(/[^0-9.]/g, '');
     if (!digits) continue;
     const numeric = Number(digits);
-    if (/^20\d{2}$/.test(digits)) continue;
+    if (/^20\d{2},?$/.test(raw)) continue;
     const lineStart = match.index === 0 || normalizedContent.slice(0, match.index).endsWith('\n');
     const after = normalizedContent.slice((match.index || 0) + raw.length);
-    if (lineStart && /^\.?\s+/.test(after) && numeric >= 1 && numeric <= 20) continue;
-    claims.push(canonicalNumericClaim(raw));
+    if (lineStart && /^\d{1,2}$/.test(raw) && /^\.?\s+/.test(after) && numeric >= 1 && numeric <= 20) continue;
+    // The numeric match starts at the digits; retain an attached minus for a
+    // multiplier so -35-fold cannot become evidence for positive 35x.
+    const negativeMultiplier = /(?:fold|x)$/i.test(raw) && /[-−]$/.test(before);
+    claims.push(canonicalNumericClaim(negativeMultiplier ? `-${raw}` : raw));
   }
 
   const wordValues: Record<string, string> = {
@@ -141,6 +144,8 @@ function canonicalNumericClaim(value: string): string {
   return value
     .toLowerCase()
     .replace(/[\s,]+/g, '')
+    // Normalize an explicit multiplier unit, never a bare number or percent.
+    .replace(/-?fold$/, 'x')
     .replace(/percentagepoints?/g, 'pp')
     .replace(/percent(?:age)?/g, '%')
     .replace(/trillion/g, 't')
