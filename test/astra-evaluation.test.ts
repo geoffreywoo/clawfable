@@ -214,6 +214,69 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(result.invalidReason).toBe('provider_or_model_substitution');
   });
 
+  it.each([
+    ['exact repair primary', {}, 'synthetic_profile', 'publishing_v2_gpt_control', true],
+    ['dated repair primary', { providerModel: 'claude-fable-5-2026-09-04' }, 'synthetic_profile', 'publishing_v2_gpt_control', true],
+    ['unplanned legacy alternate', { plannedModelStack: undefined, modelCallRole: undefined }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['missing repair role', { modelCallRole: 'primary' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['alternate judge', { stage: 'copy_judgment' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['wrong planned stack', { plannedModelStack: 'publishing_v2_astra' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['missing requested identity', { requestedModel: undefined }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['substituted request', { requestedModel: 'gpt-5.6', requestedProvider: 'openai' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['substituted wire model', { providerModel: 'claude-sonnet-4-6' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['substituted provider', { provider: 'openai' }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['actual fallback', { fallbackAttempts: [{ provider: 'openai', model: 'gpt-5.6', reason: 'timeout' }] }, 'synthetic_profile', 'publishing_v2_gpt_control', false],
+    ['Astra alternate repair', {}, 'synthetic_profile', 'publishing_v2_astra', false],
+    ['Geoffrey alternate repair', {}, 'geoffrey', 'publishing_v2_gpt_control', false],
+  ] as const)('validates only the declared existing control repair branch: %s', async (_label, overrides, kind, stack, valid) => {
+    const packet = snapshot().packets.find((packet) => packet.kind === kind)!;
+    const result = await runFrozenEvaluationArm(packet, stack, { generate: async (input) => {
+      const primaryCalls = (['idea_generation', 'idea_judgment', 'tweet_writing', 'copy_judgment'] as const).map((stage) => {
+        const primary = getModelChainForTask(stage, stack)[0];
+        return { stage, plannedModelStack: stack, modelCallRole: 'primary', requestedModel: primary.model,
+          requestedProvider: primary.provider, model: primary.model, provider: primary.provider, providerModel: primary.model, succeeded: true };
+      });
+      input.onTrace?.({ status: 'empty', estimatedCostUsd: 0.01, modelCalls: [...primaryCalls, {
+        stage: 'tweet_writing', plannedModelStack: 'publishing_v2_fable_control', modelCallRole: 'postcritic_repair',
+        requestedModel: 'claude-fable-5', requestedProvider: 'anthropic', model: 'claude-fable-5', provider: 'anthropic',
+        providerModel: 'claude-fable-5', succeeded: true, fallbackAttempts: [], ...overrides,
+      }] } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.validPrimaryModels).toBe(valid);
+    if (!valid) expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
+  it('keeps a successful primary-model result invalid when it used an actual fallback attempt', async () => {
+    const result = await runFrozenEvaluationArm(snapshot().packets[0], 'publishing_v2_astra', { generate: async (input) => {
+      input.onTrace?.({ status: 'empty', estimatedCostUsd: 0.01, modelCalls: [{
+        stage: 'tweet_writing', plannedModelStack: 'publishing_v2_astra', modelCallRole: 'primary',
+        model: 'gpt-6-astra', provider: 'openai', providerModel: 'gpt-6-astra', succeeded: true,
+        fallbackAttempts: [{ provider: 'anthropic', model: 'claude-fable-5', reason: 'provider_error' }],
+      }] } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
+  it.each(['missing', 'after_writer', 'failed', 'substituted', 'fallback'])('requires a completed primary copy judge before alternate repair: %s', async (condition) => {
+    const packet = snapshot().packets.find((packet) => packet.kind === 'synthetic_profile')!;
+    const primary = getModelChainForTask('copy_judgment', 'publishing_v2_gpt_control')[0];
+    const judge = { stage: 'copy_judgment', model: primary.model, provider: primary.provider,
+      providerModel: condition === 'substituted' ? 'other-model' : primary.model, succeeded: condition !== 'failed',
+      fallbackAttempts: condition === 'fallback' ? [{ provider: 'anthropic', model: 'claude-fable-5', reason: 'timeout' }] : [] };
+    const repair = { stage: 'tweet_writing', plannedModelStack: 'publishing_v2_fable_control', modelCallRole: 'postcritic_repair',
+      requestedModel: 'claude-fable-5', requestedProvider: 'anthropic', model: 'claude-fable-5', provider: 'anthropic',
+      providerModel: 'claude-fable-5', succeeded: true, fallbackAttempts: [] };
+    const result = await runFrozenEvaluationArm(packet, 'publishing_v2_gpt_control', { generate: async (input) => {
+      input.onTrace?.({ status: 'empty', estimatedCostUsd: 0.01,
+        modelCalls: condition === 'missing' ? [repair] : condition === 'after_writer' ? [repair, judge] : [judge, repair],
+      } as GenerationRunTrace);
+      return [];
+    } });
+    expect(result.invalidReason).toBe('provider_or_model_substitution');
+  });
+
   it('rejects Sol and dated compared-model identities as independent critics', async () => {
     const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
     for (const model of ['gpt-5.6-sol', 'gpt-5.6-sol-2026-09-04', 'gpt-5.6-2026-09-04', 'gpt-6-astra-2026-09-04']) {
@@ -562,12 +625,13 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
     expect(() => scoreFrozenEvaluation(report, undeclared)).toThrow('Declare');
   });
 
-  it('includes rejected idea facts in safety rates and reports cohort denominators separately', async () => {
+  it.each(['unsupported_operator_fact', 'idea_judge_evidence_mismatch'])('includes rejected idea facts (%s) in safety rates and reports cohort denominators separately', async (rejectionCode) => {
     const report = await runFrozenEvaluation(snapshot(), { generate: fakeGenerate, now });
-    report.packets[0].astra.ideas.push({ status: 'rejected', semanticKey: 'unsafe', rejectionCodes: ['unsupported_operator_fact'] } as IdeaCandidate);
+    report.packets[0].astra.ideas.push({ status: 'rejected', semanticKey: 'unsafe', rejectionCodes: [rejectionCode] } as IdeaCandidate);
     const score = scoreFrozenEvaluation(report, votesFor(report));
     expect(score.status).toBe('not_ready');
     expect(score.noRegression).toBe(false);
+    expect(score.metricDefinitionVersion).toBe('factual-evidence-mismatch-v2');
     expect(score.astra.factualFailureRate).toBeCloseTo(1 / 41);
     expect(score.astra.ideaFactualFailureRate).toBeCloseTo(1 / 41);
     expect(score.astra.draftFactualFailureRate).toBeNull();

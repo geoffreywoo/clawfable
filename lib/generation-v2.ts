@@ -248,6 +248,7 @@ const STORY_FAILURE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const STORY_PUBLISH_MEMORY_MS = 21 * 24 * 60 * 60 * 1000;
 const GENERATION_RUN_DEADLINE_MS = 240 * 1000;
 const ASTRA_IDEA_GENERATION_DEADLINE_MS = 120 * 1000;
+const ASTRA_TWEET_WRITING_DEADLINE_MS = 120 * 1000;
 const STAGE_DEADLINES_MS: Partial<Record<GenerationModelCallTrace['stage'], number>> = {
   idea_generation: 75 * 1000,
   idea_judgment: 30 * 1000,
@@ -590,11 +591,16 @@ export async function trackedGenerate(
   stage: GenerationModelCallTrace['stage'],
   options: GenerateTextOptions,
   calls: GenerationModelCallTrace[],
+  modelCallRole: GenerationModelCallTrace['modelCallRole'] = 'primary',
 ): Promise<GenerateTextResult> {
   const startedAt = Date.now();
   const deadline = generationRunDeadlines.get(calls);
   if (deadline !== undefined && startedAt >= deadline) throw new Error('run_deadline');
-  const stageTimeout = options.timeoutMs ?? STAGE_DEADLINES_MS[stage];
+  const stageTimeout = options.timeoutMs ?? (
+    stage === 'tweet_writing' && options.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
+      ? ASTRA_TWEET_WRITING_DEADLINE_MS
+      : STAGE_DEADLINES_MS[stage]
+  );
   const timeoutMs = deadline === undefined ? stageTimeout
     : Math.min(stageTimeout && stageTimeout > 0 ? stageTimeout : Infinity, deadline - startedAt);
   try {
@@ -604,6 +610,8 @@ export async function trackedGenerate(
     });
     calls.push({
       stage,
+      plannedModelStack: options.modelStack,
+      modelCallRole,
       provider: result.provider,
       model: result.model,
       providerModel: result.providerModel,
@@ -631,6 +639,8 @@ export async function trackedGenerate(
     const provenance = error && typeof error === 'object' ? error as Partial<GenerateTextResult> : {};
     calls.push({
       stage,
+      plannedModelStack: options.modelStack,
+      modelCallRole,
       provider: lastAttempt?.provider || null,
       model: lastAttempt?.model || null,
       providerModel: lastAttempt?.responseProgress?.providerModel || provenance.responseProgress?.providerModel || undefined,
@@ -5196,6 +5206,7 @@ async function writeIdeaDrafts({
   initialDraftCount = MAX_DRAFTS_PER_IDEA,
   initialSingleMoveFromAnchor = false,
   initialCreativeMove,
+  modelCallRole,
 }: {
   idea: IdeaCandidate;
   brief: GenerationBriefV2;
@@ -5212,6 +5223,7 @@ async function writeIdeaDrafts({
   initialDraftCount?: 1 | 2 | typeof MAX_DRAFTS_PER_IDEA;
   initialSingleMoveFromAnchor?: boolean;
   initialCreativeMove?: InitialCreativeMoveV2;
+  modelCallRole?: GenerationModelCallTrace['modelCallRole'];
 }): Promise<DraftCandidate[]> {
   const nativeVoiceContract = isGeoffreyVoiceProfile(input.voiceProfile)
     ? buildGeoffreyNativeV2WriterContract()
@@ -5328,7 +5340,7 @@ Before returning, compare each draft with the anchors for rhythm and with the ap
       selectApprovedEditExamples(input.signals, idea.topic),
       initialCreativeMove,
     ),
-  }, calls);
+  }, calls, modelCallRole);
   const root = parseJsonRoot(result.text);
   const raw = Array.isArray(root?.drafts)
     ? (root.drafts as unknown[]).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
@@ -7128,6 +7140,7 @@ async function generateRescueDraftEvaluations({
             revisionDraftCount: plan.draftCount,
             revisionParentDraftId: target.draft.id,
             candidateIdSalt: plan.candidateIdSalt,
+            modelCallRole: revisionStrategy === 'critic_adaptive' ? 'postcritic_repair' : 'primary',
           });
         } catch {
           return [];

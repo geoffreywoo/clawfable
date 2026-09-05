@@ -984,6 +984,34 @@ describe('generateTweetBatchV2 integration', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('allows Astra writers to complete after the former 75-second cutoff and still judges the result', async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = new Date('2026-08-02T02:00:00Z');
+      vi.setSystemTime(startedAt);
+      const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: startedAt }).slice(0, 1);
+      let trace: any;
+      mocks.generateText.mockImplementation(async (options: any) => {
+        const durations = { idea_generation: 50_000, idea_judgment: 10_000, tweet_writing: 90_000, copy_judgment: 5_000 };
+        if (options.task === 'tweet_writing') expect(options.timeoutMs).toBe(120_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(options.timeoutMs, durations[options.task])));
+        if (options.task === 'idea_generation') return ideaResponse(options.prompt);
+        if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
+        if (options.task === 'tweet_writing') return writerResponse(options.prompt);
+        return rankingResponse(options.prompt, 'candidates');
+      });
+      const generation = generateTweetBatchV2({ ...input, count: 1, modelStack: 'publishing_v2_astra', mode: 'preview', persistArtifacts: false,
+        previewContext: { briefs, documents: sourceDocuments }, onTrace: (value) => { trace = value; },
+      });
+      await vi.runAllTimersAsync();
+      expect((await generation).length).toBeGreaterThan(0);
+      expect(trace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === 90_000)).toBe(true);
+      expect(trace.modelCalls.some((call: any) => call.stage === 'copy_judgment' && call.succeeded)).toBe(true);
+      expect(trace.outcomeCode).toBe('completed');
+      expect(trace.durationMs).toBeLessThan(240_000);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('bounds writer work by its own run deadline without shrinking a concurrent run', async () => {
     vi.useFakeTimers();
     try {
