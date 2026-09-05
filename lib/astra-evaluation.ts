@@ -4,6 +4,7 @@ import {
   type GenerateTweetBatchV2Input, type GenerationBriefV2,
 } from './generation-v2';
 import { getModelChainForTask } from './ai';
+import { estimateAiUsageCostUsd } from './ai-pricing';
 import { ASTRA_EVALUATION_VERSION, GEOFFREY_EVALUATION_SUBJECTS, SYNTHETIC_AUTHOR_FIXTURES } from './astra-evaluation-fixtures';
 import type { GenerationContext } from './generation-context';
 import type { AccountAnalysis, DraftCandidate, GenerationRunTrace, SourceDocument, StoryCluster, SemanticBlock, IdeaCandidate, TweetPerformance, ManualExampleCuration, VoiceCorpusSnapshot } from './types';
@@ -30,6 +31,48 @@ export interface FrozenEvaluationSnapshot {
     calibrationCount: number; limitation: string | null };
   packets: FrozenEvaluationPacket[];
   hash: string;
+}
+
+/** Describes the frozen inputs; it does not recapture or relabel their evidence. */
+export function frozenEvaluationCoverage(snapshot: FrozenEvaluationSnapshot) {
+  const packets = snapshot.packets.map((packet) => {
+    const briefs = packet.input.previewContext?.briefs || [];
+    const documents = packet.input.previewContext?.documents || [];
+    const references = packet.input.learnings?.operatorVoiceReference;
+    const anchors = [...(references?.pinnedExamples || []), ...(references?.startupRegisterExamples || []), ...(references?.bestPerformers || [])];
+    return { id: packet.id, kind: packet.kind, subject: packet.subject,
+      evidenceModes: [...new Set(briefs.map((brief) => brief.evidenceMode))],
+      sourceLanes: [...new Set(briefs.map((brief) => brief.sourceLane))],
+      evidenceAtoms: briefs.reduce((sum, brief) => sum + brief.evidence.length, 0),
+      qualifiedClaimIds: [...new Set(briefs.flatMap((brief) => brief.qualifiedClaimIds))],
+      sourceDocumentIds: [...new Set(documents.map((document) => document.id))],
+      personalSubjectCues: briefs.reduce((sum, brief) => sum + (brief.personalTopicSignals?.length || 0), 0),
+      hasCreativeSeed: briefs.some((brief) => Boolean(brief.creativeSeed)),
+      calibrationAnchors: new Set(anchors.map((entry) => entry.content?.trim()).filter(Boolean)).size,
+      verifiedComposedAnchors: anchors.filter((entry) => entry.authorshipProvenance === 'operator_composed').length,
+      voiceReady: isV2VoiceReady({ ...packet.input, modelStack: 'publishing_v2_gpt_control' }),
+      calibrationSource: packet.calibrationSource,
+    };
+  });
+  const cohorts = (['geoffrey', 'synthetic_profile'] as const).map((kind) => {
+    const rows = packets.filter((packet) => packet.kind === kind);
+    return { kind, packets: rows.length,
+      verifiedSourcePackets: rows.filter((packet) => packet.evidenceModes.includes('verified_source')).length,
+      opinionOnlyPackets: rows.filter((packet) => packet.evidenceModes.every((mode) => mode === 'operator_opinion')).length,
+      packetsWithPersonalSubjectCues: rows.filter((packet) => packet.personalSubjectCues > 0).length,
+      evidenceAtoms: rows.reduce((sum, packet) => sum + packet.evidenceAtoms, 0),
+      uniqueSourceDocuments: new Set(rows.flatMap((packet) => packet.sourceDocumentIds)).size,
+      uniqueQualifiedClaims: new Set(rows.flatMap((packet) => packet.qualifiedClaimIds)).size,
+    };
+  });
+  return { schemaVersion: 1, snapshotHash: snapshot.hash, capturedAt: snapshot.capturedAt,
+    benchmarkKind: 'requested_topic_breadth_stress' as const,
+    sampling: 'Thirty hand-authored Geoffrey subjects with source matching and opinion fallback; ten synthetic profiles. Not an empirical sample of production traffic.',
+    limitations: [
+      'Source-free cases test owned opinions and cannot establish qualified-source coverage.',
+      'Synthetic fixtures do not establish real-account voice fit or human preference.',
+      ...(snapshot.referenceSummary.limitation ? [snapshot.referenceSummary.limitation] : []),
+    ], referenceSummary: snapshot.referenceSummary, cohorts, packets };
 }
 
 const CREDENTIAL_FIELD = /^(?:.*api[_-]?key|.*access[_-]?(?:token|secret)|.*refresh[_-]?token|.*oauth.*|.*password|.*credentials|.*secret|cookies?|authorization)$/i;
@@ -219,18 +262,29 @@ export interface EvaluationArmResult {
   trace: GenerationRunTrace | null;
   validPrimaryModels: boolean;
   invalidReason: string | null;
+  /** Attempted includes a failed request; it never means successful generation. */
+  attempted?: boolean;
   executionEnvironment?: { kind: 'remote'; origin: string; gitCommit: string };
 }
 export interface EvaluationComparison {
   version: string;
   snapshotHash: string;
   completed: boolean;
-  estimatedCostUsd: number;
+  attemptedCompletion?: boolean;
+  estimatedCostUsd: number | null;
+  knownEstimatedCostUsd?: number;
+  unknownCostArms?: number;
+  reservedUnknownCostUsd?: number;
+  reservedUnknownAttempts?: number;
+  unreservedUnknownAttempts?: number;
+  budgetMeasureUsd?: number;
+  coverage?: ReturnType<typeof frozenEvaluationCoverage>;
   execution?: {
     concurrency: number;
     maxEstimatedCostUsd: number;
-    budgetPolicy: 'observed_cost_stop_with_in_flight_drain';
-    stopReason: 'invalid_arm' | 'cost_budget' | 'interrupted' | 'progress_write_failed' | null;
+    budgetPolicy: 'observed_cost_stop_with_in_flight_drain' | 'known_cost_plus_unknown_reservations_with_in_flight_drain';
+    failurePolicy?: 'fail_fast' | 'complete_suite';
+    stopReason: 'invalid_arm' | 'cost_budget' | 'interrupted' | 'progress_write_failed' | 'unknown_cost' | 'authentication_failure' | 'integrity_failure' | null;
   };
   packets: Array<{ id: string; kind: FrozenEvaluationPacket['kind']; baseline: EvaluationArmResult; astra: EvaluationArmResult }>;
 }
@@ -287,10 +341,57 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     : !['completed', 'empty'].includes(completedTrace.status) ? completedTrace.error || 'generation_failed'
     : invalidCalls.length ? 'provider_or_model_substitution'
     : successfulCalls.length === 0 ? 'no_successful_model_calls'
-    : !Number.isFinite(completedTrace.estimatedCostUsd) ? 'unknown_evaluation_cost'
+    : !hasKnownArmCost({ trace: completedTrace }) ? 'unknown_evaluation_cost'
     : null);
-  return { stack, selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason };
+  return { stack, selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason, attempted: true };
 }
+
+function frozenArmFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/HTTP (?:401|403)\b/.test(message)) return 'evaluation_authentication_failed';
+  if (/HTTP 409\b|deployment|version\/hash|does not match the frozen arm|Unsafe frozen|Invalid or oversized remote/.test(message)) return 'evaluation_integrity_failed';
+  return 'evaluation_arm_execution_failed_cost_unknown';
+}
+
+/** Usage-derived costs and conservative unknown-attempt reservations stay separate. */
+export function evaluationArmCost(arm: Pick<EvaluationArmResult, 'trace'>) {
+  const trace = arm.trace;
+  const finiteCost = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const summaryComplete = finiteCost(trace?.estimatedCostUsd) && !['partial', 'missing'].includes(trace?.costDataStatus || '');
+  if (summaryComplete) return { knownEstimatedCostUsd: trace!.estimatedCostUsd!, reservedUnknownCostUsd: 0,
+    reservedUnknownAttempts: 0, unreservedUnknownAttempts: 0, costKnown: true, budgetBounded: true };
+  let knownEstimatedCostUsd = 0, reservedUnknownCostUsd = 0, reservedUnknownAttempts = 0, unreservedUnknownAttempts = 0;
+  if (!Array.isArray(trace?.modelCalls)) {
+    // Legacy partial summaries can retain a known subtotal, but cannot bound the missing attempt.
+    knownEstimatedCostUsd = finiteCost(trace?.estimatedCostUsd) ? trace!.estimatedCostUsd! : 0;
+    unreservedUnknownAttempts = 1;
+  } else for (const call of trace.modelCalls) {
+    const fallbacks = call.fallbackAttempts || [];
+    // Failed calls mirror their final fallback; count that provider attempt only once.
+    const attempts = [...fallbacks, ...(call.succeeded || (fallbacks.length === 0 && call.provider && call.model) ? [call] : [])];
+    if (attempts.length === 0) unreservedUnknownAttempts += 1;
+    for (const attempt of attempts) {
+      if ('reason' in attempt && attempt.reason === 'provider_unconfigured') continue; // No HTTP request was made.
+      const cost = finiteCost(attempt.estimatedCostUsd) ? attempt.estimatedCostUsd
+        : estimateAiUsageCostUsd(attempt.model, attempt.inputTokens, attempt.outputTokens);
+      if (finiteCost(cost)) { knownEstimatedCostUsd += cost; continue; }
+      const progress = attempt.responseProgress;
+      const auditable = attempt.provider === 'openai' && attempt.model === 'gpt-6-astra'
+        && progress && finiteCost(progress.estimatedMaxCostUsd) && progress.estimatedMaxCostUsd > 0
+        && Number.isInteger(progress.requestBytes) && progress.requestBytes! > 0
+        && Number.isInteger(progress.framingTokenAllowance) && progress.framingTokenAllowance! > 0
+        && progress.inputTokenUpperEstimate === progress.requestBytes! + progress.framingTokenAllowance!
+        && Number.isInteger(progress.outputTokenLimit) && progress.outputTokenLimit! > 0
+        && progress.estimatedMaxCostUsd === estimateAiUsageCostUsd(attempt.model, progress.inputTokenUpperEstimate, progress.outputTokenLimit);
+      if (auditable) { reservedUnknownCostUsd += progress!.estimatedMaxCostUsd!; reservedUnknownAttempts += 1; }
+      else unreservedUnknownAttempts += 1;
+    }
+  }
+  return { knownEstimatedCostUsd, reservedUnknownCostUsd, reservedUnknownAttempts, unreservedUnknownAttempts,
+    costKnown: reservedUnknownAttempts + unreservedUnknownAttempts === 0, budgetBounded: unreservedUnknownAttempts === 0 };
+}
+
+function hasKnownArmCost(arm: Pick<EvaluationArmResult, 'trace'>): boolean { return evaluationArmCost(arm).costKnown; }
 
 export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, options: {
   generate?: typeof generateTweetBatchV2;
@@ -298,6 +399,7 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
   maxEstimatedCostUsd?: number;
   limit?: number;
   concurrency?: number;
+  failurePolicy?: 'fail_fast' | 'complete_suite';
   signal?: AbortSignal;
   onProgress?: (comparison: EvaluationComparison) => void | Promise<void>;
   now?: Date;
@@ -307,9 +409,11 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
   const runArm: EvaluationArmRunner = options.runArm || ((packet, stack) => runFrozenEvaluationArm(packet, stack, { generate: options.generate }));
   const budget = options.maxEstimatedCostUsd ?? 100;
   const concurrency = options.concurrency ?? 1;
+  const failurePolicy = options.failurePolicy ?? 'fail_fast';
   if (!Number.isFinite(budget) || budget <= 0) throw new Error('A positive evaluation cost budget is required.');
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 40)) throw new Error('Evaluation limit must be an integer from 1 to 40.');
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('Evaluation concurrency must be an integer from 1 to 4.');
+  if (!['fail_fast', 'complete_suite'].includes(failurePolicy)) throw new Error('Invalid evaluation failure policy.');
   // Preflight every arm's safety contract before starting any paid worker,
   // including packets beyond a diagnostic limit.
   if (snapshot.packets.some((packet) => packet.input.requireAutopostQuality !== true || packet.input.count !== 1
@@ -317,8 +421,9 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
     throw new Error('Unsafe frozen evaluation packet.');
   }
   const comparison: EvaluationComparison = { version: ASTRA_EVALUATION_VERSION, snapshotHash: snapshot.hash,
-    completed: false, estimatedCostUsd: 0, packets: [],
-    execution: { concurrency, maxEstimatedCostUsd: budget, budgetPolicy: 'observed_cost_stop_with_in_flight_drain', stopReason: null },
+    completed: false, attemptedCompletion: false, estimatedCostUsd: 0, knownEstimatedCostUsd: 0, unknownCostArms: 0, reservedUnknownCostUsd: 0, reservedUnknownAttempts: 0, unreservedUnknownAttempts: 0, budgetMeasureUsd: 0, packets: [],
+    coverage: frozenEvaluationCoverage(snapshot),
+    execution: { concurrency, failurePolicy, maxEstimatedCostUsd: budget, budgetPolicy: 'known_cost_plus_unknown_reservations_with_in_flight_drain', stopReason: null },
   };
   const packets = snapshot.packets.slice(0, options.limit ?? 40);
   const slots: EvaluationComparison['packets'] = [];
@@ -332,33 +437,49 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
     if (options.signal?.aborted) stop('interrupted');
     // Costs are known only after an arm returns. Stop new work at observed spend;
     // up to `concurrency` already-running arms can cross the ceiling while draining.
-    if (comparison.estimatedCostUsd >= budget) stop('cost_budget');
+    if (comparison.budgetMeasureUsd! >= budget) stop('cost_budget');
     const reason = comparison.execution!.stopReason;
     return reason === 'invalid_arm' ? 'paired_run_aborted_after_invalid_arm'
       : reason === 'cost_budget' ? 'evaluation_cost_budget_reached'
       : reason === 'interrupted' ? 'evaluation_interrupted'
+      : reason === 'unknown_cost' ? 'evaluation_stopped_unknown_cost'
+      : reason === 'authentication_failure' ? 'evaluation_stopped_authentication_failure'
+      : reason === 'integrity_failure' ? 'evaluation_stopped_integrity_failure'
       : reason === 'progress_write_failed' ? 'evaluation_progress_write_failed' : null;
   };
   const absent = (stack: EvaluationArmResult['stack'], invalidReason: string): EvaluationArmResult => ({
-    stack, selected: [], ideas: [], drafts: [], trace: null, validPrimaryModels: false, invalidReason,
+    stack, selected: [], ideas: [], drafts: [], trace: null, validPrimaryModels: false, invalidReason, attempted: false,
   });
   const invokeArm = async (packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack']): Promise<EvaluationArmResult> => {
     let result: EvaluationArmResult;
-    try { result = await runArm(packet, stack); }
-    catch { result = absent(stack, 'evaluation_arm_execution_failed_cost_unknown'); }
-    if (!result.validPrimaryModels) stop('invalid_arm');
+    try { result = { ...await runArm(packet, stack), attempted: true }; }
+    catch (error) { result = { ...absent(stack, frozenArmFailure(error)), attempted: true }; }
+    const providerAuthFailure = result.trace?.modelCalls?.some((call) => call.fallbackAttempts?.some((attempt) => [401, 403].includes(attempt.statusCode!)));
+    if (result.invalidReason === 'evaluation_authentication_failed' || providerAuthFailure) stop('authentication_failure');
+    else if (['evaluation_integrity_failed', 'deployment_changed_during_evaluation'].includes(result.invalidReason || '')) stop('integrity_failure');
+    else if (!hasKnownArmCost(result) && (failurePolicy !== 'complete_suite' || !evaluationArmCost(result).budgetBounded)) stop('unknown_cost');
+    else if (!result.validPrimaryModels && failurePolicy === 'fail_fast') stop('invalid_arm');
     return result;
   };
   const recordCost = (result: EvaluationArmResult): void => {
-    const cost = result.trace?.estimatedCostUsd;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) comparison.estimatedCostUsd += cost;
+    if (!result.attempted) return;
+    const cost = evaluationArmCost(result);
+    comparison.knownEstimatedCostUsd! += cost.knownEstimatedCostUsd;
+    comparison.reservedUnknownCostUsd! += cost.reservedUnknownCostUsd;
+    comparison.reservedUnknownAttempts! += cost.reservedUnknownAttempts;
+    comparison.unreservedUnknownAttempts! += cost.unreservedUnknownAttempts;
+    if (!cost.costKnown) comparison.unknownCostArms! += 1;
+    comparison.estimatedCostUsd = comparison.unknownCostArms ? null : comparison.knownEstimatedCostUsd!;
+    comparison.budgetMeasureUsd = comparison.knownEstimatedCostUsd! + comparison.reservedUnknownCostUsd!;
     schedulingBlock();
   };
   const checkpoint = async (): Promise<void> => {
     // Slots retain snapshot order even when later packets finish first. Clone at
     // enqueue time and serialize writes so an older receipt cannot overwrite a newer one.
     comparison.packets = slots.filter(Boolean);
-    comparison.completed = comparison.packets.length === 40
+    comparison.attemptedCompletion = comparison.packets.length === 40
+      && comparison.packets.every((entry) => entry.baseline.attempted && entry.astra.attempted);
+    comparison.completed = comparison.attemptedCompletion && comparison.unknownCostArms === 0
       && comparison.packets.every((entry) => entry.baseline.validPrimaryModels && entry.astra.validPrimaryModels);
     const receipt = structuredClone(comparison);
     progressWrites = progressWrites.then(async () => {
@@ -401,16 +522,22 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
 
 export function blindedEvaluationCards(snapshot: FrozenEvaluationSnapshot, comparison: EvaluationComparison) {
   if (snapshot.hash !== comparison.snapshotHash) throw new Error('Comparison uses another snapshot.');
+  const state = (arm: EvaluationArmResult) => arm.attempted === false ? 'not_attempted'
+    : !arm.validPrimaryModels ? 'failed_or_invalid_execution' : arm.selected.length ? 'eligible_copy' : 'valid_gate_empty';
   return comparison.packets.map((entry) => {
     const packet = snapshot.packets.find((packet) => packet.id === entry.id)!;
     const astraIsA = parseInt(evaluationHash(`blind:${snapshot.hash}:${entry.id}`).slice(0, 2), 16) % 2 === 0;
     return { packetId: entry.id, kind: packet.kind, subject: packet.subject, calibrationSource: packet.calibrationSource,
       evidenceAsOf: snapshot.capturedAt,
+      benchmarkKind: 'requested_topic_breadth_stress',
       referenceLimitations: packet.kind === 'geoffrey' ? snapshot.referenceSummary.limitation : null,
       evidence: packet.input.previewContext!.briefs.flatMap((brief) => brief.evidence),
       heldoutVoiceReferences: packet.kind === 'geoffrey' ? snapshot.heldoutExamples : [],
       A: (astraIsA ? entry.astra : entry.baseline).selected.map((candidate) => candidate.content),
       B: (astraIsA ? entry.baseline : entry.astra).selected.map((candidate) => candidate.content),
+      AStatus: state(astraIsA ? entry.astra : entry.baseline),
+      BStatus: state(astraIsA ? entry.baseline : entry.astra),
+      votingInstruction: 'Only two eligible copies can yield a decisive copy-preference vote. A preference for eligible copy over a valid empty result is recorded separately as utility; failed execution is not an eligible empty result.',
     };
   });
 }
@@ -429,50 +556,109 @@ export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: E
   if (votes.judge.kind === 'independent_critic' && (!votes.judge.model || ['gpt-6-astra', 'gpt-5.6', 'gpt-5.5'].some((primaryModel) => matchesEvaluationModel(primaryModel, votes.judge.model!)))) throw new Error('Declare a critic model independent of the compared writing/judging models.');
   const ids = new Set(comparison.packets.map((packet) => packet.id));
   if (new Set(votes.votes.map((vote) => vote.packetId)).size !== votes.votes.length || votes.votes.some((vote) => !ids.has(vote.packetId) || !['A', 'B', 'tie', 'neither'].includes(vote.choice))) throw new Error('Votes must be unique and refer to known packets.');
-  let decisive = 0;
-  let astraWins = 0;
+  const decisiveVotes: Array<{ packetId: string; astraWon: boolean }> = [];
+  const utilityVotes: Array<{ packetId: string; astraWon: boolean }> = [];
   for (const vote of votes.votes) {
     if ([vote.editCharsA, vote.editCharsB].some((value) => value != null && (!Number.isFinite(value) || value < 0))) throw new Error('Edit-burden estimates must be nonnegative numbers or null.');
     if (vote.choice !== 'A' && vote.choice !== 'B') continue;
-    decisive += 1;
     const astraIsA = parseInt(evaluationHash(`blind:${comparison.snapshotHash}:${vote.packetId}`).slice(0, 2), 16) % 2 === 0;
     const packet = comparison.packets.find((packet) => packet.id === vote.packetId)!;
-    if (packet.astra.selected.length === 0 || packet.baseline.selected.length === 0) throw new Error(`A decisive vote requires two nonempty eligible results in ${vote.packetId}; use tie or neither for empty pairs.`);
-    if ((vote.choice === 'A') === astraIsA) astraWins += 1;
+    if (!packet.astra.validPrimaryModels || !packet.baseline.validPrimaryModels) throw new Error(`A copy preference cannot treat failed or invalid execution as eligible content in ${vote.packetId}.`);
+    const astraWon = (vote.choice === 'A') === astraIsA;
+    if (packet.astra.selected.length === 0 || packet.baseline.selected.length === 0) {
+      const preferred = astraWon ? packet.astra : packet.baseline;
+      const other = astraWon ? packet.baseline : packet.astra;
+      if (preferred.selected.length === 0 || other.selected.length > 0) throw new Error(`A decisive vote requires two nonempty eligible results in ${vote.packetId}; an empty result cannot win.`);
+      utilityVotes.push({ packetId: vote.packetId, astraWon });
+      continue;
+    }
+    decisiveVotes.push({ packetId: vote.packetId, astraWon });
   }
-  const metrics = (arm: 'baseline' | 'astra') => {
-    const runs = comparison.packets.map((packet) => packet[arm]);
+  const metrics = (arm: 'baseline' | 'astra', packets = comparison.packets) => {
+    const runs = packets.map((packet) => packet[arm]);
+    const costs = runs.filter((run) => run.attempted ?? Boolean(run.trace)).map(evaluationArmCost);
+    const knownEstimatedCostUsd = costs.reduce((sum, cost) => sum + cost.knownEstimatedCostUsd, 0);
+    const reservedUnknownCostUsd = costs.reduce((sum, cost) => sum + cost.reservedUnknownCostUsd, 0);
     const drafts = runs.flatMap((run) => run.drafts);
-    const rate = (codes: Set<string>) => drafts.length ? drafts.filter((draft) => draft.rejectionCodes.some((code) => codes.has(code))).length / drafts.length : 0;
+    const ideas = runs.flatMap((run) => run.ideas || []);
+    const rate = (entries: Array<{ rejectionCodes: string[] }>, codes: Set<string>) => entries.length
+      ? entries.filter((entry) => entry.rejectionCodes.some((code) => codes.has(code))).length / entries.length : null;
     const sumKnown = (values: Array<number | null | undefined>) => values.length && values.every((value) => typeof value === 'number' && Number.isFinite(value))
       ? (values as number[]).reduce((sum, value) => sum + value, 0) : null;
     const editEstimates = votes.votes.flatMap((vote) => {
+      const packet = packets.find((packet) => packet.id === vote.packetId);
+      if (!packet || !packet[arm].validPrimaryModels || packet[arm].selected.length === 0) return [];
       const astraIsA = parseInt(evaluationHash(`blind:${comparison.snapshotHash}:${vote.packetId}`).slice(0, 2), 16) % 2 === 0;
       const value = ((arm === 'astra') === astraIsA) ? vote.editCharsA : vote.editCharsB;
       return typeof value === 'number' ? [value] : [];
     });
-    return { drafts: drafts.length, selected: runs.reduce((sum, run) => sum + run.selected.length, 0),
+    return { packets: packets.length, attemptedArms: runs.filter((run) => run.attempted ?? Boolean(run.trace)).length,
+      invalidArms: runs.filter((run) => !run.validPrimaryModels).length,
+      unknownCostArms: runs.filter((run) => (run.attempted ?? Boolean(run.trace)) && !hasKnownArmCost(run)).length,
+      ideas: ideas.length, drafts: drafts.length, selected: runs.reduce((sum, run) => sum + run.selected.length, 0),
       qualifyingIdeaCount: runs.reduce((sum, run) => sum + new Set((run.ideas || [])
         .filter((idea) => idea.status === 'selected' || (idea.judgeScore != null && idea.rejectionCodes.every((code) => code === 'idea_not_selected')))
         .map((idea) => idea.semanticKey)).size, 0),
       totalDurationMs: sumKnown(runs.map((run) => run.trace?.durationMs)),
-      estimatedCostUsd: sumKnown(runs.map((run) => run.trace?.estimatedCostUsd)),
+      estimatedCostUsd: runs.length && runs.every(hasKnownArmCost) ? knownEstimatedCostUsd : null,
+      knownEstimatedCostUsd, reservedUnknownCostUsd, budgetMeasureUsd: knownEstimatedCostUsd + reservedUnknownCostUsd,
+      reservedUnknownAttempts: costs.reduce((sum, cost) => sum + cost.reservedUnknownAttempts, 0),
+      unreservedUnknownAttempts: costs.reduce((sum, cost) => sum + cost.unreservedUnknownAttempts, 0),
       estimatedEditCharacters: editEstimates.length ? editEstimates.reduce((sum, value) => sum + value, 0) / editEstimates.length : null,
       editEstimateCount: editEstimates.length,
-      factualFailureRate: rate(FACTUAL_CODES), anchorReskinRate: rate(RESKIN_CODES), slopFailureRate: rate(SLOP_CODES),
+      hardGateDenominators: { ideas: ideas.length, drafts: drafts.length },
+      factualFailureRate: rate([...ideas, ...drafts], FACTUAL_CODES),
+      ideaFactualFailureRate: rate(ideas, FACTUAL_CODES), draftFactualFailureRate: rate(drafts, FACTUAL_CODES),
+      anchorReskinRate: rate([...ideas, ...drafts], RESKIN_CODES), slopFailureRate: rate([...ideas, ...drafts], SLOP_CODES),
       emptyRuns: runs.filter((run) => run.selected.length === 0).length,
+      validGateEmptyRuns: runs.filter((run) => run.validPrimaryModels && run.selected.length === 0).length,
       selectedGateViolations: runs.flatMap((run) => run.selected).filter((candidate) => candidate.finalCriticVerdict !== 'allow').length,
     };
   };
   const baseline = metrics('baseline');
   const astra = metrics('astra');
   const validModels = comparison.packets.every((packet) => packet.baseline.validPrimaryModels && packet.astra.validPrimaryModels);
-  const noRegression = astra.factualFailureRate <= baseline.factualFailureRate && astra.anchorReskinRate <= baseline.anchorReskinRate
-    && astra.slopFailureRate <= baseline.slopFailureRate && astra.emptyRuns <= baseline.emptyRuns && astra.selectedGateViolations === 0;
+  const noIncrease = (value: number | null, control: number | null) => value === null || control === null
+    ? value === null && control === null : value <= control;
+  const noRegressionFor = (candidate: ReturnType<typeof metrics>, control: ReturnType<typeof metrics>) => (
+    noIncrease(candidate.factualFailureRate, control.factualFailureRate)
+    && noIncrease(candidate.ideaFactualFailureRate, control.ideaFactualFailureRate)
+    && noIncrease(candidate.draftFactualFailureRate, control.draftFactualFailureRate)
+    && noIncrease(candidate.anchorReskinRate, control.anchorReskinRate)
+    && noIncrease(candidate.slopFailureRate, control.slopFailureRate)
+    && candidate.emptyRuns <= control.emptyRuns && candidate.selectedGateViolations === 0
+  );
+  const noRegression = noRegressionFor(astra, baseline);
+  const decisive = decisiveVotes.length;
+  const astraWins = decisiveVotes.filter((vote) => vote.astraWon).length;
+  const utilityFor = (packets: EvaluationComparison['packets']) => {
+    const eligible = packets.filter((packet) => packet.astra.validPrimaryModels && packet.baseline.validPrimaryModels);
+    const ids = new Set(packets.map((packet) => packet.id));
+    return {
+      astraAvailableOverValidEmpty: eligible.filter((packet) => packet.astra.selected.length > 0 && packet.baseline.selected.length === 0).length,
+      baselineAvailableOverValidEmpty: eligible.filter((packet) => packet.baseline.selected.length > 0 && packet.astra.selected.length === 0).length,
+      astraPreferred: utilityVotes.filter((vote) => ids.has(vote.packetId) && vote.astraWon).length,
+      baselinePreferred: utilityVotes.filter((vote) => ids.has(vote.packetId) && !vote.astraWon).length,
+      countsTowardDecisivePreference: false,
+    };
+  };
+  const cohorts = Object.fromEntries((['geoffrey', 'synthetic_profile'] as const).map((kind) => {
+    const packets = comparison.packets.filter((packet) => packet.kind === kind);
+    const ids = new Set(packets.map((packet) => packet.id));
+    const decisions = decisiveVotes.filter((vote) => ids.has(vote.packetId));
+    const wins = decisions.filter((vote) => vote.astraWon).length;
+    const baseline = metrics('baseline', packets), astra = metrics('astra', packets);
+    return [kind, { packets: packets.length, decisive: decisions.length, astraWins: wins,
+      winRate: decisions.length ? wins / decisions.length : null, baseline, astra,
+      noRegression: noRegressionFor(astra, baseline), oneSidedUtility: utilityFor(packets) }];
+  }));
   const winRate = decisive ? astraWins / decisive : null;
   const pass = comparison.completed && comparison.packets.length === 40 && votes.votes.length === 40
     && validModels && decisive >= 30 && winRate !== null && winRate >= 0.6 && noRegression;
   return { status: pass ? 'pass' : 'not_ready', judge: votes.judge, decisive, astraWins, winRate, validModels, noRegression, baseline, astra,
+    attemptedCompletion: comparison.attemptedCompletion ?? comparison.completed, promotionValidCompletion: comparison.completed,
+    cohorts, oneSidedUtility: utilityFor(comparison.packets), coverage: comparison.coverage || null,
+    hardGateRateNotice: 'Rates include observed rejected ideas and drafts with separate factual denominators; null means no observations. Synthetic and Geoffrey results are reported separately.',
     editBurdenSource: votes.judge.kind === 'human' ? 'human_estimates_not_observed_edits' : 'critic_estimates_not_observed_edits',
     syntheticProfileNotice: 'Ten packets use synthetic calibration fixtures; they are not observed human voice or preference evidence.' };
 }

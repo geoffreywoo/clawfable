@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
 import OpenAI from 'openai';
-import type { GenerationModelStackId } from './types';
+import type { GenerationModelStackId, GenerationResponseProgress } from './types';
 import { estimateAiUsageCostUsd } from './ai-pricing';
 
 export { estimateAiUsageCostUsd } from './ai-pricing';
@@ -57,6 +57,7 @@ export interface GenerateTextResult {
   provider: AiProvider;
   model: string;
   providerModel?: string | null;
+  responseProgress?: GenerationResponseProgress;
   requestedProvider?: AiProvider;
   requestedModel?: string;
   reasoningEffort?: OpenAiReasoningEffort | null;
@@ -78,6 +79,7 @@ export interface AiFallbackAttempt {
   outputTokens: number | null;
   estimatedCostUsd: number | null;
   durationMs: number;
+  responseProgress?: GenerationResponseProgress;
 }
 
 class AiGenerationTimeoutError extends Error {
@@ -125,6 +127,10 @@ const ANTHROPIC_FABLE_MIN_MAX_TOKENS = 4000;
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const OAI_ASTRA: AiModelTarget = { provider: 'openai', model: OPENAI_ASTRA_MODEL };
 const ASTRA_JUDGE_TASKS = new Set<AiTask>(['idea_judgment', 'copy_judgment', 'bulk_judgment', 'final_judgment', 'reply_scoring']);
+// Byte-level tokenization uses no more tokens than UTF-8 bytes for literal
+// request text. Reserve extra room for provider framing/schema representation;
+// this is a conservative estimate, not a contractual billing maximum.
+const ASTRA_RESERVATION_FRAMING_TOKENS = 16_384;
 
 const OAI_COPY: AiModelTarget = { provider: 'openai', model: OPENAI_COPY_MODEL };
 const OAI_QUALITY: AiModelTarget = { provider: 'openai', model: OPENAI_QUALITY_MODEL };
@@ -386,6 +392,8 @@ async function generateWithOpenAi(
   options: GenerateTextOptions,
   model: string,
   signal?: AbortSignal,
+  progress?: GenerationResponseProgress,
+  startedAt = Date.now(),
 ): Promise<GenerateTextResult> {
   const openai = process.env.OPENAI_API_KEY
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -421,9 +429,24 @@ async function generateWithOpenAi(
       ? { temperature: options.temperature }
       : {}),
   };
-  const response = signal
-    ? await openai.responses.create(request, { signal })
-    : await openai.responses.create(request);
+  const astraRequest = model === OPENAI_ASTRA_MODEL ? { ...request, stream: true as const } : null;
+  if (astraRequest && progress) {
+    progress.requestBytes = Buffer.byteLength(JSON.stringify(astraRequest), 'utf8');
+    progress.framingTokenAllowance = ASTRA_RESERVATION_FRAMING_TOKENS;
+    progress.inputTokenUpperEstimate = progress.requestBytes + ASTRA_RESERVATION_FRAMING_TOKENS;
+    progress.outputTokenLimit = astraRequest.max_output_tokens;
+    progress.estimatedMaxCostUsd = estimateAiUsageCostUsd(model, progress.inputTokenUpperEstimate, progress.outputTokenLimit);
+  }
+  // The explicit model chain owns retries and provenance. SDK retries hide
+  // rate limits/server errors inside a single timed Astra attempt.
+  const response = model === OPENAI_ASTRA_MODEL
+    ? await consumeAstraResponseStream(
+        await openai.responses.create(astraRequest!, { ...(signal ? { signal } : {}), maxRetries: 0 }),
+        progress!, startedAt, signal,
+      )
+    : signal
+      ? await openai.responses.create(request, { signal })
+      : await openai.responses.create(request);
 
   return {
     text: extractOpenAiText(response),
@@ -431,12 +454,48 @@ async function generateWithOpenAi(
     provider: 'openai',
     model,
     providerModel: typeof response.model === 'string' ? response.model : null,
+    ...(progress ? { responseProgress: { ...progress } } : {}),
     reasoningEffort: reasoning?.effort ?? null,
     cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? null,
     reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? null,
     inputTokens: response.usage?.input_tokens ?? null,
     outputTokens: response.usage?.output_tokens ?? null,
   };
+}
+
+async function consumeAstraResponseStream(
+  stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>,
+  progress: GenerationResponseProgress,
+  startedAt: number,
+  signal?: AbortSignal,
+): Promise<OpenAI.Responses.Response> {
+  // Responses events are documented full-response snapshots at terminal states.
+  // Deltas measure progress only: never assemble or return partial copy.
+  for await (const event of stream) {
+    const elapsed = Math.max(0, Date.now() - startedAt);
+    progress.firstEventMs ??= elapsed;
+    progress.lastEventMs = elapsed;
+    progress.eventCount += 1;
+    if (event.type === 'response.output_text.delta') progress.firstOutputMs ??= elapsed;
+    if ('response' in event && event.response) {
+      progress.responseId = event.response.id || progress.responseId;
+      progress.providerModel = typeof event.response.model === 'string' ? event.response.model : progress.providerModel;
+      progress.status = event.response.status || progress.status;
+    }
+    if (event.type === 'error') {
+      throw Object.assign(new Error('OpenAI response stream returned an error.'), { code: event.code || 'OPENAI_STREAM_ERROR' });
+    }
+    if (event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed') {
+      const expectedStatus = event.type.slice('response.'.length);
+      if (event.response.status !== expectedStatus) {
+        throw Object.assign(new Error('OpenAI terminal response status mismatch.'), { code: 'OPENAI_STREAM_STATUS_MISMATCH' });
+      }
+      return event.response;
+    }
+  }
+  throw Object.assign(new Error(signal?.aborted ? 'OpenAI response stream aborted.' : 'OpenAI response stream ended without a terminal response.'), {
+    code: signal?.aborted ? 'OPENAI_STREAM_ABORTED' : 'OPENAI_STREAM_INCOMPLETE',
+  });
 }
 
 async function generateWithAnthropic(
@@ -551,6 +610,7 @@ function annotateGenerationFailure(
     requestedModel: requestedChain[0]?.model,
     reasoningEffort: attempted?.provider === 'openai'
       ? getOpenAiReasoning(options, attempted.model)?.effort ?? null : null,
+    ...(attempted?.responseProgress ? { responseProgress: { ...attempted.responseProgress } } : {}),
     fallbackAttempts,
   });
 }
@@ -584,9 +644,12 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
       ? null
       : remainingMs;
     const abortController = attemptTimeoutMs === null ? null : new AbortController();
+    const responseProgress: GenerationResponseProgress | undefined = target.provider === 'openai' && target.model === OPENAI_ASTRA_MODEL
+      ? { responseId: null, providerModel: null, status: null, firstEventMs: null, firstOutputMs: null, lastEventMs: null, eventCount: 0 }
+      : undefined;
     try {
       const generation = target.provider === 'openai'
-        ? generateWithOpenAi(options, target.model, abortController?.signal)
+        ? generateWithOpenAi(options, target.model, abortController?.signal, responseProgress, attemptStartedAt)
         : generateWithAnthropic(options, target.model, abortController?.signal);
       const result = attemptTimeoutMs === null
         ? await generation
@@ -610,6 +673,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
           outputTokens: result.outputTokens ?? null,
           estimatedCostUsd: estimateAiUsageCostUsd(target.model, result.inputTokens, result.outputTokens),
           durationMs: Date.now() - attemptStartedAt,
+          ...(responseProgress ? { responseProgress: { ...responseProgress } } : {}),
         });
         continue;
       }
@@ -627,6 +691,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         outputTokens: null,
         estimatedCostUsd: null,
         durationMs: Date.now() - attemptStartedAt,
+        ...(responseProgress ? { responseProgress: { ...responseProgress } } : {}),
       });
       if (!IS_TEST_ENV) {
         const detail = providerError.statusCode || providerError.errorType

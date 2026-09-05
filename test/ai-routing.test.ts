@@ -32,12 +32,25 @@ async function loadDefaultRouter() {
   return module;
 }
 
-async function loadGeneratorWithOpenAiMock(create: ReturnType<typeof vi.fn>) {
+function mockOpenAiResponse(request: any, response: any) {
+  if (!request.stream || response?.[Symbol.asyncIterator]) return response;
+  return (async function* () {
+    const status = response.status || 'completed';
+    yield { type: 'response.created', response: { ...response, id: response.id || 'resp-mock', status, output: [] } };
+    if (['completed', 'incomplete', 'failed'].includes(status)) {
+      yield { type: `response.${status}`, response: { ...response, id: response.id || 'resp-mock', status } };
+    }
+  })();
+}
+
+type TextCreateMock = ReturnType<typeof vi.fn<(...args: any[]) => any>>;
+
+async function loadGeneratorWithOpenAiMock(create: TextCreateMock) {
   vi.resetModules();
   vi.doMock('openai', () => ({
     default: vi.fn(function OpenAiMock() {
       return {
-        responses: { create },
+        responses: { create: async (request, options) => mockOpenAiResponse(request, await create(request, options)) },
       };
     }),
   }));
@@ -47,14 +60,14 @@ async function loadGeneratorWithOpenAiMock(create: ReturnType<typeof vi.fn>) {
 }
 
 async function loadGeneratorWithAiMocks(
-  openAiCreate: ReturnType<typeof vi.fn>,
-  anthropicCreate: ReturnType<typeof vi.fn>,
+  openAiCreate: TextCreateMock,
+  anthropicCreate: TextCreateMock,
 ) {
   vi.resetModules();
   vi.doMock('openai', () => ({
     default: vi.fn(function OpenAiMock() {
       return {
-        responses: { create: openAiCreate },
+        responses: { create: async (request, options) => mockOpenAiResponse(request, await openAiCreate(request, options)) },
       };
     }),
   }));
@@ -742,6 +755,177 @@ describe('provider request hygiene', () => {
 });
 
 describe('Astra creative pilot', () => {
+  const astraResponse = (id: string, status = 'completed', text = 'Complete copy.') => ({
+    id, object: 'response', status, model: 'gpt-6-astra',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text, annotations: [] }] }],
+    usage: { input_tokens: 100, output_tokens: 80, input_tokens_details: { cached_tokens: 20 }, output_tokens_details: { reasoning_tokens: 60 } },
+  });
+
+  it('reads real SDK SSE events but accepts only the completed response and its final usage', async () => {
+    const { default: ActualOpenAI } = await vi.importActual<typeof import('openai')>('openai');
+    const final = astraResponse('resp-sse');
+    const events = [
+      { type: 'response.created', response: { ...final, status: 'in_progress', output: [], usage: null } },
+      { type: 'response.in_progress', response: { ...final, status: 'in_progress', output: [], usage: null } },
+      { type: 'response.output_text.delta', delta: 'PARTIAL COPY MUST NOT BE RETURNED' },
+      { type: 'response.completed', response: final },
+    ];
+    const fetch = vi.fn(async (_url: unknown, options: RequestInit) => {
+      const request = JSON.parse(String(options.body));
+      expect(request).toMatchObject({ model: 'gpt-6-astra', stream: true, reasoning: { effort: 'high' }, max_output_tokens: 8192,
+        text: { format: { type: 'json_schema', strict: true } } });
+      expect(request).not.toHaveProperty('store');
+      expect(request).not.toHaveProperty('background');
+      return new Response(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), {
+        status: 200, headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+    vi.resetModules();
+    vi.doMock('openai', () => ({ default: vi.fn(function OpenAIWithOfflineTransport(options) { return new ActualOpenAI({ ...options, fetch }); }) }));
+    process.env.OPENAI_API_KEY = 'offline-test-key';
+    const { generateText } = await import('@/lib/ai');
+    const result = await generateText({ task: 'idea_generation', modelStack: 'publishing_v2_astra', system: 'Return JSON.', prompt: 'Offline.',
+      jsonSchema: { type: 'object', properties: {}, required: [], additionalProperties: false }, maxTokens: 2200, timeoutMs: 1000 });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ text: 'Complete copy.', stopReason: 'end_turn', providerModel: 'gpt-6-astra', inputTokens: 100,
+      outputTokens: 80, cachedInputTokens: 20, reasoningTokens: 60, responseProgress: { responseId: 'resp-sse', providerModel: 'gpt-6-astra',
+        status: 'completed', eventCount: 4, firstEventMs: expect.any(Number), firstOutputMs: expect.any(Number), lastEventMs: expect.any(Number) } });
+  });
+
+  it.each(['incomplete', 'failed'])('rejects streamed terminal %s despite complete-looking partial text', async status => {
+    const response = { ...astraResponse('resp-unfinished', status), ...(status === 'incomplete' ? { incomplete_details: { reason: 'max_output_tokens' } } : {}) };
+    const create = vi.fn().mockResolvedValueOnce((async function* () {
+      yield { type: 'response.created', response: { ...response, status: 'in_progress' } };
+      yield { type: 'response.output_text.delta', delta: 'Looks complete.' };
+      yield { type: `response.${status}`, response };
+    })()).mockResolvedValueOnce({ status: 'completed', output_text: 'Explicit fallback.' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const result = await generateText({ task: 'idea_generation', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'Test.', maxTokens: 500 });
+    expect(result.text).toBe('Explicit fallback.');
+    expect(result.fallbackAttempts[0]).toMatchObject({ reason: 'incomplete', inputTokens: 100, outputTokens: 80,
+      stopReason: status === 'incomplete' ? 'max_tokens' : 'failed', responseProgress: { responseId: 'resp-unfinished', status, eventCount: 3 } });
+  });
+
+  it.each(['error_event', 'premature_eof', 'status_mismatch'])('fails closed on %s without accepting streamed deltas', async scenario => {
+    const create = vi.fn().mockResolvedValue((async function* () {
+      yield { type: 'response.created', response: astraResponse('resp-broken', 'in_progress') };
+      yield { type: 'response.output_text.delta', delta: 'Partial looks valid.' };
+      if (scenario === 'error_event') yield { type: 'error', code: 'server_error', message: 'Raw provider message is not copied.' };
+      if (scenario === 'status_mismatch') yield { type: 'response.completed', response: astraResponse('resp-broken', 'in_progress') };
+    })());
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const errorType = scenario === 'error_event' ? 'server_error' : scenario === 'status_mismatch' ? 'OPENAI_STREAM_STATUS_MISMATCH' : 'OPENAI_STREAM_INCOMPLETE';
+    await expect(generateText({ modelChain: [{ provider: 'openai', model: 'gpt-6-astra' }], system: 'Write.', prompt: 'Test.', maxTokens: 500 }))
+      .rejects.toMatchObject({ responseProgress: { responseId: 'resp-broken', providerModel: 'gpt-6-astra', firstOutputMs: expect.any(Number) },
+        fallbackAttempts: [{ reason: 'provider_error', errorType, inputTokens: null, outputTokens: null }] });
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('aborts a live Astra stream at the existing deadline and preserves server progress', async () => {
+    let signal: AbortSignal | undefined;
+    const create = vi.fn((_request, options) => {
+      signal = options.signal;
+      return (async function* () {
+        yield { type: 'response.created', response: astraResponse('resp-timeout', 'in_progress') };
+        yield { type: 'response.output_text.delta', delta: 'Never accept this partial copy.' };
+        await new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('stream aborted')), { once: true }));
+      })();
+    });
+    await loadGeneratorWithOpenAiMock(create);
+    const { trackedGenerate } = await import('@/lib/generation-v2');
+    const calls: import('@/lib/types').GenerationModelCallTrace[] = [];
+    await expect(trackedGenerate('idea_generation', { modelChain: [{ provider: 'openai', model: 'gpt-6-astra' }], system: 'Write.', prompt: 'Test.', maxTokens: 500, timeoutMs: 20 }, calls))
+      .rejects.toMatchObject({ name: 'AiGenerationTimeoutError', responseProgress: { responseId: 'resp-timeout', providerModel: 'gpt-6-astra', status: 'in_progress', eventCount: 2,
+        estimatedMaxCostUsd: expect.any(Number), requestBytes: expect.any(Number), inputTokenUpperEstimate: expect.any(Number), outputTokenLimit: 8192 },
+        fallbackAttempts: [{ reason: 'timeout', responseProgress: { responseId: 'resp-timeout', firstEventMs: expect.any(Number), firstOutputMs: expect.any(Number) } }] });
+    expect(signal?.aborted).toBe(true);
+    expect(create).toHaveBeenCalledOnce();
+    expect(calls[0]).toMatchObject({ succeeded: false, providerModel: 'gpt-6-astra', inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+      responseProgress: { responseId: 'resp-timeout', providerModel: 'gpt-6-astra', status: 'in_progress', eventCount: 2,
+        estimatedMaxCostUsd: expect.any(Number) } });
+    expect(calls[0].fallbackAttempts?.[0].responseProgress).toEqual(calls[0].responseProgress);
+  });
+
+  it('isolates progress between overlapping Astra requests', async () => {
+    const create = vi.fn((request) => (async function* () {
+      const id = request.input[0].content;
+      yield { type: 'response.created', response: astraResponse(id, 'in_progress') };
+      await new Promise(resolve => setTimeout(resolve, id === 'slow' ? 15 : 2));
+      if (id === 'slow') yield { type: 'response.output_text.delta', delta: 'Slow partial.' };
+      yield { type: 'response.completed', response: astraResponse(id, 'completed', `${id} complete`) };
+    })());
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const results = await Promise.all(['slow', 'fast'].map(prompt => generateText({ modelChain: [{ provider: 'openai', model: 'gpt-6-astra' }], system: 'Write.', prompt, maxTokens: 500 })));
+    expect(results[0]).toMatchObject({ text: 'slow complete', responseProgress: { responseId: 'slow', eventCount: 3, firstOutputMs: expect.any(Number) } });
+    expect(results[1]).toMatchObject({ text: 'fast complete', responseProgress: { responseId: 'fast', eventCount: 2, firstOutputMs: null } });
+    expect(results[0].responseProgress).not.toBe(results[1].responseProgress);
+  });
+
+  it('records a predispatch reservation even when Astra never sends its first event', async () => {
+    const create = vi.fn((_request, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted before response')), { once: true });
+    }));
+    const { generateText, estimateAiUsageCostUsd } = await loadGeneratorWithOpenAiMock(create);
+    const failure = await generateText({ modelChain: [{ provider: 'openai', model: 'gpt-6-astra' }],
+      system: 'Write.', prompt: 'Frozen test.', maxTokens: 500, timeoutMs: 20 }).catch(error => error);
+    const requestBytes = Buffer.byteLength(JSON.stringify(create.mock.calls[0][0]), 'utf8');
+    const expected = { responseId: null, firstEventMs: null, firstOutputMs: null, eventCount: 0,
+      requestBytes, framingTokenAllowance: 16384, inputTokenUpperEstimate: requestBytes + 16384, outputTokenLimit: 8192,
+      estimatedMaxCostUsd: estimateAiUsageCostUsd('gpt-6-astra', requestBytes + 16384, 8192) };
+    expect(failure.responseProgress).toMatchObject(expected);
+    expect(failure.fallbackAttempts[0]).toMatchObject({ reason: 'timeout', inputTokens: null, outputTokens: null,
+      estimatedCostUsd: null, responseProgress: expected });
+  });
+
+  it('prices the UTF8 reservation conservatively at long-context rates without adding it to observed cost', async () => {
+    const create = vi.fn().mockResolvedValue(astraResponse('resp-priced'));
+    await loadGeneratorWithOpenAiMock(create);
+    const { trackedGenerate } = await import('@/lib/generation-v2');
+    const calls: import('@/lib/types').GenerationModelCallTrace[] = [];
+    const result = await trackedGenerate('idea_generation', { task: 'idea_generation', modelStack: 'publishing_v2_astra',
+      system: 'Write.', prompt: '界'.repeat(100000), maxTokens: 12000 }, calls);
+    const requestBytes = Buffer.byteLength(JSON.stringify(create.mock.calls[0][0]), 'utf8');
+    const progress = result.responseProgress!;
+    expect(progress.requestBytes).toBe(requestBytes);
+    expect(progress.inputTokenUpperEstimate).toBe(requestBytes + 16384);
+    expect(progress.inputTokenUpperEstimate).toBeGreaterThan(272000);
+    expect(progress.estimatedMaxCostUsd).toBeCloseTo(((requestBytes + 16384) * 20 + 12000 * 75) / 1000000, 6);
+    expect(calls[0].estimatedCostUsd).toBe(0.005);
+    expect(calls[0].inputTokens).toBe(100);
+    expect(calls[0].outputTokens).toBe(80);
+    expect(calls[0].responseProgress?.estimatedMaxCostUsd).toBe(progress.estimatedMaxCostUsd);
+  });
+
+  it('exposes Astra HTTP failures to the explicit fallback chain without hidden SDK retries', async () => {
+    const { default: ActualOpenAI } = await vi.importActual<typeof import('openai')>('openai');
+    const requests: Array<Record<string, any>> = [];
+    const fetch = vi.fn(async (_url: unknown, options: RequestInit) => {
+      const request = JSON.parse(String(options.body));
+      requests.push(request);
+      if (request.model === 'gpt-6-astra') {
+        return new Response(JSON.stringify({ error: { message: 'Simulated overload', type: 'server_error' } }), {
+          status: 503, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' },
+        });
+      }
+      return new Response(JSON.stringify({ id: 'resp-offline', object: 'response', status: 'completed', model: request.model,
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Explicit fallback', annotations: [] }] }],
+        usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.resetModules();
+    vi.doMock('openai', () => ({ default: vi.fn(function OpenAIWithOfflineTransport(options) {
+      return new ActualOpenAI({ ...options, fetch });
+    }) }));
+    process.env.OPENAI_API_KEY = 'offline-test-key';
+    const { generateText } = await import('@/lib/ai');
+    const result = await generateText({ task: 'idea_generation', modelStack: 'publishing_v2_astra',
+      system: 'Return JSON.', prompt: 'Offline transport test.', maxTokens: 2200, timeoutMs: 1000 });
+    expect(requests.map((request) => request.model)).toEqual(['gpt-6-astra', 'gpt-5.6']);
+    expect(requests[0]).toMatchObject({ reasoning: { effort: 'high' }, max_output_tokens: 8192 });
+    expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', providerModel: 'gpt-5.6', model: 'gpt-5.6',
+      fallbackAttempts: [{ provider: 'openai', model: 'gpt-6-astra', reason: 'provider_error', statusCode: 503 }] });
+  });
+
   it('requires explicit promotion and isolates the Geoffrey pilot', async () => {
     const { resolvePublishingV2ModelStacks, PUBLISHING_V2_ASTRA_MODEL_STACK } = await loadDefaultRouter();
     delete process.env.ASTRA_CREATIVE_ROLLOUT;
@@ -850,7 +1034,9 @@ describe('Astra creative pilot', () => {
     const { generateText } = await loadGeneratorWithOpenAiMock(create);
     const result = await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 600 });
     expect(result.text).toBe('complete');
-    expect(result.fallbackAttempts[0]).toMatchObject({ model: 'gpt-6-astra', reason: 'incomplete', stopReason: status });
+    expect(result.fallbackAttempts[0]).toMatchObject(['incomplete', 'failed'].includes(status)
+      ? { model: 'gpt-6-astra', reason: 'incomplete', stopReason: status }
+      : { model: 'gpt-6-astra', reason: 'provider_error', errorType: 'OPENAI_STREAM_INCOMPLETE', responseProgress: { status } });
   });
 
   it('prices Astra and its long-context tier without treating missing usage as free', async () => {
