@@ -185,6 +185,61 @@ describe('virality signals', () => {
     expect(getAuthorityProofIssue('Most AI agent demos optimize for applause. Production agents optimize for boring recovery paths.')).toBeNull();
   });
 
+  it.each([
+    "nuclear fission can be a heat business. the whole business.\n\nif a factory can use enough heat to justify the reactor's cost, that project should get built even if it never sells electricity.",
+    "nuclear fission could earn its keep on a factory's heat bill alone.\n\nif the factory needs enough heat to justify the reactor's cost, it's worth building. never selling electricity is fine.",
+    'founder salary should be market rate if the round leaves the founder with a tiny stake.\n\ni’d use the new money to pay them for the work, even if it leaves less for expansion. i don’t buy heavily diluting someone and still expecting them to subsidize everyone else’s equity with below-market pay.',
+    'founder salary isn’t where i’d cut the budget if the round left them with a tiny stake.\n\ni’d fund market pay, even if that meant less expansion. i don’t want the founder still subsidizing everyone else’s equity.',
+    "a founder left with a tiny stake would still be subsidizing everyone else's equity through below-market pay.\n\ni don't buy cutting their upside and expecting the same personal subsidy.\n\ni'd use the new money to pay them market, even if that meant less expansion.",
+    'public market liquidity would be worth paying for even if i planned to never sell.\n\ni’d still want the option to buy more. a private allocation i can’t increase needs to be cheaper for me.',
+    'a guaranteed future VP job is too much to give an early startup hire just to save on salary. i’d pay more to keep the decision about who runs the team open.',
+    'a guaranteed future VP job is the expensive part of an early startup offer. i’d go higher on salary just to keep that decision open.',
+  ])('does not mistake a scoped commercial proposal for unearned authority: %s', content => {
+    // Exact failed e919 benchmark drafts; passing this one detector is not a
+    // publication verdict and does not reclassify the historical receipt.
+    expect(getAuthorityProofIssue(content)).toBeNull();
+  });
+
+  it.each([
+    'If the plant can meet the heat demand, I would build it even if the reactor never sells power.',
+    'The guaranteed future vice-president role would be costly. I would offer a larger salary.',
+    'A guaranteed CEO position is too much to offer. I would pay more instead.',
+    'The guaranteed future CTO title would be costly. I would keep that decision open.',
+    'A guaranteed director role is the expensive part. I would increase the salary.',
+    "I would avoid subsidizing everyone else's shares through below-market salary.",
+  ])('handles nearby conditional wording without depending on the exact benchmark copy: %s', content => {
+    expect(getAuthorityProofIssue(content)).toBeNull();
+  });
+
+  it.each([
+    'Nuclear reactors never fail.',
+    'This reactor will never sell electricity.',
+    'Never selling electricity is fine.',
+    'If the founder asks, I would pay more. Never selling electricity is fine.',
+    'If the factory needs enough heat to justify the cost, it is worth building.\n\nNever selling electricity is fine.',
+    'Selling heat always makes a nuclear project profitable.',
+    'Everyone knows this reactor will succeed.',
+    'Nobody can lose money funding this factory.',
+    'This strategy guarantees nothing, but returns are guaranteed.',
+    'I promise you a guaranteed future VP job.',
+    'I would offer every early hire a guaranteed future VP job.',
+    'A guaranteed future VP job will make the hire rich.',
+    'I would offer every early hire a guaranteed CEO position.',
+    'I promise you a guaranteed CTO title.',
+    'A guaranteed director role will make you rich.',
+    'I have always made money funding reactor projects.',
+    'I have guaranteed future VP jobs to my hires. It never fails.',
+    "Everyone else's equity will double.",
+    "I would buy shares. Everyone else's equity will double.",
+    'Never selling electricity is guaranteed to make a reactor profitable.',
+    'If a factory needs heat, it will never fail.',
+    'A guaranteed future VP job is too much. I’d pay more. Everyone knows that salary guarantees loyalty.',
+    'Never selling electricity is fine. Investors are wrong.',
+    "I would avoid subsidizing everyone else's equity. The market is dead.",
+  ])('retains the authority floor for real certainty, experience, or an additional universal claim: %s', content => {
+    expect(getAuthorityProofIssue(content)).toContain('Authority gate');
+  });
+
   it('flags recognizable AI-post cadence more than concrete human observations', () => {
     const generic = scoreSlopRisk(
       'The real edge in AI agents is not the demo, but the feedback loop. Most people are still optimizing for optics. The winners will be the teams that build systems where learning compounds.',
