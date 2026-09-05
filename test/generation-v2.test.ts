@@ -61,7 +61,7 @@ import {
   type GenerationBriefV2,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from '@/lib/generation-v2';
-import { buildResearchSemanticKey, stableResearchId } from '@/lib/research-utils';
+import { buildResearchSemanticKey, extractResearchEntities, stableResearchId } from '@/lib/research-utils';
 import { getPublishingV2AutopostQualityMargin } from '@/lib/publishing-quality-policy';
 import {
   classifyGeoffreyTopicDomain,
@@ -3499,6 +3499,10 @@ describe('Tweet Generation V2', () => {
     } as Tweet];
 
     expect(isStoryAlreadyCommittedV2(story, published, new Date('2026-08-13T00:00:00.000Z'))).toBe(true);
+    expect(isStoryAlreadyCommittedV2({
+      ...story,
+      summary: 'The executive announced his departure after eight years and plans to build something new.',
+    }, published, new Date('2026-08-13T00:00:00.000Z'))).toBe(true);
     expect(getStoryGenerationPlanningRejectionCodesV2(story, {
       committedTweets: published,
       now: new Date('2026-08-13T00:00:00.000Z'),
@@ -3516,6 +3520,87 @@ describe('Tweet Generation V2', () => {
       now: new Date('2026-08-13T00:00:00.000Z'),
     });
     expect(briefs.some((entry) => entry.storyClusterId === story.id)).toBe(false);
+  });
+
+  describe('published-story identity with noisy headline entities', () => {
+    const title = 'Up to 30x More Work Per Watt: NVIDIA Vera Rubin NVL72 Sets a New Efficiency Standard for AI Agents';
+    const summary = 'NVIDIA reports up to 30x higher throughput per megawatt for Vera Rubin NVL72 versus GB300 NVL72 on DeepSeek V4 Pro using recorded SemiAnalysis AgentX coding workloads; the early results await SemiAnalysis review and exclude Vera CPU tool calling.';
+    const entities = extractResearchEntities(`${title}. ${summary}`);
+    const story = {
+      id: 'story-nvidia-measurements', title, summary, entities,
+      topic: 'AI inference economics', semanticKey: buildResearchSemanticKey(title, entities),
+    } as StoryCluster;
+    const now = new Date('2026-09-05T20:14:06.120Z');
+    const published = (content: string, topic = 'agents', overrides: Partial<Tweet> = {}) => ({
+      id: 'prior-post', status: 'posted', content, topic, storyClusterId: null,
+      postedAt: '2026-09-01T01:10:21.753Z', createdAt: '2026-08-31T21:02:00.753Z',
+      ...overrides,
+    } as Tweet);
+
+    it.each([
+      ['agents', 'within 12 months, some agent startups will refund failed work. i’ll distrust the ones that still make customers eat every failure.'],
+      ['agents', 'within 12 months, i’d fund the agent company that reliably finishes the ugly half-done work customers would otherwise have to clean up'],
+      ['ai', 'within 12 months i’d bet coding agents write the first full draft of most new startup software as reliability compounds across messy edits. tiny teams will attempt products they currently think are too large.'],
+      ['agents', 'i’d fund an agent startup that only gets paid for completed work in the next 12 months. reliability could make usage jump nonlinearly and turn software budgets into labor budgets.'],
+      ['software', 'over the next 12 months i want to start software with fewer people and attempt a much bigger company because coding agents should become reliable on harder work'],
+      ['startups', 'i’d pay more for @cursor_ai in 12 months. coding agents will get reliable enough on harder work to move spend out of software headcount plans and into software budgets.'],
+      ['ai', 'i expect @anthropicai coding agents to push software startups into charging for completed work within 12 months.\n\nif reliability keeps compounding across longer jobs, selling seats is just accounting inertia.'],
+    ])('does not consume a hardware measurement from a prior %s opinion: %s', (topic, content) => {
+      expect(entities).toContain('More Work Per Watt');
+      expect(isStoryAlreadyCommittedV2(story, [published(content, topic)], now)).toBe(false);
+    });
+
+    it('still recognizes a true measurement paraphrase after reclustering and lowercasing', () => {
+      const content = 'nvidia says vera rubin nvl72 delivers up to 30x more throughput per megawatt than gb300 nvl72 on deepseek v4 pro; the agentx results still await review.';
+      expect(isStoryAlreadyCommittedV2(story, [published(content, 'AI inference economics')], now)).toBe(true);
+      expect(isStoryAlreadyCommittedV2({ ...story, summary: summary.toLowerCase() }, [published(content)], now)).toBe(true);
+    });
+
+    it('does not use a complete generic AI Agents label as source identity', () => {
+      const cleanLabels = { ...story, entities: ['NVIDIA', 'Vera Rubin NVL72', 'GB300 NVL72', 'AI Agents', 'Work'] };
+      expect(isStoryAlreadyCommittedV2(cleanLabels,
+        [published('AI agents should complete work for customers before asking to get paid.', 'AI agents')], now)).toBe(false);
+    });
+
+    it('requires event language beyond the same hardware names and grammatical filler', () => {
+      expect(isStoryAlreadyCommittedV2(story, [published('NVIDIA Vera Rubin NVL72 is the name I would put on this box.', 'hardware names')], now)).toBe(false);
+    });
+
+    it('preserves a title-only named company when its factual summary uses a pronoun', () => {
+      const title = 'OpenAI increases API usage limits';
+      const summary = 'The company raised usage ceilings for its developer service.';
+      const namedStory = { ...story, title, summary,
+        entities: extractResearchEntities(`${title}. ${summary}`),
+        semanticKey: buildResearchSemanticKey(title), topic: 'developer services' };
+      expect(isStoryAlreadyCommittedV2(namedStory,
+        [published('openai raised api usage ceilings for developers.', 'developer services')], now)).toBe(true);
+      expect(isStoryAlreadyCommittedV2(namedStory,
+        [published('anthropic raised api usage ceilings for developers.', 'developer services')], now)).toBe(false);
+    });
+
+    it.each([
+      { title: 'Sam Altman Leaves OpenAI', person: 'sam altman', other: 'jane smith' },
+      { title: 'Sam Altman Steps Down', person: 'sam altman', other: 'jane smith' },
+      { title: 'Jane Smith Leaves Company', person: 'jane smith', other: 'sam altman' },
+    ])('preserves a named person inside a noisy full-headline entity: $title', ({ title, person, other }) => {
+      const summary = 'The executive announced his departure after eight years and plans to build something different.';
+      const namedStory = { ...story, title, summary,
+        entities: extractResearchEntities(`${title}. ${summary}`),
+        semanticKey: buildResearchSemanticKey(title), topic: 'executive departures' };
+      expect(namedStory.entities).toContain(title);
+      expect(isStoryAlreadyCommittedV2(namedStory,
+        [published(`${person} is leaving after eight years.`, 'executive departures')], now)).toBe(true);
+      expect(isStoryAlreadyCommittedV2(namedStory,
+        [published(`${other} is leaving after eight years.`, 'executive departures')], now)).toBe(false);
+    });
+
+    it('preserves exact cluster identity and the existing 21-day cutoff', () => {
+      const exact = published('A different short reaction.', 'technology', { storyClusterId: story.id });
+      expect(isStoryAlreadyCommittedV2(story, [exact], now)).toBe(true);
+      const cutoff = now.getTime() - 21 * 24 * 60 * 60 * 1000;
+      expect(isStoryAlreadyCommittedV2(story, [{ ...exact, postedAt: new Date(cutoff).toISOString() }], now)).toBe(true);
+      expect(isStoryAlreadyCommittedV2(story, [{ ...exact, postedAt: new Date(cutoff - 1).toISOString() }], now)).toBe(false);
+    });
   });
 
   it('cools down the same failed story even when research assigns a new cluster id', () => {

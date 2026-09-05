@@ -1666,13 +1666,35 @@ function meaningfulStoryEntityTokens(story: StoryCluster): string[] {
     .filter((token) => token.length >= 3 && !GENERIC_STORY_ENTITY_TOKENS.has(token));
 }
 
+const STORY_COMMITMENT_CONTEXT_TOKENS = new Set([
+  'and', 'are', 'but', 'can', 'did', 'for', 'had', 'has', 'how', 'its', 'new',
+  'not', 'now', 'our', 'she', 'the', 'was', 'were', 'who', 'why', 'will',
+  'ai', 'agent', 'api', 'business', 'company', 'cpu', 'gpu', 'model', 'report',
+  'software', 'startup', 'technology', 'work',
+]);
+const STORY_ENTITY_EVENT_BOUNDARY = /\b(?:announces?|appoints?|buys?|files?|joins?|launches?|leaves?|raises?|releases?|reports?|resigns?|returns?|sells?|signs?|steps\s+down|wins?)\b/i;
+
 function storyMatchesPublishedTweet(story: StoryCluster, tweet: Tweet): boolean {
   if (tweet.storyClusterId && tweet.storyClusterId === story.id) return true;
   const tweetText = `${tweet.topic || ''} ${tweet.content || ''}`;
   const tweetTokens = new Set(significantResearchTokens(tweetText));
-  const entityTokens = meaningfulStoryEntityTokens(story);
+  // Title-case extraction can mislabel "More Work Per Watt" or "AI Agents"
+  // as names. Confirm partial name tokens in the factual summary, or a whole
+  // extracted name in the prior post when the summary only uses a pronoun.
+  // Split noisy "Sam Altman Leaves OpenAI" labels at the event verb so the
+  // complete person/company names still match a differently worded prior post.
+  const summaryTokens = new Set(significantResearchTokens(story.summary));
+  const tweetTokenSequence = ` ${significantResearchTokens(tweetText).join(' ')} `;
+  const identityLabels = story.entities.flatMap((entity) => [entity, ...entity.split(STORY_ENTITY_EVENT_BOUNDARY)]);
+  const wholeMentionTokens = new Set(identityLabels.flatMap((entity) => {
+    const tokens = significantResearchTokens(entity);
+    return tokens.length && tweetTokenSequence.includes(` ${tokens.join(' ')} `) ? tokens : [];
+  }));
+  const entityTokens = meaningfulStoryEntityTokens(story)
+    .filter((token) => !STORY_COMMITMENT_CONTEXT_TOKENS.has(token)
+      && (summaryTokens.size === 0 || summaryTokens.has(token) || wholeMentionTokens.has(token)));
   const eventTokens = significantResearchTokens(`${story.title} ${story.summary}`)
-    .filter((token) => !entityTokens.includes(token));
+    .filter((token) => !entityTokens.includes(token) && !STORY_COMMITMENT_CONTEXT_TOKENS.has(token));
   const sharedEntities = sharedTokenCount(entityTokens, tweetTokens);
   const sharedEvents = sharedTokenCount(eventTokens, tweetTokens);
   if (sharedEntities >= 2 && sharedEvents >= 1) return true;

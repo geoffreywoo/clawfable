@@ -523,11 +523,35 @@ export function getReplyOptOutReason(text: string): string | null {
   return matched ? matched[1] : null;
 }
 
+function withoutScopedCommercialCertainty(content: string): string {
+  // These words can name the scope of a proposal or contract, rather than
+  // promise a universal result. Remove only the local certainty token from
+  // this detector's view; never excuse another certainty claim in the post.
+  let text = content
+    .replace(/\b((?:even\s+)?if\s+(?:it|the\s+(?:reactor|project|plant|factory))\s+)never(?=\s+sells?\s+(?:electricity|power)\b)/gi, '$1')
+    // A separate heat-only conclusion needs the immediately preceding
+    // heat/cost condition in the same paragraph, not an unrelated "if".
+    .replace(/\b(if\s+[^.!?\n]{0,300}\b(?:heat|steam)\b[^.!?\n]{0,180}\b(?:cost|economics|worth)\b[^.!?\n]{0,160}\.[ \t]+)never(?=\s+selling\s+(?:electricity|power)\s+is\s+(?:fine|acceptable|okay|ok)\b)/gi, '$1')
+    .replace(/\b((?:even\s+)?if\s+i\s+(?:planned|intended)\s+to\s+)never(?=\s+(?:sell|exit)\b)/gi, '$1');
+
+  const ownedConditionalJudgment = /\bif\b|\bi(?:['’]d|\s+would)\b|\b(?:would|should)\b|\bi\s+(?:don['’]t|do\s+not)\s+(?:want|buy)\b/i.test(text);
+  if (ownedConditionalJudgment) {
+    text = text
+      // "Everyone else's equity" refers to the other holders in this
+      // proposed financing, not to everybody having the same outcome.
+      .replace(/\b(subsidiz(?:e|es|ing)\s+)everyone(?=\s+else['’]s\s+(?:equity|shares|ownership)\b)/gi, '$1the others')
+      // Pricing or refusing a promised role is not the author promising that
+      // somebody will obtain it. Outcome guarantees and promises stay intact.
+      .replace(/\b((?:a|the)\s+)guaranteed(?=\s+(?:future\s+)?(?:VP|vice[ -]president|CEO|CTO|CFO|COO|director|manager)\s+(?:job|role|title|position)\s+(?:is|would\s+be)\s+(?:too\s+much|the\s+expensive\s+part|expensive|costly)\b)/gi, '$1');
+  }
+  return text;
+}
+
 export function getAuthorityProofIssue(content: string): string | null {
   const text = content.trim();
   if (!text) return null;
 
-  const broadCertainty = /\b(guaranteed|always|never|everyone|everybody|nobody|no one)\b|\b(the market|founders|investors|operators|creators|builders)\b.{0,90}\b(wrong|miss(?:ing)?|misread|underestimate|overrate|obsolete|dead)\b/i.test(text);
+  const broadCertainty = /\b(guaranteed|always|never|everyone|everybody|nobody|no one)\b|\b(the market|founders|investors|operators|creators|builders)\b.{0,90}\b(wrong|miss(?:ing)?|misread|underestimate|overrate|obsolete|dead)\b/i.test(withoutScopedCommercialCertainty(text));
   if (!broadCertainty) return null;
 
   const hasSupport = /\b(because|for example|for instance|data|proof|benchmark|case study|after|when|since|the reason|mechanism|incentive|bottleneck|tradeoff|constraint|failure mode|recovery path|eval|metric)\b|\b\d+[%x]?\b|\$\d/i.test(text);
