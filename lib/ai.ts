@@ -592,7 +592,14 @@ function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode'
     status?: unknown;
     code?: unknown;
     error?: { type?: unknown; error?: { type?: unknown } };
+    cause?: { code?: unknown; constructor?: { name?: unknown } };
+    constructor?: { name?: unknown };
   };
+  // Connection/SDK errors often have neither an HTTP status nor a provider
+  // body. Record class/cause codes without logging error messages or inputs.
+  const safeCode = (code: unknown): string | null => typeof code === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(code) ? code : null;
+  const localError = [safeCode(value.constructor?.name), safeCode(value.cause?.code) || safeCode(value.cause?.constructor?.name)]
+    .filter(Boolean).join(':') || null;
   return {
     statusCode: typeof value.status === 'number' ? value.status : null,
     errorType: typeof value.error?.error?.type === 'string'
@@ -601,7 +608,7 @@ function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode'
         ? value.error.type
         : typeof value.code === 'string'
           ? value.code
-          : null,
+          : localError,
   };
 }
 
@@ -736,6 +743,6 @@ function recordAiCallAudit(options: GenerateTextOptions, result: GenerateTextRes
     reasoningTokens: result?.reasoningTokens ?? null, durationMs: Math.max(0, Date.now() - startedAt),
     knownEstimatedCostUsd: costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0),
     unknownCostAttempts: costs.filter(cost => cost === null).length,
-    attempts: attempts.map(({provider, model, reason, statusCode, durationMs}) => ({provider, model, reason, statusCode, durationMs})),
+    attempts: attempts.map(({provider, model, reason, statusCode, errorType, durationMs}) => ({provider, model, reason, statusCode, errorType, durationMs})),
   }));
 }
