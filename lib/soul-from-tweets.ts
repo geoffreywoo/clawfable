@@ -117,7 +117,7 @@ export async function generateSoulFromTweets(
   // Ask the model to reverse-engineer the voice
   const response = await generateText({
     task: 'soul_generation',
-    modelStack: resolvePublishingV2ModelStacks(me.username).activeStack,
+    modelStack: resolvePublishingV2ModelStacks(me.username).learningStack,
     maxTokens: getSoulFromTweetsMaxTokens(timeline.length),
     system: `You are an expert at analyzing Twitter accounts and reverse-engineering their voice, personality, and posting strategy. You produce SOUL.md files — structured personality profiles that capture exactly how someone tweets.
 

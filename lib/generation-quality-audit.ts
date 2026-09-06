@@ -2176,6 +2176,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
       },
       strictFallbackStack: null,
       preferred: {
+        learning: getModelChainForTask('learning', modelStackAssignment.learningStack)[0],
         ideaGeneration: primaryIdeaGeneration,
         ideaJudge: primaryIdeaJudge,
         generation: primaryWriting,

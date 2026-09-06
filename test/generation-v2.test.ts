@@ -865,6 +865,10 @@ describe('Tweet Generation V2', () => {
       'AI self-help becomes compelling when it punctures grand narratives rather than manufacturing them.',
     ];
     const directMoves = [
+      "I'd finance inference for a revenue share instead of startup equity.",
+      "I'd rather cover an uncapped inference bill for a fixed cut of revenue.",
+      'Would I cover an AI startup’s uncapped inference bill for a fixed cut of revenue? I’d rather price that risk than buy into its next equity round.',
+      'I’d spend on disposable back-office software rather than buy a permanent SaaS stack.',
       'Google should be willing to cannibalize Chrome for Gemini.',
       'ChatGPT should default to forgetting most memories.',
       'i think oai and ant are 5-10T before 2029.',

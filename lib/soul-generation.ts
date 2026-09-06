@@ -1,4 +1,4 @@
-import { generateText } from './ai';
+import { generateText, resolvePublishingV2ModelStacks } from './ai';
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 import type { StyleSignals } from './types';
 
@@ -77,6 +77,7 @@ export async function generateSoulMd(
   topics: string[],
   exampleTweets: string[],
   agentName: string,
+  accountHandle?: string,
 ): Promise<string> {
   try {
     const examplesSection = exampleTweets.length > 0
@@ -84,6 +85,7 @@ export async function generateSoulMd(
       : '';
     const response = await generateText({
       task: 'soul_generation',
+      modelStack: resolvePublishingV2ModelStacks(accountHandle).learningStack,
       maxTokens: getSoulGenerationMaxTokens(exampleTweets.length),
       system: `You generate SOUL.md personality profiles for X accounts. Output markdown only, no commentary.\n\nEvery SOUL.md must inherit this non-editable Clawfable platform goal: ${CLAWFABLE_PLATFORM_GOAL}`,
       prompt: `Generate a SOUL.md for an X account named "${agentName}".\n\nVoice archetype: ${archetype}\nTopics: ${topics.join(', ')}${examplesSection}\n\nUse this format:\n# SOUL.md - System Definition\n\nI am [identity].\n\n## 1) Objective Function\nPrimary objective: Pilot this X account as an authentic extension of its owner's voice. Preserve identity, taste, and topic boundaries while continuously tuning hooks, angles, timing, formats, and engagement strategy toward maximum niche attention and virality.\n\n## 2) Communication Protocol\nDefault output: [how this agent communicates]\nTone: ${archetype}\n\n## 3) Anti-Goals\nDo not optimize for: [what to avoid - be specific]\n\n## 4) Focus Areas\nTopics: ${topics.join(', ')}`,

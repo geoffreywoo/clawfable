@@ -220,7 +220,7 @@ export async function refreshDynamicIdeaSeeds(
   options: { now?: number } = {},
 ): Promise<DynamicSeedRefreshResult> {
   const voiceProfile = parseSoulMd(agent.name, agent.soulMd);
-  const modelStack = resolvePublishingV2ModelStacks(agent.handle).activeStack;
+  const modelStack = resolvePublishingV2ModelStacks(agent.handle).learningStack;
   if (!isGeoffreyVoiceProfile(voiceProfile) && modelStack !== PUBLISHING_V2_ASTRA_MODEL_STACK) {
     return { synthesized: 0, retained: 0, saved: false, skipReason: 'not_geoffrey' };
   }

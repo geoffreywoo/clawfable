@@ -52,6 +52,7 @@ export function frozenEvaluationCoverage(snapshot: FrozenEvaluationSnapshot) {
       verifiedComposedAnchors: anchors.filter((entry) => entry.authorshipProvenance === 'operator_composed').length,
       voiceReady: isV2VoiceReady({ ...packet.input, modelStack: 'publishing_v2_gpt_control' }),
       calibrationSource: packet.calibrationSource,
+      judgeModelStack: packet.input.previewJudgeModelStack || null,
     };
   });
   const cohorts = (['geoffrey', 'synthetic_profile'] as const).map((kind) => {
@@ -112,7 +113,9 @@ export function validateFrozenEvaluation(snapshot: FrozenEvaluationSnapshot): { 
   if (geoffrey !== 30 || snapshot.packets.filter((packet) => packet.kind === 'synthetic_profile').length !== 10) throw new Error('Expected 30 Geoffrey and 10 synthetic-profile packets.');
   if (snapshot.heldoutExamples.length < 3 || snapshot.heldoutExamples.some((example) => !['operator_composed_verified', 'operator_curated_authorship_unverified', 'account_reference_authorship_unverified'].includes(example.provenance))) throw new Error('At least three real held-out references with explicit composition, curation, or active-corpus provenance are required.');
   const effectiveBriefs = new Set<string>();
+  if (new Set(snapshot.packets.map(packet => packet.input.previewJudgeModelStack || 'per_arm')).size > 1) throw new Error('A frozen comparison requires one consistent judge design.');
   for (const packet of snapshot.packets) {
+    if (packet.input.previewJudgeModelStack !== undefined && !['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(packet.input.previewJudgeModelStack)) throw new Error('Invalid preview judge stack.');
     if (packet.input.mode !== 'preview' || packet.input.persistArtifacts !== false || !packet.input.previewContext?.briefs.length) throw new Error(`Unsafe or empty frozen packet ${packet.id}.`);
     if (!isV2VoiceReady({ ...packet.input, modelStack: 'publishing_v2_gpt_control' })) throw new Error(`Frozen packet ${packet.id} has insufficient separate calibration anchors.`);
     const serialized = JSON.stringify(packet.input);
@@ -128,9 +131,10 @@ export function validateFrozenEvaluation(snapshot: FrozenEvaluationSnapshot): { 
 }
 
 export function createFrozenEvaluationSnapshot({
-  account, context, baseVoiceProfile, analysis, documents, stories, blocks = [], recentIdeas = [], referenceEvidence, now = new Date(),
+  account, context, baseVoiceProfile, analysis, documents, stories, blocks = [], recentIdeas = [], referenceEvidence, now = new Date(), previewJudgeModelStack,
 }: {
   account: { id: string; handle: string };
+  previewJudgeModelStack?: GenerateTweetBatchV2Input['previewJudgeModelStack'];
   context: GenerationContext;
   baseVoiceProfile: VoiceProfile;
   analysis: AccountAnalysis;
@@ -208,6 +212,7 @@ export function createFrozenEvaluationSnapshot({
     learnings: cleanContext.learnings, style: cleanContext.style, recentPosts: cleanContext.recentPosts,
     allTweets: cleanContext.allTweets, memory: cleanContext.memory, signals: cleanContext.signals,
     trending: null, mode: 'preview' as const, persistArtifacts: false, requireAutopostQuality: true,
+    ...(previewJudgeModelStack ? {previewJudgeModelStack} : {}),
   };
   const usedStoryIds = new Set<string>();
   const packets: FrozenEvaluationPacket[] = GEOFFREY_EVALUATION_SUBJECTS.map((subject, index) => {
@@ -256,6 +261,7 @@ export function createFrozenEvaluationSnapshot({
 
 export interface EvaluationArmResult {
   stack: 'publishing_v2_gpt_control' | 'publishing_v2_astra';
+  previewJudgeModelStack?: 'publishing_v2_gpt_control' | 'publishing_v2_astra';
   selected: RankedPublishingCandidate[];
   ideas: IdeaCandidate[];
   drafts: DraftCandidate[];
@@ -342,13 +348,16 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     // The existing GPT control may deliberately commission a Fable repair.
     // Only the actual postcritic branch may declare that role; legacy receipts
     // without it remain strict instead of inferring an intention from the model.
-    const alternateRepair = plannedStack !== stack;
+    const isJudge = task === 'idea_judgment' || task === 'copy_judgment';
+    const expectedStack = isJudge ? packet.input.previewJudgeModelStack || stack : stack;
+    if (isJudge && plannedStack !== expectedStack) return true;
+    const alternateRepair = !isJudge && plannedStack !== stack;
     if (call.modelCallRole === 'postcritic_repair' && call.stage !== 'tweet_writing') return true;
     if (alternateRepair && (call.stage !== 'tweet_writing' || call.modelCallRole !== 'postcritic_repair'
       || plannedStack !== getPostcriticRepairModelStackV2(stack, packet.input.voiceProfile))) return true;
     if (alternateRepair && !calls.slice(0, index).some((prior) => prior.stage === 'copy_judgment' && prior.succeeded
-      && (prior.plannedModelStack ?? stack) === stack
-      && matchesEvaluationCallPrimary(prior, getModelChainForTask('copy_judgment', stack)[0]))) return true;
+      && (prior.plannedModelStack ?? stack) === (packet.input.previewJudgeModelStack || stack)
+      && matchesEvaluationCallPrimary(prior, getModelChainForTask('copy_judgment', packet.input.previewJudgeModelStack || stack)[0]))) return true;
     const primary = getModelChainForTask(task, plannedStack)[0];
     return !matchesEvaluationCallPrimary(call, primary, alternateRepair);
   });
@@ -359,7 +368,7 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     : successfulCalls.length === 0 ? 'no_successful_model_calls'
     : !hasKnownArmCost({ trace: completedTrace }) ? 'unknown_evaluation_cost'
     : null);
-  return { stack, selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason, attempted: true };
+  return { stack, ...(packet.input.previewJudgeModelStack ? {previewJudgeModelStack:packet.input.previewJudgeModelStack} : {}), selected, ideas, drafts, trace: completedTrace, validPrimaryModels: invalidReason === null, invalidReason, attempted: true };
 }
 
 function frozenArmFailure(error: unknown): string {
@@ -669,11 +678,13 @@ export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: E
       noRegression: noRegressionFor(astra, baseline), oneSidedUtility: utilityFor(packets) }];
   }));
   const winRate = decisive ? astraWins / decisive : null;
+  const commonJudgeDiagnostic = comparison.packets.some(packet => packet.baseline.previewJudgeModelStack || packet.astra.previewJudgeModelStack);
   const pass = comparison.completed && comparison.packets.length === 40 && votes.votes.length === 40
-    && validModels && decisive >= 30 && winRate !== null && winRate >= 0.6 && noRegression;
+    && !commonJudgeDiagnostic && validModels && decisive >= 30 && winRate !== null && winRate >= 0.6 && noRegression;
   return { status: pass ? 'pass' : 'not_ready', metricDefinitionVersion: 'factual-evidence-mismatch-v2', judge: votes.judge, decisive, astraWins, winRate, validModels, noRegression, baseline, astra,
-    attemptedCompletion: comparison.attemptedCompletion ?? comparison.completed, promotionValidCompletion: comparison.completed,
+    attemptedCompletion: comparison.attemptedCompletion ?? comparison.completed, promotionValidCompletion: comparison.completed && !commonJudgeDiagnostic,
     cohorts, oneSidedUtility: utilityFor(comparison.packets), coverage: comparison.coverage || null,
+    evaluationDesign: commonJudgeDiagnostic ? 'common_judge_diagnostic_not_full_stack_promotion' : 'full_creative_stack',
     hardGateRateNotice: 'Rates include observed rejected ideas and drafts with separate factual denominators; null means no observations. Synthetic and Geoffrey results are reported separately.',
     editBurdenSource: votes.judge.kind === 'human' ? 'human_estimates_not_observed_edits' : 'critic_estimates_not_observed_edits',
     syntheticProfileNotice: 'Ten packets use synthetic calibration fixtures; they are not observed human voice or preference evidence.' };

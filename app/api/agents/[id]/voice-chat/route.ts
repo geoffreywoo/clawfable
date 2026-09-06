@@ -76,7 +76,7 @@ export async function POST(
     // The model responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await generateText({
       task: 'learning',
-      modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
+      modelStack: resolvePublishingV2ModelStacks(agent.handle).learningStack,
       maxTokens: getVoiceChatResponseMaxTokens({
         messageLength: message.trim().length,
         directiveCount: activeDirectiveRules.length,

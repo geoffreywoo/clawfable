@@ -64,7 +64,8 @@ export function validateFrozenArmEnvelope(value: unknown, now = new Date()): Fro
     || packet.calibrationSource !== (packet.kind === 'geoffrey' ? 'captured_account_references' : 'synthetic_fixture_no_human_ground_truth')
     || !object(packet.input)) throw new EvaluationRequestError('Invalid frozen packet.');
   const input = packet.input;
-  if (!onlyKeys(input, ['agentId', 'count', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings', 'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'mode', 'persistArtifacts', 'requireAutopostQuality', 'previewContext'])
+  if (!onlyKeys(input, ['agentId', 'count', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings', 'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'mode', 'persistArtifacts', 'requireAutopostQuality', 'previewContext', 'previewJudgeModelStack'])
+    || (input.previewJudgeModelStack !== undefined && !['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(input.previewJudgeModelStack))
     || typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 160
     || input.count !== 1 || input.mode !== 'preview' || input.persistArtifacts !== false || input.requireAutopostQuality !== true
     || !object(input.voiceProfile) || !Array.isArray(input.voiceProfile.topics)
@@ -173,7 +174,8 @@ export function createRemoteEvaluationRunner(snapshot: Pick<FrozenEvaluationSnap
     catch { throw new Error('Invalid or oversized remote evaluation response; no automatic retry.'); }
     if (!object(result) || result.protocol !== PROTOCOL_VERSION || result.snapshotHash !== envelope.snapshotHash
       || result.packetHash !== envelope.packetHash || result.packetId !== packet.id || !object(result.arm)
-      || result.arm.stack !== stack || !Array.isArray(result.arm.selected) || !Array.isArray(result.arm.drafts) || !Array.isArray(result.arm.ideas)
+      || result.arm.stack !== stack || result.arm.previewJudgeModelStack !== packet.input.previewJudgeModelStack
+      || !Array.isArray(result.arm.selected) || !Array.isArray(result.arm.drafts) || !Array.isArray(result.arm.ideas)
       || typeof result.arm.validPrimaryModels !== 'boolean'
       || (result.arm.validPrimaryModels && (!object(result.arm.trace) || !Number.isFinite(result.arm.trace.estimatedCostUsd)))) throw new Error('Remote evaluation result does not match the frozen arm.');
     if (typeof result.gitCommit !== 'string' || !/^[a-f0-9]{40,64}$/i.test(result.gitCommit)) throw new Error('Remote evaluation response lacks deployment provenance.');

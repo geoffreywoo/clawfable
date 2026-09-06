@@ -554,6 +554,8 @@ export interface GenerateTweetBatchV2Input {
   trending: TrendingTopic[] | null;
   modelStack: GenerationModelStackId;
   /** Internal offline-evaluation seam; never accepted by a live/persisting run. */
+  previewJudgeModelStack?: 'publishing_v2_gpt_control' | 'publishing_v2_astra';
+  /** Frozen research supplied only to non-persisting previews. */
   previewContext?: {
     briefs: GenerationBriefV2[];
     documents: SourceDocument[];
@@ -3286,8 +3288,10 @@ export function isSyntheticGeoffreyStatusFrameV2(text: string): boolean {
 }
 
 const ABSTRACT_PUBLIC_MOVE_EVALUATION = /\b(?:gets?|becomes?|feels?|is|seems?|sounds?)\s+(?:(?:much|way)\s+)?(?:more\s+|less\s+)?(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b|\bworth\s+caring\s+about\b/i;
-const ANNOUNCED_PUBLIC_MOVE_PREFERENCE = /^(?:i(?:['’]d|\s+would)?\s+(?:prefer|rather)|my\s+preference\s+is)\b/i;
-const BALANCED_PUBLIC_MOVE_COMPARISON = /\b(?:more|less)\s+(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b.{0,180}\b(?:than|rather\s+than|instead\s+of)\b|\b(?:rather\s+than|instead\s+of)\b/i;
+const ANNOUNCED_PUBLIC_MOVE_PREFERENCE = /^(?:i(?:['’]d|\s+would)?\s+prefer|my\s+preference\s+is)\b/i;
+// A literal choice can be a complete public move. Connectors alone establish
+// no abstraction; the idea/copy judges still assess substance and native voice.
+const BALANCED_PUBLIC_MOVE_COMPARISON = /\b(?:more|less)\s+(?:ambitious|attractive|compelling|important|interesting|relevant|useful|valuable)\b.{0,180}\b(?:than|rather\s+than|instead\s+of)\b/i;
 
 function withoutConcreteAcquisitionComparisons(publicMove: string): string {
   return publicMove.split(/(?<=[.!?])\s+/).map((sentence) => {
@@ -3311,9 +3315,15 @@ function withoutConcreteAcquisitionComparisons(publicMove: string): string {
 
 export function isAbstractComparativePublicMoveV2(publicMove: string): boolean {
   const normalized = publicMove.replace(/\s+/g, ' ').trim();
+  const comparisonText = withoutConcreteAcquisitionComparisons(normalized);
+  const abstractChoice = comparisonText.split(/(?<=[.!?])\s+/).some((sentence) => (
+    /\b(?:rather\s+than|instead\s+of)\b/i.test(sentence)
+    && /\b(?:ambition|optics|narrative|conviction|status|care\s+about|caring\s+about|think\s+about)\b/i.test(sentence)
+  ));
   return ABSTRACT_PUBLIC_MOVE_EVALUATION.test(normalized)
     || ANNOUNCED_PUBLIC_MOVE_PREFERENCE.test(normalized)
-    || BALANCED_PUBLIC_MOVE_COMPARISON.test(withoutConcreteAcquisitionComparisons(normalized));
+    || BALANCED_PUBLIC_MOVE_COMPARISON.test(comparisonText)
+    || abstractChoice;
 }
 
 export function isGenericInvestorSelectionTemplateV2(content: string): boolean {
@@ -4577,7 +4587,7 @@ async function selectIdeas({
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = await trackedGenerate('idea_judgment', {
         task: 'idea_judgment',
-        modelStack: input.modelStack,
+        modelStack: input.previewJudgeModelStack || input.modelStack,
         maxTokens: 3000,
         temperature: 0,
         jsonSchema: IDEA_JUDGMENT_SCHEMA,
@@ -6004,7 +6014,7 @@ async function judgeDraftsOnce(
     });
     const result = await trackedGenerate('copy_judgment', {
       task: 'copy_judgment',
-      modelStack: input.modelStack,
+      modelStack: input.previewJudgeModelStack || input.modelStack,
       maxTokens: 3200,
       temperature: 0,
       jsonSchema: COPY_JUDGMENT_SCHEMA,
@@ -6026,7 +6036,7 @@ async function judgeDraftsOnce(
         priorWritingRejections: getV2EditorialFeedbackLessons(blocks, ['copy']),
         approvedEditExamples: {
           instruction: 'Use these accepted edits to compare editorial judgment and voice, never as evidence for the candidate\'s facts or as wording to reuse.',
-          examples: selectApprovedEditExamples(input.signals),
+          examples: selectApprovedEditExamples(input.signals, eligible.map(entry => entry.idea.topic).join(' ')),
         },
         operatorPremiseExclusions: operatorPremiseExclusions(
           input,
@@ -7232,6 +7242,10 @@ function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
 }
 
 export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Promise<RankedProtocolTweet[]> {
+  if (input.previewJudgeModelStack && (input.mode !== 'preview' || input.persistArtifacts !== false
+    || !['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(input.previewJudgeModelStack))) {
+    throw new Error('judge_override_requires_non_persisting_preview');
+  }
   if (input.previewContext && (input.mode !== 'preview' || input.persistArtifacts !== false)) {
     throw new Error('preview_context_requires_non_persisting_preview');
   }
