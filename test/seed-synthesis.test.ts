@@ -84,6 +84,18 @@ function aiSeeds(seeds: unknown[]): { text: string } {
 }
 
 describe('synthesizeDynamicIdeaSeeds', () => {
+  it('retains complete qualified source claims and skips oversize claims rather than clipping them', async () => {
+    const document = doc('doc-1', 'Vendor inference measurements');
+    const claim = `The vendor reports lower inference cost on its own benchmark using the specified workload and hardware configuration, with a comparison against the previous generation measured under the same operating conditions; independent review is still pending and tool-calling costs are excluded.`;
+    document.claims = [
+      { id: 'oversize', text: 'x'.repeat(601) } as never,
+      { id: 'qualified', text: claim } as never,
+    ];
+    generateTextMock.mockResolvedValueOnce(aiSeeds([]));
+    await synthesizeDynamicIdeaSeeds({ stories: [story('inference')], documents: [document], existingSeeds: [], now: NOW });
+    const corpus = JSON.parse(generateTextMock.mock.calls.at(-1)![0].prompt);
+    expect(corpus.documents[0].claims).toEqual([claim]);
+  });
   it('accepts corpus-grounded seeds and stamps provenance', async () => {
     generateTextMock.mockResolvedValueOnce(aiSeeds([{
       kind: 'ai_product',
