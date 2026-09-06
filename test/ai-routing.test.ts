@@ -6,6 +6,7 @@ const ENV_KEYS = [
   'OPENAI_REASONING_EFFORT_TWEET_WRITING',
   'ANTHROPIC_API_KEY',
   'ASTRA_CREATIVE_ROLLOUT',
+  'ASTRA_LEARNING_ROLLOUT',
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -82,6 +83,55 @@ async function loadGeneratorWithAiMocks(
   process.env.ANTHROPIC_API_KEY = 'anthropic-test-key';
   return import('@/lib/ai');
 }
+
+describe('AI call audit corrections', () => {
+  it('honors an explicit primary before task defaults and records both attempts', async () => {
+    const openAi = vi.fn().mockResolvedValue({status:'completed', model:'gpt-5.6-sol', output_text:'done', usage:{input_tokens:10,output_tokens:2}});
+    const anthropic = vi.fn().mockRejectedValue(Object.assign(new Error('unavailable'), {status:503}));
+    const {generateText} = await loadGeneratorWithAiMocks(openAi, anthropic);
+    const result = await generateText({task:'tweet_writing', modelChain:[{provider:'anthropic',model:'claude-sonnet-4-6'}], system:'secret instruction',prompt:'secret source',maxTokens:100});
+    expect(result.requestedModel).toBe('claude-sonnet-4-6');
+    expect(result.model).toBe('gpt-5.6');
+    expect(result.fallbackAttempts).toEqual([expect.objectContaining({model:'claude-sonnet-4-6',reason:'provider_error',statusCode:503})]);
+    expect(anthropic).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({maxRetries:0}));
+    expect(openAi).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({maxRetries:0}));
+  });
+
+  it.each(['pause_turn','tool_use','refusal'])('does not accept Anthropic %s text as finished copy', async stop_reason => {
+    const openAi=vi.fn().mockResolvedValue({status:'completed',output_text:'finished'});
+    const anthropic=vi.fn().mockResolvedValue({content:[{type:'text',text:'partial response'}],stop_reason});
+    const {generateText}=await loadGeneratorWithAiMocks(openAi,anthropic);
+    const result=await generateText({task:'tweet_writing',modelChain:[{provider:'anthropic',model:'claude-sonnet-4-6'}],system:'write',prompt:'test',maxTokens:100});
+    expect(result.text).toBe('finished');
+    expect(result.fallbackAttempts[0]).toMatchObject({reason:'incomplete',stopReason:stop_reason});
+  });
+
+  it('logs every learning call with model identity, cost completeness and no copy or prompts', async () => {
+    const create=vi.fn().mockResolvedValue({status:'completed',model:'gpt-5.6-sol',output_text:'PRIVATE COPY',usage:{input_tokens:20,output_tokens:10}});
+    const {generateText}=await loadGeneratorWithOpenAiMock(create);
+    const log=vi.spyOn(console,'info').mockImplementation(()=>{});
+    try {
+      await generateText({task:'learning',modelChain:[{provider:'openai',model:'gpt-5.6'}],system:'PRIVATE SYSTEM',prompt:'PRIVATE SOURCE',maxTokens:100});
+      expect(log).toHaveBeenCalledOnce();
+      const record=JSON.parse(log.mock.calls[0][1] as string);
+      expect(record).toMatchObject({task:'learning',requestedModel:'gpt-5.6',providerModel:'gpt-5.6-sol',succeeded:true,inputTokens:20,outputTokens:10,unknownCostAttempts:0});
+      expect(record.knownEstimatedCostUsd).toBeGreaterThan(0);
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/PRIVATE|test-key/);
+    } finally { log.mockRestore(); }
+  });
+
+  it('routes Geoffrey learning to Astra independently of the writing pilot with an explicit rollback', async () => {
+    const {resolvePublishingV2ModelStacks,getModelChainForTask}=await loadDefaultRouter();
+    delete process.env.ASTRA_CREATIVE_ROLLOUT;
+    delete process.env.ASTRA_LEARNING_ROLLOUT;
+    const assignment=resolvePublishingV2ModelStacks('@GeoffWoo');
+    expect(assignment.activeStack).toBe('publishing_v2_gpt_control');
+    expect(getModelChainForTask('learning',assignment.learningStack)[0].model).toBe('gpt-6-astra');
+    expect(resolvePublishingV2ModelStacks('someone-else').learningStack).toBe('publishing_v2_quality');
+    process.env.ASTRA_LEARNING_ROLLOUT='off';
+    expect(resolvePublishingV2ModelStacks('geoffwoo').learningStack).toBe('publishing_v2_gpt_control');
+  });
+});
 
 describe('AI model routing', () => {
   it('uses GPT-5.6 first for copy generation with GPT-5.5 and Anthropic fallbacks', async () => {
@@ -218,12 +268,14 @@ describe('AI model routing', () => {
 
     expect(current).toEqual({
       activeStack: 'publishing_v2_gpt_control',
+      learningStack: 'publishing_v2_astra',
       shadowStack: 'publishing_v2_fable_control',
       reason: 'geoffrey_gpt_independent_native_variants_with_surgical_rescue',
     });
     expect(legacyHandle).toEqual(current);
     expect(generic).toEqual({
       activeStack: 'publishing_v2_quality',
+      learningStack: 'publishing_v2_quality',
       shadowStack: 'publishing_v2_fable_control',
       reason: 'default_gpt_primary',
     });
@@ -393,7 +445,7 @@ describe('AI model routing', () => {
     });
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.6',
+      model: 'gpt-5.5',
       reasoning: { effort: 'high' },
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
@@ -438,8 +490,8 @@ describe('AI model routing', () => {
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
-  it('prefers OpenAI even when a task-scoped override lists Anthropic first', async () => {
-    const anthropicCreate = vi.fn();
+  it('honors a task-scoped explicit Anthropic primary', async () => {
+    const anthropicCreate = vi.fn().mockResolvedValue({content:[{type:'text',text:'explicit primary'}],stop_reason:'end_turn'});
     const openAiCreate = vi.fn().mockResolvedValue({
       status: 'completed',
       output: [{ content: [{ type: 'output_text', text: 'openai ok' }] }],
@@ -454,14 +506,12 @@ describe('AI model routing', () => {
       maxTokens: 64,
     });
 
-    expect(anthropicCreate).not.toHaveBeenCalled();
-    expect(openAiCreate).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.5',
-    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(anthropicCreate).toHaveBeenCalledOnce();
+    expect(openAiCreate).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      text: 'openai ok',
-      provider: 'openai',
-      model: 'gpt-5.5',
+      text: 'explicit primary',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
     }));
   });
 

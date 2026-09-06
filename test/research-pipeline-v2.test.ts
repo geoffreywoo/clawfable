@@ -5,6 +5,7 @@ import {
   isResearchDocumentEligibleForClustering,
   isStoryClusterEligibleForGeneration,
   selectSourceDocumentsForEnrichment,
+  normalizeModelClaims,
 } from '@/lib/research-pipeline';
 import type { ResearchAgenda, SourceDocument } from '@/lib/types';
 import { ANTIFUND_PROMOTION_COMPANIES } from '@/lib/antifund-portfolio';
@@ -625,6 +626,18 @@ describe('research agenda and story qualification', () => {
 
     expect(official.scores.freshness).toBeGreaterThan(0.5);
     expect(news.scores.freshness).toBe(0);
+  });
+
+  it('accepts only intact source spans rather than numeric or attribution-changing paraphrases', () => {
+    const original = 'NVIDIA reports up to 35x lower token cost in preliminary measurements pending independent review.';
+    const document = source({id:'vendor-measurement',title:'Vendor inference results',publisher:'NVIDIA',excerpt:original});
+    const entry = {text:original,kind:'measurement',confidence:0.9,entities:['NVIDIA']};
+    expect(normalizeModelClaims([entry],document)[0].text).toBe(original);
+    expect(normalizeModelClaims([{...entry,text:original.replace('35x','350x')}],document)).toEqual(document.claims);
+    expect(normalizeModelClaims([{...entry,text:'Independent review confirms 35x lower token cost in NVIDIA measurements.'}],document)).toEqual(document.claims);
+    expect(normalizeModelClaims([{...entry,text:'NVIDIA reports 35x lower token cost.'}],document)).toEqual(document.claims);
+    expect(normalizeModelClaims([{...entry,text:original.split(' in preliminary')[0]}],document)).toEqual(document.claims);
+    expect(normalizeModelClaims([{...entry,text:original.repeat(8)}],document)).toEqual(document.claims);
   });
 
   it('spreads source enrichment capacity across adapters', () => {

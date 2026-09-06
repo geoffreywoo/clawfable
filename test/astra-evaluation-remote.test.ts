@@ -104,6 +104,7 @@ describe('protected frozen evaluation remote adapter (mocked model calls)', () =
     ['multiple drafts', (value: any) => { value.packet.input.count = 2; }],
     ['missing frozen context', (value: any) => { delete value.packet.input.previewContext; }],
     ['unknown stack', (value: any) => { value.stack = 'default'; }],
+    ['unknown judge stack', (value: any) => { value.packet.input.previewJudgeModelStack = 'standard'; value.packetHash = evaluationHash(value.packet); }],
     ['runtime callback', (value: any) => { value.packet.input.onTrace = 'inject'; }],
     ['credential field', (value: any) => { value.packet.input.analysis.apiKey = 'not-a-real-key'; }],
     ['stale capture', (value: any) => { value.capturedAt = '2000-01-01T00:00:00Z'; }],
@@ -186,6 +187,27 @@ describe('protected frozen evaluation remote adapter (mocked model calls)', () =
     for (const origin of ['http://clawfable.com', 'https://user:pass@clawfable.com', 'https://clawfable.com/some-path', 'https://clawfable.co']) {
       expect(() => createRemoteEvaluationRunner({ version: value.version, capturedAt: value.capturedAt, hash: value.snapshotHash }, { origin, secret })).toThrow('HTTPS origin');
     }
+  });
+
+  it('transfers a frozen common judge and rejects a response that silently changes it', async () => {
+    const frozen = packet();
+    frozen.input.previewJudgeModelStack = 'publishing_v2_gpt_control';
+    const context = { version: ASTRA_EVALUATION_VERSION, capturedAt: new Date().toISOString(), hash: 'a'.repeat(64) };
+    let alterJudge = false;
+    const run = createRemoteEvaluationRunner(context, { origin: 'https://clawfable.com', secret,
+      fetch: async (url, init) => {
+        const response = await POST(new Request(url, init));
+        const result = await response.json();
+        if (alterJudge) result.arm.previewJudgeModelStack = 'publishing_v2_astra';
+        return Response.json(result);
+      },
+    });
+    expect((await run(frozen, 'publishing_v2_astra')).previewJudgeModelStack).toBe('publishing_v2_gpt_control');
+    expect(mocks.generate.mock.calls[0][0]).toMatchObject({
+      previewJudgeModelStack: 'publishing_v2_gpt_control', modelStack: 'publishing_v2_astra', persistArtifacts: false,
+    });
+    alterJudge = true;
+    await expect(run(frozen, 'publishing_v2_astra')).rejects.toThrow('does not match');
   });
 
   it('validates the canonical packet hash independently of JSON property order', () => {

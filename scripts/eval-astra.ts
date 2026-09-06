@@ -35,12 +35,14 @@ async function loadJson<T>(filename: string | undefined): Promise<T> {
 async function main() {
   const modes = ['--capture', '--validate', '--coverage', '--run', '--score'].filter((mode) => process.argv.includes(mode));
   if (modes.length !== 1) {
-    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --coverage --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--complete-suite] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Coverage writes a separate manifest without changing the frozen benchmark. Complete-suite attempts all paired arms despite generation failures with known costs or auditable per-request Astra reservations; authentication, integrity, unreserved unknown spend, or budget exhaustion still stop new work. Attempted completion is not promotion validity. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at known spend plus conservative unknown-attempt reservations; reservations are not observed charges or guaranteed billing maxima, and in-flight arms may exceed the ceiling. SIGINT/SIGTERM drain active arms into private receipts. The hand-authored stress set and synthetic profiles are not an empirical sample of account traffic or human preferences.');
+    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--common-judge gpt|astra] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --coverage --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--complete-suite] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Common-judge snapshots isolate writing from judging and cannot promote the full creative stack. Coverage writes a separate manifest without changing the frozen benchmark. Complete-suite attempts all paired arms despite generation failures with known costs or auditable per-request Astra reservations; authentication, integrity, unreserved unknown spend, or budget exhaustion still stop new work. Attempted completion is not promotion validity. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at known spend plus conservative unknown-attempt reservations; reservations are not observed charges or guaranteed billing maxima, and in-flight arms may exceed the ceiling. SIGINT/SIGTERM drain active arms into private receipts. The hand-authored stress set and synthetic profiles are not an empirical sample of account traffic or human preferences.');
     if (modes.length > 1) process.exitCode = 1;
     return;
   }
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   if (modes[0] === '--capture') {
+    const commonJudge = arg('--common-judge');
+    if (commonJudge && !['gpt', 'astra'].includes(commonJudge)) throw new Error('--common-judge must be gpt or astra.');
     const handle = arg('--handle') || 'geoffwoo';
     if (!['geoffwoo', 'geoffreywoo'].includes(handle.replace(/^@/, '').toLowerCase())) throw new Error('This pilot capture requires the Geoffrey account.');
     const agent = await getAgentByHandle(handle.replace(/^@/, ''));
@@ -53,6 +55,7 @@ async function main() {
     if (!analysis) throw new Error('The account has no stored analysis to capture.');
     const snapshot = createFrozenEvaluationSnapshot({ account: { id: agent.id, handle: agent.handle }, context,
       baseVoiceProfile: parseSoulMd(agent.name, agent.soulMd), analysis, documents, stories, blocks, recentIdeas, referenceEvidence: { history, curation, corpus },
+      previewJudgeModelStack: commonJudge === 'gpt' ? 'publishing_v2_gpt_control' : commonJudge === 'astra' ? 'publishing_v2_astra' : undefined,
     });
     const output = privatePath(arg('--out') || path.join(privateRoot, timestamp, 'snapshot.json'));
     await saveJson(output, snapshot);

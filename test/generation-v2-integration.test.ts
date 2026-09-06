@@ -393,6 +393,27 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.upsertIdeaCandidates).not.toHaveBeenCalled();
   });
 
+  it('uses the same requested judges while leaving Astra idea and writing calls on Astra', async () => {
+    const briefs=buildGenerationBriefsV2({...input,stories:storyClusters,documents:sourceDocuments,now:new Date('2026-08-02T02:00:00Z')});
+    const outputs=await generateTweetBatchV2({...input,modelStack:'publishing_v2_astra',previewJudgeModelStack:'publishing_v2_gpt_control',
+      mode:'preview',persistArtifacts:false,previewContext:{briefs,documents:sourceDocuments,stories:storyClusters}});
+    const calls=mocks.generateText.mock.calls.map(([options])=>options);
+    const judges=calls.filter(call=>['idea_judgment','copy_judgment'].includes(call.task));
+    expect(judges.some(call=>call.task==='copy_judgment')).toBe(true);
+    expect(judges.every(call=>call.modelStack==='publishing_v2_gpt_control')).toBe(true);
+    expect(calls.filter(call=>['idea_generation','tweet_writing'].includes(call.task)).every(call=>call.modelStack==='publishing_v2_astra')).toBe(true);
+    expect(outputs.length).toBeGreaterThan(0);
+    expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects a judge override outside a non-persisting preview before calls or writes', async () => {
+    for(const options of [{mode:'live',persistArtifacts:false},{mode:'preview',persistArtifacts:true},{mode:'preview'}]) {
+      await expect(generateTweetBatchV2({...input,...options,previewJudgeModelStack:'publishing_v2_gpt_control'})).rejects.toThrow('judge_override_requires_non_persisting_preview');
+    }
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.saveGenerationRun).not.toHaveBeenCalled();
+  });
+
   it('rejects live or persisting frozen-context overrides before any side effect', async () => {
     for (const options of [{ mode: 'live', persistArtifacts: false }, { mode: 'preview', persistArtifacts: true }, { mode: 'preview' }]) {
       await expect(generateTweetBatchV2({ ...input, ...options, previewContext: { briefs: [], documents: [] } })).rejects.toThrow('preview_context_requires_non_persisting_preview');

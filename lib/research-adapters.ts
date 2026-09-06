@@ -31,12 +31,29 @@ const DEFAULT_OFFICIAL_HOST_ALLOWLIST = [
   'arxiv.org',
   'github.com',
   'nasa.gov',
+  'blogs.nvidia.com',
   'openai.com',
   'sec.gov',
   'usgs.gov',
 ];
 
 export const DEFAULT_RESEARCH_FEEDS: ResearchFeedConfig[] = [
+  {
+    id: 'nvidia-research-and-platforms',
+    url: 'https://blogs.nvidia.com/feed/',
+    publisher: 'NVIDIA',
+    trustTier: 'primary',
+    topics: ['AI', 'inference', 'semiconductors', 'robotics', 'manufacturing', 'energy'],
+    sourceType: 'official',
+  },
+  {
+    id: 'openai-news',
+    url: 'https://openai.com/news/rss.xml',
+    publisher: 'OpenAI',
+    trustTier: 'primary',
+    topics: ['AI', 'inference', 'software', 'company formation'],
+    sourceType: 'official',
+  },
   {
     id: 'nasa-technology',
     url: 'https://www.nasa.gov/technology/feed/',
@@ -281,7 +298,7 @@ function feedDocument({
 }): SourceDocument {
   const canonicalUrl = canonicalizeResearchUrl(entry.url) || entry.url;
   const title = compactText(entry.title, 300);
-  const excerpt = compactText(entry.excerpt, 1200);
+  const excerpt = compactText(entry.excerpt, 4000);
   const entities = extractResearchEntities(`${title}. ${excerpt}`);
   const publishedAt = safePublishedAt(entry.publishedAt, now);
   const claims = sourceType === 'sec_edgar'
@@ -615,10 +632,24 @@ export async function fetchConfiguredFeeds(
       }));
   }));
 
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') documents.push(...result.value);
-    else errors.push(`${feeds[index]?.id || 'feed'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+  // Share the adapter's capacity across feeds. Concatenation let the first two
+  // twenty-item feeds consume all forty slots, starving every later publisher.
+  const queues = results.flatMap((result, index) => {
+    if (result.status === 'fulfilled') return [result.value];
+    errors.push(`${feeds[index]?.id || 'feed'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+    return [];
   });
+  const seen = new Set<string>();
+  while (documents.length < MAX_DOCUMENTS_PER_ADAPTER && queues.some(queue => queue.length > 0)) {
+    for (const queue of queues) {
+      const document = queue.shift();
+      if (document && !seen.has(document.id)) {
+        seen.add(document.id);
+        documents.push(document);
+      }
+      if (documents.length >= MAX_DOCUMENTS_PER_ADAPTER) break;
+    }
+  }
   return {
     sourceType: lane === 'official' ? 'official' : 'rss_atom',
     documents: documents.slice(0, MAX_DOCUMENTS_PER_ADAPTER),

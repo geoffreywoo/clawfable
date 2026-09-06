@@ -103,7 +103,10 @@ export function stripResearchMarkup(value: string, limit = 1200): string {
 function tagValue(block: string, names: string[]): string {
   for (const name of names) {
     const match = block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, 'i'));
-    if (match?.[1]) return stripResearchMarkup(match[1], 4000);
+    if (match?.[1]) {
+      const text = stripResearchMarkup(match[1], 4000);
+      if (text) return text;
+    }
   }
   return '';
 }
@@ -135,13 +138,14 @@ export function parseSyndicationFeed(xml: string, limit = 30): ParsedFeedEntry[]
     if (!title || !url || seen.has(url)) continue;
     seen.add(url);
     const publishedAt = safeIsoDate(tagValue(block, ['pubDate', 'published', 'updated', 'dc:date']));
-    const excerpt = tagValue(block, ['description', 'summary', 'content', 'content:encoded']);
+    // Full feed content often carries measurement scope omitted by summaries.
+    const excerpt = tagValue(block, ['content:encoded', 'content', 'summary', 'description']);
     entries.push({
       id: tagValue(block, ['guid', 'id']) || url,
       title: title.slice(0, 300),
       url,
       publishedAt,
-      excerpt: excerpt.slice(0, 1200),
+      excerpt: excerpt.slice(0, 4000),
     });
     if (entries.length >= limit) break;
   }

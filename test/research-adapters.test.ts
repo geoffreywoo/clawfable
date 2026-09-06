@@ -8,6 +8,7 @@ import {
   getResearchFeedUrlIssue,
   fetchSecEdgar,
   sourceDocumentsFromTrending,
+  DEFAULT_RESEARCH_FEEDS,
 } from '@/lib/research-adapters';
 import type { ResearchAgenda } from '@/lib/types';
 
@@ -30,11 +31,38 @@ function atom(title = 'AI startup release', url = 'https://example.com/release')
 }
 
 describe('research adapters', () => {
+  it('includes verified AI primary feeds without trusting lookalike hosts', () => {
+    for (const id of ['openai-news', 'nvidia-research-and-platforms']) {
+      const feed=DEFAULT_RESEARCH_FEEDS.find(feed=>feed.id===id)!;
+      expect(getResearchFeedUrlIssue(feed)).toBeNull();
+      expect(getResearchFeedUrlIssue({...feed,url:feed.url.replace('.com','.com.evil.example')})).not.toBeNull();
+    }
+  });
+
+  it('shares a full adapter budget across early and late publishers', async () => {
+    const feeds=Array.from({length:3},(_,i)=>({id:`publisher-${i}`,url:`https://feeds.example.com/${i}.xml`,publisher:`Publisher ${i}`,trustTier:'trusted' as const,topics:['AI']}));
+    const fetchImpl=vi.fn(async(url: string | URL | Request)=>{
+      const feed=feeds.find(feed=>feed.url===String(url));
+      if(!feed) return new Response('<rss><channel/></rss>');
+      return new Response(`<rss><channel>${Array.from({length:20},(_,i)=>`<item><title>AI release ${i}</title><link>https://example.com/${feed.id}/${i}</link><description>AI software release for startups.</description></item>`).join('')}</channel></rss>`);
+    }) as unknown as typeof fetch;
+    const result=await fetchConfiguredFeeds({agentId:'agent-1',agenda:{...agenda,rssFeeds:feeds},trending:[],fetchImpl,now},'rss_atom');
+    expect(result.documents).toHaveLength(40);
+    expect(result.documents.filter(document=>document.publisher==='Publisher 2').length).toBeGreaterThan(10);
+    expect(result.errors).toEqual([]);
+  });
   it('rejects private feed targets and non-allowlisted primary-source hosts', () => {
     expect(getResearchFeedUrlIssue({ url: 'http://127.0.0.1/feed', trustTier: 'trusted' })).toBe('HTTPS is required');
     expect(getResearchFeedUrlIssue({ url: 'https://192.168.1.4/feed', trustTier: 'trusted' })).toBe('private network hosts are not allowed');
     expect(getResearchFeedUrlIssue({ url: 'https://random.example/feed', trustTier: 'primary', sourceType: 'official' })).toBe('official source host is not allowlisted');
     expect(getResearchFeedUrlIssue({ url: 'https://www.sec.gov/news/feed', trustTier: 'primary', sourceType: 'official' })).toBeNull();
+  });
+
+  it('counts an overlapping article only once across publisher feeds', async () => {
+    const fetchImpl = vi.fn(async () => new Response(atom('AI product release'))) as unknown as typeof fetch;
+    const result = await fetchConfiguredFeeds({ agentId: 'agent-1', agenda, trending: [], fetchImpl, now }, 'official');
+    expect(result.documents).toHaveLength(1);
+    expect(result.errors).toEqual([]);
   });
 
   it('converts source-backed network topics and drops URL-less chatter', () => {
@@ -148,7 +176,7 @@ describe('research adapters', () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const value = String(url);
       if (value.includes('bad.xml')) return new Response('unavailable', { status: 503, statusText: 'Unavailable' });
-      return new Response(atom(), { status: 200 });
+      return new Response(value.includes('good.xml') ? atom() : '<rss><channel/></rss>', { status: 200 });
     }) as unknown as typeof fetch;
     const result = await fetchConfiguredFeeds({ agentId: 'agent-1', agenda: configured, trending: [], fetchImpl, now });
 

@@ -8,6 +8,14 @@ import {
 } from '@/lib/research-utils';
 
 describe('research utilities', () => {
+  it('retains full-content qualifications instead of the shorter RSS description', () => {
+    const full = `NVIDIA reports a preliminary result. ${'Background context. '.repeat(70)}Independent review remains pending and CPU tool calling is excluded.`;
+    const [entry] = parseSyndicationFeed(`<rss><channel><item><title>Inference results</title><link>https://blogs.nvidia.com/blog/results/</link><description>Brief promotional summary.</description><content:encoded><![CDATA[<p>${full}</p>]]></content:encoded></item></channel></rss>`);
+    expect(entry.excerpt).toContain('Independent review remains pending');
+    expect(entry.excerpt).not.toContain('Brief promotional summary');
+    expect(entry.excerpt.length).toBeGreaterThan(1200);
+    expect(entry.excerpt.length).toBeLessThanOrEqual(4000);
+  });
   it('canonicalizes URLs without campaign parameters or fragments', () => {
     expect(canonicalizeResearchUrl('HTTPS://Example.COM//news/item/?utm_source=x&b=2&a=1#section')).toBe(
       'https://example.com/news/item?a=1&b=2',
@@ -53,6 +61,11 @@ describe('research utilities', () => {
         url: 'https://github.com/acme/tool/releases/tag/v2',
       }),
     ]);
+  });
+
+  it('falls back to the useful summary when full content contains only markup', () => {
+    const xml = '<rss><channel><item><title>Shipping a CPU</title><link>https://example.com/cpu</link><content:encoded><![CDATA[<p> </p>]]></content:encoded><description>The new CPU is shipping now.</description></item></channel></rss>';
+    expect(parseSyndicationFeed(xml)[0].excerpt).toBe('The new CPU is shipping now.');
   });
 
   it('builds stable semantic IDs while recognizing synonym-level token reskins', () => {

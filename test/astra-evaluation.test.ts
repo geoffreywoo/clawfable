@@ -88,6 +88,33 @@ function controlledArms() {
 }
 
 describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
+  it('validates a pinned common judge separately from the writer and rejects judge substitutions', async () => {
+    const packet=snapshot().packets[0];
+    packet.input.previewJudgeModelStack='publishing_v2_gpt_control';
+    for(const wrong of [false,true]) {
+      const result=await runFrozenEvaluationArm(packet,'publishing_v2_astra',{generate:async input=>{
+        input.onTrace?.({status:'empty',estimatedCostUsd:0.01,modelCalls:(['idea_generation','idea_judgment','tweet_writing','copy_judgment'] as const).map(stage=>{
+          const judge=['idea_judgment','copy_judgment'].includes(stage);
+          const plannedModelStack=judge&&!wrong?'publishing_v2_gpt_control':'publishing_v2_astra';
+          const primary=getModelChainForTask(stage,plannedModelStack)[0];
+          return {stage,plannedModelStack,modelCallRole:'primary',requestedProvider:primary.provider,requestedModel:primary.model,provider:primary.provider,model:primary.model,providerModel:primary.model,succeeded:true};
+        })} as GenerationRunTrace);
+        return [];
+      }});
+      expect(result.validPrimaryModels).toBe(!wrong);
+      expect(result.previewJudgeModelStack).toBe('publishing_v2_gpt_control');
+    }
+  });
+
+  it('does not turn a common-judge diagnostic into full-stack promotion even with perfect mocked votes', async () => {
+    const comparison=await runFrozenEvaluation(snapshot(),{generate:fakeGenerate});
+    for(const packet of comparison.packets) {
+      packet.baseline.previewJudgeModelStack='publishing_v2_gpt_control';
+      packet.astra.previewJudgeModelStack='publishing_v2_gpt_control';
+    }
+    expect(scoreFrozenEvaluation(comparison,votesFor(comparison,40))).toMatchObject({status:'not_ready',promotionValidCompletion:false,evaluationDesign:'common_judge_diagnostic_not_full_stack_promotion'});
+  });
+
   it('creates 40 unique frozen packets and disjoint real held-outs with explicit synthetic labels', () => {
     const frozen = snapshot();
     expect(validateFrozenEvaluation(frozen)).toMatchObject({ packets: 40, geoffrey: 30, synthetic: 10 });

@@ -163,6 +163,8 @@ export const PUBLISHING_V2_ASTRA_MODEL_STACK: GenerationModelStackId = 'publishi
 
 export interface PublishingV2ModelStackAssignment {
   activeStack: GenerationModelStackId;
+  /** Learning can improve independently of the public-copy rollout. */
+  learningStack: GenerationModelStackId;
   shadowStack: GenerationModelStackId;
   reason: 'geoffrey_gpt_independent_native_variants_with_surgical_rescue' | 'default_gpt_primary' | 'astra_geoffrey_pilot' | 'astra_general_release';
 }
@@ -173,9 +175,11 @@ export function resolvePublishingV2ModelStacks(handle?: string | null): Publishi
   // enabling the pilot, and never broaden it because a model happens to exist.
   const rollout = process.env.ASTRA_CREATIVE_ROLLOUT?.trim().toLowerCase();
   const isGeoffrey = normalizedHandle === 'geoffwoo' || normalizedHandle === 'geoffreywoo';
+  const astraLearning = isGeoffrey && process.env.ASTRA_LEARNING_ROLLOUT?.trim().toLowerCase() !== 'off';
   if (rollout === 'all' || (rollout === 'geoffrey' && isGeoffrey)) {
     return {
       activeStack: PUBLISHING_V2_ASTRA_MODEL_STACK,
+      learningStack: PUBLISHING_V2_ASTRA_MODEL_STACK,
       shadowStack: isGeoffrey ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : PUBLISHING_V2_MODEL_STACK,
       reason: rollout === 'all' ? 'astra_general_release' : 'astra_geoffrey_pilot',
     };
@@ -183,12 +187,14 @@ export function resolvePublishingV2ModelStacks(handle?: string | null): Publishi
   if (normalizedHandle === 'geoffwoo' || normalizedHandle === 'geoffreywoo') {
     return {
       activeStack: PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
+      learningStack: astraLearning ? PUBLISHING_V2_ASTRA_MODEL_STACK : PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
       shadowStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
       reason: 'geoffrey_gpt_independent_native_variants_with_surgical_rescue',
     };
   }
   return {
     activeStack: PUBLISHING_V2_MODEL_STACK,
+    learningStack: PUBLISHING_V2_MODEL_STACK,
     shadowStack: PUBLISHING_V2_CONTROL_MODEL_STACK,
     reason: 'default_gpt_primary',
   };
@@ -382,7 +388,9 @@ function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
     const taskFallbacks = options.task
       ? getModelChainForTask(options.task, options.modelStack)
       : [];
-    return dedupeTargets([...taskFallbacks, ...options.modelChain]);
+    // An explicit primary must actually be attempted first. Task routing still
+    // supplies the ordinary fallbacks, under the same deadline and quality gates.
+    return dedupeTargets([...options.modelChain, ...taskFallbacks]);
   }
   if (options.task) return getModelChainForTask(options.task, options.modelStack);
   return getModelChainForTask('default_quality');
@@ -437,16 +445,15 @@ async function generateWithOpenAi(
     progress.outputTokenLimit = astraRequest.max_output_tokens;
     progress.estimatedMaxCostUsd = estimateAiUsageCostUsd(model, progress.inputTokenUpperEstimate, progress.outputTokenLimit);
   }
-  // The explicit model chain owns retries and provenance. SDK retries hide
-  // rate limits/server errors inside a single timed Astra attempt.
+  // The explicit model chain owns retries and provenance for every provider.
   const response = model === OPENAI_ASTRA_MODEL
     ? await consumeAstraResponseStream(
         await openai.responses.create(astraRequest!, { ...(signal ? { signal } : {}), maxRetries: 0 }),
         progress!, startedAt, signal,
       )
     : signal
-      ? await openai.responses.create(request, { signal })
-      : await openai.responses.create(request);
+      ? await openai.responses.create(request, { signal, maxRetries: 0 })
+      : await openai.responses.create(request, { maxRetries: 0 });
 
   return {
     text: extractOpenAiText(response),
@@ -551,8 +558,8 @@ async function generateWithAnthropic(
       : {}),
   };
   const response = signal
-    ? await anthropic.messages.create(request, { signal })
-    : await anthropic.messages.create(request);
+    ? await anthropic.messages.create(request, { signal, maxRetries: 0 })
+    : await anthropic.messages.create(request, { maxRetries: 0 });
 
   return {
     text: response.content
@@ -616,10 +623,12 @@ function annotateGenerationFailure(
 }
 
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+  const callStartedAt = Date.now();
   const requestedChain = resolveModelChain(options);
   const modelChain = requestedChain;
 
   if (!modelChain.some((target) => isProviderConfigured(target.provider))) {
+    recordAiCallAudit(options, null, requestedChain, [], callStartedAt);
     throw annotateGenerationFailure(new Error('No AI provider is configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.'), options, requestedChain, []);
   }
 
@@ -659,7 +668,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
             new AiGenerationTimeoutError(target.provider, target.model, attemptTimeoutMs),
             () => abortController?.abort(),
           );
-      const incomplete = ['max_tokens', 'content_filter', 'failed', 'incomplete', 'cancelled', 'queued', 'in_progress'].includes(result.stopReason || '');
+      const incomplete = ['max_tokens', 'content_filter', 'failed', 'incomplete', 'cancelled', 'queued', 'in_progress', 'pause_turn', 'tool_use', 'refusal'].includes(result.stopReason || '');
       if (!result.text.trim() || incomplete) {
         lastError = new Error(`${target.provider}:${target.model} returned ${incomplete ? 'incomplete' : 'empty'} text`);
         fallbackAttempts.push({
@@ -677,7 +686,9 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         });
         continue;
       }
-      return { ...result, requestedProvider: requestedChain[0]?.provider, requestedModel: requestedChain[0]?.model, fallbackAttempts };
+      const completed = { ...result, requestedProvider: requestedChain[0]?.provider, requestedModel: requestedChain[0]?.model, fallbackAttempts };
+      recordAiCallAudit(options, completed, requestedChain, fallbackAttempts, callStartedAt);
+      return completed;
     } catch (error) {
       lastError = error;
       const providerError = readProviderError(error);
@@ -707,5 +718,24 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
   }
 
   const failure = lastError instanceof Error ? lastError : new Error('AI generation failed');
+  recordAiCallAudit(options, null, requestedChain, fallbackAttempts, callStartedAt);
   throw annotateGenerationFailure(failure, options, requestedChain, fallbackAttempts);
+}
+
+/** Operational metadata only: never log prompts, source text, generated copy or credentials. */
+function recordAiCallAudit(options: GenerateTextOptions, result: GenerateTextResult | null,
+  requested: AiModelTarget[], attempts: AiFallbackAttempt[], startedAt: number): void {
+  const costs = [...attempts.map(attempt => attempt.estimatedCostUsd),
+    ...(result ? [estimateAiUsageCostUsd(result.model, result.inputTokens, result.outputTokens)] : [])];
+  console.info('[ai:call]', JSON.stringify({
+    task: options.task || 'default_quality', modelStack: options.modelStack || 'standard',
+    succeeded: result !== null, requestedProvider: requested[0]?.provider, requestedModel: requested[0]?.model,
+    provider: result?.provider ?? null, model: result?.model ?? null, providerModel: result?.providerModel ?? null,
+    reasoningEffort: result?.reasoningEffort ?? null, inputTokens: result?.inputTokens ?? null,
+    outputTokens: result?.outputTokens ?? null, cachedInputTokens: result?.cachedInputTokens ?? null,
+    reasoningTokens: result?.reasoningTokens ?? null, durationMs: Math.max(0, Date.now() - startedAt),
+    knownEstimatedCostUsd: costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0),
+    unknownCostAttempts: costs.filter(cost => cost === null).length,
+    attempts: attempts.map(({provider, model, reason, statusCode, durationMs}) => ({provider, model, reason, statusCode, durationMs})),
+  }));
 }

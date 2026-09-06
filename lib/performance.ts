@@ -1732,7 +1732,7 @@ async function generateInsights(
   try {
     const response = await generateText({
       task: 'learning',
-      modelStack: resolvePublishingV2ModelStacks(accountHandle).activeStack,
+      modelStack: resolvePublishingV2ModelStacks(accountHandle).learningStack,
       maxTokens: getLearningInsightMaxTokens(history.length),
       system: `You are a content strategist analyzing tweet performance. Generate 5-7 PRESCRIPTIVE RULES. Each rule must be:
 1. Specific and actionable (not "post more engaging content")
