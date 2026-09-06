@@ -85,6 +85,20 @@ async function loadGeneratorWithAiMocks(
 }
 
 describe('AI call audit corrections', () => {
+  it('records transport error classes and cause codes without leaking messages', async () => {
+    class APIConnectionError extends Error {}
+    const create = vi.fn().mockRejectedValueOnce(Object.assign(new APIConnectionError('PRIVATE provider request'), {
+      cause: Object.assign(new TypeError('PRIVATE socket details'), { code: 'ECONNRESET' }),
+    })).mockResolvedValue({ status: 'completed', output_text: 'finished' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const result = await generateText({ task: 'tweet_writing', system: 'write', prompt: 'PRIVATE source', maxTokens: 100 });
+      expect(result.fallbackAttempts[0]).toMatchObject({ statusCode: null, errorType: 'APIConnectionError:ECONNRESET' });
+      expect(JSON.stringify(info.mock.calls)).toContain('APIConnectionError:ECONNRESET');
+      expect(JSON.stringify(info.mock.calls)).not.toContain('PRIVATE');
+    } finally { info.mockRestore(); }
+  });
   it('honors an explicit primary before task defaults and records both attempts', async () => {
     const openAi = vi.fn().mockResolvedValue({status:'completed', model:'gpt-5.6-sol', output_text:'done', usage:{input_tokens:10,output_tokens:2}});
     const anthropic = vi.fn().mockRejectedValue(Object.assign(new Error('unavailable'), {status:503}));
@@ -571,7 +585,7 @@ describe('AI model routing', () => {
         reason: 'provider_error',
         stopReason: null,
         statusCode: null,
-        errorType: null,
+        errorType: 'Error',
         inputTokens: null,
         outputTokens: null,
         estimatedCostUsd: null,

@@ -139,7 +139,9 @@ export async function synthesizeDynamicIdeaSeeds({
       id: doc.id,
       title: doc.title?.slice(0, 160) || '',
       publisher: doc.publisher || '',
-      claims: (doc.claims || []).slice(0, 2).map((claim) => claim.text.slice(0, 220)),
+      // Keep qualified source sentences intact; skip oversize claims instead
+      // of cutting off attribution, measurement scope or a trailing caveat.
+      claims: (doc.claims || []).filter((claim) => claim.text.length <= 600).slice(0, 2).map((claim) => claim.text),
     })),
     alreadyCoveredPremises: existingSeeds.slice(0, 60).map(seedSignature),
   };
