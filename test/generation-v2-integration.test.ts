@@ -372,7 +372,7 @@ describe('generateTweetBatchV2 integration', () => {
     const ideaCalls = mocks.generateText.mock.calls.map(([options]) => options).filter((options) => options.task === 'idea_generation');
     expect(ideaCalls).toHaveLength(briefs.length * 3);
     expect(ideaCalls.every((options) => JSON.parse(options.prompt).briefs.length === 1
-      && JSON.parse(options.prompt).requirements.ideasPerBrief === 1 && options.timeoutMs <= 120_000)).toBe(true);
+      && JSON.parse(options.prompt).requirements.ideasPerBrief === 1 && options.timeoutMs <= 180_000)).toBe(true);
     expect(new Set(ideaCalls.map((options) => JSON.parse(options.prompt).requirements.independentApproach.move)))
       .toEqual(new Set(['direct_conviction', 'decision_question', 'institutional_consequence']));
     expect(trace.stageCounts).toMatchObject({ ideaGenerationCalls: briefs.length * 3, ideaRetryCalls: 0, ideasGenerated: briefs.length * 3 });
@@ -974,9 +974,9 @@ describe('generateTweetBatchV2 integration', () => {
   });
 
   it.each([
-    { preparationMs: 80_000, expectedTimeouts: [120_000, 120_000, 120_000, 120_000], expectedDuration: 200_000, outcomeCode: 'idea_generation_failed' },
+    { preparationMs: 80_000, expectedTimeouts: [160_000, 160_000, 160_000, 160_000], expectedDuration: 240_000, outcomeCode: 'run_deadline' },
     { preparationMs: 175_000, expectedTimeouts: [65_000, 65_000, 65_000, 65_000], expectedDuration: 240_000, outcomeCode: 'run_deadline' },
-  ])('clips queued Astra waves after $preparationMs preparation and reserves writing time', async ({ preparationMs, expectedTimeouts, expectedDuration, outcomeCode }) => {
+  ])('clips queued Astra waves after $preparationMs preparation to the unchanged run ceiling', async ({ preparationMs, expectedTimeouts, expectedDuration, outcomeCode }) => {
     vi.useFakeTimers();
     try {
       const startedAt = new Date('2026-08-02T02:00:00Z');
@@ -1005,7 +1005,10 @@ describe('generateTweetBatchV2 integration', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('allows Astra writers to complete after the former 75-second cutoff and still judges the result', async () => {
+  it.each([
+    { ideaMs: 50_000, writerMs: 90_000, writerTimeout: 120_000 },
+    { ideaMs: 150_000, writerMs: 60_000, writerTimeout: 80_000 },
+  ])('finishes $ideaMs ms Astra ideation and $writerMs ms writing with final judgment inside four minutes', async ({ ideaMs, writerMs, writerTimeout }) => {
     vi.useFakeTimers();
     try {
       const startedAt = new Date('2026-08-02T02:00:00Z');
@@ -1013,8 +1016,9 @@ describe('generateTweetBatchV2 integration', () => {
       const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: startedAt }).slice(0, 1);
       let trace: any;
       mocks.generateText.mockImplementation(async (options: any) => {
-        const durations = { idea_generation: 50_000, idea_judgment: 10_000, tweet_writing: 90_000, copy_judgment: 5_000 };
-        if (options.task === 'tweet_writing') expect(options.timeoutMs).toBe(120_000);
+        const durations = { idea_generation: ideaMs, idea_judgment: 10_000, tweet_writing: writerMs, copy_judgment: 5_000 };
+        if (options.task === 'idea_generation') expect(options.timeoutMs).toBeGreaterThanOrEqual(ideaMs);
+        if (options.task === 'tweet_writing') expect(options.timeoutMs).toBe(writerTimeout);
         await new Promise<void>((resolve) => setTimeout(resolve, Math.min(options.timeoutMs, durations[options.task])));
         if (options.task === 'idea_generation') return ideaResponse(options.prompt);
         if (options.task === 'idea_judgment') return rankingResponse(options.prompt, 'ideas');
@@ -1026,7 +1030,7 @@ describe('generateTweetBatchV2 integration', () => {
       });
       await vi.runAllTimersAsync();
       expect((await generation).length).toBeGreaterThan(0);
-      expect(trace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === 90_000)).toBe(true);
+      expect(trace.modelCalls.filter((call: any) => call.stage === 'tweet_writing').every((call: any) => call.durationMs === writerMs)).toBe(true);
       expect(trace.modelCalls.some((call: any) => call.stage === 'copy_judgment' && call.succeeded)).toBe(true);
       expect(trace.outcomeCode).toBe('completed');
       expect(trace.durationMs).toBeLessThan(240_000);
