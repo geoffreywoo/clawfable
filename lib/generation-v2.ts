@@ -247,7 +247,10 @@ const QUALITY_EMPTY_PAUSE_MS = 2 * 60 * 60 * 1000;
 const STORY_FAILURE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const STORY_PUBLISH_MEMORY_MS = 21 * 24 * 60 * 60 * 1000;
 const GENERATION_RUN_DEADLINE_MS = 240 * 1000;
-const ASTRA_IDEA_GENERATION_DEADLINE_MS = 120 * 1000;
+// High-reasoning first attempts can still be producing progress past two
+// minutes. Give them room inside the unchanged four-minute run ceiling.
+const ASTRA_IDEA_GENERATION_DEADLINE_MS = 180 * 1000;
+const ASTRA_IDEA_RETRY_DEADLINE_MS = 120 * 1000;
 const ASTRA_TWEET_WRITING_DEADLINE_MS = 120 * 1000;
 const STAGE_DEADLINES_MS: Partial<Record<GenerationModelCallTrace['stage'], number>> = {
   idea_generation: 75 * 1000,
@@ -3976,6 +3979,8 @@ async function generateIdeas({
   // judges and writers. Completed responses remain usable when queued work ends.
   const ideaDeadline = astra ? Math.min(Date.now() + ASTRA_IDEA_GENERATION_DEADLINE_MS,
     generationRunDeadlines.get(calls) ?? Infinity) : Infinity;
+  // A longer first-attempt allowance must not expand the correction budget.
+  const retryDeadline = astra ? Math.min(Date.now() + ASTRA_IDEA_RETRY_DEADLINE_MS, ideaDeadline) : Infinity;
   const generateBriefBatch = async (
     briefBatch: GenerationBriefV2[],
     retryFailures: Array<{
@@ -3992,7 +3997,8 @@ async function generateIdeas({
     minimumAttemptMs = 0,
   ) => {
     try {
-      if (Date.now() >= ideaDeadline) return { raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0 };
+      const attemptDeadline = minimumAttemptMs > 0 ? retryDeadline : ideaDeadline;
+      if (Date.now() >= attemptDeadline) return { raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0 };
       const batchSubject = briefBatch.map((brief) => `${brief.topic} ${brief.title}`).join(' ');
       const batchReference = briefBatch[0];
       const batchPremiseMemory = uniqueStrings(briefBatch.flatMap((brief) => (
@@ -4027,7 +4033,7 @@ async function generateIdeas({
         batchPremiseMemory, batchLearning, batchExclusions, batchReactionAnchors, retryFailures,
         subjectReactionPatterns, promptSpreadReferences];
       const prompt = astra ? buildAstraSingleIdeaGenerationPromptV2(promptArgs, approachIndex!) : buildIdeaGenerationPromptV2(...promptArgs);
-      const remainingIdeaMs = ideaDeadline - Date.now();
+      const remainingIdeaMs = attemptDeadline - Date.now();
       if (remainingIdeaMs <= 0 || remainingIdeaMs < minimumAttemptMs) return {
         raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0,
       };
@@ -4132,7 +4138,7 @@ async function generateIdeas({
     const observedIdeaMs = Math.max(0, ...calls.filter((call) => call.stage === 'idea_generation' && call.succeeded)
       .map((call) => call.durationMs));
     requiredRetryMs = Math.max(60_000, observedIdeaMs);
-    if (ideaDeadline - Date.now() < requiredRetryMs) {
+    if (retryDeadline - Date.now() < requiredRetryMs) {
       onRetryBudgetDeferred?.(retryBriefs.length);
       return initial;
     }
