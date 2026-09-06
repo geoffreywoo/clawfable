@@ -33,7 +33,7 @@ it('lets the explicit chain handle a real SDK connection failure without retryin
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body));
     models.push(body.model);
-    if (models.length === 1) throw Object.assign(new TypeError('fetch failed'), { code: 'ECONNRESET' });
+    if (models.length === 1) throw new TypeError('fetch failed', { cause: Object.assign(new Error('PRIVATE socket details'), { code: 'ECONNRESET' }) });
     return Response.json({ id: 'resp-fallback', object: 'response', status: 'completed', model: 'gpt-5.5',
       output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'finished', annotations: [] }] }],
       usage: { input_tokens: 20, output_tokens: 2 } });
@@ -41,6 +41,6 @@ it('lets the explicit chain handle a real SDK connection failure without retryin
   const result = await generateText({ task: 'idea_judgment', modelStack: 'publishing_v2_gpt_control',
     system: 'Judge.', prompt: 'Test candidate', maxTokens: 100 });
   expect(models).toEqual(['gpt-5.6', 'gpt-5.5']);
-  expect(result.fallbackAttempts[0]).toMatchObject({ reason: 'provider_error', errorType: 'APIConnectionError:ECONNRESET' });
+  expect(result.fallbackAttempts[0]).toMatchObject({ reason: 'provider_error', errorType: 'APIConnectionError:TypeError:ECONNRESET' });
   expect(result.model).toBe('gpt-5.5');
 });

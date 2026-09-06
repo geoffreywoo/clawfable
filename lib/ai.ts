@@ -598,8 +598,16 @@ function readProviderError(error: unknown): Pick<AiFallbackAttempt, 'statusCode'
   // Connection/SDK errors often have neither an HTTP status nor a provider
   // body. Record class/cause codes without logging error messages or inputs.
   const safeCode = (code: unknown): string | null => typeof code === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(code) ? code : null;
-  const localError = [safeCode(value.constructor?.name), safeCode(value.cause?.code) || safeCode(value.cause?.constructor?.name)]
-    .filter(Boolean).join(':') || null;
+  const causeCodes: string[] = [];
+  const seen = new Set<object>();
+  let cause: any = value;
+  while (cause && typeof cause === 'object' && !seen.has(cause) && seen.size < 4) {
+    seen.add(cause);
+    const code = safeCode(cause.code) || safeCode(cause.constructor?.name);
+    if (code) causeCodes.push(code);
+    cause = cause.cause;
+  }
+  const localError = causeCodes.join(':') || null;
   return {
     statusCode: typeof value.status === 'number' ? value.status : null,
     errorType: typeof value.error?.error?.type === 'string'
