@@ -1325,6 +1325,8 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   const trending = Array.isArray(trendingValue) ? trendingValue as TrendingTopic[] : [];
   const modelStackAssignment = resolvePublishingV2ModelStacks(agent.handle);
   const activeModelStack = modelStackAssignment.activeStack;
+  const efficientGeneration = ['geoffwoo','geoffreywoo'].includes(agent.handle.replace(/^@/,'').toLowerCase())
+    && activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK && process.env.GEOFFREY_EFFICIENT_GENERATION === 'true';
   const writerShadowRuns = generationV2.lineage.filter((run) => {
     if (run.mode !== 'live' || (run.surface || 'original') !== 'original') return false;
     const stacks = new Set(run.drafts
@@ -1341,7 +1343,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   );
   const ideaJudgeChain = getModelChainForTask(
     'idea_judgment',
-    activeModelStack,
+    efficientGeneration ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : activeModelStack,
   );
   const writingChain = getModelChainForTask(
     'tweet_writing',
@@ -1349,7 +1351,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
   );
   const copyJudgeChain = getModelChainForTask(
     'copy_judgment',
-    activeModelStack,
+    efficientGeneration ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : activeModelStack,
   );
   const shadowControlWritingChain = getModelChainForTask(
     'tweet_writing',
@@ -1723,7 +1725,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     maxOriginalsPerRolling24Hours: 5,
     minQueueSize: context.settings.minQueueSize,
     refillBatchLimit: 2,
-    refillCanIterateUntilMinimum: true,
+    refillCanIterateUntilMinimum: !isGeoffrey,
     ...postingRateAudit,
   };
   const corpusSurfaceRiskAnchors = anchors.flatMap((entry) => {
@@ -2148,12 +2150,14 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     },
     models: {
       activeStack: activeModelStack,
+      generationPolicy: efficientGeneration ? 'geoffrey-autopost-per-dollar-1' : 'legacy-v2',
+      efficientGenerationFlag: process.env.GEOFFREY_EFFICIENT_GENERATION === 'true',
       pipelineVersion,
       routingReason: modelStackAssignment.reason,
       shadowControlStack: modelStackAssignment.shadowStack,
       shadowComparison: {
-        isolatedVariable: activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? 'complete_creative_stack' : 'primary_writer',
-        samplingDesign: activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
+        isolatedVariable: efficientGeneration ? 'bounded_generation_with_shared_gpt_judges' : activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? 'complete_creative_stack' : 'primary_writer',
+        samplingDesign: efficientGeneration ? 'one Astra idea and draft per brief, common GPT medium judges, at most one execution repair per run' : activeModelStack === PUBLISHING_V2_ASTRA_MODEL_STACK
           ? 'three independent Astra variants using direct judgment, concrete decision, and unexpected consequence; comparison stack is available for explicit preview evaluation'
           : activeModelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
             ? 'three independent GPT one-draft calls with separate native register anchors; matched Fable control retired after zero-yield production audit'

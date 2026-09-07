@@ -342,7 +342,7 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
   let failure: string | null = null;
   try {
     selected = await generate({ ...structuredClone(packet.input), modelStack: stack,
-      generationPolicy: stack === 'publishing_v2_astra' ? packet.input.generationPolicy : undefined,
+      generationPolicy: packet.input.generationPolicy,
       ...(options.spendContext ? { spendContext: options.spendContext } : {}),
       onTrace: (value) => { trace = value; }, onArtifacts: (artifacts) => { drafts = artifacts.drafts; ideas = artifacts.ideas; },
     });

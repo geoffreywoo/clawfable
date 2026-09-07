@@ -44,6 +44,9 @@ export function canRepairDraft(content: string, codes: string[], decision: Repai
   // Missing evidence, weak premises and insufficient ambition/originality cannot be fixed by wording.
   return Boolean(allowed && codes.length && codes.every(code => allowed.includes(code)));
 }
+export function preservesRepairDecision(content: string, decision: RepairDecision | null | undefined): boolean {
+  return Boolean(decision?.preserve.length && decision.preserve.every(span => content.includes(span)));
+}
 export function substantiveBriefDigest(brief: { topic: string; title: string; sourceBrief?: string; evidenceMode?: string; }, claims: string[], voiceVersion: string, policyVersion: string): string {
   const normalize = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
   return createHash('sha256').update(JSON.stringify([normalize(brief.topic), normalize(brief.title), normalize(brief.sourceBrief || ''),

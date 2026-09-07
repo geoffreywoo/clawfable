@@ -1,6 +1,6 @@
 import inferenceDrafts from './fixtures/inference-five-rejections.json';
 import { describe,it,expect } from 'vitest';
-import { canRepairDraft, substantiveBriefDigest, recordBriefAttempts, failedBriefKeys, qualityGenerationPauseUntil, type RepairDecision } from '@/lib/generation-efficiency';
+import { canRepairDraft, preservesRepairDecision, substantiveBriefDigest, recordBriefAttempts, failedBriefKeys, qualityGenerationPauseUntil, type RepairDecision } from '@/lib/generation-efficiency';
 import { calibrateQualityCutoffs, type QualityCalibrationExample } from '@/lib/quality-calibration';
 import { hasUnsupportedOperatorEvidenceV2 } from '@/lib/generation-v2';
 const decision:RepairDecision={disposition:'repair',failingDimension:'clarity',offendingSpan:'very very',permittedChange:'Remove the duplicated intensifier',evidenceIds:[],preserve:['compute providers']};
@@ -11,6 +11,10 @@ describe('autopost efficiency policy',()=>{
      expect(canRepairDraft('compute providers are very very expensive',[code],decision,[])).toBe(false);
    expect(canRepairDraft('compute providers are expensive',['final_quality_margin'],decision,[])).toBe(false);
    expect(canRepairDraft('compute providers are very very expensive',['final_quality_margin'],{...decision,evidenceIds:['invented']},[])).toBe(false);
+ });
+ it('rejects a revision that discards the words the critic required preserving',()=>{
+   expect(preservesRepairDecision('compute providers are expensive',decision)).toBe(true);
+   expect(preservesRepairDecision('VCs are expensive',decision)).toBe(false);
  });
  it('does not equate a conditional financing preference with an observed contract',()=>{
    const conditional='an inference provider still taking a revenue cut after the compute it funded is gone would make me prefer equity financing. i do want VCs having to compete with the compute supplier to finance AI-run companies. the supplier would carry the inference bill for revenue upside. the duration of that cut matters to me.';
