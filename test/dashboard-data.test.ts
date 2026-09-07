@@ -187,7 +187,7 @@ describe('dashboard data topic loading', () => {
         accessSecret: 'access-secret',
       },
       agent.xUserId,
-      { previousNetworkState: null },
+      { previousNetworkState: null, network: { agentId: agent.id } },
     );
     expect(mocks.setTrendingCache).toHaveBeenCalledWith(agent.id, [{ ...cachedTopic, id: 2 }]);
   });

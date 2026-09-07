@@ -1,6 +1,8 @@
+import { aiSpendContext } from './ai-budget';
 import { generateText, hasTextGenerationProvider } from './ai';
 
 interface InferDeleteIntentInput {
+  agentId?: string;
   agentName: string;
   soulMd: string | null;
   tweetText: string;
@@ -33,6 +35,7 @@ function cleanIntentSummary(text: string): string {
 }
 
 export async function inferDeleteIntent({
+  agentId,
   agentName,
   soulMd,
   tweetText,
@@ -43,6 +46,7 @@ export async function inferDeleteIntent({
 
   try {
     const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'delete-intent'),
       task: 'classification',
       maxTokens: 48,
       temperature: 0,

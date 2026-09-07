@@ -1,3 +1,4 @@
+import { aiSpendContext } from '@/lib/ai-budget';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAgentAccess, handleAuthError } from '@/lib/auth';
 import { getVoiceChat, addVoiceChatMessage, addVoiceDirective, getVoiceDirectives, getVoiceDirectiveRules, getQueuedTweets, updateTweet } from '@/lib/kv-storage';
@@ -75,6 +76,7 @@ export async function POST(
 
     // The model responds AS the agent, acknowledges the feedback, and extracts a directive
     const response = await generateText({
+      spendContext: aiSpendContext(id, 'voice-chat'),
       task: 'learning',
       modelStack: resolvePublishingV2ModelStacks(agent.handle).learningStack,
       maxTokens: getVoiceChatResponseMaxTokens({
@@ -173,6 +175,7 @@ async function auditQueueAgainstDirective(
   const tweetList = formatDirectiveAuditTweetList(queue);
 
   const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'voice-chat'),
     task: 'final_judgment',
     modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
     maxTokens: getDirectiveAuditMaxTokens(queue.length),

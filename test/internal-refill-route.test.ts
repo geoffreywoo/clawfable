@@ -38,7 +38,7 @@ function request(body: Record<string, unknown>, secret = 'test-cron-secret'): Re
 
 describe('internal queue refill route', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     process.env.CRON_SECRET = 'test-cron-secret';
     process.env.AUTOMATION_EXEMPT_AGENT_IDS = '13';
     mocks.getAgent.mockResolvedValue({ id: '13', handle: 'geoffreywoo' });
@@ -98,7 +98,8 @@ describe('internal queue refill route', () => {
     });
   });
 
-  it('iterates bounded two-post batches until the requested refill is met', async () => {
+  it('keeps other accounts bounded refill batching unchanged', async () => {
+    mocks.getAgent.mockResolvedValue({ id: '13', handle: 'othercreator' });
     mocks.refillQueue
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(2)
@@ -135,7 +136,8 @@ describe('internal queue refill route', () => {
     });
   });
 
-  it('retries once after an empty stochastic generation batch', async () => {
+  it('keeps other accounts existing empty-batch retry policy', async () => {
+    mocks.getAgent.mockResolvedValue({ id: '13', handle: 'othercreator' });
     mocks.refillQueue
       .mockReset()
       .mockResolvedValueOnce(0)
@@ -166,6 +168,14 @@ describe('internal queue refill route', () => {
         { requested: 2, added: 2 },
       ],
     });
+  });
+
+  it('does not immediately regenerate Geoffrey after an empty run', async () => {
+    mocks.refillQueue.mockResolvedValue(0);
+    const response = await POST(request({ count: 5 }) as any, { params: Promise.resolve({ id: '13' }) });
+    expect(response.status).toBe(200);
+    expect(mocks.refillQueue).toHaveBeenCalledOnce();
+    expect((await response.json()).added).toBe(0);
   });
 
   it('returns a conflict instead of racing another autopilot run', async () => {

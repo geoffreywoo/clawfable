@@ -1,0 +1,6 @@
+{
+  "version": "geoffrey-owner-calibration-1",
+  "activated": false,
+  "evidenceHash": null,
+  "cutoffs": { "aiAmbition": 0.9, "qualityMargin": 0.87 }
+}

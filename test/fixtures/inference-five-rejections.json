@@ -1,0 +1,43 @@
+[
+  {
+    "content": "inference providers should cover the compute bill for AI-run companies in exchange for a cut of revenue.\n\ni want them competing with VCs for founders who'd otherwise sell equity just to pay for inference.",
+    "rejectionCodes": [
+      "final_ai_bullishness_below_floor",
+      "final_quality_margin"
+    ],
+    "parentDraftId": null
+  },
+  {
+    "content": "Inference providers should bankroll AI-run companies for a cut of revenue.\n\nIf I were raising money just to pay the inference bill, I\u2019d negotiate that cut before selling equity.",
+    "rejectionCodes": [
+      "copy_judge_voice_mismatch",
+      "final_native_voice_below_floor",
+      "final_ai_bullishness_below_floor",
+      "final_quality_margin"
+    ],
+    "parentDraftId": null
+  },
+  {
+    "content": "inference providers should be competing with VCs to bankroll AI-run companies.\n\ni'd want them fronting the compute bill for a revenue cut so the founder could keep the equity they'd otherwise sell just to pay for inference.",
+    "rejectionCodes": [
+      "generated_writing_pattern",
+      "final_cringe_risk"
+    ],
+    "parentDraftId": null
+  },
+  {
+    "content": "AI-run companies shouldn\u2019t have to sell equity just to pay for inference. i want their compute providers financing the bill for a cut of revenue, competing directly with VC.\n\ni\u2019m not sure founders would stomach the revenue cut that makes the provider\u2019s risk worth taking.",
+    "rejectionCodes": [
+      "final_ai_bullishness_below_floor",
+      "final_quality_margin"
+    ],
+    "parentDraftId": "draft-113dh98"
+  },
+  {
+    "content": "an inference provider still taking a revenue cut after the compute it funded is gone would make me prefer equity financing.\n\ni do want VCs having to compete with the compute supplier to finance AI-run companies. the supplier would carry the inference bill for revenue upside. the duration of that cut matters to me.",
+    "rejectionCodes": [
+      "unsupported_operator_fact"
+    ],
+    "parentDraftId": "draft-113dh98"
+  }
+]

@@ -1,3 +1,4 @@
+import { isGeoffreyAccount } from '@/lib/account-taste';
 import { NextRequest, NextResponse } from 'next/server';
 import { refillQueue } from '@/lib/autopilot';
 import {
@@ -57,7 +58,7 @@ export async function POST(
     let added = 0;
     let consecutiveEmptyAttempts = 0;
     const attempts: Array<{ requested: number; added: number }> = [];
-    const maxAttempts = Math.min(10, Math.max(1, Math.ceil(requestedCount / 2) + 1));
+    const maxAttempts = isGeoffreyAccount(agent.handle) ? 1 : Math.min(10, Math.max(1, Math.ceil(requestedCount / 2) + 1));
     while (added < requestedCount && attempts.length < maxAttempts) {
       const remaining = requestedCount - added;
       const attemptAdded = await refillQueue(agent, remaining, {}, {

@@ -1,3 +1,5 @@
+import { collectOwnerCalibrationData } from './owner-calibration-data';
+import type { LearningSignal, FeedbackEntry } from './types';
 import type { Tweet } from './types';
 
 export type TasteCalibrationRole = 'best' | 'safest' | 'weirdest' | 'provocative' | 'uncertain';
@@ -94,7 +96,7 @@ function roleReason(role: TasteCalibrationRole, tweet: Tweet): string {
   }
 }
 
-export function buildTasteCalibrationQueue(tweets: Tweet[], now = new Date()): TasteCalibrationSnapshot {
+export function buildTasteCalibrationQueue(tweets: Tweet[], now = new Date(), ownerEvidence?: { signals: LearningSignal[]; feedback: FeedbackEntry[] }): TasteCalibrationSnapshot {
   const candidates = eligibleDrafts(tweets);
   const selected = new Map<string, TasteCalibrationItem>();
   const roles: TasteCalibrationRole[] = ['best', 'safest', 'weirdest', 'provocative', 'uncertain'];
@@ -115,11 +117,15 @@ export function buildTasteCalibrationQueue(tweets: Tweet[], now = new Date()): T
   }
 
   const items = [...selected.values()];
+  const labels = ownerEvidence ? collectOwnerCalibrationData({ ...ownerEvidence, tweets, drafts: [], ideas: [] }).knownLabels : null;
+  const missing = labels ? { approvals: Math.max(0,20-labels.approved), rejections: Math.max(0,20-labels.rejected) } : null;
+  const request = missing && (missing.approvals || missing.rejections)
+    ? ` To calibrate autopost scoring, we still need ${missing.approvals} clear approvals and ${missing.rejections} clear rejections. Use the taste buttons below; automatic posts do not count.` : '';
   return {
     generatedAt: now.toISOString(),
     items,
     summary: items.length > 0
-      ? `${items.length} calibration draft${items.length === 1 ? '' : 's'} selected from the current queue.`
-      : 'No active drafts are available for taste calibration yet.',
+      ? `${items.length} calibration draft${items.length === 1 ? '' : 's'} selected from the current queue.${request}`
+      : `No active drafts are available for taste calibration yet.${request}`,
   };
 }

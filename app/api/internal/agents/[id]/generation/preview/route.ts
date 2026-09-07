@@ -1,3 +1,4 @@
+import { evaluationSpendContext } from '@/lib/ai-budget';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   PUBLISHING_V2_ASTRA_MODEL_STACK,
@@ -199,7 +200,13 @@ export async function POST(
     const trending = Array.isArray(cachedTrending) ? cachedTrending as TrendingTopic[] : [];
     let generationTrace: GenerationRunTrace | null = null;
     let previewArtifacts: { ideas: IdeaCandidate[]; drafts: DraftCandidate[] } | null = null;
+    let spendContext;
+    if (process.env.NODE_ENV !== 'test') {
+      try { spendContext = await evaluationSpendContext('internal-preview', 20); }
+      catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'evaluation_deferred' }, { status: 409 }); }
+    }
     const drafts = await generatePublishingBatchV2({
+          spendContext,
           agentId: id,
           count: requestedCount,
           request: generationRequest,

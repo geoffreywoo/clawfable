@@ -1,3 +1,4 @@
+import { aiSpendContext } from './ai-budget';
 /**
  * Generate a SOUL.md from an account's actual tweet history.
  * Reverse-engineers voice, tone, topics, style, and anti-patterns
@@ -65,7 +66,8 @@ export function getSoulSummaryMaxTokens(tweetCount: number): number {
 export async function generateSoulFromTweets(
   keys: TwitterKeys,
   userId: string,
-  agentName: string
+  agentName: string,
+  agentId?: string,
 ): Promise<SoulFromTweetsResult> {
   // Fetch deep history — up to 1000 tweets
   const timeline = await getDeepTimeline(keys, userId, 1000);
@@ -116,6 +118,7 @@ export async function generateSoulFromTweets(
 
   // Ask the model to reverse-engineer the voice
   const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'soul-from-tweets'),
     task: 'soul_generation',
     modelStack: resolvePublishingV2ModelStacks(me.username).learningStack,
     maxTokens: getSoulFromTweetsMaxTokens(timeline.length),
@@ -183,6 +186,7 @@ Output ONLY the SOUL.md markdown. No commentary.`,
 
   // Extract a quick voice summary
   const summaryResponse = await generateText({
+      spendContext: aiSpendContext(agentId, 'soul-from-tweets'),
     task: 'classification',
     maxTokens: getSoulSummaryMaxTokens(timeline.length),
     system: 'Output a single JSON object with: tone (string), topics (array of strings, max 5), voiceSummary (one sentence).',
