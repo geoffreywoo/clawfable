@@ -1,3 +1,5 @@
+import { evaluationSpendContext } from './ai-budget';
+import { EFFICIENT_GENERATION_POLICY } from './generation-efficiency';
 import { createHash } from 'node:crypto';
 import {
   generateTweetBatchV2, buildGenerationBriefsV2, buildVoiceGuidanceV2, isV2VoiceReady, getPostcriticRepairModelStackV2,
@@ -22,6 +24,7 @@ export interface FrozenEvaluationPacket {
   input: FrozenInput;
 }
 export interface FrozenEvaluationSnapshot {
+  purpose?: 'efficiency_screen';
   version: string;
   capturedAt: string;
   account: { id: string; handle: string };
@@ -67,8 +70,8 @@ export function frozenEvaluationCoverage(snapshot: FrozenEvaluationSnapshot) {
     };
   });
   return { schemaVersion: 1, snapshotHash: snapshot.hash, capturedAt: snapshot.capturedAt,
-    benchmarkKind: 'requested_topic_breadth_stress' as const,
-    sampling: 'Thirty hand-authored Geoffrey subjects with source matching and opinion fallback; ten synthetic profiles. Not an empirical sample of production traffic.',
+    benchmarkKind: snapshot.purpose === 'efficiency_screen' ? 'fresh_eight_brief_efficiency_screen' : 'requested_topic_breadth_stress',
+    sampling: snapshot.purpose === 'efficiency_screen' ? 'Six freshly planned Geoffrey briefs and two synthetic regression profiles; identical frozen evidence for both policies.' : 'Thirty hand-authored Geoffrey subjects with source matching and opinion fallback; ten synthetic profiles. Not an empirical sample of production traffic.',
     limitations: [
       'Source-free cases test owned opinions and cannot establish qualified-source coverage.',
       'Synthetic fixtures do not establish real-account voice fit or human preference.',
@@ -108,9 +111,10 @@ function scrub(value: unknown, excluded: string[] = []): unknown {
 export function validateFrozenEvaluation(snapshot: FrozenEvaluationSnapshot): { packets: number; geoffrey: number; synthetic: number; hash: string } {
   const { hash, ...body } = snapshot;
   if (snapshot.version !== ASTRA_EVALUATION_VERSION || hash !== evaluationHash(body)) throw new Error('Frozen evaluation version/hash mismatch.');
-  if (snapshot.packets.length !== 40 || new Set(snapshot.packets.map((packet) => packet.id)).size !== 40) throw new Error('A full evaluation requires 40 unique packets.');
+  const expectedCount = snapshot.purpose === 'efficiency_screen' ? 8 : 40;
+  if (snapshot.packets.length !== expectedCount || new Set(snapshot.packets.map((packet) => packet.id)).size !== expectedCount) throw new Error('A full evaluation requires 40 unique packets.');
   const geoffrey = snapshot.packets.filter((packet) => packet.kind === 'geoffrey').length;
-  if (geoffrey !== 30 || snapshot.packets.filter((packet) => packet.kind === 'synthetic_profile').length !== 10) throw new Error('Expected 30 Geoffrey and 10 synthetic-profile packets.');
+  if (geoffrey !== (snapshot.purpose === 'efficiency_screen' ? 6 : 30) || snapshot.packets.filter((packet) => packet.kind === 'synthetic_profile').length !== (snapshot.purpose === 'efficiency_screen' ? 2 : 10)) throw new Error('Expected 30 Geoffrey and 10 synthetic-profile packets.');
   if (snapshot.heldoutExamples.length < 3 || snapshot.heldoutExamples.some((example) => !['operator_composed_verified', 'operator_curated_authorship_unverified', 'account_reference_authorship_unverified'].includes(example.provenance))) throw new Error('At least three real held-out references with explicit composition, curation, or active-corpus provenance are required.');
   const effectiveBriefs = new Set<string>();
   if (new Set(snapshot.packets.map(packet => packet.input.previewJudgeModelStack || 'per_arm')).size > 1) throw new Error('A frozen comparison requires one consistent judge design.');
@@ -127,7 +131,7 @@ export function validateFrozenEvaluation(snapshot: FrozenEvaluationSnapshot): { 
     if (snapshot.heldoutExamples.some((example) => serialized.includes(example.content) || (example.content.length >= 64 && serialized.includes(example.content.slice(0, 64))))) throw new Error(`Held-out example leaked into ${packet.id}.`);
     if (canonical(packet.input) !== canonical(scrub(packet.input))) throw new Error(`Credential field found in ${packet.id}.`);
   }
-  return { packets: 40, geoffrey, synthetic: 10, hash };
+  return { packets: expectedCount, geoffrey, synthetic: expectedCount-geoffrey, hash };
 }
 
 export function createFrozenEvaluationSnapshot({
@@ -321,6 +325,7 @@ function matchesEvaluationCallPrimary(call: GenerationModelCallTrace, primary: R
 /** One identical non-persisting arm, shared by local and protected remote execution. */
 export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack'], options: {
   generate?: typeof generateTweetBatchV2;
+  spendContext?: import('./ai-budget').AiSpendContext;
 } = {}): Promise<EvaluationArmResult> {
   if (!['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(stack)
     || packet.input.mode !== 'preview' || packet.input.persistArtifacts !== false
@@ -329,6 +334,7 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
     throw new Error('Unsafe frozen evaluation arm.');
   }
   const generate = options.generate || generateTweetBatchV2;
+  if (!options.spendContext && !options.generate && process.env.NODE_ENV !== 'test') options.spendContext = await evaluationSpendContext(evaluationHash(packet), 12);
   let trace: GenerationRunTrace | null = null;
   let drafts: DraftCandidate[] = [];
   let ideas: IdeaCandidate[] = [];
@@ -336,6 +342,8 @@ export async function runFrozenEvaluationArm(packet: FrozenEvaluationPacket, sta
   let failure: string | null = null;
   try {
     selected = await generate({ ...structuredClone(packet.input), modelStack: stack,
+      generationPolicy: packet.input.generationPolicy,
+      ...(options.spendContext ? { spendContext: options.spendContext } : {}),
       onTrace: (value) => { trace = value; }, onArtifacts: (artifacts) => { drafts = artifacts.drafts; ideas = artifacts.ideas; },
     });
   } catch (error) { failure = error instanceof Error ? error.message : String(error); }
@@ -420,6 +428,7 @@ function hasKnownArmCost(arm: Pick<EvaluationArmResult, 'trace'>): boolean { ret
 
 export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, options: {
   generate?: typeof generateTweetBatchV2;
+  spendContext?: import('./ai-budget').AiSpendContext;
   runArm?: EvaluationArmRunner;
   maxEstimatedCostUsd?: number;
   limit?: number;
@@ -431,7 +440,9 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
 } = {}): Promise<EvaluationComparison> {
   validateFrozenEvaluation(snapshot);
   validateFrozenEvaluationAge(snapshot.capturedAt, options.now);
-  const runArm: EvaluationArmRunner = options.runArm || ((packet, stack) => runFrozenEvaluationArm(packet, stack, { generate: options.generate }));
+  const runArm: EvaluationArmRunner = options.runArm || (async (packet, stack) => runFrozenEvaluationArm(packet, stack, { generate: options.generate,
+    ...(!options.generate && process.env.NODE_ENV !== 'test' ? { spendContext: await evaluationSpendContext(snapshot.hash, snapshot.purpose === 'efficiency_screen' ? 12 : 100) } : {}),
+  }));
   const budget = options.maxEstimatedCostUsd ?? 100;
   const concurrency = options.concurrency ?? 1;
   const failurePolicy = options.failurePolicy ?? 'fail_fast';
@@ -502,7 +513,7 @@ export async function runFrozenEvaluation(snapshot: FrozenEvaluationSnapshot, op
     // Slots retain snapshot order even when later packets finish first. Clone at
     // enqueue time and serialize writes so an older receipt cannot overwrite a newer one.
     comparison.packets = slots.filter(Boolean);
-    comparison.attemptedCompletion = comparison.packets.length === 40
+    comparison.attemptedCompletion = comparison.packets.length === snapshot.packets.length
       && comparison.packets.every((entry) => entry.baseline.attempted && entry.astra.attempted);
     comparison.completed = comparison.attemptedCompletion && comparison.unknownCostArms === 0
       && comparison.packets.every((entry) => entry.baseline.validPrimaryModels && entry.astra.validPrimaryModels);
@@ -554,7 +565,7 @@ export function blindedEvaluationCards(snapshot: FrozenEvaluationSnapshot, compa
     const astraIsA = parseInt(evaluationHash(`blind:${snapshot.hash}:${entry.id}`).slice(0, 2), 16) % 2 === 0;
     return { packetId: entry.id, kind: packet.kind, subject: packet.subject, calibrationSource: packet.calibrationSource,
       evidenceAsOf: snapshot.capturedAt,
-      benchmarkKind: 'requested_topic_breadth_stress',
+      benchmarkKind: snapshot.purpose === 'efficiency_screen' ? 'fresh_eight_brief_efficiency_screen' : 'requested_topic_breadth_stress',
       referenceLimitations: packet.kind === 'geoffrey' ? snapshot.referenceSummary.limitation : null,
       evidence: packet.input.previewContext!.briefs.flatMap((brief) => brief.evidence),
       heldoutVoiceReferences: packet.kind === 'geoffrey' ? snapshot.heldoutExamples : [],
@@ -678,13 +689,16 @@ export function scoreFrozenEvaluation(comparison: EvaluationComparison, votes: E
       noRegression: noRegressionFor(astra, baseline), oneSidedUtility: utilityFor(packets) }];
   }));
   const winRate = decisive ? astraWins / decisive : null;
-  const commonJudgeDiagnostic = comparison.packets.some(packet => packet.baseline.previewJudgeModelStack || packet.astra.previewJudgeModelStack);
+  const budgetMixedPolicy = comparison.packets.filter(p=>p.kind==='geoffrey').length === 30
+    && comparison.packets.filter(p=>p.kind==='geoffrey').every(p=>p.astra.trace?.generationPolicyVersion === EFFICIENT_GENERATION_POLICY)
+    && comparison.packets.every(p=>p.baseline.previewJudgeModelStack==='publishing_v2_gpt_control' && p.astra.previewJudgeModelStack==='publishing_v2_gpt_control');
+  const commonJudgeDiagnostic = !budgetMixedPolicy && comparison.packets.some(packet => packet.baseline.previewJudgeModelStack || packet.astra.previewJudgeModelStack);
   const pass = comparison.completed && comparison.packets.length === 40 && votes.votes.length === 40
     && !commonJudgeDiagnostic && validModels && decisive >= 30 && winRate !== null && winRate >= 0.6 && noRegression;
   return { status: pass ? 'pass' : 'not_ready', metricDefinitionVersion: 'factual-evidence-mismatch-v2', judge: votes.judge, decisive, astraWins, winRate, validModels, noRegression, baseline, astra,
     attemptedCompletion: comparison.attemptedCompletion ?? comparison.completed, promotionValidCompletion: comparison.completed && !commonJudgeDiagnostic,
     cohorts, oneSidedUtility: utilityFor(comparison.packets), coverage: comparison.coverage || null,
-    evaluationDesign: commonJudgeDiagnostic ? 'common_judge_diagnostic_not_full_stack_promotion' : 'full_creative_stack',
+    evaluationDesign: budgetMixedPolicy ? 'budget_mixed_policy' : commonJudgeDiagnostic ? 'common_judge_diagnostic_not_full_stack_promotion' : 'full_creative_stack',
     hardGateRateNotice: 'Rates include observed rejected ideas and drafts with separate factual denominators; null means no observations. Synthetic and Geoffrey results are reported separately.',
     editBurdenSource: votes.judge.kind === 'human' ? 'human_estimates_not_observed_edits' : 'critic_estimates_not_observed_edits',
     syntheticProfileNotice: 'Ten packets use synthetic calibration fixtures; they are not observed human voice or preference evidence.' };

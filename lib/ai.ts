@@ -3,6 +3,7 @@ import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
 import OpenAI from 'openai';
 import type { GenerationModelStackId, GenerationResponseProgress } from './types';
 import { estimateAiUsageCostUsd } from './ai-pricing';
+import { AiBudgetError, reserveAiAttempt, updateAiAttempt, type AiSpendContext } from './ai-budget';
 
 export { estimateAiUsageCostUsd } from './ai-pricing';
 
@@ -38,6 +39,7 @@ export interface AiMessage {
 }
 
 export interface GenerateTextOptions {
+  spendContext?: AiSpendContext;
   system: string;
   prompt?: string;
   messages?: AiMessage[];
@@ -52,6 +54,7 @@ export interface GenerateTextOptions {
 }
 
 export interface GenerateTextResult {
+  spendAttemptId?: string;
   text: string;
   stopReason: string | null;
   provider: AiProvider;
@@ -638,6 +641,7 @@ function annotateGenerationFailure(
 }
 
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+  if ((!options.spendContext?.agentId || !options.spendContext?.runId || !options.spendContext?.operation) && (!IS_TEST_ENV || process.env.AI_BUDGET_TEST_ENFORCE === 'true')) throw new AiBudgetError('attribution_missing');
   const callStartedAt = Date.now();
   const requestedChain = resolveModelChain(options);
   const modelChain = requestedChain;
@@ -653,8 +657,11 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     ? options.timeoutMs
     : DEFAULT_TASK_TIMEOUT_MS[options.task || 'default_quality'];
   const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : null;
+  let paidAttempts = 0;
+  let boundedAccount = false;
   for (let index = 0; index < modelChain.length; index++) {
     const target = modelChain[index];
+    if (boundedAccount && paidAttempts >= 2) break;
     if (!isProviderConfigured(target.provider)) {
       fallbackAttempts.push({ provider: target.provider, model: target.model, reason: 'provider_unconfigured',
         stopReason: null, statusCode: null, errorType: null, inputTokens: null, outputTokens: null,
@@ -664,13 +671,23 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     const attemptStartedAt = Date.now();
     const remainingMs = deadlineAt === null ? null : deadlineAt - Date.now();
     if (remainingMs !== null && remainingMs <= 0) break;
-    const attemptTimeoutMs = remainingMs === null
-      ? null
-      : remainingMs;
-    const abortController = attemptTimeoutMs === null ? null : new AbortController();
+    const abortController = deadlineAt === null ? null : new AbortController();
     const responseProgress: GenerationResponseProgress | undefined = target.provider === 'openai' && target.model === OPENAI_ASTRA_MODEL
       ? { responseId: null, providerModel: null, status: null, firstEventMs: null, firstOutputMs: null, lastEventMs: null, eventCount: 0 }
       : undefined;
+    const reservation = options.spendContext && (!IS_TEST_ENV || process.env.AI_BUDGET_TEST_ENFORCE === 'true') ? await reserveAiAttempt(options.spendContext, target,
+      Buffer.byteLength(JSON.stringify({ system: options.system, messages: getInputMessages(options), schema: options.jsonSchema }), 'utf8'),
+      target.model === OPENAI_ASTRA_MODEL ? Math.max(options.maxTokens, 8192)
+        : target.model === ANTHROPIC_FABLE_MODEL ? Math.max(options.maxTokens, ANTHROPIC_FABLE_MIN_MAX_TOKENS) : options.maxTokens) : null;
+    boundedAccount ||= reservation !== null;
+    await updateAiAttempt(reservation, { state: 'dispatched' });
+    // No SDK call has been made yet. Storage latency consumes the same deadline.
+    const attemptTimeoutMs = deadlineAt === null ? null : deadlineAt - Date.now();
+    if (attemptTimeoutMs !== null && attemptTimeoutMs <= 0) {
+      await updateAiAttempt(reservation, { state: 'released', reason: 'not_dispatched_deadline' });
+      break;
+    }
+    paidAttempts++;
     try {
       const generation = target.provider === 'openai'
         ? generateWithOpenAi(options, target.model, abortController?.signal, responseProgress, attemptStartedAt)
@@ -684,6 +701,10 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
             () => abortController?.abort(),
           );
       const incomplete = ['max_tokens', 'content_filter', 'failed', 'incomplete', 'cancelled', 'queued', 'in_progress', 'pause_turn', 'tool_use', 'refusal'].includes(result.stopReason || '');
+      const observedUsd = estimateAiUsageCostUsd(target.model, result.inputTokens, result.outputTokens);
+      await updateAiAttempt(reservation, { state: observedUsd === null ? 'dispatched' : 'settled', observedUsd,
+        inputTokens: result.inputTokens, outputTokens: result.outputTokens, reasoningEffort: result.reasoningEffort, cachedInputTokens: result.cachedInputTokens, reasoningTokens: result.reasoningTokens, actualModel: result.providerModel || result.model,
+        latencyMs: Date.now() - attemptStartedAt, reason: incomplete ? 'incomplete' : index ? 'fallback' : null });
       if (!result.text.trim() || incomplete) {
         lastError = new Error(`${target.provider}:${target.model} returned ${incomplete ? 'incomplete' : 'empty'} text`);
         fallbackAttempts.push({
@@ -701,10 +722,12 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         });
         continue;
       }
-      const completed = { ...result, requestedProvider: requestedChain[0]?.provider, requestedModel: requestedChain[0]?.model, fallbackAttempts };
+      const completed = { ...result, spendAttemptId: reservation?.id, requestedProvider: requestedChain[0]?.provider, requestedModel: requestedChain[0]?.model, fallbackAttempts };
       recordAiCallAudit(options, completed, requestedChain, fallbackAttempts, callStartedAt);
       return completed;
     } catch (error) {
+      if (error instanceof AiBudgetError) throw error;
+      await updateAiAttempt(reservation, { reason: error instanceof AiGenerationTimeoutError ? 'timeout' : 'provider_error', latencyMs: Date.now() - attemptStartedAt });
       lastError = error;
       const providerError = readProviderError(error);
       fallbackAttempts.push({
@@ -743,7 +766,8 @@ function recordAiCallAudit(options: GenerateTextOptions, result: GenerateTextRes
   const costs = [...attempts.map(attempt => attempt.estimatedCostUsd),
     ...(result ? [estimateAiUsageCostUsd(result.model, result.inputTokens, result.outputTokens)] : [])];
   console.info('[ai:call]', JSON.stringify({
-    task: options.task || 'default_quality', modelStack: options.modelStack || 'standard',
+    agentId: options.spendContext?.agentId, operation: options.spendContext?.operation, runId: options.spendContext?.runId,
+    spendAttemptId: result?.spendAttemptId, task: options.task || 'default_quality', modelStack: options.modelStack || 'standard',
     succeeded: result !== null, requestedProvider: requested[0]?.provider, requestedModel: requested[0]?.model,
     provider: result?.provider ?? null, model: result?.model ?? null, providerModel: result?.providerModel ?? null,
     reasoningEffort: result?.reasoningEffort ?? null, inputTokens: result?.inputTokens ?? null,

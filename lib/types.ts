@@ -894,6 +894,8 @@ export interface IdeaCandidate {
 }
 
 export interface DraftCandidate {
+  judgePolicyVersion?: string;
+  repairDecision?: import('./generation-efficiency').RepairDecision | null;
   schemaVersion: 2;
   id: string;
   agentId: string;
@@ -988,6 +990,9 @@ export type PublishingGenerationRequest =
 
 export type GenerationOutcomeCode =
   | 'completed'
+  | 'budget_exhausted'
+  | 'budget_unavailable'
+  | 'evaluation_deferred'
   | 'no_qualified_context'
   | 'voice_not_ready'
   | 'quality_empty'
@@ -1071,6 +1076,7 @@ export interface GenerationModelCallTrace {
 }
 
 export interface GenerationRunTrace {
+  generationPolicyVersion?: string;
   schemaVersion: 2;
   id: string;
   agentId: string;

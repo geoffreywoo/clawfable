@@ -1,3 +1,5 @@
+import { cachedAiValue } from './ai-value-cache';
+import { aiSpendContext } from './ai-budget';
 /**
  * Performance tracking engine.
  * Checks how posted tweets actually performed, builds learnings,
@@ -880,7 +882,7 @@ export async function checkPerformance(
   const classificationConcurrency = 3;
   for (let index = 0; index < classificationChunks.length; index += classificationConcurrency) {
     classificationResults.push(...await Promise.all(
-      classificationChunks.slice(index, index + classificationConcurrency).map(batchClassifyTweets),
+      classificationChunks.slice(index, index + classificationConcurrency).map(chunk => batchClassifyTweets(chunk, agent.id)),
     ));
   }
   const classifications = new Map(classificationResults.flatMap((result) => [...result.entries()]));
@@ -1000,7 +1002,8 @@ export async function checkPerformance(
  * dimensions they express.
  */
 async function batchClassifyTweets(
-  tweets: Array<{ id: string; text: string }>
+  tweets: Array<{ id: string; text: string }>,
+  agentId?: string,
 ): Promise<Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>> {
   const result = new Map<string, { format: string; topic: string; hook: TweetPerformance['hook']; tone: TweetPerformance['tone']; specificity: TweetPerformance['specificity'] }>();
   if (tweets.length === 0) return result;
@@ -1009,6 +1012,7 @@ async function batchClassifyTweets(
     const tweetList = formatTweetClassificationList(tweets);
 
     const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'performance'),
       task: 'classification',
       maxTokens: getTweetClassificationMaxTokens(tweets.length),
       system: `You classify tweets by content dimensions. For each tweet, output one JSON line with:
@@ -1298,7 +1302,10 @@ export async function buildLearnings(agent: Agent, options: { backfillAudienceFe
     .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights
-  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, agent.handle);
+  const insights = await cachedAiValue(agent.id, 'performance-insights-2',
+    { history: policyLearningHistory, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, accountHandle: agent.handle },
+    () => generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, agent.handle, agent.id))
+    .catch(async () => (await getLearnings(agent.id))?.insights || []);
 
   const learnings: AgentLearnings = {
     learningDerivation,
@@ -1715,6 +1722,7 @@ async function generateInsights(
   styleFingerprint: StyleFingerprint,
   sourceBreakdown: NonNullable<AgentLearnings['sourceBreakdown']>,
   accountHandle: string,
+  agentId?: string,
 ): Promise<string[]> {
   if (history.length < 5) return ['Not enough data yet — need at least 5 tracked tweets.'];
 
@@ -1731,6 +1739,7 @@ async function generateInsights(
 
   try {
     const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'performance'),
       task: 'learning',
       modelStack: resolvePublishingV2ModelStacks(accountHandle).learningStack,
       maxTokens: getLearningInsightMaxTokens(history.length),
@@ -1775,8 +1784,8 @@ Generate prescriptive rules for improving content quality. Focus on style patter
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())
       .filter((l) => l.length > 10)
       .slice(0, 7);
-  } catch {
-    return ['Insight generation failed — will retry on next learning cycle.'];
+  } catch (error) {
+    throw error;
   }
 }
 

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getAgent: mocks.getAgent,
+  getAiOperationalState: async () => null,
   resetReadCache: mocks.resetReadCache,
 }));
 

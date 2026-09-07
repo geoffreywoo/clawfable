@@ -1,3 +1,4 @@
+export const AI_PRICING_VERSION = 'standard-2026-09-04-v1';
 export interface AiModelTokenRates {
   input: number;
   output: number;
@@ -32,6 +33,10 @@ function configuredRates(): Record<string, AiModelTokenRates> {
   } catch {
     return DEFAULT_AI_MODEL_COSTS_USD_PER_MILLION;
   }
+}
+
+export function getAiModelPricing(model: string): AiModelTokenRates | null {
+  return configuredRates()[model] || null;
 }
 
 export function hasAiModelPricing(model: string | null | undefined): boolean {

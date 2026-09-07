@@ -1,6 +1,7 @@
+import { createEfficiencyScreen, scoreEfficiencyScreen } from '../lib/efficiency-screen';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createFrozenEvaluationSnapshot, validateFrozenEvaluation, runFrozenEvaluation, blindedEvaluationCards, scoreFrozenEvaluation, frozenEvaluationCoverage,
+import { createFrozenEvaluationSnapshot, evaluationHash, validateFrozenEvaluation, runFrozenEvaluation, blindedEvaluationCards, scoreFrozenEvaluation, frozenEvaluationCoverage,
   type FrozenEvaluationSnapshot, type EvaluationComparison, type EvaluationVotes,
 } from '../lib/astra-evaluation';
 import { getAgentByHandle, getAnalysis, getSourceDocuments, getStoryClusters, getSemanticBlocks, getIdeaCandidates, getPerformanceHistory, getManualExampleCuration, getVoiceCorpusSnapshot } from '../lib/kv-storage';
@@ -35,7 +36,7 @@ async function loadJson<T>(filename: string | undefined): Promise<T> {
 async function main() {
   const modes = ['--capture', '--validate', '--coverage', '--run', '--score'].filter((mode) => process.argv.includes(mode));
   if (modes.length !== 1) {
-    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--common-judge gpt|astra] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --coverage --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--complete-suite] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Common-judge snapshots isolate writing from judging and cannot promote the full creative stack. Coverage writes a separate manifest without changing the frozen benchmark. Complete-suite attempts all paired arms despite generation failures with known costs or auditable per-request Astra reservations; authentication, integrity, unreserved unknown spend, or budget exhaustion still stop new work. Attempted completion is not promotion validity. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at known spend plus conservative unknown-attempt reservations; reservations are not observed charges or guaranteed billing maxima, and in-flight arms may exceed the ceiling. SIGINT/SIGTERM drain active arms into private receipts. The hand-authored stress set and synthetic profiles are not an empirical sample of account traffic or human preferences.');
+    console.log('Use exactly one mode: --capture [--handle geoffwoo] [--common-judge gpt|astra] [--efficiency-screen | --efficient-policy] [--out .gstack/astra-evaluation/session/snapshot.json]; --validate --snapshot FILE; --coverage --snapshot FILE; --run --snapshot FILE [--limit 40] [--concurrency 1] [--max-cost-usd 100] [--complete-suite] [--remote-origin https://clawfable.com]; --score --comparison FILE --votes FILE. Common-judge snapshots isolate writing from judging and cannot promote the full creative stack. Coverage writes a separate manifest without changing the frozen benchmark. Complete-suite attempts all paired arms despite generation failures with known costs or auditable per-request Astra reservations; authentication, integrity, unreserved unknown spend, or budget exhaustion still stop new work. Attempted completion is not promotion validity. Run invokes real models locally with OPENAI_API_KEY or remotely with CRON_SECRET. Concurrency is 1–4 packets; each pair stays sequential. The cost budget stops new arms at known spend plus conservative unknown-attempt reservations; reservations are not observed charges or guaranteed billing maxima, the provider boundary separately enforces the durable $20 Pacific-day account ceiling and $3 run ceiling. Eight-brief screens have a shared $12 campaign ceiling. Live inventory takes priority. SIGINT/SIGTERM drain active arms into private receipts. The hand-authored stress set and synthetic profiles are not an empirical sample of account traffic or human preferences.');
     if (modes.length > 1) process.exitCode = 1;
     return;
   }
@@ -53,10 +54,16 @@ async function main() {
       getPerformanceHistory(agent.id, 5000), getManualExampleCuration(agent.id), getVoiceCorpusSnapshot(agent.id),
     ]);
     if (!analysis) throw new Error('The account has no stored analysis to capture.');
-    const snapshot = createFrozenEvaluationSnapshot({ account: { id: agent.id, handle: agent.handle }, context,
+    let snapshot = createFrozenEvaluationSnapshot({ account: { id: agent.id, handle: agent.handle }, context,
       baseVoiceProfile: parseSoulMd(agent.name, agent.soulMd), analysis, documents, stories, blocks, recentIdeas, referenceEvidence: { history, curation, corpus },
       previewJudgeModelStack: commonJudge === 'gpt' ? 'publishing_v2_gpt_control' : commonJudge === 'astra' ? 'publishing_v2_astra' : undefined,
     });
+    if (process.argv.includes('--efficient-policy')) {
+      const {hash,...body}=snapshot;
+      const next={...body,packets:body.packets.map(p=>({...p,input:{...p.input,generationPolicy:'budget_v1' as const,previewJudgeModelStack:'publishing_v2_gpt_control' as const}}))};
+      snapshot={...next,hash:evaluationHash(next)};
+    }
+    if (process.argv.includes('--efficiency-screen')) snapshot = createEfficiencyScreen(snapshot, { documents, stories, blocks, recentIdeas });
     const output = privatePath(arg('--out') || path.join(privateRoot, timestamp, 'snapshot.json'));
     await saveJson(output, snapshot);
     await saveJson(path.join(path.dirname(output), 'manifest.json'), {
@@ -113,7 +120,7 @@ async function main() {
       runArm: remoteRunner, signal: controller.signal,
       failurePolicy: process.argv.includes('--complete-suite') ? 'complete_suite' : 'fail_fast',
       limit: Number(arg('--limit') ?? 40), concurrency: Number(arg('--concurrency') ?? 1),
-      maxEstimatedCostUsd: Number(arg('--max-cost-usd') ?? 100),
+      maxEstimatedCostUsd: snapshot.purpose === 'efficiency_screen' ? Math.min(12, Number(arg('--max-cost-usd') ?? 12)) : Number(arg('--max-cost-usd') ?? 100),
       onProgress: async (progress) => {
         await saveJson(comparisonFile, progress);
         console.log(JSON.stringify({ completedPackets: progress.packets.filter((packet) => packet.baseline.validPrimaryModels && packet.astra.validPrimaryModels).length,
@@ -130,6 +137,7 @@ async function main() {
     process.removeListener('SIGTERM', onSigterm);
   }
   await saveJson(comparisonFile, comparison);
+  if (snapshot.purpose === 'efficiency_screen') await saveJson(path.join(outputDirectory, 'efficiency-score.json'), scoreEfficiencyScreen(comparison));
   await saveJson(path.join(outputDirectory, 'blinded-cards.json'), blindedEvaluationCards(snapshot, comparison));
   await saveJson(path.join(outputDirectory, 'votes-template.json'), {
     snapshotHash: snapshot.hash, judge: { kind: 'human', id: '' },

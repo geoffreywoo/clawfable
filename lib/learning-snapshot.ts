@@ -1911,7 +1911,7 @@ export function buildLearningSnapshot({
     policyChanges: narratives.policyChanges,
     decisionInsights,
     planner,
-    tasteCalibration: buildTasteCalibrationQueue(allTweets),
+    tasteCalibration: buildTasteCalibrationQueue(allTweets, new Date(nowMs), { signals, feedback }),
     soulEvolution: memory.soulEvolution ?? null,
   };
 }

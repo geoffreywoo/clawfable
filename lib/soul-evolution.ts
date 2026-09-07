@@ -1,3 +1,4 @@
+import { aiSpendContext } from './ai-budget';
 /**
  * Soul evolution engine.
  * Periodically updates the SOUL.md based on what the learning loop discovers.
@@ -295,6 +296,7 @@ async function evolveSoul(
       .join('\n');
 
     const response = await generateText({
+      spendContext: aiSpendContext(agent.id, 'soul-evolution'),
       task: 'learning',
       modelStack: resolvePublishingV2ModelStacks(agent.handle).activeStack,
       maxTokens: getSoulEvolutionMaxTokens(currentSoul.length),

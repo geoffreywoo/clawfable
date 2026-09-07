@@ -1,3 +1,4 @@
+import { aiSpendContext } from './ai-budget';
 import { generateText, resolvePublishingV2ModelStacks } from './ai';
 import { CLAWFABLE_PLATFORM_GOAL } from './platform-goal';
 import type { StyleSignals } from './types';
@@ -49,10 +50,11 @@ export function formatSoulExampleTweets(exampleTweets: string[]): string {
     .join('\n');
 }
 
-export async function extractStyleSignals(exampleTweets: string[]): Promise<StyleSignals> {
+export async function extractStyleSignals(exampleTweets: string[], agentId?: string): Promise<StyleSignals> {
   if (exampleTweets.length === 0) return DEFAULT_STYLE_SIGNALS;
   try {
     const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'soul-generation'),
       task: 'classification',
       maxTokens: getStyleExtractionMaxTokens(exampleTweets.length),
       system: 'You are a writing style analyst. Analyze the given tweets and extract style patterns. Output valid JSON only, no markdown.',
@@ -78,12 +80,14 @@ export async function generateSoulMd(
   exampleTweets: string[],
   agentName: string,
   accountHandle?: string,
+  agentId?: string,
 ): Promise<string> {
   try {
     const examplesSection = exampleTweets.length > 0
       ? `\n\nExample tweets this agent admires or has written:\n${formatSoulExampleTweets(exampleTweets)}`
       : '';
     const response = await generateText({
+      spendContext: aiSpendContext(agentId, 'soul-generation'),
       task: 'soul_generation',
       modelStack: resolvePublishingV2ModelStacks(accountHandle).learningStack,
       maxTokens: getSoulGenerationMaxTokens(exampleTweets.length),

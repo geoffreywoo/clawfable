@@ -218,6 +218,18 @@ async function mutateStoredValue<T, R>(
   }
 }
 
+/** Account-owned durable operational state. Never silently use local memory in production. */
+export async function mutateAiOperationalState<T, R>(agentId: string, namespace: string,
+  update: (current: T | null) => CasMutation<T, R>): Promise<R> {
+  if (process.env.NODE_ENV === 'production' && !await getKvClient()) throw new Error('ai_budget_storage_unavailable');
+  return mutateStoredValue(`agent:${agentId}:ai:${namespace}`, update);
+}
+
+export async function getAiOperationalState<T>(agentId: string, namespace: string): Promise<T | null> {
+  if (process.env.NODE_ENV === 'production' && !await getKvClient()) throw new Error('ai_budget_storage_unavailable');
+  return kvGet<T>(`agent:${agentId}:ai:${namespace}`);
+}
+
 // When a real client is configured, a failed command is retried once and then
 // rethrown. Falling back to the process-local memStore would report success
 // while KV truth stays unchanged, which callers cannot detect.

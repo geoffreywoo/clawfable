@@ -61,9 +61,9 @@ export async function POST(
 
     // Parallel model calls: SOUL.md generation + style extraction
     const [soulMd, styleSignals] = await Promise.all([
-      generateSoulMd(archetype, topics, examples, agent.name, agent.handle),
+      generateSoulMd(archetype, topics, examples, agent.name, agent.handle, agent.id),
       examples.length > 0
-        ? extractStyleSignals(examples)
+        ? extractStyleSignals(examples, agent.id)
         : Promise.resolve({ sentenceLength: 'mixed' as const, vocabulary: 'mixed' as const, toneMarkers: [], topicPreferences: topics, rawExtraction: '' }),
     ]);
 

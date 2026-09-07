@@ -1,3 +1,5 @@
+import { recordEmptyQueueRun } from './generation-efficiency';
+import { recordAutopostReadyOutput } from './ai-budget';
 /**
  * Autopilot engine.
  * Manages automated tweet posting and mention replies for agents.
@@ -2858,7 +2860,7 @@ export async function refillQueue(
 ): Promise<number> {
   try {
     const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
-    const refillCount = Math.min(2, Math.max(0, count));
+    let refillCount = Math.min(2, Math.max(0, count));
     if (refillCount <= 0) return 0;
     const analysis = await getAnalysis(agent.id);
     if (!analysis) return 0;
@@ -2867,6 +2869,13 @@ export async function refillQueue(
       negativeLimit: 10,
       directiveLimit: 10,
     });
+    if (isGeoffreyAccount(agent.handle)) {
+      const settings = context.settings;
+      const currentQueue = await getQueuedTweets(agent.id);
+      const valid = await validateQueuedTweetsForPosting(agent, currentQueue.filter(tweet => !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId));
+      refillCount = Math.min(refillCount, Math.max(0, settings.minQueueSize - valid.length));
+      if (refillCount === 0) return 0;
+    }
     if (context.learnings?.voiceCorpus?.active !== true) {
       context.learnings = await buildLearnings(agent);
     }
@@ -3166,13 +3175,20 @@ export async function refillQueue(
           topic: item.targetTopic,
         });
         contentMixHistory.push(persistedTweet);
+        if (isGeoffreyAccount(agent.handle)) await recordAutopostReadyOutput(agent.id, persistedTweet).catch(() => console.warn('[ai:yield] receipt pending', persistedTweet.id));
         await recordQueueDecision(item, 'persisted').catch(() => null);
         addedFromBatch++;
       }
       return addedFromBatch;
     };
 
-    return await addBatchItems(allBatch);
+    const added = await addBatchItems(allBatch);
+    if (added === 0 && isGeoffreyAccount(agent.handle)) {
+      for (const runId of new Set(allBatch.flatMap(item => item.generationRunId ? [item.generationRunId] : []))) {
+        await recordEmptyQueueRun(agent.id, runId).catch(() => null);
+      }
+    }
+    return added;
   } catch (err) {
     await addPostLogEntry(agent.id, {
       agentId: agent.id,

@@ -1,3 +1,5 @@
+import { cachedAiValue } from './ai-value-cache';
+import { aiSpendContext } from './ai-budget';
 import type {
   Agent,
   AgentLearnings,
@@ -448,10 +450,19 @@ export function normalizeModelClaims(value: unknown, document: SourceDocument): 
   return claims.length > 0 ? claims.slice(0, 3) : document.claims;
 }
 
-export async function enrichSourceDocuments(
+export async function enrichSourceDocuments(documents: SourceDocument[], modelStack: GenerationModelStackId = 'standard',
+  onModelCall?: (call: GenerationModelCallTrace) => void, agentId?: string): Promise<SourceDocument[]> {
+  const cached = await cachedAiValue(agentId, 'source-enrichment-2', documents.map(doc => ({ id: doc.id, title: doc.title,
+    contentHash: doc.contentHash, content: doc.excerpt, url: doc.canonicalUrl })),
+    () => enrichSourceDocumentsUncached(documents, modelStack, onModelCall, agentId));
+  return documents.map(doc => { const enriched = cached.find(item => item.id === doc.id); return enriched && enriched !== doc ? { ...doc, claims: enriched.claims, entities: enriched.entities } : doc; });
+}
+
+async function enrichSourceDocumentsUncached(
   documents: SourceDocument[],
   modelStack: GenerationModelStackId = 'standard',
   onModelCall?: (call: GenerationModelCallTrace) => void,
+  agentId?: string,
 ): Promise<SourceDocument[]> {
   if (documents.length === 0 || !hasTextGenerationProvider()) return documents;
   const selected = selectSourceDocumentsForEnrichment(documents, 8);
@@ -459,6 +470,7 @@ export async function enrichSourceDocuments(
   let result: Awaited<ReturnType<typeof generateText>>;
   try {
     result = await generateText({
+      spendContext: aiSpendContext(agentId, 'research-pipeline'),
       task: 'source_enrichment',
       modelStack,
       maxTokens: 6400,
@@ -1049,6 +1061,7 @@ export async function refreshAgentResearch(
           fetchedDocuments,
           options.modelStack,
           (call) => sourceModelCalls.push(call),
+          agent.id,
         );
       } catch (error) {
         errors.push(`source_enrichment: ${error instanceof Error ? error.message : String(error)}`);

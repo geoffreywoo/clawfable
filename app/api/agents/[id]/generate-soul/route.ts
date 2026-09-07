@@ -28,7 +28,7 @@ export async function POST(
       accessSecret: agent.accessSecret,
     });
 
-    const result = await generateSoulFromTweets(keys, agent.xUserId, agent.name);
+    const result = await generateSoulFromTweets(keys, agent.xUserId, agent.name, agent.id);
 
     // Save the generated SOUL.md to the agent
     const voiceProfile = parseSoulMd(agent.name, result.soulMd);

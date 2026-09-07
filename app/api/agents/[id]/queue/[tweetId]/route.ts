@@ -326,6 +326,7 @@ export async function DELETE(
     const intentSummary = userReason
       || structuredOption?.description
       || await inferDeleteIntent({
+        agentId: id,
         agentName: agent.name,
         soulMd: agent.soulMd,
         tweetText: tweet.content,

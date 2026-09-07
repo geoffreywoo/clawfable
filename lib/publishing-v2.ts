@@ -1,3 +1,4 @@
+import { aiSpendContext } from './ai-budget';
 import type {
   ActionRewardBreakdown,
   AutomationEntitlement,
@@ -733,6 +734,7 @@ async function generateContextualBatchV2(
     } else {
       ensureRunDeadline();
       const response = await trackedGenerate('idea_generation', {
+        spendContext: aiSpendContext(input.agentId, 'contextual-generation', runId, 3),
         task: 'idea_generation',
         modelStack: input.modelStack,
         maxTokens: 800,
@@ -813,6 +815,7 @@ async function generateContextualBatchV2(
     const writerResults = await Promise.all([0, 1].map(async (variant) => {
       try {
         return await trackedGenerate('tweet_writing', {
+        spendContext: aiSpendContext(input.agentId, 'contextual-generation', runId, 3),
           task: 'tweet_writing',
           modelStack: input.modelStack,
           maxTokens: 600,
@@ -915,6 +918,7 @@ async function generateContextualBatchV2(
     try {
       ensureRunDeadline();
       judgeResult = await trackedGenerate('copy_judgment', {
+        spendContext: aiSpendContext(input.agentId, 'contextual-generation', runId, 3),
         task: 'copy_judgment',
         modelStack: input.modelStack,
         maxTokens: 1400,

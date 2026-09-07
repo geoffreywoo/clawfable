@@ -1,3 +1,4 @@
+import { getAiBudgetSummary } from '@/lib/ai-budget';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildGenerationQualityAudit } from '@/lib/generation-quality-audit';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
@@ -18,7 +19,7 @@ export async function GET(
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
 
   const audit = await buildGenerationQualityAudit(agent);
-  return NextResponse.json(audit, {
+  return NextResponse.json({ ...audit, aiBudget: await getAiBudgetSummary(id) }, {
     headers: { 'Cache-Control': 'private, no-store' },
   });
 }

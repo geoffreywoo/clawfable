@@ -91,6 +91,7 @@ export async function refreshAgentTopicIntelligence(
     });
     const previousNetworkState = await getTopicIntelligenceState(agent.id);
     const discovery = await discoverCurrentTrends(keys, String(agent.xUserId), {
+      network: { agentId: agent.id },
       previousNetworkState,
     });
     if (discovery.networkRefreshed && discovery.networkState) {

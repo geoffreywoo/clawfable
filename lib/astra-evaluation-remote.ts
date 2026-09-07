@@ -1,3 +1,4 @@
+import { evaluationSpendContext } from './ai-budget';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { ASTRA_EVALUATION_VERSION } from './astra-evaluation-fixtures';
 import { evaluationHash, validateFrozenEvaluationAge, runFrozenEvaluationArm,
@@ -16,6 +17,7 @@ export class EvaluationRequestError extends Error {
 }
 
 export interface FrozenArmEnvelope {
+  purpose?: 'efficiency_screen';
   protocol: typeof PROTOCOL_VERSION;
   version: string;
   capturedAt: string;
@@ -48,7 +50,8 @@ function onlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 
 export function validateFrozenArmEnvelope(value: unknown, now = new Date()): FrozenArmEnvelope {
   inspectJsonTree(value);
-  if (!object(value) || !onlyKeys(value, ['protocol', 'version', 'capturedAt', 'snapshotHash', 'packetHash', 'packet', 'stack'])
+  if (!object(value) || !onlyKeys(value, ['protocol', 'version', 'capturedAt', 'snapshotHash', 'packetHash', 'packet', 'stack', 'purpose'])
+    || (value.purpose !== undefined && value.purpose !== 'efficiency_screen')
     || value.protocol !== PROTOCOL_VERSION || value.version !== ASTRA_EVALUATION_VERSION
     || typeof value.snapshotHash !== 'string' || !HASH.test(value.snapshotHash)
     || typeof value.packetHash !== 'string' || !HASH.test(value.packetHash)
@@ -64,7 +67,8 @@ export function validateFrozenArmEnvelope(value: unknown, now = new Date()): Fro
     || packet.calibrationSource !== (packet.kind === 'geoffrey' ? 'captured_account_references' : 'synthetic_fixture_no_human_ground_truth')
     || !object(packet.input)) throw new EvaluationRequestError('Invalid frozen packet.');
   const input = packet.input;
-  if (!onlyKeys(input, ['agentId', 'count', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings', 'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'mode', 'persistArtifacts', 'requireAutopostQuality', 'previewContext', 'previewJudgeModelStack'])
+  if (!onlyKeys(input, ['agentId', 'count', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings', 'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'mode', 'persistArtifacts', 'requireAutopostQuality', 'previewContext', 'previewJudgeModelStack', 'generationPolicy'])
+    || (input.generationPolicy !== undefined && input.generationPolicy !== 'budget_v1')
     || (input.previewJudgeModelStack !== undefined && !['publishing_v2_gpt_control', 'publishing_v2_astra'].includes(input.previewJudgeModelStack))
     || typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 160
     || input.count !== 1 || input.mode !== 'preview' || input.persistArtifacts !== false || input.requireAutopostQuality !== true
@@ -127,14 +131,19 @@ export async function decodeFrozenArmRequest(request: Request): Promise<FrozenAr
   return validateFrozenArmEnvelope(value);
 }
 
-export function createFrozenArmEnvelope(snapshot: Pick<FrozenEvaluationSnapshot, 'version' | 'capturedAt' | 'hash'>,
+export function createFrozenArmEnvelope(snapshot: Pick<FrozenEvaluationSnapshot, 'version' | 'capturedAt' | 'hash' | 'purpose'>,
   packet: FrozenEvaluationPacket, stack: EvaluationArmResult['stack']): FrozenArmEnvelope {
-  return { protocol: PROTOCOL_VERSION, version: snapshot.version, capturedAt: snapshot.capturedAt,
+  return { ...(snapshot.purpose ? { purpose: snapshot.purpose } : {}), protocol: PROTOCOL_VERSION, version: snapshot.version, capturedAt: snapshot.capturedAt,
     snapshotHash: snapshot.hash, packetHash: evaluationHash(packet), packet, stack };
 }
 
 export async function executeFrozenArmEnvelope(envelope: FrozenArmEnvelope) {
-  const arm = await runFrozenEvaluationArm(envelope.packet, envelope.stack);
+  let spendContext;
+  if (process.env.NODE_ENV !== 'test') {
+    try { spendContext = await evaluationSpendContext(envelope.snapshotHash, envelope.purpose === 'efficiency_screen' ? 12 : 100); }
+    catch (error) { throw new EvaluationRequestError(error instanceof Error ? error.message : 'evaluation_deferred', 409); }
+  }
+  const arm = await runFrozenEvaluationArm(envelope.packet, envelope.stack, { spendContext });
   // Provider error bodies can contain partial API keys. Keep the audit outcome
   // and model provenance, but never transport raw provider error messages.
   const sanitized = JSON.parse(JSON.stringify(arm, (key, value) => (
@@ -145,7 +154,7 @@ export async function executeFrozenArmEnvelope(envelope: FrozenArmEnvelope) {
     packetId: envelope.packet.id, gitCommit: process.env.VERCEL_GIT_COMMIT_SHA || null, arm: sanitized };
 }
 
-export function createRemoteEvaluationRunner(snapshot: Pick<FrozenEvaluationSnapshot, 'version' | 'capturedAt' | 'hash'>,
+export function createRemoteEvaluationRunner(snapshot: Pick<FrozenEvaluationSnapshot, 'version' | 'capturedAt' | 'hash' | 'purpose'>,
   options: { origin: string; secret: string; fetch?: typeof fetch }): EvaluationArmRunner {
   let origin: URL;
   try { origin = new URL(options.origin); } catch { throw new Error('Remote evaluation requires an HTTPS origin.'); }

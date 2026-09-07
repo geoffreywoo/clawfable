@@ -362,6 +362,40 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
+  it('uses identical calibrated critic contracts while retaining different generation policies', async () => {
+    const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
+    const critics:any[]=[]; const traces:any[]=[];
+    for (const modelStack of ['publishing_v2_gpt_control','publishing_v2_astra'] as const) {
+      mocks.generateText.mockClear();
+      await generateTweetBatchV2({ ...input,modelStack,generationPolicy:'budget_v1',previewJudgeModelStack:'publishing_v2_gpt_control',
+        mode:'preview',persistArtifacts:false,previewContext:{briefs,documents:sourceDocuments,stories:storyClusters},onTrace:t=>{traces.push(t);},
+      });
+      critics.push(mocks.generateText.mock.calls.map(([o])=>o).find(o=>o.task==='copy_judgment'));
+    }
+    expect(critics.every(Boolean)).toBe(true);
+    expect(critics[0].system).toBe(critics[1].system);
+    expect(critics[0].jsonSchema).toEqual(critics[1].jsonSchema);
+    expect(critics.every(o=>o.modelStack==='publishing_v2_gpt_control'&&o.openAiReasoningEffort==='medium')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='legacy-v2')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-1')).toBe(true);
+  });
+
+  it('bounds the efficient policy to one idea and one writer per brief with common medium judges', async () => {
+    const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
+    let trace: any;
+    await generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', generationPolicy: 'budget_v1',
+      mode: 'preview', persistArtifacts: false, previewContext: { briefs, documents: sourceDocuments, stories: storyClusters },
+      onTrace: value => { trace=value; },
+    });
+    const calls=mocks.generateText.mock.calls.map(([options])=>options);
+    expect(calls.filter(o=>o.task==='idea_generation')).toHaveLength(Math.min(2,briefs.length));
+    expect(calls.filter(o=>o.task==='tweet_writing').length).toBeLessThanOrEqual(2);
+    expect(calls.filter(o=>o.task==='idea_judgment'||o.task==='copy_judgment').every(o=>o.modelStack==='publishing_v2_gpt_control' && o.openAiReasoningEffort==='medium')).toBe(true);
+    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-1');
+    expect(trace.stageCounts.ideaRetryCalls).toBe(0);
+    expect(trace.stageCounts.rescueDraftsGenerated || 0).toBe(0);
+  });
+
   it('runs frozen Astra previews through the real gates without reading or writing account storage', async () => {
     const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
     let trace: any;
