@@ -7464,7 +7464,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const failed = input.mode === 'preview' ? new Set<string>() : await failedBriefKeys(input.agentId);
       for (const brief of briefs) {
         const claims = sourceDocumentsForBrief(brief, documents).flatMap(doc => doc.claims.filter(c => brief.qualifiedClaimIds.includes(c.id)).map(c => c.text));
-        briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, trace.voiceCorpusVersion || JSON.stringify(input.voiceProfile) || '', trace.qualityPolicyVersion || ''));
+        briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${EFFICIENT_GENERATION_POLICY}`));
       }
       briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!)).slice(0, Math.min(2, input.count));
       if (input.mode !== 'preview') {
