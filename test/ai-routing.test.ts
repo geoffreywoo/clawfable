@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const ENV_KEYS = [
+  'AI_MODEL_POLICY',
   'OPENAI_API_KEY',
   'OPENAI_REASONING_EFFORT',
   'OPENAI_REASONING_EFFORT_TWEET_WRITING',
@@ -1123,5 +1124,22 @@ describe('Astra creative pilot', () => {
     expect(openAi).not.toHaveBeenCalled();
     expect(result).toMatchObject({ requestedModel: 'gpt-6-astra', provider: 'anthropic' });
     expect(result.fallbackAttempts[0]).toMatchObject({ model: 'gpt-6-astra', reason: 'provider_unconfigured', durationMs: 0 });
+  });
+});
+
+describe('operator-directed all-Astra production policy', () => {
+  it('routes every task and stack to Astra with no older fallback', async () => {
+    const router=await loadDefaultRouter();process.env.AI_MODEL_POLICY='astra_all';
+    const tasks=['source_enrichment','idea_generation','idea_judgment','tweet_writing','copy_judgment','tweet_generation','creative_variant','bulk_judgment','final_judgment','reply_generation','reply_scoring','learning','classification','soul_generation','exceptional','default_quality'] as const;
+    for(const stack of ['standard','publishing_v2_quality','publishing_v2_gpt_control','publishing_v2_fable_control','publishing_v2_astra'] as const)
+      for(const task of tasks) expect(router.getModelChainForTask(task,stack)).toEqual([{provider:'openai',model:'gpt-6-astra'}]);
+    for(const handle of ['geoffwoo','another_creator'])expect(router.resolvePublishingV2ModelStacks(handle).activeStack).toBe('publishing_v2_astra');
+  });
+  it.each([['classification','low'],['source_enrichment','low'],['copy_judgment','medium'],['learning','high'],['tweet_writing','high']] as const)('uses Astra for explicit older %s callers at %s effort',async(task,effort)=>{
+    const create=vi.fn().mockResolvedValue({status:'completed',output_text:'Done',usage:{input_tokens:50,output_tokens:10}});
+    const {generateText}=await loadGeneratorWithOpenAiMock(create);process.env.AI_MODEL_POLICY='astra_all';
+    const output=await generateText({task,system:'Task',prompt:'Content',maxTokens:500,temperature:.8,modelChain:[{provider:'openai',model:'gpt-5.6'}]});
+    expect(create.mock.calls[0][0]).toMatchObject({model:'gpt-6-astra',reasoning:{effort},max_output_tokens:8192});
+    expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');expect(output.model).toBe('gpt-6-astra');
   });
 });
