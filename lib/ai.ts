@@ -129,6 +129,8 @@ const ANTHROPIC_QUALITY_MODEL = 'claude-sonnet-4-6';
 const ANTHROPIC_FABLE_MIN_MAX_TOKENS = 4000;
 const OPENAI_REASONING_EFFORTS = new Set<OpenAiReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const OAI_ASTRA: AiModelTarget = { provider: 'openai', model: OPENAI_ASTRA_MODEL };
+const ASTRA_UTILITY_TASKS = new Set<AiTask>(['classification', 'source_enrichment', 'default_quality']);
+export function usesAstraForAllTasks(): boolean { return process.env.AI_MODEL_POLICY === 'astra_all'; }
 const ASTRA_JUDGE_TASKS = new Set<AiTask>(['idea_judgment', 'copy_judgment', 'bulk_judgment', 'final_judgment', 'reply_scoring']);
 // Byte-level tokenization uses no more tokens than UTF-8 bytes for literal
 // request text. Reserve extra room for provider framing/schema representation;
@@ -173,6 +175,7 @@ export interface PublishingV2ModelStackAssignment {
 }
 
 export function resolvePublishingV2ModelStacks(handle?: string | null): PublishingV2ModelStackAssignment {
+  if (usesAstraForAllTasks()) return { activeStack: PUBLISHING_V2_ASTRA_MODEL_STACK, learningStack: PUBLISHING_V2_ASTRA_MODEL_STACK, shadowStack: PUBLISHING_V2_ASTRA_MODEL_STACK, reason: 'astra_general_release' };
   const normalizedHandle = String(handle || '').trim().replace(/^@/, '').toLowerCase();
   // Promotion is explicit: deploy the compatibility and correctness work before
   // enabling the pilot, and never broaden it because a model happens to exist.
@@ -348,7 +351,7 @@ function getOpenAiReasoning(options: GenerateTextOptions, model: string): { effo
   if (normalizeOpenAiModelName(model) === OPENAI_ASTRA_MODEL) {
     const effort = configured === 'none' || configured === 'minimal'
       ? 'low'
-      : configured || (options.task && ASTRA_JUDGE_TASKS.has(options.task) ? 'medium' : 'high');
+      : configured || (options.task && ASTRA_UTILITY_TASKS.has(options.task) ? 'low' : options.task && ASTRA_JUDGE_TASKS.has(options.task) ? 'medium' : 'high');
     return { effort };
   }
   const effort = configured || getDefaultOpenAiReasoningEffort(model);
@@ -377,6 +380,7 @@ export function getModelChainForTask(
   task: AiTask,
   modelStack: GenerationModelStackId = 'standard',
 ): AiModelTarget[] {
+  if (usesAstraForAllTasks()) return [OAI_ASTRA];
   if (modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK) {
     const utilityTask = task === 'classification' || task === 'source_enrichment' || task === 'default_quality';
     if (!utilityTask) {
@@ -387,6 +391,8 @@ export function getModelChainForTask(
 }
 
 function resolveModelChain(options: GenerateTextOptions): AiModelTarget[] {
+  // Operator-directed live policy also covers explicit legacy utility/feature chains.
+  if (usesAstraForAllTasks()) return [OAI_ASTRA];
   if (options.modelChain?.length) {
     const taskFallbacks = options.task
       ? getModelChainForTask(options.task, options.modelStack)

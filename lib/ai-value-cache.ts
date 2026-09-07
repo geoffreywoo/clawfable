@@ -5,7 +5,7 @@ interface CachedValue<T> { digest: string; value?: T; owner?: string; leaseUntil
 /** A content/version cache, not a time-based permission to repeat a paid call. */
 export async function cachedAiValue<T>(agentId: string | undefined, operation: string, material: unknown, compute: () => Promise<T>): Promise<T> {
   if (!agentId || (process.env.NODE_ENV === 'test' && process.env.AI_BUDGET_TEST_ENFORCE !== 'true')) return compute();
-  const digest = createHash('sha256').update(JSON.stringify(material)).digest('hex');
+  const digest = createHash('sha256').update(JSON.stringify({ modelPolicy: process.env.AI_MODEL_POLICY || 'legacy_task_chains', material })).digest('hex');
   const namespace = `cache:${operation}:${digest}`;
   const owner = randomUUID();
   const claimed = await mutateAiOperationalState<CachedValue<T>, CachedValue<T>>(agentId, namespace, current => {

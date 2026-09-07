@@ -595,6 +595,9 @@ export function usesEfficientGeneration(input: Pick<GenerateTweetBatchV2Input, '
 }
 
 // Both evaluation arms use the same critic contract; only the Astra arm changes generation.
+function budgetJudgeStack(): GenerationModelStackId {
+  return process.env.AI_MODEL_POLICY === 'astra_all' ? PUBLISHING_V2_ASTRA_MODEL_STACK : PUBLISHING_V2_GPT_CONTROL_MODEL_STACK;
+}
 function usesBudgetJudge(input: GenerateTweetBatchV2Input): boolean {
   return usesEfficientGeneration(input) || (input.generationPolicy === 'budget_v1'
     && input.mode === 'preview' && input.persistArtifacts === false && isGeoffreyVoiceProfile(input.voiceProfile));
@@ -4615,7 +4618,7 @@ async function selectIdeas({
     for (let attempt = 0; attempt < (usesEfficientGeneration(input) ? 1 : 2); attempt++) {
       const result = await trackedGenerate('idea_judgment', {
         task: 'idea_judgment',
-        modelStack: usesBudgetJudge(input) ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : input.previewJudgeModelStack || input.modelStack,
+        modelStack: usesBudgetJudge(input) ? budgetJudgeStack() : input.previewJudgeModelStack || input.modelStack,
         ...(usesBudgetJudge(input) ? { openAiReasoningEffort: 'medium' as const } : {}),
         maxTokens: 3000,
         temperature: 0,
@@ -6046,7 +6049,7 @@ async function judgeDraftsOnce(
     });
     const result = await trackedGenerate('copy_judgment', {
       task: 'copy_judgment',
-      modelStack: usesBudgetJudge(input) ? PUBLISHING_V2_GPT_CONTROL_MODEL_STACK : input.previewJudgeModelStack || input.modelStack,
+      modelStack: usesBudgetJudge(input) ? budgetJudgeStack() : input.previewJudgeModelStack || input.modelStack,
         ...(usesBudgetJudge(input) ? { openAiReasoningEffort: 'medium' as const } : {}),
       maxTokens: 3200,
       temperature: 0,
@@ -6585,7 +6588,7 @@ async function selectFinalTweets({
     evaluation.draft.judgeProvider = judge.provider;
     evaluation.draft.judgeModel = judge.model;
     evaluation.draft.judgeScore = score.overall;
-    evaluation.draft.judgePolicyVersion = usesBudgetJudge(input) ? 'budget-copy-judge-1' : getGenerationPolicyVersions(input.voiceProfile, input.surface || 'original').finalCriticVersion;
+    evaluation.draft.judgePolicyVersion = usesBudgetJudge(input) ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1') : getGenerationPolicyVersions(input.voiceProfile, input.surface || 'original').finalCriticVersion;
     evaluation.draft.judgeRawNotes = score.diagnosis;
     evaluation.draft.repairDecision = score.repairDecision;
     evaluation.draft.updatedAt = new Date().toISOString();
@@ -7303,7 +7306,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const persistArtifacts = input.persistArtifacts !== false;
   const policyVersions = getGenerationPolicyVersions(input.voiceProfile, input.surface || 'original');
   let trace: GenerationRunTrace = {
-    generationPolicyVersion: usesEfficientGeneration(input) ? EFFICIENT_GENERATION_POLICY : 'legacy-v2',
+    generationPolicyVersion: usesEfficientGeneration(input) ? (process.env.AI_MODEL_POLICY === 'astra_all' ? `${EFFICIENT_GENERATION_POLICY}-astra-judge` : EFFICIENT_GENERATION_POLICY) : 'legacy-v2',
     schemaVersion: 2,
     id: runId,
     agentId: input.agentId,
@@ -7464,7 +7467,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       const failed = input.mode === 'preview' ? new Set<string>() : await failedBriefKeys(input.agentId);
       for (const brief of briefs) {
         const claims = sourceDocumentsForBrief(brief, documents).flatMap(doc => doc.claims.filter(c => brief.qualifiedClaimIds.includes(c.id)).map(c => c.text));
-        briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${EFFICIENT_GENERATION_POLICY}`));
+        briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${trace.generationPolicyVersion}`));
       }
       briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!)).slice(0, Math.min(2, input.count));
       if (input.mode !== 'preview') {
