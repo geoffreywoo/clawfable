@@ -16,6 +16,7 @@ import { ANTIHUNTER_AGENT_ID as AGENT_ID, ANTIHUNTER_X_USER_ID as X_USER_ID, ANT
 import { withOperatorXBudget, reserveVerification, releaseVerification, recordMediaPricing } from '../lib/antihunter-x-budget';
 import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaForOperatorTweet } from '../lib/antihunter-media';
 import { getOperatorComparison, observedAgeHours } from '../lib/antihunter-measurement';
+import { getOperatorOriginals } from '../lib/antihunter-report';
 import type { Tweet } from '../lib/types';
 import { assertOperatorCadence, getOperatorCadence, getOperatorOutbox } from '../lib/antihunter-publication';
 import { assertNoDuplicateOperatorReply, assertOperatorReplyPolicy, assertReplyTargetUnchanged,
@@ -65,6 +66,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     for (const entry of performance) if (!latest.has(entry.xTweetId) || entry.checkedAt > latest.get(entry.xTweetId)!.checkedAt) latest.set(entry.xTweetId, entry);
     return { ...summary, settings, signals, log, followers, dispatches: growth.dispatches, media: growth.media,
       cadence: getOperatorCadence(tweets, growth), outbox: getOperatorOutbox(tweets, growth),
+      operatorOriginals: getOperatorOriginals(tweets, performance),
       campaigns: Object.values(growth.campaigns).map(campaign => {
         const contributions = Object.values(growth.contributions || {}).filter(c => c.campaignId === campaign.campaignId);
         const episodeContributions = contributions.filter(c => c.episodeId === campaign.episodeId);
