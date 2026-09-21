@@ -1,0 +1,66 @@
+{
+  "version": "probation-v1",
+  "provenance": "Ten original synthetic text fixtures authored by the Anti Hunter operator. No real customer invoices or personal information.",
+  "cases": [
+    {
+      "id": "01", "title": "Clean USD invoice",
+      "input": "Supplier: North Ledger Studio\nInvoice number: INV-001\nInvoice date: 2026-09-01\nDue date: 2026-09-30\nGrand total (including tax): USD 120.00",
+      "expected": {"supplier":"North Ledger Studio","invoice_number":"INV-001","invoice_date":"2026-09-01","due_date":"2026-09-30","currency":"USD","invoice_total":"120.00","review_fields":[]},
+      "evidence": {"supplier":"Supplier: North Ledger Studio","invoice_number":"Invoice number: INV-001","invoice_date":"Invoice date: 2026-09-01","due_date":"Due date: 2026-09-30","currency":"USD 120.00","invoice_total":"Grand total (including tax): USD 120.00","review_fields":"All six fields are explicit and uncontested."}
+    },
+    {
+      "id": "02", "title": "Invoice in ordinary email prose",
+      "input": "Hello, Harbor Workshop issued invoice HW-84 on 2 September 2026. Its tax-inclusive grand total is GBP 84.20, due on 15 October 2026. This message contains the complete invoice details.",
+      "expected": {"supplier":"Harbor Workshop","invoice_number":"HW-84","invoice_date":"2026-09-02","due_date":"2026-10-15","currency":"GBP","invoice_total":"84.20","review_fields":[]},
+      "evidence": {"supplier":"Harbor Workshop issued invoice","invoice_number":"invoice HW-84","invoice_date":"issued ... on 2 September 2026","due_date":"due on 15 October 2026","currency":"GBP 84.20","invoice_total":"tax-inclusive grand total is GBP 84.20","review_fields":"Month names and explicit years make both dates unambiguous."}
+    },
+    {
+      "id": "03", "title": "Missing identifier and explicit due date",
+      "input": "Supplier: Cedar Printing\nInvoice number: not assigned\nInvoice date: 2026-09-03\nPayment terms: net 30; no due date printed\nGrand total including tax: USD 46.00",
+      "expected": {"supplier":"Cedar Printing","invoice_number":null,"invoice_date":"2026-09-03","due_date":null,"currency":"USD","invoice_total":"46.00","review_fields":["due_date","invoice_number"]},
+      "evidence": {"supplier":"Supplier: Cedar Printing","invoice_number":"not assigned means no identifier is supplied","invoice_date":"Invoice date: 2026-09-03","due_date":"no due date printed; the rules prohibit computing a date from net 30","currency":"USD 46.00","invoice_total":"Grand total including tax: USD 46.00","review_fields":"Only due_date and invoice_number lack explicit values, in alphabetical order."}
+    },
+    {
+      "id": "04", "title": "Ambiguous dollar currency",
+      "input": "Supplier: Orbit Parts\nInvoice: OP-17\nIssued: 2026-09-04\nDue: 2026-09-25\nTax-inclusive grand total: $90.00\nNo currency code or country is provided.",
+      "expected": {"supplier":"Orbit Parts","invoice_number":"OP-17","invoice_date":"2026-09-04","due_date":"2026-09-25","currency":null,"invoice_total":"90.00","review_fields":["currency"]},
+      "evidence": {"supplier":"Supplier: Orbit Parts","invoice_number":"Invoice: OP-17","invoice_date":"Issued: 2026-09-04","due_date":"Due: 2026-09-25","currency":"$ alone does not establish USD","invoice_total":"Tax-inclusive grand total: $90.00 establishes the numeric amount","review_fields":"Currency alone is unresolved; preserve the known numeric total."}
+    },
+    {
+      "id": "05", "title": "Ambiguous numeric issue date",
+      "input": "Supplier: Moss Design\nInvoice number: MD-005\nInvoice date: 04/05/2026\nDate order convention: not specified\nDue date: 2026-10-15\nGrand total including tax: USD 125.00",
+      "expected": {"supplier":"Moss Design","invoice_number":"MD-005","invoice_date":null,"due_date":"2026-10-15","currency":"USD","invoice_total":"125.00","review_fields":["invoice_date"]},
+      "evidence": {"supplier":"Supplier: Moss Design","invoice_number":"Invoice number: MD-005","invoice_date":"04/05/2026 could mean April 5 or May 4; USD does not settle date order","due_date":"Due date: 2026-10-15","currency":"USD 125.00","invoice_total":"Grand total including tax: USD 125.00","review_fields":"Only invoice_date is ambiguous."}
+    },
+    {
+      "id": "06", "title": "Grand total versus remaining balance",
+      "input": "Supplier: Pine Dispatch\nInvoice number: PD-9\nIssued: 2026-09-06\nDue: 2026-09-20\nSubtotal: USD 120.00\nTax: USD 12.00\nGrand total including tax: USD 132.00\nDeposit already paid: USD 40.00\nRemaining balance: USD 92.00",
+      "expected": {"supplier":"Pine Dispatch","invoice_number":"PD-9","invoice_date":"2026-09-06","due_date":"2026-09-20","currency":"USD","invoice_total":"132.00","review_fields":[]},
+      "evidence": {"supplier":"Supplier: Pine Dispatch","invoice_number":"Invoice number: PD-9","invoice_date":"Issued: 2026-09-06","due_date":"Due: 2026-09-20","currency":"All amounts explicitly use USD","invoice_total":"Grand total including tax: USD 132.00; the deposit and balance are different fields","review_fields":"All requested values are supplied; no arithmetic is needed."}
+    },
+    {
+      "id": "07", "title": "Explicit European amount formatting",
+      "input": "Supplier: Marble Forms\nInvoice number: MF-37\nInvoice date: 7 September 2026\nDue date: 30 September 2026\nCurrency: EUR\nPrinted number format: de-DE (dot for grouping, comma for decimals)\nGrand total including tax: 1.234,50 EUR",
+      "expected": {"supplier":"Marble Forms","invoice_number":"MF-37","invoice_date":"2026-09-07","due_date":"2026-09-30","currency":"EUR","invoice_total":"1234.50","review_fields":[]},
+      "evidence": {"supplier":"Supplier: Marble Forms","invoice_number":"Invoice number: MF-37","invoice_date":"Invoice date: 7 September 2026","due_date":"Due date: 30 September 2026","currency":"Currency: EUR","invoice_total":"The explicitly defined printed format normalizes 1.234,50 to 1234.50","review_fields":"Date and number conventions are explicit."}
+    },
+    {
+      "id": "08", "title": "Explicit replacement overrides stale copy",
+      "input": "Quoted earlier copy: Supplier Beacon Research; invoice BR-18; issued 2026-09-08; due 2026-09-28; tax-inclusive grand total USD 210.00.\nCorrection from Beacon Research: the following replacement supersedes that copy of BR-18. Invoice date remains 2026-09-08. Correct due date: 2026-10-05. Correct tax-inclusive grand total: USD 198.00.",
+      "expected": {"supplier":"Beacon Research","invoice_number":"BR-18","invoice_date":"2026-09-08","due_date":"2026-10-05","currency":"USD","invoice_total":"198.00","review_fields":[]},
+      "evidence": {"supplier":"Correction from Beacon Research","invoice_number":"replacement ... of BR-18","invoice_date":"Invoice date remains 2026-09-08","due_date":"Correct due date: 2026-10-05","currency":"Correct ... grand total: USD 198.00","invoice_total":"Explicit replacement supersedes USD 210.00 with USD 198.00","review_fields":"The explicit replacement resolves the old/new differences."}
+    },
+    {
+      "id": "09", "title": "Forwarding date is not invoice date",
+      "input": "Forwarded on 2026-09-21 at 17:00 UTC. Please process the original invoice below without amendments.\nSupplier: Elm Repairs\nInvoice number: ER-019\nInvoice date: 2026-08-19\nDue date: 2026-09-18\nGrand total including tax: GBP 58.00",
+      "expected": {"supplier":"Elm Repairs","invoice_number":"ER-019","invoice_date":"2026-08-19","due_date":"2026-09-18","currency":"GBP","invoice_total":"58.00","review_fields":[]},
+      "evidence": {"supplier":"Supplier: Elm Repairs","invoice_number":"Invoice number: ER-019","invoice_date":"Invoice date: 2026-08-19, unchanged by forwarding","due_date":"Due date: 2026-09-18, unchanged by forwarding","currency":"GBP 58.00","invoice_total":"Grand total including tax: GBP 58.00","review_fields":"The forwarding timestamp does not replace either invoice date."}
+    },
+    {
+      "id": "10", "title": "Conflicting final totals without supersession",
+      "input": "Two files were received for the same invoice. File A: Supplier Cobalt Tools; invoice CT-20; invoice date 2026-09-10; due date 2026-10-10; FINAL grand total including tax USD 210.00. File B: Supplier Cobalt Tools; invoice CT-20; invoice date 2026-09-10; due date 2026-10-10; FINAL grand total including tax USD 240.00. Neither file is identified as a correction or replacement, and there is no instruction choosing between them.",
+      "expected": {"supplier":"Cobalt Tools","invoice_number":"CT-20","invoice_date":"2026-09-10","due_date":"2026-10-10","currency":"USD","invoice_total":null,"review_fields":["invoice_total"]},
+      "evidence": {"supplier":"Both files say Cobalt Tools","invoice_number":"Both files say CT-20","invoice_date":"Both files say 2026-09-10","due_date":"Both files say 2026-10-10","currency":"Both conflicting totals explicitly use USD","invoice_total":"USD 210.00 and USD 240.00 conflict with no supersession rule","review_fields":"Only invoice_total is contested; preserve the five agreed fields."}
+    }
+  ]
+}

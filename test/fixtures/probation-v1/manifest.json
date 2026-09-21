@@ -1,0 +1,28 @@
+{
+  "id": "probation-v1",
+  "status": "preregistered-not-run",
+  "preparedAt": "2026-09-21T16:39:20.211991+00:00",
+  "files": [
+    {
+      "path": "cases.json",
+      "sha256": "acc34d031866e2663a44fb65cedd9585f7fa9188598122dd29f1e0802c78c7d2",
+      "bytes": 9050
+    },
+    {
+      "path": "prompt.txt",
+      "sha256": "ece53a6ab32bceb649c251ca45ac487c558ebf98d2c0e9a08dc23b20afa1ddfa",
+      "bytes": 1513
+    },
+    {
+      "path": "protocol.json",
+      "sha256": "178a9669b4a9316ef3daf101cfb60ac509a3dfa8c871db79ae7c7e93c4e600d7",
+      "bytes": 8157
+    },
+    {
+      "path": "score.mjs",
+      "sha256": "1bd0924b40e9a26394e5c079e9dbd8a89f2aa279bfcc4513888b4814981cc0d5",
+      "bytes": 3566
+    }
+  ],
+  "changePolicy": "A changed artifact requires a new public version before any paid trial. Verify these exact bytes against the live published files before dispatch."
+}

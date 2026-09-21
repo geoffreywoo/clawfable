@@ -1,0 +1,107 @@
+{
+  "id": "probation-v1",
+  "campaignId": "thirty-dollar-machine",
+  "episodeId": "probation-for-the-machines",
+  "status": "preregistered-not-run",
+  "question": "On these ten synthetic invoice extractions, does the more expensive existing configuration earn its bill through additional accepted results?",
+  "hypothesis": "The less expensive configuration may match whole-case acceptance at lower estimated API cost. This is a hypothesis, not a result.",
+  "task": "Extract six invoice fields and an explicit review list from ten synthetic text inputs. No private data, OCR, browsing, tool use, real invoices or money movement.",
+  "files": {
+    "cases": "cases.json",
+    "systemPrompt": "prompt.txt",
+    "scorer": "score.mjs",
+    "hashes": "manifest.json"
+  },
+  "modelInput": "Use the complete UTF-8 prompt.txt bytes as system, and only the selected case.input as the sole user message. Do not send expected answers, evidence notes, case titles or earlier model outputs.",
+  "configurations": [
+    {
+      "id": "sonnet",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 4000,
+      "temperature": "omitted",
+      "jsonSchema": "omitted",
+      "inputUsdPerMillion": 3,
+      "outputUsdPerMillion": 15,
+      "rateSource": "https://platform.claude.com/docs/en/models/sonnet-4-6/overview"
+    },
+    {
+      "id": "fable",
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "maxTokens": 4000,
+      "temperature": "omitted",
+      "jsonSchema": "omitted",
+      "inputUsdPerMillion": 10,
+      "outputUsdPerMillion": 50,
+      "rateSource": "https://platform.claude.com/docs/en/models/fable-5/overview"
+    }
+  ],
+  "pricingCheckedOn": "2026-09-21",
+  "runtime": {
+    "library": "Clawfable generateText at commit 58c0f14574b885ce532ca2c898f05df7775b6608",
+    "isolation": "Dedicated child process sets AI_MODEL_POLICY=standard. Saved production environment and unrelated accounts stay unchanged.",
+    "routing": "Explicit singleton modelChain for the chosen configuration. Omit task and modelStack so no fallback chain is appended. SDK retries=0. No repair or retry of a task/model slot.",
+    "accountId": "5",
+    "spendContext": {
+      "operation": "extraction-comparison",
+      "runId": "extraction-v1",
+      "runLimitUsd": 3,
+      "campaignId": "extraction-v1",
+      "campaignLimitUsd": 3
+    },
+    "inputLimitBytes": 4096,
+    "inputByteDefinition": "Buffer.byteLength(JSON.stringify({system,messages:[{role:'user',content:case.input}],schema:undefined}),'utf8'); includes framing keys and escaping. Reject larger inputs before dispatch.",
+    "timeoutMs": 60000,
+    "liveModelEntitlement": "Unverified before the first paid dispatch. An access failure stops the run and is recorded, not repaired with another model.",
+    "configurationLimit": "Identical task, system prompt, output cap and timeout do not equal identical internal reasoning. Preserve each route's existing provider defaults; report the effective request controls and returned model ID. This compares configured services, not an isolated model-size effect."
+  },
+  "execution": {
+    "caseOrder": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10"
+    ],
+    "routeOrder": "Odd case: sonnet then fable. Even case: fable then sonnet. Sequential dispatch, same case order for each configuration.",
+    "targetCalls": 20,
+    "maxCalls": 20,
+    "attemptsPerSlot": 1,
+    "tools": false,
+    "resume": "Persist each unique case/configuration dispatch before sending. Never repeat an attempted or uncertain slot. Resume only after inspecting persisted provider and spending receipts and preserving the same fixed run/campaign IDs.",
+    "changePolicy": "Publish and verify all manifest hashes before the first paid call. Any material change to fixtures, prompt, scorer or controls requires a new public version before execution; no tuning after seeing outputs."
+  },
+  "budget": {
+    "admissionCapUsd": 3,
+    "basis": "Account-5 published-rate estimates, including settled spending and full unresolved reservations; not a final invoice guarantee. Account daily limits apply too.",
+    "maxPerCallReservationUsd": {
+      "sonnet": 0.12144,
+      "fable": 0.4048
+    },
+    "sumOfTwentyMaximumReservationsUsd": 5.2624,
+    "explanation": "Twenty calls are a target, not a guaranteed completion. Settled measured usage can release unused reservation capacity. Stop before admitting a call that would exceed the fixed $3 run or campaign limit. Never erase holds or increase this trial's limit to finish.",
+    "stopRules": "Stop on budget denial, uncertain dispatch, missing usage, identity/routing mismatch or unavailable entitlement. Preserve failed calls and their charges. An incomplete run gets no winner."
+  },
+  "rubric": {
+    "primary": "Number of fully correct cases per configuration, out of ten planned cases, with attempted and unattempted counts shown separately.",
+    "acceptance": "One JSON object with exactly the seven required keys, no duplicate keys, nonempty strings or null for the six fields, ISO dates that exist, explicit USD/GBP/EUR currency, and nonnegative invoice_total with exactly two decimal places and no leading zeroes except 0.xx. All six values and the exact sorted review_fields set must match the key; review_fields must also agree with null values.",
+    "normalization": "JSON whitespace and object key order are immaterial. Supplier strings alone are Unicode-NFC normalized, trimmed, and internal whitespace collapsed. Other values and invoice identifiers compare exactly. No output repair, Markdown removal, inferred values or model judge.",
+    "diagnostics": "Report correct field decisions out of 60 planned fields, exact review sets out of ten, and schema validity out of ten. Structurally invalid or nonparseable output earns no field credit. Wrong review-list contents can retain field diagnostics but never whole-case acceptance.",
+    "cost": "Report ledger estimated API spend, tokens and observed wall-clock latency. Estimated API cost per accepted result equals configuration spending divided by accepted cases; it is undefined when zero pass. Human review time and cost remain unmeasured, never treated as zero.",
+    "decision": "Only a complete, reconciled run with all twenty slots attempted and no routing deviations can support a comparison. If both configurations accept at least one case, a configuration dominates only with at least as many accepted cases and lower estimated API cost per accepted result, or more accepted cases at equal cost. Otherwise report a tradeoff or tie. If only one accepts any cases, report it as the only configuration yielding accepted results; the other has undefined cost per acceptance, so no numeric ratio comparison. No winner for an incomplete run, both-zero acceptance, or unresolved costs.",
+    "errors": "Refusals, truncations, invalid answers and known request failures remain visible as failed attempts with costs. A slot never dispatched is labeled unattempted, not silently removed or called a model error."
+  },
+  "publication": "Publish requested/returned model IDs and controls, dataset/prompt/scorer hashes, per-slot status, synthetic text outputs returned by the shared client (which trims outer whitespace), scorer output, error classification, observed latency, token usage and spending receipts stripped of credentials. Publish failures as well as passes. No private account-state dump.",
+  "limitations": [
+    "Ten hand-authored synthetic cases and one attempt per configuration are not a representative production benchmark or a reliability estimate.",
+    "A public answer key makes the task reproducible; it is not a hidden held-out evaluation or a contamination claim. The answer key is never included in model input.",
+    "Provider defaults, stochasticity, network conditions, latency, prompt wording, task selection and model alias changes limit generalization.",
+    "No causal growth claim, universal model ranking, measured human-review cost, investment return or token-price conclusion follows from this test."
+  ]
+}
