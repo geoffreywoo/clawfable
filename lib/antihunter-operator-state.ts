@@ -24,12 +24,28 @@ export interface OperatorAsset {
   byteLength: number;
   altText: string;
 }
+export interface OperatorReplyContext {
+  targetTweetId: string;
+  targetAuthorId: string;
+  conversationId: string;
+  targetText: string;
+  verifiedAt: string;
+  reason: string;
+  mentionUserId: string;
+}
+export interface OperatorReplyPolicy {
+  ownerEnabled: boolean;
+  authorizedAt: string;
+  platformApproval: { recordedAt: string; evidence: string } | null;
+  optedOutAuthorIds: string[];
+}
 export interface OperatorSourceBrief {
   operator: 'codex';
   sources: string[];
   thesis: string | null;
   campaign?: CampaignMetadata;
   asset?: OperatorAsset;
+  reply?: OperatorReplyContext;
 }
 export interface AnalyticsObservation {
   day: string;
@@ -52,6 +68,10 @@ export interface MediaReceipt {
 export interface DispatchReceipt {
   state: 'pending' | 'posted' | 'uncertain' | 'reconciled' | 'rejected'; at: string; fingerprint: string;
   xTweetId?: string; verifiedAt?: string; result?: { status: number; persistenceWarning?: string };
+  type?: 'original' | 'reply';
+  targetTweetId?: string;
+  targetAuthorId?: string;
+  conversationId?: string;
 }
 export interface OperatorGrowthState {
   version: 1;
@@ -64,6 +84,7 @@ export interface OperatorGrowthState {
   mediaHistory?: Record<string, MediaReceipt[]>;
   dispatches: Record<string, DispatchReceipt>;
   lastRuns: Record<string, string>;
+  replyPolicy?: OperatorReplyPolicy;
   contributions?: Record<string, { campaignId: string; episodeId: string; xPostId: string; xAuthorId: string; sourceUrl: string; observedAt: string; assessment: string }>;
   mediaPricing?: { day: string; uploadUsd: number; source: string; checkedAt: string };
 }

@@ -88,6 +88,15 @@ export async function uploadOperatorImage(keys: TwitterKeys, tweet: Tweet, bytes
 /** Compare expanded URL text, not X's t.co normalization; exact media key required. */
 export function verifyOperatorPost(tweet: Tweet, data: any, media?: MediaReceipt | null): void {
   if (data?.author_id !== '2019634783962226688') throw new Error('Published author mismatch');
+  const references = Array.isArray(data.referenced_tweets) ? data.referenced_tweets : [];
+  const parents = references.filter((reference: any) => reference.type === 'replied_to');
+  if (tweet.type === 'reply') {
+    const reply = parseOperatorBrief(tweet.sourceBrief)?.reply;
+    if (!reply || parents.length !== 1 || parents[0].id !== reply.targetTweetId
+      || data.conversation_id !== reply.conversationId || data.in_reply_to_user_id !== reply.targetAuthorId) {
+      throw new Error('Published reply target or conversation mismatch');
+    }
+  } else if (parents.length) throw new Error('Original post unexpectedly published as a reply');
   let text = data.note_tweet?.text || data.text;
   for (const url of (data.note_tweet?.entities || data.entities)?.urls || []) {
     if (url.url && url.expanded_url) {

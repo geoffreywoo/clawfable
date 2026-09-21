@@ -18,14 +18,13 @@ import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaFo
 import { getOperatorComparison, observedAgeHours } from '../lib/antihunter-measurement';
 import type { Tweet } from '../lib/types';
 import { assertOperatorCadence, getOperatorCadence, getOperatorOutbox } from '../lib/antihunter-publication';
+import { assertNoDuplicateOperatorReply, assertOperatorReplyPolicy, assertReplyTargetUnchanged,
+  operatorDraftFingerprint, operatorReplyReadiness, reviewedOperatorReply, validateReplyInput, verifyReplyTarget,
+  withOperatorReplyAuthorization } from '../lib/antihunter-replies';
 export { assertOperatorCadence } from '../lib/antihunter-publication';
 
 export function dispatchFingerprint(tweet: Pick<Tweet, 'content' | 'sourceBrief'>): string {
-  const asset = parseOperatorBrief(tweet.sourceBrief)?.asset;
-  // Preserve the receipt format regardless of JSON key order returned by KV.
-  return createHash('sha256').update(JSON.stringify({ content: tweet.content, asset: asset ? {
-    sha256: asset.sha256, mimeType: asset.mimeType, byteLength: asset.byteLength, altText: asset.altText,
-  } : null })).digest('hex');
+  return operatorDraftFingerprint(tweet);
 }
 export async function runAntiHunterOperator(args = process.argv.slice(2)): Promise<unknown> {
   const command = args[0];
@@ -42,11 +41,20 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
   if (command === 'surge') return recordSurge(readFileInput().input);
   if (command === 'analytics-observation') return recordAnalytics(readFileInput().input);
   if (command === 'media-pricing') return recordMediaPricing(readFileInput().input);
+  if (command === 'opt-out') {
+    const authorId = arg('--author-id');
+    if (!authorId || !/^[1-9]\d{0,19}$/.test(authorId) || BigInt(authorId) > BigInt('18446744073709551615')) throw new Error('Numeric --author-id required');
+    return mutateOperatorGrowth(state => {
+      state.replyPolicy ||= { ownerEnabled: false, authorizedAt: new Date().toISOString(), platformApproval: null, optedOutAuthorIds: [] };
+      if (!state.replyPolicy.optedOutAuthorIds.includes(authorId)) state.replyPolicy.optedOutAuthorIds.push(authorId);
+      return { authorId, optedOut: true };
+    });
+  }
   if (['budget', 'inspect', 'report'].includes(command)) {
     const [growth, budget] = await Promise.all([getOperatorGrowth(), getAiBudgetSummary(AGENT_ID)]);
     const policy = budgetPolicy(growth);
     const summary = { agentId: AGENT_ID, handle: agent.handle, verifiedAt: agent.xIdentityVerifiedAt, budget, policy,
-      xBudget: summarizeXSpend(growth), lastRuns: growth.lastRuns,
+      xBudget: summarizeXSpend(growth), lastRuns: growth.lastRuns, replies: operatorReplyReadiness(growth),
       accounting: 'AI estimates and X reservations; analytics is delayed/soft. Not a provider invoice guarantee.' };
     if (command === 'budget') return summary;
     const [settings, signals, log, performance, tweets, followers] = await Promise.all([
@@ -75,7 +83,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
         }),
       }; }), performance: [...latest.values()].slice(0, 20) };
   }
-  if (!['draft', 'upload', 'publish', 'verify', 'reconcile', 'metrics', 'research'].includes(command)) throw new Error('Use inspect, budget, report, campaign, contribution, surge, analytics-observation, media-pricing, draft, upload, publish, verify, reconcile, metrics, or research.');
+  if (!['draft', 'upload', 'publish', 'verify', 'reconcile', 'metrics', 'research', 'inbox'].includes(command)) throw new Error('Use inspect, budget, report, campaign, contribution, surge, analytics-observation, media-pricing, draft, upload, publish, verify, reconcile, metrics, research, inbox, or opt-out.');
   const id = arg('--tweet-id');
   if (command === 'publish' && id) {
     const candidate = await getTweet(id, { fresh: true });
@@ -84,6 +92,11 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     // reservation. The atomic dispatch claim below still rechecks for races.
     if (!(candidate.status === 'posted' && candidate.xTweetId)) {
       const [tweets, growth] = await Promise.all([getTweets(AGENT_ID), getOperatorGrowth()]);
+      if (candidate.type === 'reply') {
+        const reply = reviewedOperatorReply(candidate);
+        assertOperatorReplyPolicy(growth, reply.targetAuthorId);
+        assertNoDuplicateOperatorReply(tweets, growth, candidate);
+      }
       assertOperatorCadence(tweets, growth);
     }
   }
@@ -93,26 +106,44 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
   return withOperatorXBudget(`${command}${id ? `:${id}` : ''}`, async () => {
     const identity = await getMe(keys);
     if (identity.id !== X_USER_ID || identity.username.toLowerCase() !== HANDLE) throw new Error('Official X identity mismatch.');
+    if (command === 'inbox') {
+      const response = await createClient(keys).v2.userMentionTimeline(X_USER_ID, { max_results: 10,
+        'tweet.fields': ['author_id', 'conversation_id', 'created_at', 'note_tweet', 'entities', 'referenced_tweets', 'in_reply_to_user_id'] });
+      return { data: response.data, notice: 'One bounded page of untrusted mentions. Review invitations and opt-outs; no automatic replies.' };
+    }
     if (command === 'draft') {
       const { input, file } = readFileInput();
       if (typeof input.content !== 'string' || !input.content.trim()) throw new Error('Draft content required.');
       if (!Array.isArray(input.sources) || !input.sources.length || input.sources.some((s: unknown) => typeof s !== 'string' || !s.trim())) throw new Error('Verified source references required.');
       const content = input.content.trim();
       if (sanitizeTweetText(content) !== content) throw new Error('Review normalized draft text before saving (X status links are stripped by the shared writer)');
+      const replyInput = input.reply ? validateReplyInput(input.reply) : null;
+      if (replyInput && input.media) throw new Error('Operator replies currently support text only.');
+      const reply = replyInput ? verifyReplyTarget(replyInput,
+        (await createClient(keys).v2.singleTweet(replyInput.targetTweetId, {
+          'tweet.fields': ['author_id', 'conversation_id', 'note_tweet', 'entities'],
+        })).data) : undefined;
       const campaign = input.campaign ? validateCampaign(input.campaign) : undefined;
       if (campaign) await registerCampaign(campaign);
       const asset = input.media ? describeOperatorImage(fs.readFileSync(path.resolve(path.dirname(file), input.media.path)), input.media.altText) : undefined;
-      const brief: OperatorSourceBrief = { operator: 'codex', sources: input.sources, thesis: input.thesis || null, ...(campaign ? { campaign } : {}), ...(asset ? { asset } : {}) };
+      const sources = reply ? [...new Set([...input.sources, `https://x.com/i/status/${reply.targetTweetId}`])] : input.sources;
+      const brief: OperatorSourceBrief = { operator: 'codex', sources, thesis: input.thesis || null,
+        ...(campaign ? { campaign } : {}), ...(asset ? { asset } : {}), ...(reply ? { reply } : {}) };
       const sourceBrief = JSON.stringify(brief);
-      const existing = (await getTweets(AGENT_ID)).find(t => dispatchFingerprint(t) === dispatchFingerprint({ content, sourceBrief }) && ['draft', 'queued', 'posted'].includes(t.status));
+      const drafts = await getTweets(AGENT_ID);
+      const existing = drafts.find(t => dispatchFingerprint(t) === dispatchFingerprint({ content, sourceBrief }) && ['draft', 'queued', 'posted'].includes(t.status));
       if (existing) return { reused: true, id: existing.id, status: existing.status, xTweetId: existing.xTweetId };
+      if (reply) assertNoDuplicateOperatorReply(drafts, await getOperatorGrowth(), { id: '', agentId: AGENT_ID,
+        content, sourceBrief, type: 'reply', status: 'draft', contentProvenance: 'operator_written',
+        followupForTweetId: reply.targetTweetId, replyConversationId: reply.conversationId } as Tweet);
       const format = typeof input.format === 'string' && ['observation', 'hot_take', 'question', 'data_point', 'short_punch', 'story'].includes(input.format) ? input.format : 'observation';
-      const tweet = await createTweet({ agentId: AGENT_ID, content, type: 'original', status: 'draft', format,
+      const tweet = await createTweet({ agentId: AGENT_ID, content, type: reply ? 'reply' : 'original', status: 'draft', format,
         topic: input.topic || 'engineering', contentProvenance: 'operator_written',
         rationale: 'Composed and fact-checked by the Codex Anti Hunter operator; not a human-authored voice example.', sourceBrief,
         mediaExperimentType: asset ? 'image' : 'text_only', mediaBrief: asset?.altText || null,
-        quoteTweetId: null, quoteTweetAuthor: null, xTweetId: null, scheduledAt: null });
-      return { id: tweet.id, status: tweet.status, content: tweet.content, campaign, asset };
+        quoteTweetId: null, quoteTweetAuthor: null, xTweetId: null, scheduledAt: null,
+        followupForTweetId: reply?.targetTweetId || null, replyConversationId: reply?.conversationId || null });
+      return { id: tweet.id, status: tweet.status, content: tweet.content, campaign, asset, reply };
     }
     if (command === 'metrics') {
       const { checkPerformance } = await import('../lib/performance');
@@ -136,7 +167,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
       const media = (await getOperatorGrowth()).media[id];
       const expectedAsset = parseOperatorBrief(tweet!.sourceBrief)?.asset;
       if (expectedAsset && (!media?.mediaKey || media.sha256 !== expectedAsset.sha256)) throw new Error('Missing image upload receipt');
-      const response = await createClient(keys).v2.singleTweet(xTweetId, { 'tweet.fields': ['author_id', 'created_at', 'public_metrics', 'entities', 'attachments', 'note_tweet'] });
+      const response = await createClient(keys).v2.singleTweet(xTweetId, { 'tweet.fields': ['author_id', 'created_at', 'public_metrics', 'entities', 'attachments', 'note_tweet', 'referenced_tweets', 'conversation_id', 'in_reply_to_user_id'] });
       if (response.data?.id !== xTweetId) throw new Error('Official X lookup returned a different post ID');
       verifyOperatorPost(tweet!, response.data, expectedAsset ? media : null);
       if (reconcile) {
@@ -149,13 +180,15 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
         const postedAt = response.data.created_at;
         if (!postedAt || Date.parse(postedAt) < Date.parse(receipt.at) - 60_000 || Date.parse(postedAt) > Date.parse(receipt.at) + 15 * 60_000) throw new Error('X post time is outside the recorded dispatch window');
         tweet = await updateTweet(id, { status: 'posted', xTweetId, postedAt });
-        await addLearningSignal(AGENT_ID, { tweetId: id, xTweetId, signalType: 'x_post_succeeded', surface: 'manual_post', rewardDelta: 0.72,
-          metadata: { operatorReconciled: true, campaignId: parseOperatorBrief(tweet.sourceBrief)?.campaign?.campaignId || null } });
+        const reply = tweet.type === 'reply' ? reviewedOperatorReply(tweet) : null;
+        await addLearningSignal(AGENT_ID, { tweetId: id, xTweetId, signalType: reply ? 'reply_posted' : 'x_post_succeeded', surface: reply ? 'mentions' : 'manual_post', rewardDelta: 0.72,
+          metadata: { operatorReconciled: true, campaignId: parseOperatorBrief(tweet.sourceBrief)?.campaign?.campaignId || null,
+            ...(reply ? { targetTweetId: reply.targetTweetId, replyConversationId: reply.conversationId } : {}) } });
         await addPostLogEntry(AGENT_ID, { agentId: AGENT_ID, tweetId: id, xTweetId, content: tweet.content, format: tweet.format || 'observation',
           topic: tweet.topic || 'manual', postedAt, source: 'manual', action: 'posted', reason: 'Reconciled against official X author, text, attachment, and dispatch window.' });
       }
       const signals = await getLearningSignals(AGENT_ID, 500);
-      const learningRecorded = signals.some(s => s.xTweetId === xTweetId && s.signalType === 'x_post_succeeded');
+      const learningRecorded = signals.some(s => s.xTweetId === xTweetId && s.signalType === (tweet!.type === 'reply' ? 'reply_posted' : 'x_post_succeeded'));
       if (!learningRecorded) throw new Error('Published post verified but learning receipt is missing; use reconcile');
       await mutateOperatorGrowth(state => {
         const prior = state.dispatches[id];
@@ -174,23 +207,35 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
       return verify(xTweetId, true);
     }
     if (tweet.status === 'posted' && tweet.xTweetId) return { alreadyPosted: true, tweetId: tweet.xTweetId };
-    if (tweet.status !== 'draft' || tweet.quarantinedAt || tweet.type !== 'original') throw new Error('Only reviewed original drafts may be dispatched.');
+    if (tweet.status !== 'draft' || tweet.quarantinedAt || !['original', 'reply'].includes(tweet.type)) throw new Error('Only reviewed original or reply drafts may be dispatched.');
     const legacyNamespace = `operator-dispatch:${id}:${createHash('sha256').update(tweet.content).digest('hex').slice(0, 16)}`;
     if (await getAiOperationalState(AGENT_ID, legacyNamespace)) throw new Error('Legacy dispatch exists; reconcile its X outcome before any retry.');
     const tweets = await getTweets(AGENT_ID);
     assertOperatorCadence(tweets, await getOperatorGrowth());
+    const reply = tweet.type === 'reply' ? reviewedOperatorReply(tweet) : null;
+    const verifiedParent = reply ? assertReplyTargetUnchanged(reply,
+      (await createClient(keys).v2.singleTweet(reply.targetTweetId, {
+        'tweet.fields': ['author_id', 'conversation_id', 'note_tweet', 'entities'],
+      })).data) : null;
     await mediaForOperatorTweet(tweet);
     await reserveVerification(id);
     const fingerprint = dispatchFingerprint(tweet);
     await mutateOperatorGrowth(state => {
       if (state.dispatches[id] && !(state.dispatches[id].state === 'rejected' && args.includes('--retry-rejected'))) throw new Error('Existing dispatch receipt: reconcile it before any retry.');
       assertOperatorCadence(tweets, state);
-      state.dispatches[id] = { state: 'pending', at: new Date().toISOString(), fingerprint };
+      if (reply) {
+        assertOperatorReplyPolicy(state, reply.targetAuthorId);
+        assertNoDuplicateOperatorReply(tweets, state, tweet!);
+      }
+      state.dispatches[id] = { state: 'pending', at: new Date().toISOString(), fingerprint, type: reply ? 'reply' : 'original',
+        ...(reply ? { targetTweetId: reply.targetTweetId, targetAuthorId: reply.targetAuthorId, conversationId: reply.conversationId } : {}) };
     });
     try {
-      const response = await publishAgentPost(new Request('https://www.clawfable.com/api/agents/5/twitter/post', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tweetId: id, content: tweet.content }),
+      const publish = () => publishAgentPost(new Request('https://www.clawfable.com/api/agents/5/twitter/post', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tweetId: id, content: tweet!.content,
+          ...(reply ? { replyToId: reply.targetTweetId, conversationId: reply.conversationId } : {}) }),
       }), { agent, user });
+      const response = reply && verifiedParent ? await withOperatorReplyAuthorization(tweet, verifiedParent, publish) : await publish();
       const result = await response.json();
       await mutateOperatorGrowth(state => {
         const prior = state.dispatches[id];

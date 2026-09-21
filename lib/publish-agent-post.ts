@@ -17,6 +17,7 @@ import { readJsonObjectBody } from '@/lib/request-validation';
 import { mediaForOperatorTweet } from '@/lib/antihunter-media';
 import { hasOperatorXBudget } from '@/lib/antihunter-x-budget';
 import { isOperatorManagedAgent } from '@/lib/operator-management';
+import { assertOperatorReplyReceipt, isAuthorizedOperatorReply } from '@/lib/antihunter-replies';
 
 // Shared by the authenticated web route and the trusted local operator CLI.
 // Callers must establish account ownership before entering this service.
@@ -78,6 +79,14 @@ export async function publishAgentPost(
       || existingTweet?.replyConversationId
       || null;
     isReply = existingTweet?.type === 'reply' || Boolean(effectiveReplyToId);
+    const authorizedOperatorReply = isReply && hasOperatorXBudget()
+      && isAuthorizedOperatorReply(agent, existingTweet, effectiveReplyToId);
+    if (isReply && id === '5' && agent.handle.toLowerCase() === 'antihunterai' && !authorizedOperatorReply) {
+      return NextResponse.json({ error: 'Use a verified, receipt-bound Anti Hunter operator reply draft.', code: 'operator_reply_required' }, { status: 409 });
+    }
+    if (authorizedOperatorReply && replyConversationId !== existingTweet?.replyConversationId) {
+      return NextResponse.json({ error: 'Reply conversation differs from the reviewed draft.', code: 'operator_reply_context_mismatch' }, { status: 409 });
+    }
     const generationOriginIssue = existingTweet
       ? getGeneratedPublishIssue(existingTweet, { accountHandle: agent.handle })
       : null;
@@ -98,7 +107,7 @@ export async function publishAgentPost(
     if (isReply && !replyConversationId) {
       replyConversationId = existingTweet?.followupForTweetId || existingTweet?.quoteTweetId || effectiveReplyToId;
     }
-    if (isReply && areRepliesDisabled()) {
+    if (isReply && areRepliesDisabled() && !authorizedOperatorReply) {
       await addPostLogEntry(id, {
         agentId: id,
         tweetId: dbTweetId || '',
@@ -261,7 +270,7 @@ export async function publishAgentPost(
       }
     }
 
-    if (isReply) {
+    if (isReply && !authorizedOperatorReply) {
       const duplicateReply = await findPostedReplyForConversation(id, replyConversationId, dbTweetId);
       if (duplicateReply) {
         const reason = `Reply conversation gate: this account already posted reply ${duplicateReply.xTweetId} for conversation ${replyConversationId}.`;
@@ -296,6 +305,12 @@ export async function publishAgentPost(
 
     let result: { tweetUrl: string; tweetId: string; username: string };
     if (effectiveReplyToId) {
+      if (authorizedOperatorReply) {
+        if (!existingTweet || !isAuthorizedOperatorReply(agent, existingTweet, effectiveReplyToId)) {
+          return NextResponse.json({ error: 'Operator reply authorization expired or changed.', code: 'operator_reply_context_mismatch' }, { status: 409 });
+        }
+        await assertOperatorReplyReceipt(existingTweet);
+      }
       result = await replyToTweet(keys, content, String(effectiveReplyToId), { username: agent.handle });
     } else {
       const media = existingTweet ? await mediaForOperatorTweet(existingTweet) : null;

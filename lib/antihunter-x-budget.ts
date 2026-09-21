@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ITwitterApiClientPlugin } from 'twitter-api-v2';
+import { assertOperatorReplyPolicy, getAuthorizedOperatorReplyContext, getAuthorizedOperatorReplyTarget } from './antihunter-replies';
 import { ANTIHUNTER_AGENT_ID, ANTIHUNTER_HANDLE, ANTIHUNTER_X_USER_ID, assertAntiHunterId,
   budgetPolicy, getOperatorGrowth, mutateOperatorGrowth, pacificDay, summarizeXSpend,
   type OperatorGrowthState, type XSpendAttempt } from './antihunter-operator-state';
@@ -31,6 +32,7 @@ export function priceOperatorXRequest(method: string, url: URL, query: Record<st
     let unit = 0.005;
     if (path === '/2/users/me' || /^\/2\/users\/by\/username\/[^/]+$/.test(path)) unit = 0.01;
     else if (path === `/2/users/${ANTIHUNTER_X_USER_ID}/tweets`) count = boundedCount(fields.max_results);
+    else if (path === `/2/users/${ANTIHUNTER_X_USER_ID}/mentions`) count = boundedCount(fields.max_results, 10);
     else if (path === '/2/tweets/search/recent') count = boundedCount(fields.max_results, 10);
     else if (path === '/2/tweets') count = boundedCount(String(fields.ids || '').split(',').filter(Boolean).length);
     else if (!/^\/2\/tweets\/\d+$/.test(path)) throw new Error('x_endpoint_pricing_unavailable');
@@ -38,9 +40,14 @@ export function priceOperatorXRequest(method: string, url: URL, query: Record<st
     return { reservedUsd: Number((count * unit + userMax * 0.01).toFixed(6)), primaryUnitUsd: unit, primaryMax: count, userMax, fixed: false, source: PRICE_SOURCE };
   }
   if (method === 'POST' && path === '/2/tweets') {
-    if (body.reply || body.quote_tweet_id || body.poll) throw new Error('operator_originals_only');
+    if (body.quote_tweet_id || body.poll) throw new Error('operator_originals_or_verified_replies_only');
+    if (body.reply) {
+      const target = body.reply.in_reply_to_tweet_id;
+      if (typeof target !== 'string' || !/^[1-9][0-9]{0,19}$/.test(target)
+        || target !== getAuthorizedOperatorReplyTarget()) throw new Error('operator_reply_target_unverified');
+    }
     // X also recognizes bare domains. Reserve the documented URL-post price
-    // for every original rather than undercount a provider-recognized link.
+    // for every original or reply rather than undercount a provider-recognized link.
     return fixed(0.2);
   }
   if (method === 'POST' && path === '/2/media/metadata') return fixed(0.005);
@@ -118,6 +125,17 @@ export function operatorXBudgetPlugin(credentials?: { appKey: string; appSecret:
           const draftId = context.operation.startsWith('publish:') ? context.operation.slice('publish:'.length) : null;
           const hold = draftId ? state.verificationHolds[draftId] : null;
           if (!hold || hold.day !== pacificDay(now) || hold.usd < 0.015 - 1e-9) throw new Error('x_verification_budget_unavailable');
+          const reply = (params.body as any)?.reply;
+          if (reply) {
+            const authorization = getAuthorizedOperatorReplyContext();
+            const dispatch = draftId ? state.dispatches[draftId] : null;
+            if (!authorization || authorization.draftId !== draftId) throw new Error('operator_reply_target_unverified');
+            assertOperatorReplyPolicy(state, authorization.targetAuthorId);
+            if (!dispatch || dispatch.state !== 'pending' || dispatch.type !== 'reply'
+              || dispatch.targetTweetId !== reply.in_reply_to_tweet_id || dispatch.targetTweetId !== authorization.targetTweetId
+              || dispatch.targetAuthorId !== authorization.targetAuthorId || dispatch.conversationId !== authorization.conversationId
+              || dispatch.fingerprint !== authorization.fingerprint) throw new Error('operator_reply_dispatch_unverified');
+          }
         }
         const price = priceOperatorXRequest(method, resolvedUrl, params.query as any, params.body as any, state, now);
         const attempt: XSpendAttempt = { id, day: pacificDay(now), at: now.toISOString(), operation: context.operation,

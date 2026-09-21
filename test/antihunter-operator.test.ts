@@ -10,15 +10,16 @@ import { getAccountDailyAiLimit, getAiBudgetSummary, reserveAiAttempt } from '@/
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { GET as analyticsGET } from '@/app/api/public/antihunter/analytics-control/route';
 import TwitterApi from 'twitter-api-v2';
+import { operatorDraftFingerprint, reviewedOperatorReply, withOperatorReplyAuthorization } from '@/lib/antihunter-replies';
 
-const mocks = vi.hoisted(() => ({ post: vi.fn(), metadata: vi.fn(), getAgent: vi.fn() }));
+const mocks = vi.hoisted(() => ({ post: vi.fn(), metadata: vi.fn(), getAgent: vi.fn(), getTweet: vi.fn(), getTweets: vi.fn(), getLearningSignals: vi.fn() }));
 vi.mock('@/lib/twitter-client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/twitter-client')>('@/lib/twitter-client');
   return { ...actual, createClient: () => ({ v2: { post: mocks.post, createMediaMetadata: mocks.metadata } }) };
 });
 vi.mock('@/lib/kv-storage', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv-storage')>('@/lib/kv-storage');
-  return { ...actual, getAgent: mocks.getAgent };
+  return { ...actual, getAgent: mocks.getAgent, getTweet: mocks.getTweet, getTweets: mocks.getTweets, getLearningSignals: mocks.getLearningSignals };
 });
 const now = new Date('2026-09-21T16:00:00Z');
 const campaign = { campaignId: 'anti-bureau', episodeId: 'rejected-001', hypothesis: 'People share specific rejection cards.', audience: 'builders', landingPath: '/bureau', primaryMetric: 'share_intent' };
@@ -36,6 +37,9 @@ beforeEach(async () => {
   vi.setSystemTime(now);
   vi.stubEnv('ANTIHUNTER_DAILY_AI_LIMIT_USD', '24');
   mocks.getAgent.mockImplementation(async id => ({ id, handle: id === '5' ? 'antihunterai' : 'geoffwoo' }));
+  mocks.getTweet.mockResolvedValue(null);
+  mocks.getTweets.mockResolvedValue([]);
+  mocks.getLearningSignals.mockResolvedValue([]);
   await mutateAiOperationalState('5', OPERATOR_GROWTH_NAMESPACE, () => ({ value: emptyGrowthState(), result: undefined }));
 });
 
@@ -162,6 +166,42 @@ describe('analytics observation and public control', () => {
 });
 
 describe('X per-request reservations', () => {
+  it.each(['valid', 'revoked', 'opt-out', 'future-approval', 'retargeted-dispatch'])(
+    'checks fresh reply authorization inside the final budget transaction: %s', async scenario => {
+      const reply = { targetTweetId: '111', targetAuthorId: '222', conversationId: '100', targetText: '@AntiHunterAI explain the result',
+        verifiedAt: now.toISOString(), reason: 'Answer the direct question.', mentionUserId: '2019634783962226688' };
+      const tweet = { id: 'reply-draft', agentId: '5', content: 'The published result uses a strict parser.', type: 'reply', status: 'draft',
+        contentProvenance: 'operator_written', followupForTweetId: '111', replyConversationId: '100',
+        sourceBrief: JSON.stringify({ operator: 'codex', sources: ['https://antihunter.com/acts'], reply }) } as any;
+      mocks.getTweet.mockResolvedValue(tweet);
+      await mutateOperatorGrowth(state => {
+        state.replyPolicy = { ownerEnabled: true, authorizedAt: now.toISOString(), optedOutAuthorIds: [],
+          platformApproval: { recordedAt: now.toISOString(), evidence: 'Synthetic written-approval test fixture only.' } };
+        state.dispatches[tweet.id] = { state: 'pending', type: 'reply', at: now.toISOString(), fingerprint: operatorDraftFingerprint(tweet),
+          targetTweetId: '111', targetAuthorId: '222', conversationId: '100' };
+      });
+      await reserveVerification(tweet.id);
+      await withOperatorXBudget(`publish:${tweet.id}`, () => withOperatorReplyAuthorization(tweet, reviewedOperatorReply(tweet), async () => {
+        const plugin = operatorXBudgetPlugin()!;
+        const identity = { params: { method: 'GET', query: {} }, url: new URL('https://api.x.com/2/users/me') } as any;
+        await plugin.onBeforeRequest!(identity);
+        await plugin.onAfterRequest!({ ...identity, response: { data: { data: { id: '2019634783962226688', username: 'AntiHunterAI' } } } });
+        await mutateOperatorGrowth(state => {
+          if (scenario === 'revoked') state.replyPolicy!.ownerEnabled = false;
+          if (scenario === 'opt-out') state.replyPolicy!.optedOutAuthorIds.push('222');
+          if (scenario === 'future-approval') state.replyPolicy!.platformApproval!.recordedAt = '2099-01-01T00:00:00Z';
+          if (scenario === 'retargeted-dispatch') state.dispatches[tweet.id].conversationId = '999';
+        });
+        const args = { params: { method: 'POST', body: { text: tweet.content, reply: { in_reply_to_tweet_id: '111' } } }, url: new URL('https://api.x.com/2/tweets') } as any;
+        if (scenario === 'valid') {
+          await plugin.onBeforeRequest!(args);
+          expect(Object.values((await getOperatorGrowth()).xAttempts).find(attempt => attempt.endpoint === 'POST /2/tweets')?.reservedUsd).toBe(0.2);
+        } else {
+          await expect(plugin.onBeforeRequest!(args)).rejects.toThrow();
+          expect(Object.values((await getOperatorGrowth()).xAttempts).some(attempt => attempt.endpoint === 'POST /2/tweets')).toBe(false);
+        }
+      }));
+    });
   it('fails closed on unpriced endpoints, expands bounded read costs, and requires media price evidence', () => {
     const state = emptyGrowthState();
     const price = priceOperatorXRequest('GET', new URL('https://api.x.com/2/tweets/search/recent'), { max_results: 10, expansions: ['author_id'] }, {}, state);
@@ -169,8 +209,12 @@ describe('X per-request reservations', () => {
     expect(settledRequestEstimate(price, { data: [{}, {}], includes: { users: [{}] } })).toBe(0.02);
     expect(() => priceOperatorXRequest('GET', new URL('https://api.x.com/2/tweets/search/recent'), { max_results: 100 }, {}, state)).toThrow('bound');
     expect(() => priceOperatorXRequest('GET', new URL('https://api.x.com/2/users/other/tweets'), { max_results: 10 }, {}, state)).toThrow('unavailable');
+    expect(priceOperatorXRequest('GET', new URL('https://api.x.com/2/users/2019634783962226688/mentions'), { max_results: 10 }, {}, state).reservedUsd).toBe(0.05);
+    expect(() => priceOperatorXRequest('GET', new URL('https://api.x.com/2/users/2019634783962226688/mentions'), { max_results: 100 }, {}, state)).toThrow('bound');
+    expect(() => priceOperatorXRequest('GET', new URL('https://api.x.com/2/users/other/mentions'), { max_results: 10 }, {}, state)).toThrow('unavailable');
     expect(() => priceOperatorXRequest('POST', new URL('https://api.x.com/2/media/upload'), {}, {}, state)).toThrow('pricing_unavailable');
-    expect(() => priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { reply: {} }, state)).toThrow('originals_only');
+    expect(() => priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { reply: {} }, state)).toThrow('reply_target_unverified');
+    expect(() => priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { quote_tweet_id: '123' }, state)).toThrow('originals_or_verified_replies_only');
     expect(priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { text: 'see https://antihunter.com' }, state).reservedUsd).toBe(0.2);
     expect(priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { text: 'see antihunter.com/machine' }, state).reservedUsd).toBe(0.2);
   });
@@ -311,6 +355,19 @@ describe('reviewed native image and dispatch safety', () => {
     await withOperatorXBudget('upload', async () => { expect((await uploadOperatorImage(keys, tweet, imageBytes)).mediaId).toBe('new'); });
     expect((await getOperatorGrowth()).mediaHistory![tweet.id][0].mediaId).toBe('old');
   });
+  it('verifies a reply against its exact parent, root conversation and recipient', () => {
+    const reply = { targetTweetId: '111', targetAuthorId: '222', conversationId: '100' };
+    const tweet = { type: 'reply', content: 'Here is the measured result.',
+      sourceBrief: JSON.stringify({ operator: 'codex', sources: ['https://x.com/reader/status/111'], reply }) } as any;
+    const data = { id: '333', author_id: '2019634783962226688', text: tweet.content,
+      referenced_tweets: [{ type: 'replied_to', id: '111' }], conversation_id: '100', in_reply_to_user_id: '222' };
+    expect(() => verifyOperatorPost(tweet, data)).not.toThrow();
+    for (const changes of [{ referenced_tweets: [] }, { referenced_tweets: [{ type: 'replied_to', id: '999' }] },
+      { conversation_id: '999' }, { in_reply_to_user_id: '999' }, { in_reply_to_user_id: undefined }]) {
+      expect(() => verifyOperatorPost(tweet, { ...data, ...changes })).toThrow('reply target or conversation');
+    }
+    expect(() => verifyOperatorPost({ ...tweet, type: 'original' }, data)).toThrow('unexpectedly published as a reply');
+  });
   it('serializes publication decisions and never converts uncertain writes into retries', async () => {
     const claim = (id: string) => mutateOperatorGrowth(state => {
       assertOperatorCadence([], state);
@@ -320,6 +377,6 @@ describe('reviewed native image and dispatch safety', () => {
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     await mutateOperatorGrowth(state => { Object.values(state.dispatches)[0].state = 'uncertain'; });
     await expect(claim('c')).rejects.toThrow('outstanding');
-    expect(() => assertOperatorCadence([{ agentId: '5', type: 'original', status: 'posted', xTweetId: '123', postedAt: now.toISOString() } as any], emptyGrowthState())).toThrow('cadence');
+    expect(() => assertOperatorCadence([{ agentId: '5', type: 'original', status: 'posted', xTweetId: '123', postedAt: now.toISOString() } as any], emptyGrowthState())).not.toThrow();
   });
 });
