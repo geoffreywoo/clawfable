@@ -11,12 +11,26 @@ export const OPERATOR_CADENCE = {
 const DAY_MS = 24 * 60 * 60_000;
 const GAP_MS = OPERATOR_CADENCE.minimumGapMinutes * 60_000;
 
+/** Missing legacy dates only; this decodes an existing post ID, not proof of publication.
+ * X's string/64-bit contract: https://docs.x.com/fundamentals/x-ids
+ * Epoch and 22-bit layout: https://github.com/twitter-archive/snowflake/blob/snowflake-2010/src/main/scala/com/twitter/service/snowflake/IdWorker.scala
+ */
+function snowflakeCreatedAt(id: unknown): number {
+  if (typeof id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(id)) return NaN;
+  const bits = BigInt(id);
+  if (bits > BigInt('18446744073709551615')) return NaN;
+  const elapsed = bits >> BigInt(22);
+  // Tiny IDs without timestamp bits cannot supply a usable creation time.
+  if (elapsed === BigInt(0)) return NaN;
+  return Number(elapsed) + 1_288_834_974_657;
+}
+
 /** Account-5 originals, including legacy posts without operator-growth receipts. */
 export function getOperatorCadence(tweets: Tweet[], state: OperatorGrowthState, now = Date.now()) {
   const posted = new Map<string, number>();
   let blockedReason: string | null = null;
-  const remember = (id: string, value: string | null | undefined) => {
-    const at = value ? Date.parse(value) : NaN;
+  const remember = (id: string, value: string | null | undefined, allowMissingDateFallback = false) => {
+    const at = value == null && allowMissingDateFallback ? snowflakeCreatedAt(id) : value ? Date.parse(value) : NaN;
     if (!Number.isFinite(at) || at > now) {
       blockedReason ||= 'Resolve the invalid publication timestamp before publishing';
       return;
@@ -26,7 +40,7 @@ export function getOperatorCadence(tweets: Tweet[], state: OperatorGrowthState, 
   for (const tweet of tweets) {
     if (String(tweet.agentId) !== ANTIHUNTER_AGENT_ID || tweet.type !== 'original') continue;
     // Deleting a published post does not restore a publishing slot.
-    if (['posted', 'deleted_from_x'].includes(tweet.status) && tweet.xTweetId) remember(tweet.xTweetId, tweet.postedAt);
+    if (['posted', 'deleted_from_x'].includes(tweet.status) && tweet.xTweetId) remember(tweet.xTweetId, tweet.postedAt, true);
   }
   for (const receipt of Object.values(state.dispatches)) {
     if (['pending', 'uncertain'].includes(receipt.state)) blockedReason ||= 'Resolve the outstanding dispatch before publishing';

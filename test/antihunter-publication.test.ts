@@ -45,6 +45,55 @@ describe('account-5 publication cadence', () => {
     expect(() => assertOperatorCadence([posted('legacy', now - minute)], emptyGrowthState(), now)).toThrow('cadence');
     expect(() => assertOperatorCadence([posted('deleted', now - minute, { status: 'deleted_from_x' })], emptyGrowthState(), now)).toThrow('cadence');
   });
+  it('derives only missing legacy publication dates from exact string Snowflakes without changing records', () => {
+    const tweets = [posted('1342', now, { xTweetId: '2041705540187726188', postedAt: null }),
+      posted('deleted', now, { xTweetId: '2041705540187726189', postedAt: undefined, status: 'deleted_from_x' })];
+    const before = JSON.stringify(tweets);
+    expect(getOperatorCadence(tweets, emptyGrowthState(), now)).toMatchObject({
+      lastPostedAt: '2026-04-08T02:31:48.492Z', postedLast24Hours: 0, blockedReason: null,
+    });
+    expect(JSON.stringify(tweets)).toBe(before);
+  });
+  it('counts a recent Snowflake fallback and deduplicates its verified receipt', () => {
+    const xTweetId = '2102062413180997866';
+    const tweet = posted('launch', now, { xTweetId, postedAt: null });
+    const state = emptyGrowthState();
+    state.dispatches.launch = { state: 'posted', at: iso(now - minute), fingerprint: 'launch', xTweetId, verifiedAt: iso(now) };
+    expect(getOperatorCadence([tweet], state, now)).toMatchObject({
+      lastPostedAt: '2026-09-21T15:48:28.390Z', postedLast24Hours: 1, nextEligibleAt: '2026-09-21T17:18:28.390Z',
+    });
+    const boundary = Date.parse('2026-09-21T17:18:28.390Z');
+    expect(() => assertOperatorCadence([tweet], state, boundary - 1)).toThrow('90 minutes');
+    expect(() => assertOperatorCadence([tweet], state, boundary)).not.toThrow();
+  });
+  it('keeps all eight missing-date originals in the rolling cap, including deleted records', () => {
+    const tweets = Array.from({ length: 8 }, (_, index) => {
+      const at = now - (index + 1) * 120 * minute;
+      const xTweetId = ((BigInt(at) - BigInt(1288834974657)) << BigInt(22)).toString();
+      return posted(String(index), at, { xTweetId, postedAt: null, status: index === 7 ? 'deleted_from_x' : 'posted' });
+    });
+    expect(getOperatorCadence(tweets, emptyGrowthState(), now)).toMatchObject({
+      postedLast24Hours: 8, nextEligibleAt: iso(now + 8 * 60 * minute),
+    });
+    expect(() => assertOperatorCadence(tweets, emptyGrowthState(), now)).toThrow('eight originals');
+  });
+  it('rejects malformed, oversized, rounded-number and future Snowflakes when a date is missing', () => {
+    const future = ((BigInt(now + 1) - BigInt(1288834974657)) << BigInt(22)).toString();
+    for (const xTweetId of ['0', '123', '-2041705540187726188', '+2041705540187726188', '02041705540187726188',
+      '2041705540187726188 ', '2.041705540187726e18', '18446744073709551616', '1'.repeat(100), 2041705540187726188, future]) {
+      expect(() => assertOperatorCadence([posted('bad', now, { xTweetId: xTweetId as string, postedAt: null })], emptyGrowthState(), now)).toThrow('timestamp');
+    }
+  });
+  it('does not use a Snowflake to override invalid or future explicit dates or missing receipt times', () => {
+    const xTweetId = '2041705540187726188';
+    for (const postedAt of ['', 'not-a-date', iso(now + 1)]) {
+      expect(() => assertOperatorCadence([posted('bad', now, { xTweetId, postedAt })], emptyGrowthState(), now)).toThrow('timestamp');
+    }
+    const state = emptyGrowthState();
+    state.dispatches.old = { state: 'reconciled', at: undefined as unknown as string, fingerprint: 'old', xTweetId };
+    expect(() => assertOperatorCadence([], state, now)).toThrow('timestamp');
+    expect(getOperatorCadence([posted('dated', now - minute, { xTweetId })], emptyGrowthState(), now).lastPostedAt).toBe(iso(now - minute));
+  });
   it('deduplicates an X post across storage and receipts, using the stored publication time', () => {
     const tweets = Array.from({ length: 7 }, (_, index) => posted(String(index), now - (index + 1) * 120 * minute));
     const state = emptyGrowthState();
