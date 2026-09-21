@@ -48,3 +48,9 @@ The owner's app may list exact internal account exemptions in
 `AUTOMATION_EXEMPT_AGENT_IDS`; preserve existing entries. Do not fabricate paid
 invoices or change customer billing state. Keep background generation disabled
 until the owner has authorized the applicable spending and publishing policy.
+
+Set `CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS=5` in production when the Mini's
+Codex schedule owns this account. Both Vercel posting and research cron skip
+these exact IDs before doing any per-account work. This prevents a competing
+scheduler and unbudgeted background API reads. The operator explicitly calls
+metrics through Clawfable at its own bounded cadence. Other IDs are unaffected.

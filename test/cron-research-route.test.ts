@@ -43,7 +43,19 @@ describe('cron research isolation', () => {
   });
 
   afterEach(() => {
+    delete process.env.CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS;
     delete process.env.CRON_SECRET;
+  });
+
+  it('leaves operator-managed accounts to their sole scheduler before doing any per-account work', async () => {
+    process.env.CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS = 'agent-1';
+    mocks.getAgents.mockResolvedValue([{ id: 'agent-1', handle: 'antihunterai' }]);
+    const response = await GET(new Request('http://localhost/api/cron/research', {
+      headers: { authorization: 'Bearer test-cron-secret' },
+    }) as any);
+    expect(response.status).toBe(200);
+    expect(mocks.getProtocolSettings).not.toHaveBeenCalled();
+    expect(mocks.refreshAgentResearch).not.toHaveBeenCalled();
   });
 
   it('records one agent\'s research failure and keeps refreshing the remaining agents', async () => {

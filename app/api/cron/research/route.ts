@@ -1,3 +1,4 @@
+import { isOperatorManagedAgent } from '@/lib/operator-management';
 import { NextRequest, NextResponse } from 'next/server';
 import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
 import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
   const agents = await getAgents();
   const results: ResearchRefreshResult[] = [];
   for (const agent of agents) {
+      if (isOperatorManagedAgent(agent.id)) continue;
     // One agent's failure is recorded as its own result and never aborts the
     // tick for the agents after it.
     try {

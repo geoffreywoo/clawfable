@@ -1,3 +1,4 @@
+import { isOperatorManagedAgent } from '@/lib/operator-management';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent, getQueuedTweets, quarantineAgentAutomation } from '@/lib/kv-storage';
 import { runAutopilot } from '@/lib/autopilot';
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
     let networkTopicCandidates = 0;
 
     for (const agent of agents) {
+      if (isOperatorManagedAgent(agent.id)) continue;
       // Every per-agent step (settings, entitlement, quarantine writes, lock
       // acquisition, autopilot) is isolated: one agent throwing records an
       // error result for that agent and the tick continues with the rest.

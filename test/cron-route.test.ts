@@ -108,6 +108,18 @@ import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 
 describe('cron autopilot isolation', () => {
+  it('leaves operator-managed accounts to their sole scheduler before doing any per-account work', async () => {
+    process.env.CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS = 'agent-1';
+    mocks.getAgents.mockResolvedValue([{ id: 'agent-1', handle: 'antihunterai' }]);
+    const response = await GET(new Request('http://localhost/api/cron/post', {
+      headers: { authorization: 'Bearer test-cron-secret' },
+    }) as any);
+    expect(response.status).toBe(200);
+    expect(mocks.getProtocolSettings).not.toHaveBeenCalled();
+    expect(mocks.runAutopilot).not.toHaveBeenCalled();
+    expect(mocks.checkPerformance).not.toHaveBeenCalled();
+  });
+
   it('has enough runtime and lock headroom for the quality generation pipeline', () => {
     expect(maxDuration).toBe(800);
     expect(CRON_AUTOPILOT_LOCK_TTL_SECONDS).toBeGreaterThan(maxDuration);
@@ -197,6 +209,7 @@ describe('cron autopilot isolation', () => {
   });
 
   afterEach(() => {
+    delete process.env.CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS;
     delete process.env.CRON_SECRET;
     delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
   });
