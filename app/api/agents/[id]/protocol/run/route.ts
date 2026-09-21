@@ -4,6 +4,7 @@ import { runAutopilot } from '@/lib/autopilot';
 import { acquireAutopilotLock, addCronLogEntry, addOutcomeEvent, addPostLogEntry, getProtocolSettings, releaseAutopilotLock } from '@/lib/kv-storage';
 import { refreshAutopilotHealth, runAutopilotWatchdog } from '@/lib/autopilot-health';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
+import { isOperatorManagedAgent, OPERATOR_MANAGED_AUTOPILOT_REASON } from '@/lib/operator-management';
 
 // POST /api/agents/[id]/protocol/run — manually trigger autopilot for one agent
 export async function POST(
@@ -13,6 +14,9 @@ export async function POST(
   const { id } = await params;
   try {
     const { user, agent } = await requireAgentAccess(id);
+    if (isOperatorManagedAgent(agent.id)) {
+      return NextResponse.json({ agentId: agent.id, action: 'skipped', code: 'operator_managed', reason: OPERATOR_MANAGED_AUTOPILOT_REASON }, { status: 409 });
+    }
     await assertAgentAutomationEntitlement(id, { agent, user });
     const settings = await getProtocolSettings(id);
     const runId = `manual:${Date.now()}:${id}`;

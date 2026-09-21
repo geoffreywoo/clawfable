@@ -1,5 +1,6 @@
 import { recordEmptyQueueRun } from './generation-efficiency';
 import { recordAutopostReadyOutput } from './ai-budget';
+import { isOperatorManagedAgent, OPERATOR_MANAGED_AUTOPILOT_REASON } from './operator-management';
 /**
  * Autopilot engine.
  * Manages automated tweet posting and mention replies for agents.
@@ -1319,6 +1320,9 @@ export async function selfHealAutopilotQueue(
  */
 export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   const agentId = agent.id;
+  if (isOperatorManagedAgent(agentId)) {
+    return { agentId, action: 'skipped', reason: OPERATOR_MANAGED_AUTOPILOT_REASON };
+  }
 
   const { getAgentAutomationEntitlement } = await import('./automation-entitlement');
   const entitlement = await getAgentAutomationEntitlement(agentId, { agent });

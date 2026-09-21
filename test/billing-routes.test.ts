@@ -109,6 +109,7 @@ const grandfatheredUser = {
 describe('billing route guards', () => {
   afterEach(() => {
     delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+    vi.unstubAllEnvs();
   });
 
   beforeEach(() => {
@@ -187,6 +188,22 @@ describe('billing route guards', () => {
     expect(response.status).toBe(402);
     expect(data.code).toBe('payment_required');
     expect(mocks.updateProtocolSettings).not.toHaveBeenCalled();
+  });
+
+  it('blocks manual autopilot for an operator-managed account before settings, locks, or watchdog work', async () => {
+    vi.stubEnv('CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS', '5');
+    mocks.requireAgentAccess.mockResolvedValue({ user: freeUser, agent: { id: '5', handle: 'antihunterai' } });
+    const response = await protocolRunPOST(
+      new Request('http://localhost/api/agents/5/protocol/run', { method: 'POST' }) as any,
+      { params: Promise.resolve({ id: '5' }) },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ agentId: '5', action: 'skipped', code: 'operator_managed' });
+    expect(mocks.requireAgentAccess).toHaveBeenCalledWith('5');
+    for (const effect of [mocks.getAgentOwnerId, mocks.getProtocolSettings, mocks.acquireAutopilotLock,
+      mocks.runAutopilot, mocks.addCronLogEntry, mocks.addPostLogEntry, mocks.addOutcomeEvent]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
   });
 
   it('blocks free users from manually running autopilot', async () => {

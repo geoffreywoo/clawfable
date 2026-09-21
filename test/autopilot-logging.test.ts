@@ -580,6 +580,7 @@ afterEach(() => {
   vi.useRealTimers();
   delete process.env.VERCEL_ENV;
   delete process.env.AUTOMATION_EXEMPT_AGENT_IDS;
+  vi.unstubAllEnvs();
 });
 
 afterEach(() => {
@@ -587,6 +588,22 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  it('leaves operator-managed accounts to their sole writer before any reads, AI, or X calls', async () => {
+    vi.stubEnv('CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS', ' 5 ');
+    const result = await runAutopilot({ ...baseAgent, id: '5', handle: 'antihunterai' });
+    expect(result).toMatchObject({ agentId: '5', action: 'skipped', reason: expect.stringContaining('existing operator') });
+    for (const effect of [mocks.getAgentOwnerId, mocks.getProtocolSettings, mocks.getQueuedTweets, mocks.getMe,
+      mocks.decodeKeys, mocks.generateText, mocks.generateTweetBatchV2, mocks.postTweet, mocks.replyToTweet]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+  it('preserves the existing autopilot path for unrelated accounts', async () => {
+    vi.stubEnv('CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS', '5');
+    mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, enabled: false, autoReply: false });
+    expect(await runAutopilot(baseAgent)).toMatchObject({ action: 'skipped', reason: 'Auto-post and auto-reply both disabled' });
+    expect(mocks.getAgentOwnerId).toHaveBeenCalledWith(baseAgent.id);
+    expect(mocks.getProtocolSettings).toHaveBeenCalledWith(baseAgent.id);
+  });
   it('uses only warmed caches during a V2 refill and never performs live topic discovery', async () => {
     process.env.VERCEL_ENV = 'production';
     const agent = { ...baseAgent, handle: 'geoffwoo' };
