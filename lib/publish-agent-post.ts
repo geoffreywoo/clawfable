@@ -14,6 +14,9 @@ import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { AutomationEntitlementError, assertAgentAutomationEntitlement, entitlementErrorResponse } from '@/lib/automation-entitlement';
 import { getAccountPublishingPolicyIssue } from '@/lib/account-publish-policy';
 import { readJsonObjectBody } from '@/lib/request-validation';
+import { mediaForOperatorTweet } from '@/lib/antihunter-media';
+import { hasOperatorXBudget } from '@/lib/antihunter-x-budget';
+import { isOperatorManagedAgent } from '@/lib/operator-management';
 
 // Shared by the authenticated web route and the trusted local operator CLI.
 // Callers must establish account ownership before entering this service.
@@ -30,6 +33,9 @@ export async function publishAgentPost(
   let lockOwner: string | null = null;
   try {
     currentAgent = agent;
+    if (id === '5' && agent.handle.toLowerCase() === 'antihunterai' && isOperatorManagedAgent(id) && !hasOperatorXBudget()) {
+      return NextResponse.json({ error: 'Use the bound Anti Hunter operator for this managed account.', code: 'operator_writer_required' }, { status: 409 });
+    }
     await assertAgentAutomationEntitlement(id, { agent, user });
 
     if (!agent.isConnected || !agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret) {
@@ -197,7 +203,7 @@ export async function publishAgentPost(
           tweetUrl: `https://x.com/${agent.handle.replace(/^@/, '')}/status/${fresh.xTweetId}`,
           tweetId: fresh.xTweetId });
       }
-      if (fresh.content !== existingTweet?.content || fresh.status !== existingTweet?.status
+      if (fresh.content !== existingTweet?.content || fresh.sourceBrief !== existingTweet?.sourceBrief || fresh.status !== existingTweet?.status
         || fresh.type !== existingTweet?.type || fresh.followupForTweetId !== existingTweet?.followupForTweetId
         || fresh.quoteTweetId !== existingTweet?.quoteTweetId || fresh.replyConversationId !== existingTweet?.replyConversationId
         || fresh.quarantinedAt || fresh.xTweetId || !['preview', 'draft', 'queued'].includes(fresh.status)) {
@@ -292,7 +298,8 @@ export async function publishAgentPost(
     if (effectiveReplyToId) {
       result = await replyToTweet(keys, content, String(effectiveReplyToId), { username: agent.handle });
     } else {
-      result = await postTweet(keys, content, { username: agent.handle });
+      const media = existingTweet ? await mediaForOperatorTweet(existingTweet) : null;
+      result = await postTweet(keys, content, { username: agent.handle, ...(media ? { mediaId: media.mediaId } : {}) });
     }
 
     const postedAt = new Date().toISOString();

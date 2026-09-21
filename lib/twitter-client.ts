@@ -10,6 +10,7 @@ import { normalizeTwitterError, type TwitterErrorContext } from './twitter-debug
 import { getInternalPromptLeakIssue } from './survivability';
 import { normalizeGeneratedTweetContent } from './tweet-text';
 import { isLeadingXMention } from './entity-mentions';
+import { hasOperatorXBudget, operatorXBudgetPlugin } from './antihunter-x-budget';
 
 export interface TwitterKeys {
   appKey: string;
@@ -20,6 +21,7 @@ export interface TwitterKeys {
 
 interface TweetWriteOptions {
   username?: string | null;
+  mediaId?: string;
 }
 
 function normalizeKeyPart(value: string): string {
@@ -39,12 +41,13 @@ function stripHallucinatedStatusUrls(text: string): string {
  * Create a TwitterApi client from raw key strings.
  */
 export function createClient(keys: TwitterKeys): TwitterApi {
+  const budgetPlugin = operatorXBudgetPlugin(keys);
   return new TwitterApi({
     appKey: normalizeKeyPart(keys.appKey),
     appSecret: normalizeKeyPart(keys.appSecret),
     accessToken: normalizeKeyPart(keys.accessToken),
     accessSecret: normalizeKeyPart(keys.accessSecret),
-  });
+  }, budgetPlugin ? { plugins: [budgetPlugin] } : undefined);
 }
 
 function handleApiError(error: unknown, context: TwitterErrorContext): never {
@@ -112,7 +115,9 @@ export async function postTweet(
     const username = normalizeUsername(options.username) || (await getMe(keys)).username;
     const rwClient = client.readWrite;
 
-    const result = await rwClient.v2.tweet(tweetText);
+    const result = options.mediaId
+      ? await rwClient.v2.tweet(tweetText, { media: { media_ids: [options.mediaId] } })
+      : await rwClient.v2.tweet(tweetText);
 
     const tweetId = result.data.id;
     return {
@@ -129,6 +134,7 @@ export async function postTweet(
 }
 
 async function createAppReadClient(): Promise<TwitterApi> {
+  if (hasOperatorXBudget()) throw new Error('Operator reads require the verified account client and its budget interceptor');
   const { appKey, appSecret } = getConsumerKeys();
   const client = new TwitterApi({ appKey, appSecret });
   return client.appLogin();

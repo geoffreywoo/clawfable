@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AI_PRICING_VERSION, getAiModelPricing, estimateAiUsageCostUsd } from './ai-pricing';
 import { getAgent, getAiOperationalState, mutateAiOperationalState } from './kv-storage';
+import { ANTIHUNTER_AGENT_ID, budgetPolicy, getOperatorGrowth } from './antihunter-operator-state';
 
 export const AI_BUDGET_VERSION = 'account-budget-1';
 export const GEOFFREY_DAILY_AI_LIMIT_USD = 20;
@@ -97,7 +98,13 @@ export function resolveAccountDailyAiLimit(handle: string, configuredAntiHunterL
 export async function getAccountDailyAiLimit(agentId: string): Promise<number | null> {
   const agent = await getAgent(agentId);
   if (!agent) throw new AiBudgetError('attribution_missing');
-  return resolveAccountDailyAiLimit(agent.handle);
+  const configured = resolveAccountDailyAiLimit(agent.handle);
+  if (String(agentId) !== ANTIHUNTER_AGENT_ID || agent.handle.replace(/^@/, '').toLowerCase() !== 'antihunterai') return configured;
+  if (configured === null || configured <= 0) return configured;
+  const policy = budgetPolicy(await getOperatorGrowth());
+  // A smaller operator/env cap stays binding. Only the authorized $24 normal
+  // allowance enables the recorded, same-Pacific-day $38 exception.
+  return Math.min(configured < 24 ? configured : policy.aiLimitUsd, policy.aiLimitUsd);
 }
 export async function isBudgetAccount(agentId: string): Promise<boolean> {
   return (await getAccountDailyAiLimit(agentId)) !== null;
@@ -105,12 +112,14 @@ export async function isBudgetAccount(agentId: string): Promise<boolean> {
 export interface AiReservation { context: AiSpendContext; id: string; day: string; }
 export async function reserveAiAttempt(context: AiSpendContext, target: { model: string; provider: string }, inputBytes: number, outputLimit: number): Promise<AiReservation | null> {
   try {
+    const day = aiBudgetDay();
     const dailyLimitUsd = await getAccountDailyAiLimit(context.agentId);
     if (dailyLimitUsd === null) return null;
     if (dailyLimitUsd <= 0) throw new AiBudgetError('budget_exhausted');
     const reservedUsd = estimateAiUsageCostUsd(target.model, inputBytes + 16384, outputLimit);
     if (reservedUsd === null || !Number.isFinite(reservedUsd)) throw new AiBudgetError('budget_unavailable');
-    const id = randomUUID(); const day = aiBudgetDay();
+    const id = randomUUID();
+    if (aiBudgetDay() !== day) throw new AiBudgetError('budget_unavailable');
     // The first production day has earlier calls without receipts. Do not assume they were free.
     // Reserve that day's full allowance until reconciliation; future Pacific days reset normally.
     if (process.env.NODE_ENV === 'production') {
@@ -119,10 +128,14 @@ export async function reserveAiAttempt(context: AiSpendContext, target: { model:
         result:undefined,skip:ledger!==null,
       }));
     }
-    await mutateAiOperationalState<AiSpendLedger, void>(context.agentId, 'spend', ledger => ({
-      value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, runId: context.runId,
+    await mutateAiOperationalState<AiSpendLedger, void>(context.agentId, 'spend', ledger => {
+      // An async KV/account read must never carry yesterday's surge into a
+      // reservation admitted after Pacific midnight. Retry on the new day.
+      if (aiBudgetDay() !== day) throw new AiBudgetError('budget_unavailable');
+      return { value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, runId: context.runId,
         day, reservedUsd, pricingVersion: AI_PRICING_VERSION, pricingRates: getAiModelPricing(target.model)!, campaignId: context.campaignId, observedUsd: null, state: 'reserved', createdAt: new Date().toISOString() }, day, dailyLimitUsd), result: undefined,
-    }));
+      };
+    });
     return { context, id, day };
   } catch (error) { if (error instanceof AiBudgetError) throw error; throw new AiBudgetError('budget_unavailable'); }
 }
@@ -145,8 +158,7 @@ export async function getAiBudgetSummary(agentId: string) {
 
 export async function recordAutopostReadyOutput(agentId: string, tweet: { id:string; content:string; generationRunId?:string|null; draftCandidateId?:string|null }): Promise<void> {
   if (!tweet.generationRunId || !tweet.draftCandidateId) return;
-  const account = await getAgent(agentId);
-  const dailyLimitUsd = (account ? resolveAccountDailyAiLimit(account.handle) : null) ?? GEOFFREY_DAILY_AI_LIMIT_USD;
+  const dailyLimitUsd = await getAccountDailyAiLimit(agentId) ?? GEOFFREY_DAILY_AI_LIMIT_USD;
   const {createHash}=await import('node:crypto');
   await mutateAiOperationalState<AiSpendLedger,void>(agentId,'spend',ledger=>({
     value:{...(ledger || {version:AI_BUDGET_VERSION,day:aiBudgetDay(),attempts:{},...(process.env.NODE_ENV==='production'?{openingBalance:{day:aiBudgetDay(),unresolvedUsd:dailyLimitUsd,reason:'pre_enforcement_usage_unknown' as const}}:{})}),outputs:{...(ledger?.outputs || {}),
