@@ -65,6 +65,17 @@ describe('Anti Hunter growth and allocation', () => {
     expect((await getOperatorGrowth()).campaigns['anti-bureau:rejected-001']).toBeDefined();
     expect(await getAiOperationalState('13', OPERATOR_GROWTH_NAMESPACE)).toBeNull();
   });
+  it('keeps a campaign immutable across KV key reordering without resetting registration', async () => {
+    const registered = await registerCampaign(campaign);
+    await mutateOperatorGrowth(state => {
+      state.campaigns['anti-bureau:rejected-001'] = Object.fromEntries(Object.entries(registered).reverse()) as typeof registered;
+    });
+    expect(await registerCampaign(Object.fromEntries(Object.entries(campaign).reverse()))).toEqual(registered);
+    expect((await getOperatorGrowth()).campaigns['anti-bureau:rejected-001'].registeredAt).toBe(registered.registeredAt);
+    for (const key of ['hypothesis', 'audience', 'landingPath', 'primaryMetric']) {
+      await expect(registerCampaign({ ...campaign, [key]: key === 'landingPath' ? '/changed' : 'changed' })).rejects.toThrow('immutable');
+    }
+  });
   it('expires the reasoned surge at Pacific midnight and preserves Geoffrey’s allowance', async () => {
     expect(await getAccountDailyAiLimit('5')).toBe(24);
     await expect(recordSurge({ reason: 'promising post' })).rejects.toThrow('expectedBenefit');
@@ -309,6 +320,6 @@ describe('reviewed native image and dispatch safety', () => {
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     await mutateOperatorGrowth(state => { Object.values(state.dispatches)[0].state = 'uncertain'; });
     await expect(claim('c')).rejects.toThrow('outstanding');
-    expect(() => assertOperatorCadence([{ status: 'posted', xTweetId: '123', postedAt: now.toISOString() } as any], emptyGrowthState())).toThrow('cadence');
+    expect(() => assertOperatorCadence([{ agentId: '5', type: 'original', status: 'posted', xTweetId: '123', postedAt: now.toISOString() } as any], emptyGrowthState())).toThrow('cadence');
   });
 });

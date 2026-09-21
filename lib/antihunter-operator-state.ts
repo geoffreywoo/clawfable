@@ -103,7 +103,7 @@ export async function registerCampaign(value: unknown) {
   return mutateOperatorGrowth(state => {
     const key = `${campaign.campaignId}:${campaign.episodeId}`;
     const prior = state.campaigns[key];
-    if (prior && JSON.stringify({ ...prior, registeredAt: undefined }) !== JSON.stringify({ ...campaign, registeredAt: undefined })) throw new Error('Campaign episode is immutable; choose a new episode ID');
+    if (prior && (Object.keys(campaign) as Array<keyof CampaignMetadata>).some(key => prior[key] !== campaign[key])) throw new Error('Campaign episode is immutable; choose a new episode ID');
     return state.campaigns[key] ||= { ...campaign, registeredAt: new Date().toISOString() };
   });
 }

@@ -17,6 +17,8 @@ import { withOperatorXBudget, reserveVerification, releaseVerification, recordMe
 import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaForOperatorTweet } from '../lib/antihunter-media';
 import { isMaturePerformance } from '../lib/performance-signals';
 import type { Tweet } from '../lib/types';
+import { assertOperatorCadence, getOperatorCadence, getOperatorOutbox } from '../lib/antihunter-publication';
+export { assertOperatorCadence } from '../lib/antihunter-publication';
 
 export function dispatchFingerprint(tweet: Pick<Tweet, 'content' | 'sourceBrief'>): string {
   const asset = parseOperatorBrief(tweet.sourceBrief)?.asset;
@@ -24,17 +26,6 @@ export function dispatchFingerprint(tweet: Pick<Tweet, 'content' | 'sourceBrief'
   return createHash('sha256').update(JSON.stringify({ content: tweet.content, asset: asset ? {
     sha256: asset.sha256, mimeType: asset.mimeType, byteLength: asset.byteLength, altText: asset.altText,
   } : null })).digest('hex');
-}
-export function assertOperatorCadence(tweets: Tweet[], state: Awaited<ReturnType<typeof getOperatorGrowth>>, now = Date.now()) {
-  const posted = new Map<string, number>();
-  for (const tweet of tweets) if (tweet.status === 'posted' && tweet.postedAt && tweet.xTweetId) posted.set(tweet.xTweetId, Date.parse(tweet.postedAt));
-  for (const receipt of Object.values(state.dispatches)) {
-    if (['pending', 'uncertain'].includes(receipt.state)) throw new Error('Resolve the outstanding dispatch before publishing');
-    if (receipt.state === 'posted' && !receipt.verifiedAt) throw new Error('Verify the previous publication and learning receipt before publishing');
-    if (receipt.xTweetId) posted.set(receipt.xTweetId, posted.get(receipt.xTweetId) ?? Date.parse(receipt.at));
-  }
-  const recent = [...posted.values()].filter(at => now - at < 86_400_000);
-  if (recent.length >= 4 || recent.some(at => now - at < 6 * 3_600_000)) throw new Error('Operator cadence cap: four posts/day, at least six hours apart.');
 }
 export async function runAntiHunterOperator(args = process.argv.slice(2)): Promise<unknown> {
   const command = args[0];
@@ -65,6 +56,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     const latest = new Map<string, typeof performance[number]>();
     for (const entry of performance) if (!latest.has(entry.xTweetId) || entry.checkedAt > latest.get(entry.xTweetId)!.checkedAt) latest.set(entry.xTweetId, entry);
     return { ...summary, settings, signals, log, followers, dispatches: growth.dispatches, media: growth.media,
+      cadence: getOperatorCadence(tweets, growth), outbox: getOperatorOutbox(tweets, growth),
       campaigns: Object.values(growth.campaigns).map(campaign => {
         const contributions = Object.values(growth.contributions || {}).filter(c => c.campaignId === campaign.campaignId);
         const episodeContributions = contributions.filter(c => c.episodeId === campaign.episodeId);
@@ -82,9 +74,19 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
       }; }), performance: [...latest.values()].slice(0, 20) };
   }
   if (!['draft', 'upload', 'publish', 'verify', 'reconcile', 'metrics', 'research'].includes(command)) throw new Error('Use inspect, budget, report, campaign, contribution, surge, analytics-observation, media-pricing, draft, upload, publish, verify, reconcile, metrics, or research.');
+  const id = arg('--tweet-id');
+  if (command === 'publish' && id) {
+    const candidate = await getTweet(id, { fresh: true });
+    if (!candidate || String(candidate.agentId) !== AGENT_ID) throw new Error('Draft belongs to another account or is missing.');
+    // Cheap local admission before the paid identity request or verification
+    // reservation. The atomic dispatch claim below still rechecks for races.
+    if (!(candidate.status === 'posted' && candidate.xTweetId)) {
+      const [tweets, growth] = await Promise.all([getTweets(AGENT_ID), getOperatorGrowth()]);
+      assertOperatorCadence(tweets, growth);
+    }
+  }
   await assertAgentAutomationEntitlement(AGENT_ID, { agent, user });
   const keys = decodeKeys(agent as Required<typeof agent>);
-  const id = arg('--tweet-id');
   if (['metrics', 'research'].includes(command) && !await claimBoundedRun(command as 'metrics' | 'research')) return { skipped: true, reason: 'Six-hour read cadence' };
   return withOperatorXBudget(`${command}${id ? `:${id}` : ''}`, async () => {
     const identity = await getMe(keys);
@@ -173,9 +175,10 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     if (tweet.status !== 'draft' || tweet.quarantinedAt || tweet.type !== 'original') throw new Error('Only reviewed original drafts may be dispatched.');
     const legacyNamespace = `operator-dispatch:${id}:${createHash('sha256').update(tweet.content).digest('hex').slice(0, 16)}`;
     if (await getAiOperationalState(AGENT_ID, legacyNamespace)) throw new Error('Legacy dispatch exists; reconcile its X outcome before any retry.');
+    const tweets = await getTweets(AGENT_ID);
+    assertOperatorCadence(tweets, await getOperatorGrowth());
     await mediaForOperatorTweet(tweet);
     await reserveVerification(id);
-    const tweets = await getTweets(AGENT_ID);
     const fingerprint = dispatchFingerprint(tweet);
     await mutateOperatorGrowth(state => {
       if (state.dispatches[id] && !(state.dispatches[id].state === 'rejected' && args.includes('--retry-rejected'))) throw new Error('Existing dispatch receipt: reconcile it before any retry.');
