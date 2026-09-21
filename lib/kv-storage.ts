@@ -1,3 +1,4 @@
+import { normalizeSourceBrief } from './source-brief';
 import type {
   Agent,
   Tweet,
@@ -1080,7 +1081,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     finalCriticVerdict: tweet.finalCriticVerdict ?? null,
     finalCriticScores: coerceNullableJson(tweet.finalCriticScores),
     finalCriticVersion: tweet.finalCriticVersion ?? null,
-    sourceBrief: tweet.sourceBrief ?? null,
+    sourceBrief: normalizeSourceBrief(tweet.sourceBrief),
     sourceEvidenceTexts: coerceNullableJson<string[]>(tweet.sourceEvidenceTexts),
     pipelineVersion: tweet.pipelineVersion ?? null,
     generationSurface: tweet.generationSurface ?? (tweet.pipelineVersion === 'v2' ? 'original' : null),

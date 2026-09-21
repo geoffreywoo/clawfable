@@ -19,7 +19,11 @@ import { isMaturePerformance } from '../lib/performance-signals';
 import type { Tweet } from '../lib/types';
 
 export function dispatchFingerprint(tweet: Pick<Tweet, 'content' | 'sourceBrief'>): string {
-  return createHash('sha256').update(JSON.stringify({ content: tweet.content, asset: parseOperatorBrief(tweet.sourceBrief)?.asset || null })).digest('hex');
+  const asset = parseOperatorBrief(tweet.sourceBrief)?.asset;
+  // Preserve the receipt format regardless of JSON key order returned by KV.
+  return createHash('sha256').update(JSON.stringify({ content: tweet.content, asset: asset ? {
+    sha256: asset.sha256, mimeType: asset.mimeType, byteLength: asset.byteLength, altText: asset.altText,
+  } : null })).digest('hex');
 }
 export function assertOperatorCadence(tweets: Tweet[], state: Awaited<ReturnType<typeof getOperatorGrowth>>, now = Date.now()) {
   const posted = new Map<string, number>();

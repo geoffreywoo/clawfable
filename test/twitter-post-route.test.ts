@@ -145,6 +145,41 @@ describe('twitter post route', () => {
     },
   );
 
+  it.each(['unchanged', 'campaign_edited', 'asset_added'] as const)(
+    'handles KV-deserialized source briefs while retaining the edit guard: %s', async (change) => {
+      const agent = await createAgent({ handle: `manual-brief-${change}`, name: 'Guard', soulMd: '# soul',
+        apiKey: 'key', apiSecret: 'secret', accessToken: 'token', accessSecret: 'secret', isConnected: 1,
+        xUserId: `x-brief-${change}` } as any);
+      const brief = { operator: 'codex', sources: ['https://antihunter.com/machine'], thesis: 'A useful calculator.',
+        campaign: { campaignId: 'machine', episodeId: 'supervisor' } };
+      const tweet = await createTweet({ agentId: agent.id, content: 'We shipped a calculator for human review costs today.',
+        type: 'original', status: 'draft', contentProvenance: 'operator_written', sourceBrief: JSON.stringify(brief) } as any);
+      mocks.requireAgentAccess.mockResolvedValue({ agent, user: { id: 'owner' } });
+      const store = (globalThis as any)[Symbol.for('clawfable.localKvFallback')].memStore as Map<string, unknown>;
+      const key = `tweet:${tweet.id}`;
+      // Production KV decodes JSON hash values into fresh objects on every read.
+      store.set(key, { ...(store.get(key) as object), sourceBrief: structuredClone(brief) });
+      const cached = await getTweet(tweet.id, { fresh: true });
+      expect(typeof cached?.sourceBrief).toBe('string');
+      mocks.acquireAutopilotLock.mockImplementationOnce(async () => {
+        const sourceBrief = { campaign: { episodeId: change === 'campaign_edited' ? 'changed' : 'supervisor', campaignId: 'machine' },
+          thesis: brief.thesis, sources: brief.sources, operator: brief.operator,
+          ...(change === 'asset_added' ? { asset: { sha256: 'different-asset' } } : {}) };
+        store.set(key, { ...(store.get(key) as object), sourceBrief });
+        return { acquired: true, owner: 'manual-post-lock' };
+      });
+      const response = await POST(new Request('http://localhost/api/post', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tweetId: tweet.id, content: tweet.content }),
+      }) as any, { params: Promise.resolve({ id: agent.id }) });
+      expect(response.status).toBe(change === 'unchanged' ? 200 : 409);
+      if (change === 'unchanged') expect(mocks.postTweet).toHaveBeenCalledOnce();
+      else {
+        expect(await response.json()).toMatchObject({ code: 'draft_changed_before_post' });
+        expect(mocks.postTweet).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it('answers 400 for a malformed JSON body before touching X', async () => {
     const agent = await createAgent({
       handle: 'manual-post-json-guard',

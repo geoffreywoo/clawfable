@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mutateAiOperationalState, getAiOperationalState } from '@/lib/kv-storage';
 import { analyticsControl, budgetPolicy, claimBoundedRun, emptyGrowthState, getOperatorGrowth, mutateOperatorGrowth,
-  OPERATOR_GROWTH_NAMESPACE, pacificDay, recordAnalytics, recordContribution, recordSurge, registerCampaign, summarizeXSpend, validateCampaign } from '@/lib/antihunter-operator-state';
+  OPERATOR_GROWTH_NAMESPACE, pacificDay, parseOperatorBrief, recordAnalytics, recordContribution, recordSurge, registerCampaign, summarizeXSpend, validateCampaign } from '@/lib/antihunter-operator-state';
+import { normalizeSourceBrief } from '@/lib/source-brief';
 import { operatorXBudgetPlugin, priceOperatorXRequest, reserveVerification, reserveXInState, settledRequestEstimate, withOperatorXBudget } from '@/lib/antihunter-x-budget';
 import { assertAssetMatches, describeOperatorImage, uploadOperatorImage, usableMediaReceipt, verifyOperatorPost } from '@/lib/antihunter-media';
 import { assertOperatorCadence, dispatchFingerprint } from '../scripts/operator-antihunter';
@@ -39,6 +40,20 @@ beforeEach(async () => {
 });
 
 describe('Anti Hunter growth and allocation', () => {
+  it('preserves campaign and image metadata for strings and KV-deserialized objects', () => {
+    const tweet = imageTweet();
+    const decoded = JSON.parse(tweet.sourceBrief);
+    expect(parseOperatorBrief(decoded)).toEqual(parseOperatorBrief(tweet.sourceBrief));
+    expect(parseOperatorBrief(decoded)?.campaign).toEqual(campaign);
+    expect(dispatchFingerprint({ ...tweet, sourceBrief: decoded })).toBe(dispatchFingerprint(tweet));
+    expect(dispatchFingerprint({ ...tweet, sourceBrief: normalizeSourceBrief(tweet.sourceBrief) })).toBe(dispatchFingerprint(tweet));
+    expect(normalizeSourceBrief({ b: { y: 2, x: 1 }, a: ['ordered', 'array'] }))
+      .toBe(normalizeSourceBrief('{ "a": ["ordered","array"], "b": {"x":1,"y":2} }'));
+    for (const prose of ['Ordinary source note.', '', 'true', '123', 'null']) expect(normalizeSourceBrief(prose)).toBe(prose);
+    expect(normalizeSourceBrief(null)).toBeNull();
+    expect(parseOperatorBrief(null)).toBeNull();
+    expect(parseOperatorBrief('Ordinary source note.')).toBeNull();
+  });
   it('keeps campaign metadata out of generated provenance and rejects foreign URLs', async () => {
     const registered = await registerCampaign(campaign);
     expect(registered).toMatchObject(campaign);

@@ -107,11 +107,11 @@ export async function registerCampaign(value: unknown) {
     return state.campaigns[key] ||= { ...campaign, registeredAt: new Date().toISOString() };
   });
 }
-export function parseOperatorBrief(sourceBrief: string | null | undefined): OperatorSourceBrief | null {
+export function parseOperatorBrief(sourceBrief: unknown): OperatorSourceBrief | null {
   if (!sourceBrief) return null;
   try {
-    const value = JSON.parse(sourceBrief);
-    if (value.operator !== 'codex' || !Array.isArray(value.sources)) return null;
+    const value = typeof sourceBrief === 'string' ? JSON.parse(sourceBrief) : sourceBrief;
+    if (!value || typeof value !== 'object' || value.operator !== 'codex' || !Array.isArray(value.sources)) return null;
     return value;
   } catch { return null; }
 }
