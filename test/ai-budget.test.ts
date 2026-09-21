@@ -72,3 +72,28 @@ it('protects undispatched completion capacity from competing runs',()=>{
  const ledger=reserveAiSpendInLedger(null,{...context,runLimitUsd:20,downstreamReserveUsd:2},attempt('a',17),day);
  expect(()=>reserveAiSpendInLedger(ledger,{...context,runId:'competitor'},attempt('b',2,'competitor'),day)).toThrow('budget_exhausted');
 });
+
+describe('Anti Hunter account budget isolation', () => {
+  it('keeps Geoffrey at $20 and fails closed for an unconfigured Anti Hunter budget', async () => {
+    const { resolveAccountDailyAiLimit } = await import('@/lib/ai-budget');
+    expect(resolveAccountDailyAiLimit('geoffwoo', '5')).toBe(20);
+    expect(resolveAccountDailyAiLimit('geoffreywoo', '0')).toBe(20);
+    expect(resolveAccountDailyAiLimit('@AntiHunterAI', '')).toBe(0);
+    expect(resolveAccountDailyAiLimit('antihunterai', '5')).toBe(5);
+    expect(resolveAccountDailyAiLimit('other-account', '5')).toBeNull();
+    for (const invalid of ['-1', 'Infinity', 'garbage']) {
+      expect(() => resolveAccountDailyAiLimit('antihunterai', invalid)).toThrow('budget_unavailable');
+    }
+  });
+  it('counts unresolved calls and completion holds against the smaller account cap', () => {
+    const first = reserveAiSpendInLedger(null, { ...context, runLimitUsd: 10, downstreamReserveUsd: 1 }, attempt('a', 3), day, 5);
+    expect(() => reserveAiSpendInLedger(first, { ...context, runId: 'b' }, attempt('b', 1.01, 'b'), day, 5)).toThrow('budget_exhausted');
+    expect(() => reserveAiSpendInLedger(null, context, attempt('c', 0.01), day, 0)).toThrow('budget_exhausted');
+    expect(reserveAiSpendInLedger(first, { ...context, runId: 'b' }, attempt('b', 1, 'b'), day, 5).attempts.b).toBeDefined();
+  });
+  it('reports the selected cap rather than Geoffrey’s allowance', async () => {
+    const { summarizeAiSpend } = await import('@/lib/ai-budget');
+    expect(summarizeAiSpend(null, 5)).toMatchObject({ dailyLimitUsd: 5, remainingUsd: 5 });
+    expect(summarizeAiSpend(null, 0)).toMatchObject({ dailyLimitUsd: 0, remainingUsd: 0 });
+  });
+});
